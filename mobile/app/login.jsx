@@ -8,16 +8,18 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Redirect } from 'expo-router';
 import { api } from '../lib/api';
-import { signIn } from '../lib/authState';
+import { signIn, useAuthToken } from '../lib/authState';
 
 export default function Login() {
-  const router = useRouter();
+  const token = useAuthToken();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  if (token) return <Redirect href="/(app)/map" />;
 
   async function onSubmit() {
     setError(null);

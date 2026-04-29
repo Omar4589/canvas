@@ -1,11 +1,17 @@
 import { View, ActivityIndicator } from 'react-native';
+import { Redirect } from 'expo-router';
+import { useAuthToken, useAuthReady } from '../lib/authState';
 
-// The root layout's auth gate handles redirection. This is just a holding
-// screen while the gate decides where to send us.
 export default function Index() {
-  return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <ActivityIndicator />
-    </View>
-  );
+  const token = useAuthToken();
+  const ready = useAuthReady();
+
+  if (!ready) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+  return <Redirect href={token ? '/(app)/map' : '/login'} />;
 }
