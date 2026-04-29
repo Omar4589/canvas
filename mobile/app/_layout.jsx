@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { getToken } from '../lib/auth';
+import { useAuthToken, useAuthReady } from '../lib/authState';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -13,29 +13,22 @@ const queryClient = new QueryClient({
 });
 
 function useAuthGate() {
-  const [hasToken, setHasToken] = useState(null); // null = unknown
+  const token = useAuthToken();
+  const ready = useAuthReady();
   const router = useRouter();
   const segments = useSegments();
 
   useEffect(() => {
-    let mounted = true;
-    getToken().then((t) => {
-      if (mounted) setHasToken(!!t);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (hasToken === null) return;
-    const inAuthGroup = segments[0] === '(app)';
-    if (!hasToken && inAuthGroup) {
+    if (!ready) return;
+    const hasToken = !!token;
+    const inAppGroup = segments[0] === '(app)';
+    const onLogin = segments[0] === 'login';
+    if (!hasToken && !onLogin) {
       router.replace('/login');
-    } else if (hasToken && !inAuthGroup) {
+    } else if (hasToken && !inAppGroup) {
       router.replace('/(app)/map');
     }
-  }, [hasToken, segments, router]);
+  }, [token, ready, segments, router]);
 }
 
 function RootStack() {

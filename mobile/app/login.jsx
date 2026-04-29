@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { api } from '../lib/api';
-import { setToken } from '../lib/auth';
+import { signIn } from '../lib/authState';
 
 export default function Login() {
   const router = useRouter();
@@ -27,8 +27,9 @@ export default function Login() {
         method: 'POST',
         body: { email: email.trim(), password },
       });
-      await setToken(res.token);
-      router.replace('/(app)/map');
+      // signIn updates the global auth store; the gate in _layout reacts
+      // and navigates to the map automatically.
+      await signIn(res.token);
     } catch (err) {
       setError(err.message);
     } finally {

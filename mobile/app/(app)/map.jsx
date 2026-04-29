@@ -12,7 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../lib/api';
-import { setToken } from '../../lib/auth';
+import { signOut } from '../../lib/authState';
 import { saveBootstrap, loadBootstrap } from '../../lib/cache';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
@@ -102,9 +102,9 @@ export default function MapScreen() {
   );
 
   async function onLogout() {
-    await setToken(null);
     qc.clear();
-    router.replace('/login');
+    await signOut();
+    // Auth gate in _layout handles redirect to /login
   }
 
   async function onRefresh() {

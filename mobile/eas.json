@@ -32,8 +32,7 @@
     "production": {
       "ios": {
         "appleId": "omar4589@hotmail.com",
-        "appleTeamId": "62RUXR2CLQ",
-        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID"
+        "appleTeamId": "62RUXR2CLQ"
       },
       "android": {
         "serviceAccountKeyPath": "./google-play-service-account.json",

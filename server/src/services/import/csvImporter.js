@@ -27,6 +27,13 @@ function parseDob(raw) {
   return new Date(t);
 }
 
+function parseCoord(raw) {
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
 function mapRow(raw) {
   const r = {};
   for (const [k, v] of Object.entries(raw)) r[k.trim()] = trimOrNull(v);
@@ -51,12 +58,19 @@ function mapRow(raw) {
     uid: r['uid'],
   };
 
+  const lat = parseCoord(r['p_Latitude']);
+  const lng = parseCoord(r['p_Longitude']);
+  const hasValidCoords =
+    lat != null && lng != null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+
   const household = {
     addressLine1: r['Address'],
     addressLine2: r['Address Line 2'],
     city: r['City'],
     state: r['Registered State'],
     zipCode: r['Zip Code'],
+    latitude: hasValidCoords ? lat : null,
+    longitude: hasValidCoords ? lng : null,
   };
 
   return { raw: r, voter, household };
@@ -113,39 +127,53 @@ export async function runImport({ buffer, filename, userId }) {
       validRows.push(mapped);
     });
 
-    // Group into unique households
+    // Group into unique households. First row with valid coords wins.
     const householdMap = new Map();
     for (const row of validRows) {
       const norm = normalizeAddress(row.household);
-      if (!householdMap.has(norm)) {
+      const existing = householdMap.get(norm);
+      if (!existing) {
         householdMap.set(norm, { ...row.household, normalizedAddress: norm });
+      } else if (existing.latitude == null && row.household.latitude != null) {
+        existing.latitude = row.household.latitude;
+        existing.longitude = row.household.longitude;
       }
     }
 
-    // Bulk upsert households (idempotent — preserves geocode/status fields on existing)
-    const householdOps = Array.from(householdMap.values()).map((h) => ({
-      updateOne: {
-        filter: { normalizedAddress: h.normalizedAddress },
-        update: {
-          $setOnInsert: {
-            normalizedAddress: h.normalizedAddress,
-            geocodeStatus: 'pending',
-            geocodeProvider: null,
-            location: null,
-            status: 'unknocked',
-            isActive: true,
-          },
-          $set: {
-            addressLine1: h.addressLine1,
-            addressLine2: h.addressLine2,
-            city: h.city,
-            state: h.state,
-            zipCode: h.zipCode,
-          },
+    // Bulk upsert households. Coordinates from the CSV always overwrite existing
+    // location data; addresses without coords leave any prior location untouched.
+    const householdOps = Array.from(householdMap.values()).map((h) => {
+      const hasCoords = h.latitude != null && h.longitude != null;
+      const set = {
+        addressLine1: h.addressLine1,
+        addressLine2: h.addressLine2,
+        city: h.city,
+        state: h.state,
+        zipCode: h.zipCode,
+      };
+      if (hasCoords) {
+        set.location = { type: 'Point', coordinates: [h.longitude, h.latitude] };
+        set.geocodeStatus = 'success';
+        set.geocodeProvider = 'csv';
+      }
+      const setOnInsert = {
+        normalizedAddress: h.normalizedAddress,
+        status: 'unknocked',
+        isActive: true,
+      };
+      if (!hasCoords) {
+        setOnInsert.geocodeStatus = 'pending';
+        setOnInsert.geocodeProvider = null;
+        setOnInsert.location = null;
+      }
+      return {
+        updateOne: {
+          filter: { normalizedAddress: h.normalizedAddress },
+          update: { $set: set, $setOnInsert: setOnInsert },
+          upsert: true,
         },
-        upsert: true,
-      },
-    }));
+      };
+    });
 
     let newHouseholds = 0;
     if (householdOps.length) {

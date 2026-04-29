@@ -28,7 +28,7 @@ const householdSchema = new mongoose.Schema(
     },
     geocodeProvider: {
       type: String,
-      enum: ['census', 'mapbox', null],
+      enum: ['csv', 'census', 'mapbox', null],
       default: null,
     },
     geocodeRaw: { type: mongoose.Schema.Types.Mixed, default: null },
