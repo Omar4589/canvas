@@ -35,7 +35,6 @@
         "appleTeamId": "62RUXR2CLQ"
       },
       "android": {
-        "serviceAccountKeyPath": "./google-play-service-account.json",
         "track": "internal"
       }
     }

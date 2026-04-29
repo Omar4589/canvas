@@ -7,11 +7,13 @@ import ImportPage from './pages/ImportPage.jsx';
 import GeocodingPage from './pages/GeocodingPage.jsx';
 import UsersPage from './pages/UsersPage.jsx';
 import SurveysPage from './pages/SurveysPage.jsx';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage.jsx';
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/privacy" element={<PrivacyPolicyPage />} />
       <Route
         element={
           <ProtectedRoute role="admin">

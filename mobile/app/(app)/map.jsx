@@ -46,6 +46,7 @@ export default function MapScreen() {
   const cameraRef = useRef(null);
   const [selected, setSelected] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
+  const [following, setFollowing] = useState(false);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['bootstrap'],
@@ -143,9 +144,11 @@ export default function MapScreen() {
       <Mapbox.MapView style={{ flex: 1 }} styleURL={Mapbox.StyleURL.Street}>
         <Mapbox.Camera
           ref={cameraRef}
-          zoomLevel={12}
-          centerCoordinate={initialCenter}
-          animationMode="none"
+          defaultSettings={{ centerCoordinate: initialCenter, zoomLevel: 12 }}
+          followUserLocation={following}
+          followZoomLevel={16}
+          animationMode="flyTo"
+          animationDuration={500}
         />
         <Mapbox.UserLocation visible androidRenderMode="compass" />
 
@@ -196,6 +199,24 @@ export default function MapScreen() {
           <Text style={styles.iconButtonText}>Sign out</Text>
         </Pressable>
       </SafeAreaView>
+
+      <Pressable
+        onPress={() => setFollowing((v) => !v)}
+        style={[
+          styles.recenterButton,
+          selected && styles.recenterButtonAboveSheet,
+          following && styles.recenterButtonActive,
+        ]}
+      >
+        <Text
+          style={[
+            styles.recenterButtonText,
+            following && styles.recenterButtonTextActive,
+          ]}
+        >
+          ◎
+        </Text>
+      </Pressable>
 
       {selected && (
         <SafeAreaView edges={['bottom']} style={styles.sheet}>
@@ -274,6 +295,26 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   pendingBadgeText: { color: '#92400e', fontWeight: '600', fontSize: 12 },
+  recenterButton: {
+    position: 'absolute',
+    right: 16,
+    bottom: 32,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  recenterButtonAboveSheet: { bottom: 220 },
+  recenterButtonActive: { backgroundColor: '#0284c7' },
+  recenterButtonText: { fontSize: 24, color: '#0284c7', lineHeight: 26 },
+  recenterButtonTextActive: { color: '#ffffff' },
   sheet: {
     position: 'absolute',
     bottom: 0,
