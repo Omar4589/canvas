@@ -21,6 +21,8 @@ const surveyTemplateSchema = new mongoose.Schema(
     name: { type: String, required: true },
     isActive: { type: Boolean, default: false, index: true },
     version: { type: Number, default: 1 },
+    intro: { type: String, default: '' },
+    closing: { type: String, default: '' },
     questions: { type: [questionSchema], default: [] },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },

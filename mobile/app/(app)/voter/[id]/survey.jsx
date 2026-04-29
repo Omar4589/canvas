@@ -189,6 +189,13 @@ export default function VoterSurvey() {
           {[voter.party, voter.precinct].filter(Boolean).join(' · ')}
         </Text>
 
+        {survey.intro ? (
+          <View style={styles.scriptBlock}>
+            <Text style={styles.scriptLabel}>Greeting</Text>
+            <Text style={styles.scriptText}>{survey.intro}</Text>
+          </View>
+        ) : null}
+
         {survey.questions.map((q, i) => (
           <View key={q.key} style={styles.questionBlock}>
             <Text style={styles.questionLabel}>
@@ -210,6 +217,13 @@ export default function VoterSurvey() {
             )}
           </View>
         ))}
+
+        {survey.closing ? (
+          <View style={styles.scriptBlock}>
+            <Text style={styles.scriptLabel}>Closing</Text>
+            <Text style={styles.scriptText}>{survey.closing}</Text>
+          </View>
+        ) : null}
 
         <Text style={styles.questionLabel}>Note (optional)</Text>
         <TextInput
@@ -256,6 +270,23 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e5e7eb',
   },
   title: { fontSize: 22, fontWeight: '600' },
+  scriptBlock: {
+    backgroundColor: '#fef3c7',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+    borderRadius: 6,
+    padding: 12,
+    marginBottom: 20,
+  },
+  scriptLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#92400e',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  scriptText: { fontSize: 14, color: '#78350f', lineHeight: 20 },
   questionBlock: { marginBottom: 24 },
   questionLabel: { fontSize: 15, fontWeight: '600', color: '#111827', marginBottom: 10 },
   choice: {

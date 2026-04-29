@@ -18,6 +18,8 @@ const questionSchema = z.object({
 const upsertSchema = z.object({
   name: z.string().min(1),
   isActive: z.boolean().optional().default(false),
+  intro: z.string().optional().default(''),
+  closing: z.string().optional().default(''),
   questions: z.array(questionSchema).default([]),
 });
 
