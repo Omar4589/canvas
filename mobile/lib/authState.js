@@ -17,10 +17,15 @@ function emit() {
 }
 
 // Hydrate from SecureStore once at module load.
-const hydration = getToken().then((t) => {
-  _token = t || null;
-  emit();
-});
+const hydration = getToken()
+  .then((t) => {
+    _token = t || null;
+    emit();
+  })
+  .catch(() => {
+    _token = null;
+    emit();
+  });
 
 export function getCurrentToken() {
   return _token;

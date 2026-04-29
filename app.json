@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "7d5664ac-809d-4e58-b6fe-0130a85be1f2"
+      }
+    },
+    "android": {
+      "package": "com.omar4589.canvassapp"
+    }
+  }
+}

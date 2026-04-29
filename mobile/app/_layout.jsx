@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -17,8 +17,13 @@ function useAuthGate() {
   const ready = useAuthReady();
   const router = useRouter();
   const segments = useSegments();
+  // Until the root navigator has registered its state, calling
+  // router.replace throws "Attempted to navigate before mounting the Root
+  // Layout". Gate on navState?.key so the redirect waits for mount.
+  const navState = useRootNavigationState();
 
   useEffect(() => {
+    if (!navState?.key) return;
     if (!ready) return;
     const hasToken = !!token;
     const inAppGroup = segments[0] === '(app)';
@@ -28,7 +33,7 @@ function useAuthGate() {
     } else if (hasToken && !inAppGroup) {
       router.replace('/(app)/map');
     }
-  }, [token, ready, segments, router]);
+  }, [navState?.key, token, ready, segments, router]);
 }
 
 function RootStack() {
