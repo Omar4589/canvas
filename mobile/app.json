@@ -19,7 +19,12 @@
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
       },
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -41,7 +46,11 @@
       "apiBaseUrl": "http://localhost:4000",
       "router": {
         "origin": false
+      },
+      "eas": {
+        "projectId": "4d913345-676f-4240-8f9a-6e8cafdda04c"
       }
-    }
+    },
+    "owner": "omar4589"
   }
 }
