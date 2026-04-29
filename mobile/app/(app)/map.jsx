@@ -18,7 +18,9 @@ import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { STATUS_COLORS } from '../../components/StatusColor';
 
-Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
+if (MAPBOX_PUBLIC_TOKEN) {
+  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
+}
 
 const DEFAULT_CENTER = [-84.5, 39.0]; // northern Kentucky default
 
@@ -116,6 +118,18 @@ export default function MapScreen() {
     setPendingCount(await getPendingCount());
   }
 
+  if (!MAPBOX_PUBLIC_TOKEN) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={{ color: '#b91c1c', marginBottom: 12, textAlign: 'center' }}>
+          Map unavailable: missing Mapbox configuration. Please contact support.
+        </Text>
+        <Pressable onPress={onLogout} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Sign out</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
   if (isLoading) {
     return (
       <SafeAreaView style={styles.center}>

@@ -8,6 +8,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "channel": "development",
+      "environment": "development",
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "REPLACE_WITH_YOUR_LAN_IP_OR_NGROK_URL"
       }
@@ -15,6 +16,7 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
+      "environment": "preview",
       "ios": { "simulator": false },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://canvass-c038d2d7dc96.herokuapp.com"
@@ -23,6 +25,7 @@
     "production": {
       "channel": "production",
       "autoIncrement": true,
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://canvass-c038d2d7dc96.herokuapp.com"
       }
