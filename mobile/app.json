@@ -23,6 +23,10 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
@@ -51,6 +55,12 @@
         "projectId": "4d913345-676f-4240-8f9a-6e8cafdda04c"
       }
     },
-    "owner": "omar4589"
+    "owner": "omar4589",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/4d913345-676f-4240-8f9a-6e8cafdda04c"
+    }
   }
 }
