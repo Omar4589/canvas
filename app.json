@@ -7,6 +7,9 @@
     },
     "android": {
       "package": "com.omar4589.canvassapp"
+    },
+    "ios": {
+      "bundleIdentifier": "com.omar4589.canvassapp"
     }
   }
 }
