@@ -1,0 +1,59 @@
+node_modules/
+
+# Env files (NEVER commit secrets)
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+*.log
+*.swp
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Vite
+client/dist/
+
+# Expo / React Native
+.expo/
+.expo-shared/
+mobile/ios/
+mobile/android/
+mobile/.expo/
+mobile/web-build/
+mobile/dist/
+
+# EAS / signing material
+mobile/credentials/
+mobile/google-play-service-account.json
+mobile/AuthKey_*.p8
+mobile/*.mobileprovision
+mobile/*.p12
+mobile/*.keystore
+mobile/*.jks
+
+# Server
+server/uploads/
+server/tmp/
+
+# Voter data — NEVER commit. Upload via the admin dashboard instead.
+/*.csv
+voter*.csv
+target-universe*.csv
+Target-Universe*.csv
+
+# Misc
+.DS_Store
+*.tgz
+.npm/
