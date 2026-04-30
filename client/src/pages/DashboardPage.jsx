@@ -99,16 +99,21 @@ export default function DashboardPage() {
         </div>
       ) : (
         <section className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          <StatCard label="Households" value={totals.households?.toLocaleString()} />
+          <StatCard
+            label="Households"
+            value={totals.households?.toLocaleString()}
+            hint="unique addresses"
+          />
           <StatCard
             label="Homes knocked"
             value={totals.homesKnocked?.toLocaleString()}
-            hint={`${knockedPct}% of households`}
+            hint={`${knockedPct}% of households · unique`}
             accent="brand"
           />
           <StatCard
             label="Surveys submitted"
             value={totals.surveysSubmitted?.toLocaleString()}
+            hint="per voter"
             accent="green"
           />
           <StatCard
@@ -178,7 +183,12 @@ export default function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {surveyResultsQ.data.questions.map((q) => (
-              <QuestionResults key={q.key} question={q} />
+              <QuestionResults
+                key={q.key}
+                question={q}
+                surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
+                dateRange={dateRange}
+              />
             ))}
           </div>
         )}

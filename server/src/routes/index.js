@@ -5,6 +5,8 @@ import adminImportsRouter from './admin/imports.js';
 import adminGeocodingRouter from './admin/geocoding.js';
 import adminReportsRouter from './admin/reports.js';
 import adminSurveysRouter from './admin/surveys.js';
+import adminConfigRouter from './admin/config.js';
+import adminHouseholdsRouter from './admin/households.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
 
@@ -20,6 +22,8 @@ router.use('/admin/imports', adminImportsRouter);
 router.use('/admin/geocoding', adminGeocodingRouter);
 router.use('/admin/reports', adminReportsRouter);
 router.use('/admin/surveys', adminSurveysRouter);
+router.use('/admin/config', adminConfigRouter);
+router.use('/admin/households', adminHouseholdsRouter);
 router.use('/mobile', mobileBootstrapRouter);
 router.use('/mobile', mobileCanvassRouter);
 

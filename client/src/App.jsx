@@ -7,6 +7,7 @@ import ImportPage from './pages/ImportPage.jsx';
 import GeocodingPage from './pages/GeocodingPage.jsx';
 import UsersPage from './pages/UsersPage.jsx';
 import SurveysPage from './pages/SurveysPage.jsx';
+import MapPage from './pages/MapPage.jsx';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage.jsx';
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/map" element={<MapPage />} />
         <Route path="/import" element={<ImportPage />} />
         <Route path="/geocoding" element={<GeocodingPage />} />
         <Route path="/users" element={<UsersPage />} />

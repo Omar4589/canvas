@@ -269,6 +269,64 @@ router.get('/survey-results', async (req, res, next) => {
   }
 });
 
+router.get('/voters-by-answer', async (req, res, next) => {
+  try {
+    const { questionKey, option, surveyTemplateId } = req.query;
+    if (!questionKey || !option) {
+      return res.status(400).json({ error: 'questionKey and option are required' });
+    }
+    const dateRange = parseDateRange(req, 'submittedAt');
+    const filter = {
+      ...dateRange,
+      answers: { $elemMatch: { questionKey, answer: option } },
+    };
+    if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
+      filter.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
+    }
+
+    const responses = await SurveyResponse.find(filter)
+      .sort({ submittedAt: -1 })
+      .limit(500)
+      .populate('voterId', 'fullName party')
+      .populate('householdId', 'addressLine1 city state')
+      .populate('userId', 'firstName lastName')
+      .lean();
+
+    res.json({
+      total: responses.length,
+      voters: responses.map((r) => ({
+        responseId: String(r._id),
+        submittedAt: r.submittedAt,
+        voter: r.voterId
+          ? {
+              id: String(r.voterId._id),
+              fullName: r.voterId.fullName,
+              party: r.voterId.party || null,
+            }
+          : null,
+        household: r.householdId
+          ? {
+              id: String(r.householdId._id),
+              addressLine1: r.householdId.addressLine1,
+              city: r.householdId.city,
+              state: r.householdId.state,
+            }
+          : null,
+        canvasser: r.userId
+          ? {
+              id: String(r.userId._id),
+              firstName: r.userId.firstName,
+              lastName: r.userId.lastName,
+            }
+          : null,
+        note: r.note || null,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/canvassers/:userId/responses', async (req, res, next) => {
   try {
     const { userId } = req.params;
