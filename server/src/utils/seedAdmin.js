@@ -1,4 +1,11 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+// Resolve the server's .env relative to this file so the script works no matter
+// what directory it was invoked from.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv({ path: path.resolve(__dirname, '../../.env') });
+
 import mongoose from 'mongoose';
 import { connectDb } from '../config/db.js';
 import { User } from '../models/User.js';

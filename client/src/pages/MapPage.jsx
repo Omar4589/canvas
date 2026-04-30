@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
 import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.jsx';
 import HouseholdDetailPanel from '../components/HouseholdDetailPanel.jsx';
