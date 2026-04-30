@@ -7,6 +7,7 @@ import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.
 import HouseholdDetailPanel from '../components/HouseholdDetailPanel.jsx';
 import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
+import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
 
 const STATUS_COLORS = {
   unknocked: '#9ca3af',
@@ -138,17 +139,59 @@ function householdsToGeoJSON(households) {
   };
 }
 
+function activitiesToPingsGeoJSON(activities) {
+  return {
+    type: 'FeatureCollection',
+    features: activities
+      .filter((a) => a.location?.lng != null && a.location?.lat != null)
+      .map((a) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [a.location.lng, a.location.lat],
+        },
+        properties: {
+          activityId: a.id,
+          actionType: a.actionType,
+        },
+      })),
+  };
+}
+
+function activitiesToLinesGeoJSON(activities, householdsById) {
+  const features = [];
+  for (const a of activities) {
+    if (a.location?.lng == null || a.location?.lat == null) continue;
+    const h = householdsById.get(a.householdId);
+    if (!h?.location) continue;
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [a.location.lng, a.location.lat],
+          [h.location.lng, h.location.lat],
+        ],
+      },
+      properties: { activityId: a.id },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
 export default function MapPage() {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [selectedActivityId, setSelectedActivityId] = useState(null);
 
   const [rangeId, setRangeId] = useState('all');
   const dateRange = useMemo(() => rangeFromId(rangeId), [rangeId]);
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState('');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '' });
+  const [showCanvasserPins, setShowCanvasserPins] = useState(false);
 
   const tokenQ = useQuery({
     queryKey: ['config', 'mapbox-token'],
@@ -168,6 +211,7 @@ export default function MapPage() {
     userId: canvasserId,
     questionKey: answerFilter.questionKey,
     option: answerFilter.option,
+    includeActivities: showCanvasserPins ? '1' : '',
   });
 
   const householdsQ = useQuery({
@@ -180,12 +224,14 @@ export default function MapPage() {
       canvasserId,
       answerFilter.questionKey,
       answerFilter.option,
+      showCanvasserPins,
     ],
     queryFn: () => api(`/admin/households/map${queryString}`),
   });
 
   const households = householdsQ.data?.households || [];
   const canvassers = householdsQ.data?.canvassers || [];
+  const activities = householdsQ.data?.activities || [];
 
   // Initialize the map once we have a token.
   useEffect(() => {
@@ -240,11 +286,76 @@ export default function MapPage() {
         const f = e.features?.[0];
         if (!f) return;
         setSelected(f.properties.id);
+        setSelectedActivityId(null);
       });
       map.on('mouseenter', 'households-symbols', () => {
         map.getCanvas().style.cursor = 'pointer';
       });
       map.on('mouseleave', 'households-symbols', () => {
+        map.getCanvas().style.cursor = '';
+      });
+
+      // Canvasser GPS pings + dashed lines connecting them to their households.
+      // Added BEFORE the household symbols so houses render on top.
+      map.addSource('canvasser-lines', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer(
+        {
+          id: 'canvasser-lines',
+          type: 'line',
+          source: 'canvasser-lines',
+          paint: {
+            'line-color': '#6b7280',
+            'line-width': 1,
+            'line-opacity': 0.45,
+            'line-dasharray': [2, 2],
+          },
+        },
+        'households-symbols'
+      );
+
+      map.addSource('canvasser-pings', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer(
+        {
+          id: 'canvasser-pings',
+          type: 'circle',
+          source: 'canvasser-pings',
+          paint: {
+            'circle-radius': [
+              'interpolate', ['linear'], ['zoom'],
+              10, 3,
+              14, 5,
+              17, 7,
+            ],
+            'circle-color': [
+              'match', ['get', 'actionType'],
+              'survey_submitted', STATUS_COLORS.surveyed,
+              'not_home', STATUS_COLORS.not_home,
+              'wrong_address', STATUS_COLORS.wrong_address,
+              '#6b7280',
+            ],
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 1.5,
+          },
+        },
+        'households-symbols'
+      );
+
+      map.on('click', 'canvasser-pings', (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        setSelectedActivityId(f.properties.activityId);
+        setSelected(null);
+      });
+      map.on('mouseenter', 'canvasser-pings', () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', 'canvasser-pings', () => {
         map.getCanvas().style.cursor = '';
       });
 
@@ -277,9 +388,49 @@ export default function MapPage() {
     }
   }, [households, mapReady]);
 
+  const householdsById = useMemo(() => {
+    const m = new Map();
+    for (const h of households) m.set(h.id, h);
+    return m;
+  }, [households]);
+
+  // Push canvasser activity GPS points + connecting lines.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const pingsSrc = mapRef.current.getSource('canvasser-pings');
+    const linesSrc = mapRef.current.getSource('canvasser-lines');
+    if (!pingsSrc || !linesSrc) return;
+    const list = showCanvasserPins ? activities : [];
+    pingsSrc.setData(activitiesToPingsGeoJSON(list));
+    linesSrc.setData(activitiesToLinesGeoJSON(list, householdsById));
+  }, [activities, householdsById, showCanvasserPins, mapReady]);
+
+  // Toggle layer visibility — instant, no refetch.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const vis = showCanvasserPins ? 'visible' : 'none';
+    if (mapRef.current.getLayer('canvasser-pings')) {
+      mapRef.current.setLayoutProperty('canvasser-pings', 'visibility', vis);
+    }
+    if (mapRef.current.getLayer('canvasser-lines')) {
+      mapRef.current.setLayoutProperty('canvasser-lines', 'visibility', vis);
+    }
+  }, [showCanvasserPins, mapReady]);
+
   const selectedHousehold = useMemo(
     () => households.find((h) => h.id === selected) || null,
     [selected, households]
+  );
+
+  const selectedActivity = useMemo(
+    () => activities.find((a) => a.id === selectedActivityId) || null,
+    [selectedActivityId, activities]
+  );
+
+  const selectedActivityHousehold = useMemo(
+    () =>
+      selectedActivity ? householdsById.get(selectedActivity.householdId) || null : null,
+    [selectedActivity, householdsById]
   );
 
   function flyToHousehold(h) {
@@ -290,6 +441,7 @@ export default function MapPage() {
       essential: true,
     });
     setSelected(h.id);
+    setSelectedActivityId(null);
   }
 
   if (tokenQ.isLoading) {
@@ -343,6 +495,8 @@ export default function MapPage() {
             onAnswerChange={setAnswerFilter}
             statusColors={STATUS_COLORS}
             statusLabels={STATUS_LABELS}
+            showCanvasserPins={showCanvasserPins}
+            onShowCanvasserPinsChange={setShowCanvasserPins}
           />
         </aside>
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
@@ -366,6 +520,31 @@ export default function MapPage() {
                 onClose={() => setSelected(null)}
                 statusColors={STATUS_COLORS}
                 statusLabels={STATUS_LABELS}
+              />
+            </div>
+          )}
+          {selectedActivity && !selectedHousehold && (
+            <div
+              style={{
+                position: 'absolute',
+                right: 16,
+                top: 16,
+                zIndex: 10,
+                width: 320,
+                maxWidth: 'calc(100% - 32px)',
+                maxHeight: 'calc(100% - 32px)',
+                overflowY: 'auto',
+              }}
+              className="rounded-lg border border-gray-200 bg-white shadow-lg"
+            >
+              <CanvasserPingPanel
+                activity={selectedActivity}
+                household={selectedActivityHousehold}
+                onOpenHousehold={(id) => {
+                  setSelectedActivityId(null);
+                  setSelected(id);
+                }}
+                onClose={() => setSelectedActivityId(null)}
               />
             </div>
           )}

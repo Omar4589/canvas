@@ -24,6 +24,14 @@ if (MAPBOX_PUBLIC_TOKEN) {
 
 const DEFAULT_CENTER = [-84.5, 39.0]; // northern Kentucky default
 
+const STATUS_FILTER_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'unknocked', label: 'Unknocked' },
+  { key: 'not_home', label: 'Not home' },
+  { key: 'surveyed', label: 'Surveyed' },
+  { key: 'wrong_address', label: 'Wrong addr' },
+];
+
 function buildFeatureCollection(households) {
   return {
     type: 'FeatureCollection',
@@ -49,6 +57,19 @@ export default function MapScreen() {
   const [selected, setSelected] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [following, setFollowing] = useState(false);
+  const [activeFilter, setActiveFilter] = useState('all');
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+
+  const activeOption = STATUS_FILTER_OPTIONS.find((o) => o.key === activeFilter);
+
+  // 'all' shows every status; any other value shows only that status.
+  const layerFilter = useMemo(
+    () =>
+      activeFilter === 'all'
+        ? ['has', 'status']
+        : ['==', ['get', 'status'], activeFilter],
+    [activeFilter]
+  );
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['bootstrap'],
@@ -177,6 +198,7 @@ export default function MapScreen() {
         <Mapbox.ShapeSource id="households" shape={features} onPress={onPinPress}>
           <Mapbox.SymbolLayer
             id="household-pins"
+            filter={layerFilter}
             style={{
               iconImage: [
                 'match',
@@ -191,9 +213,9 @@ export default function MapScreen() {
                 'interpolate',
                 ['linear'],
                 ['zoom'],
-                10, 0.25,
-                14, 0.4,
-                17, 0.55,
+                10, 0.13,
+                14, 0.2,
+                17, 0.28,
               ],
               iconAllowOverlap: true,
               iconIgnorePlacement: true,
@@ -202,24 +224,84 @@ export default function MapScreen() {
         </Mapbox.ShapeSource>
       </Mapbox.MapView>
 
-      <SafeAreaView edges={['top']} style={styles.topBar} pointerEvents="box-none">
-        <Pressable onPress={onRefresh} style={styles.iconButton}>
-          {isFetching ? (
-            <ActivityIndicator size="small" />
-          ) : (
-            <Text style={styles.iconButtonText}>Refresh</Text>
+      <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
+        <View style={styles.topBar}>
+          <Pressable onPress={onRefresh} style={styles.iconButton}>
+            {isFetching ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <Text style={styles.iconButtonText}>Refresh</Text>
+            )}
+          </Pressable>
+          {pendingCount > 0 && (
+            <View style={styles.pendingBadge}>
+              <Text style={styles.pendingBadgeText}>
+                {pendingCount} pending sync
+              </Text>
+            </View>
           )}
-        </Pressable>
-        {pendingCount > 0 && (
-          <View style={styles.pendingBadge}>
-            <Text style={styles.pendingBadgeText}>
-              {pendingCount} pending sync
-            </Text>
-          </View>
-        )}
-        <Pressable onPress={onLogout} style={styles.iconButton}>
-          <Text style={styles.iconButtonText}>Sign out</Text>
-        </Pressable>
+          <Pressable onPress={onLogout} style={styles.iconButton}>
+            <Text style={styles.iconButtonText}>Sign out</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.filterRow}>
+          <Pressable
+            onPress={() => setFilterMenuOpen((v) => !v)}
+            style={styles.filterButton}
+          >
+            {activeFilter !== 'all' && (
+              <View
+                style={[
+                  styles.filterDot,
+                  { backgroundColor: STATUS_COLORS[activeFilter] },
+                ]}
+              />
+            )}
+            <Text style={styles.filterButtonText}>{activeOption.label}</Text>
+            <Text style={styles.filterChevron}>{filterMenuOpen ? '▲' : '▼'}</Text>
+          </Pressable>
+
+          {filterMenuOpen && (
+            <View style={styles.filterMenu}>
+              {STATUS_FILTER_OPTIONS.map((opt) => {
+                const isActive = opt.key === activeFilter;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    onPress={() => {
+                      setActiveFilter(opt.key);
+                      setFilterMenuOpen(false);
+                    }}
+                    style={[
+                      styles.filterMenuItem,
+                      isActive && styles.filterMenuItemActive,
+                    ]}
+                  >
+                    {opt.key !== 'all' ? (
+                      <View
+                        style={[
+                          styles.filterDot,
+                          { backgroundColor: STATUS_COLORS[opt.key] },
+                        ]}
+                      />
+                    ) : (
+                      <View style={styles.filterDotPlaceholder} />
+                    )}
+                    <Text
+                      style={[
+                        styles.filterMenuItemText,
+                        isActive && styles.filterMenuItemTextActive,
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </View>
       </SafeAreaView>
 
       <Pressable
@@ -291,15 +373,85 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  topBar: {
+  topBarWrap: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
+  },
+  topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 8,
+  },
+  filterRow: {
+    paddingHorizontal: 8,
+    paddingBottom: 4,
+    alignItems: 'flex-start',
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffffee',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  filterButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  filterChevron: {
+    marginLeft: 6,
+    fontSize: 9,
+    color: '#6b7280',
+  },
+  filterDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    marginRight: 7,
+  },
+  filterDotPlaceholder: {
+    width: 9,
+    height: 9,
+    marginRight: 7,
+  },
+  filterMenu: {
+    marginTop: 6,
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    paddingVertical: 4,
+    minWidth: 160,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  filterMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  filterMenuItemActive: {
+    backgroundColor: '#f3f4f6',
+  },
+  filterMenuItemText: {
+    fontSize: 14,
+    color: '#111827',
+  },
+  filterMenuItemTextActive: {
+    fontWeight: '700',
+    color: '#0284c7',
   },
   iconButton: {
     backgroundColor: '#ffffffcc',

@@ -94,8 +94,9 @@ router.get('/map', async (req, res, next) => {
     }
 
     const householdIds = households.map((h) => h._id);
+    const includeActivities = req.query.includeActivities === '1';
 
-    const [voters, surveys, lastActivities, allCanvassers] = await Promise.all([
+    const [voters, surveys, lastActivities, allCanvassers, activities] = await Promise.all([
       Voter.find(
         { householdId: { $in: householdIds } },
         'householdId fullName surveyStatus party'
@@ -121,6 +122,15 @@ router.get('/map', async (req, res, next) => {
       ]),
       // Distinct list of canvassers who have any activity (used to populate the filter dropdown).
       User.find({ isActive: true }, 'firstName lastName email').sort({ firstName: 1 }).lean(),
+      // Raw GPS pings for each activity, only when requested (the canvasser-pin overlay).
+      includeActivities
+        ? CanvassActivity.find(
+            { ...activityMatch, householdId: { $in: householdIds } },
+            'householdId userId actionType timestamp location distanceFromHouseMeters'
+          )
+            .populate('userId', 'firstName lastName')
+            .lean()
+        : Promise.resolve([]),
     ]);
 
     const votersByHh = new Map();
@@ -207,6 +217,23 @@ router.get('/map', async (req, res, next) => {
         firstName: u.firstName,
         lastName: u.lastName,
         email: u.email,
+      })),
+      activities: activities.map((a) => ({
+        id: String(a._id),
+        householdId: String(a.householdId),
+        actionType: a.actionType,
+        timestamp: a.timestamp,
+        location: a.location
+          ? { lng: a.location.lng, lat: a.location.lat, accuracy: a.location.accuracy }
+          : null,
+        distanceFromHouseMeters: a.distanceFromHouseMeters,
+        canvasser: a.userId
+          ? {
+              id: String(a.userId._id),
+              firstName: a.userId.firstName,
+              lastName: a.userId.lastName,
+            }
+          : null,
       })),
       total: result.length,
     });

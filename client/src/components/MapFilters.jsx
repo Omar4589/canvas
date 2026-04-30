@@ -43,6 +43,8 @@ export default function MapFilters({
   onAnswerChange,
   statusColors,
   statusLabels,
+  showCanvasserPins = false,
+  onShowCanvasserPinsChange,
 }) {
   function toggleStatus(s) {
     if (statusFilter.includes(s)) onStatusChange(statusFilter.filter((x) => x !== s));
@@ -77,6 +79,22 @@ export default function MapFilters({
 
   return (
     <div className="space-y-5">
+      <div>
+        <SectionLabel>Layers</SectionLabel>
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={showCanvasserPins}
+            onChange={(e) => onShowCanvasserPinsChange?.(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-600"
+          />
+          <span className="text-gray-800">Show canvasser locations</span>
+        </label>
+        <div className="mt-1 text-xs text-gray-500">
+          Where each survey, not-home, or wrong-address was submitted from.
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-900">Filters</h3>
         {hasActiveFilters && (
