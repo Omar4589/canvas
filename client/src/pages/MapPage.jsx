@@ -220,8 +220,11 @@ export default function MapPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-6 py-3">
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{ flexShrink: 0 }}
+        className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-6 py-3"
+      >
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Map</h1>
           <div className="text-xs text-gray-500">
@@ -235,8 +238,11 @@ export default function MapPage() {
           <DateRangeSelector value={rangeId} onChange={setRangeId} />
         </div>
       </div>
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-72 shrink-0 overflow-y-auto border-r border-gray-200 bg-white p-4">
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        <aside
+          style={{ flexShrink: 0, overflowY: 'auto' }}
+          className="w-72 border-r border-gray-200 bg-white p-4"
+        >
           <MapFilters
             statusFilter={statusFilter}
             onStatusChange={setStatusFilter}
@@ -250,10 +256,22 @@ export default function MapPage() {
             statusLabels={STATUS_LABELS}
           />
         </aside>
-        <div className="relative flex-1">
-          <div ref={containerRef} className="absolute inset-0" />
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
           {selectedHousehold && (
-            <div className="absolute right-4 top-4 z-10 max-h-[calc(100%-2rem)] w-96 max-w-[calc(100%-2rem)] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+            <div
+              style={{
+                position: 'absolute',
+                right: 16,
+                top: 16,
+                zIndex: 10,
+                width: 384,
+                maxWidth: 'calc(100% - 32px)',
+                maxHeight: 'calc(100% - 32px)',
+                overflowY: 'auto',
+              }}
+              className="rounded-lg border border-gray-200 bg-white shadow-lg"
+            >
               <HouseholdDetailPanel
                 household={selectedHousehold}
                 onClose={() => setSelected(null)}
