@@ -46,6 +46,21 @@ async function recordHouseholdAction({ householdId, userId, actionType, status, 
     actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted'] },
   });
 
+  // If this canvasser previously submitted any surveys at this house, those become
+  // invalid too (e.g. they realized they were at the wrong door). Drop the
+  // SurveyResponse records and reset surveyStatus on the affected voters.
+  const priorSurveys = await SurveyResponse.find(
+    { userId, householdId },
+    'voterId'
+  ).lean();
+  if (priorSurveys.length) {
+    await SurveyResponse.deleteMany({ userId, householdId });
+    await Voter.updateMany(
+      { _id: { $in: priorSurveys.map((s) => s.voterId) } },
+      { $set: { surveyStatus: 'not_surveyed' } }
+    );
+  }
+
   const activity = await CanvassActivity.create({
     householdId,
     userId,
@@ -130,6 +145,12 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
 
     const ts = data.timestamp ? new Date(data.timestamp) : new Date();
     const distance = distanceFromHouse(household, data.location);
+
+    // Per-voter overwrite: each voter has at most one SurveyResponse — the latest
+    // submission wins. Without this, re-surveys would inflate counts and answer
+    // breakdowns (e.g., a voter who answered "Undecided" then "Yes" would appear
+    // in both buckets).
+    await SurveyResponse.deleteMany({ voterId: voter._id });
 
     const surveyResponse = await SurveyResponse.create({
       voterId: voter._id,
