@@ -35,8 +35,8 @@ router.get('/overview', async (req, res, next) => {
       activeUsers,
       surveysSubmitted,
       homesKnocked,
-      geocodeAgg,
       statusAgg,
+      eventAgg,
     ] = await Promise.all([
       Household.countDocuments({ isActive: true }),
       Voter.countDocuments({}),
@@ -45,24 +45,27 @@ router.get('/overview', async (req, res, next) => {
       Household.countDocuments({ isActive: true, status: { $ne: 'unknocked' } }),
       Household.aggregate([
         { $match: { isActive: true } },
-        { $group: { _id: '$geocodeStatus', count: { $sum: 1 } } },
-      ]),
-      Household.aggregate([
-        { $match: { isActive: true } },
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
+      CanvassActivity.aggregate([
+        { $group: { _id: '$actionType', count: { $sum: 1 } } },
+      ]),
     ]);
-
-    const geocoded = { pending: 0, success: 0, failed: 0 };
-    for (const r of geocodeAgg) geocoded[r._id] = r.count;
 
     const canvass = { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0 };
     for (const r of statusAgg) canvass[r._id] = r.count;
 
+    const events = { notHome: 0, wrongAddress: 0, surveySubmitted: 0 };
+    for (const r of eventAgg) {
+      if (r._id === 'not_home') events.notHome = r.count;
+      else if (r._id === 'wrong_address') events.wrongAddress = r.count;
+      else if (r._id === 'survey_submitted') events.surveySubmitted = r.count;
+    }
+
     res.json({
       totals: { households, voters, activeUsers, surveysSubmitted, homesKnocked },
-      geocoded,
       canvass,
+      events,
     });
   } catch (err) {
     next(err);

@@ -39,6 +39,86 @@ function buildQuery(params) {
   return s ? `?${s}` : '';
 }
 
+// Render a modern two-tone house icon — rounded body in the status color, a
+// slightly darker roof, a small white door + window, and a soft drop shadow.
+// One pre-colored ImageData per status; we ship our own because the
+// streets-v12 sprite no longer bundles Maki icons.
+function darkenHex(hex, amount = 0.2) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.max(0, Math.round(((n >> 16) & 0xff) * (1 - amount)));
+  const g = Math.max(0, Math.round(((n >> 8) & 0xff) * (1 - amount)));
+  const b = Math.max(0, Math.round((n & 0xff) * (1 - amount)));
+  return `rgb(${r},${g},${b})`;
+}
+
+function drawHouseIcon(color, size = 64) {
+  const dpr = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const darker = darkenHex(color);
+
+  // Drop shadow
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(size / 2, size - 4, 19, 2.8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // House body (walls) — rounded rectangle in the status color
+  ctx.beginPath();
+  ctx.roundRect(11, 28, 42, 26, 3);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  // Roof — darker shade of the same color, rounded peak
+  ctx.beginPath();
+  ctx.moveTo(6, 30);
+  ctx.lineTo(31, 8);
+  ctx.quadraticCurveTo(32, 7, 33, 8);
+  ctx.lineTo(58, 30);
+  ctx.closePath();
+  ctx.fillStyle = darker;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  // Small window (left)
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.roundRect(17, 34, 9, 9, 1.5);
+  ctx.fill();
+  // Window cross
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(21.5, 34);
+  ctx.lineTo(21.5, 43);
+  ctx.moveTo(17, 38.5);
+  ctx.lineTo(26, 38.5);
+  ctx.stroke();
+
+  // Door (right of center)
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.roundRect(32, 38, 11, 16, 1.5);
+  ctx.fill();
+  // Door knob
+  ctx.fillStyle = darker;
+  ctx.beginPath();
+  ctx.arc(41, 47, 0.9, 0, Math.PI * 2);
+  ctx.fill();
+
+  return ctx.getImageData(0, 0, size * dpr, size * dpr);
+}
+
 function householdsToGeoJSON(households) {
   return {
     type: 'FeatureCollection',
@@ -119,43 +199,52 @@ export default function MapPage() {
     });
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'top-right');
     map.on('load', () => {
+      // Register one house icon per status (pre-colored, non-SDF).
+      // pixelRatio: 2 because drawHouseIcon renders at 2x for retina sharpness.
+      for (const status of Object.keys(STATUS_COLORS)) {
+        const id = `house-${status}`;
+        if (!map.hasImage(id)) {
+          map.addImage(id, drawHouseIcon(STATUS_COLORS[status]), { pixelRatio: 2 });
+        }
+      }
+
       map.addSource('households', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
       map.addLayer({
-        id: 'households-circles',
-        type: 'circle',
+        id: 'households-symbols',
+        type: 'symbol',
         source: 'households',
-        paint: {
-          'circle-radius': [
-            'interpolate', ['linear'], ['zoom'],
-            10, 4,
-            14, 7,
-            17, 10,
-          ],
-          'circle-color': [
+        layout: {
+          'icon-image': [
             'match', ['get', 'status'],
-            'unknocked', STATUS_COLORS.unknocked,
-            'not_home', STATUS_COLORS.not_home,
-            'surveyed', STATUS_COLORS.surveyed,
-            'wrong_address', STATUS_COLORS.wrong_address,
-            '#888',
+            'unknocked', 'house-unknocked',
+            'not_home', 'house-not_home',
+            'surveyed', 'house-surveyed',
+            'wrong_address', 'house-wrong_address',
+            'house-unknocked',
           ],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 1.5,
+          'icon-size': [
+            'interpolate', ['linear'], ['zoom'],
+            10, 0.32,
+            14, 0.5,
+            17, 0.7,
+          ],
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       });
 
-      map.on('click', 'households-circles', (e) => {
+      map.on('click', 'households-symbols', (e) => {
         const f = e.features?.[0];
         if (!f) return;
         setSelected(f.properties.id);
       });
-      map.on('mouseenter', 'households-circles', () => {
+      map.on('mouseenter', 'households-symbols', () => {
         map.getCanvas().style.cursor = 'pointer';
       });
-      map.on('mouseleave', 'households-circles', () => {
+      map.on('mouseleave', 'households-symbols', () => {
         map.getCanvas().style.cursor = '';
       });
 

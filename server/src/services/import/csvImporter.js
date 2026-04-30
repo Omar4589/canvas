@@ -117,6 +117,14 @@ export async function runImport({ buffer, filename, userId }) {
         });
         return;
       }
+      if (mapped.household.latitude == null || mapped.household.longitude == null) {
+        errors.push({
+          rowIndex: i + 2,
+          reason: 'Missing or invalid p_Latitude/p_Longitude',
+          stateVoterId: mapped.voter.stateVoterId || null,
+        });
+        return;
+      }
       const svid = mapped.voter.stateVoterId;
       if (seenSvids.has(svid)) {
         dupSvids.add(svid);
@@ -140,40 +148,29 @@ export async function runImport({ buffer, filename, userId }) {
       }
     }
 
-    // Bulk upsert households. Coordinates from the CSV always overwrite existing
-    // location data; addresses without coords leave any prior location untouched.
-    const householdOps = Array.from(householdMap.values()).map((h) => {
-      const hasCoords = h.latitude != null && h.longitude != null;
-      const set = {
-        addressLine1: h.addressLine1,
-        addressLine2: h.addressLine2,
-        city: h.city,
-        state: h.state,
-        zipCode: h.zipCode,
-      };
-      if (hasCoords) {
-        set.location = { type: 'Point', coordinates: [h.longitude, h.latitude] };
-        set.geocodeStatus = 'success';
-        set.geocodeProvider = 'csv';
-      }
-      const setOnInsert = {
-        normalizedAddress: h.normalizedAddress,
-        status: 'unknocked',
-        isActive: true,
-      };
-      if (!hasCoords) {
-        setOnInsert.geocodeStatus = 'pending';
-        setOnInsert.geocodeProvider = null;
-        setOnInsert.location = null;
-      }
-      return {
-        updateOne: {
-          filter: { normalizedAddress: h.normalizedAddress },
-          update: { $set: set, $setOnInsert: setOnInsert },
-          upsert: true,
+    // Bulk upsert households. Coordinates are required (rows without lat/lng were
+    // already rejected above), so every household here gets a location.
+    const householdOps = Array.from(householdMap.values()).map((h) => ({
+      updateOne: {
+        filter: { normalizedAddress: h.normalizedAddress },
+        update: {
+          $set: {
+            addressLine1: h.addressLine1,
+            addressLine2: h.addressLine2,
+            city: h.city,
+            state: h.state,
+            zipCode: h.zipCode,
+            location: { type: 'Point', coordinates: [h.longitude, h.latitude] },
+          },
+          $setOnInsert: {
+            normalizedAddress: h.normalizedAddress,
+            status: 'unknocked',
+            isActive: true,
+          },
         },
-      };
-    });
+        upsert: true,
+      },
+    }));
 
     let newHouseholds = 0;
     if (householdOps.length) {

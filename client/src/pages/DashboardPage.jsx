@@ -75,15 +75,11 @@ export default function DashboardPage() {
   const overview = overviewQ.data || {};
   const totals = overview.totals || {};
   const canvass = overview.canvass || {};
+  const events = overview.events || {};
 
   const knockedPct = totals.households
     ? Math.round((100 * (totals.homesKnocked || 0)) / totals.households)
     : 0;
-
-  function pctOfKnocked(n) {
-    if (!totals.homesKnocked) return 0;
-    return Math.round((100 * (n || 0)) / totals.homesKnocked);
-  }
 
   return (
     <div>
@@ -141,29 +137,29 @@ export default function DashboardPage() {
           <section className="mb-6">
             <div className="mb-2 flex items-baseline justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Of homes knocked
+                Canvasser activity
               </h2>
               <span className="text-xs text-gray-400">
-                {totals.homesKnocked?.toLocaleString() || 0} households
+                events · sums to leaderboard
               </span>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <StatCard
-                label="Surveyed"
-                value={canvass.surveyed?.toLocaleString()}
-                hint={`${pctOfKnocked(canvass.surveyed)}% of knocked`}
+                label="Surveys submitted"
+                value={events.surveySubmitted?.toLocaleString()}
+                hint="per voter"
                 accent="green"
               />
               <StatCard
                 label="Not home"
-                value={canvass.not_home?.toLocaleString()}
-                hint={`${pctOfKnocked(canvass.not_home)}% of knocked`}
+                value={events.notHome?.toLocaleString()}
+                hint="events"
                 accent="amber"
               />
               <StatCard
                 label="Wrong addresses"
-                value={canvass.wrong_address?.toLocaleString()}
-                hint={`${pctOfKnocked(canvass.wrong_address)}% of knocked`}
+                value={events.wrongAddress?.toLocaleString()}
+                hint="events"
                 accent="red"
               />
             </div>

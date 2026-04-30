@@ -115,7 +115,7 @@ export default function PrivacyPolicyPage() {
               backend API and admin dashboard.
             </li>
             <li>
-              <strong>Mapbox</strong> — map tiles and geocoding services.
+              <strong>Mapbox</strong> — map tiles.
             </li>
             <li>
               <strong>Expo / EAS</strong> — over-the-air mobile app updates.

@@ -166,29 +166,37 @@ export default function MapScreen() {
         />
         <Mapbox.UserLocation visible androidRenderMode="compass" />
 
+        <Mapbox.Images
+          images={{
+            'house-unknocked': require('../../assets/icons/house-unknocked.png'),
+            'house-not_home': require('../../assets/icons/house-not_home.png'),
+            'house-surveyed': require('../../assets/icons/house-surveyed.png'),
+            'house-wrong_address': require('../../assets/icons/house-wrong_address.png'),
+          }}
+        />
         <Mapbox.ShapeSource id="households" shape={features} onPress={onPinPress}>
-          <Mapbox.CircleLayer
+          <Mapbox.SymbolLayer
             id="household-pins"
             style={{
-              circleRadius: [
+              iconImage: [
+                'match',
+                ['get', 'status'],
+                'unknocked', 'house-unknocked',
+                'not_home', 'house-not_home',
+                'surveyed', 'house-surveyed',
+                'wrong_address', 'house-wrong_address',
+                'house-unknocked',
+              ],
+              iconSize: [
                 'interpolate',
                 ['linear'],
                 ['zoom'],
-                10, 4,
-                14, 7,
-                17, 10,
+                10, 0.25,
+                14, 0.4,
+                17, 0.55,
               ],
-              circleColor: [
-                'match',
-                ['get', 'status'],
-                'unknocked', STATUS_COLORS.unknocked,
-                'not_home', STATUS_COLORS.not_home,
-                'surveyed', STATUS_COLORS.surveyed,
-                'wrong_address', STATUS_COLORS.wrong_address,
-                STATUS_COLORS.unknocked,
-              ],
-              circleStrokeWidth: 1.5,
-              circleStrokeColor: '#ffffff',
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
             }}
           />
         </Mapbox.ShapeSource>

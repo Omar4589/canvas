@@ -6,7 +6,6 @@ import LoginPage from './pages/LoginPage.jsx';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
-const GeocodingPage = lazy(() => import('./pages/GeocodingPage.jsx'));
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
@@ -34,7 +33,6 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/import" element={<ImportPage />} />
-          <Route path="/geocoding" element={<GeocodingPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
         </Route>

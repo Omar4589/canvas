@@ -20,19 +20,6 @@ const householdSchema = new mongoose.Schema(
 
     location: { type: pointSchema, default: null },
 
-    geocodeStatus: {
-      type: String,
-      enum: ['pending', 'success', 'failed'],
-      default: 'pending',
-      index: true,
-    },
-    geocodeProvider: {
-      type: String,
-      enum: ['csv', 'census', 'mapbox', null],
-      default: null,
-    },
-    geocodeRaw: { type: mongoose.Schema.Types.Mixed, default: null },
-
     status: {
       type: String,
       enum: ['unknocked', 'not_home', 'surveyed', 'wrong_address'],

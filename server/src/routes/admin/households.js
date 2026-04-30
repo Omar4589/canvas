@@ -32,10 +32,9 @@ router.get('/map', async (req, res, next) => {
     const questionKey = req.query.questionKey || null;
     const answerOption = req.query.option || null;
 
-    // Households we display: geocoded successfully + active.
+    // Households we display: active + have coordinates.
     const householdFilter = {
       isActive: true,
-      geocodeStatus: 'success',
       'location.coordinates': { $exists: true, $ne: null },
     };
     if (status && status.length) householdFilter.status = { $in: status };

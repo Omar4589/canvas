@@ -38,6 +38,14 @@ async function recordHouseholdAction({ householdId, userId, actionType, status, 
   const ts = data.timestamp ? new Date(data.timestamp) : new Date();
   const distance = distanceFromHouse(household, data.location);
 
+  // Per-canvasser overwrite: a canvasser can have at most one activity per household.
+  // Re-entering an action replaces their previous one (corrects mistakes cleanly).
+  await CanvassActivity.deleteMany({
+    userId,
+    householdId,
+    actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted'] },
+  });
+
   const activity = await CanvassActivity.create({
     householdId,
     userId,
@@ -135,6 +143,14 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       distanceFromHouseMeters: distance,
       submittedAt: ts,
       wasOfflineSubmission: !!data.wasOfflineSubmission,
+    });
+
+    // Per-canvasser overwrite (matches recordHouseholdAction): one activity per
+    // (canvasser, household). The SurveyResponse above is the per-voter source of truth.
+    await CanvassActivity.deleteMany({
+      userId: req.user._id,
+      householdId: household._id,
+      actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted'] },
     });
 
     const activity = await CanvassActivity.create({

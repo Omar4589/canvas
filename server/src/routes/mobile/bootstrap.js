@@ -11,7 +11,7 @@ router.get('/bootstrap', async (req, res, next) => {
   try {
     const [households, voters, activeSurvey] = await Promise.all([
       Household.find(
-        { isActive: true, geocodeStatus: 'success' },
+        { isActive: true, 'location.coordinates': { $exists: true, $ne: null } },
         {
           addressLine1: 1,
           addressLine2: 1,
