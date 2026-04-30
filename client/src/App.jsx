@@ -3,8 +3,6 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
-// Imported eagerly (NOT lazy) on purpose — diagnostic page to rule out lazy-load issues.
-import MapDebugPage from './pages/MapDebugPage.jsx';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
@@ -35,7 +33,6 @@ export default function App() {
         >
           <Route path="/" element={<DashboardPage />} />
           <Route path="/map" element={<MapPage />} />
-          <Route path="/map-debug" element={<MapDebugPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/geocoding" element={<GeocodingPage />} />
           <Route path="/users" element={<UsersPage />} />
