@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
@@ -7,6 +7,7 @@ import QuestionResults from '../components/QuestionResults.jsx';
 import CanvasserTable from '../components/CanvasserTable.jsx';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.jsx';
+import VoterHighlights from '../components/VoterHighlights.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -58,9 +59,18 @@ export default function DashboardPage() {
           surveyTemplateId: selectedTemplateId,
           from: dateRange.from,
           to: dateRange.to,
+          voterPreview: 5,
         })}`
       ),
   });
+
+  const surveyResultsRef = useRef(null);
+  const questionResultsRefs = useRef({});
+
+  function scrollToOption(questionKey) {
+    const el = questionResultsRefs.current[questionKey];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const overview = overviewQ.data || {};
   const totals = overview.totals || {};
@@ -144,7 +154,25 @@ export default function DashboardPage() {
         )}
       </section>
 
-      <section className="mb-8">
+      {surveyResultsQ.data?.surveyTemplate &&
+        surveyResultsQ.data.questions?.some((q) => q.type === 'multiple_choice') && (
+          <section className="mb-8">
+            <SectionHeading
+              title="Voter highlights"
+              right={
+                <span className="text-xs text-gray-500">
+                  Latest voters per option
+                </span>
+              }
+            />
+            <VoterHighlights
+              surveyResults={surveyResultsQ.data}
+              onSeeAll={scrollToOption}
+            />
+          </section>
+        )}
+
+      <section className="mb-8" ref={surveyResultsRef}>
         <SectionHeading
           title="Survey results"
           right={
@@ -183,12 +211,18 @@ export default function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {surveyResultsQ.data.questions.map((q) => (
-              <QuestionResults
+              <div
                 key={q.key}
-                question={q}
-                surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
-                dateRange={dateRange}
-              />
+                ref={(el) => {
+                  questionResultsRefs.current[q.key] = el;
+                }}
+              >
+                <QuestionResults
+                  question={q}
+                  surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
+                  dateRange={dateRange}
+                />
+              </div>
             ))}
           </div>
         )}

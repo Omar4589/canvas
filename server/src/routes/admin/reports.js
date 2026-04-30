@@ -210,9 +210,16 @@ router.get('/survey-results', async (req, res, next) => {
     const match = { surveyTemplateId: template._id, ...dateRange };
     const totalResponses = await SurveyResponse.countDocuments(match);
 
+    const voterPreviewLimit = Math.min(
+      Math.max(parseInt(req.query.voterPreview, 10) || 0, 0),
+      20
+    );
+
     const questions = [];
     const sortedQs = [...(template.questions || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
 
+    // First pass: aggregate counts (and gather top-N response IDs per option if requested).
+    const aggResults = [];
     for (const q of sortedQs) {
       const pipeline = [
         { $match: match },
@@ -224,27 +231,106 @@ router.get('/survey-results', async (req, res, next) => {
         pipeline.push({ $unwind: '$answers.answer' });
       }
 
-      pipeline.push({
-        $group: {
-          _id: '$answers.answer',
-          count: { $sum: 1 },
-        },
-      });
-      pipeline.push({ $sort: { count: -1 } });
+      // For non-text questions with voter preview, sort by submittedAt desc so the first
+      // N pushed into each group are the latest responses.
+      const wantsPreview = voterPreviewLimit > 0 && q.type !== 'text';
+      if (wantsPreview) {
+        pipeline.push({ $sort: { submittedAt: -1 } });
+      }
 
+      const groupStage = {
+        _id: '$answers.answer',
+        count: { $sum: 1 },
+      };
+      if (wantsPreview) {
+        groupStage.responseIds = { $push: '$_id' };
+      }
+      pipeline.push({ $group: groupStage });
+
+      if (wantsPreview) {
+        pipeline.push({
+          $project: {
+            count: 1,
+            responseIds: { $slice: ['$responseIds', voterPreviewLimit] },
+          },
+        });
+      }
+
+      pipeline.push({ $sort: { count: -1 } });
       if (q.type === 'text') {
         pipeline.push({ $limit: 10 });
       }
 
       const agg = await SurveyResponse.aggregate(pipeline);
+      aggResults.push({ q, agg });
+    }
 
+    // Collect every response ID we'll need to populate, so we can fetch in one batch.
+    const allResponseIds = new Set();
+    for (const { q, agg } of aggResults) {
+      if (q.type === 'text') continue;
+      for (const row of agg) {
+        for (const id of row.responseIds || []) allResponseIds.add(String(id));
+      }
+    }
+
+    let responseLookup = new Map();
+    if (allResponseIds.size > 0) {
+      const ids = Array.from(allResponseIds).map((id) => new mongoose.Types.ObjectId(id));
+      const responses = await SurveyResponse.find({ _id: { $in: ids } })
+        .populate('voterId', 'fullName party')
+        .populate('householdId', 'addressLine1 city state')
+        .populate('userId', 'firstName lastName')
+        .lean();
+      responseLookup = new Map(responses.map((r) => [String(r._id), r]));
+    }
+
+    function shapeVoter(r) {
+      return {
+        responseId: String(r._id),
+        submittedAt: r.submittedAt,
+        voter: r.voterId
+          ? {
+              id: String(r.voterId._id),
+              fullName: r.voterId.fullName,
+              party: r.voterId.party || null,
+            }
+          : null,
+        household: r.householdId
+          ? {
+              id: String(r.householdId._id),
+              addressLine1: r.householdId.addressLine1,
+              city: r.householdId.city,
+              state: r.householdId.state,
+            }
+          : null,
+        canvasser: r.userId
+          ? {
+              id: String(r.userId._id),
+              firstName: r.userId.firstName,
+              lastName: r.userId.lastName,
+            }
+          : null,
+      };
+    }
+
+    for (const { q, agg } of aggResults) {
       const options = agg
         .filter((r) => r._id !== null && r._id !== undefined && r._id !== '')
-        .map((r) => ({
-          option: typeof r._id === 'string' ? r._id : String(r._id),
-          count: r.count,
-          percent: totalResponses > 0 ? Math.round((r.count / totalResponses) * 1000) / 10 : 0,
-        }));
+        .map((r) => {
+          const out = {
+            option: typeof r._id === 'string' ? r._id : String(r._id),
+            count: r.count,
+            percent: totalResponses > 0 ? Math.round((r.count / totalResponses) * 1000) / 10 : 0,
+          };
+          if (voterPreviewLimit > 0 && q.type !== 'text') {
+            out.voters = (r.responseIds || [])
+              .map((id) => responseLookup.get(String(id)))
+              .filter(Boolean)
+              .map(shapeVoter);
+          }
+          return out;
+        });
 
       questions.push({
         key: q.key,
