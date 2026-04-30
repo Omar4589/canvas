@@ -80,6 +80,11 @@ export default function DashboardPage() {
     ? Math.round((100 * (totals.homesKnocked || 0)) / totals.households)
     : 0;
 
+  function pctOfKnocked(n) {
+    if (!totals.homesKnocked) return 0;
+    return Math.round((100 * (n || 0)) / totals.homesKnocked);
+  }
+
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
@@ -108,39 +113,62 @@ export default function DashboardPage() {
           Error loading overview: {overviewQ.error.message}
         </div>
       ) : (
-        <section className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          <StatCard
-            label="Households"
-            value={totals.households?.toLocaleString()}
-            hint="unique addresses"
-          />
-          <StatCard
-            label="Homes knocked"
-            value={totals.homesKnocked?.toLocaleString()}
-            hint={`${knockedPct}% of households · unique`}
-            accent="brand"
-          />
-          <StatCard
-            label="Surveys submitted"
-            value={totals.surveysSubmitted?.toLocaleString()}
-            hint="per voter"
-            accent="green"
-          />
-          <StatCard
-            label="Wrong addresses"
-            value={canvass.wrong_address?.toLocaleString()}
-            accent="red"
-          />
-          <StatCard
-            label="Not home"
-            value={canvass.not_home?.toLocaleString()}
-            accent="amber"
-          />
-          <StatCard
-            label="Active canvassers"
-            value={totals.activeUsers?.toLocaleString()}
-          />
-        </section>
+        <>
+          <section className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+            <StatCard
+              label="Households"
+              value={totals.households?.toLocaleString()}
+              hint="unique addresses"
+            />
+            <StatCard
+              label="Homes knocked"
+              value={totals.homesKnocked?.toLocaleString()}
+              hint={`${knockedPct}% of households · unique`}
+              accent="brand"
+            />
+            <StatCard
+              label="Surveys submitted"
+              value={totals.surveysSubmitted?.toLocaleString()}
+              hint="per voter"
+              accent="green"
+            />
+            <StatCard
+              label="Active canvassers"
+              value={totals.activeUsers?.toLocaleString()}
+            />
+          </section>
+
+          <section className="mb-6">
+            <div className="mb-2 flex items-baseline justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Of homes knocked
+              </h2>
+              <span className="text-xs text-gray-400">
+                {totals.homesKnocked?.toLocaleString() || 0} households
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <StatCard
+                label="Surveyed"
+                value={canvass.surveyed?.toLocaleString()}
+                hint={`${pctOfKnocked(canvass.surveyed)}% of knocked`}
+                accent="green"
+              />
+              <StatCard
+                label="Not home"
+                value={canvass.not_home?.toLocaleString()}
+                hint={`${pctOfKnocked(canvass.not_home)}% of knocked`}
+                accent="amber"
+              />
+              <StatCard
+                label="Wrong addresses"
+                value={canvass.wrong_address?.toLocaleString()}
+                hint={`${pctOfKnocked(canvass.wrong_address)}% of knocked`}
+                accent="red"
+              />
+            </div>
+          </section>
+        </>
       )}
 
       <section className="mb-8">

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 
@@ -18,13 +18,26 @@ function formatDate(d) {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+const PAGE_SIZE = 25;
+
 function VoterList({ questionKey, option, surveyTemplateId, dateRange }) {
+  const [skip, setSkip] = useState(0);
+  const [accumulated, setAccumulated] = useState([]);
+
+  // Reset when filters change.
+  useEffect(() => {
+    setSkip(0);
+    setAccumulated([]);
+  }, [questionKey, option, surveyTemplateId, dateRange?.from, dateRange?.to]);
+
   const queryString = buildQuery({
     questionKey,
     option,
     surveyTemplateId,
     from: dateRange?.from,
     to: dateRange?.to,
+    limit: PAGE_SIZE,
+    skip,
   });
   const { data, isLoading, error } = useQuery({
     queryKey: [
@@ -35,49 +48,80 @@ function VoterList({ questionKey, option, surveyTemplateId, dateRange }) {
       surveyTemplateId,
       dateRange?.from,
       dateRange?.to,
+      skip,
     ],
     queryFn: () => api(`/admin/reports/voters-by-answer${queryString}`),
   });
 
-  if (isLoading) {
+  useEffect(() => {
+    if (!data?.voters) return;
+    setAccumulated((prev) => {
+      if (skip === 0) return data.voters;
+      const seen = new Set(prev.map((v) => v.responseId));
+      return [...prev, ...data.voters.filter((v) => !seen.has(v.responseId))];
+    });
+  }, [data, skip]);
+
+  if (isLoading && skip === 0) {
     return <div className="px-3 py-2 text-xs text-gray-500">Loading…</div>;
   }
   if (error) {
     return <div className="px-3 py-2 text-xs text-red-600">Error: {error.message}</div>;
   }
-  if (!data?.voters?.length) {
+  if (!accumulated.length) {
     return <div className="px-3 py-2 text-xs text-gray-500">No voters.</div>;
   }
+
+  const total = data?.total ?? accumulated.length;
+  const remaining = Math.max(total - accumulated.length, 0);
+
   return (
-    <ul className="divide-y divide-gray-100">
-      {data.voters.map((v) => (
-        <li key={v.responseId} className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm">
-          <div className="min-w-0">
-            <div className="truncate text-gray-900">
-              {v.voter?.fullName || 'Unknown'}
-              {v.voter?.party && (
-                <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                  {v.voter.party}
-                </span>
+    <div>
+      <ul className="max-h-80 divide-y divide-gray-100 overflow-y-auto">
+        {accumulated.map((v) => (
+          <li key={v.responseId} className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm">
+            <div className="min-w-0">
+              <div className="truncate text-gray-900">
+                {v.voter?.fullName || 'Unknown'}
+                {v.voter?.party && (
+                  <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                    {v.voter.party}
+                  </span>
+                )}
+              </div>
+              {v.household && (
+                <div className="truncate text-xs text-gray-500">
+                  {v.household.addressLine1}, {v.household.city}
+                </div>
               )}
             </div>
-            {v.household && (
-              <div className="truncate text-xs text-gray-500">
-                {v.household.addressLine1}, {v.household.city}
-              </div>
-            )}
-          </div>
-          <div className="shrink-0 text-right text-xs text-gray-500">
-            {v.canvasser && (
-              <div>
-                {v.canvasser.firstName} {v.canvasser.lastName}
-              </div>
-            )}
-            <div>{formatDate(v.submittedAt)}</div>
-          </div>
-        </li>
-      ))}
-    </ul>
+            <div className="shrink-0 text-right text-xs text-gray-500">
+              {v.canvasser && (
+                <div>
+                  {v.canvasser.firstName} {v.canvasser.lastName}
+                </div>
+              )}
+              <div>{formatDate(v.submittedAt)}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-2 text-xs">
+        <span className="text-gray-500">
+          Showing {accumulated.length} of {total}
+        </span>
+        {remaining > 0 && (
+          <button
+            type="button"
+            onClick={() => setSkip(skip + PAGE_SIZE)}
+            disabled={isLoading}
+            className="rounded border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {isLoading ? 'Loading…' : `Load ${Math.min(PAGE_SIZE, remaining)} more`}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

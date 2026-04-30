@@ -361,6 +361,8 @@ router.get('/voters-by-answer', async (req, res, next) => {
     if (!questionKey || !option) {
       return res.status(400).json({ error: 'questionKey and option are required' });
     }
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+    const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
     const dateRange = parseDateRange(req, 'submittedAt');
     const filter = {
       ...dateRange,
@@ -370,16 +372,20 @@ router.get('/voters-by-answer', async (req, res, next) => {
       filter.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
     }
 
-    const responses = await SurveyResponse.find(filter)
-      .sort({ submittedAt: -1 })
-      .limit(500)
-      .populate('voterId', 'fullName party')
-      .populate('householdId', 'addressLine1 city state')
-      .populate('userId', 'firstName lastName')
-      .lean();
+    const [total, responses] = await Promise.all([
+      SurveyResponse.countDocuments(filter),
+      SurveyResponse.find(filter)
+        .sort({ submittedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('voterId', 'fullName party')
+        .populate('householdId', 'addressLine1 city state')
+        .populate('userId', 'firstName lastName')
+        .lean(),
+    ]);
 
     res.json({
-      total: responses.length,
+      total,
       voters: responses.map((r) => ({
         responseId: String(r._id),
         submittedAt: r.submittedAt,
