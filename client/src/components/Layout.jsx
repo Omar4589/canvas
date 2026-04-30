@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 
 const NAV = [
@@ -19,6 +19,9 @@ function navClass({ isActive }) {
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  // The map page manages its own scroll/padding so it can take the full content area.
+  const isFullBleed = location.pathname === '/map';
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="w-56 border-r border-gray-200 bg-white p-4 flex flex-col">
@@ -46,7 +49,7 @@ export default function Layout() {
           </button>
         </div>
       </aside>
-      <main className="flex-1 overflow-auto p-6">
+      <main className={isFullBleed ? 'flex-1 overflow-hidden' : 'flex-1 overflow-auto p-6'}>
         <Outlet />
       </main>
     </div>
