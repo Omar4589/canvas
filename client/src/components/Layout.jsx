@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/map', label: 'Map' },
+  { to: '/campaigns', label: 'Campaigns' },
   { to: '/import', label: 'CSV Import' },
   { to: '/users', label: 'Users' },
   { to: '/surveys', label: 'Surveys' },

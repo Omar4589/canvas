@@ -15,23 +15,34 @@ const upload = multer({
 router.post('/csv', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
+    const campaignId = req.body?.campaignId;
+    if (!campaignId) {
+      return res.status(400).json({ error: 'campaignId is required' });
+    }
     const job = await runImport({
       buffer: req.file.buffer,
       filename: req.file.originalname,
       userId: req.user._id,
+      campaignId,
     });
     res.status(201).json({ job });
   } catch (err) {
+    if (err.message === 'Campaign not found' || err.message === 'campaignId is required') {
+      return res.status(400).json({ error: err.message });
+    }
     next(err);
   }
 });
 
 router.get('/', async (req, res, next) => {
   try {
-    const jobs = await ImportJob.find({}, { errors: 0 })
+    const filter = {};
+    if (req.query.campaignId) filter.campaignId = req.query.campaignId;
+    const jobs = await ImportJob.find(filter, { errors: 0 })
       .sort({ createdAt: -1 })
       .limit(50)
-      .populate('uploadedBy', 'firstName lastName email');
+      .populate('uploadedBy', 'firstName lastName email')
+      .populate('campaignId', 'name type state');
     res.json({ jobs });
   } catch (err) {
     next(err);

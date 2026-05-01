@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { User } from '../../models/User.js';
@@ -27,39 +28,61 @@ function parseDateRange(req, field) {
   return { [field]: range };
 }
 
+function campaignFilter(req) {
+  const { campaignId } = req.query;
+  if (campaignId && mongoose.isValidObjectId(campaignId)) {
+    return { campaignId: new mongoose.Types.ObjectId(campaignId) };
+  }
+  return {};
+}
+
 router.get('/overview', async (req, res, next) => {
   try {
+    const cFilter = campaignFilter(req);
+    const householdMatch = { isActive: true, ...cFilter };
+
     const [
       households,
-      voters,
+      voterDocs,
       activeUsers,
       surveysSubmitted,
       homesKnocked,
       statusAgg,
       eventAgg,
     ] = await Promise.all([
-      Household.countDocuments({ isActive: true }),
-      Voter.countDocuments({}),
+      Household.countDocuments(householdMatch),
+      Household.find(householdMatch, { _id: 1 }).lean(),
       User.countDocuments({ isActive: true }),
-      SurveyResponse.countDocuments({}),
-      Household.countDocuments({ isActive: true, status: { $ne: 'unknocked' } }),
+      SurveyResponse.countDocuments(cFilter),
+      Household.countDocuments({ ...householdMatch, status: { $ne: 'unknocked' } }),
       Household.aggregate([
-        { $match: { isActive: true } },
+        { $match: householdMatch },
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
+        ...(Object.keys(cFilter).length ? [{ $match: cFilter }] : []),
         { $group: { _id: '$actionType', count: { $sum: 1 } } },
       ]),
     ]);
 
-    const canvass = { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0 };
+    const voterIds = voterDocs.map((h) => h._id);
+    const voters = await Voter.countDocuments({ householdId: { $in: voterIds } });
+
+    const canvass = {
+      unknocked: 0,
+      not_home: 0,
+      surveyed: 0,
+      wrong_address: 0,
+      lit_dropped: 0,
+    };
     for (const r of statusAgg) canvass[r._id] = r.count;
 
-    const events = { notHome: 0, wrongAddress: 0, surveySubmitted: 0 };
+    const events = { notHome: 0, wrongAddress: 0, surveySubmitted: 0, litDropped: 0 };
     for (const r of eventAgg) {
       if (r._id === 'not_home') events.notHome = r.count;
       else if (r._id === 'wrong_address') events.wrongAddress = r.count;
       else if (r._id === 'survey_submitted') events.surveySubmitted = r.count;
+      else if (r._id === 'lit_dropped') events.litDropped = r.count;
     }
 
     res.json({
@@ -74,8 +97,9 @@ router.get('/overview', async (req, res, next) => {
 
 router.get('/canvassers', async (req, res, next) => {
   try {
-    const surveyMatch = parseDateRange(req, 'submittedAt');
-    const activityMatch = parseDateRange(req, 'timestamp');
+    const cFilter = campaignFilter(req);
+    const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter };
+    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter };
 
     const [surveyAgg, activityAgg] = await Promise.all([
       SurveyResponse.aggregate([
@@ -109,6 +133,7 @@ router.get('/canvassers', async (req, res, next) => {
           surveysSubmitted: 0,
           notHome: 0,
           wrongAddress: 0,
+          litDropped: 0,
           lastActivityAt: null,
         });
       }
@@ -126,6 +151,7 @@ router.get('/canvassers', async (req, res, next) => {
       const u = ensure(row._id.userId);
       if (row._id.actionType === 'not_home') u.notHome = row.count;
       else if (row._id.actionType === 'wrong_address') u.wrongAddress = row.count;
+      else if (row._id.actionType === 'lit_dropped') u.litDropped = row.count;
       if (row.lastAt && (!u.lastActivityAt || row.lastAt > u.lastActivityAt)) {
         u.lastActivityAt = row.lastAt;
       }
@@ -150,7 +176,9 @@ router.get('/canvassers', async (req, res, next) => {
           surveysSubmitted: u.surveysSubmitted,
           notHome: u.notHome,
           wrongAddress: u.wrongAddress,
-          homesKnocked: u.surveysSubmitted + u.notHome + u.wrongAddress,
+          litDropped: u.litDropped,
+          homesKnocked:
+            u.surveysSubmitted + u.notHome + u.wrongAddress + u.litDropped,
           lastActivityAt: u.lastActivityAt,
         };
       })
@@ -167,9 +195,22 @@ router.get('/canvassers', async (req, res, next) => {
 
 router.get('/surveys', async (req, res, next) => {
   try {
+    const cFilter = campaignFilter(req);
+
+    let templateFilter = {};
+    if (cFilter.campaignId) {
+      const campaign = await Campaign.findById(cFilter.campaignId).lean();
+      if (campaign?.surveyTemplateId) {
+        templateFilter = { _id: campaign.surveyTemplateId };
+      } else {
+        return res.json([]);
+      }
+    }
+
     const [templates, responseCounts] = await Promise.all([
-      SurveyTemplate.find({}, 'name version isActive').sort({ updatedAt: -1 }).lean(),
+      SurveyTemplate.find(templateFilter, 'name version').sort({ updatedAt: -1 }).lean(),
       SurveyResponse.aggregate([
+        ...(Object.keys(cFilter).length ? [{ $match: cFilter }] : []),
         { $group: { _id: '$surveyTemplateId', count: { $sum: 1 } } },
       ]),
     ]);
@@ -180,14 +221,10 @@ router.get('/surveys', async (req, res, next) => {
         id: String(t._id),
         name: t.name,
         version: t.version,
-        isActive: t.isActive,
         responseCount: counts.get(String(t._id)) || 0,
       }))
-      .filter((t) => t.isActive || t.responseCount > 0)
-      .sort((a, b) => {
-        if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
-        return b.responseCount - a.responseCount;
-      });
+      .filter((t) => t.responseCount > 0 || !cFilter.campaignId)
+      .sort((a, b) => b.responseCount - a.responseCount);
 
     res.json(rows);
   } catch (err) {
@@ -197,20 +234,25 @@ router.get('/surveys', async (req, res, next) => {
 
 router.get('/survey-results', async (req, res, next) => {
   try {
-    const { surveyTemplateId } = req.query;
+    const cFilter = campaignFilter(req);
+    let { surveyTemplateId } = req.query;
+
     let template = null;
     if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
       template = await SurveyTemplate.findById(surveyTemplateId).lean();
     }
-    if (!template) {
-      template = await SurveyTemplate.findOne({ isActive: true }).lean();
+    if (!template && cFilter.campaignId) {
+      const campaign = await Campaign.findById(cFilter.campaignId).lean();
+      if (campaign?.surveyTemplateId) {
+        template = await SurveyTemplate.findById(campaign.surveyTemplateId).lean();
+      }
     }
     if (!template) {
       return res.json({ surveyTemplate: null, totalResponses: 0, questions: [] });
     }
 
     const dateRange = parseDateRange(req, 'submittedAt');
-    const match = { surveyTemplateId: template._id, ...dateRange };
+    const match = { surveyTemplateId: template._id, ...dateRange, ...cFilter };
     const totalResponses = await SurveyResponse.countDocuments(match);
 
     const voterPreviewLimit = Math.min(
@@ -221,7 +263,6 @@ router.get('/survey-results', async (req, res, next) => {
     const questions = [];
     const sortedQs = [...(template.questions || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
 
-    // First pass: aggregate counts (and gather top-N response IDs per option if requested).
     const aggResults = [];
     for (const q of sortedQs) {
       const pipeline = [
@@ -234,8 +275,6 @@ router.get('/survey-results', async (req, res, next) => {
         pipeline.push({ $unwind: '$answers.answer' });
       }
 
-      // For non-text questions with voter preview, sort by submittedAt desc so the first
-      // N pushed into each group are the latest responses.
       const wantsPreview = voterPreviewLimit > 0 && q.type !== 'text';
       if (wantsPreview) {
         pipeline.push({ $sort: { submittedAt: -1 } });
@@ -268,7 +307,6 @@ router.get('/survey-results', async (req, res, next) => {
       aggResults.push({ q, agg });
     }
 
-    // Collect every response ID we'll need to populate, so we can fetch in one batch.
     const allResponseIds = new Set();
     for (const { q, agg } of aggResults) {
       if (q.type === 'text') continue;
@@ -348,7 +386,6 @@ router.get('/survey-results', async (req, res, next) => {
         id: String(template._id),
         name: template.name,
         version: template.version,
-        isActive: template.isActive,
       },
       totalResponses,
       questions,
@@ -367,8 +404,10 @@ router.get('/voters-by-answer', async (req, res, next) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
     const dateRange = parseDateRange(req, 'submittedAt');
+    const cFilter = campaignFilter(req);
     const filter = {
       ...dateRange,
+      ...cFilter,
       answers: { $elemMatch: { questionKey, answer: option } },
     };
     if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
@@ -431,7 +470,12 @@ router.get('/canvassers/:userId/responses', async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
     const skip = parseInt(req.query.skip, 10) || 0;
     const dateRange = parseDateRange(req, 'submittedAt');
-    const filter = { userId: new mongoose.Types.ObjectId(userId), ...dateRange };
+    const cFilter = campaignFilter(req);
+    const filter = {
+      userId: new mongoose.Types.ObjectId(userId),
+      ...dateRange,
+      ...cFilter,
+    };
 
     const [user, total, responses] = await Promise.all([
       User.findById(userId, 'firstName lastName email').lean(),

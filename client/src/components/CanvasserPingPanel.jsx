@@ -13,6 +13,8 @@ function actionLabel(t) {
       return 'Wrong address';
     case 'survey_submitted':
       return 'Survey submitted';
+    case 'lit_dropped':
+      return 'Lit dropped';
     case 'note_added':
       return 'Note added';
     default:
@@ -22,6 +24,7 @@ function actionLabel(t) {
 
 const ACTION_COLORS = {
   survey_submitted: '#22c55e',
+  lit_dropped: '#a855f7',
   not_home: '#3b82f6',
   wrong_address: '#ef4444',
   note_added: '#9ca3af',

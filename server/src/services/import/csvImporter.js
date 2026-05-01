@@ -1,4 +1,6 @@
 import Papa from 'papaparse';
+import mongoose from 'mongoose';
+import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { ImportJob } from '../../models/ImportJob.js';
@@ -80,8 +82,15 @@ function missingRequired(raw) {
   return REQUIRED_HEADERS.filter((field) => !raw[field]);
 }
 
-export async function runImport({ buffer, filename, userId }) {
+export async function runImport({ buffer, filename, userId, campaignId }) {
+  if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+    throw new Error('campaignId is required');
+  }
+  const campaign = await Campaign.findById(campaignId);
+  if (!campaign) throw new Error('Campaign not found');
+
   const job = await ImportJob.create({
+    campaignId: campaign._id,
     filename,
     uploadedBy: userId || null,
     status: 'parsing',
@@ -148,11 +157,13 @@ export async function runImport({ buffer, filename, userId }) {
       }
     }
 
-    // Bulk upsert households. Coordinates are required (rows without lat/lng were
-    // already rejected above), so every household here gets a location.
+    // Bulk upsert households (scoped to this campaign). Coordinates are required
+    // (rows without lat/lng were already rejected above), so every household here
+    // gets a location. The (campaignId, normalizedAddress) compound unique index
+    // means the same physical address can exist once per campaign.
     const householdOps = Array.from(householdMap.values()).map((h) => ({
       updateOne: {
-        filter: { normalizedAddress: h.normalizedAddress },
+        filter: { campaignId: campaign._id, normalizedAddress: h.normalizedAddress },
         update: {
           $set: {
             addressLine1: h.addressLine1,
@@ -163,6 +174,7 @@ export async function runImport({ buffer, filename, userId }) {
             location: { type: 'Point', coordinates: [h.longitude, h.latitude] },
           },
           $setOnInsert: {
+            campaignId: campaign._id,
             normalizedAddress: h.normalizedAddress,
             status: 'unknocked',
             isActive: true,
@@ -178,9 +190,9 @@ export async function runImport({ buffer, filename, userId }) {
       newHouseholds = result.upsertedCount || 0;
     }
 
-    // Resolve normalizedAddress -> _id
+    // Resolve normalizedAddress -> _id (within this campaign).
     const houses = await Household.find(
-      { normalizedAddress: { $in: Array.from(householdMap.keys()) } },
+      { campaignId: campaign._id, normalizedAddress: { $in: Array.from(householdMap.keys()) } },
       { normalizedAddress: 1 }
     );
     const addressToId = new Map(houses.map((h) => [h.normalizedAddress, h._id]));

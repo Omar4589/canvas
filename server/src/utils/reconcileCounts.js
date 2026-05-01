@@ -75,7 +75,7 @@ async function dedupCanvassActivities() {
   const dupes = await CanvassActivity.aggregate([
     {
       $match: {
-        actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted'] },
+        actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'] },
       },
     },
     {
@@ -148,7 +148,7 @@ async function reconcileHouseholdStatus() {
   const latestByHousehold = await CanvassActivity.aggregate([
     {
       $match: {
-        actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted'] },
+        actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'] },
       },
     },
     { $sort: { timestamp: -1 } },

@@ -4,6 +4,7 @@ export const STATUS_COLORS = {
   not_home: '#3b82f6', // blue
   surveyed: '#22c55e', // green
   wrong_address: '#ef4444', // red
+  lit_dropped: '#a855f7', // purple
 };
 
 export const STATUS_LABELS = {
@@ -11,4 +12,5 @@ export const STATUS_LABELS = {
   not_home: 'Not home',
   surveyed: 'Surveyed',
   wrong_address: 'Wrong address',
+  lit_dropped: 'Lit dropped',
 };

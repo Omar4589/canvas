@@ -19,6 +19,8 @@ function actionLabel(t) {
       return 'Wrong address';
     case 'survey_submitted':
       return 'Survey submitted';
+    case 'lit_dropped':
+      return 'Lit dropped';
     case 'note_added':
       return 'Note added';
     default:

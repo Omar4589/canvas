@@ -13,7 +13,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../lib/api';
 import { signOut } from '../../lib/authState';
-import { saveBootstrap, loadBootstrap } from '../../lib/cache';
+import {
+  saveBootstrap,
+  loadBootstrap,
+  loadActiveCampaign,
+  saveActiveCampaign,
+  clearBootstrap,
+} from '../../lib/cache';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { STATUS_COLORS } from '../../components/StatusColor';
@@ -24,12 +30,18 @@ if (MAPBOX_PUBLIC_TOKEN) {
 
 const DEFAULT_CENTER = [-84.5, 39.0]; // northern Kentucky default
 
-const STATUS_FILTER_OPTIONS = [
+const SURVEY_FILTER_OPTIONS = [
   { key: 'all', label: 'All' },
   { key: 'unknocked', label: 'Unknocked' },
   { key: 'not_home', label: 'Not home' },
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'wrong_address', label: 'Wrong addr' },
+];
+
+const LIT_DROP_FILTER_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'unknocked', label: 'Not yet' },
+  { key: 'lit_dropped', label: 'Dropped' },
 ];
 
 function buildFeatureCollection(households) {
@@ -59,8 +71,26 @@ export default function MapScreen() {
   const [following, setFollowing] = useState(false);
   const [activeFilter, setActiveFilter] = useState('all');
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [activeCampaign, setActiveCampaign] = useState(undefined);
 
-  const activeOption = STATUS_FILTER_OPTIONS.find((o) => o.key === activeFilter);
+  useEffect(() => {
+    let mounted = true;
+    loadActiveCampaign().then((c) => {
+      if (!mounted) return;
+      if (!c) {
+        router.replace('/(app)/campaigns');
+        return;
+      }
+      setActiveCampaign(c);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
+  const filterOptions =
+    activeCampaign?.type === 'lit_drop' ? LIT_DROP_FILTER_OPTIONS : SURVEY_FILTER_OPTIONS;
+  const activeOption = filterOptions.find((o) => o.key === activeFilter) || filterOptions[0];
 
   // 'all' shows every status; any other value shows only that status.
   const layerFilter = useMemo(
@@ -75,18 +105,28 @@ export default function MapScreen() {
     queryKey: ['bootstrap'],
     queryFn: async () => {
       try {
-        const fresh = await api('/mobile/bootstrap');
+        const fresh = await api(`/mobile/bootstrap?campaignId=${activeCampaign.id}`);
         await saveBootstrap(fresh);
         return fresh;
       } catch (err) {
-        // Fall back to cache when offline
+        // Fall back to cache when offline (only if it was for the same campaign).
         const cached = await loadBootstrap();
-        if (cached) return cached;
+        if (cached && String(cached.campaign?.id) === String(activeCampaign.id)) {
+          return cached;
+        }
         throw err;
       }
     },
+    enabled: !!activeCampaign?.id,
     staleTime: 5 * 60 * 1000,
   });
+
+  async function switchCampaign() {
+    await saveActiveCampaign(null);
+    await clearBootstrap();
+    qc.removeQueries({ queryKey: ['bootstrap'] });
+    router.replace('/(app)/campaigns');
+  }
 
   // Try to flush offline queue on mount and after focus
   useEffect(() => {
@@ -151,7 +191,7 @@ export default function MapScreen() {
       </SafeAreaView>
     );
   }
-  if (isLoading) {
+  if (activeCampaign === undefined || (activeCampaign && isLoading)) {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator />
@@ -193,6 +233,7 @@ export default function MapScreen() {
             'house-not_home': require('../../assets/icons/house-not_home.png'),
             'house-surveyed': require('../../assets/icons/house-surveyed.png'),
             'house-wrong_address': require('../../assets/icons/house-wrong_address.png'),
+            'house-lit_dropped': require('../../assets/icons/house-surveyed.png'),
           }}
         />
         <Mapbox.ShapeSource id="households" shape={features} onPress={onPinPress}>
@@ -207,6 +248,7 @@ export default function MapScreen() {
                 'not_home', 'house-not_home',
                 'surveyed', 'house-surveyed',
                 'wrong_address', 'house-wrong_address',
+                'lit_dropped', 'house-lit_dropped',
                 'house-unknocked',
               ],
               iconSize: [
@@ -245,6 +287,16 @@ export default function MapScreen() {
           </Pressable>
         </View>
 
+        {activeCampaign && (
+          <Pressable onPress={switchCampaign} style={styles.campaignBar}>
+            <Text style={styles.campaignBarText}>
+              {activeCampaign.name}
+              {activeCampaign.type === 'lit_drop' ? ' · Lit drop' : ''}
+            </Text>
+            <Text style={styles.campaignBarSwitch}>Switch ›</Text>
+          </Pressable>
+        )}
+
         <View style={styles.filterRow}>
           <Pressable
             onPress={() => setFilterMenuOpen((v) => !v)}
@@ -264,7 +316,7 @@ export default function MapScreen() {
 
           {filterMenuOpen && (
             <View style={styles.filterMenu}>
-              {STATUS_FILTER_OPTIONS.map((opt) => {
+              {filterOptions.map((opt) => {
                 const isActive = opt.key === activeFilter;
                 return (
                   <Pressable
@@ -460,6 +512,32 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     minWidth: 60,
     alignItems: 'center',
+  },
+  campaignBar: {
+    marginHorizontal: 8,
+    marginBottom: 4,
+    backgroundColor: '#ffffffee',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  campaignBarText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  campaignBarSwitch: {
+    fontSize: 13,
+    color: '#0284c7',
+    fontWeight: '600',
   },
   iconButtonText: { color: '#0284c7', fontWeight: '600' },
   pendingBadge: {

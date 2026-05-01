@@ -6,6 +6,7 @@ import adminReportsRouter from './admin/reports.js';
 import adminSurveysRouter from './admin/surveys.js';
 import adminConfigRouter from './admin/config.js';
 import adminHouseholdsRouter from './admin/households.js';
+import adminCampaignsRouter from './admin/campaigns.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
 
@@ -22,6 +23,7 @@ router.use('/admin/reports', adminReportsRouter);
 router.use('/admin/surveys', adminSurveysRouter);
 router.use('/admin/config', adminConfigRouter);
 router.use('/admin/households', adminHouseholdsRouter);
+router.use('/admin/campaigns', adminCampaignsRouter);
 router.use('/mobile', mobileBootstrapRouter);
 router.use('/mobile', mobileCanvassRouter);
 

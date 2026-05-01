@@ -1,5 +1,6 @@
 const SEGMENTS = [
   { key: 'surveyed', label: 'Surveyed', color: 'bg-green-500', dot: 'bg-green-500' },
+  { key: 'lit_dropped', label: 'Lit dropped', color: 'bg-purple-500', dot: 'bg-purple-500' },
   { key: 'not_home', label: 'Not home', color: 'bg-amber-400', dot: 'bg-amber-400' },
   { key: 'wrong_address', label: 'Wrong address', color: 'bg-red-500', dot: 'bg-red-500' },
   { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-300', dot: 'bg-gray-300' },
@@ -8,6 +9,7 @@ const SEGMENTS = [
 export default function CoverageBar({ canvass = {} }) {
   const total =
     (canvass.surveyed || 0) +
+    (canvass.lit_dropped || 0) +
     (canvass.not_home || 0) +
     (canvass.wrong_address || 0) +
     (canvass.unknocked || 0);

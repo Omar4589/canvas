@@ -72,14 +72,14 @@ function ResponseCard({ r }) {
   );
 }
 
-export default function CanvasserResponsesModal({ canvasser, dateRange, onClose }) {
+export default function CanvasserResponsesModal({ canvasser, dateRange, campaignId, onClose }) {
   const [skip, setSkip] = useState(0);
   const [accumulated, setAccumulated] = useState([]);
 
   useEffect(() => {
     setSkip(0);
     setAccumulated([]);
-  }, [canvasser?.userId, dateRange?.from, dateRange?.to]);
+  }, [canvasser?.userId, dateRange?.from, dateRange?.to, campaignId]);
 
   useEffect(() => {
     function onKey(e) {
@@ -91,6 +91,7 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, onClose 
 
   const userId = canvasser?.userId;
   const queryString = buildQuery({
+    campaignId,
     from: dateRange?.from,
     to: dateRange?.to,
     skip,
@@ -98,7 +99,15 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, onClose 
   });
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['reports', 'canvasser-responses', userId, dateRange?.from, dateRange?.to, skip],
+    queryKey: [
+      'reports',
+      'canvasser-responses',
+      userId,
+      campaignId,
+      dateRange?.from,
+      dateRange?.to,
+      skip,
+    ],
     queryFn: () => api(`/admin/reports/canvassers/${userId}/responses${queryString}`),
     enabled: !!userId,
   });

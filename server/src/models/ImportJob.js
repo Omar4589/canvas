@@ -2,6 +2,12 @@ import mongoose from 'mongoose';
 
 const importJobSchema = new mongoose.Schema(
   {
+    campaignId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Campaign',
+      required: true,
+      index: true,
+    },
     filename: { type: String, default: null },
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     status: {

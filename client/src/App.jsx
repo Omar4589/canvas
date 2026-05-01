@@ -8,6 +8,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
+const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
 const PrivacyPolicyPage = lazy(() => import('./pages/PrivacyPolicyPage.jsx'));
 
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="/import" element={<ImportPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
+          <Route path="/campaigns" element={<CampaignsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -10,19 +10,26 @@ const pointSchema = new mongoose.Schema(
 
 const householdSchema = new mongoose.Schema(
   {
+    campaignId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Campaign',
+      required: true,
+      index: true,
+    },
+
     addressLine1: { type: String, required: true, trim: true },
     addressLine2: { type: String, default: null, trim: true },
     city: { type: String, required: true, trim: true },
     state: { type: String, required: true, trim: true, uppercase: true },
     zipCode: { type: String, required: true, trim: true },
 
-    normalizedAddress: { type: String, required: true, unique: true, index: true },
+    normalizedAddress: { type: String, required: true, index: true },
 
     location: { type: pointSchema, default: null },
 
     status: {
       type: String,
-      enum: ['unknocked', 'not_home', 'surveyed', 'wrong_address'],
+      enum: ['unknocked', 'not_home', 'surveyed', 'wrong_address', 'lit_dropped'],
       default: 'unknocked',
       index: true,
     },
@@ -35,5 +42,6 @@ const householdSchema = new mongoose.Schema(
 );
 
 householdSchema.index({ location: '2dsphere' });
+householdSchema.index({ campaignId: 1, normalizedAddress: 1 }, { unique: true });
 
 export const Household = mongoose.model('Household', householdSchema);

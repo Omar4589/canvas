@@ -28,16 +28,23 @@ function findHouseholdAndVoters(bootstrap, householdId) {
   return { household, voters };
 }
 
+const ACTION_PATHS = {
+  not_home: 'not-home',
+  wrong_address: 'wrong-address',
+  lit_dropped: 'lit-drop',
+};
+
 export default function HouseholdDetail() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const qc = useQueryClient();
 
   const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'] });
+  const campaignType = bootstrap?.campaign?.type || 'survey';
   const { household, voters } = findHouseholdAndVoters(bootstrap, id);
 
   const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(null); // 'not_home' | 'wrong_address' | null
+  const [submitting, setSubmitting] = useState(null);
 
   if (!household) {
     return (
@@ -54,7 +61,8 @@ export default function HouseholdDetail() {
     setSubmitting(action);
     try {
       const location = await getCurrentLocation();
-      const result = await submitOrQueue(`/mobile/households/${id}/${action.replace('_', '-')}`, {
+      const path = ACTION_PATHS[action];
+      const result = await submitOrQueue(`/mobile/households/${id}/${path}`, {
         note: note.trim() || null,
         location,
         timestamp: new Date().toISOString(),
@@ -126,31 +134,35 @@ export default function HouseholdDetail() {
           <Text style={styles.statusLabel}>{STATUS_LABELS[household.status]}</Text>
         </View>
 
-        <Text style={styles.sectionTitle}>Voters at this address</Text>
-        {voters.length === 0 && (
-          <Text style={{ color: '#6b7280' }}>No registered voters listed here.</Text>
+        {campaignType === 'survey' && (
+          <>
+            <Text style={styles.sectionTitle}>Voters at this address</Text>
+            {voters.length === 0 && (
+              <Text style={{ color: '#6b7280' }}>No registered voters listed here.</Text>
+            )}
+            {voters.map((v) => (
+              <View key={v._id} style={styles.voterCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.voterName}>{v.fullName}</Text>
+                  <Text style={styles.voterMeta}>
+                    {[v.party, v.gender, v.precinct].filter(Boolean).join(' · ')}
+                  </Text>
+                  <Text style={styles.voterMeta}>
+                    {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => router.push(`/(app)/voter/${v._id}/survey`)}
+                  style={styles.surveyButton}
+                >
+                  <Text style={styles.surveyButtonText}>
+                    {v.surveyStatus === 'surveyed' ? 'Re-survey' : 'Take survey'}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+          </>
         )}
-        {voters.map((v) => (
-          <View key={v._id} style={styles.voterCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.voterName}>{v.fullName}</Text>
-              <Text style={styles.voterMeta}>
-                {[v.party, v.gender, v.precinct].filter(Boolean).join(' · ')}
-              </Text>
-              <Text style={styles.voterMeta}>
-                {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
-              </Text>
-            </View>
-            <Pressable
-              onPress={() => router.push(`/(app)/voter/${v._id}/survey`)}
-              style={styles.surveyButton}
-            >
-              <Text style={styles.surveyButtonText}>
-                {v.surveyStatus === 'surveyed' ? 'Re-survey' : 'Take survey'}
-              </Text>
-            </Pressable>
-          </View>
-        ))}
 
         <Text style={styles.sectionTitle}>Optional note</Text>
         <TextInput
@@ -163,39 +175,63 @@ export default function HouseholdDetail() {
         />
 
         <View style={{ marginTop: 20 }}>
-          <Pressable
-            onPress={() => submitAction('not_home')}
-            disabled={!!submitting}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              { backgroundColor: '#3b82f6', opacity: submitting || pressed ? 0.7 : 1 },
-            ]}
-          >
-            {submitting === 'not_home' ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Not home</Text>
-            )}
-          </Pressable>
+          {campaignType === 'lit_drop' ? (
+            <Pressable
+              onPress={() => submitAction('lit_dropped')}
+              disabled={!!submitting}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                {
+                  backgroundColor: STATUS_COLORS.lit_dropped,
+                  opacity: submitting || pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              {submitting === 'lit_dropped' ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  {household.status === 'lit_dropped' ? 'Re-record drop' : 'Lit dropped'}
+                </Text>
+              )}
+            </Pressable>
+          ) : (
+            <>
+              <Pressable
+                onPress={() => submitAction('not_home')}
+                disabled={!!submitting}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  { backgroundColor: '#3b82f6', opacity: submitting || pressed ? 0.7 : 1 },
+                ]}
+              >
+                {submitting === 'not_home' ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Not home</Text>
+                )}
+              </Pressable>
 
-          <Pressable
-            onPress={() => submitAction('wrong_address')}
-            disabled={!!submitting}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              {
-                backgroundColor: '#ef4444',
-                opacity: submitting || pressed ? 0.7 : 1,
-                marginTop: 10,
-              },
-            ]}
-          >
-            {submitting === 'wrong_address' ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Wrong address</Text>
-            )}
-          </Pressable>
+              <Pressable
+                onPress={() => submitAction('wrong_address')}
+                disabled={!!submitting}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  {
+                    backgroundColor: '#ef4444',
+                    opacity: submitting || pressed ? 0.7 : 1,
+                    marginTop: 10,
+                  },
+                ]}
+              >
+                {submitting === 'wrong_address' ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Wrong address</Text>
+                )}
+              </Pressable>
+            </>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>

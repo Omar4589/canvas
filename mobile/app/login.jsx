@@ -19,7 +19,7 @@ export default function Login() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  if (token) return <Redirect href="/(app)/map" />;
+  if (token) return <Redirect href="/" />;
 
   async function onSubmit() {
     setError(null);

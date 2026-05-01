@@ -19,6 +19,12 @@ function StatusBadge({ status }) {
 export default function ImportPage() {
   const queryClient = useQueryClient();
   const [file, setFile] = useState(null);
+  const [campaignId, setCampaignId] = useState('');
+
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['imports'],
@@ -30,16 +36,21 @@ export default function ImportPage() {
   });
 
   const upload = useMutation({
-    mutationFn: async (f) => {
+    mutationFn: async ({ file, campaignId }) => {
       const fd = new FormData();
-      fd.append('file', f);
+      fd.append('file', file);
+      fd.append('campaignId', campaignId);
       return api('/admin/imports/csv', { method: 'POST', formData: fd });
     },
     onSuccess: () => {
       setFile(null);
       queryClient.invalidateQueries({ queryKey: ['imports'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
     },
   });
+
+  const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
+  const canSubmit = file && campaignId && !upload.isPending;
 
   return (
     <div>
@@ -48,18 +59,49 @@ export default function ImportPage() {
       <section className="mb-8 rounded-lg border border-gray-200 bg-white p-5">
         <h2 className="mb-3 text-base font-medium">Upload voter CSV</h2>
         <p className="mb-4 text-sm text-gray-600">
-          Upserts by State Voter ID — re-uploading is safe and won't lose canvass activity.
+          Each upload is scoped to a single campaign. Upserts by State Voter ID — re-uploading
+          the same CSV under the same campaign is safe and won't lose canvass activity.
         </p>
-        <input
-          type="file"
-          accept=".csv"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
-          className="block text-sm"
-        />
+
+        <div className="mb-4">
+          <label className="mb-1 block text-xs font-medium text-gray-700">
+            Campaign
+          </label>
+          <select
+            value={campaignId}
+            onChange={(e) => setCampaignId(e.target.value)}
+            className="w-full max-w-md rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          >
+            <option value="">— Choose a campaign —</option>
+            {campaigns.map((c) => (
+              <option key={c._id} value={c._id}>
+                {c.name} ({c.state} · {c.type === 'survey' ? 'Survey' : 'Lit drop'})
+              </option>
+            ))}
+          </select>
+          {!campaignsQ.isLoading && !campaigns.length && (
+            <p className="mt-1 text-xs text-amber-700">
+              No active campaigns. Create one on the Campaigns page first.
+            </p>
+          )}
+        </div>
+
+        <div className="mb-4">
+          <label className="mb-1 block text-xs font-medium text-gray-700">
+            CSV file
+          </label>
+          <input
+            type="file"
+            accept=".csv"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            className="block text-sm"
+          />
+        </div>
+
         <button
-          onClick={() => file && upload.mutate(file)}
-          disabled={!file || upload.isPending}
-          className="mt-4 rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          onClick={() => canSubmit && upload.mutate({ file, campaignId })}
+          disabled={!canSubmit}
+          className="rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
           {upload.isPending ? 'Importing…' : 'Import'}
         </button>
@@ -87,6 +129,7 @@ export default function ImportPage() {
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-4 py-2 text-left">When</th>
+                <th className="px-4 py-2 text-left">Campaign</th>
                 <th className="px-4 py-2 text-left">File</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="px-4 py-2 text-right">Voters</th>
@@ -100,6 +143,9 @@ export default function ImportPage() {
                 <tr key={j._id} className="border-t border-gray-100">
                   <td className="px-4 py-2 text-gray-600">
                     {new Date(j.createdAt).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-2">
+                    {j.campaignId?.name || '—'}
                   </td>
                   <td className="px-4 py-2">{j.filename || '—'}</td>
                   <td className="px-4 py-2">
@@ -115,7 +161,7 @@ export default function ImportPage() {
               ))}
               {!data?.jobs?.length && (
                 <tr>
-                  <td colSpan="7" className="px-4 py-6 text-center text-gray-500">
+                  <td colSpan="8" className="px-4 py-6 text-center text-gray-500">
                     No imports yet.
                   </td>
                 </tr>

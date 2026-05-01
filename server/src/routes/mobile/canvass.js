@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/auth.js';
+import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
@@ -30,9 +31,24 @@ function distanceFromHouse(household, location) {
   return Math.round(haversineMeters(hLat, hLng, location.lat, location.lng));
 }
 
-async function recordHouseholdAction({ householdId, userId, actionType, status, body }) {
+const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
+
+async function recordHouseholdAction({ householdId, userId, actionType, status, body, requireCampaignType }) {
   const household = await Household.findById(householdId);
   if (!household) return { error: { status: 404, message: 'Household not found' } };
+
+  if (requireCampaignType) {
+    const campaign = await Campaign.findById(household.campaignId).lean();
+    if (!campaign) return { error: { status: 404, message: 'Campaign not found' } };
+    if (campaign.type !== requireCampaignType) {
+      return {
+        error: {
+          status: 400,
+          message: `Action not valid for campaign type "${campaign.type}".`,
+        },
+      };
+    }
+  }
 
   const data = baseActionSchema.parse(body);
   const ts = data.timestamp ? new Date(data.timestamp) : new Date();
@@ -43,7 +59,7 @@ async function recordHouseholdAction({ householdId, userId, actionType, status, 
   await CanvassActivity.deleteMany({
     userId,
     householdId,
-    actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted'] },
+    actionType: { $in: REPLACEABLE_ACTIONS },
   });
 
   // If this canvasser previously submitted any surveys at this house, those become
@@ -62,6 +78,7 @@ async function recordHouseholdAction({ householdId, userId, actionType, status, 
   }
 
   const activity = await CanvassActivity.create({
+    campaignId: household.campaignId,
     householdId,
     userId,
     actionType,
@@ -88,6 +105,7 @@ router.post('/households/:householdId/not-home', async (req, res, next) => {
       actionType: 'not_home',
       status: 'not_home',
       body: req.body,
+      requireCampaignType: 'survey',
     });
     if (result.error) return res.status(result.error.status).json({ error: result.error.message });
     res.status(201).json(result);
@@ -105,6 +123,25 @@ router.post('/households/:householdId/wrong-address', async (req, res, next) => 
       actionType: 'wrong_address',
       status: 'wrong_address',
       body: req.body,
+      requireCampaignType: 'survey',
+    });
+    if (result.error) return res.status(result.error.status).json({ error: result.error.message });
+    res.status(201).json(result);
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+router.post('/households/:householdId/lit-drop', async (req, res, next) => {
+  try {
+    const result = await recordHouseholdAction({
+      householdId: req.params.householdId,
+      userId: req.user._id,
+      actionType: 'lit_dropped',
+      status: 'lit_dropped',
+      body: req.body,
+      requireCampaignType: 'lit_drop',
     });
     if (result.error) return res.status(result.error.status).json({ error: result.error.message });
     res.status(201).json(result);
@@ -140,8 +177,24 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     const household = await Household.findById(voter.householdId);
     if (!household) return res.status(404).json({ error: 'Household for voter not found' });
 
+    const campaign = await Campaign.findById(household.campaignId).lean();
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (campaign.type !== 'survey') {
+      return res
+        .status(400)
+        .json({ error: 'Surveys can only be submitted on survey-type campaigns.' });
+    }
+
     const template = await SurveyTemplate.findById(data.surveyTemplateId);
     if (!template) return res.status(404).json({ error: 'Survey template not found' });
+    if (
+      campaign.surveyTemplateId &&
+      String(campaign.surveyTemplateId) !== String(template._id)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Survey template doesn't match the campaign's active survey." });
+    }
 
     const ts = data.timestamp ? new Date(data.timestamp) : new Date();
     const distance = distanceFromHouse(household, data.location);
@@ -153,6 +206,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     await SurveyResponse.deleteMany({ voterId: voter._id });
 
     const surveyResponse = await SurveyResponse.create({
+      campaignId: campaign._id,
       voterId: voter._id,
       householdId: household._id,
       userId: req.user._id,
@@ -171,10 +225,11 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     await CanvassActivity.deleteMany({
       userId: req.user._id,
       householdId: household._id,
-      actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted'] },
+      actionType: { $in: REPLACEABLE_ACTIONS },
     });
 
     const activity = await CanvassActivity.create({
+      campaignId: campaign._id,
       householdId: household._id,
       voterId: voter._id,
       userId: req.user._id,

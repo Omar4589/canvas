@@ -20,7 +20,7 @@ function formatDate(d) {
 
 const PAGE_SIZE = 25;
 
-function VoterList({ questionKey, option, surveyTemplateId, dateRange }) {
+function VoterList({ questionKey, option, surveyTemplateId, dateRange, campaignId }) {
   const [skip, setSkip] = useState(0);
   const [accumulated, setAccumulated] = useState([]);
 
@@ -28,12 +28,13 @@ function VoterList({ questionKey, option, surveyTemplateId, dateRange }) {
   useEffect(() => {
     setSkip(0);
     setAccumulated([]);
-  }, [questionKey, option, surveyTemplateId, dateRange?.from, dateRange?.to]);
+  }, [questionKey, option, surveyTemplateId, dateRange?.from, dateRange?.to, campaignId]);
 
   const queryString = buildQuery({
     questionKey,
     option,
     surveyTemplateId,
+    campaignId,
     from: dateRange?.from,
     to: dateRange?.to,
     limit: PAGE_SIZE,
@@ -46,6 +47,7 @@ function VoterList({ questionKey, option, surveyTemplateId, dateRange }) {
       questionKey,
       option,
       surveyTemplateId,
+      campaignId,
       dateRange?.from,
       dateRange?.to,
       skip,
@@ -192,6 +194,7 @@ export default function QuestionResults({
   question,
   surveyTemplateId,
   dateRange,
+  campaignId,
 }) {
   const { key, label, type, options = [] } = question;
   const totalAnswered = options.reduce((sum, o) => sum + (o.count || 0), 0);
@@ -229,6 +232,7 @@ export default function QuestionResults({
                       option={o.option}
                       surveyTemplateId={surveyTemplateId}
                       dateRange={dateRange}
+                      campaignId={campaignId}
                     />
                   </div>
                 )}

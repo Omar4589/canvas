@@ -26,6 +26,7 @@ export default function CanvasserTable({ rows = [], onRowClick }) {
           <tr>
             <th className="px-4 py-2 font-medium">Canvasser</th>
             <th className="px-4 py-2 text-right font-medium">Surveys</th>
+            <th className="px-4 py-2 text-right font-medium">Lit drops</th>
             <th className="px-4 py-2 text-right font-medium">Not home</th>
             <th className="px-4 py-2 text-right font-medium">Wrong addr</th>
             <th className="px-4 py-2 text-right font-medium">Homes knocked</th>
@@ -53,6 +54,7 @@ export default function CanvasserTable({ rows = [], onRowClick }) {
               <td className="px-4 py-2 text-right tabular-nums font-semibold text-gray-900">
                 {r.surveysSubmitted}
               </td>
+              <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.litDropped || 0}</td>
               <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.notHome}</td>
               <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.wrongAddress}</td>
               <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.homesKnocked}</td>

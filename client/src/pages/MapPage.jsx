@@ -8,12 +8,14 @@ import HouseholdDetailPanel from '../components/HouseholdDetailPanel.jsx';
 import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
 import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
+import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
 
 const STATUS_COLORS = {
   unknocked: '#9ca3af',
   not_home: '#3b82f6',
   surveyed: '#22c55e',
   wrong_address: '#ef4444',
+  lit_dropped: '#a855f7',
 };
 
 const STATUS_LABELS = {
@@ -21,6 +23,7 @@ const STATUS_LABELS = {
   not_home: 'Not home',
   surveyed: 'Surveyed',
   wrong_address: 'Wrong address',
+  lit_dropped: 'Lit dropped',
 };
 
 const DEFAULT_CENTER = [-95.7129, 37.0902]; // continental US
@@ -193,6 +196,14 @@ export default function MapPage() {
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '' });
   const [showCanvasserPins, setShowCanvasserPins] = useState(false);
 
+  const {
+    campaignId,
+    setCampaignId,
+    campaigns,
+    selected: selectedCampaign,
+    isLoading: campaignsLoading,
+  } = useCampaignSelection();
+
   const tokenQ = useQuery({
     queryKey: ['config', 'mapbox-token'],
     queryFn: () => api('/admin/config/mapbox-token'),
@@ -200,11 +211,14 @@ export default function MapPage() {
   });
 
   const surveyQ = useQuery({
-    queryKey: ['reports', 'survey-results'],
-    queryFn: () => api('/admin/reports/survey-results'),
+    queryKey: ['reports', 'survey-results', campaignId],
+    queryFn: () =>
+      api(`/admin/reports/survey-results${buildQuery({ campaignId })}`),
+    enabled: !!campaignId && selectedCampaign?.type !== 'lit_drop',
   });
 
   const queryString = buildQuery({
+    campaignId,
     from: dateRange.from,
     to: dateRange.to,
     status: statusFilter,
@@ -218,6 +232,7 @@ export default function MapPage() {
     queryKey: [
       'admin',
       'households-map',
+      campaignId,
       dateRange.from,
       dateRange.to,
       statusFilter.join(','),
@@ -227,6 +242,7 @@ export default function MapPage() {
       showCanvasserPins,
     ],
     queryFn: () => api(`/admin/households/map${queryString}`),
+    enabled: !!campaignId,
   });
 
   const households = householdsQ.data?.households || [];
@@ -269,6 +285,7 @@ export default function MapPage() {
             'not_home', 'house-not_home',
             'surveyed', 'house-surveyed',
             'wrong_address', 'house-wrong_address',
+            'lit_dropped', 'house-lit_dropped',
             'house-unknocked',
           ],
           'icon-size': [
@@ -337,6 +354,7 @@ export default function MapPage() {
               'survey_submitted', STATUS_COLORS.surveyed,
               'not_home', STATUS_COLORS.not_home,
               'wrong_address', STATUS_COLORS.wrong_address,
+              'lit_dropped', STATUS_COLORS.lit_dropped,
               '#6b7280',
             ],
             'circle-stroke-color': '#ffffff',
@@ -475,6 +493,12 @@ export default function MapPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <CampaignSelector
+            campaignId={campaignId}
+            onChange={setCampaignId}
+            campaigns={campaigns}
+            isLoading={campaignsLoading}
+          />
           <AddressSearch households={households} onSelect={flyToHousehold} />
           <DateRangeSelector value={rangeId} onChange={setRangeId} />
         </div>

@@ -32,12 +32,18 @@ router.get('/map', async (req, res, next) => {
     const questionKey = req.query.questionKey || null;
     const answerOption = req.query.option || null;
 
+    const campaignId =
+      req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
+        ? new mongoose.Types.ObjectId(req.query.campaignId)
+        : null;
+
     // Households we display: active + have coordinates.
     const householdFilter = {
       isActive: true,
       'location.coordinates': { $exists: true, $ne: null },
     };
     if (status && status.length) householdFilter.status = { $in: status };
+    if (campaignId) householdFilter.campaignId = campaignId;
 
     // Build SurveyResponse + CanvassActivity match scoped by date/user/answer.
     const surveyMatch = {};
@@ -53,6 +59,10 @@ router.get('/map', async (req, res, next) => {
     if (userId) {
       surveyMatch.userId = userId;
       activityMatch.userId = userId;
+    }
+    if (campaignId) {
+      surveyMatch.campaignId = campaignId;
+      activityMatch.campaignId = campaignId;
     }
     if (questionKey && answerOption) {
       surveyMatch.answers = {

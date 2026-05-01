@@ -230,14 +230,12 @@ function QuestionCard({
 
 function SurveyForm({ initial, onSave, onCancel, saving }) {
   const [name, setName] = useState(initial?.name || '');
-  const [isActive, setIsActive] = useState(!!initial?.isActive);
   const [intro, setIntro] = useState(initial?.intro || '');
   const [closing, setClosing] = useState(initial?.closing || '');
   const [questions, setQuestions] = useState(initial?.questions || []);
 
   useEffect(() => {
     setName(initial?.name || '');
-    setIsActive(!!initial?.isActive);
     setIntro(initial?.intro || '');
     setClosing(initial?.closing || '');
     setQuestions(initial?.questions || []);
@@ -275,7 +273,7 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
         : [];
       return { ...q, key, options };
     });
-    onSave({ name, isActive, intro, closing, questions: reorder(cleaned) });
+    onSave({ name, intro, closing, questions: reorder(cleaned) });
   }
 
   return (
@@ -284,30 +282,20 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
           Survey settings
         </h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="md:col-span-2">
-            <label className="mb-1 block text-xs font-medium text-gray-700">
-              Survey name
-            </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              placeholder="Scott Berger Door-to-Door Survey"
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
-            />
-          </div>
-          <div className="flex items-end">
-            <label className="flex cursor-pointer items-center gap-2 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isActive}
-                onChange={(e) => setIsActive(e.target.checked)}
-              />
-              Active survey
-              <span className="text-xs text-gray-500">(only one)</span>
-            </label>
-          </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-700">
+            Survey name
+          </label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            placeholder="Scott Berger Door-to-Door Survey"
+            className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          />
+          <p className="mt-2 text-xs text-gray-500">
+            Surveys are linked to campaigns on the Campaigns page.
+          </p>
         </div>
       </section>
 
@@ -460,7 +448,7 @@ export default function SurveysPage() {
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-4 py-3 text-left">Name</th>
-                <th className="px-4 py-3 text-left">Status</th>
+                <th className="px-4 py-3 text-left">Used by campaigns</th>
                 <th className="px-4 py-3 text-right">Questions</th>
                 <th className="px-4 py-3 text-right">Version</th>
                 <th className="px-4 py-3 text-right">Actions</th>
@@ -470,16 +458,10 @@ export default function SurveysPage() {
               {surveys.map((s) => (
                 <tr key={s._id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={
-                        s.isActive
-                          ? 'rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700'
-                          : 'rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600'
-                      }
-                    >
-                      {s.isActive ? 'Active' : 'Inactive'}
-                    </span>
+                  <td className="px-4 py-3 text-gray-600">
+                    {s.usedByCampaigns?.length
+                      ? s.usedByCampaigns.map((c) => c.name).join(', ')
+                      : <span className="text-gray-400">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right">{s.questions?.length || 0}</td>
                   <td className="px-4 py-3 text-right text-gray-500">v{s.version || 1}</td>
@@ -514,7 +496,7 @@ export default function SurveysPage() {
 
           {creating ? (
             <SurveyForm
-              initial={{ name: '', isActive: false, intro: '', closing: '', questions: [] }}
+              initial={{ name: '', intro: '', closing: '', questions: [] }}
               onSave={(body) => create.mutate(body)}
               onCancel={closeEditor}
               saving={create.isPending}
