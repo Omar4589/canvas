@@ -34,6 +34,16 @@ const ACTION_PATHS = {
   lit_dropped: 'lit-drop',
 };
 
+function initials(fullName) {
+  return (fullName || '')
+    .split(' ')
+    .map((s) => s[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
+
 function StatusPill({ status }) {
   const dotColor = colors.status[status] || colors.textMuted;
   const isDone = status === 'surveyed' || status === 'lit_dropped';
@@ -47,6 +57,63 @@ function StatusPill({ status }) {
         {colors.statusLabels[status] || 'Unknown'}
       </Text>
     </View>
+  );
+}
+
+function VoterCard({ voter, onPress }) {
+  const surveyed = voter.surveyStatus === 'surveyed';
+  const meta = [voter.party, voter.gender, voter.precinct].filter(Boolean).join(' · ');
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.voterCard,
+        pressed && { opacity: 0.85 },
+        surveyed && styles.voterCardSurveyed,
+      ]}
+    >
+      <View
+        style={[
+          styles.voterAvatar,
+          surveyed && { backgroundColor: colors.successBg },
+        ]}
+      >
+        <Text
+          style={[
+            styles.voterAvatarText,
+            surveyed && { color: colors.success },
+          ]}
+        >
+          {initials(voter.fullName)}
+        </Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.voterName}>{voter.fullName}</Text>
+        {meta ? <Text style={styles.voterMeta}>{meta}</Text> : null}
+        <View style={styles.voterStatusRow}>
+          <View
+            style={[
+              styles.voterStatusDot,
+              { backgroundColor: surveyed ? colors.success : colors.textMuted },
+            ]}
+          />
+          <Text
+            style={[
+              styles.voterStatusText,
+              { color: surveyed ? colors.success : colors.textSecondary },
+            ]}
+          >
+            {surveyed ? 'Surveyed' : 'Not surveyed'}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.voterCta}>
+        <Text style={styles.voterCtaText}>
+          {surveyed ? 'Re-survey' : 'Take survey'}
+        </Text>
+        <Text style={styles.voterCtaChevron}>›</Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -120,6 +187,8 @@ export default function HouseholdDetail() {
     }
   }
 
+  const surveyedCount = voters.filter((v) => v.surveyStatus === 'surveyed').length;
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
@@ -149,7 +218,14 @@ export default function HouseholdDetail() {
 
         {campaignType === 'survey' && (
           <>
-            <Text style={styles.sectionTitle}>Voters at this address</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Voters at this address</Text>
+              {voters.length > 0 && (
+                <Text style={styles.sectionCount}>
+                  {surveyedCount}/{voters.length} surveyed
+                </Text>
+              )}
+            </View>
             {voters.length === 0 && (
               <View style={styles.emptyVoters}>
                 <Text style={type.caption}>
@@ -157,32 +233,13 @@ export default function HouseholdDetail() {
                 </Text>
               </View>
             )}
-            {voters.map((v) => {
-              const surveyed = v.surveyStatus === 'surveyed';
-              return (
-                <View key={v._id} style={styles.voterCard}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.voterName}>{v.fullName}</Text>
-                    <Text style={styles.voterMeta}>
-                      {[v.party, v.gender, v.precinct].filter(Boolean).join(' · ')}
-                    </Text>
-                    {surveyed && (
-                      <View style={styles.surveyedBadge}>
-                        <Text style={styles.surveyedBadgeText}>Surveyed</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Pressable
-                    onPress={() => router.push(`/(app)/voter/${v._id}/survey`)}
-                    style={styles.surveyButton}
-                  >
-                    <Text style={styles.surveyButtonText}>
-                      {surveyed ? 'Re-survey' : 'Take survey'}
-                    </Text>
-                  </Pressable>
-                </View>
-              );
-            })}
+            {voters.map((v) => (
+              <VoterCard
+                key={v._id}
+                voter={v}
+                onPress={() => router.push(`/(app)/voter/${v._id}/survey`)}
+              />
+            ))}
           </>
         )}
 
@@ -302,11 +359,24 @@ const styles = StyleSheet.create({
   pillDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
   pillText: { fontSize: 11, fontWeight: '700' },
 
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
+  },
   sectionTitle: {
     ...type.micro,
     marginTop: spacing.xl,
     marginBottom: spacing.sm,
   },
+  sectionCount: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+
   emptyVoters: {
     backgroundColor: colors.card,
     padding: spacing.md,
@@ -314,6 +384,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+
   voterCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
@@ -324,31 +395,62 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card,
+    gap: spacing.md,
   },
-  voterName: { ...type.bodyStrong },
+  voterCardSurveyed: {
+    borderColor: colors.successBorder,
+  },
+  voterAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.brandTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voterAvatarText: {
+    color: colors.brand,
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  voterName: { ...type.bodyStrong, fontSize: 15 },
   voterMeta: { ...type.caption, marginTop: 2 },
-  surveyedBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.successBg,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+  voterStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: 4,
   },
-  surveyedBadgeText: {
-    color: colors.success,
-    fontSize: 10,
+  voterStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  voterStatusText: {
+    fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  surveyButton: {
+  voterCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.brand,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
   },
-  surveyButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 13 },
+  voterCtaText: {
+    color: colors.textInverse,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  voterCtaChevron: {
+    color: colors.textInverse,
+    fontWeight: '700',
+    fontSize: 16,
+    marginLeft: 4,
+  },
 
   noteInput: {
     backgroundColor: colors.card,

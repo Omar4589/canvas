@@ -22,6 +22,7 @@ import {
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import Logo from '../../components/Logo';
+import PinIcon from '../../components/PinIcon';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
 if (MAPBOX_PUBLIC_TOKEN) {
@@ -31,7 +32,7 @@ if (MAPBOX_PUBLIC_TOKEN) {
 const DEFAULT_CENTER = [-84.5, 39.0];
 
 const SURVEY_FILTER_OPTIONS = [
-  { key: 'all', label: 'All' },
+  { key: 'all', label: 'All houses' },
   { key: 'unknocked', label: 'Unknocked' },
   { key: 'not_home', label: 'Not home' },
   { key: 'surveyed', label: 'Surveyed' },
@@ -39,7 +40,7 @@ const SURVEY_FILTER_OPTIONS = [
 ];
 
 const LIT_DROP_FILTER_OPTIONS = [
-  { key: 'all', label: 'All' },
+  { key: 'all', label: 'All houses' },
   { key: 'unknocked', label: 'Not yet' },
   { key: 'lit_dropped', label: 'Dropped' },
 ];
@@ -62,13 +63,57 @@ function buildFeatureCollection(households) {
   };
 }
 
-function ProgressStat({ icon, value, label, accent }) {
+function timeAgo(date) {
+  if (!date) return null;
+  const ms = Date.now() - new Date(date).getTime();
+  if (Number.isNaN(ms) || ms < 0) return null;
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  const w = Math.floor(d / 7);
+  return `${w}w ago`;
+}
+
+function StatusPill({ status, compact = false }) {
+  const dotColor = colors.status[status] || colors.textMuted;
+  const isDone = status === 'surveyed' || status === 'lit_dropped';
+  const isMiss = status === 'not_home' || status === 'wrong_address';
+  const bg = isDone ? colors.successBg : isMiss ? colors.dangerBg : colors.bg;
+  const border = isDone
+    ? colors.successBorder
+    : isMiss
+    ? '#FCA5A5'
+    : colors.border;
+  const textColor = isDone
+    ? colors.success
+    : isMiss
+    ? colors.danger
+    : colors.textSecondary;
+  return (
+    <View
+      style={[
+        pillStyles.pill,
+        { backgroundColor: bg, borderColor: border },
+        compact && pillStyles.compact,
+      ]}
+    >
+      <View style={[pillStyles.dot, { backgroundColor: dotColor }]} />
+      <Text style={[pillStyles.text, { color: textColor }]}>
+        {colors.statusLabels[status] || 'Unknown'}
+      </Text>
+    </View>
+  );
+}
+
+function ProgressStat({ pinStatus, value, label }) {
   return (
     <View style={styles.progressStat}>
-      <View style={[styles.progressIcon, { backgroundColor: accent }]}>
-        <Text style={styles.progressIconText}>{icon}</Text>
-      </View>
-      <View>
+      <PinIcon status={pinStatus} size={26} />
+      <View style={{ marginLeft: spacing.sm }}>
         <Text style={styles.progressValue}>{value ?? '—'}</Text>
         <Text style={styles.progressLabel}>{label}</Text>
       </View>
@@ -135,11 +180,30 @@ export default function MapScreen() {
 
   const todayQ = useQuery({
     queryKey: ['mobile', 'me', 'today', activeCampaign?.id],
-    queryFn: () => api(`/mobile/me/today?campaignId=${activeCampaign.id}`),
+    queryFn: () => {
+      // Send start-of-today in the device's local timezone as an absolute
+      // ISO. Server uses it as-is, so canvassers in different zones each get
+      // their own day boundary.
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const since = encodeURIComponent(startOfDay.toISOString());
+      return api(`/mobile/me/today?campaignId=${activeCampaign.id}&since=${since}`);
+    },
     enabled: !!activeCampaign?.id,
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
   });
+
+  // Index voters by household for the bottom sheet stats.
+  const votersByHousehold = useMemo(() => {
+    const m = new Map();
+    for (const v of data?.voters || []) {
+      const k = String(v.householdId);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(v);
+    }
+    return m;
+  }, [data]);
 
   async function switchCampaign() {
     await saveActiveCampaign(null);
@@ -231,6 +295,16 @@ export default function MapScreen() {
 
   const initialCenter = data?.households?.[0]?.location?.coordinates || DEFAULT_CENTER;
   const today = todayQ.data || {};
+  const isLitDrop = activeCampaign?.type === 'lit_drop';
+
+  // Selected household stats for the bottom sheet.
+  const selectedVoters = selected
+    ? votersByHousehold.get(String(selected._id)) || []
+    : [];
+  const selectedSurveyedCount = selectedVoters.filter(
+    (v) => v.surveyStatus === 'surveyed'
+  ).length;
+  const selectedLastSeen = selected ? timeAgo(selected.lastActionAt) : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -291,23 +365,18 @@ export default function MapScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
             {pendingCount > 0 && (
               <View style={styles.pendingBadge}>
-                <Text style={styles.pendingBadgeText}>{pendingCount}</Text>
+                <Text style={styles.pendingBadgeText}>{pendingCount} pending</Text>
               </View>
             )}
-            <Pressable
-              onPress={() => setFilterMenuOpen((v) => !v)}
-              style={styles.iconButton}
-            >
-              <Text style={styles.iconButtonText}>
-                {activeFilter === 'all' ? '⚲' : '●'}
-              </Text>
-            </Pressable>
             <Pressable onPress={onRefresh} style={styles.iconButton}>
               {isFetching ? (
                 <ActivityIndicator size="small" color={colors.brand} />
               ) : (
                 <Text style={styles.iconButtonText}>↻</Text>
               )}
+            </Pressable>
+            <Pressable onPress={onLogout} style={styles.iconButtonGhost}>
+              <Text style={styles.iconButtonGhostText}>Sign out</Text>
             </Pressable>
           </View>
         </View>
@@ -322,14 +391,30 @@ export default function MapScreen() {
               <Text style={styles.campaignChipSwitch}>Switch</Text>
             </Pressable>
           )}
-          <Pressable onPress={onLogout} style={styles.signOutChip}>
-            <Text style={styles.signOutChipText}>Sign out</Text>
+          <Pressable
+            onPress={() => setFilterMenuOpen((v) => !v)}
+            style={[
+              styles.filterChip,
+              activeFilter !== 'all' && styles.filterChipActive,
+            ]}
+          >
+            <Text style={styles.filterIcon}>⌕</Text>
+            <Text
+              style={[
+                styles.filterChipText,
+                activeFilter !== 'all' && styles.filterChipTextActive,
+              ]}
+              numberOfLines={1}
+            >
+              {activeOption.label}
+            </Text>
+            <Text style={styles.filterChevron}>{filterMenuOpen ? '▴' : '▾'}</Text>
           </Pressable>
         </View>
 
         {filterMenuOpen && (
           <View style={styles.filterMenu}>
-            <Text style={styles.filterMenuLabel}>Show</Text>
+            <Text style={styles.filterMenuLabel}>Show on map</Text>
             {filterOptions.map((opt) => {
               const isActive = opt.key === activeFilter;
               return (
@@ -374,7 +459,7 @@ export default function MapScreen() {
         onPress={() => setFollowing((v) => !v)}
         style={[
           styles.recenterButton,
-          selected && styles.recenterButtonAboveSheet,
+          selected ? styles.recenterButtonAboveSheet : styles.recenterButtonAboveProgress,
           following && styles.recenterButtonActive,
         ]}
       >
@@ -388,28 +473,50 @@ export default function MapScreen() {
         </Text>
       </Pressable>
 
-      {/* Pin sheet OR progress card (sheet takes precedence) */}
+      {/* Pin sheet OR progress card */}
       {selected ? (
         <SafeAreaView edges={['bottom']} style={styles.sheet}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetAddress}>
-            {selected.addressLine1}
-            {selected.addressLine2 ? `, ${selected.addressLine2}` : ''}
-          </Text>
-          <Text style={styles.sheetSub}>
-            {selected.city}, {selected.state} {selected.zipCode}
-          </Text>
-          <View style={styles.sheetRow}>
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: colors.status[selected.status] },
-              ]}
-            />
-            <Text style={styles.sheetStatusText}>
-              {colors.statusLabels[selected.status]}
-            </Text>
+
+          <View style={styles.sheetHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sheetAddress}>
+                {selected.addressLine1}
+                {selected.addressLine2 ? `, ${selected.addressLine2}` : ''}
+              </Text>
+              <Text style={styles.sheetSub}>
+                {selected.city}, {selected.state} {selected.zipCode}
+              </Text>
+            </View>
+            <StatusPill status={selected.status} compact />
           </View>
+
+          <View style={styles.sheetMetaRow}>
+            {!isLitDrop && (
+              <View style={styles.sheetMetaItem}>
+                <Text style={styles.sheetMetaIcon}>👥</Text>
+                <Text style={styles.sheetMetaText}>
+                  <Text style={styles.sheetMetaStrong}>{selectedVoters.length}</Text>{' '}
+                  {selectedVoters.length === 1 ? 'voter' : 'voters'}
+                  {selectedSurveyedCount > 0 ? (
+                    <Text style={styles.sheetMetaSub}>
+                      {' '}· {selectedSurveyedCount} surveyed
+                    </Text>
+                  ) : null}
+                </Text>
+              </View>
+            )}
+            {selectedLastSeen && (
+              <View style={styles.sheetMetaItem}>
+                <Text style={styles.sheetMetaIcon}>🕒</Text>
+                <Text style={styles.sheetMetaText}>
+                  <Text style={styles.sheetMetaStrong}>Last visit</Text>{' '}
+                  <Text style={styles.sheetMetaSub}>{selectedLastSeen}</Text>
+                </Text>
+              </View>
+            )}
+          </View>
+
           <View style={styles.sheetButtons}>
             <Pressable
               onPress={() => {
@@ -431,25 +538,23 @@ export default function MapScreen() {
       ) : (
         <SafeAreaView edges={['bottom']} style={styles.progressCard}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.progressTitle}>Today's Progress</Text>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressTitle}>Today's Progress</Text>
+            <Text style={styles.progressLegendHint}>also serves as map legend</Text>
+          </View>
           <View style={styles.progressRow}>
             <ProgressStat
-              icon="✓"
-              accent={colors.status.surveyed}
+              pinStatus="not_home"
               value={today.doorsKnocked?.toLocaleString()}
               label="Doors knocked"
             />
             <ProgressStat
-              icon="◉"
-              accent={colors.info}
+              pinStatus={isLitDrop ? 'lit_dropped' : 'surveyed'}
               value={today.responses?.toLocaleString()}
-              label={
-                activeCampaign?.type === 'lit_drop' ? 'Lit drops' : 'Responses'
-              }
+              label={isLitDrop ? 'Lit drops' : 'Responses'}
             />
             <ProgressStat
-              icon="⌂"
-              accent={colors.textMuted}
+              pinStatus="unknocked"
               value={today.remaining?.toLocaleString()}
               label="Remaining"
             />
@@ -510,6 +615,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  iconButtonGhost: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  iconButtonGhostText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
   pendingBadge: {
     backgroundColor: colors.warnBg,
     paddingHorizontal: spacing.sm,
@@ -556,18 +670,39 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginLeft: spacing.sm,
   },
-  signOutChip: {
+
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.card,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
+    ...shadow.card,
   },
-  signOutChipText: {
-    fontSize: 12,
+  filterChipActive: {
+    backgroundColor: colors.brandTint,
+    borderColor: colors.brand,
+  },
+  filterIcon: {
+    fontSize: 13,
     color: colors.textSecondary,
+    marginRight: 6,
+    fontWeight: '700',
+  },
+  filterChipText: {
+    fontSize: 13,
     fontWeight: '600',
+    color: colors.textPrimary,
+    maxWidth: 120,
+  },
+  filterChipTextActive: { color: colors.brand },
+  filterChevron: {
+    marginLeft: 6,
+    fontSize: 11,
+    color: colors.textSecondary,
   },
 
   filterMenu: {
@@ -600,7 +735,6 @@ const styles = StyleSheet.create({
   recenterButton: {
     position: 'absolute',
     right: spacing.lg,
-    bottom: 200,
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -609,6 +743,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadow.raised,
   },
+  recenterButtonAboveProgress: { bottom: 180 },
   recenterButtonAboveSheet: { bottom: 280 },
   recenterButtonActive: { backgroundColor: colors.brand },
   recenterButtonText: { fontSize: 24, color: colors.brand, lineHeight: 26 },
@@ -634,11 +769,32 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     marginBottom: spacing.md,
   },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
   sheetAddress: { ...type.h3 },
   sheetSub: { ...type.caption, marginTop: 2 },
-  sheetRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
-  sheetStatusText: { color: colors.textSecondary, textTransform: 'capitalize' },
-  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: spacing.sm },
+
+  sheetMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  sheetMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sheetMetaIcon: { fontSize: 14, marginRight: spacing.xs },
+  sheetMetaText: { fontSize: 13, color: colors.textSecondary },
+  sheetMetaStrong: { fontWeight: '700', color: colors.textPrimary },
+  sheetMetaSub: { color: colors.textSecondary },
+
   sheetButtons: { flexDirection: 'row', marginTop: spacing.md, marginBottom: spacing.sm },
   primaryButton: {
     backgroundColor: colors.brand,
@@ -670,9 +826,17 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.lg,
     ...shadow.raised,
   },
-  progressTitle: {
-    ...type.h3,
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
     marginBottom: spacing.md,
+  },
+  progressTitle: { ...type.h3 },
+  progressLegendHint: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontStyle: 'italic',
   },
   progressRow: {
     flexDirection: 'row',
@@ -684,19 +848,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  progressIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.sm,
-  },
-  progressIconText: {
-    color: colors.textInverse,
-    fontWeight: '800',
-    fontSize: 16,
-  },
   progressValue: {
     ...type.h2,
     fontSize: 20,
@@ -707,4 +858,18 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '600',
   },
+});
+
+const pillStyles = StyleSheet.create({
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  compact: { paddingHorizontal: 8, paddingVertical: 3 },
+  dot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
+  text: { fontSize: 11, fontWeight: '700' },
 });
