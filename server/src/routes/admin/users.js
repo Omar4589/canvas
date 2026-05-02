@@ -21,6 +21,8 @@ const updateSchema = z.object({
   role: z.enum(['admin', 'user']).optional(),
 });
 
+const passwordSchema = z.object({ password: z.string().min(8) });
+
 router.get('/', async (req, res, next) => {
   try {
     const users = await User.find().sort({ createdAt: -1 });
@@ -79,6 +81,23 @@ router.patch('/:userId/reactivate', async (req, res, next) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user: user.toSafeJSON() });
   } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/:userId/password', async (req, res, next) => {
+  try {
+    const { password } = passwordSchema.parse(req.body);
+    const passwordHash = await User.hashPassword(password);
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { passwordHash },
+      { new: true }
+    );
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ user: user.toSafeJSON() });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
   }
 });

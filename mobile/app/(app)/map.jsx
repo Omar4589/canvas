@@ -18,6 +18,7 @@ import {
   loadActiveCampaign,
   saveActiveCampaign,
   clearBootstrap,
+  loadCurrentUser,
 } from '../../lib/cache';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
@@ -131,6 +132,7 @@ export default function MapScreen() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
+  const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -142,10 +144,15 @@ export default function MapScreen() {
       }
       setActiveCampaign(c);
     });
+    loadCurrentUser().then((u) => {
+      if (mounted) setCurrentUser(u);
+    });
     return () => {
       mounted = false;
     };
   }, [router]);
+
+  const isAdmin = currentUser?.role === 'admin';
 
   const filterOptions =
     activeCampaign?.type === 'lit_drop' ? LIT_DROP_FILTER_OPTIONS : SURVEY_FILTER_OPTIONS;
@@ -367,6 +374,14 @@ export default function MapScreen() {
               <View style={styles.pendingBadge}>
                 <Text style={styles.pendingBadgeText}>{pendingCount} pending</Text>
               </View>
+            )}
+            {isAdmin && (
+              <Pressable
+                onPress={() => router.push('/(app)/admin')}
+                style={styles.adminChip}
+              >
+                <Text style={styles.adminChipText}>Admin ↑</Text>
+              </Pressable>
             )}
             <Pressable onPress={onRefresh} style={styles.iconButton}>
               {isFetching ? (
@@ -631,6 +646,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   pendingBadgeText: { color: '#92400E', fontWeight: '700', fontSize: 12 },
+  adminChip: {
+    backgroundColor: colors.brandTint,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderWidth: 1,
+    borderColor: colors.brand,
+  },
+  adminChipText: { color: colors.brand, fontWeight: '700', fontSize: 12 },
 
   subBar: {
     flexDirection: 'row',

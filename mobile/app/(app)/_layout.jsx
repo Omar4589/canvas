@@ -14,6 +14,7 @@ export default function AppLayout() {
       <Stack.Screen name="map" />
       <Stack.Screen name="household/[id]" />
       <Stack.Screen name="voter/[id]/survey" />
+      <Stack.Screen name="admin" />
     </Stack>
   );
 }

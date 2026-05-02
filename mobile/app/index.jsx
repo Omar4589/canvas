@@ -2,28 +2,28 @@ import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Redirect } from 'expo-router';
 import { useAuthToken, useAuthReady } from '../lib/authState';
-import { loadActiveCampaign } from '../lib/cache';
+import { loadActiveCampaign, loadCurrentUser } from '../lib/cache';
 
 export default function Index() {
   const token = useAuthToken();
   const ready = useAuthReady();
-  const [campaign, setCampaign] = useState(undefined);
+  const [boot, setBoot] = useState(undefined); // { user, campaign } | null
 
   useEffect(() => {
     let mounted = true;
     if (!ready || !token) {
-      setCampaign(null);
+      setBoot(null);
       return;
     }
-    loadActiveCampaign().then((c) => {
-      if (mounted) setCampaign(c || null);
+    Promise.all([loadCurrentUser(), loadActiveCampaign()]).then(([user, campaign]) => {
+      if (mounted) setBoot({ user: user || null, campaign: campaign || null });
     });
     return () => {
       mounted = false;
     };
   }, [ready, token]);
 
-  if (!ready || (token && campaign === undefined)) {
+  if (!ready || (token && boot === undefined)) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
@@ -31,6 +31,10 @@ export default function Index() {
     );
   }
   if (!token) return <Redirect href="/login" />;
-  if (!campaign) return <Redirect href="/(app)/campaigns" />;
+
+  if (boot?.user?.role === 'admin') {
+    return <Redirect href="/(app)/admin" />;
+  }
+  if (!boot?.campaign) return <Redirect href="/(app)/campaigns" />;
   return <Redirect href="/(app)/map" />;
 }

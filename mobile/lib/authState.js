@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getToken, setToken as persistToken } from './auth';
+import { clearCurrentUser, clearActiveCampaign, clearBootstrap } from './cache';
 
 // Tiny subscriber-based store. Token is the single source of truth for
 // auth across screens, so login/logout updates propagate synchronously.
@@ -39,6 +40,11 @@ export async function signIn(token) {
 
 export async function signOut() {
   await persistToken(null);
+  await Promise.all([
+    clearCurrentUser(),
+    clearActiveCampaign(),
+    clearBootstrap(),
+  ]);
   _token = null;
   emit();
 }

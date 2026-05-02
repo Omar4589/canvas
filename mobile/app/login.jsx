@@ -12,7 +12,9 @@ import {
 import { Redirect } from 'expo-router';
 import { api } from '../lib/api';
 import { signIn, useAuthToken } from '../lib/authState';
+import { saveCurrentUser } from '../lib/cache';
 import Logo from '../components/Logo';
+import PasswordInput from '../components/PasswordInput';
 import { colors, radius, spacing, type, shadow } from '../lib/theme';
 
 export default function Login() {
@@ -32,6 +34,9 @@ export default function Login() {
         method: 'POST',
         body: { email: email.trim(), password },
       });
+      if (res.user) {
+        await saveCurrentUser(res.user);
+      }
       await signIn(res.token);
     } catch (err) {
       setError(err.message);
@@ -66,15 +71,11 @@ export default function Login() {
           />
 
           <Text style={[styles.label, { marginTop: spacing.md }]}>Password</Text>
-          <TextInput
+          <PasswordInput
             value={password}
             onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoComplete="password"
+            autoComplete="current-password"
             placeholder="••••••••"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
           />
 
           {error && (
