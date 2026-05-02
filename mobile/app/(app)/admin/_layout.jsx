@@ -35,6 +35,7 @@ export default function AdminLayout() {
       <Stack.Screen name="users" />
       <Stack.Screen name="map" />
       <Stack.Screen name="canvassers" />
+      <Stack.Screen name="overlaps" />
     </Stack>
   );
 }

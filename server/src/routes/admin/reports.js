@@ -461,6 +461,98 @@ router.get('/voters-by-answer', async (req, res, next) => {
   }
 });
 
+router.get('/overlaps', async (req, res, next) => {
+  try {
+    const cFilter = campaignFilter(req);
+    const dateRange = parseDateRange(req, 'timestamp');
+    const match = {
+      ...cFilter,
+      ...dateRange,
+      actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'] },
+    };
+
+    // Per-canvasser overwrite already guarantees one row per (canvasser, household).
+    // Group by household — any household with count > 1 has been touched by 2+
+    // distinct canvassers in this range.
+    const overlaps = await CanvassActivity.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: '$householdId',
+          canvassers: {
+            $push: {
+              userId: '$userId',
+              actionType: '$actionType',
+              timestamp: '$timestamp',
+            },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $match: { count: { $gt: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 200 },
+    ]);
+
+    if (!overlaps.length) {
+      return res.json({ overlaps: [], total: 0 });
+    }
+
+    const householdIds = overlaps.map((o) => o._id);
+    const userIds = [
+      ...new Set(
+        overlaps.flatMap((o) => o.canvassers.map((c) => String(c.userId)))
+      ),
+    ].map((id) => new mongoose.Types.ObjectId(id));
+
+    const [households, users] = await Promise.all([
+      Household.find(
+        { _id: { $in: householdIds } },
+        'addressLine1 addressLine2 city state zipCode location'
+      ).lean(),
+      User.find({ _id: { $in: userIds } }, 'firstName lastName email').lean(),
+    ]);
+
+    const hMap = new Map(households.map((h) => [String(h._id), h]));
+    const uMap = new Map(users.map((u) => [String(u._id), u]));
+
+    const result = overlaps
+      .map((o) => {
+        const h = hMap.get(String(o._id));
+        if (!h) return null;
+        return {
+          household: {
+            id: String(h._id),
+            addressLine1: h.addressLine1,
+            addressLine2: h.addressLine2 || null,
+            city: h.city,
+            state: h.state,
+            zipCode: h.zipCode,
+          },
+          count: o.count,
+          canvassers: o.canvassers
+            .map((c) => {
+              const u = uMap.get(String(c.userId));
+              return {
+                userId: String(c.userId),
+                firstName: u?.firstName || '',
+                lastName: u?.lastName || '',
+                email: u?.email || '',
+                actionType: c.actionType,
+                timestamp: c.timestamp,
+              };
+            })
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
+        };
+      })
+      .filter(Boolean);
+
+    res.json({ overlaps: result, total: result.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/canvassers/:userId/responses', async (req, res, next) => {
   try {
     const { userId } = req.params;

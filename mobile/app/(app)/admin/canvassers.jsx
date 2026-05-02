@@ -83,6 +83,18 @@ export default function AdminCanvassers() {
     enabled: !!cId,
   });
 
+  const overlapsQ = useQuery({
+    queryKey: ['admin', 'reports', 'overlaps', cId, range.from, range.to],
+    queryFn: () => {
+      const p = new URLSearchParams();
+      if (cId) p.set('campaignId', cId);
+      if (range.from) p.set('from', range.from);
+      if (range.to) p.set('to', range.to);
+      return api(`/admin/reports/overlaps?${p.toString()}`);
+    },
+    enabled: !!cId,
+  });
+
   const isLitDrop = campaign?.type === 'lit_drop';
   const rows = canvassersQ.data || [];
 
@@ -135,6 +147,34 @@ export default function AdminCanvassers() {
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
       >
+        {/* Overlap banner — visible only when there's overlap in this range */}
+        {overlapsQ.data?.total > 0 && (
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/(app)/admin/overlaps',
+                params: { preset },
+              })
+            }
+            style={({ pressed }) => [
+              styles.overlapBanner,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Text style={styles.overlapBannerIcon}>⚠️</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.overlapBannerTitle}>
+                {overlapsQ.data.total}{' '}
+                {overlapsQ.data.total === 1 ? 'house' : 'houses'} hit by 2+ canvassers
+              </Text>
+              <Text style={styles.overlapBannerSub}>
+                Tap to review overlap
+              </Text>
+            </View>
+            <Text style={styles.overlapBannerChevron}>›</Text>
+          </Pressable>
+        )}
+
         {/* Totals card */}
         <View style={styles.totalsCard}>
           <Text style={styles.totalsTitle}>
@@ -311,4 +351,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: { ...type.caption, textAlign: 'center' },
+
+  overlapBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.warnBg,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: '#FBBF24',
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  overlapBannerIcon: { fontSize: 18 },
+  overlapBannerTitle: {
+    color: '#92400E',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  overlapBannerSub: {
+    color: '#92400E',
+    fontSize: 12,
+    marginTop: 1,
+  },
+  overlapBannerChevron: {
+    color: '#92400E',
+    fontWeight: '700',
+    fontSize: 22,
+  },
 });
