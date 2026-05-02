@@ -38,7 +38,8 @@
         "appleTeamId": "62RUXR2CLQ"
       },
       "android": {
-        "track": "internal"
+        "track": "internal",
+        "releaseStatus": "draft"
       }
     }
   }
