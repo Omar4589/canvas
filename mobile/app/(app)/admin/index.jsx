@@ -20,6 +20,7 @@ import {
 } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
 import PinIcon from '../../../components/PinIcon';
+import { formatRange } from '../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 function startOfTodayISO() {
@@ -223,6 +224,7 @@ export default function AdminHome() {
               const primary = isLitDrop ? c.litDropped || 0 : c.surveysSubmitted || 0;
               const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
               const knocked = c.homesKnocked || 0;
+              const range = formatRange(c.firstActivityAt, c.lastActivityAt);
               return (
                 <View key={c.userId} style={styles.canvasserRow}>
                   <Text style={styles.canvasserRank}>{i + 1}</Text>
@@ -233,6 +235,9 @@ export default function AdminHome() {
                     <Text style={styles.canvasserMeta}>
                       {knocked} houses · {primary} {primaryLabel}
                     </Text>
+                    {range ? (
+                      <Text style={styles.canvasserShift}>🕘 {range}</Text>
+                    ) : null}
                   </View>
                 </View>
               );
@@ -386,6 +391,12 @@ const styles = StyleSheet.create({
   },
   canvasserName: { ...type.bodyStrong, fontSize: 14 },
   canvasserMeta: { ...type.caption, marginTop: 1 },
+  canvasserShift: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
 
   quickLinkRow: {
     flexDirection: 'row',

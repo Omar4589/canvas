@@ -2,9 +2,11 @@ import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import PasswordInput from '../components/PasswordInput.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 export default function UsersPage() {
   const qc = useQueryClient();
+  const { user: currentUser } = useAuth();
   const { data, isLoading } = useQuery({
     queryKey: ['users'],
     queryFn: () => api('/admin/users'),
@@ -46,6 +48,19 @@ export default function UsersPage() {
       setResetTargetId(null);
       setResetPassword('');
       setResetMessage(`Password reset for ${u?.email || 'user'}.`);
+      setTimeout(() => setResetMessage(null), 4000);
+    },
+  });
+
+  const updateRole = useMutation({
+    mutationFn: ({ id, role }) =>
+      api(`/admin/users/${id}`, { method: 'PATCH', body: { role } }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      const u = (data?.users || []).find((x) => x.id === vars.id);
+      setResetMessage(
+        `${u?.email || 'User'} is now ${vars.role === 'admin' ? 'an admin' : 'a canvasser'}.`
+      );
       setTimeout(() => setResetMessage(null), 4000);
     },
   });
@@ -173,6 +188,21 @@ export default function UsersPage() {
                       >
                         Reset password
                       </button>
+                      {currentUser?.id !== u.id && (
+                        <button
+                          onClick={() => {
+                            const nextRole = u.role === 'admin' ? 'user' : 'admin';
+                            const verb = nextRole === 'admin' ? 'make admin' : 'demote to canvasser';
+                            if (window.confirm(`Are you sure you want to ${verb} ${u.email}?`)) {
+                              updateRole.mutate({ id: u.id, role: nextRole });
+                            }
+                          }}
+                          disabled={updateRole.isPending}
+                          className="mr-3 text-xs text-brand-700 hover:underline disabled:opacity-50"
+                        >
+                          {u.role === 'admin' ? 'Make canvasser' : 'Make admin'}
+                        </button>
+                      )}
                       <button
                         onClick={() =>
                           toggleActive.mutate({

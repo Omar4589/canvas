@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
+import { formatRange } from '../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 const PRESETS = [
@@ -217,6 +218,7 @@ export default function AdminCanvassers() {
             const name = `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.email;
             const primary = isLitDrop ? r.litDropped || 0 : r.surveysSubmitted || 0;
             const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
+            const range = formatRange(r.firstActivityAt, r.lastActivityAt);
             return (
               <View key={r.userId} style={styles.row}>
                 <Text style={styles.rank}>{i + 1}</Text>
@@ -241,6 +243,9 @@ export default function AdminCanvassers() {
                       </Text>
                     ) : null}
                   </View>
+                  {range ? (
+                    <Text style={styles.shift}>🕘 {range}</Text>
+                  ) : null}
                 </View>
               </View>
             );
@@ -341,6 +346,12 @@ const styles = StyleSheet.create({
   },
   stat: { fontSize: 12, color: colors.textSecondary },
   statBold: { fontSize: 12, color: colors.textPrimary, fontWeight: '700' },
+  shift: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
 
   empty: {
     backgroundColor: colors.card,

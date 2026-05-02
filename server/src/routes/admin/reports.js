@@ -101,7 +101,7 @@ router.get('/canvassers', async (req, res, next) => {
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter };
     const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter };
 
-    const [surveyAgg, activityAgg] = await Promise.all([
+    const [surveyAgg, activityAgg, rangeAgg] = await Promise.all([
       SurveyResponse.aggregate([
         ...(Object.keys(surveyMatch).length ? [{ $match: surveyMatch }] : []),
         {
@@ -122,6 +122,18 @@ router.get('/canvassers', async (req, res, next) => {
           },
         },
       ]),
+      // First/last activity per canvasser, across all action types. Powers
+      // the "shift range" UI — when did they start and finish.
+      CanvassActivity.aggregate([
+        ...(Object.keys(activityMatch).length ? [{ $match: activityMatch }] : []),
+        {
+          $group: {
+            _id: '$userId',
+            firstActivityAt: { $min: '$timestamp' },
+            lastActivityAt: { $max: '$timestamp' },
+          },
+        },
+      ]),
     ]);
 
     const byUser = new Map();
@@ -134,6 +146,7 @@ router.get('/canvassers', async (req, res, next) => {
           notHome: 0,
           wrongAddress: 0,
           litDropped: 0,
+          firstActivityAt: null,
           lastActivityAt: null,
         });
       }
@@ -154,6 +167,19 @@ router.get('/canvassers', async (req, res, next) => {
       else if (row._id.actionType === 'lit_dropped') u.litDropped = row.count;
       if (row.lastAt && (!u.lastActivityAt || row.lastAt > u.lastActivityAt)) {
         u.lastActivityAt = row.lastAt;
+      }
+    }
+    for (const row of rangeAgg) {
+      const u = ensure(row._id);
+      u.firstActivityAt = row.firstActivityAt;
+      // The rangeAgg uses CanvassActivity which includes survey_submitted rows,
+      // so its lastActivityAt covers everything. Take the later of the two
+      // sources just in case.
+      if (
+        row.lastActivityAt &&
+        (!u.lastActivityAt || row.lastActivityAt > u.lastActivityAt)
+      ) {
+        u.lastActivityAt = row.lastActivityAt;
       }
     }
 
@@ -179,6 +205,7 @@ router.get('/canvassers', async (req, res, next) => {
           litDropped: u.litDropped,
           homesKnocked:
             u.surveysSubmitted + u.notHome + u.wrongAddress + u.litDropped,
+          firstActivityAt: u.firstActivityAt,
           lastActivityAt: u.lastActivityAt,
         };
       })

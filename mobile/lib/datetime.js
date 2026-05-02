@@ -34,3 +34,32 @@ export function formatExact(date) {
   });
   return `${datePart} · ${timePart}`;
 }
+
+// Compact "shift range" display.
+// Same day: "8:32 AM – 11:47 AM"
+// Multi-day: "May 1, 8:32 AM – May 5, 6:00 PM"
+// Single timestamp (only one action): "8:32 AM" / "May 1, 8:32 AM"
+export function formatRange(first, last) {
+  if (!first && !last) return '';
+  const f = first ? new Date(first) : null;
+  const l = last ? new Date(last) : null;
+  if (f && Number.isNaN(f.getTime())) return '';
+  if (l && Number.isNaN(l.getTime())) return '';
+
+  const timeOpts = { hour: 'numeric', minute: '2-digit' };
+  const dateOpts = { month: 'short', day: 'numeric' };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  function part(d) {
+    const sameDayAsToday = d.toDateString() === new Date().toDateString();
+    if (sameDayAsToday) return d.toLocaleTimeString(undefined, timeOpts);
+    return `${d.toLocaleDateString(undefined, dateOpts)}, ${d.toLocaleTimeString(undefined, timeOpts)}`;
+  }
+
+  if (!l || (f && f.getTime() === l.getTime())) {
+    return part(f || l);
+  }
+  if (!f) return part(l);
+  return `${part(f)} – ${part(l)}`;
+}

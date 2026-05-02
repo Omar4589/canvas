@@ -55,6 +55,18 @@ router.patch('/:userId', async (req, res, next) => {
   try {
     const data = updateSchema.parse(req.body);
     if (data.email) data.email = data.email.toLowerCase();
+
+    // Don't let an admin demote themselves — that would lock them out of the
+    // admin console mid-session. They can ask another admin to do it.
+    if (
+      data.role === 'user' &&
+      String(req.params.userId) === String(req.user._id)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "You can't change your own role. Ask another admin." });
+    }
+
     const user = await User.findByIdAndUpdate(req.params.userId, data, { new: true });
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user: user.toSafeJSON() });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import PasswordInput from '../../../components/PasswordInput';
+import { loadCurrentUser } from '../../../lib/cache';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 function initials(name) {
@@ -101,6 +102,11 @@ export default function AdminUsers() {
   const [resetUser, setResetUser] = useState(null);
   const [resetPwd, setResetPwd] = useState('');
   const [actionUser, setActionUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    loadCurrentUser().then((u) => setCurrentUser(u));
+  }, []);
 
   const usersQ = useQuery({
     queryKey: ['admin', 'users'],
@@ -134,6 +140,22 @@ export default function AdminUsers() {
     },
     onError: (err) => {
       Alert.alert('Failed', err.message || 'Could not reset password.');
+    },
+  });
+
+  const updateRole = useMutation({
+    mutationFn: ({ id, role }) =>
+      api(`/admin/users/${id}`, { method: 'PATCH', body: { role } }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setActionUser(null);
+      Alert.alert(
+        'Role updated',
+        vars.role === 'admin' ? 'User is now an admin.' : 'User is now a canvasser.'
+      );
+    },
+    onError: (err) => {
+      Alert.alert('Failed', err.message || 'Could not update role.');
     },
   });
 
@@ -180,6 +202,32 @@ export default function AdminUsers() {
             >
               <Text style={styles.actionItemText}>Reset password</Text>
             </Pressable>
+            {actionUser && currentUser?.id !== actionUser.id && (
+              <Pressable
+                style={styles.actionItem}
+                onPress={() => {
+                  const nextRole = actionUser.role === 'admin' ? 'user' : 'admin';
+                  const verb =
+                    nextRole === 'admin' ? 'Make admin' : 'Demote to canvasser';
+                  Alert.alert(
+                    verb,
+                    `Are you sure you want to change ${actionUser.email}?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Confirm',
+                        onPress: () =>
+                          updateRole.mutate({ id: actionUser.id, role: nextRole }),
+                      },
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.actionItemText}>
+                  {actionUser.role === 'admin' ? 'Make canvasser' : 'Make admin'}
+                </Text>
+              </Pressable>
+            )}
             <Pressable
               style={styles.actionItem}
               onPress={() =>
