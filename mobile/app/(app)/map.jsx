@@ -187,6 +187,57 @@ export default function MapScreen() {
     refetchInterval: 60 * 1000,
   });
 
+  // Delta polling: every 30s, ask the server for any household/voter changes
+  // since the last fetch and patch the bootstrap cache. Keeps multiple
+  // canvassers' maps in near-sync without re-fetching the whole campaign.
+  const sinceRef = useRef(null);
+  useEffect(() => {
+    if (data?.generatedAt) sinceRef.current = data.generatedAt;
+  }, [data?.generatedAt]);
+
+  const changesQ = useQuery({
+    queryKey: ['mobile', 'changes', activeCampaign?.id],
+    queryFn: async () => {
+      if (!sinceRef.current || !activeCampaign?.id) return null;
+      const since = encodeURIComponent(sinceRef.current);
+      return api(`/mobile/changes?campaignId=${activeCampaign.id}&since=${since}`);
+    },
+    enabled: !!activeCampaign?.id && !!data,
+    refetchInterval: 30 * 1000,
+    refetchIntervalInBackground: false,
+  });
+
+  useEffect(() => {
+    const result = changesQ.data;
+    if (!result) return;
+    const { households = [], voters = [], serverTime } = result;
+    if (households.length || voters.length) {
+      qc.setQueryData(['bootstrap'], (prev) => {
+        if (!prev) return prev;
+        const hMap = new Map(households.map((h) => [String(h._id), h]));
+        const vMap = new Map(voters.map((v) => [String(v._id), v]));
+        const next = {
+          ...prev,
+          households: prev.households
+            .map((h) => {
+              const c = hMap.get(String(h._id));
+              if (!c) return h;
+              if (c.isActive === false) return null; // archived — drop from map
+              return { ...h, status: c.status, lastActionAt: c.lastActionAt };
+            })
+            .filter(Boolean),
+          voters: prev.voters.map((v) => {
+            const c = vMap.get(String(v._id));
+            return c ? { ...v, surveyStatus: c.surveyStatus } : v;
+          }),
+        };
+        saveBootstrap(next);
+        return next;
+      });
+    }
+    if (serverTime) sinceRef.current = serverTime;
+  }, [changesQ.data, qc]);
+
   // Index voters by household for the bottom sheet stats.
   const votersByHousehold = useMemo(() => {
     const m = new Map();

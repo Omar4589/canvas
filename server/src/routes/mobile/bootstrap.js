@@ -101,4 +101,54 @@ router.get('/bootstrap', async (req, res, next) => {
   }
 });
 
+// Lightweight delta endpoint. Mobile polls this every ~30s with the timestamp
+// of its last fetch; we return only the households + voters that have changed
+// in this campaign since then. Designed to keep payload tiny — usually 0 rows.
+router.get('/changes', async (req, res, next) => {
+  try {
+    const { campaignId, since } = req.query;
+    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+      return res.status(400).json({ error: 'campaignId query param is required' });
+    }
+    const sinceMs = since ? Date.parse(since) : NaN;
+    if (!Number.isFinite(sinceMs)) {
+      return res.status(400).json({ error: 'since query param is required (ISO datetime)' });
+    }
+    const sinceDate = new Date(sinceMs);
+    const cId = new mongoose.Types.ObjectId(campaignId);
+
+    // updatedAt covers every Mongoose-tracked change: status flips, isActive
+    // flips on Household, surveyStatus flips on Voter, fresh imports, etc.
+    const changedHouseholds = await Household.find(
+      {
+        campaignId: cId,
+        updatedAt: { $gt: sinceDate },
+      },
+      { _id: 1, status: 1, lastActionAt: 1, isActive: 1 }
+    ).lean();
+
+    let changedVoters = [];
+    if (changedHouseholds.length > 0) {
+      // Voters can only flip via a survey at their household, which also bumps
+      // the household's updatedAt — so the changed-household set covers all
+      // voter changes in this window.
+      changedVoters = await Voter.find(
+        {
+          householdId: { $in: changedHouseholds.map((h) => h._id) },
+          updatedAt: { $gt: sinceDate },
+        },
+        { _id: 1, householdId: 1, surveyStatus: 1 }
+      ).lean();
+    }
+
+    res.json({
+      serverTime: new Date().toISOString(),
+      households: changedHouseholds,
+      voters: changedVoters,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
