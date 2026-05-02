@@ -18,6 +18,7 @@ import { api } from '../../../lib/api';
 import { getCurrentLocation } from '../../../lib/location';
 import { submitOrQueue, flushQueue } from '../../../lib/offlineQueue';
 import { saveBootstrap } from '../../../lib/cache';
+import { timeAgo, formatExact } from '../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 function findHouseholdAndVoters(bootstrap, householdId) {
@@ -221,6 +222,19 @@ export default function HouseholdDetail() {
             <Text style={styles.addressSub}>
               {household.city}, {household.state} {household.zipCode}
             </Text>
+            {household.lastActionAt && (
+              <View style={styles.lastVisitBlock}>
+                <Text style={styles.lastVisitLine}>
+                  Last visit{' '}
+                  <Text style={styles.lastVisitStrong}>
+                    {timeAgo(household.lastActionAt)}
+                  </Text>
+                </Text>
+                <Text style={styles.lastVisitTimestamp}>
+                  {formatExact(household.lastActionAt)}
+                </Text>
+              </View>
+            )}
           </View>
           <StatusPill status={household.status} />
         </View>
@@ -356,6 +370,20 @@ const styles = StyleSheet.create({
   },
   address: { ...type.h2, fontSize: 18 },
   addressSub: { ...type.caption, marginTop: 2 },
+  lastVisitBlock: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  lastVisitLine: { fontSize: 12, color: colors.textSecondary },
+  lastVisitStrong: { color: colors.textPrimary, fontWeight: '700' },
+  lastVisitTimestamp: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
 
   pill: {
     flexDirection: 'row',

@@ -24,6 +24,7 @@ import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import Logo from '../../components/Logo';
 import PinIcon from '../../components/PinIcon';
+import { timeAgo, formatExact } from '../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
 if (MAPBOX_PUBLIC_TOKEN) {
@@ -62,21 +63,6 @@ function buildFeatureCollection(households) {
         geometry: { type: 'Point', coordinates: h.location.coordinates },
       })),
   };
-}
-
-function timeAgo(date) {
-  if (!date) return null;
-  const ms = Date.now() - new Date(date).getTime();
-  if (Number.isNaN(ms) || ms < 0) return null;
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d ago`;
-  const w = Math.floor(d / 7);
-  return `${w}w ago`;
 }
 
 function StatusPill({ status, compact = false }) {
@@ -524,10 +510,15 @@ export default function MapScreen() {
             {selectedLastSeen && (
               <View style={styles.sheetMetaItem}>
                 <Text style={styles.sheetMetaIcon}>🕒</Text>
-                <Text style={styles.sheetMetaText}>
-                  <Text style={styles.sheetMetaStrong}>Last visit</Text>{' '}
-                  <Text style={styles.sheetMetaSub}>{selectedLastSeen}</Text>
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetMetaText}>
+                    <Text style={styles.sheetMetaStrong}>Last visit</Text>{' '}
+                    <Text style={styles.sheetMetaSub}>{selectedLastSeen}</Text>
+                  </Text>
+                  <Text style={styles.sheetTimestamp}>
+                    {formatExact(selected.lastActionAt)}
+                  </Text>
+                </View>
               </View>
             )}
           </View>
@@ -818,6 +809,12 @@ const styles = StyleSheet.create({
   sheetMetaText: { fontSize: 13, color: colors.textSecondary },
   sheetMetaStrong: { fontWeight: '700', color: colors.textPrimary },
   sheetMetaSub: { color: colors.textSecondary },
+  sheetTimestamp: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
 
   sheetButtons: { flexDirection: 'row', marginTop: spacing.md, marginBottom: spacing.sm },
   primaryButton: {

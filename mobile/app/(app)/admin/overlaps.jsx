@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
+import { timeAgo, formatExact } from '../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 const PRESETS = [
@@ -42,18 +43,6 @@ function rangeFor(preset) {
     return { from: s.toISOString(), to: null };
   }
   return { from: null, to: null };
-}
-
-function timeAgo(date) {
-  if (!date) return '';
-  const ms = Date.now() - new Date(date).getTime();
-  if (Number.isNaN(ms) || ms < 0) return '';
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
 }
 
 function actionLabel(t) {
@@ -181,15 +170,22 @@ export default function AdminOverlaps() {
                           { backgroundColor: actionColor(c.actionType) },
                         ]}
                       />
-                      <Text style={styles.canvasserName}>
-                        {c.firstName} {c.lastName}
-                      </Text>
-                      <Text style={styles.canvasserAction}>
-                        {actionLabel(c.actionType)}
-                      </Text>
-                      <Text style={styles.canvasserTime}>
-                        {timeAgo(c.timestamp)}
-                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.canvasserTopLine}>
+                          <Text style={styles.canvasserName} numberOfLines={1}>
+                            {c.firstName} {c.lastName}
+                          </Text>
+                          <Text style={styles.canvasserAction}>
+                            {actionLabel(c.actionType)}
+                          </Text>
+                          <Text style={styles.canvasserTimeAgo}>
+                            {timeAgo(c.timestamp)}
+                          </Text>
+                        </View>
+                        <Text style={styles.canvasserTimestamp}>
+                          {formatExact(c.timestamp)}
+                        </Text>
+                      </View>
                     </View>
                   ))}
                 </View>
@@ -301,17 +297,23 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    gap: 4,
+    gap: spacing.sm,
   },
   canvasserRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.sm,
   },
   actionDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
+    marginTop: 6,
+  },
+  canvasserTopLine: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.sm,
   },
   canvasserName: {
     fontSize: 13,
@@ -323,10 +325,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
   },
-  canvasserTime: {
+  canvasserTimeAgo: {
     fontSize: 11,
     color: colors.textMuted,
-    minWidth: 60,
-    textAlign: 'right',
+  },
+  canvasserTimestamp: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
   },
 });
