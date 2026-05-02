@@ -9,6 +9,7 @@ import adminHouseholdsRouter from './admin/households.js';
 import adminCampaignsRouter from './admin/campaigns.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
+import mobileMeRouter from './mobile/me.js';
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use('/admin/households', adminHouseholdsRouter);
 router.use('/admin/campaigns', adminCampaignsRouter);
 router.use('/mobile', mobileBootstrapRouter);
 router.use('/mobile', mobileCanvassRouter);
+router.use('/mobile/me', mobileMeRouter);
 
 export default router;

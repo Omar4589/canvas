@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Canvass",
+    "name": "Doorline",
     "slug": "canvass-mobile",
     "scheme": "canvass",
     "version": "0.1.0",
@@ -10,7 +10,7 @@
       "bundleIdentifier": "com.canvassapp.mobile",
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Canvass needs your location to log when you knock on a door, so admins can verify field activity.",
+        "NSLocationWhenInUseUsageDescription": "Doorline needs your location to log when you knock on a door, so admins can verify field activity.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -30,7 +30,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Canvass needs your location to log when you knock on a door."
+          "locationAlwaysAndWhenInUsePermission": "Doorline needs your location to log when you knock on a door."
         }
       ],
       [

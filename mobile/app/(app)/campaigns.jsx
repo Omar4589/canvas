@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { signOut } from '../../lib/authState';
 import { saveActiveCampaign, clearBootstrap } from '../../lib/cache';
+import Logo from '../../components/Logo';
+import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
 export default function CampaignsScreen() {
   const router = useRouter();
@@ -28,7 +30,6 @@ export default function CampaignsScreen() {
     setPicking(c.id);
     try {
       await saveActiveCampaign(c);
-      // Drop the cached bootstrap from the previous campaign (if any).
       await clearBootstrap();
       qc.removeQueries({ queryKey: ['bootstrap'] });
       router.replace('/(app)/map');
@@ -43,21 +44,25 @@ export default function CampaignsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Pick a campaign</Text>
-        <Pressable onPress={onLogout} style={styles.signOut}>
-          <Text style={styles.signOutText}>Sign out</Text>
+        <Logo size={28} />
+        <Pressable onPress={onLogout} hitSlop={8}>
+          <Text style={styles.signOut}>Sign out</Text>
         </Pressable>
       </View>
-      <Text style={styles.subtitle}>
-        {data?.user?.firstName ? `Hi ${data.user.firstName}. ` : ''}
-        Choose the campaign you'll be canvassing for. You can switch from the map.
-      </Text>
+
+      <View style={styles.intro}>
+        <Text style={styles.title}>Pick a campaign</Text>
+        <Text style={styles.subtitle}>
+          {data?.user?.firstName ? `Hi ${data.user.firstName}. ` : ''}
+          Choose the campaign you'll be canvassing for. You can switch later.
+        </Text>
+      </View>
 
       {isLoading && (
         <View style={styles.center}>
-          <ActivityIndicator />
+          <ActivityIndicator color={colors.brand} />
         </View>
       )}
 
@@ -70,30 +75,53 @@ export default function CampaignsScreen() {
         </View>
       )}
 
-      <ScrollView contentContainerStyle={{ padding: 16 }}>
-        {(data?.campaigns || []).map((c) => (
-          <Pressable
-            key={c.id}
-            onPress={() => pick(c)}
-            disabled={!!picking}
-            style={({ pressed }) => [
-              styles.card,
-              { opacity: picking || pressed ? 0.7 : 1 },
-            ]}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>{c.name}</Text>
-              <Text style={styles.cardMeta}>
-                {c.state} · {c.type === 'survey' ? 'Survey campaign' : 'Lit drop'}
-              </Text>
-            </View>
-            {picking === c.id ? (
-              <ActivityIndicator />
-            ) : (
-              <Text style={styles.chevron}>›</Text>
-            )}
-          </Pressable>
-        ))}
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: spacing.lg,
+          paddingBottom: spacing.xl,
+        }}
+      >
+        {(data?.campaigns || []).map((c) => {
+          const isLitDrop = c.type === 'lit_drop';
+          return (
+            <Pressable
+              key={c.id}
+              onPress={() => pick(c)}
+              disabled={!!picking}
+              style={({ pressed }) => [
+                styles.card,
+                { opacity: picking || pressed ? 0.85 : 1 },
+              ]}
+            >
+              <View style={styles.cardLeft}>
+                <View
+                  style={[
+                    styles.typePill,
+                    isLitDrop ? styles.typePillLitDrop : styles.typePillSurvey,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.typePillText,
+                      {
+                        color: isLitDrop ? '#7E22CE' : colors.brand,
+                      },
+                    ]}
+                  >
+                    {isLitDrop ? 'Lit drop' : 'Survey'}
+                  </Text>
+                </View>
+                <Text style={styles.cardTitle}>{c.name}</Text>
+                <Text style={styles.cardMeta}>{c.state}</Text>
+              </View>
+              {picking === c.id ? (
+                <ActivityIndicator color={colors.brand} />
+              ) : (
+                <Text style={styles.chevron}>›</Text>
+              )}
+            </Pressable>
+          );
+        })}
         {!isLoading && !error && !(data?.campaigns || []).length && (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
@@ -107,69 +135,79 @@ export default function CampaignsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
+  screen: { flex: 1, backgroundColor: colors.bg },
   header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  title: { fontSize: 24, fontWeight: '700', color: '#111827' },
-  subtitle: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    color: '#6b7280',
-    fontSize: 14,
+  signOut: { color: colors.brand, fontWeight: '600', fontSize: 14 },
+  intro: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
   },
-  signOut: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#ffffff',
-  },
-  signOutText: { color: '#0284c7', fontWeight: '600' },
+  title: type.title,
+  subtitle: { ...type.caption, marginTop: spacing.xs },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: spacing.xl,
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 16,
-    marginBottom: 10,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
+    ...shadow.card,
   },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: '#111827' },
-  cardMeta: { fontSize: 13, color: '#6b7280', marginTop: 2 },
-  chevron: { fontSize: 28, color: '#9ca3af', paddingHorizontal: 4 },
+  cardLeft: { flex: 1 },
+  typePill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    marginBottom: spacing.xs,
+  },
+  typePillSurvey: { backgroundColor: colors.brandTint },
+  typePillLitDrop: { backgroundColor: '#F3E8FF' },
+  typePillText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  cardTitle: { ...type.h3 },
+  cardMeta: { ...type.caption, marginTop: 2 },
+  chevron: {
+    fontSize: 28,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.sm,
+  },
   empty: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 24,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     alignItems: 'center',
   },
-  emptyText: { color: '#6b7280', fontSize: 14, textAlign: 'center' },
+  emptyText: { ...type.body, color: colors.textSecondary, textAlign: 'center' },
   errorBox: {
-    margin: 16,
-    padding: 16,
-    borderRadius: 10,
-    backgroundColor: '#fee2e2',
+    margin: spacing.lg,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.dangerBg,
     alignItems: 'center',
   },
-  errorText: { color: '#b91c1c', marginBottom: 8 },
+  errorText: { color: colors.danger, marginBottom: spacing.sm },
   retryButton: {
-    backgroundColor: '#0284c7',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
+    backgroundColor: colors.brand,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
   },
-  retryButtonText: { color: '#fff', fontWeight: '600' },
+  retryButtonText: { color: colors.textInverse, fontWeight: '600' },
 });

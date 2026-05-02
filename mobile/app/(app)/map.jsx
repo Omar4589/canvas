@@ -5,7 +5,6 @@ import {
   Pressable,
   ActivityIndicator,
   StyleSheet,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,13 +21,14 @@ import {
 } from '../../lib/cache';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
-import { STATUS_COLORS } from '../../components/StatusColor';
+import Logo from '../../components/Logo';
+import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
 if (MAPBOX_PUBLIC_TOKEN) {
   Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
 }
 
-const DEFAULT_CENTER = [-84.5, 39.0]; // northern Kentucky default
+const DEFAULT_CENTER = [-84.5, 39.0];
 
 const SURVEY_FILTER_OPTIONS = [
   { key: 'all', label: 'All' },
@@ -62,6 +62,20 @@ function buildFeatureCollection(households) {
   };
 }
 
+function ProgressStat({ icon, value, label, accent }) {
+  return (
+    <View style={styles.progressStat}>
+      <View style={[styles.progressIcon, { backgroundColor: accent }]}>
+        <Text style={styles.progressIconText}>{icon}</Text>
+      </View>
+      <View>
+        <Text style={styles.progressValue}>{value ?? '—'}</Text>
+        <Text style={styles.progressLabel}>{label}</Text>
+      </View>
+    </View>
+  );
+}
+
 export default function MapScreen() {
   const router = useRouter();
   const qc = useQueryClient();
@@ -92,7 +106,6 @@ export default function MapScreen() {
     activeCampaign?.type === 'lit_drop' ? LIT_DROP_FILTER_OPTIONS : SURVEY_FILTER_OPTIONS;
   const activeOption = filterOptions.find((o) => o.key === activeFilter) || filterOptions[0];
 
-  // 'all' shows every status; any other value shows only that status.
   const layerFilter = useMemo(
     () =>
       activeFilter === 'all'
@@ -109,7 +122,6 @@ export default function MapScreen() {
         await saveBootstrap(fresh);
         return fresh;
       } catch (err) {
-        // Fall back to cache when offline (only if it was for the same campaign).
         const cached = await loadBootstrap();
         if (cached && String(cached.campaign?.id) === String(activeCampaign.id)) {
           return cached;
@@ -121,6 +133,14 @@ export default function MapScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const todayQ = useQuery({
+    queryKey: ['mobile', 'me', 'today', activeCampaign?.id],
+    queryFn: () => api(`/mobile/me/today?campaignId=${activeCampaign.id}`),
+    enabled: !!activeCampaign?.id,
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+
   async function switchCampaign() {
     await saveActiveCampaign(null);
     await clearBootstrap();
@@ -128,7 +148,6 @@ export default function MapScreen() {
     router.replace('/(app)/campaigns');
   }
 
-  // Try to flush offline queue on mount and after focus
   useEffect(() => {
     let mounted = true;
     async function refreshPending() {
@@ -168,7 +187,6 @@ export default function MapScreen() {
   async function onLogout() {
     qc.clear();
     await signOut();
-    // Auth gate in _layout handles redirect to /login
   }
 
   async function onRefresh() {
@@ -176,13 +194,14 @@ export default function MapScreen() {
       await flushQueue();
     } catch {}
     await refetch();
+    todayQ.refetch();
     setPendingCount(await getPendingCount());
   }
 
   if (!MAPBOX_PUBLIC_TOKEN) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={{ color: '#b91c1c', marginBottom: 12, textAlign: 'center' }}>
+        <Text style={styles.errorText}>
           Map unavailable: missing Mapbox configuration. Please contact support.
         </Text>
         <Pressable onPress={onLogout} style={styles.primaryButton}>
@@ -194,15 +213,15 @@ export default function MapScreen() {
   if (activeCampaign === undefined || (activeCampaign && isLoading)) {
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8, color: '#6b7280' }}>Loading houses…</Text>
+        <ActivityIndicator color={colors.brand} />
+        <Text style={styles.loadingText}>Loading houses…</Text>
       </SafeAreaView>
     );
   }
   if (error) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={{ color: '#b91c1c', marginBottom: 12 }}>{error.message}</Text>
+        <Text style={styles.errorText}>{error.message}</Text>
         <Pressable onPress={onRefresh} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>Retry</Text>
         </Pressable>
@@ -210,12 +229,11 @@ export default function MapScreen() {
     );
   }
 
-  // Center camera on first household if available
-  const initialCenter =
-    data?.households?.[0]?.location?.coordinates || DEFAULT_CENTER;
+  const initialCenter = data?.households?.[0]?.location?.coordinates || DEFAULT_CENTER;
+  const today = todayQ.data || {};
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <Mapbox.MapView style={{ flex: 1 }} styleURL={Mapbox.StyleURL.Street}>
         <Mapbox.Camera
           ref={cameraRef}
@@ -266,96 +284,92 @@ export default function MapScreen() {
         </Mapbox.ShapeSource>
       </Mapbox.MapView>
 
+      {/* Top chrome */}
       <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
         <View style={styles.topBar}>
-          <Pressable onPress={onRefresh} style={styles.iconButton}>
-            {isFetching ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Text style={styles.iconButtonText}>Refresh</Text>
+          <Logo size={24} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+            {pendingCount > 0 && (
+              <View style={styles.pendingBadge}>
+                <Text style={styles.pendingBadgeText}>{pendingCount}</Text>
+              </View>
             )}
-          </Pressable>
-          {pendingCount > 0 && (
-            <View style={styles.pendingBadge}>
-              <Text style={styles.pendingBadgeText}>
-                {pendingCount} pending sync
+            <Pressable
+              onPress={() => setFilterMenuOpen((v) => !v)}
+              style={styles.iconButton}
+            >
+              <Text style={styles.iconButtonText}>
+                {activeFilter === 'all' ? '⚲' : '●'}
               </Text>
-            </View>
+            </Pressable>
+            <Pressable onPress={onRefresh} style={styles.iconButton}>
+              {isFetching ? (
+                <ActivityIndicator size="small" color={colors.brand} />
+              ) : (
+                <Text style={styles.iconButtonText}>↻</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.subBar}>
+          {activeCampaign && (
+            <Pressable onPress={switchCampaign} style={styles.campaignChip}>
+              <View style={styles.campaignDot} />
+              <Text style={styles.campaignChipText} numberOfLines={1}>
+                {activeCampaign.name}
+              </Text>
+              <Text style={styles.campaignChipSwitch}>Switch</Text>
+            </Pressable>
           )}
-          <Pressable onPress={onLogout} style={styles.iconButton}>
-            <Text style={styles.iconButtonText}>Sign out</Text>
+          <Pressable onPress={onLogout} style={styles.signOutChip}>
+            <Text style={styles.signOutChipText}>Sign out</Text>
           </Pressable>
         </View>
 
-        {activeCampaign && (
-          <Pressable onPress={switchCampaign} style={styles.campaignBar}>
-            <Text style={styles.campaignBarText}>
-              {activeCampaign.name}
-              {activeCampaign.type === 'lit_drop' ? ' · Lit drop' : ''}
-            </Text>
-            <Text style={styles.campaignBarSwitch}>Switch ›</Text>
-          </Pressable>
-        )}
-
-        <View style={styles.filterRow}>
-          <Pressable
-            onPress={() => setFilterMenuOpen((v) => !v)}
-            style={styles.filterButton}
-          >
-            {activeFilter !== 'all' && (
-              <View
-                style={[
-                  styles.filterDot,
-                  { backgroundColor: STATUS_COLORS[activeFilter] },
-                ]}
-              />
-            )}
-            <Text style={styles.filterButtonText}>{activeOption.label}</Text>
-            <Text style={styles.filterChevron}>{filterMenuOpen ? '▲' : '▼'}</Text>
-          </Pressable>
-
-          {filterMenuOpen && (
-            <View style={styles.filterMenu}>
-              {filterOptions.map((opt) => {
-                const isActive = opt.key === activeFilter;
-                return (
-                  <Pressable
-                    key={opt.key}
-                    onPress={() => {
-                      setActiveFilter(opt.key);
-                      setFilterMenuOpen(false);
-                    }}
+        {filterMenuOpen && (
+          <View style={styles.filterMenu}>
+            <Text style={styles.filterMenuLabel}>Show</Text>
+            {filterOptions.map((opt) => {
+              const isActive = opt.key === activeFilter;
+              return (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => {
+                    setActiveFilter(opt.key);
+                    setFilterMenuOpen(false);
+                  }}
+                  style={[
+                    styles.filterMenuItem,
+                    isActive && styles.filterMenuItemActive,
+                  ]}
+                >
+                  {opt.key !== 'all' ? (
+                    <View
+                      style={[
+                        styles.filterDot,
+                        { backgroundColor: colors.status[opt.key] },
+                      ]}
+                    />
+                  ) : (
+                    <View style={styles.filterDotPlaceholder} />
+                  )}
+                  <Text
                     style={[
-                      styles.filterMenuItem,
-                      isActive && styles.filterMenuItemActive,
+                      styles.filterMenuItemText,
+                      isActive && styles.filterMenuItemTextActive,
                     ]}
                   >
-                    {opt.key !== 'all' ? (
-                      <View
-                        style={[
-                          styles.filterDot,
-                          { backgroundColor: STATUS_COLORS[opt.key] },
-                        ]}
-                      />
-                    ) : (
-                      <View style={styles.filterDotPlaceholder} />
-                    )}
-                    <Text
-                      style={[
-                        styles.filterMenuItemText,
-                        isActive && styles.filterMenuItemTextActive,
-                      ]}
-                    >
-                      {opt.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </View>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
       </SafeAreaView>
 
+      {/* Recenter button */}
       <Pressable
         onPress={() => setFollowing((v) => !v)}
         style={[
@@ -374,8 +388,10 @@ export default function MapScreen() {
         </Text>
       </Pressable>
 
-      {selected && (
+      {/* Pin sheet OR progress card (sheet takes precedence) */}
+      {selected ? (
         <SafeAreaView edges={['bottom']} style={styles.sheet}>
+          <View style={styles.sheetHandle} />
           <Text style={styles.sheetAddress}>
             {selected.addressLine1}
             {selected.addressLine2 ? `, ${selected.addressLine2}` : ''}
@@ -387,11 +403,11 @@ export default function MapScreen() {
             <View
               style={[
                 styles.statusDot,
-                { backgroundColor: STATUS_COLORS[selected.status] },
+                { backgroundColor: colors.status[selected.status] },
               ]}
             />
-            <Text style={{ color: '#374151', textTransform: 'capitalize' }}>
-              {selected.status.replace('_', ' ')}
+            <Text style={styles.sheetStatusText}>
+              {colors.statusLabels[selected.status]}
             </Text>
           </View>
           <View style={styles.sheetButtons}>
@@ -412,6 +428,33 @@ export default function MapScreen() {
             </Pressable>
           </View>
         </SafeAreaView>
+      ) : (
+        <SafeAreaView edges={['bottom']} style={styles.progressCard}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.progressTitle}>Today's Progress</Text>
+          <View style={styles.progressRow}>
+            <ProgressStat
+              icon="✓"
+              accent={colors.status.surveyed}
+              value={today.doorsKnocked?.toLocaleString()}
+              label="Doors knocked"
+            />
+            <ProgressStat
+              icon="◉"
+              accent={colors.info}
+              value={today.responses?.toLocaleString()}
+              label={
+                activeCampaign?.type === 'lit_drop' ? 'Lit drops' : 'Responses'
+              }
+            />
+            <ProgressStat
+              icon="⌂"
+              accent={colors.textMuted}
+              value={today.remaining?.toLocaleString()}
+              label="Remaining"
+            />
+          </View>
+        </SafeAreaView>
       )}
     </View>
   );
@@ -420,11 +463,22 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   center: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: spacing.xl,
   },
+  loadingText: {
+    marginTop: spacing.sm,
+    color: colors.textSecondary,
+    fontSize: 14,
+  },
+  errorText: {
+    color: colors.danger,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+
   topBarWrap: {
     position: 'absolute',
     top: 0,
@@ -435,170 +489,222 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  filterRow: {
-    paddingHorizontal: 8,
-    paddingBottom: 4,
-    alignItems: 'flex-start',
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  filterButton: {
+  iconButtonText: {
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  pendingBadge: {
+    backgroundColor: colors.warnBg,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+  },
+  pendingBadgeText: { color: '#92400E', fontWeight: '700', fontSize: 12 },
+
+  subBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffffee',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 3,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
   },
-  filterButtonText: {
+  campaignChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  campaignDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.brand,
+    marginRight: spacing.sm,
+  },
+  campaignChipText: {
+    flex: 1,
     fontSize: 13,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.textPrimary,
   },
-  filterChevron: {
-    marginLeft: 6,
-    fontSize: 9,
-    color: '#6b7280',
+  campaignChipSwitch: {
+    fontSize: 12,
+    color: colors.brand,
+    fontWeight: '700',
+    marginLeft: spacing.sm,
   },
-  filterDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-    marginRight: 7,
+  signOutChip: {
+    backgroundColor: colors.card,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  filterDotPlaceholder: {
-    width: 9,
-    height: 9,
-    marginRight: 7,
+  signOutChipText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '600',
   },
+
   filterMenu: {
-    marginTop: 6,
-    backgroundColor: '#ffffff',
-    borderRadius: 10,
-    paddingVertical: 4,
-    minWidth: 160,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    elevation: 6,
+    marginHorizontal: spacing.md,
+    marginTop: 4,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.raised,
+  },
+  filterMenuLabel: {
+    ...type.micro,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xs,
   },
   filterMenuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
   },
-  filterMenuItemActive: {
-    backgroundColor: '#f3f4f6',
-  },
-  filterMenuItemText: {
-    fontSize: 14,
-    color: '#111827',
-  },
-  filterMenuItemTextActive: {
-    fontWeight: '700',
-    color: '#0284c7',
-  },
-  iconButton: {
-    backgroundColor: '#ffffffcc',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    minWidth: 60,
-    alignItems: 'center',
-  },
-  campaignBar: {
-    marginHorizontal: 8,
-    marginBottom: 4,
-    backgroundColor: '#ffffffee',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  campaignBarText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  campaignBarSwitch: {
-    fontSize: 13,
-    color: '#0284c7',
-    fontWeight: '600',
-  },
-  iconButtonText: { color: '#0284c7', fontWeight: '600' },
-  pendingBadge: {
-    backgroundColor: '#fef3c7',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  pendingBadgeText: { color: '#92400e', fontWeight: '600', fontSize: 12 },
+  filterMenuItemActive: { backgroundColor: colors.brandTint },
+  filterMenuItemText: { fontSize: 14, color: colors.textPrimary },
+  filterMenuItemTextActive: { color: colors.brand, fontWeight: '700' },
+  filterDot: { width: 9, height: 9, borderRadius: 4.5, marginRight: spacing.sm },
+  filterDotPlaceholder: { width: 9, height: 9, marginRight: spacing.sm },
+
   recenterButton: {
     position: 'absolute',
-    right: 16,
-    bottom: 32,
+    right: spacing.lg,
+    bottom: 200,
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    elevation: 4,
+    ...shadow.raised,
   },
-  recenterButtonAboveSheet: { bottom: 220 },
-  recenterButtonActive: { backgroundColor: '#0284c7' },
-  recenterButtonText: { fontSize: 24, color: '#0284c7', lineHeight: 26 },
-  recenterButtonTextActive: { color: '#ffffff' },
+  recenterButtonAboveSheet: { bottom: 280 },
+  recenterButtonActive: { backgroundColor: colors.brand },
+  recenterButtonText: { fontSize: 24, color: colors.brand, lineHeight: 26 },
+  recenterButtonTextActive: { color: colors.textInverse },
+
   sheet: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
-    padding: 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 8,
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    ...shadow.raised,
   },
-  sheetAddress: { fontSize: 16, fontWeight: '600' },
-  sheetSub: { fontSize: 14, color: '#6b7280', marginTop: 2 },
-  sheetRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
-  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
-  sheetButtons: { flexDirection: 'row', marginTop: 14 },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    marginBottom: spacing.md,
+  },
+  sheetAddress: { ...type.h3 },
+  sheetSub: { ...type.caption, marginTop: 2 },
+  sheetRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
+  sheetStatusText: { color: colors.textSecondary, textTransform: 'capitalize' },
+  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: spacing.sm },
+  sheetButtons: { flexDirection: 'row', marginTop: spacing.md, marginBottom: spacing.sm },
   primaryButton: {
-    backgroundColor: '#0284c7',
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
     alignItems: 'center',
   },
-  primaryButtonText: { color: '#fff', fontWeight: '600' },
+  primaryButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 15 },
   secondaryButton: {
-    backgroundColor: '#f3f4f6',
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: colors.bg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  secondaryButtonText: { color: '#111827', fontWeight: '600' },
+  secondaryButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 15 },
+
+  progressCard: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    ...shadow.raised,
+  },
+  progressTitle: {
+    ...type.h3,
+    marginBottom: spacing.md,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingBottom: spacing.sm,
+  },
+  progressStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  progressIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  progressIconText: {
+    color: colors.textInverse,
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  progressValue: {
+    ...type.h2,
+    fontSize: 20,
+    lineHeight: 22,
+  },
+  progressLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
 });

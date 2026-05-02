@@ -16,7 +16,7 @@ import { api } from '../../../lib/api';
 import { getCurrentLocation } from '../../../lib/location';
 import { submitOrQueue, flushQueue } from '../../../lib/offlineQueue';
 import { saveBootstrap } from '../../../lib/cache';
-import { STATUS_COLORS, STATUS_LABELS } from '../../../components/StatusColor';
+import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 function findHouseholdAndVoters(bootstrap, householdId) {
   const household = (bootstrap?.households || []).find(
@@ -34,6 +34,22 @@ const ACTION_PATHS = {
   lit_dropped: 'lit-drop',
 };
 
+function StatusPill({ status }) {
+  const dotColor = colors.status[status] || colors.textMuted;
+  const isDone = status === 'surveyed' || status === 'lit_dropped';
+  const bg = isDone ? colors.successBg : colors.bg;
+  const border = isDone ? colors.successBorder : colors.border;
+  const textColor = isDone ? colors.success : colors.textSecondary;
+  return (
+    <View style={[styles.pill, { backgroundColor: bg, borderColor: border }]}>
+      <View style={[styles.pillDot, { backgroundColor: dotColor }]} />
+      <Text style={[styles.pillText, { color: textColor }]}>
+        {colors.statusLabels[status] || 'Unknown'}
+      </Text>
+    </View>
+  );
+}
+
 export default function HouseholdDetail() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
@@ -49,7 +65,7 @@ export default function HouseholdDetail() {
   if (!household) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text>Household not found.</Text>
+        <Text style={type.body}>Household not found.</Text>
         <Pressable onPress={() => router.back()} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>Back</Text>
         </Pressable>
@@ -76,7 +92,6 @@ export default function HouseholdDetail() {
         return;
       }
 
-      // Optimistically update the cache
       const updatedHousehold = result.response?.household;
       qc.setQueryData(['bootstrap'], (prev) => {
         if (!prev) return prev;
@@ -96,9 +111,7 @@ export default function HouseholdDetail() {
         return next;
       });
 
-      // Try to push any other queued items
       flushQueue().catch(() => {});
-
       router.back();
     } catch (err) {
       Alert.alert('Error', err.message || 'Failed to submit');
@@ -108,59 +121,68 @@ export default function HouseholdDetail() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#f9fafb' }} edges={['top']}>
+    <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backText}>← Map</Text>
+        <Pressable onPress={() => router.back()} hitSlop={8}>
+          <Text style={styles.back}>‹ Map</Text>
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-        <Text style={styles.address}>
-          {household.addressLine1}
-          {household.addressLine2 ? `, ${household.addressLine2}` : ''}
-        </Text>
-        <Text style={styles.addressSub}>
-          {household.city}, {household.state} {household.zipCode}
-        </Text>
-
-        <View style={styles.statusRow}>
-          <View
-            style={[
-              styles.statusDot,
-              { backgroundColor: STATUS_COLORS[household.status] },
-            ]}
-          />
-          <Text style={styles.statusLabel}>{STATUS_LABELS[household.status]}</Text>
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: spacing.lg,
+          paddingBottom: spacing.xxl,
+        }}
+      >
+        <View style={styles.addressCard}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.address}>{household.addressLine1}</Text>
+            {household.addressLine2 ? (
+              <Text style={styles.address}>{household.addressLine2}</Text>
+            ) : null}
+            <Text style={styles.addressSub}>
+              {household.city}, {household.state} {household.zipCode}
+            </Text>
+          </View>
+          <StatusPill status={household.status} />
         </View>
 
         {campaignType === 'survey' && (
           <>
             <Text style={styles.sectionTitle}>Voters at this address</Text>
             {voters.length === 0 && (
-              <Text style={{ color: '#6b7280' }}>No registered voters listed here.</Text>
-            )}
-            {voters.map((v) => (
-              <View key={v._id} style={styles.voterCard}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.voterName}>{v.fullName}</Text>
-                  <Text style={styles.voterMeta}>
-                    {[v.party, v.gender, v.precinct].filter(Boolean).join(' · ')}
-                  </Text>
-                  <Text style={styles.voterMeta}>
-                    {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={() => router.push(`/(app)/voter/${v._id}/survey`)}
-                  style={styles.surveyButton}
-                >
-                  <Text style={styles.surveyButtonText}>
-                    {v.surveyStatus === 'surveyed' ? 'Re-survey' : 'Take survey'}
-                  </Text>
-                </Pressable>
+              <View style={styles.emptyVoters}>
+                <Text style={type.caption}>
+                  No registered voters listed here.
+                </Text>
               </View>
-            ))}
+            )}
+            {voters.map((v) => {
+              const surveyed = v.surveyStatus === 'surveyed';
+              return (
+                <View key={v._id} style={styles.voterCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.voterName}>{v.fullName}</Text>
+                    <Text style={styles.voterMeta}>
+                      {[v.party, v.gender, v.precinct].filter(Boolean).join(' · ')}
+                    </Text>
+                    {surveyed && (
+                      <View style={styles.surveyedBadge}>
+                        <Text style={styles.surveyedBadgeText}>Surveyed</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Pressable
+                    onPress={() => router.push(`/(app)/voter/${v._id}/survey`)}
+                    style={styles.surveyButton}
+                  >
+                    <Text style={styles.surveyButtonText}>
+                      {surveyed ? 'Re-survey' : 'Take survey'}
+                    </Text>
+                  </Pressable>
+                </View>
+              );
+            })}
           </>
         )}
 
@@ -169,12 +191,12 @@ export default function HouseholdDetail() {
           value={note}
           onChangeText={setNote}
           placeholder="Anything worth remembering"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={colors.textMuted}
           multiline
           style={styles.noteInput}
         />
 
-        <View style={{ marginTop: 20 }}>
+        <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
           {campaignType === 'lit_drop' ? (
             <Pressable
               onPress={() => submitAction('lit_dropped')}
@@ -182,16 +204,18 @@ export default function HouseholdDetail() {
               style={({ pressed }) => [
                 styles.primaryButton,
                 {
-                  backgroundColor: STATUS_COLORS.lit_dropped,
-                  opacity: submitting || pressed ? 0.7 : 1,
+                  backgroundColor: colors.status.lit_dropped,
+                  opacity: submitting || pressed ? 0.85 : 1,
                 },
               ]}
             >
               {submitting === 'lit_dropped' ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={colors.textInverse} />
               ) : (
                 <Text style={styles.primaryButtonText}>
-                  {household.status === 'lit_dropped' ? 'Re-record drop' : 'Lit dropped'}
+                  {household.status === 'lit_dropped'
+                    ? 'Re-record drop'
+                    : 'Lit dropped'}
                 </Text>
               )}
             </Pressable>
@@ -201,14 +225,15 @@ export default function HouseholdDetail() {
                 onPress={() => submitAction('not_home')}
                 disabled={!!submitting}
                 style={({ pressed }) => [
-                  styles.primaryButton,
-                  { backgroundColor: '#3b82f6', opacity: submitting || pressed ? 0.7 : 1 },
+                  styles.actionButton,
+                  styles.actionNotHome,
+                  { opacity: submitting || pressed ? 0.85 : 1 },
                 ]}
               >
                 {submitting === 'not_home' ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.textInverse} />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Not home</Text>
+                  <Text style={styles.actionButtonText}>Not home</Text>
                 )}
               </Pressable>
 
@@ -216,18 +241,15 @@ export default function HouseholdDetail() {
                 onPress={() => submitAction('wrong_address')}
                 disabled={!!submitting}
                 style={({ pressed }) => [
-                  styles.primaryButton,
-                  {
-                    backgroundColor: '#ef4444',
-                    opacity: submitting || pressed ? 0.7 : 1,
-                    marginTop: 10,
-                  },
+                  styles.actionButton,
+                  styles.actionWrongAddress,
+                  { opacity: submitting || pressed ? 0.85 : 1 },
                 ]}
               >
                 {submitting === 'wrong_address' ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.textInverse} />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Wrong address</Text>
+                  <Text style={styles.actionButtonText}>Wrong address</Text>
                 )}
               </Pressable>
             </>
@@ -239,70 +261,120 @@ export default function HouseholdDetail() {
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
-    backgroundColor: '#f9fafb',
+    padding: spacing.xl,
+    backgroundColor: colors.bg,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
-  backButton: { paddingVertical: 4 },
-  backText: { color: '#0284c7', fontWeight: '600' },
-  address: { fontSize: 20, fontWeight: '600' },
-  addressSub: { color: '#6b7280', marginTop: 2 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
-  statusLabel: { color: '#374151', fontWeight: '500' },
+  back: { color: colors.brand, fontWeight: '700', fontSize: 16 },
+
+  addressCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+    marginTop: spacing.xs,
+  },
+  address: { ...type.h2, fontSize: 18 },
+  addressSub: { ...type.caption, marginTop: 2 },
+
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    marginLeft: spacing.sm,
+  },
+  pillDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
+  pillText: { fontSize: 11, fontWeight: '700' },
+
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginTop: 24,
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...type.micro,
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
+  },
+  emptyVoters: {
+    backgroundColor: colors.card,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   voterCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
+    ...shadow.card,
   },
-  voterName: { fontSize: 15, fontWeight: '600' },
-  voterMeta: { color: '#6b7280', fontSize: 12, marginTop: 2 },
+  voterName: { ...type.bodyStrong },
+  voterMeta: { ...type.caption, marginTop: 2 },
+  surveyedBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.successBg,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    marginTop: 4,
+  },
+  surveyedBadgeText: {
+    color: colors.success,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   surveyButton: {
-    backgroundColor: '#0284c7',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
+    backgroundColor: colors.brand,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
   },
-  surveyButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  surveyButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 13 },
+
   noteInput: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    padding: 12,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
     fontSize: 15,
-    minHeight: 80,
+    minHeight: 88,
     textAlignVertical: 'top',
+    color: colors.textPrimary,
   },
+
   primaryButton: {
-    backgroundColor: '#0284c7',
-    paddingVertical: 14,
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    paddingVertical: spacing.md + 2,
+    borderRadius: radius.md,
     alignItems: 'center',
   },
-  primaryButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  primaryButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
+  actionButton: {
+    paddingVertical: spacing.md + 2,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  actionNotHome: { backgroundColor: colors.info },
+  actionWrongAddress: { backgroundColor: colors.danger },
+  actionButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
 });
