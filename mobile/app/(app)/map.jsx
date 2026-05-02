@@ -565,7 +565,7 @@ export default function MapScreen() {
             />
             <ProgressStat
               pinStatus={isLitDrop ? 'lit_dropped' : 'surveyed'}
-              value={today.responses?.toLocaleString()}
+              value={(isLitDrop ? today.litDropped : today.responses)?.toLocaleString()}
               label={isLitDrop ? 'Lit drops' : 'Responses'}
             />
             <ProgressStat

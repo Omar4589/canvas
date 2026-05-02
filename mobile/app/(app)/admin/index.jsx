@@ -205,19 +205,24 @@ export default function AdminHome() {
         </View>
 
         {/* Top canvassers */}
-        <View style={styles.statsCard}>
-          <Text style={styles.cardTitle}>Top canvassers today</Text>
+        <Pressable
+          onPress={() => router.push('/(app)/admin/canvassers')}
+          style={({ pressed }) => [styles.statsCard, pressed && { opacity: 0.85 }]}
+        >
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Top canvassers today</Text>
+            <Text style={styles.cardLink}>See all ›</Text>
+          </View>
           {canvassersQ.isLoading ? (
             <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
           ) : topCanvassers.length === 0 ? (
             <Text style={styles.emptyText}>No activity yet today.</Text>
           ) : (
             topCanvassers.map((c, i) => {
-              const knocked =
-                (c.surveysSubmitted || 0) +
-                (c.notHome || 0) +
-                (c.wrongAddress || 0) +
-                (c.litDropped || 0);
+              const isLitDrop = activeCampaign?.type === 'lit_drop';
+              const primary = isLitDrop ? c.litDropped || 0 : c.surveysSubmitted || 0;
+              const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
+              const knocked = c.homesKnocked || 0;
               return (
                 <View key={c.userId} style={styles.canvasserRow}>
                   <Text style={styles.canvasserRank}>{i + 1}</Text>
@@ -226,14 +231,14 @@ export default function AdminHome() {
                       {c.firstName || c.email} {c.lastName || ''}
                     </Text>
                     <Text style={styles.canvasserMeta}>
-                      {knocked} doors · {c.surveysSubmitted} surveys
+                      {knocked} houses · {primary} {primaryLabel}
                     </Text>
                   </View>
                 </View>
               );
             })
           )}
-        </View>
+        </Pressable>
 
         {/* Quick links */}
         <View style={styles.quickLinkRow}>
@@ -342,6 +347,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   cardTitle: { ...type.h3, marginBottom: spacing.md },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
+  cardLink: {
+    color: colors.brand,
+    fontWeight: '700',
+    fontSize: 13,
+  },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

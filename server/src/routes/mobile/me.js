@@ -32,7 +32,7 @@ router.get('/today', async (req, res, next) => {
       start.setHours(0, 0, 0, 0);
     }
 
-    const [doorsKnocked, responses, remaining] = await Promise.all([
+    const [doorsKnocked, responses, litDropped, remaining] = await Promise.all([
       CanvassActivity.countDocuments({
         userId: req.user._id,
         campaignId: cId,
@@ -44,6 +44,12 @@ router.get('/today', async (req, res, next) => {
         campaignId: cId,
         submittedAt: { $gte: start },
       }),
+      CanvassActivity.countDocuments({
+        userId: req.user._id,
+        campaignId: cId,
+        timestamp: { $gte: start },
+        actionType: 'lit_dropped',
+      }),
       Household.countDocuments({
         campaignId: cId,
         isActive: true,
@@ -51,7 +57,7 @@ router.get('/today', async (req, res, next) => {
       }),
     ]);
 
-    res.json({ doorsKnocked, responses, remaining });
+    res.json({ doorsKnocked, responses, litDropped, remaining });
   } catch (err) {
     next(err);
   }
