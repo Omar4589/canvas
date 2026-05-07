@@ -816,6 +816,25 @@ function formatDistance(meters, doorsKnocked) {
   return `${miles.toFixed(1)} mi`;
 }
 
+// Connection rate = surveys ÷ doors knocked. Returns null when there's no
+// data yet (avoids "0%, looks bad" on a fresh day). The `level` drives the
+// banner's color tier: ≥20% green (good), 10–19% amber (caution), <10% red.
+function getConnectionRate(surveys, doorsKnocked) {
+  if (!doorsKnocked) return null;
+  const pct = Math.round(((surveys || 0) / doorsKnocked) * 100);
+  let level;
+  if (pct >= 20) level = 'good';
+  else if (pct >= 10) level = 'caution';
+  else level = 'low';
+  return { value: `${pct}%`, level };
+}
+
+const RATE_COLORS = {
+  good: { bg: colors.successBg, fg: colors.success },
+  caution: { bg: colors.warnBg, fg: '#92400E' },
+  low: { bg: colors.dangerBg, fg: colors.danger },
+};
+
 function ShiftStat({ label, value }) {
   return (
     <View style={styles.shiftStat}>
@@ -829,6 +848,10 @@ function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
   const legend = isLitDrop ? LIT_DROP_LEGEND : SURVEY_LEGEND;
   const breakdown = today.answerBreakdown || [];
   const showAnswers = !isLitDrop && breakdown.length > 0;
+  const connectionRate = isLitDrop
+    ? null
+    : getConnectionRate(today.responses, today.doorsKnocked);
+  const rateColors = connectionRate ? RATE_COLORS[connectionRate.level] : null;
 
   return (
     <>
@@ -880,6 +903,23 @@ function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
             </View>
           ))}
         </View>
+
+        {connectionRate && (
+          <View
+            style={[
+              styles.rateBanner,
+              styles.sectionGap,
+              { backgroundColor: rateColors.bg },
+            ]}
+          >
+            <Text style={[styles.rateValue, { color: rateColors.fg }]}>
+              {connectionRate.value}
+            </Text>
+            <Text style={[styles.rateLabel, { color: rateColors.fg }]}>
+              connection rate
+            </Text>
+          </View>
+        )}
 
         <Text style={[styles.sheetSectionTitle, styles.sectionGap]}>
           Today's shift
@@ -1405,6 +1445,26 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginTop: 2,
     fontVariant: ['tabular-nums'],
+  },
+
+  // Connection rate banner — surveys / doorsKnocked. Survey campaigns only.
+  // Background + text color are applied inline based on the rate tier.
+  rateBanner: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    gap: spacing.sm,
+  },
+  rateValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  rateLabel: {
+    ...type.body,
+    fontWeight: '600',
   },
 
   // Footer link tucked at the bottom of the expanded sheet content.

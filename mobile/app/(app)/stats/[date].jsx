@@ -59,6 +59,24 @@ function formatDistance(meters, doorsKnocked) {
   return `${miles.toFixed(1)} mi`;
 }
 
+// Connection rate tiers — green ≥20% (good), amber 10–19% (caution),
+// red <10% (low). Returns null if no doors knocked yet.
+function getConnectionRate(surveys, doorsKnocked) {
+  if (!doorsKnocked) return null;
+  const pct = Math.round(((surveys || 0) / doorsKnocked) * 100);
+  let level;
+  if (pct >= 20) level = 'good';
+  else if (pct >= 10) level = 'caution';
+  else level = 'low';
+  return { value: `${pct}%`, level };
+}
+
+const RATE_COLORS = {
+  good: { bg: colors.successBg, fg: colors.success },
+  caution: { bg: colors.warnBg, fg: '#92400E' },
+  low: { bg: colors.dangerBg, fg: colors.danger },
+};
+
 function ShiftStat({ label, value }) {
   return (
     <View style={styles.shiftStat}>
@@ -132,6 +150,10 @@ export default function DayDetailScreen() {
   const isLitDrop = activeCampaign.type === 'lit_drop';
   const breakdown = stats.answerBreakdown || [];
   const showAnswers = !isLitDrop && breakdown.length > 0;
+  const connectionRate = isLitDrop
+    ? null
+    : getConnectionRate(stats.responses, stats.doorsKnocked);
+  const rateColors = connectionRate ? RATE_COLORS[connectionRate.level] : null;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -166,6 +188,17 @@ export default function DayDetailScreen() {
             </View>
           )}
         </View>
+
+        {connectionRate && (
+          <View style={[styles.rateBanner, { backgroundColor: rateColors.bg }]}>
+            <Text style={[styles.rateValue, { color: rateColors.fg }]}>
+              {connectionRate.value}
+            </Text>
+            <Text style={[styles.rateLabel, { color: rateColors.fg }]}>
+              connection rate
+            </Text>
+          </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>Shift</Text>
@@ -293,6 +326,25 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     marginTop: spacing.md,
     ...shadow.card,
+  },
+
+  rateBanner: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  rateValue: {
+    fontSize: 28,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  rateLabel: {
+    ...type.body,
+    fontWeight: '600',
   },
   sectionLabel: {
     ...type.micro,

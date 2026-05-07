@@ -49,6 +49,24 @@ function metersToMiles(m) {
   return ((m || 0) * 0.000621371).toFixed(1);
 }
 
+// Connection rate tiers — green ≥20% (good), amber 10–19% (caution),
+// red <10% (low). Returns null if no doors knocked yet.
+function getConnectionRate(surveys, doorsKnocked) {
+  if (!doorsKnocked) return null;
+  const pct = Math.round(((surveys || 0) / doorsKnocked) * 100);
+  let level;
+  if (pct >= 20) level = 'good';
+  else if (pct >= 10) level = 'caution';
+  else level = 'low';
+  return { value: `${pct}%`, level };
+}
+
+const RATE_COLORS = {
+  good: { bg: colors.successBg, fg: colors.success },
+  caution: { bg: colors.warnBg, fg: '#92400E' },
+  low: { bg: colors.dangerBg, fg: colors.danger },
+};
+
 function StatCell({ value, label }) {
   return (
     <View style={styles.statCell}>
@@ -163,6 +181,10 @@ export default function StatsScreen() {
 
   const primaryLabel = isLitDrop ? 'Lit drops' : 'Surveys';
   const primaryValue = isLitDrop ? allTime.litDropped : allTime.surveysSubmitted;
+  const connectionRate = isLitDrop
+    ? null
+    : getConnectionRate(allTime.surveysSubmitted, allTime.doorsKnocked);
+  const rateColors = connectionRate ? RATE_COLORS[connectionRate.level] : null;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -179,6 +201,17 @@ export default function StatsScreen() {
             <StatCell value={metersToMiles(allTime.distanceMeters)} label="Miles walked" />
             <StatCell value={allTime.daysActive?.toLocaleString()} label="Days active" />
           </View>
+
+          {connectionRate && (
+            <View style={[styles.rateBanner, { backgroundColor: rateColors.bg }]}>
+              <Text style={[styles.rateValue, { color: rateColors.fg }]}>
+                {connectionRate.value}
+              </Text>
+              <Text style={[styles.rateLabel, { color: rateColors.fg }]}>
+                connection rate
+              </Text>
+            </View>
+          )}
 
           {streak > 0 && (
             <View style={styles.streakBanner}>
@@ -301,6 +334,25 @@ const styles = StyleSheet.create({
   statLabel: {
     ...type.caption,
     marginTop: 1,
+  },
+
+  rateBanner: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  rateValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  rateLabel: {
+    ...type.body,
+    fontWeight: '600',
   },
 
   streakBanner: {

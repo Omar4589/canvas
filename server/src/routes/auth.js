@@ -21,6 +21,11 @@ router.post('/login', async (req, res, next) => {
     const ok = await user.verifyPassword(password);
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
+    // Stamp last-login. Don't await — the response should not wait on this.
+    User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } }).catch(
+      () => {}
+    );
+
     const token = signUserToken(user);
     res.json({ token, user: user.toSafeJSON() });
   } catch (err) {

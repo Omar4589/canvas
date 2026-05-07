@@ -6,11 +6,13 @@ const userSchema = new mongoose.Schema(
     firstName: { type: String, required: true, trim: true },
     lastName: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    phone: { type: String, default: null, trim: true },
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ['admin', 'user'], default: 'user', index: true },
     isActive: { type: Boolean, default: true },
     passwordResetToken: { type: String, default: null },
     passwordResetExpiresAt: { type: Date, default: null },
+    lastLoginAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -29,8 +31,10 @@ userSchema.methods.toSafeJSON = function () {
     firstName: this.firstName,
     lastName: this.lastName,
     email: this.email,
+    phone: this.phone,
     role: this.role,
     isActive: this.isActive,
+    lastLoginAt: this.lastLoginAt,
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
   };
