@@ -632,6 +632,12 @@ export default function MapScreen() {
                 <Text style={styles.pendingBadgeText}>{pendingCount} pending</Text>
               </View>
             )}
+            <Pressable
+              onPress={() => router.push('/(app)/stats')}
+              style={styles.statsChip}
+            >
+              <Text style={styles.statsChipText}>My stats</Text>
+            </Pressable>
             {isAdmin && (
               <Pressable
                 onPress={() => router.push('/(app)/admin')}
@@ -757,7 +763,11 @@ export default function MapScreen() {
             onClose={() => setSelected(null)}
           />
         ) : (
-          <ProgressSheetContent today={today} isLitDrop={isLitDrop} />
+          <ProgressSheetContent
+            today={today}
+            isLitDrop={isLitDrop}
+            onViewHistory={() => router.push('/(app)/stats')}
+          />
         )}
       </PullableSheet>
     </View>
@@ -815,7 +825,7 @@ function ShiftStat({ label, value }) {
   );
 }
 
-function ProgressSheetContent({ today, isLitDrop }) {
+function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
   const legend = isLitDrop ? LIT_DROP_LEGEND : SURVEY_LEGEND;
   const breakdown = today.answerBreakdown || [];
   const showAnswers = !isLitDrop && breakdown.length > 0;
@@ -904,6 +914,12 @@ function ProgressSheetContent({ today, isLitDrop }) {
               ))}
             </View>
           </>
+        )}
+
+        {onViewHistory && (
+          <Pressable onPress={onViewHistory} style={styles.historyLink}>
+            <Text style={styles.historyLinkText}>See full shift history →</Text>
+          </Pressable>
         )}
       </ScrollView>
     </>
@@ -1103,6 +1119,15 @@ const styles = StyleSheet.create({
     borderColor: colors.brand,
   },
   adminChipText: { color: colors.brand, fontWeight: '700', fontSize: 12 },
+  statsChip: {
+    backgroundColor: colors.card,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  statsChipText: { color: colors.textPrimary, fontWeight: '700', fontSize: 12 },
 
   subBar: {
     flexDirection: 'row',
@@ -1380,6 +1405,18 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginTop: 2,
     fontVariant: ['tabular-nums'],
+  },
+
+  // Footer link tucked at the bottom of the expanded sheet content.
+  historyLink: {
+    marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  historyLinkText: {
+    color: colors.brand,
+    fontWeight: '700',
+    fontSize: 14,
   },
 
   // Voter list (selected-house expanded view)
