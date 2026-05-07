@@ -44,12 +44,14 @@ if (MAPBOX_PUBLIC_TOKEN) {
 const DEFAULT_CENTER = [-84.5, 39.0];
 
 // Pullable sheet snap points. PEEK shows summary stats / selected-house header;
-// EXPANDED reveals the legend / voter list. translateY runs from 0 (expanded)
-// to SNAP_DELTA (peek), so the sheet sits above the bottom edge by PEEK_HEIGHT
-// in its resting state.
-const PEEK_HEIGHT = 200;
-const EXPANDED_HEIGHT = 460;
-const SNAP_DELTA = EXPANDED_HEIGHT - PEEK_HEIGHT;
+// EXPANDED reveals the legend / voter list. Both peek AND expanded heights
+// vary by mode — the progress legend is short, the voter list can be long —
+// so the sheet "right-sizes" itself to its content instead of leaving dead
+// air below the legend.
+const PROGRESS_PEEK_HEIGHT = 130;
+const PROGRESS_EXPANDED_HEIGHT = 480;
+const HOUSE_PEEK_HEIGHT = 220;
+const HOUSE_EXPANDED_HEIGHT = 460;
 // Smooth ease, no bounce — the spring overshoot felt too playful for what is
 // essentially a stats panel.
 const SHEET_TIMING = { duration: 240, easing: Easing.out(Easing.cubic) };
@@ -71,6 +73,20 @@ async function tryGetUserCoords() {
   } catch {
     return null;
   }
+}
+
+function voterAge(dob) {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.floor((Date.now() - d.getTime()) / (365.25 * 86400000));
+}
+
+function formatTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
 const SURVEY_FILTER_OPTIONS = [
@@ -151,10 +167,15 @@ function ProgressStat({ pinStatus, value, label }) {
 // Bottom sheet with two snap points. The pan gesture is attached only to the
 // handle area at the top so it doesn't fight with the map's own pan/pinch
 // gestures. Tap the handle as a fallback for users who don't drag.
-function PullableSheet({ translateY, children }) {
+//
+// snapDelta and sheetHeight are shared values rather than constants because
+// peek + expanded heights both differ between the no-selection and
+// house-selected modes (the legend is short, the voter list is long).
+function PullableSheet({ translateY, snapDelta, sheetHeight, children }) {
   const startY = useSharedValue(0);
 
   const animatedStyle = useAnimatedStyle(() => ({
+    height: sheetHeight.value,
     transform: [{ translateY: translateY.value }],
   }));
 
@@ -164,18 +185,18 @@ function PullableSheet({ translateY, children }) {
     })
     .onUpdate((e) => {
       const next = startY.value + e.translationY;
-      translateY.value = Math.max(0, Math.min(SNAP_DELTA, next));
+      translateY.value = Math.max(0, Math.min(snapDelta.value, next));
     })
     .onEnd((e) => {
       let target;
       if (e.velocityY < -500) target = 0;
-      else if (e.velocityY > 500) target = SNAP_DELTA;
-      else target = translateY.value < SNAP_DELTA / 2 ? 0 : SNAP_DELTA;
+      else if (e.velocityY > 500) target = snapDelta.value;
+      else target = translateY.value < snapDelta.value / 2 ? 0 : snapDelta.value;
       translateY.value = withTiming(target, SHEET_TIMING);
     });
 
   function toggle() {
-    const target = translateY.value > SNAP_DELTA / 2 ? 0 : SNAP_DELTA;
+    const target = translateY.value > snapDelta.value / 2 ? 0 : snapDelta.value;
     translateY.value = withTiming(target, SHEET_TIMING);
   }
 
@@ -204,10 +225,17 @@ export default function MapScreen() {
   const [activeCampaign, setActiveCampaign] = useState(undefined);
   const [currentUser, setCurrentUser] = useState(null);
 
-  // Sheet vertical position. 0 = expanded (full height visible), SNAP_DELTA =
-  // peek (only the top PEEK_HEIGHT visible). Lifted to MapScreen so the
-  // recenter button can ride along with the sheet's edge.
-  const sheetTranslateY = useSharedValue(SNAP_DELTA);
+  // Sheet animation state. translateY: 0 = expanded, snapDelta = peek.
+  // sheetHeight is the rendered height of the sheet (changes with selection).
+  // Lifted to MapScreen so the recenter button can ride along with the sheet's
+  // edge.
+  const sheetTranslateY = useSharedValue(
+    PROGRESS_EXPANDED_HEIGHT - PROGRESS_PEEK_HEIGHT
+  );
+  const sheetSnapDelta = useSharedValue(
+    PROGRESS_EXPANDED_HEIGHT - PROGRESS_PEEK_HEIGHT
+  );
+  const sheetHeight = useSharedValue(PROGRESS_EXPANDED_HEIGHT);
 
   useEffect(() => {
     let mounted = true;
@@ -259,6 +287,18 @@ export default function MapScreen() {
     enabled: !!activeCampaign?.id,
     staleTime: 5 * 60 * 1000,
   });
+
+  // When the selection mode changes, animate the sheet to the new
+  // peek + expanded heights. Progress mode is short (just stats + legend);
+  // house mode is taller (peek with buttons + scrollable voter list).
+  useEffect(() => {
+    const peek = selected ? HOUSE_PEEK_HEIGHT : PROGRESS_PEEK_HEIGHT;
+    const expanded = selected ? HOUSE_EXPANDED_HEIGHT : PROGRESS_EXPANDED_HEIGHT;
+    const nextSnap = expanded - peek;
+    sheetSnapDelta.value = nextSnap;
+    sheetHeight.value = withTiming(expanded, SHEET_TIMING);
+    sheetTranslateY.value = withTiming(nextSnap, SHEET_TIMING);
+  }, [selected, sheetSnapDelta, sheetHeight, sheetTranslateY]);
 
   // Smart hybrid initial camera. Try GPS — if the user is roughly inside the
   // campaign's footprint we drop them on themselves at walking zoom. Otherwise
@@ -690,6 +730,7 @@ export default function MapScreen() {
           reachable regardless of sheet expansion. */}
       <RecenterButton
         translateY={sheetTranslateY}
+        sheetHeight={sheetHeight}
         following={following}
         onPress={() => setFollowing((v) => !v)}
       />
@@ -697,7 +738,11 @@ export default function MapScreen() {
       {/* Bottom sheet. Always rendered; content branches on `selected`. The
           peek view sits at the top of the children; pulling up reveals the
           divider and the legend / voter list below it. */}
-      <PullableSheet translateY={sheetTranslateY}>
+      <PullableSheet
+        translateY={sheetTranslateY}
+        snapDelta={sheetSnapDelta}
+        sheetHeight={sheetHeight}
+      >
         {selected ? (
           <SelectedHouseSheetContent
             selected={selected}
@@ -719,9 +764,9 @@ export default function MapScreen() {
   );
 }
 
-function RecenterButton({ translateY, following, onPress }) {
+function RecenterButton({ translateY, sheetHeight, following, onPress }) {
   const animatedStyle = useAnimatedStyle(() => ({
-    bottom: EXPANDED_HEIGHT - translateY.value + spacing.lg,
+    bottom: sheetHeight.value - translateY.value + spacing.lg,
   }));
   return (
     <Animated.View style={[styles.recenterButtonWrap, animatedStyle]}>
@@ -745,14 +790,42 @@ function RecenterButton({ translateY, following, onPress }) {
 const SURVEY_LEGEND = ['unknocked', 'not_home', 'surveyed', 'wrong_address'];
 const LIT_DROP_LEGEND = ['unknocked', 'lit_dropped', 'wrong_address'];
 
+function formatPace(today) {
+  const knocked = today.doorsKnocked || 0;
+  if (!knocked || !today.firstDoorAt || !today.lastDoorAt) return '—';
+  const hours =
+    (new Date(today.lastDoorAt).getTime() - new Date(today.firstDoorAt).getTime()) /
+    3600000;
+  if (hours < 0.25) return '—';
+  return `${(knocked / hours).toFixed(1)}/hr`;
+}
+
+function formatDistance(meters, doorsKnocked) {
+  if (!doorsKnocked) return '—';
+  const miles = (meters || 0) * 0.000621371;
+  return `${miles.toFixed(1)} mi`;
+}
+
+function ShiftStat({ label, value }) {
+  return (
+    <View style={styles.shiftStat}>
+      <Text style={styles.shiftStatValue}>{value}</Text>
+      <Text style={styles.shiftStatLabel}>{label}</Text>
+    </View>
+  );
+}
+
 function ProgressSheetContent({ today, isLitDrop }) {
   const legend = isLitDrop ? LIT_DROP_LEGEND : SURVEY_LEGEND;
+  const breakdown = today.answerBreakdown || [];
+  const showAnswers = !isLitDrop && breakdown.length > 0;
+
   return (
     <>
       {/* Peek */}
       <View style={styles.progressHeader}>
         <Text style={styles.progressTitle}>Today's Progress</Text>
-        <Text style={styles.progressLegendHint}>pull up for legend</Text>
+        <Text style={styles.progressLegendHint}>pull up for more</Text>
       </View>
       <View style={styles.progressRow}>
         <ProgressStat
@@ -772,24 +845,67 @@ function ProgressSheetContent({ today, isLitDrop }) {
         />
       </View>
 
-      {/* Expanded — revealed when sheet is pulled up */}
-      <View style={styles.sheetDivider} />
-      <Text style={styles.sheetSectionTitle}>Pin legend</Text>
-      <View style={styles.legendGrid}>
-        {legend.map((status) => (
-          <View key={status} style={styles.legendItem}>
-            <View
-              style={[
-                styles.legendDot,
-                { backgroundColor: colors.status[status] },
-              ]}
-            />
-            <Text style={styles.legendItemLabel}>
-              {colors.statusLabels[status]}
+      {/* Expanded — revealed when sheet is pulled up. Wrapped in ScrollView so
+          extra content (top answers across many questions) can overflow
+          gracefully. */}
+      <ScrollView
+        style={styles.expandedScroll}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.sheetDivider} />
+
+        <Text style={styles.sheetSectionTitle}>Pin legend</Text>
+        <View style={styles.legendGrid}>
+          {legend.map((status) => (
+            <View key={status} style={styles.legendItem}>
+              <View
+                style={[
+                  styles.legendDot,
+                  { backgroundColor: colors.status[status] },
+                ]}
+              />
+              <Text style={styles.legendItemLabel}>
+                {colors.statusLabels[status]}
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        <Text style={[styles.sheetSectionTitle, styles.sectionGap]}>
+          Today's shift
+        </Text>
+        <View style={styles.shiftGrid}>
+          <ShiftStat label="First door" value={formatTime(today.firstDoorAt)} />
+          <ShiftStat label="Last door" value={formatTime(today.lastDoorAt)} />
+          <ShiftStat label="Pace" value={formatPace(today)} />
+          <ShiftStat
+            label="Distance"
+            value={formatDistance(today.distanceMeters, today.doorsKnocked)}
+          />
+        </View>
+
+        {showAnswers && (
+          <>
+            <Text style={[styles.sheetSectionTitle, styles.sectionGap]}>
+              Top answers
             </Text>
-          </View>
-        ))}
-      </View>
+            <View style={styles.answersList}>
+              {breakdown.map((q) => (
+                <View key={q.questionKey} style={styles.answerRow}>
+                  <Text style={styles.answerQuestion} numberOfLines={1}>
+                    {q.questionLabel}
+                  </Text>
+                  <Text style={styles.answerOptions} numberOfLines={1}>
+                    {q.topOptions
+                      .map((o) => `${o.option} ${o.count}`)
+                      .join('  ·  ')}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+      </ScrollView>
     </>
   );
 }
@@ -878,15 +994,21 @@ function SelectedHouseSheetContent({
           contentContainerStyle={styles.voterList}
           showsVerticalScrollIndicator={false}
         >
-          {voters.map((v) => (
-            <View key={v._id} style={styles.voterRow}>
-              <Text style={styles.voterName} numberOfLines={1}>
-                {v.fullName}
-              </Text>
-              <View style={styles.voterTags}>
-                {v.party && (
-                  <Text style={styles.voterParty}>{v.party}</Text>
-                )}
+          {voters.map((v) => {
+            const age = voterAge(v.dateOfBirth);
+            const metaParts = [v.party, v.gender, age != null ? `${age} yrs` : null].filter(Boolean);
+            return (
+              <View key={v._id} style={styles.voterRow}>
+                <View style={styles.voterMain}>
+                  <Text style={styles.voterName} numberOfLines={1}>
+                    {v.fullName}
+                  </Text>
+                  {metaParts.length > 0 && (
+                    <Text style={styles.voterMeta} numberOfLines={1}>
+                      {metaParts.join(' · ')}
+                    </Text>
+                  )}
+                </View>
                 <Text
                   style={[
                     styles.voterStatus,
@@ -898,8 +1020,8 @@ function SelectedHouseSheetContent({
                   {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
                 </Text>
               </View>
-            </View>
-          ))}
+            );
+          })}
         </ScrollView>
       )}
     </>
@@ -1099,17 +1221,18 @@ const styles = StyleSheet.create({
   recenterButtonText: { fontSize: 24, color: colors.brand, lineHeight: 26 },
   recenterButtonTextActive: { color: colors.textInverse },
 
-  // Pullable sheet container. Sheet is always EXPANDED_HEIGHT tall; translateY
-  // pushes it down so only PEEK_HEIGHT is visible at rest.
+  // Pullable sheet container. Height is set via the animated style (varies by
+  // mode: progress is short, house view is taller). translateY pushes it down
+  // so only the peek height is visible at rest.
   sheetContainer: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: EXPANDED_HEIGHT,
     backgroundColor: colors.card,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
+    overflow: 'hidden',
     ...shadow.raised,
   },
   sheetHandleArea: {
@@ -1192,6 +1315,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
 
+  // Expanded scroll wraps everything below the peek so overflow scrolls
+  // cleanly when answer breakdown adds many rows.
+  expandedScroll: {
+    flex: 1,
+  },
+  sectionGap: {
+    marginTop: spacing.lg,
+  },
+
   // Pin legend (no-selection expanded view) — 2-column compact grid.
   legendGrid: {
     flexDirection: 'row',
@@ -1215,6 +1347,41 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
 
+  // Shift stats 2x2 grid (first/last door, pace, distance).
+  shiftGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: spacing.md,
+    columnGap: spacing.md,
+  },
+  shiftStat: {
+    width: '47%',
+  },
+  shiftStatValue: {
+    ...type.h3,
+    fontVariant: ['tabular-nums'],
+  },
+  shiftStatLabel: {
+    ...type.caption,
+    marginTop: 1,
+  },
+
+  // Top answers per choice question.
+  answersList: {
+    gap: spacing.md,
+  },
+  answerRow: {},
+  answerQuestion: {
+    ...type.bodyStrong,
+    fontSize: 13,
+  },
+  answerOptions: {
+    fontSize: 13,
+    color: colors.textPrimary,
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
+
   // Voter list (selected-house expanded view)
   voterScroll: {
     flexGrow: 0,
@@ -1228,28 +1395,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing.xs + 2,
+    paddingVertical: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     gap: spacing.sm,
   },
-  voterName: {
-    ...type.body,
+  voterMain: {
     flex: 1,
   },
-  voterTags: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
+  voterName: {
+    ...type.body,
   },
-  voterParty: {
-    ...type.micro,
-    backgroundColor: colors.bg,
-    color: colors.textSecondary,
-    paddingHorizontal: spacing.xs + 2,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    overflow: 'hidden',
+  voterMeta: {
+    ...type.caption,
+    marginTop: 1,
   },
   voterStatus: {
     fontSize: 11,
