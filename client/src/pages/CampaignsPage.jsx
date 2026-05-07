@@ -131,14 +131,14 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
+          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={saving}
-          className="rounded bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
         >
           {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create campaign'}
         </button>
@@ -189,7 +189,7 @@ export default function CampaignsPage() {
         {!creating && !editing && (
           <button
             onClick={() => setCreating(true)}
-            className="rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
           >
             + New campaign
           </button>

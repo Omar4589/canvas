@@ -1,5 +1,5 @@
 {
-  "name": "canvass-mobile",
+  "name": "doorline-mobile",
   "version": "0.1.0",
   "private": true,
   "main": "expo-router/entry",
@@ -7,7 +7,9 @@
     "start": "expo start --dev-client",
     "ios": "expo run:ios",
     "android": "expo run:android",
-    "prebuild": "expo prebuild"
+    "prebuild": "expo prebuild",
+    "ota:production": "eas update --branch production --environment production",
+    "ota:preview": "eas update --branch preview --environment preview"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

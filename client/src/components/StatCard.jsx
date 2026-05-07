@@ -6,6 +6,8 @@ export default function StatCard({ label, value, hint, accent }) {
       ? 'text-red-700'
       : accent === 'amber'
       ? 'text-amber-700'
+      : accent === 'blue'
+      ? 'text-blue-700'
       : accent === 'brand'
       ? 'text-brand-700'
       : 'text-gray-900';

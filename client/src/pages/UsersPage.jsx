@@ -71,7 +71,7 @@ export default function UsersPage() {
         <h1 className="text-2xl font-semibold">Users</h1>
         <button
           onClick={() => setShowForm((s) => !s)}
-          className="rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
         >
           {showForm ? 'Cancel' : 'New user'}
         </button>
@@ -101,7 +101,7 @@ export default function UsersPage() {
                 type={field === 'email' ? 'email' : 'text'}
                 required
                 onChange={(e) => setForm((f) => ({ ...f, [field]: e.target.value }))}
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
               />
             </div>
           ))}
@@ -121,7 +121,7 @@ export default function UsersPage() {
             <select
               value={form.role}
               onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
             >
               <option value="user">user</option>
               <option value="admin">admin</option>
@@ -131,7 +131,7 @@ export default function UsersPage() {
             <button
               type="submit"
               disabled={createUser.isPending}
-              className="rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
             >
               {createUser.isPending ? 'Creating…' : 'Create user'}
             </button>
@@ -241,7 +241,7 @@ export default function UsersPage() {
                           <button
                             type="submit"
                             disabled={resetPasswordM.isPending || resetPassword.length < 8}
-                            className="rounded bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                            className="rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
                           >
                             {resetPasswordM.isPending ? 'Saving…' : 'Save password'}
                           </button>
@@ -251,7 +251,7 @@ export default function UsersPage() {
                               setResetTargetId(null);
                               setResetPassword('');
                             }}
-                            className="rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+                            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
                           >
                             Cancel
                           </button>

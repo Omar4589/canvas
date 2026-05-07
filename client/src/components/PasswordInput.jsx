@@ -31,7 +31,7 @@ export default function PasswordInput({
         autoComplete={autoComplete}
         disabled={disabled}
         className={
-          'w-full rounded border border-gray-300 px-3 py-2 pr-10 text-sm focus:border-brand-500 focus:outline-none ' +
+          'w-full rounded-md border border-gray-300 px-3 py-2.5 pr-10 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 ' +
           className
         }
       />

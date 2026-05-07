@@ -1,9 +1,11 @@
+// Status colors mirror mobile/lib/theme.js so admin and canvasser see the
+// same color for the same status across surfaces.
 const SEGMENTS = [
   { key: 'surveyed', label: 'Surveyed', color: 'bg-green-500', dot: 'bg-green-500' },
   { key: 'lit_dropped', label: 'Lit dropped', color: 'bg-purple-500', dot: 'bg-purple-500' },
-  { key: 'not_home', label: 'Not home', color: 'bg-amber-400', dot: 'bg-amber-400' },
+  { key: 'not_home', label: 'Not home', color: 'bg-blue-500', dot: 'bg-blue-500' },
   { key: 'wrong_address', label: 'Wrong address', color: 'bg-red-500', dot: 'bg-red-500' },
-  { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-300', dot: 'bg-gray-300' },
+  { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-400', dot: 'bg-gray-400' },
 ];
 
 export default function CoverageBar({ canvass = {} }) {

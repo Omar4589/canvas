@@ -5,10 +5,19 @@ import {
   Pressable,
   ActivityIndicator,
   StyleSheet,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import * as Location from 'expo-location';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../lib/api';
 import { signOut } from '../../lib/authState';
@@ -22,6 +31,7 @@ import {
 } from '../../lib/cache';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
+import { ensureLocationPermission } from '../../lib/location';
 import Logo from '../../components/Logo';
 import PinIcon from '../../components/PinIcon';
 import { timeAgo, formatExact } from '../../lib/datetime';
@@ -32,6 +42,36 @@ if (MAPBOX_PUBLIC_TOKEN) {
 }
 
 const DEFAULT_CENTER = [-84.5, 39.0];
+
+// Pullable sheet snap points. PEEK shows summary stats / selected-house header;
+// EXPANDED reveals the legend / voter list. translateY runs from 0 (expanded)
+// to SNAP_DELTA (peek), so the sheet sits above the bottom edge by PEEK_HEIGHT
+// in its resting state.
+const PEEK_HEIGHT = 200;
+const EXPANDED_HEIGHT = 460;
+const SNAP_DELTA = EXPANDED_HEIGHT - PEEK_HEIGHT;
+// Smooth ease, no bounce — the spring overshoot felt too playful for what is
+// essentially a stats panel.
+const SHEET_TIMING = { duration: 240, easing: Easing.out(Easing.cubic) };
+
+// Best-effort user location lookup for the smart-hybrid initial camera. Returns
+// [lng, lat] or null. Times out after 4s so we don't hold the camera hostage
+// when GPS is slow on cold-start.
+async function tryGetUserCoords() {
+  const granted = await ensureLocationPermission();
+  if (!granted) return null;
+  try {
+    const pos = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 4000)
+      ),
+    ]);
+    return [pos.coords.longitude, pos.coords.latitude];
+  } catch {
+    return null;
+  }
+}
 
 const SURVEY_FILTER_OPTIONS = [
   { key: 'all', label: 'All houses' },
@@ -108,10 +148,54 @@ function ProgressStat({ pinStatus, value, label }) {
   );
 }
 
+// Bottom sheet with two snap points. The pan gesture is attached only to the
+// handle area at the top so it doesn't fight with the map's own pan/pinch
+// gestures. Tap the handle as a fallback for users who don't drag.
+function PullableSheet({ translateY, children }) {
+  const startY = useSharedValue(0);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  const pan = Gesture.Pan()
+    .onStart(() => {
+      startY.value = translateY.value;
+    })
+    .onUpdate((e) => {
+      const next = startY.value + e.translationY;
+      translateY.value = Math.max(0, Math.min(SNAP_DELTA, next));
+    })
+    .onEnd((e) => {
+      let target;
+      if (e.velocityY < -500) target = 0;
+      else if (e.velocityY > 500) target = SNAP_DELTA;
+      else target = translateY.value < SNAP_DELTA / 2 ? 0 : SNAP_DELTA;
+      translateY.value = withTiming(target, SHEET_TIMING);
+    });
+
+  function toggle() {
+    const target = translateY.value > SNAP_DELTA / 2 ? 0 : SNAP_DELTA;
+    translateY.value = withTiming(target, SHEET_TIMING);
+  }
+
+  return (
+    <Animated.View style={[styles.sheetContainer, animatedStyle]}>
+      <GestureDetector gesture={pan}>
+        <Pressable onPress={toggle} style={styles.sheetHandleArea}>
+          <View style={styles.sheetHandle} />
+        </Pressable>
+      </GestureDetector>
+      <View style={styles.sheetBody}>{children}</View>
+    </Animated.View>
+  );
+}
+
 export default function MapScreen() {
   const router = useRouter();
   const qc = useQueryClient();
   const cameraRef = useRef(null);
+  const cameraInitializedRef = useRef(false);
   const [selected, setSelected] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [following, setFollowing] = useState(false);
@@ -119,6 +203,11 @@ export default function MapScreen() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
   const [currentUser, setCurrentUser] = useState(null);
+
+  // Sheet vertical position. 0 = expanded (full height visible), SNAP_DELTA =
+  // peek (only the top PEEK_HEIGHT visible). Lifted to MapScreen so the
+  // recenter button can ride along with the sheet's edge.
+  const sheetTranslateY = useSharedValue(SNAP_DELTA);
 
   useEffect(() => {
     let mounted = true;
@@ -170,6 +259,69 @@ export default function MapScreen() {
     enabled: !!activeCampaign?.id,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Smart hybrid initial camera. Try GPS — if the user is roughly inside the
+  // campaign's footprint we drop them on themselves at walking zoom. Otherwise
+  // (permission denied, GPS slow, or canvasser is at home far away) we fit
+  // bounds to the assigned households. Runs exactly once per session.
+  useEffect(() => {
+    if (cameraInitializedRef.current) return;
+    if (!data?.households?.length) return;
+
+    let cancelled = false;
+
+    async function setInitialCamera() {
+      const validHouses = data.households.filter(
+        (h) => h.location?.coordinates?.length === 2
+      );
+      if (!validHouses.length) return;
+
+      let minLng = Infinity;
+      let maxLng = -Infinity;
+      let minLat = Infinity;
+      let maxLat = -Infinity;
+      for (const h of validHouses) {
+        const [lng, lat] = h.location.coordinates;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+
+      const userCoords = await tryGetUserCoords();
+      if (cancelled || !cameraRef.current) return;
+
+      // ~0.05 degrees ≈ ~5km of slack on each edge.
+      const margin = 0.05;
+      const userInBounds =
+        userCoords &&
+        userCoords[0] >= minLng - margin &&
+        userCoords[0] <= maxLng + margin &&
+        userCoords[1] >= minLat - margin &&
+        userCoords[1] <= maxLat + margin;
+
+      if (userInBounds) {
+        cameraRef.current.setCamera({
+          centerCoordinate: userCoords,
+          zoomLevel: 15,
+          animationDuration: 0,
+        });
+      } else {
+        cameraRef.current.fitBounds(
+          [maxLng, maxLat],
+          [minLng, minLat],
+          [80, 80, 80, 80],
+          0
+        );
+      }
+      cameraInitializedRef.current = true;
+    }
+
+    setInitialCamera();
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
 
   const todayQ = useQuery({
     queryKey: ['mobile', 'me', 'today', activeCampaign?.id],
@@ -287,7 +439,14 @@ export default function MapScreen() {
       if (!f) return;
       const id = f.properties?.id;
       const h = householdsById.get(String(id));
-      if (h) setSelected(h);
+      if (!h) return;
+      setSelected(h);
+      // Center the camera on the tapped pin so it ends up roughly behind the
+      // sheet's peek view rather than wherever the user happened to scroll.
+      const coords = h.location?.coordinates;
+      if (coords && cameraRef.current) {
+        cameraRef.current.flyTo(coords, 500);
+      }
     },
     [householdsById]
   );
@@ -349,6 +508,7 @@ export default function MapScreen() {
     (v) => v.surveyStatus === 'surveyed'
   ).length;
   const selectedLastSeen = selected ? timeAgo(selected.lastActionAt) : null;
+  const selectedId = selected ? String(selected._id) : '';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -373,6 +533,26 @@ export default function MapScreen() {
           }}
         />
         <Mapbox.ShapeSource id="households" shape={features} onPress={onPinPress}>
+          {/* Halo under the selected pin. Empty filter when nothing selected
+              renders no features. */}
+          <Mapbox.CircleLayer
+            id="household-halo"
+            filter={['==', ['get', 'id'], selectedId]}
+            style={{
+              circleRadius: [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                10, 14,
+                14, 22,
+                17, 32,
+              ],
+              circleColor: colors.brandTint,
+              circleStrokeColor: colors.brand,
+              circleStrokeWidth: 3,
+              circleOpacity: 0.55,
+            }}
+          />
           <Mapbox.SymbolLayer
             id="household-pins"
             filter={layerFilter}
@@ -506,14 +686,48 @@ export default function MapScreen() {
         )}
       </SafeAreaView>
 
-      {/* Recenter button */}
-      <Pressable
+      {/* Recenter button — rides above the sheet's top edge so it's always
+          reachable regardless of sheet expansion. */}
+      <RecenterButton
+        translateY={sheetTranslateY}
+        following={following}
         onPress={() => setFollowing((v) => !v)}
-        style={[
-          styles.recenterButton,
-          selected ? styles.recenterButtonAboveSheet : styles.recenterButtonAboveProgress,
-          following && styles.recenterButtonActive,
-        ]}
+      />
+
+      {/* Bottom sheet. Always rendered; content branches on `selected`. The
+          peek view sits at the top of the children; pulling up reveals the
+          divider and the legend / voter list below it. */}
+      <PullableSheet translateY={sheetTranslateY}>
+        {selected ? (
+          <SelectedHouseSheetContent
+            selected={selected}
+            voters={selectedVoters}
+            surveyedCount={selectedSurveyedCount}
+            lastSeen={selectedLastSeen}
+            isLitDrop={isLitDrop}
+            onOpen={() => {
+              setSelected(null);
+              router.push(`/(app)/household/${selected._id}`);
+            }}
+            onClose={() => setSelected(null)}
+          />
+        ) : (
+          <ProgressSheetContent today={today} isLitDrop={isLitDrop} />
+        )}
+      </PullableSheet>
+    </View>
+  );
+}
+
+function RecenterButton({ translateY, following, onPress }) {
+  const animatedStyle = useAnimatedStyle(() => ({
+    bottom: EXPANDED_HEIGHT - translateY.value + spacing.lg,
+  }));
+  return (
+    <Animated.View style={[styles.recenterButtonWrap, animatedStyle]}>
+      <Pressable
+        onPress={onPress}
+        style={[styles.recenterButton, following && styles.recenterButtonActive]}
       >
         <Text
           style={[
@@ -524,101 +738,171 @@ export default function MapScreen() {
           ◎
         </Text>
       </Pressable>
+    </Animated.View>
+  );
+}
 
-      {/* Pin sheet OR progress card */}
-      {selected ? (
-        <SafeAreaView edges={['bottom']} style={styles.sheet}>
-          <View style={styles.sheetHandle} />
+const SURVEY_LEGEND = ['unknocked', 'not_home', 'surveyed', 'wrong_address'];
+const LIT_DROP_LEGEND = ['unknocked', 'lit_dropped', 'wrong_address'];
 
-          <View style={styles.sheetHeader}>
+function ProgressSheetContent({ today, isLitDrop }) {
+  const legend = isLitDrop ? LIT_DROP_LEGEND : SURVEY_LEGEND;
+  return (
+    <>
+      {/* Peek */}
+      <View style={styles.progressHeader}>
+        <Text style={styles.progressTitle}>Today's Progress</Text>
+        <Text style={styles.progressLegendHint}>pull up for legend</Text>
+      </View>
+      <View style={styles.progressRow}>
+        <ProgressStat
+          pinStatus="not_home"
+          value={today.doorsKnocked?.toLocaleString()}
+          label="Doors knocked"
+        />
+        <ProgressStat
+          pinStatus={isLitDrop ? 'lit_dropped' : 'surveyed'}
+          value={(isLitDrop ? today.litDropped : today.responses)?.toLocaleString()}
+          label={isLitDrop ? 'Lit drops' : 'Responses'}
+        />
+        <ProgressStat
+          pinStatus="unknocked"
+          value={today.remaining?.toLocaleString()}
+          label="Remaining"
+        />
+      </View>
+
+      {/* Expanded — revealed when sheet is pulled up */}
+      <View style={styles.sheetDivider} />
+      <Text style={styles.sheetSectionTitle}>Pin legend</Text>
+      <View style={styles.legendGrid}>
+        {legend.map((status) => (
+          <View key={status} style={styles.legendItem}>
+            <View
+              style={[
+                styles.legendDot,
+                { backgroundColor: colors.status[status] },
+              ]}
+            />
+            <Text style={styles.legendItemLabel}>
+              {colors.statusLabels[status]}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+}
+
+function SelectedHouseSheetContent({
+  selected,
+  voters,
+  surveyedCount,
+  lastSeen,
+  isLitDrop,
+  onOpen,
+  onClose,
+}) {
+  return (
+    <>
+      {/* Peek */}
+      <View style={styles.sheetHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetAddress}>
+            {selected.addressLine1}
+            {selected.addressLine2 ? `, ${selected.addressLine2}` : ''}
+          </Text>
+          <Text style={styles.sheetSub}>
+            {selected.city}, {selected.state} {selected.zipCode}
+          </Text>
+        </View>
+        <StatusPill status={selected.status} compact />
+      </View>
+
+      <View style={styles.sheetMetaRow}>
+        {!isLitDrop && (
+          <View style={styles.sheetMetaItem}>
+            <Text style={styles.sheetMetaIcon}>👥</Text>
+            <Text style={styles.sheetMetaText}>
+              <Text style={styles.sheetMetaStrong}>{voters.length}</Text>{' '}
+              {voters.length === 1 ? 'voter' : 'voters'}
+              {surveyedCount > 0 ? (
+                <Text style={styles.sheetMetaSub}>
+                  {' '}· {surveyedCount} surveyed
+                </Text>
+              ) : null}
+            </Text>
+          </View>
+        )}
+        {lastSeen && (
+          <View style={styles.sheetMetaItem}>
+            <Text style={styles.sheetMetaIcon}>🕒</Text>
             <View style={{ flex: 1 }}>
-              <Text style={styles.sheetAddress}>
-                {selected.addressLine1}
-                {selected.addressLine2 ? `, ${selected.addressLine2}` : ''}
+              <Text style={styles.sheetMetaText}>
+                <Text style={styles.sheetMetaStrong}>Last visit</Text>{' '}
+                <Text style={styles.sheetMetaSub}>{lastSeen}</Text>
               </Text>
-              <Text style={styles.sheetSub}>
-                {selected.city}, {selected.state} {selected.zipCode}
+              <Text style={styles.sheetTimestamp}>
+                {formatExact(selected.lastActionAt)}
               </Text>
             </View>
-            <StatusPill status={selected.status} compact />
           </View>
+        )}
+      </View>
 
-          <View style={styles.sheetMetaRow}>
-            {!isLitDrop && (
-              <View style={styles.sheetMetaItem}>
-                <Text style={styles.sheetMetaIcon}>👥</Text>
-                <Text style={styles.sheetMetaText}>
-                  <Text style={styles.sheetMetaStrong}>{selectedVoters.length}</Text>{' '}
-                  {selectedVoters.length === 1 ? 'voter' : 'voters'}
-                  {selectedSurveyedCount > 0 ? (
-                    <Text style={styles.sheetMetaSub}>
-                      {' '}· {selectedSurveyedCount} surveyed
-                    </Text>
-                  ) : null}
+      <View style={styles.sheetButtons}>
+        <Pressable
+          onPress={onOpen}
+          style={[styles.primaryButton, { flex: 1, marginRight: 6 }]}
+        >
+          <Text style={styles.primaryButtonText}>Open</Text>
+        </Pressable>
+        <Pressable
+          onPress={onClose}
+          style={[styles.secondaryButton, { flex: 1, marginLeft: 6 }]}
+        >
+          <Text style={styles.secondaryButtonText}>Close</Text>
+        </Pressable>
+      </View>
+
+      {/* Expanded — voter list */}
+      <View style={styles.sheetDivider} />
+      <Text style={styles.sheetSectionTitle}>
+        Voters at this house{isLitDrop ? '' : ` (${voters.length})`}
+      </Text>
+      {voters.length === 0 ? (
+        <Text style={styles.voterEmpty}>No voters on file.</Text>
+      ) : (
+        <ScrollView
+          style={styles.voterScroll}
+          contentContainerStyle={styles.voterList}
+          showsVerticalScrollIndicator={false}
+        >
+          {voters.map((v) => (
+            <View key={v._id} style={styles.voterRow}>
+              <Text style={styles.voterName} numberOfLines={1}>
+                {v.fullName}
+              </Text>
+              <View style={styles.voterTags}>
+                {v.party && (
+                  <Text style={styles.voterParty}>{v.party}</Text>
+                )}
+                <Text
+                  style={[
+                    styles.voterStatus,
+                    v.surveyStatus === 'surveyed'
+                      ? styles.voterStatusDone
+                      : styles.voterStatusOpen,
+                  ]}
+                >
+                  {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
                 </Text>
               </View>
-            )}
-            {selectedLastSeen && (
-              <View style={styles.sheetMetaItem}>
-                <Text style={styles.sheetMetaIcon}>🕒</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sheetMetaText}>
-                    <Text style={styles.sheetMetaStrong}>Last visit</Text>{' '}
-                    <Text style={styles.sheetMetaSub}>{selectedLastSeen}</Text>
-                  </Text>
-                  <Text style={styles.sheetTimestamp}>
-                    {formatExact(selected.lastActionAt)}
-                  </Text>
-                </View>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.sheetButtons}>
-            <Pressable
-              onPress={() => {
-                setSelected(null);
-                router.push(`/(app)/household/${selected._id}`);
-              }}
-              style={[styles.primaryButton, { flex: 1, marginRight: 6 }]}
-            >
-              <Text style={styles.primaryButtonText}>Open</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setSelected(null)}
-              style={[styles.secondaryButton, { flex: 1, marginLeft: 6 }]}
-            >
-              <Text style={styles.secondaryButtonText}>Close</Text>
-            </Pressable>
-          </View>
-        </SafeAreaView>
-      ) : (
-        <SafeAreaView edges={['bottom']} style={styles.progressCard}>
-          <View style={styles.sheetHandle} />
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressTitle}>Today's Progress</Text>
-            <Text style={styles.progressLegendHint}>also serves as map legend</Text>
-          </View>
-          <View style={styles.progressRow}>
-            <ProgressStat
-              pinStatus="not_home"
-              value={today.doorsKnocked?.toLocaleString()}
-              label="Doors knocked"
-            />
-            <ProgressStat
-              pinStatus={isLitDrop ? 'lit_dropped' : 'surveyed'}
-              value={(isLitDrop ? today.litDropped : today.responses)?.toLocaleString()}
-              label={isLitDrop ? 'Lit drops' : 'Responses'}
-            />
-            <ProgressStat
-              pinStatus="unknocked"
-              value={today.remaining?.toLocaleString()}
-              label="Remaining"
-            />
-          </View>
-        </SafeAreaView>
+            </View>
+          ))}
+        </ScrollView>
       )}
-    </View>
+    </>
   );
 }
 
@@ -798,9 +1082,11 @@ const styles = StyleSheet.create({
   filterDot: { width: 9, height: 9, borderRadius: 4.5, marginRight: spacing.sm },
   filterDotPlaceholder: { width: 9, height: 9, marginRight: spacing.sm },
 
-  recenterButton: {
+  recenterButtonWrap: {
     position: 'absolute',
     right: spacing.lg,
+  },
+  recenterButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -809,32 +1095,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadow.raised,
   },
-  recenterButtonAboveProgress: { bottom: 180 },
-  recenterButtonAboveSheet: { bottom: 280 },
   recenterButtonActive: { backgroundColor: colors.brand },
   recenterButtonText: { fontSize: 24, color: colors.brand, lineHeight: 26 },
   recenterButtonTextActive: { color: colors.textInverse },
 
-  sheet: {
+  // Pullable sheet container. Sheet is always EXPANDED_HEIGHT tall; translateY
+  // pushes it down so only PEEK_HEIGHT is visible at rest.
+  sheetContainer: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
+    bottom: 0,
+    height: EXPANDED_HEIGHT,
     backgroundColor: colors.card,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     ...shadow.raised,
   },
-  sheetHandle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    backgroundColor: colors.border,
-    borderRadius: 2,
-    marginBottom: spacing.md,
+  sheetHandleArea: {
+    alignItems: 'center',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
   },
+  sheetHandle: {
+    width: 44,
+    height: 5,
+    backgroundColor: colors.borderStrong,
+    borderRadius: 3,
+  },
+  sheetBody: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+
   sheetHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -885,19 +1179,98 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 15 },
 
-  progressCard: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: colors.card,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    ...shadow.raised,
+  // Section divider between peek content and expanded content. Spans the
+  // full sheet width so it reads as a clean break when the sheet is pulled up.
+  sheetDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
+    marginHorizontal: -spacing.lg,
   },
+  sheetSectionTitle: {
+    ...type.micro,
+    marginBottom: spacing.sm,
+  },
+
+  // Pin legend (no-selection expanded view) — 2-column compact grid.
+  legendGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: spacing.sm,
+    columnGap: spacing.md,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+    width: '47%',
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  legendItemLabel: {
+    ...type.caption,
+    color: colors.textPrimary,
+  },
+
+  // Voter list (selected-house expanded view)
+  voterScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  voterList: {
+    gap: spacing.xs,
+    paddingBottom: spacing.sm,
+  },
+  voterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.xs + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.sm,
+  },
+  voterName: {
+    ...type.body,
+    flex: 1,
+  },
+  voterTags: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  voterParty: {
+    ...type.micro,
+    backgroundColor: colors.bg,
+    color: colors.textSecondary,
+    paddingHorizontal: spacing.xs + 2,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  voterStatus: {
+    fontSize: 11,
+    fontWeight: '700',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    overflow: 'hidden',
+  },
+  voterStatusDone: {
+    backgroundColor: colors.successBg,
+    color: colors.success,
+  },
+  voterStatusOpen: {
+    backgroundColor: colors.bg,
+    color: colors.textSecondary,
+  },
+  voterEmpty: {
+    ...type.caption,
+  },
+
   progressHeader: {
     flexDirection: 'row',
     alignItems: 'baseline',

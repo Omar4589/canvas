@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
+import Logo from './Logo.jsx';
 
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
@@ -12,38 +13,41 @@ const NAV = [
 
 function navClass({ isActive }) {
   return [
-    'block rounded px-3 py-2 text-sm',
-    isActive ? 'bg-brand-600 text-white' : 'text-gray-700 hover:bg-gray-100',
+    'block rounded-md px-3 py-2 text-sm font-medium transition-colors',
+    isActive
+      ? 'bg-brand-600 text-white shadow-sm'
+      : 'text-gray-700 hover:bg-brand-50 hover:text-brand-700',
   ].join(' ');
 }
 
 export default function Layout() {
   const { user, logout } = useAuth();
   const location = useLocation();
-  // The map page manages its own scroll/padding so it can take the full content area.
   const isFullBleed = location.pathname === '/map';
   return (
-    <div className="flex h-screen overflow-hidden">
-      <aside className="w-56 border-r border-gray-200 bg-white p-4 flex flex-col">
-        <div className="mb-6">
-          <div className="text-lg font-semibold">Canvass Admin</div>
-          <div className="text-xs text-gray-500">Internal tool</div>
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      <aside className="flex w-60 flex-col border-r border-gray-200 bg-white px-4 py-5">
+        <div className="mb-1 px-1">
+          <Logo size={26} />
         </div>
-        <nav className="space-y-1 flex-1">
+        <div className="mb-6 px-1 text-xs text-gray-500">Admin console</div>
+
+        <nav className="flex-1 space-y-1">
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} end={n.end} className={navClass}>
               {n.label}
             </NavLink>
           ))}
         </nav>
-        <div className="mt-4 border-t border-gray-200 pt-3 text-sm">
-          <div className="text-gray-700 truncate">
+
+        <div className="mt-4 border-t border-gray-200 pt-4">
+          <div className="truncate text-sm font-medium text-gray-900">
             {user?.firstName} {user?.lastName}
           </div>
-          <div className="text-xs text-gray-500 truncate">{user?.email}</div>
+          <div className="truncate text-xs text-gray-500">{user?.email}</div>
           <button
             onClick={logout}
-            className="mt-2 text-xs text-brand-600 hover:underline"
+            className="mt-2 text-xs font-semibold text-brand-600 hover:text-brand-700"
           >
             Sign out
           </button>

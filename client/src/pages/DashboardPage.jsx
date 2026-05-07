@@ -207,7 +207,7 @@ export default function DashboardPage() {
                   label="Not home"
                   value={events.notHome?.toLocaleString()}
                   hint="events"
-                  accent="amber"
+                  accent="blue"
                 />
                 <StatCard
                   label="Wrong addresses"

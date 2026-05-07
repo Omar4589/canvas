@@ -1,6 +1,6 @@
 const LAST_UPDATED = 'April 29, 2026';
 const CONTACT_EMAIL = 'omar@foxbryant.com';
-const APP_NAME = 'Canvass';
+const APP_NAME = 'Doorline';
 
 export default function PrivacyPolicyPage() {
   return (
