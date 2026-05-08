@@ -49,7 +49,10 @@ export default function Index() {
   }
   if (!token) return <Redirect href="/login" />;
 
+  const isSuperAdmin = !!boot?.user?.isSuperAdmin;
+
   if (!boot?.activeOrgId) {
+    if (isSuperAdmin) return <Redirect href="/(app)/super-admin" />;
     return <Redirect href="/(app)/select-org" />;
   }
 
@@ -57,7 +60,6 @@ export default function Index() {
     (m) => m.organizationId === boot.activeOrgId
   );
   const role = activeMembership?.role;
-  const isSuperAdmin = !!boot?.user?.isSuperAdmin;
 
   if (role === 'admin' || isSuperAdmin) {
     return <Redirect href="/(app)/admin" />;

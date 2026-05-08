@@ -29,6 +29,7 @@ import {
   clearBootstrap,
   loadCurrentUser,
 } from '../../lib/cache';
+import { loadRoleContext } from '../../lib/role';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { ensureLocationPermission } from '../../lib/location';
@@ -237,6 +238,8 @@ export default function MapScreen() {
   );
   const sheetHeight = useSharedValue(PROGRESS_EXPANDED_HEIGHT);
 
+  const [isAdmin, setIsAdmin] = useState(false);
+
   useEffect(() => {
     let mounted = true;
     loadActiveCampaign().then((c) => {
@@ -247,15 +250,15 @@ export default function MapScreen() {
       }
       setActiveCampaign(c);
     });
-    loadCurrentUser().then((u) => {
-      if (mounted) setCurrentUser(u);
+    loadRoleContext().then((ctx) => {
+      if (!mounted) return;
+      setCurrentUser(ctx.user);
+      setIsAdmin(ctx.isOrgAdmin);
     });
     return () => {
       mounted = false;
     };
   }, [router]);
-
-  const isAdmin = currentUser?.role === 'admin';
 
   const filterOptions =
     activeCampaign?.type === 'lit_drop' ? LIT_DROP_FILTER_OPTIONS : SURVEY_FILTER_OPTIONS;

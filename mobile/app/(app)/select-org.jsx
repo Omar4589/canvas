@@ -16,6 +16,7 @@ import {
   loadMemberships,
   loadCurrentUser,
   saveActiveOrgId,
+  clearActiveOrgId,
   clearActiveCampaign,
   clearBootstrap,
 } from '../../lib/cache';
@@ -81,6 +82,14 @@ export default function SelectOrgScreen() {
     }
   }
 
+  async function pickPlatform() {
+    qc.clear();
+    await clearActiveOrgId();
+    await clearActiveCampaign();
+    await clearBootstrap();
+    router.replace('/(app)/super-admin');
+  }
+
   async function onLogout() {
     qc.clear();
     await signOut();
@@ -121,6 +130,22 @@ export default function SelectOrgScreen() {
           paddingBottom: spacing.xl,
         }}
       >
+        {user?.isSuperAdmin && (
+          <Pressable
+            onPress={pickPlatform}
+            style={({ pressed }) => [
+              styles.card,
+              styles.platformCard,
+              { opacity: pressed ? 0.85 : 1 },
+            ]}
+          >
+            <View style={styles.cardLeft}>
+              <Text style={styles.platformTitle}>🌐 Platform view</Text>
+              <Text style={styles.platformMeta}>All orgs · super admin</Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
+          </Pressable>
+        )}
         {(items || []).map((m) => (
           <Pressable
             key={m.organizationId}
@@ -196,6 +221,19 @@ const styles = StyleSheet.create({
   cardLeft: { flex: 1 },
   cardTitle: { ...type.h3 },
   cardMeta: { ...type.caption, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.4 },
+  platformCard: {
+    backgroundColor: colors.brandTint,
+    borderColor: colors.brand,
+  },
+  platformTitle: { ...type.h3, color: colors.brand },
+  platformMeta: {
+    ...type.caption,
+    color: colors.brand,
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    fontWeight: '700',
+  },
   chevron: {
     fontSize: 28,
     color: colors.textMuted,

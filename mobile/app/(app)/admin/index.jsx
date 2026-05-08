@@ -118,6 +118,14 @@ export default function AdminHome() {
     router.replace('/(app)/select-org');
   }
 
+  async function onPlatformView() {
+    qc.clear();
+    await clearActiveOrgId();
+    await saveActiveCampaign(null);
+    await clearBootstrap();
+    router.replace('/(app)/super-admin');
+  }
+
   function goCanvass() {
     if (!activeCampaign?.id) {
       router.push('/(app)/campaigns');
@@ -137,6 +145,11 @@ export default function AdminHome() {
       <View style={styles.header}>
         <Logo size={26} />
         <View style={{ flexDirection: 'row', gap: spacing.md }}>
+          {user?.isSuperAdmin && (
+            <Pressable onPress={onPlatformView} hitSlop={8}>
+              <Text style={styles.signOut}>‹ Platform</Text>
+            </Pressable>
+          )}
           <Pressable onPress={onSwitchOrg} hitSlop={8}>
             <Text style={styles.signOut}>Switch org</Text>
           </Pressable>

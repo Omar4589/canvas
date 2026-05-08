@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { signOut } from '../../lib/authState';
 import { saveActiveCampaign, clearBootstrap } from '../../lib/cache';
+import { loadRoleContext } from '../../lib/role';
 import Logo from '../../components/Logo';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
@@ -20,6 +21,17 @@ export default function CampaignsScreen() {
   const router = useRouter();
   const qc = useQueryClient();
   const [picking, setPicking] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    loadRoleContext().then((ctx) => {
+      if (mounted) setIsAdmin(ctx.isOrgAdmin);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['mobile', 'campaigns'],
@@ -47,9 +59,16 @@ export default function CampaignsScreen() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Logo size={28} />
-        <Pressable onPress={onLogout} hitSlop={8}>
-          <Text style={styles.signOut}>Sign out</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: spacing.md }}>
+          {isAdmin && (
+            <Pressable onPress={() => router.replace('/(app)/admin')} hitSlop={8}>
+              <Text style={styles.signOut}>‹ Admin</Text>
+            </Pressable>
+          )}
+          <Pressable onPress={onLogout} hitSlop={8}>
+            <Text style={styles.signOut}>Sign out</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.intro}>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { getActiveOrgId } from '../api/client.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import Logo from '../components/Logo.jsx';
 
@@ -29,7 +30,8 @@ export default function LoginPage() {
       }
       const memberships = res.memberships || [];
       if (res.user.isSuperAdmin) {
-        navigate('/select-org', { replace: true });
+        const savedOrgId = getActiveOrgId();
+        navigate(savedOrgId ? '/' : '/super-admin', { replace: true });
         return;
       }
       if (memberships.length > 1) {

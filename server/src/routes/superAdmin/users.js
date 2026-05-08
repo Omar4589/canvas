@@ -50,6 +50,11 @@ router.post('/:userId/promote', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    if (String(req.params.userId) === String(req.user._id)) {
+      return res
+        .status(400)
+        .json({ error: "You can't change your own super-admin flag." });
+    }
     const target = await User.findById(req.params.userId);
     if (!target) return res.status(404).json({ error: 'User not found' });
     target.isSuperAdmin = !target.isSuperAdmin;

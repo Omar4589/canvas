@@ -14,7 +14,11 @@ const NAV = [
   { to: '/surveys', label: 'Surveys' },
 ];
 
-const SUPER_NAV = [{ to: '/organizations', label: 'Organizations' }];
+const SUPER_NAV = [
+  { to: '/super-admin', label: 'Control Room' },
+  { to: '/super-admin/users', label: 'All Users' },
+  { to: '/organizations', label: 'Organizations' },
+];
 
 function navClass({ isActive }) {
   return [
@@ -58,7 +62,14 @@ function OrgSwitcher() {
     qc.clear();
   }
 
-  if (list.length === 0) return null;
+  function pickPlatform() {
+    switchOrg(null);
+    setOpen(false);
+    qc.clear();
+    navigate('/super-admin');
+  }
+
+  if (list.length === 0 && !isSuperAdmin) return null;
 
   return (
     <div className="relative mb-4">
@@ -78,6 +89,24 @@ function OrgSwitcher() {
       </button>
       {open && (
         <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-md border border-gray-200 bg-white shadow-lg">
+          {isSuperAdmin && (
+            <div className="border-b border-gray-100 px-1 py-1">
+              <button
+                onClick={pickPlatform}
+                className={[
+                  'flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm',
+                  !activeOrgId
+                    ? 'bg-brand-50 font-semibold text-brand-700'
+                    : 'hover:bg-gray-50',
+                ].join(' ')}
+              >
+                <span>🌐 Platform view</span>
+                <span className="ml-2 text-[10px] uppercase tracking-wide text-gray-400">
+                  all orgs
+                </span>
+              </button>
+            </div>
+          )}
           <ul className="max-h-72 overflow-auto py-1">
             {list.map((m) => (
               <li key={m.organizationId}>

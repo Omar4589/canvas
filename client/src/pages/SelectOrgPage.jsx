@@ -27,6 +27,11 @@ export default function SelectOrgPage() {
     navigate(from === '/select-org' ? '/' : from, { replace: true });
   }
 
+  function pickPlatform() {
+    switchOrg(null);
+    navigate('/super-admin', { replace: true });
+  }
+
   const items = isSuperAdmin
     ? allOrgs.map((o) => ({
         organizationId: o.id,
@@ -51,6 +56,18 @@ export default function SelectOrgPage() {
             Hi {user?.firstName}. Pick the org you want to work in.
           </p>
         </div>
+
+        {isSuperAdmin && (
+          <button
+            onClick={pickPlatform}
+            className="mb-3 flex w-full items-center justify-between rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-left text-sm font-semibold text-brand-700 transition-colors hover:bg-brand-100"
+          >
+            <span>🌐 Platform view</span>
+            <span className="text-[10px] uppercase tracking-wide text-brand-700/70">
+              all orgs
+            </span>
+          </button>
+        )}
 
         <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
           {loadingOrgs && (

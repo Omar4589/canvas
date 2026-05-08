@@ -11,6 +11,7 @@ import adminCampaignsRouter from './admin/campaigns.js';
 import adminActivitiesRouter from './admin/activities.js';
 import superAdminOrganizationsRouter from './superAdmin/organizations.js';
 import superAdminUsersRouter from './superAdmin/users.js';
+import superAdminPlatformRouter from './superAdmin/platform.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
 import mobileMeRouter from './mobile/me.js';
@@ -23,6 +24,7 @@ router.get('/health', (req, res) => {
 
 router.use('/auth', authRouter);
 
+router.use('/super-admin/platform', superAdminPlatformRouter);
 router.use('/super-admin/organizations', superAdminOrganizationsRouter);
 router.use('/super-admin/users', superAdminUsersRouter);
 

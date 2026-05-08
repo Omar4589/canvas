@@ -34,12 +34,14 @@ export default function ProtectedRoute({
     );
   }
 
-  if (requireActiveOrg && !activeOrgId && !isSuperAdmin) {
-    return <Navigate to="/select-org" state={{ from: location }} replace />;
-  }
-
-  if (requireActiveOrg && !activeOrgId && isSuperAdmin) {
-    return <Navigate to="/select-org" state={{ from: location }} replace />;
+  if (requireActiveOrg && !activeOrgId) {
+    return (
+      <Navigate
+        to={isSuperAdmin ? '/super-admin' : '/select-org'}
+        state={{ from: location }}
+        replace
+      />
+    );
   }
 
   if (requireOrgAdmin && !isOrgAdmin) {
