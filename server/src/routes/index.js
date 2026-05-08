@@ -24,9 +24,9 @@ router.get('/health', (req, res) => {
 
 router.use('/auth', authRouter);
 
-router.use('/super-admin/platform', superAdminPlatformRouter);
 router.use('/super-admin/organizations', superAdminOrganizationsRouter);
 router.use('/super-admin/users', superAdminUsersRouter);
+router.use('/super-admin', superAdminPlatformRouter);
 
 router.use('/admin/memberships', adminMembershipsRouter);
 router.use('/admin/imports', adminImportsRouter);
