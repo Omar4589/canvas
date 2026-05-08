@@ -1,8 +1,23 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import PasswordInput from './PasswordInput.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
+
+const ACTION_LABEL = {
+  survey_submitted: 'Surveyed',
+  not_home: 'Not home',
+  wrong_address: 'Wrong address',
+  lit_dropped: 'Lit dropped',
+};
+
+const ACTION_DOT_CLS = {
+  survey_submitted: 'bg-green-500',
+  not_home: 'bg-blue-500',
+  wrong_address: 'bg-red-500',
+  lit_dropped: 'bg-purple-500',
+};
 
 const inputCls =
   'w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600';
@@ -115,6 +130,12 @@ export default function UserProfileModal({ user, onClose }) {
     queryKey: ['admin', 'user-stats', user.id, tz],
     queryFn: () =>
       api(`/admin/users/${user.id}/stats?tz=${encodeURIComponent(tz)}`),
+    enabled: !!user.id,
+  });
+
+  const activityQ = useQuery({
+    queryKey: ['admin', 'user-recent-activity', user.id],
+    queryFn: () => api(`/admin/users/${user.id}/recent-activity?limit=20`),
     enabled: !!user.id,
   });
 
@@ -392,6 +413,70 @@ export default function UserProfileModal({ user, onClose }) {
               </div>
             </>
           ) : null}
+        </div>
+
+        {/* Recent activity */}
+        <div className="border-b border-gray-200 px-6 py-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Recent activity
+            </h3>
+            <Link
+              to="/map"
+              className="text-xs font-semibold text-brand-600 hover:underline"
+              onClick={onClose}
+            >
+              View on map →
+            </Link>
+          </div>
+          {activityQ.isLoading ? (
+            <div className="text-sm text-gray-500">Loading…</div>
+          ) : activityQ.error ? (
+            <div className="text-sm text-red-600">
+              Error: {activityQ.error.message}
+            </div>
+          ) : !activityQ.data?.activities?.length ? (
+            <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+              No activity yet.
+            </div>
+          ) : (
+            <ul className="divide-y divide-gray-100 overflow-hidden rounded-md border border-gray-200">
+              {activityQ.data.activities.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-start gap-3 bg-white px-3 py-2 text-sm"
+                >
+                  <span
+                    className={`mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
+                      ACTION_DOT_CLS[a.actionType] || 'bg-gray-400'
+                    }`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-gray-900">
+                      {ACTION_LABEL[a.actionType] || a.actionType}
+                    </div>
+                    <div className="truncate text-xs text-gray-500">
+                      {a.household
+                        ? `${a.household.addressLine1}${
+                            a.household.city ? ', ' + a.household.city : ''
+                          }`
+                        : 'Address unavailable'}
+                      {a.campaign?.name && (
+                        <>
+                          {' '}
+                          <span className="text-gray-400">·</span>{' '}
+                          {a.campaign.name}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-xs text-gray-500">
+                    {formatRelative(a.timestamp)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {/* Account actions */}

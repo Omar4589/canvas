@@ -33,6 +33,7 @@ export default function AdminLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="users" />
+      <Stack.Screen name="users/[id]" />
       <Stack.Screen name="map" />
       <Stack.Screen name="canvassers" />
       <Stack.Screen name="overlaps" />

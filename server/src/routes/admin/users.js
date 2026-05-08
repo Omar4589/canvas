@@ -218,4 +218,53 @@ router.get('/:userId/stats', async (req, res, next) => {
   }
 });
 
+// Recent canvass activity for one user, across all campaigns. Powers the
+// "audit"-style timeline in the admin user profile (web modal + mobile screen).
+// `note_added` actions are intentionally excluded — they're internal annotations
+// rather than door interactions and would clutter the timeline.
+router.get('/:userId/recent-activity', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+    const userId = new mongoose.Types.ObjectId(req.params.userId);
+    const requested = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(requested)
+      ? Math.min(Math.max(requested, 1), 100)
+      : 20;
+
+    const activities = await CanvassActivity.find({
+      userId,
+      actionType: { $in: DOOR_ACTIONS },
+    })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .populate('householdId', 'addressLine1 city state zipCode')
+      .populate('campaignId', 'name')
+      .lean();
+
+    res.json({
+      activities: activities.map((a) => ({
+        id: String(a._id),
+        actionType: a.actionType,
+        timestamp: a.timestamp.toISOString(),
+        household: a.householdId
+          ? {
+              id: String(a.householdId._id),
+              addressLine1: a.householdId.addressLine1,
+              city: a.householdId.city,
+              state: a.householdId.state,
+              zipCode: a.householdId.zipCode,
+            }
+          : null,
+        campaign: a.campaignId
+          ? { id: String(a.campaignId._id), name: a.campaignId.name }
+          : null,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
