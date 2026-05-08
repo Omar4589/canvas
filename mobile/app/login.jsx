@@ -12,7 +12,13 @@ import {
 import { Redirect } from 'expo-router';
 import { api } from '../lib/api';
 import { signIn, useAuthToken } from '../lib/authState';
-import { saveCurrentUser } from '../lib/cache';
+import {
+  saveCurrentUser,
+  saveMemberships,
+  saveActiveOrgId,
+  clearActiveOrgId,
+  clearActiveCampaign,
+} from '../lib/cache';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
 import { colors, radius, spacing, type, shadow } from '../lib/theme';
@@ -36,6 +42,13 @@ export default function Login() {
       });
       if (res.user) {
         await saveCurrentUser(res.user);
+      }
+      const memberships = res.memberships || [];
+      await saveMemberships(memberships);
+      await clearActiveOrgId();
+      await clearActiveCampaign();
+      if (memberships.length === 1 && !res.user?.isSuperAdmin) {
+        await saveActiveOrgId(memberships[0].organizationId);
       }
       await signIn(res.token);
     } catch (err) {

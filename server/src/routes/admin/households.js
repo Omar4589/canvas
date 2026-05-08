@@ -1,14 +1,28 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { orgContext } from '../../middleware/orgContext.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { User } from '../../models/User.js';
+import { Membership } from '../../models/Membership.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 
 const router = Router();
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth, orgContext, requireOrgRole('admin'));
+
+function activeOrgId(req) {
+  return req.activeOrg?._id;
+}
+
+function ensureOrgScoped(req, res) {
+  if (!activeOrgId(req)) {
+    res.status(400).json({ error: 'Active organization required (X-Org-Id header)' });
+    return false;
+  }
+  return true;
+}
 
 function parseDate(s) {
   if (!s) return null;
@@ -18,6 +32,8 @@ function parseDate(s) {
 
 router.get('/map', async (req, res, next) => {
   try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
     const from = parseDate(req.query.from);
     const to = parseDate(req.query.to);
     const userId =
@@ -37,17 +53,16 @@ router.get('/map', async (req, res, next) => {
         ? new mongoose.Types.ObjectId(req.query.campaignId)
         : null;
 
-    // Households we display: active + have coordinates.
     const householdFilter = {
+      organizationId: orgId,
       isActive: true,
       'location.coordinates': { $exists: true, $ne: null },
     };
     if (status && status.length) householdFilter.status = { $in: status };
     if (campaignId) householdFilter.campaignId = campaignId;
 
-    // Build SurveyResponse + CanvassActivity match scoped by date/user/answer.
-    const surveyMatch = {};
-    const activityMatch = {};
+    const surveyMatch = { organizationId: orgId };
+    const activityMatch = { organizationId: orgId };
     if (from) {
       surveyMatch.submittedAt = { ...(surveyMatch.submittedAt || {}), $gte: from };
       activityMatch.timestamp = { ...(activityMatch.timestamp || {}), $gte: from };
@@ -73,13 +88,10 @@ router.get('/map', async (req, res, next) => {
     const filteringInteractions =
       Boolean(from || to || userId || (questionKey && answerOption));
 
-    // If we're filtering by interaction (date/user/answer), restrict households
-    // to those with at least one matching SurveyResponse OR matching CanvassActivity.
     let interactedHouseholdIds = null;
     if (filteringInteractions) {
       const [surveyHIds, activityHIds] = await Promise.all([
         SurveyResponse.distinct('householdId', surveyMatch),
-        // If we're filtering by an answer, only surveys count — activities have no answers.
         questionKey && answerOption
           ? Promise.resolve([])
           : CanvassActivity.distinct('householdId', activityMatch),
@@ -106,20 +118,22 @@ router.get('/map', async (req, res, next) => {
     const householdIds = households.map((h) => h._id);
     const includeActivities = req.query.includeActivities === '1';
 
+    const orgMemberIds = await Membership.find({
+      organizationId: orgId,
+      isActive: true,
+    }).distinct('userId');
+
     const [voters, surveys, lastActivities, allCanvassers, activities] = await Promise.all([
       Voter.find(
-        { householdId: { $in: householdIds } },
+        { householdId: { $in: householdIds }, organizationId: orgId },
         'householdId fullName surveyStatus party'
       ).lean(),
-      SurveyResponse.find(
-        // for popup: ALL surveys at these houses (so popup is informative even if filter is on activity-only)
-        { householdId: { $in: householdIds } }
-      )
+      SurveyResponse.find({ householdId: { $in: householdIds }, organizationId: orgId })
         .populate('voterId', 'fullName')
         .populate('userId', 'firstName lastName')
         .lean(),
       CanvassActivity.aggregate([
-        { $match: { householdId: { $in: householdIds } } },
+        { $match: { householdId: { $in: householdIds }, organizationId: orgId } },
         { $sort: { timestamp: -1 } },
         {
           $group: {
@@ -130,9 +144,12 @@ router.get('/map', async (req, res, next) => {
           },
         },
       ]),
-      // Distinct list of canvassers who have any activity (used to populate the filter dropdown).
-      User.find({ isActive: true }, 'firstName lastName email').sort({ firstName: 1 }).lean(),
-      // Raw GPS pings for each activity, only when requested (the canvasser-pin overlay).
+      User.find(
+        { _id: { $in: orgMemberIds }, isActive: true },
+        'firstName lastName email'
+      )
+        .sort({ firstName: 1 })
+        .lean(),
       includeActivities
         ? CanvassActivity.find(
             { ...activityMatch, householdId: { $in: householdIds } },

@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Household } from '../../models/Household.js';
@@ -9,7 +10,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 
 const router = Router();
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth, orgContext, requireOrgRole('admin'));
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -20,6 +21,18 @@ const createSchema = z.object({
 });
 
 const updateSchema = createSchema.partial();
+
+function activeOrgId(req) {
+  return req.activeOrg?._id;
+}
+
+function ensureOrgScoped(req, res) {
+  if (!activeOrgId(req)) {
+    res.status(400).json({ error: 'Active organization required (X-Org-Id header)' });
+    return false;
+  }
+  return true;
+}
 
 async function withCounts(campaigns) {
   const ids = campaigns.map((c) => c._id);
@@ -75,7 +88,8 @@ async function withCounts(campaigns) {
 
 router.get('/', async (req, res, next) => {
   try {
-    const campaigns = await Campaign.find()
+    if (!ensureOrgScoped(req, res)) return;
+    const campaigns = await Campaign.find({ organizationId: activeOrgId(req) })
       .sort({ isActive: -1, createdAt: -1 })
       .populate('surveyTemplateId', 'name version')
       .lean();
@@ -88,15 +102,18 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
     const data = createSchema.parse(req.body);
     if (data.type === 'survey') {
       if (!data.surveyTemplateId || !mongoose.isValidObjectId(data.surveyTemplateId)) {
         return res.status(400).json({ error: 'Survey campaigns require a surveyTemplateId.' });
       }
-      const tmpl = await SurveyTemplate.findById(data.surveyTemplateId);
-      if (!tmpl) return res.status(400).json({ error: 'Survey template not found.' });
+      const tmpl = await SurveyTemplate.findOne({ _id: data.surveyTemplateId, organizationId: orgId });
+      if (!tmpl) return res.status(400).json({ error: 'Survey template not found in this org.' });
     }
     const campaign = await Campaign.create({
+      organizationId: orgId,
       name: data.name,
       type: data.type,
       state: data.state,
@@ -113,8 +130,10 @@ router.post('/', async (req, res, next) => {
 
 router.patch('/:campaignId', async (req, res, next) => {
   try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
     const data = updateSchema.parse(req.body);
-    const campaign = await Campaign.findById(req.params.campaignId);
+    const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
     if (data.name !== undefined) campaign.name = data.name;
@@ -122,8 +141,15 @@ router.patch('/:campaignId', async (req, res, next) => {
     if (data.isActive !== undefined) campaign.isActive = data.isActive;
     if (data.type !== undefined) campaign.type = data.type;
     if (data.surveyTemplateId !== undefined) {
-      if (data.surveyTemplateId && !mongoose.isValidObjectId(data.surveyTemplateId)) {
-        return res.status(400).json({ error: 'Invalid surveyTemplateId.' });
+      if (data.surveyTemplateId) {
+        if (!mongoose.isValidObjectId(data.surveyTemplateId)) {
+          return res.status(400).json({ error: 'Invalid surveyTemplateId.' });
+        }
+        const tmpl = await SurveyTemplate.findOne({
+          _id: data.surveyTemplateId,
+          organizationId: orgId,
+        });
+        if (!tmpl) return res.status(400).json({ error: 'Survey template not found in this org.' });
       }
       campaign.surveyTemplateId = data.surveyTemplateId || null;
     }

@@ -1,19 +1,24 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { orgContext } from '../../middleware/orgContext.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 
 const router = Router();
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth, orgContext, requireOrgRole('admin'));
 
 router.get('/:activityId', async (req, res, next) => {
   try {
+    const orgId = req.activeOrg?._id;
+    if (!orgId) {
+      return res.status(400).json({ error: 'Active organization required (X-Org-Id header)' });
+    }
     const { activityId } = req.params;
     if (!mongoose.isValidObjectId(activityId)) {
       return res.status(400).json({ error: 'Invalid activityId' });
     }
-    const activity = await CanvassActivity.findById(activityId)
+    const activity = await CanvassActivity.findOne({ _id: activityId, organizationId: orgId })
       .populate('userId', 'firstName lastName email')
       .populate('householdId', 'addressLine1 addressLine2 city state zipCode')
       .populate('voterId', 'fullName party')
@@ -22,8 +27,10 @@ router.get('/:activityId', async (req, res, next) => {
 
     let surveyResponse = null;
     if (activity.actionType === 'survey_submitted' && activity.voterId) {
-      // Per-voter overwrite means at most one SurveyResponse per voter.
-      surveyResponse = await SurveyResponse.findOne({ voterId: activity.voterId._id })
+      surveyResponse = await SurveyResponse.findOne({
+        voterId: activity.voterId._id,
+        organizationId: orgId,
+      })
         .select('answers note submittedAt surveyTemplateVersion')
         .lean();
     }

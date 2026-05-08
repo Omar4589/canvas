@@ -17,6 +17,7 @@ import {
   loadActiveCampaign,
   saveActiveCampaign,
   clearBootstrap,
+  clearActiveOrgId,
 } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
 import PinIcon from '../../../components/PinIcon';
@@ -109,6 +110,14 @@ export default function AdminHome() {
     await signOut();
   }
 
+  async function onSwitchOrg() {
+    qc.clear();
+    await clearActiveOrgId();
+    await saveActiveCampaign(null);
+    await clearBootstrap();
+    router.replace('/(app)/select-org');
+  }
+
   function goCanvass() {
     if (!activeCampaign?.id) {
       router.push('/(app)/campaigns');
@@ -127,9 +136,14 @@ export default function AdminHome() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Logo size={26} />
-        <Pressable onPress={onLogout} hitSlop={8}>
-          <Text style={styles.signOut}>Sign out</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: spacing.md }}>
+          <Pressable onPress={onSwitchOrg} hitSlop={8}>
+            <Text style={styles.signOut}>Switch org</Text>
+          </Pressable>
+          <Pressable onPress={onLogout} hitSlop={8}>
+            <Text style={styles.signOut}>Sign out</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
@@ -260,6 +274,16 @@ export default function AdminHome() {
           >
             <Text style={styles.quickLinkIcon}>👥</Text>
             <Text style={styles.quickLinkText}>Users</Text>
+          </Pressable>
+          <Pressable
+            style={styles.quickLink}
+            onPress={() => {
+              if (cId) router.push(`/(app)/admin/campaign-assignments/${cId}`);
+            }}
+            disabled={!cId}
+          >
+            <Text style={styles.quickLinkIcon}>🔗</Text>
+            <Text style={styles.quickLinkText}>Assignments</Text>
           </Pressable>
         </View>
 

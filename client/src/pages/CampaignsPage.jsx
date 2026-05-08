@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -151,6 +152,7 @@ export default function CampaignsPage() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [assigningCampaign, setAssigningCampaign] = useState(null);
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -279,7 +281,13 @@ export default function CampaignsPage() {
                       {c.isActive ? 'Active' : 'Archived'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => setAssigningCampaign(c)}
+                      className="mr-3 text-xs font-medium text-brand-700 hover:underline"
+                    >
+                      Assignments
+                    </button>
                     <button
                       onClick={() => setEditing(c)}
                       className="text-xs font-medium text-brand-700 hover:underline"
@@ -299,6 +307,13 @@ export default function CampaignsPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {assigningCampaign && (
+        <CampaignAssignmentsModal
+          campaign={assigningCampaign}
+          onClose={() => setAssigningCampaign(null)}
+        />
       )}
     </div>
   );

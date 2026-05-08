@@ -1,10 +1,18 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { api, getToken, setToken } from '../api/client.js';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  api,
+  getToken,
+  setToken,
+  getActiveOrgId,
+  setActiveOrgId,
+} from '../api/client.js';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [memberships, setMemberships] = useState([]);
+  const [activeOrgId, setActiveOrgIdState] = useState(getActiveOrgId());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -14,8 +22,15 @@ export function AuthProvider({ children }) {
       return;
     }
     api('/auth/me')
-      .then((res) => setUser(res.user))
-      .catch(() => setToken(null))
+      .then((res) => {
+        setUser(res.user);
+        setMemberships(res.memberships || []);
+      })
+      .catch(() => {
+        setToken(null);
+        setActiveOrgId(null);
+        setActiveOrgIdState(null);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -26,16 +41,51 @@ export function AuthProvider({ children }) {
     });
     setToken(res.token);
     setUser(res.user);
-    return res.user;
+    setMemberships(res.memberships || []);
+    if ((res.memberships || []).length === 1 && !res.user.isSuperAdmin) {
+      const onlyOrg = res.memberships[0].organizationId;
+      setActiveOrgId(onlyOrg);
+      setActiveOrgIdState(onlyOrg);
+    }
+    return res;
   }
 
   function logout() {
     setToken(null);
+    setActiveOrgId(null);
+    setActiveOrgIdState(null);
     setUser(null);
+    setMemberships([]);
   }
 
+  function switchOrg(orgId) {
+    setActiveOrgId(orgId);
+    setActiveOrgIdState(orgId);
+  }
+
+  const activeMembership = useMemo(
+    () => memberships.find((m) => m.organizationId === activeOrgId) || null,
+    [memberships, activeOrgId]
+  );
+
+  const isSuperAdmin = !!user?.isSuperAdmin;
+  const isOrgAdmin = isSuperAdmin || activeMembership?.role === 'admin';
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        memberships,
+        activeOrgId,
+        activeMembership,
+        isSuperAdmin,
+        isOrgAdmin,
+        loading,
+        login,
+        logout,
+        switchOrg,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

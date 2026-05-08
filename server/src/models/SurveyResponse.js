@@ -20,6 +20,12 @@ const locationSchema = new mongoose.Schema(
 
 const surveyResponseSchema = new mongoose.Schema(
   {
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: true,
+      index: true,
+    },
     campaignId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Campaign',

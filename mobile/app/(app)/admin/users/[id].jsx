@@ -88,20 +88,27 @@ export default function AdminUserDetail() {
   }, []);
 
   const usersQ = useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => api('/admin/users'),
+    queryKey: ['admin', 'memberships'],
+    queryFn: () => api('/admin/memberships'),
   });
 
-  const user = (usersQ.data?.users || []).find((u) => u.id === userId);
+  const member = (usersQ.data?.members || []).find((m) => m.user.id === userId);
+  const user = member
+    ? {
+        ...member.user,
+        role: member.role,
+        isActive: member.isActive && member.user.isActive,
+        addedAt: member.addedAt,
+      }
+    : null;
   const isSelf = currentUser?.id === userId;
 
-  // Form state — populated from user once loaded.
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
     email: '',
     phone: '',
-    role: 'user',
+    role: 'canvasser',
   });
 
   useEffect(() => {
@@ -111,7 +118,7 @@ export default function AdminUserDetail() {
       lastName: user.lastName || '',
       email: user.email || '',
       phone: user.phone || '',
-      role: user.role || 'user',
+      role: user.role || 'canvasser',
     });
   }, [user?.id, user?.firstName, user?.lastName, user?.email, user?.phone, user?.role]);
 
@@ -127,31 +134,41 @@ export default function AdminUserDetail() {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
   const statsQ = useQuery({
-    queryKey: ['admin', 'user-stats', userId, tz],
+    queryKey: ['admin', 'membership-stats', userId, tz],
     queryFn: () =>
-      api(`/admin/users/${userId}/stats?tz=${encodeURIComponent(tz)}`),
+      api(`/admin/memberships/${userId}/stats?tz=${encodeURIComponent(tz)}`),
     enabled: !!userId,
   });
 
   const activityQ = useQuery({
-    queryKey: ['admin', 'user-recent-activity', userId],
-    queryFn: () => api(`/admin/users/${userId}/recent-activity?limit=20`),
+    queryKey: ['admin', 'membership-recent-activity', userId],
+    queryFn: () => api(`/admin/memberships/${userId}/recent-activity?limit=20`),
     enabled: !!userId,
   });
 
   const saveProfile = useMutation({
     mutationFn: (body) =>
-      api(`/admin/users/${userId}`, { method: 'PATCH', body }),
+      api(`/admin/memberships/${userId}/user`, { method: 'PATCH', body }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
       flash('success', 'Profile updated.');
+    },
+    onError: (err) => flash('error', err.message),
+  });
+
+  const saveRole = useMutation({
+    mutationFn: (role) =>
+      api(`/admin/memberships/${userId}`, { method: 'PATCH', body: { role } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
+      flash('success', 'Role updated.');
     },
     onError: (err) => flash('error', err.message),
   });
 
   const resetPw = useMutation({
     mutationFn: (password) =>
-      api(`/admin/users/${userId}/password`, {
+      api(`/admin/memberships/${userId}/password`, {
         method: 'PATCH',
         body: { password },
       }),
@@ -166,12 +183,12 @@ export default function AdminUserDetail() {
   const toggleActive = useMutation({
     mutationFn: () =>
       api(
-        `/admin/users/${userId}/${user?.isActive ? 'deactivate' : 'reactivate'}`,
+        `/admin/memberships/${userId}/${user?.isActive ? 'deactivate' : 'reactivate'}`,
         { method: 'PATCH' }
       ),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
-      flash('success', user?.isActive ? 'Deactivated.' : 'Reactivated.');
+      qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
+      flash('success', user?.isActive ? 'Membership deactivated.' : 'Membership reactivated.');
     },
     onError: (err) => flash('error', err.message),
   });
@@ -198,22 +215,27 @@ export default function AdminUserDetail() {
     );
   }
 
-  const isDirty =
+  const isProfileDirty =
     form.firstName !== (user.firstName || '') ||
     form.lastName !== (user.lastName || '') ||
     form.email !== (user.email || '') ||
-    form.phone !== (user.phone || '') ||
-    form.role !== (user.role || 'user');
+    form.phone !== (user.phone || '');
+  const isRoleDirty = form.role !== (user.role || 'canvasser');
+  const isDirty = isProfileDirty || isRoleDirty;
 
   function onSave() {
     if (!isDirty) return;
-    const body = {};
-    if (form.firstName !== user.firstName) body.firstName = form.firstName;
-    if (form.lastName !== user.lastName) body.lastName = form.lastName;
-    if (form.email !== user.email) body.email = form.email;
-    if (form.phone !== (user.phone || '')) body.phone = form.phone;
-    if (form.role !== user.role) body.role = form.role;
-    saveProfile.mutate(body);
+    if (isProfileDirty) {
+      const body = {};
+      if (form.firstName !== user.firstName) body.firstName = form.firstName;
+      if (form.lastName !== user.lastName) body.lastName = form.lastName;
+      if (form.email !== user.email) body.email = form.email;
+      if (form.phone !== (user.phone || '')) body.phone = form.phone;
+      saveProfile.mutate(body);
+    }
+    if (isRoleDirty) {
+      saveRole.mutate(form.role);
+    }
   }
 
   function onResetPw() {
@@ -389,7 +411,7 @@ export default function AdminUserDetail() {
             ) : (
               <View style={styles.roleRow}>
                 {[
-                  { v: 'user', l: 'Canvasser' },
+                  { v: 'canvasser', l: 'Canvasser' },
                   { v: 'admin', l: 'Admin' },
                 ].map((opt) => {
                   const active = form.role === opt.v;
@@ -420,16 +442,16 @@ export default function AdminUserDetail() {
 
             <Pressable
               onPress={onSave}
-              disabled={!isDirty || saveProfile.isPending}
+              disabled={!isDirty || saveProfile.isPending || saveRole.isPending}
               style={[
                 styles.saveBtn,
                 {
                   opacity:
-                    isDirty && !saveProfile.isPending ? 1 : 0.5,
+                    isDirty && !saveProfile.isPending && !saveRole.isPending ? 1 : 0.5,
                 },
               ]}
             >
-              {saveProfile.isPending ? (
+              {saveProfile.isPending || saveRole.isPending ? (
                 <ActivityIndicator color={colors.textInverse} />
               ) : (
                 <Text style={styles.saveBtnText}>Save changes</Text>

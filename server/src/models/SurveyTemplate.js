@@ -18,6 +18,12 @@ const questionSchema = new mongoose.Schema(
 
 const surveyTemplateSchema = new mongoose.Schema(
   {
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: true,
+      index: true,
+    },
     name: { type: String, required: true },
     isActive: { type: Boolean, default: false, index: true },
     version: { type: Number, default: 1 },

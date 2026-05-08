@@ -1,16 +1,39 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
+import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
+import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { Household } from '../../models/Household.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 
 const router = Router();
-router.use(requireAuth);
+router.use(requireAuth, orgContext, requireOrgMember);
 
 const DOOR_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
+
+function activeOrgId(req) {
+  return req.activeOrg?._id;
+}
+
+function isOrgAdminOrSuper(req) {
+  if (req.user.isSuperAdmin) return true;
+  return req.activeMembership?.role === 'admin';
+}
+
+async function assertCampaignAccess(req, campaignId) {
+  if (!mongoose.isValidObjectId(campaignId)) return { error: 400, message: 'Invalid campaignId' };
+  const orgId = activeOrgId(req);
+  if (!orgId) return { error: 400, message: 'Active organization required' };
+  const campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId }).lean();
+  if (!campaign) return { error: 404, message: 'Campaign not found' };
+  if (isOrgAdminOrSuper(req)) return { campaign };
+  const assigned = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.user._id });
+  if (!assigned) return { error: 403, message: 'Not assigned to this campaign' };
+  return { campaign };
+}
 
 function haversineMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
@@ -23,10 +46,7 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Returns the date-specific stats for a single user/campaign in a [start, end)
-// window. Used by /today and /day so behavior stays identical between the
-// "today" sheet on the map and the day-detail screen.
-async function computeDailyStats({ userId, campaignId, start, end }) {
+async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
   const timestampQuery = { $gte: start, $lt: end };
   const submittedAtQuery = { $gte: start, $lt: end };
 
@@ -34,6 +54,7 @@ async function computeDailyStats({ userId, campaignId, start, end }) {
     CanvassActivity.find({
       userId,
       campaignId,
+      organizationId: orgId,
       timestamp: timestampQuery,
       actionType: { $in: DOOR_ACTIONS },
     })
@@ -43,9 +64,10 @@ async function computeDailyStats({ userId, campaignId, start, end }) {
     SurveyResponse.countDocuments({
       userId,
       campaignId,
+      organizationId: orgId,
       submittedAt: submittedAtQuery,
     }),
-    Campaign.findById(campaignId).select('surveyTemplateId').lean(),
+    Campaign.findOne({ _id: campaignId, organizationId: orgId }).select('surveyTemplateId').lean(),
   ]);
 
   const doorsKnocked = activities.length;
@@ -72,12 +94,16 @@ async function computeDailyStats({ userId, campaignId, start, end }) {
   let answerBreakdown = [];
   if (campaign?.surveyTemplateId) {
     const [template, todaysResponses] = await Promise.all([
-      SurveyTemplate.findById(campaign.surveyTemplateId)
+      SurveyTemplate.findOne({
+        _id: campaign.surveyTemplateId,
+        organizationId: orgId,
+      })
         .select('questions')
         .lean(),
       SurveyResponse.find({
         userId,
         campaignId,
+        organizationId: orgId,
         submittedAt: submittedAtQuery,
       })
         .select('answers')
@@ -134,17 +160,16 @@ async function computeDailyStats({ userId, campaignId, start, end }) {
 
 router.get('/today', async (req, res, next) => {
   try {
+    const orgId = activeOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'Active organization required' });
     const { campaignId, since } = req.query;
-    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+    if (!campaignId) {
       return res.status(400).json({ error: 'campaignId query param is required' });
     }
-    const cId = new mongoose.Types.ObjectId(campaignId);
+    const access = await assertCampaignAccess(req, campaignId);
+    if (access.error) return res.status(access.error).json({ error: access.message });
+    const cId = access.campaign._id;
 
-    // The mobile client sends `since` = start-of-today in its local timezone
-    // (as an absolute ISO timestamp). We use that directly. If absent or
-    // invalid, fall back to start-of-today in the server's TZ. We clamp the
-    // accepted window to [now-36h, now] so a malformed/forged value can't
-    // inflate counts beyond ~one day.
     const now = Date.now();
     const minStart = now - 36 * 60 * 60 * 1000;
     let start;
@@ -158,6 +183,7 @@ router.get('/today', async (req, res, next) => {
 
     const [stats, remaining] = await Promise.all([
       computeDailyStats({
+        orgId,
         userId: req.user._id,
         campaignId: cId,
         start,
@@ -165,6 +191,7 @@ router.get('/today', async (req, res, next) => {
       }),
       Household.countDocuments({
         campaignId: cId,
+        organizationId: orgId,
         isActive: true,
         status: 'unknocked',
       }),
@@ -176,15 +203,17 @@ router.get('/today', async (req, res, next) => {
   }
 });
 
-// Single-day stats. Mobile passes [since, until) bookends already anchored to
-// the canvasser's local midnight, so the server doesn't need to know about
-// timezones for this endpoint.
 router.get('/day', async (req, res, next) => {
   try {
+    const orgId = activeOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'Active organization required' });
     const { campaignId, since, until } = req.query;
-    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+    if (!campaignId) {
       return res.status(400).json({ error: 'campaignId query param is required' });
     }
+    const access = await assertCampaignAccess(req, campaignId);
+    if (access.error) return res.status(access.error).json({ error: access.message });
+
     const sinceMs = Date.parse(since);
     const untilMs = Date.parse(until);
     if (!Number.isFinite(sinceMs) || !Number.isFinite(untilMs) || untilMs <= sinceMs) {
@@ -195,8 +224,9 @@ router.get('/day', async (req, res, next) => {
     }
 
     const stats = await computeDailyStats({
+      orgId,
       userId: req.user._id,
-      campaignId: new mongoose.Types.ObjectId(campaignId),
+      campaignId: access.campaign._id,
       start: new Date(sinceMs),
       end: new Date(untilMs),
     });
@@ -207,28 +237,27 @@ router.get('/day', async (req, res, next) => {
   }
 });
 
-// All-time history for one user in one campaign, binned by day in the
-// canvasser's timezone. Returns: per-day summary rows, all-time totals,
-// personal best (max doors in a day), and current streak. Single user × single
-// campaign aggregation is bounded — even a long campaign produces a tractable
-// payload (~150 bytes per day × <1y = under ~50KB).
 router.get('/history', async (req, res, next) => {
   try {
+    const orgId = activeOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'Active organization required' });
     const { campaignId, tz } = req.query;
-    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+    if (!campaignId) {
       return res.status(400).json({ error: 'campaignId query param is required' });
     }
     if (!tz) {
       return res.status(400).json({ error: 'tz query param required (IANA name)' });
     }
-
+    const access = await assertCampaignAccess(req, campaignId);
+    if (access.error) return res.status(access.error).json({ error: access.message });
     const userId = req.user._id;
-    const cId = new mongoose.Types.ObjectId(campaignId);
+    const cId = access.campaign._id;
 
     const [activities, responses] = await Promise.all([
       CanvassActivity.find({
         userId,
         campaignId: cId,
+        organizationId: orgId,
         actionType: { $in: DOOR_ACTIONS },
       })
         .sort({ timestamp: 1 })
@@ -237,13 +266,12 @@ router.get('/history', async (req, res, next) => {
       SurveyResponse.find({
         userId,
         campaignId: cId,
+        organizationId: orgId,
       })
         .select('submittedAt')
         .lean(),
     ]);
 
-    // Validate the IANA name once by formatting `now` in it. Throws on bad
-    // input — caught and returned as a 400 below.
     let dayFormatter;
     try {
       dayFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -258,9 +286,6 @@ router.get('/history', async (req, res, next) => {
     }
     const dayStr = (date) => dayFormatter.format(date);
 
-    // Bin into a day map. Distance is computed per-day from the activity
-    // sequence within that day (so the chain doesn't carry across the
-    // overnight gap).
     const dayMap = new Map();
     function ensureDay(d) {
       if (!dayMap.has(d)) {
@@ -328,8 +353,6 @@ router.get('/history', async (req, res, next) => {
       }
     }
 
-    // Current streak — consecutive days with activity ending today (or yesterday
-    // if today hasn't had any yet, so the streak doesn't die at midnight).
     const activeDates = new Set(
       days.filter((d) => d.doorsKnocked > 0).map((d) => d.date)
     );

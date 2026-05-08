@@ -82,14 +82,19 @@ function missingRequired(raw) {
   return REQUIRED_HEADERS.filter((field) => !raw[field]);
 }
 
-export async function runImport({ buffer, filename, userId, campaignId }) {
+export async function runImport({ buffer, filename, userId, campaignId, organizationId }) {
   if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
     throw new Error('campaignId is required');
   }
-  const campaign = await Campaign.findById(campaignId);
+  const campaignFilter = { _id: campaignId };
+  if (organizationId) campaignFilter.organizationId = organizationId;
+  const campaign = await Campaign.findOne(campaignFilter);
   if (!campaign) throw new Error('Campaign not found');
 
+  const orgId = campaign.organizationId;
+
   const job = await ImportJob.create({
+    organizationId: orgId,
     campaignId: campaign._id,
     filename,
     uploadedBy: userId || null,
@@ -166,6 +171,7 @@ export async function runImport({ buffer, filename, userId, campaignId }) {
         filter: { campaignId: campaign._id, normalizedAddress: h.normalizedAddress },
         update: {
           $set: {
+            organizationId: orgId,
             addressLine1: h.addressLine1,
             addressLine2: h.addressLine2,
             city: h.city,
@@ -206,7 +212,7 @@ export async function runImport({ buffer, filename, userId, campaignId }) {
         updateOne: {
           filter: { stateVoterId: row.voter.stateVoterId },
           update: {
-            $set: { ...row.voter, householdId },
+            $set: { ...row.voter, householdId, organizationId: orgId },
             $setOnInsert: { surveyStatus: 'not_surveyed' },
           },
           upsert: true,

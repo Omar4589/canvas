@@ -1,16 +1,30 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { User } from '../../models/User.js';
+import { Membership } from '../../models/Membership.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 
 const router = Router();
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth, orgContext, requireOrgRole('admin'));
+
+function activeOrgId(req) {
+  return req.activeOrg?._id;
+}
+
+function ensureOrgScoped(req, res) {
+  if (!activeOrgId(req)) {
+    res.status(400).json({ error: 'Active organization required (X-Org-Id header)' });
+    return false;
+  }
+  return true;
+}
 
 function parseDateRange(req, field) {
   const { from, to } = req.query;
@@ -28,18 +42,26 @@ function parseDateRange(req, field) {
   return { [field]: range };
 }
 
-function campaignFilter(req) {
-  const { campaignId } = req.query;
-  if (campaignId && mongoose.isValidObjectId(campaignId)) {
-    return { campaignId: new mongoose.Types.ObjectId(campaignId) };
+function baseFilter(req) {
+  const orgId = activeOrgId(req);
+  const filter = { organizationId: orgId };
+  if (req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)) {
+    filter.campaignId = new mongoose.Types.ObjectId(req.query.campaignId);
   }
-  return {};
+  return filter;
 }
 
 router.get('/overview', async (req, res, next) => {
   try {
-    const cFilter = campaignFilter(req);
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const cFilter = baseFilter(req);
     const householdMatch = { isActive: true, ...cFilter };
+
+    const memberCountPromise = Membership.countDocuments({
+      organizationId: orgId,
+      isActive: true,
+    });
 
     const [
       households,
@@ -52,7 +74,7 @@ router.get('/overview', async (req, res, next) => {
     ] = await Promise.all([
       Household.countDocuments(householdMatch),
       Household.find(householdMatch, { _id: 1 }).lean(),
-      User.countDocuments({ isActive: true }),
+      memberCountPromise,
       SurveyResponse.countDocuments(cFilter),
       Household.countDocuments({ ...householdMatch, status: { $ne: 'unknocked' } }),
       Household.aggregate([
@@ -60,13 +82,16 @@ router.get('/overview', async (req, res, next) => {
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
-        ...(Object.keys(cFilter).length ? [{ $match: cFilter }] : []),
+        { $match: cFilter },
         { $group: { _id: '$actionType', count: { $sum: 1 } } },
       ]),
     ]);
 
     const voterIds = voterDocs.map((h) => h._id);
-    const voters = await Voter.countDocuments({ householdId: { $in: voterIds } });
+    const voters = await Voter.countDocuments({
+      householdId: { $in: voterIds },
+      organizationId: orgId,
+    });
 
     const canvass = {
       unknocked: 0,
@@ -97,13 +122,14 @@ router.get('/overview', async (req, res, next) => {
 
 router.get('/canvassers', async (req, res, next) => {
   try {
-    const cFilter = campaignFilter(req);
+    if (!ensureOrgScoped(req, res)) return;
+    const cFilter = baseFilter(req);
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter };
     const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter };
 
     const [surveyAgg, activityAgg, rangeAgg] = await Promise.all([
       SurveyResponse.aggregate([
-        ...(Object.keys(surveyMatch).length ? [{ $match: surveyMatch }] : []),
+        { $match: surveyMatch },
         {
           $group: {
             _id: '$userId',
@@ -113,7 +139,7 @@ router.get('/canvassers', async (req, res, next) => {
         },
       ]),
       CanvassActivity.aggregate([
-        ...(Object.keys(activityMatch).length ? [{ $match: activityMatch }] : []),
+        { $match: activityMatch },
         {
           $group: {
             _id: { userId: '$userId', actionType: '$actionType' },
@@ -122,10 +148,8 @@ router.get('/canvassers', async (req, res, next) => {
           },
         },
       ]),
-      // First/last activity per canvasser, across all action types. Powers
-      // the "shift range" UI — when did they start and finish.
       CanvassActivity.aggregate([
-        ...(Object.keys(activityMatch).length ? [{ $match: activityMatch }] : []),
+        { $match: activityMatch },
         {
           $group: {
             _id: '$userId',
@@ -172,9 +196,6 @@ router.get('/canvassers', async (req, res, next) => {
     for (const row of rangeAgg) {
       const u = ensure(row._id);
       u.firstActivityAt = row.firstActivityAt;
-      // The rangeAgg uses CanvassActivity which includes survey_submitted rows,
-      // so its lastActivityAt covers everything. Take the later of the two
-      // sources just in case.
       if (
         row.lastActivityAt &&
         (!u.lastActivityAt || row.lastActivityAt > u.lastActivityAt)
@@ -222,13 +243,15 @@ router.get('/canvassers', async (req, res, next) => {
 
 router.get('/surveys', async (req, res, next) => {
   try {
-    const cFilter = campaignFilter(req);
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const cFilter = baseFilter(req);
 
-    let templateFilter = {};
+    let templateFilter = { organizationId: orgId };
     if (cFilter.campaignId) {
-      const campaign = await Campaign.findById(cFilter.campaignId).lean();
+      const campaign = await Campaign.findOne({ _id: cFilter.campaignId, organizationId: orgId }).lean();
       if (campaign?.surveyTemplateId) {
-        templateFilter = { _id: campaign.surveyTemplateId };
+        templateFilter = { _id: campaign.surveyTemplateId, organizationId: orgId };
       } else {
         return res.json([]);
       }
@@ -237,7 +260,7 @@ router.get('/surveys', async (req, res, next) => {
     const [templates, responseCounts] = await Promise.all([
       SurveyTemplate.find(templateFilter, 'name version').sort({ updatedAt: -1 }).lean(),
       SurveyResponse.aggregate([
-        ...(Object.keys(cFilter).length ? [{ $match: cFilter }] : []),
+        { $match: cFilter },
         { $group: { _id: '$surveyTemplateId', count: { $sum: 1 } } },
       ]),
     ]);
@@ -261,17 +284,25 @@ router.get('/surveys', async (req, res, next) => {
 
 router.get('/survey-results', async (req, res, next) => {
   try {
-    const cFilter = campaignFilter(req);
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const cFilter = baseFilter(req);
     let { surveyTemplateId } = req.query;
 
     let template = null;
     if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
-      template = await SurveyTemplate.findById(surveyTemplateId).lean();
+      template = await SurveyTemplate.findOne({
+        _id: surveyTemplateId,
+        organizationId: orgId,
+      }).lean();
     }
     if (!template && cFilter.campaignId) {
-      const campaign = await Campaign.findById(cFilter.campaignId).lean();
+      const campaign = await Campaign.findOne({ _id: cFilter.campaignId, organizationId: orgId }).lean();
       if (campaign?.surveyTemplateId) {
-        template = await SurveyTemplate.findById(campaign.surveyTemplateId).lean();
+        template = await SurveyTemplate.findOne({
+          _id: campaign.surveyTemplateId,
+          organizationId: orgId,
+        }).lean();
       }
     }
     if (!template) {
@@ -345,7 +376,7 @@ router.get('/survey-results', async (req, res, next) => {
     let responseLookup = new Map();
     if (allResponseIds.size > 0) {
       const ids = Array.from(allResponseIds).map((id) => new mongoose.Types.ObjectId(id));
-      const responses = await SurveyResponse.find({ _id: { $in: ids } })
+      const responses = await SurveyResponse.find({ _id: { $in: ids }, organizationId: orgId })
         .populate('voterId', 'fullName party')
         .populate('householdId', 'addressLine1 city state')
         .populate('userId', 'firstName lastName')
@@ -424,6 +455,8 @@ router.get('/survey-results', async (req, res, next) => {
 
 router.get('/voters-by-answer', async (req, res, next) => {
   try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
     const { questionKey, option, surveyTemplateId } = req.query;
     if (!questionKey || !option) {
       return res.status(400).json({ error: 'questionKey and option are required' });
@@ -431,7 +464,7 @@ router.get('/voters-by-answer', async (req, res, next) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
     const dateRange = parseDateRange(req, 'submittedAt');
-    const cFilter = campaignFilter(req);
+    const cFilter = baseFilter(req);
     const filter = {
       ...dateRange,
       ...cFilter,
@@ -490,7 +523,9 @@ router.get('/voters-by-answer', async (req, res, next) => {
 
 router.get('/overlaps', async (req, res, next) => {
   try {
-    const cFilter = campaignFilter(req);
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const cFilter = baseFilter(req);
     const dateRange = parseDateRange(req, 'timestamp');
     const match = {
       ...cFilter,
@@ -498,9 +533,6 @@ router.get('/overlaps', async (req, res, next) => {
       actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'] },
     };
 
-    // Per-canvasser overwrite already guarantees one row per (canvasser, household).
-    // Group by household — any household with count > 1 has been touched by 2+
-    // distinct canvassers in this range.
     const overlaps = await CanvassActivity.aggregate([
       { $match: match },
       {
@@ -534,7 +566,7 @@ router.get('/overlaps', async (req, res, next) => {
 
     const [households, users] = await Promise.all([
       Household.find(
-        { _id: { $in: householdIds } },
+        { _id: { $in: householdIds }, organizationId: orgId },
         'addressLine1 addressLine2 city state zipCode location'
       ).lean(),
       User.find({ _id: { $in: userIds } }, 'firstName lastName email').lean(),
@@ -582,6 +614,7 @@ router.get('/overlaps', async (req, res, next) => {
 
 router.get('/canvassers/:userId/responses', async (req, res, next) => {
   try {
+    if (!ensureOrgScoped(req, res)) return;
     const { userId } = req.params;
     if (!mongoose.isValidObjectId(userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
@@ -589,7 +622,7 @@ router.get('/canvassers/:userId/responses', async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
     const skip = parseInt(req.query.skip, 10) || 0;
     const dateRange = parseDateRange(req, 'submittedAt');
-    const cFilter = campaignFilter(req);
+    const cFilter = baseFilter(req);
     const filter = {
       userId: new mongoose.Types.ObjectId(userId),
       ...dateRange,

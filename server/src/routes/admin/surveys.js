@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { orgContext } from '../../middleware/orgContext.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Campaign } from '../../models/Campaign.js';
 
 const router = Router();
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth, orgContext, requireOrgRole('admin'));
 
 const questionSchema = z.object({
   key: z.string().min(1),
@@ -23,11 +24,25 @@ const upsertSchema = z.object({
   questions: z.array(questionSchema).default([]),
 });
 
+function activeOrgId(req) {
+  return req.activeOrg?._id;
+}
+
+function ensureOrgScoped(req, res) {
+  if (!activeOrgId(req)) {
+    res.status(400).json({ error: 'Active organization required (X-Org-Id header)' });
+    return false;
+  }
+  return true;
+}
+
 router.get('/', async (req, res, next) => {
   try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
     const [surveys, campaigns] = await Promise.all([
-      SurveyTemplate.find().sort({ createdAt: -1 }).lean(),
-      Campaign.find({ surveyTemplateId: { $ne: null } })
+      SurveyTemplate.find({ organizationId: orgId }).sort({ createdAt: -1 }).lean(),
+      Campaign.find({ organizationId: orgId, surveyTemplateId: { $ne: null } })
         .select('name surveyTemplateId isActive')
         .lean(),
     ]);
@@ -50,9 +65,11 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
+    if (!ensureOrgScoped(req, res)) return;
     const data = upsertSchema.parse(req.body);
     const survey = await SurveyTemplate.create({
       ...data,
+      organizationId: activeOrgId(req),
       createdBy: req.user._id,
       version: 1,
     });
@@ -65,8 +82,12 @@ router.post('/', async (req, res, next) => {
 
 router.patch('/:surveyId', async (req, res, next) => {
   try {
+    if (!ensureOrgScoped(req, res)) return;
     const data = upsertSchema.partial().parse(req.body);
-    const existing = await SurveyTemplate.findById(req.params.surveyId);
+    const existing = await SurveyTemplate.findOne({
+      _id: req.params.surveyId,
+      organizationId: activeOrgId(req),
+    });
     if (!existing) return res.status(404).json({ error: 'Survey not found' });
 
     Object.assign(existing, data);

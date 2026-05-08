@@ -76,28 +76,28 @@ function Stat({ label, value }) {
   );
 }
 
-export default function UserProfileModal({ user, onClose }) {
+export default function UserProfileModal({ membership, onClose }) {
   const qc = useQueryClient();
   const { user: currentUser } = useAuth();
+  const user = membership.user;
   const isSelf = currentUser?.id === user?.id;
+  const membershipActive = !!membership.isActive;
 
   const [form, setForm] = useState({
     firstName: user.firstName || '',
     lastName: user.lastName || '',
     email: user.email || '',
     phone: user.phone || '',
-    role: user.role || 'user',
+    role: membership.role || 'canvasser',
   });
 
-  // Reset form when prop user changes (e.g., after a successful save the
-  // parent's `users` list re-renders with a refreshed user object).
   useEffect(() => {
     setForm({
       firstName: user.firstName || '',
       lastName: user.lastName || '',
       email: user.email || '',
       phone: user.phone || '',
-      role: user.role || 'user',
+      role: membership.role || 'canvasser',
     });
   }, [
     user.id,
@@ -105,7 +105,7 @@ export default function UserProfileModal({ user, onClose }) {
     user.lastName,
     user.email,
     user.phone,
-    user.role,
+    membership.role,
   ]);
 
   const [showResetPw, setShowResetPw] = useState(false);
@@ -127,31 +127,41 @@ export default function UserProfileModal({ user, onClose }) {
 
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const statsQ = useQuery({
-    queryKey: ['admin', 'user-stats', user.id, tz],
+    queryKey: ['admin', 'membership-stats', user.id, tz],
     queryFn: () =>
-      api(`/admin/users/${user.id}/stats?tz=${encodeURIComponent(tz)}`),
+      api(`/admin/memberships/${user.id}/stats?tz=${encodeURIComponent(tz)}`),
     enabled: !!user.id,
   });
 
   const activityQ = useQuery({
-    queryKey: ['admin', 'user-recent-activity', user.id],
-    queryFn: () => api(`/admin/users/${user.id}/recent-activity?limit=20`),
+    queryKey: ['admin', 'membership-recent-activity', user.id],
+    queryFn: () => api(`/admin/memberships/${user.id}/recent-activity?limit=20`),
     enabled: !!user.id,
   });
 
   const saveProfile = useMutation({
     mutationFn: (body) =>
-      api(`/admin/users/${user.id}`, { method: 'PATCH', body }),
+      api(`/admin/memberships/${user.id}/user`, { method: 'PATCH', body }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['memberships'] });
       flash('success', 'Profile updated.');
+    },
+    onError: (err) => flash('error', err.message),
+  });
+
+  const saveRole = useMutation({
+    mutationFn: (role) =>
+      api(`/admin/memberships/${user.id}`, { method: 'PATCH', body: { role } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['memberships'] });
+      flash('success', 'Role updated.');
     },
     onError: (err) => flash('error', err.message),
   });
 
   const resetPw = useMutation({
     mutationFn: (password) =>
-      api(`/admin/users/${user.id}/password`, {
+      api(`/admin/memberships/${user.id}/password`, {
         method: 'PATCH',
         body: { password },
       }),
@@ -166,33 +176,47 @@ export default function UserProfileModal({ user, onClose }) {
   const toggleActive = useMutation({
     mutationFn: () =>
       api(
-        `/admin/users/${user.id}/${user.isActive ? 'deactivate' : 'reactivate'}`,
+        `/admin/memberships/${user.id}/${membershipActive ? 'deactivate' : 'reactivate'}`,
         { method: 'PATCH' }
       ),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['users'] });
-      flash('success', user.isActive ? 'User deactivated.' : 'User reactivated.');
+      qc.invalidateQueries({ queryKey: ['memberships'] });
+      flash('success', membershipActive ? 'Membership deactivated.' : 'Membership reactivated.');
     },
     onError: (err) => flash('error', err.message),
   });
 
-  const isDirty =
+  const removeFromOrg = useMutation({
+    mutationFn: () => api(`/admin/memberships/${user.id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['memberships'] });
+      onClose();
+    },
+    onError: (err) => flash('error', err.message),
+  });
+
+  const isProfileDirty =
     form.firstName !== (user.firstName || '') ||
     form.lastName !== (user.lastName || '') ||
     form.email !== (user.email || '') ||
-    form.phone !== (user.phone || '') ||
-    form.role !== (user.role || 'user');
+    form.phone !== (user.phone || '');
 
-  function onSave(e) {
+  const isRoleDirty = form.role !== (membership.role || 'canvasser');
+
+  function onSaveProfile(e) {
     e.preventDefault();
-    if (!isDirty) return;
+    if (!isProfileDirty) return;
     const body = {};
     if (form.firstName !== user.firstName) body.firstName = form.firstName;
     if (form.lastName !== user.lastName) body.lastName = form.lastName;
     if (form.email !== user.email) body.email = form.email;
     if (form.phone !== (user.phone || '')) body.phone = form.phone;
-    if (form.role !== user.role) body.role = form.role;
     saveProfile.mutate(body);
+  }
+
+  function onSaveRole() {
+    if (!isRoleDirty) return;
+    saveRole.mutate(form.role);
   }
 
   function onResetPw(e) {
@@ -202,9 +226,19 @@ export default function UserProfileModal({ user, onClose }) {
   }
 
   function onToggleActive() {
-    const verb = user.isActive ? 'deactivate' : 'reactivate';
-    if (window.confirm(`Are you sure you want to ${verb} ${user.email}?`)) {
+    const verb = membershipActive ? 'deactivate' : 'reactivate';
+    if (window.confirm(`Are you sure you want to ${verb} this membership for ${user.email}?`)) {
       toggleActive.mutate();
+    }
+  }
+
+  function onRemove() {
+    if (
+      window.confirm(
+        `Remove ${user.email} from this organization? This also removes their campaign assignments here.`
+      )
+    ) {
+      removeFromOrg.mutate();
     }
   }
 
@@ -219,7 +253,6 @@ export default function UserProfileModal({ user, onClose }) {
         className="w-full max-w-2xl rounded-xl bg-white shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5">
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand-50 text-lg font-bold text-brand-700">
@@ -233,24 +266,29 @@ export default function UserProfileModal({ user, onClose }) {
               <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    user.role === 'admin'
+                    membership.role === 'admin'
                       ? 'bg-brand-50 text-brand-700'
                       : 'bg-gray-100 text-gray-700'
                   }`}
                 >
-                  {user.role === 'admin' ? 'Admin' : 'Canvasser'}
+                  {membership.role === 'admin' ? 'Admin' : 'Canvasser'}
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    user.isActive
+                    membershipActive && user.isActive
                       ? 'bg-green-100 text-green-700'
                       : 'bg-gray-100 text-gray-500'
                   }`}
                 >
-                  {user.isActive ? 'Active' : 'Inactive'}
+                  {membershipActive && user.isActive ? 'Active' : 'Inactive'}
                 </span>
+                {user.isSuperAdmin && (
+                  <span className="rounded-full bg-yellow-50 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-yellow-700">
+                    super admin
+                  </span>
+                )}
                 <span className="text-xs text-gray-500">
-                  Member since {formatDate(user.createdAt)}
+                  Joined org {formatDate(membership.addedAt)}
                 </span>
                 <span className="text-xs text-gray-400">·</span>
                 <span className="text-xs text-gray-500">
@@ -271,7 +309,6 @@ export default function UserProfileModal({ user, onClose }) {
           </button>
         </div>
 
-        {/* Inline feedback banner */}
         {feedback && (
           <div
             className={`px-6 py-2 text-sm ${
@@ -284,9 +321,8 @@ export default function UserProfileModal({ user, onClose }) {
           </div>
         )}
 
-        {/* Profile form */}
         <form
-          onSubmit={onSave}
+          onSubmit={onSaveProfile}
           className="border-b border-gray-200 px-6 py-5"
         >
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -332,14 +368,29 @@ export default function UserProfileModal({ user, onClose }) {
               className={inputCls}
             />
           </Field>
-          <Field label="Role" className="mt-3">
-            {isSelf ? (
-              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm italic text-gray-500">
-                You can&apos;t change your own role. Ask another admin.
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                {['user', 'admin'].map((r) => (
+          <div className="mt-4 flex justify-end">
+            <button
+              type="submit"
+              disabled={!isProfileDirty || saveProfile.isPending}
+              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50"
+            >
+              {saveProfile.isPending ? 'Saving…' : 'Save profile'}
+            </button>
+          </div>
+        </form>
+
+        <div className="border-b border-gray-200 px-6 py-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Role in this org
+          </h3>
+          {isSelf ? (
+            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm italic text-gray-500">
+              You can&apos;t change your own role. Ask another admin.
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="flex flex-1 gap-2">
+                {['canvasser', 'admin'].map((r) => (
                   <label
                     key={r}
                     className={`flex flex-1 cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm ${
@@ -360,23 +411,21 @@ export default function UserProfileModal({ user, onClose }) {
                   </label>
                 ))}
               </div>
-            )}
-          </Field>
-          <div className="mt-4 flex justify-end">
-            <button
-              type="submit"
-              disabled={!isDirty || saveProfile.isPending}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50"
-            >
-              {saveProfile.isPending ? 'Saving…' : 'Save changes'}
-            </button>
-          </div>
-        </form>
+              <button
+                type="button"
+                onClick={onSaveRole}
+                disabled={!isRoleDirty || saveRole.isPending}
+                className="rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+              >
+                {saveRole.isPending ? 'Saving…' : 'Save role'}
+              </button>
+            </div>
+          )}
+        </div>
 
-        {/* Activity stats */}
         <div className="border-b border-gray-200 px-6 py-5">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Activity (lifetime)
+            Activity (in this org)
           </h3>
           {statsQ.isLoading ? (
             <div className="text-sm text-gray-500">Loading…</div>
@@ -415,7 +464,6 @@ export default function UserProfileModal({ user, onClose }) {
           ) : null}
         </div>
 
-        {/* Recent activity */}
         <div className="border-b border-gray-200 px-6 py-5">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -479,7 +527,6 @@ export default function UserProfileModal({ user, onClose }) {
           )}
         </div>
 
-        {/* Account actions */}
         <div className="px-6 py-5">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
             Account
@@ -493,18 +540,28 @@ export default function UserProfileModal({ user, onClose }) {
               {showResetPw ? 'Cancel reset' : 'Reset password'}
             </button>
             {!isSelf && (
-              <button
-                type="button"
-                onClick={onToggleActive}
-                disabled={toggleActive.isPending}
-                className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
-                  user.isActive
-                    ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                    : 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'
-                }`}
-              >
-                {user.isActive ? 'Deactivate' : 'Reactivate'}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={onToggleActive}
+                  disabled={toggleActive.isPending}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                    membershipActive
+                      ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                      : 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'
+                  }`}
+                >
+                  {membershipActive ? 'Deactivate membership' : 'Reactivate membership'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  disabled={removeFromOrg.isPending}
+                  className="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+                >
+                  Remove from org
+                </button>
+              </>
             )}
           </div>
           {showResetPw && (

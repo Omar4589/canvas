@@ -1,10 +1,13 @@
 import { API_BASE_URL } from './config';
 import { getToken } from './auth';
+import { loadActiveOrgId } from './cache';
 
 export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   const token = await getToken();
+  const orgId = await loadActiveOrgId();
   const finalHeaders = { Accept: 'application/json', ...headers };
   if (token) finalHeaders.Authorization = `Bearer ${token}`;
+  if (orgId) finalHeaders['X-Org-Id'] = orgId;
 
   const init = { method, headers: finalHeaders };
   if (body !== undefined) {

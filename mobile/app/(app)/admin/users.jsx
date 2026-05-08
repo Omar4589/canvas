@@ -151,19 +151,28 @@ export default function AdminUsers() {
   const [sortPickerOpen, setSortPickerOpen] = useState(false);
 
   const usersQ = useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => api('/admin/users'),
+    queryKey: ['admin', 'memberships'],
+    queryFn: () => api('/admin/memberships'),
   });
 
   const createUser = useMutation({
-    mutationFn: (body) => api('/admin/users', { method: 'POST', body }),
+    mutationFn: (body) => api('/admin/memberships', { method: 'POST', body }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
       setShowCreate(false);
     },
   });
 
-  const users = usersQ.data?.users || [];
+  const users = useMemo(
+    () =>
+      (usersQ.data?.members || []).map((m) => ({
+        ...m.user,
+        role: m.role,
+        isActive: m.isActive && m.user.isActive,
+        addedAt: m.addedAt,
+      })),
+    [usersQ.data]
+  );
 
   const visibleUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -182,7 +191,7 @@ export default function AdminUsers() {
     else if (sortMode === 'name-desc')
       list.sort((a, b) => compareName(a, b, 'desc'));
     else if (sortMode === 'recent-joined')
-      list.sort((a, b) => compareDate(a, b, 'createdAt'));
+      list.sort((a, b) => compareDate(a, b, 'addedAt'));
     else if (sortMode === 'recent-active')
       list.sort((a, b) => compareDate(a, b, 'lastLoginAt'));
     return list;
@@ -228,9 +237,9 @@ export default function AdminUsers() {
             onPress={() => setRoleFilter('admin')}
           />
           <FilterPill
-            active={roleFilter === 'user'}
+            active={roleFilter === 'canvasser'}
             label="Canvassers"
-            onPress={() => setRoleFilter('user')}
+            onPress={() => setRoleFilter('canvasser')}
           />
           <View style={styles.filterDivider} />
           <FilterPill
@@ -379,7 +388,7 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('user');
+  const [role, setRole] = useState('canvasser');
 
   const valid =
     firstName.trim() && lastName.trim() && email.trim() && password.length >= 8;
@@ -446,7 +455,7 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
       <Text style={styles.formLabel}>Role</Text>
       <View style={styles.roleRow}>
         {[
-          { v: 'user', l: 'Canvasser' },
+          { v: 'canvasser', l: 'Canvasser' },
           { v: 'admin', l: 'Admin' },
         ].map((opt) => {
           const active = role === opt.v;

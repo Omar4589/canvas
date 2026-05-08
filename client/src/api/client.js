@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'canvass.token';
+const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -9,10 +10,21 @@ export function setToken(token) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+export function getActiveOrgId() {
+  return localStorage.getItem(ACTIVE_ORG_KEY);
+}
+
+export function setActiveOrgId(orgId) {
+  if (orgId) localStorage.setItem(ACTIVE_ORG_KEY, orgId);
+  else localStorage.removeItem(ACTIVE_ORG_KEY);
+}
+
 export async function api(path, { method = 'GET', body, headers = {}, formData } = {}) {
   const token = getToken();
+  const orgId = getActiveOrgId();
   const finalHeaders = { ...headers };
   if (token) finalHeaders.Authorization = `Bearer ${token}`;
+  if (orgId) finalHeaders['X-Org-Id'] = orgId;
 
   const init = { method, headers: finalHeaders };
 

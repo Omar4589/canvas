@@ -2,12 +2,17 @@ import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Redirect } from 'expo-router';
 import { useAuthToken, useAuthReady } from '../lib/authState';
-import { loadActiveCampaign, loadCurrentUser } from '../lib/cache';
+import {
+  loadActiveCampaign,
+  loadCurrentUser,
+  loadMemberships,
+  loadActiveOrgId,
+} from '../lib/cache';
 
 export default function Index() {
   const token = useAuthToken();
   const ready = useAuthReady();
-  const [boot, setBoot] = useState(undefined); // { user, campaign } | null
+  const [boot, setBoot] = useState(undefined);
 
   useEffect(() => {
     let mounted = true;
@@ -15,8 +20,20 @@ export default function Index() {
       setBoot(null);
       return;
     }
-    Promise.all([loadCurrentUser(), loadActiveCampaign()]).then(([user, campaign]) => {
-      if (mounted) setBoot({ user: user || null, campaign: campaign || null });
+    Promise.all([
+      loadCurrentUser(),
+      loadActiveCampaign(),
+      loadMemberships(),
+      loadActiveOrgId(),
+    ]).then(([user, campaign, memberships, activeOrgId]) => {
+      if (mounted) {
+        setBoot({
+          user: user || null,
+          campaign: campaign || null,
+          memberships: memberships || [],
+          activeOrgId: activeOrgId || null,
+        });
+      }
     });
     return () => {
       mounted = false;
@@ -32,7 +49,17 @@ export default function Index() {
   }
   if (!token) return <Redirect href="/login" />;
 
-  if (boot?.user?.role === 'admin') {
+  if (!boot?.activeOrgId) {
+    return <Redirect href="/(app)/select-org" />;
+  }
+
+  const activeMembership = boot.memberships.find(
+    (m) => m.organizationId === boot.activeOrgId
+  );
+  const role = activeMembership?.role;
+  const isSuperAdmin = !!boot?.user?.isSuperAdmin;
+
+  if (role === 'admin' || isSuperAdmin) {
     return <Redirect href="/(app)/admin" />;
   }
   if (!boot?.campaign) return <Redirect href="/(app)/campaigns" />;

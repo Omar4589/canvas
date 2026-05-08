@@ -10,6 +10,7 @@ export default function AppLayout() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="select-org" />
       <Stack.Screen name="campaigns" />
       <Stack.Screen name="map" />
       <Stack.Screen name="household/[id]" />

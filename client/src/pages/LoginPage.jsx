@@ -20,9 +20,20 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const user = await login(email, password);
-      if (user.role !== 'admin') {
-        setError('Only admin users can sign in to the dashboard.');
+      const res = await login(email, password);
+      const adminMemberships = (res.memberships || []).filter((m) => m.role === 'admin');
+      const canAccessConsole = res.user.isSuperAdmin || adminMemberships.length > 0;
+      if (!canAccessConsole) {
+        setError('You need an admin role on at least one organization to use the dashboard.');
+        return;
+      }
+      const memberships = res.memberships || [];
+      if (res.user.isSuperAdmin) {
+        navigate('/select-org', { replace: true });
+        return;
+      }
+      if (memberships.length > 1) {
+        navigate('/select-org', { replace: true });
         return;
       }
       navigate(from, { replace: true });

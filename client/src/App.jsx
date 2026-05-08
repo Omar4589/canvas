@@ -11,6 +11,8 @@ const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
 const PrivacyPolicyPage = lazy(() => import('./pages/PrivacyPolicyPage.jsx'));
+const SelectOrgPage = lazy(() => import('./pages/SelectOrgPage.jsx'));
+const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage.jsx'));
 
 function PageFallback() {
   return (
@@ -25,8 +27,16 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route
+          path="/select-org"
           element={
-            <ProtectedRoute role="admin">
+            <ProtectedRoute requireActiveOrg={false}>
+              <SelectOrgPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          element={
+            <ProtectedRoute requireOrgAdmin>
               <Layout />
             </ProtectedRoute>
           }
@@ -37,6 +47,7 @@ export default function App() {
           <Route path="/users" element={<UsersPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
           <Route path="/campaigns" element={<CampaignsPage />} />
+          <Route path="/organizations" element={<OrganizationsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
