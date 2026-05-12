@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import {
 import Logo from '../../../components/Logo';
 import PinIcon from '../../../components/PinIcon';
 import { formatRange } from '../../../lib/datetime';
+import { getConnectionRate, RATE_COLORS } from '../../../lib/rates';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 function startOfTodayISO() {
@@ -38,6 +39,35 @@ function StatTile({ pinStatus, value, label }) {
         <Text style={styles.statValue}>{value ?? '—'}</Text>
         <Text style={styles.statLabel}>{label}</Text>
       </View>
+    </View>
+  );
+}
+
+function TodayTile({ value, label, level }) {
+  const palette = level ? RATE_COLORS[level] : null;
+  return (
+    <View
+      style={[
+        styles.todayTile,
+        palette && { backgroundColor: palette.bg, borderColor: palette.bg },
+      ]}
+    >
+      <Text
+        style={[
+          styles.todayTileValue,
+          palette && { color: palette.fg },
+        ]}
+      >
+        {value ?? '—'}
+      </Text>
+      <Text
+        style={[
+          styles.todayTileLabel,
+          palette && { color: palette.fg },
+        ]}
+      >
+        {label}
+      </Text>
     </View>
   );
 }
@@ -138,6 +168,29 @@ export default function AdminHome() {
   const events = overviewQ.data?.events || {};
   const isLitDrop = activeCampaign?.type === 'lit_drop';
   const topCanvassers = (canvassersQ.data || []).slice(0, 5);
+
+  // Today's totals — sum across the canvasser leaderboard rows already fetched.
+  // canvassersQ is called with from=startOfTodayISO so rows reflect today only.
+  const todayTotals = useMemo(() => {
+    const rows = canvassersQ.data || [];
+    let doors = 0;
+    let surveys = 0;
+    let lit = 0;
+    for (const r of rows) {
+      doors += r.homesKnocked || 0;
+      surveys += r.surveysSubmitted || 0;
+      lit += r.litDropped || 0;
+    }
+    return { doors, surveys, lit };
+  }, [canvassersQ.data]);
+
+  const todayRate = isLitDrop
+    ? getConnectionRate(todayTotals.lit, todayTotals.doors)
+    : getConnectionRate(todayTotals.surveys, todayTotals.doors);
+
+  const overallRate = isLitDrop
+    ? getConnectionRate(events.litDropped || 0, totals.homesKnocked || 0)
+    : getConnectionRate(totals.surveysSubmitted || 0, totals.homesKnocked || 0);
   const activeCampaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
 
   return (
@@ -201,6 +254,31 @@ export default function AdminHome() {
             })}
           </View>
         )}
+
+        {/* Today */}
+        <View style={styles.statsCard}>
+          <Text style={styles.cardTitle}>Today</Text>
+          {canvassersQ.isLoading || overviewQ.isLoading ? (
+            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
+          ) : (
+            <View style={styles.todayRow}>
+              <TodayTile
+                value={todayTotals.doors.toLocaleString()}
+                label="Doors knocked"
+              />
+              <TodayTile
+                value={todayRate?.value}
+                label={isLitDrop ? 'Lit drop rate' : 'Survey rate'}
+                level={todayRate?.level}
+              />
+              <TodayTile
+                value={overallRate?.value}
+                label={isLitDrop ? 'Overall lit rate' : 'Overall connection'}
+                level={overallRate?.level}
+              />
+            </View>
+          )}
+        </View>
 
         {/* Stats */}
         <View style={styles.statsCard}>
@@ -410,6 +488,34 @@ const styles = StyleSheet.create({
   },
   statValue: { ...type.h2, fontSize: 20, lineHeight: 22 },
   statLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
+
+  todayRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  todayTile: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    alignItems: 'center',
+  },
+  todayTileValue: {
+    ...type.h2,
+    fontSize: 20,
+    fontVariant: ['tabular-nums'],
+    color: colors.textPrimary,
+  },
+  todayTileLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    fontWeight: '600',
+    marginTop: 2,
+    textAlign: 'center',
+  },
 
   emptyText: { ...type.caption, paddingVertical: spacing.md },
 

@@ -53,6 +53,17 @@ export default function AdminLayout() {
       <Stack.Screen name="canvassers" />
       <Stack.Screen name="overlaps" />
       <Stack.Screen name="campaign-assignments/[campaignId]" />
+      <Stack.Screen name="canvasser/[id]/index" />
+      <Stack.Screen name="canvasser/[id]/days" />
+      <Stack.Screen name="canvasser/[id]/day/[date]" />
+      <Stack.Screen name="canvasser/[id]/activity" />
+      <Stack.Screen name="canvasser/[id]/households" />
+      <Stack.Screen name="canvasser/[id]/voters" />
+      <Stack.Screen name="canvasser/[id]/answers" />
+      <Stack.Screen name="canvasser/[id]/notes" />
+      <Stack.Screen name="canvasser/[id]/map" />
+      <Stack.Screen name="canvasser/[id]/quality" />
+      <Stack.Screen name="canvasser/compare" />
     </Stack>
   );
 }

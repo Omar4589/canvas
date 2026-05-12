@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { loadActiveCampaign } from '../../lib/cache';
+import { getConnectionRate, RATE_COLORS } from '../../lib/rates';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
 function getLocalDateStr(date = new Date()) {
@@ -48,24 +49,6 @@ function formatBestDate(yyyymmdd) {
 function metersToMiles(m) {
   return ((m || 0) * 0.000621371).toFixed(1);
 }
-
-// Connection rate tiers — green ≥20% (good), amber 10–19% (caution),
-// red <10% (low). Returns null if no doors knocked yet.
-function getConnectionRate(surveys, doorsKnocked) {
-  if (!doorsKnocked) return null;
-  const pct = Math.round(((surveys || 0) / doorsKnocked) * 100);
-  let level;
-  if (pct >= 20) level = 'good';
-  else if (pct >= 10) level = 'caution';
-  else level = 'low';
-  return { value: `${pct}%`, level };
-}
-
-const RATE_COLORS = {
-  good: { bg: colors.successBg, fg: colors.success },
-  caution: { bg: colors.warnBg, fg: '#92400E' },
-  low: { bg: colors.dangerBg, fg: colors.danger },
-};
 
 function StatCell({ value, label }) {
   return (

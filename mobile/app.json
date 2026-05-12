@@ -6,9 +6,11 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "icon": "./assets/AppIcons/appstore.png",
     "ios": {
       "bundleIdentifier": "com.canvassapp.mobile",
       "supportsTablet": false,
+      "icon": "./assets/AppIcons/appstore.png",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Doorline needs your location to log when you knock on a door, so admins can verify field activity.",
         "ITSAppUsesNonExemptEncryption": false
@@ -17,6 +19,7 @@
     "android": {
       "package": "com.canvassapp.mobile",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/AppIcons/appstore.png",
         "backgroundColor": "#ffffff"
       },
       "permissions": [
@@ -38,7 +41,8 @@
         {
           "RNMapboxMapsImpl": "mapbox"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "apiBaseUrl": "http://localhost:4000",
