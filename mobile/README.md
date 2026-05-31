@@ -128,7 +128,7 @@ Same as preview but with `--profile production`. EAS auto-increments the version
 |---|---|
 | `app/_layout.jsx` | Auth gate, providers |
 | `app/login.jsx` | Login (token in SecureStore) |
-| `app/(app)/map.jsx` | Mapbox map, all geocoded households as a single GeoJSON ShapeSource + CircleLayer |
+| `app/(app)/map.jsx` | Mapbox map, all households as a single GeoJSON ShapeSource + CircleLayer + SymbolLayer |
 | `app/(app)/household/[id].jsx` | Voter list + Not Home / Wrong Address |
 | `app/(app)/voter/[id]/survey.jsx` | Voter-level survey |
 | `lib/offlineQueue.js` | AsyncStorage queue + flush, marks `wasOfflineSubmission: true` |

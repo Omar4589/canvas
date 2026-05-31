@@ -1,6 +1,6 @@
 # Canvass App
 
-Internal door-to-door canvassing system. One campaign, one admin, ~3 canvassers.
+Internal door-to-door canvassing system. Multi-tenant: each organization runs its own campaigns with its own admins and canvassers, under a super-admin tier. (Originally built for a single campaign with one admin and ~3 canvassers.)
 
 ## Repo layout
 
@@ -65,13 +65,10 @@ heroku config:set \
   NODE_ENV=production \
   MONGODB_URI='mongodb+srv://USER:PASS@cluster0.xxxxx.mongodb.net/canvass-app?retryWrites=true&w=majority' \
   JWT_SECRET="$(openssl rand -hex 48)" \
-  MAPBOX_SECRET_TOKEN='sk.xxxxx' \
-  CENSUS_BENCHMARK=Public_AR_Current
+  MAPBOX_PUBLIC_TOKEN='pk.xxxxx'
 ```
 
-`MAPBOX_SECRET_TOKEN` is the runtime token used by the server when it falls back to Mapbox geocoding. The Mapbox **download** token (different — `RNMAPBOX_MAPS_DOWNLOAD_TOKEN`) is only needed when *building the mobile app*, not when running the server.
-
-You can use the same token for both if it has the right scopes, but they serve different purposes.
+`MAPBOX_PUBLIC_TOKEN` (a `pk.*` token) is what the server hands to the admin dashboard to render Mapbox map tiles. The Mapbox **download** token (different — `RNMAPBOX_MAPS_DOWNLOAD_TOKEN`) is only needed when *building the mobile app*, not when running the server.
 
 ### Deploy
 
@@ -104,8 +101,7 @@ Visit `https://canvass-app.herokuapp.com` to log in.
 
 1. Open the deployed admin dashboard.
 2. Sign in.
-3. Go to CSV Import → upload your `Target-Universe-HD-64.csv`.
-4. Geocoding → Run Census on pending → Mapbox fallback on failed.
+3. Go to CSV Import → upload your `Target-Universe-HD-64.csv` (the CSV must include `p_Latitude` / `p_Longitude` columns; rows without coordinates are rejected).
 
 (Alternatively, do the upload locally against the prod Mongo URI if you trust the data — but the dashboard works fine.)
 
@@ -135,9 +131,7 @@ eas submit --profile production --platform android --latest  # uploads to Play I
 |---|---|
 | Auth + role middleware | ✅ |
 | CSV import (upsert by State Voter ID) | ✅ tested with real CSV: 8,668 voters / 5,840 households / 0 errors |
-| Census geocoding | ✅ 5,449 matched on real data |
-| Mapbox fallback | ✅ +390 → 99.98% coverage |
-| Admin dashboard: login, dashboard, import, geocoding, users, **surveys** | ✅ |
+| Admin dashboard: login, dashboard, import, campaigns, users, **surveys** | ✅ |
 | Mobile API (bootstrap, household actions, voter survey) | ✅ |
 | Mobile app: login, map, household, voter survey, offline queue | ✅ code complete, needs phone |
 | Heroku one-process deploy + monorepo build | ✅ smoke-tested locally in NODE_ENV=production |
