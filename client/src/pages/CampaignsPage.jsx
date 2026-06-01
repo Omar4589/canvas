@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
 
@@ -282,6 +283,12 @@ export default function CampaignsPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <Link
+                      to={`/dashboard/${c._id}`}
+                      className="mr-3 text-xs font-medium text-brand-700 hover:underline"
+                    >
+                      View data
+                    </Link>
                     <button
                       onClick={() => setAssigningCampaign(c)}
                       className="mr-3 text-xs font-medium text-brand-700 hover:underline"

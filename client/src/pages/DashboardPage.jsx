@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
@@ -8,7 +9,6 @@ import CanvasserTable from '../components/CanvasserTable.jsx';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.jsx';
 import VoterHighlights from '../components/VoterHighlights.jsx';
-import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -29,18 +29,30 @@ function SectionHeading({ title, right }) {
 }
 
 export default function DashboardPage() {
+  const { campaignId } = useParams();
+  const navigate = useNavigate();
   const [rangeId, setRangeId] = useState('all');
   const dateRange = useMemo(() => rangeFromId(rangeId), [rangeId]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [selectedCanvasser, setSelectedCanvasser] = useState(null);
 
-  const {
-    campaignId,
-    setCampaignId,
-    campaigns,
-    selected: selectedCampaign,
-    isLoading: campaignsLoading,
-  } = useCampaignSelection();
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+    staleTime: 60 * 1000,
+  });
+
+  const campaigns = campaignsQ.data?.campaigns || [];
+  const campaignsLoading = campaignsQ.isLoading;
+  const current =
+    campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
+  const selectedCampaign = current || null;
+  const activeCampaigns = campaigns.filter((c) => c.isActive);
+  // Active campaigns plus the current one (even when archived) for the switcher.
+  const switcherCampaigns =
+    current && current.isActive === false
+      ? [...activeCampaigns, current]
+      : activeCampaigns;
 
   const overviewQ = useQuery({
     queryKey: ['reports', 'overview', campaignId],
@@ -108,38 +120,78 @@ export default function DashboardPage() {
     ? Math.round((100 * (totals.homesKnocked || 0)) / totals.households)
     : 0;
 
+  // Guard: missing/falsy campaign id, or an id that resolves to no campaign.
+  if (!campaignId || (!campaignsLoading && !current)) {
+    return (
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
+        <h1 className="text-xl font-semibold text-gray-900">
+          {!campaignId ? 'No campaign selected' : 'Campaign not found'}
+        </h1>
+        <p className="text-sm text-gray-600">
+          Pick a campaign from the Overview to view its dashboard.
+        </p>
+        <Link
+          to="/"
+          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+        >
+          Go to Overview
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Overview</h1>
+          <Link
+            to="/"
+            className="text-sm font-medium text-brand-700 hover:underline"
+          >
+            ‹ Overview
+          </Link>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-900">
+            {current?.name || 'Dashboard'}
+          </h1>
           {selectedCampaign && (
             <div className="mt-1 text-sm text-gray-600">
-              {selectedCampaign.name}{' '}
-              <span className="text-gray-400">·</span>{' '}
               {selectedCampaign.type === 'survey' ? 'Survey' : 'Lit drop'}{' '}
               <span className="text-gray-400">·</span> {selectedCampaign.state}
             </div>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <CampaignSelector
-            campaignId={campaignId}
-            onChange={setCampaignId}
-            campaigns={campaigns}
-            isLoading={campaignsLoading}
-          />
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              Campaign
+            </span>
+            <select
+              value={campaignId}
+              onChange={(e) => navigate('/dashboard/' + e.target.value)}
+              disabled={campaignsLoading}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            >
+              {!switcherCampaigns.some((c) => String(c._id) === String(campaignId)) && (
+                <option value={campaignId || ''} hidden>
+                  {campaignsLoading ? 'Loading…' : current?.name || 'Select campaign'}
+                </option>
+              )}
+              {switcherCampaigns.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.name} ({c.type === 'survey' ? 'Survey' : 'Lit drop'})
+                  {c.isActive === false ? ' · Archived' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
           <DateRangeSelector value={rangeId} onChange={setRangeId} />
         </div>
       </div>
 
-      {!campaignId && !campaignsLoading && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          No active campaign selected. Create one on the{' '}
-          <a href="/campaigns" className="underline">
-            Campaigns
-          </a>{' '}
-          page.
+      {current && current.isActive === false && (
+        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          This campaign is archived — data is read-only. Reactivate it from
+          Campaigns to resume canvassing.
         </div>
       )}
 

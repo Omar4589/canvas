@@ -195,6 +195,193 @@ router.get('/overview', async (req, res, next) => {
   }
 });
 
+// Cross-campaign rollup: one row per campaign plus a cumulative total. Scope by
+// active/archived/all campaigns. Door-days are deduped per household per day.
+router.get('/campaign-rollup', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const organizationId = activeOrgId(req);
+    const scope = req.query.scope || 'active';
+
+    const filter = { organizationId };
+    if (scope === 'active') filter.isActive = true;
+    else if (scope === 'archived') filter.isActive = false;
+
+    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1 }).lean();
+    const ids = campaigns.map((c) => c._id);
+
+    if (ids.length === 0) {
+      return res.json({
+        scope,
+        cumulative: {
+          campaigns: 0,
+          households: 0,
+          homesKnocked: 0,
+          knockedPct: 0,
+          doorDays: 0,
+          surveysSubmitted: 0,
+          litDropped: 0,
+          activeCanvassers: 0,
+          lastActivityAt: null,
+        },
+        campaigns: [],
+      });
+    }
+
+    const tz = tzOf(req);
+    const match = { organizationId, campaignId: { $in: ids } };
+
+    const [coverageAgg, eventAgg, doorDayAgg, canvasserAgg, cumulativeCanvassers] =
+      await Promise.all([
+        Household.aggregate([
+          { $match: { organizationId, campaignId: { $in: ids }, isActive: true } },
+          {
+            $group: {
+              _id: { campaignId: '$campaignId', status: '$status' },
+              count: { $sum: 1 },
+            },
+          },
+        ]),
+        CanvassActivity.aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: { campaignId: '$campaignId', actionType: '$actionType' },
+              count: { $sum: 1 },
+            },
+          },
+        ]),
+        // Door-days bucket by each campaign's own timeZone (parity with the
+        // detailed dashboard's resolveDayTz), falling back to tz for campaigns
+        // without one. A single tz can't be right across mixed-timezone campaigns.
+        CanvassActivity.aggregate([
+          { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },
+          {
+            $lookup: {
+              from: Campaign.collection.name,
+              localField: 'campaignId',
+              foreignField: '_id',
+              as: 'campaign',
+            },
+          },
+          { $set: { dayTz: { $ifNull: [{ $arrayElemAt: ['$campaign.timeZone', 0] }, tz] } } },
+          {
+            $group: {
+              _id: {
+                campaignId: '$campaignId',
+                householdId: '$householdId',
+                day: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: '$dayTz' } },
+              },
+            },
+          },
+          { $group: { _id: '$_id.campaignId', doorDays: { $sum: 1 } } },
+        ]),
+        CanvassActivity.aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: '$campaignId',
+              users: { $addToSet: '$userId' },
+              last: { $max: '$timestamp' },
+            },
+          },
+          { $project: { activeCanvassers: { $size: '$users' }, last: 1 } },
+        ]),
+        CanvassActivity.distinct('userId', match),
+      ]);
+
+    const byCampaign = new Map();
+    for (const c of campaigns) {
+      byCampaign.set(String(c._id), {
+        households: 0,
+        homesKnocked: 0,
+        coverage: {
+          unknocked: 0,
+          not_home: 0,
+          surveyed: 0,
+          wrong_address: 0,
+          lit_dropped: 0,
+        },
+        surveysSubmitted: 0,
+        litDropped: 0,
+        doorDays: 0,
+        activeCanvassers: 0,
+        lastActivityAt: null,
+      });
+    }
+
+    for (const r of coverageAgg) {
+      const c = byCampaign.get(String(r._id.campaignId));
+      if (!c) continue;
+      c.households += r.count;
+      if (r._id.status !== 'unknocked') c.homesKnocked += r.count;
+      if (r._id.status in c.coverage) c.coverage[r._id.status] = r.count;
+    }
+    for (const r of eventAgg) {
+      const c = byCampaign.get(String(r._id.campaignId));
+      if (!c) continue;
+      if (r._id.actionType === 'survey_submitted') c.surveysSubmitted = r.count;
+      else if (r._id.actionType === 'lit_dropped') c.litDropped = r.count;
+    }
+    for (const r of doorDayAgg) {
+      const c = byCampaign.get(String(r._id));
+      if (!c) continue;
+      c.doorDays = r.doorDays;
+    }
+    for (const r of canvasserAgg) {
+      const c = byCampaign.get(String(r._id));
+      if (!c) continue;
+      c.activeCanvassers = r.activeCanvassers;
+      c.lastActivityAt = r.last;
+    }
+
+    const rows = campaigns
+      .map((campaign) => {
+        const c = byCampaign.get(String(campaign._id));
+        return {
+          id: String(campaign._id),
+          name: campaign.name,
+          type: campaign.type,
+          isActive: campaign.isActive,
+          households: c.households,
+          homesKnocked: c.homesKnocked,
+          knockedPct: c.households > 0 ? Math.round((c.homesKnocked / c.households) * 100) : 0,
+          doorDays: c.doorDays,
+          surveysSubmitted: c.surveysSubmitted,
+          litDropped: c.litDropped,
+          activeCanvassers: c.activeCanvassers,
+          lastActivityAt: c.lastActivityAt,
+          coverage: c.coverage,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const cumulative = {
+      campaigns: ids.length,
+      households: rows.reduce((acc, r) => acc + r.households, 0),
+      homesKnocked: rows.reduce((acc, r) => acc + r.homesKnocked, 0),
+      knockedPct: 0,
+      doorDays: rows.reduce((acc, r) => acc + r.doorDays, 0),
+      surveysSubmitted: rows.reduce((acc, r) => acc + r.surveysSubmitted, 0),
+      litDropped: rows.reduce((acc, r) => acc + r.litDropped, 0),
+      activeCanvassers: cumulativeCanvassers.length,
+      lastActivityAt: rows.reduce(
+        (acc, r) =>
+          r.lastActivityAt && (!acc || r.lastActivityAt > acc) ? r.lastActivityAt : acc,
+        null
+      ),
+    };
+    cumulative.knockedPct =
+      cumulative.households > 0
+        ? Math.round((cumulative.homesKnocked / cumulative.households) * 100)
+        : 0;
+
+    res.json({ scope, cumulative, campaigns: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/canvassers', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;

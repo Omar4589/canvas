@@ -23,6 +23,10 @@ router.get('/platform-overview', async (req, res, next) => {
     const since = new Date(Date.now() - FIFTEEN_MIN_MS);
     const todayStart = startOfTodayUTC();
 
+    // Platform-wide "active" filter: only count activity tied to active campaigns,
+    // matching the campaign COUNT aggregation which already filters isActive:true.
+    const activeCampaignIds = await Campaign.distinct('_id', { isActive: true });
+
     const [
       orgsAgg,
       usersAgg,
@@ -48,12 +52,15 @@ router.get('/platform-overview', async (req, res, next) => {
           },
         },
       ]),
-      CanvassActivity.distinct('userId', { timestamp: { $gte: since } }),
+      CanvassActivity.distinct('userId', {
+        timestamp: { $gte: since },
+        campaignId: { $in: activeCampaignIds },
+      }),
       Campaign.aggregate([
         { $group: { _id: '$isActive', count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
-        { $match: { timestamp: { $gte: todayStart } } },
+        { $match: { timestamp: { $gte: todayStart }, campaignId: { $in: activeCampaignIds } } },
         { $group: { _id: '$actionType', count: { $sum: 1 } } },
       ]),
       Organization.find().sort({ createdAt: -1 }).lean(),
@@ -66,11 +73,12 @@ router.get('/platform-overview', async (req, res, next) => {
         { $group: { _id: '$organizationId', count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
-        { $match: { timestamp: { $gte: since } } },
+        { $match: { timestamp: { $gte: since }, campaignId: { $in: activeCampaignIds } } },
         { $group: { _id: { org: '$organizationId', user: '$userId' } } },
         { $group: { _id: '$_id.org', count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
+        { $match: { campaignId: { $in: activeCampaignIds } } },
         { $group: { _id: '$organizationId', last: { $max: '$timestamp' } } },
       ]),
     ]);

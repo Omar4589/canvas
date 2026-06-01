@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,8 +15,8 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
-import { loadActiveCampaign } from '../../../lib/cache';
 import { formatRange } from '../../../lib/datetime';
+import CampaignChip from '../../../components/CampaignChip';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
 import DateRangeBar from '../../../components/DateRangeBar';
@@ -73,10 +73,6 @@ export default function AdminCanvassers() {
 
   const [compareMode, setCompareMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
-
-  useEffect(() => {
-    loadActiveCampaign().then((c) => setCampaign(c || null));
-  }, []);
 
   const cId = campaign?.id;
 
@@ -210,11 +206,11 @@ export default function AdminCanvassers() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Admin</Text>
-        </Pressable>
         <Text style={styles.headerTitle}>Canvassers</Text>
-        <View style={{ width: 80 }} />
+      </View>
+
+      <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>
+        <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
 
       <DateRangeBar value={range} onChange={setRange} />

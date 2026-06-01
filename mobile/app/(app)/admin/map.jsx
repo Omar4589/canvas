@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
+import CampaignChip from '../../../components/CampaignChip';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
@@ -182,12 +183,10 @@ export default function AdminMap() {
   if (!campaign) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={styles.errorText}>
-          No campaign selected. Pick one from the admin home.
-        </Text>
-        <Pressable onPress={() => router.back()} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>Back</Text>
-        </Pressable>
+        <View style={{ width: '100%', paddingHorizontal: spacing.lg, marginBottom: spacing.lg }}>
+          <CampaignChip value={campaign} onChange={setCampaign} />
+        </View>
+        <Text style={styles.errorText}>No active campaign yet.</Text>
       </SafeAreaView>
     );
   }
@@ -264,13 +263,9 @@ export default function AdminMap() {
       {/* Top bar */}
       <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
         <View style={styles.topBar}>
-          <Pressable onPress={() => router.back()} style={styles.topBarLeft} hitSlop={8}>
-            <Text style={styles.back}>‹ Admin</Text>
-          </Pressable>
-          <Text style={styles.topBarTitle} numberOfLines={1}>
-            {campaign.name}
-          </Text>
-          <View style={{ width: 80 }} />
+          <View style={{ flex: 1 }}>
+            <CampaignChip value={campaign} onChange={setCampaign} />
+          </View>
         </View>
 
         <View style={styles.subBar}>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,385 +9,170 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
-import { signOut } from '../../../lib/authState';
-import {
-  loadCurrentUser,
-  loadActiveCampaign,
-  saveActiveCampaign,
-  clearBootstrap,
-  clearActiveOrgId,
-} from '../../../lib/cache';
+import { loadCurrentUser } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
-import PinIcon from '../../../components/PinIcon';
-import { formatRange } from '../../../lib/datetime';
-import { getConnectionRate, RATE_COLORS } from '../../../lib/rates';
+import KpiGrid from '../../../components/KpiGrid';
+import SectionHeader from '../../../components/SectionHeader';
+import { timeAgo } from '../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
-function startOfTodayISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
+function fmt(n) {
+  return n == null ? '—' : Number(n).toLocaleString();
 }
 
-function StatTile({ pinStatus, value, label }) {
+function CampaignCard({ campaign, onPress }) {
+  const c = campaign;
+  const isLitDrop = c.type === 'lit_drop';
   return (
-    <View style={styles.statTile}>
-      <PinIcon status={pinStatus} size={26} />
-      <View style={{ marginLeft: spacing.sm }}>
-        <Text style={styles.statValue}>{value ?? '—'}</Text>
-        <Text style={styles.statLabel}>{label}</Text>
-      </View>
-    </View>
-  );
-}
-
-function TodayTile({ value, label, level }) {
-  const palette = level ? RATE_COLORS[level] : null;
-  return (
-    <View
-      style={[
-        styles.todayTile,
-        palette && { backgroundColor: palette.bg, borderColor: palette.bg },
-      ]}
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.campaignCard, pressed && { opacity: 0.85 }]}
     >
-      <Text
-        style={[
-          styles.todayTileValue,
-          palette && { color: palette.fg },
-        ]}
-      >
-        {value ?? '—'}
+      <View style={styles.campaignCardHead}>
+        <Text style={styles.campaignName} numberOfLines={1}>
+          {c.name}
+        </Text>
+        <View style={[styles.typePill, isLitDrop ? styles.typePillLit : styles.typePillSurvey]}>
+          <Text style={[styles.typePillText, isLitDrop ? styles.typePillTextLit : styles.typePillTextSurvey]}>
+            {isLitDrop ? 'Lit drop' : 'Survey'}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.campaignStatsRow}>
+        <View style={styles.campaignStat}>
+          <Text style={styles.campaignStatValue}>{fmt(c.households)}</Text>
+          <Text style={styles.campaignStatLabel}>Households</Text>
+        </View>
+        <View style={styles.campaignStat}>
+          <Text style={styles.campaignStatValue}>{c.knockedPct ?? 0}%</Text>
+          <Text style={styles.campaignStatLabel}>Knocked</Text>
+        </View>
+        <View style={styles.campaignStat}>
+          <Text style={styles.campaignStatValue}>{fmt(isLitDrop ? c.litDropped : c.surveysSubmitted)}</Text>
+          <Text style={styles.campaignStatLabel}>{isLitDrop ? 'Lit drops' : 'Surveys'}</Text>
+        </View>
+        <View style={styles.campaignStat}>
+          <Text style={styles.campaignStatValue}>{fmt(c.activeCanvassers)}</Text>
+          <Text style={styles.campaignStatLabel}>Canvassers</Text>
+        </View>
+      </View>
+      <Text style={styles.campaignFoot}>
+        {c.lastActivityAt ? `Last activity ${timeAgo(c.lastActivityAt)}` : 'No activity yet'}
+        {'   ›'}
       </Text>
-      <Text
-        style={[
-          styles.todayTileLabel,
-          palette && { color: palette.fg },
-        ]}
-      >
-        {label}
-      </Text>
-    </View>
+    </Pressable>
   );
 }
 
-export default function AdminHome() {
+export default function AdminOverview() {
   const router = useRouter();
-  const qc = useQueryClient();
   const [user, setUser] = useState(null);
-  const [activeCampaign, setActiveCampaign] = useState(undefined);
-  const [campaignMenuOpen, setCampaignMenuOpen] = useState(false);
+  const [archivedOpen, setArchivedOpen] = useState(false);
 
   useEffect(() => {
     loadCurrentUser().then((u) => setUser(u));
-    loadActiveCampaign().then((c) => setActiveCampaign(c || null));
   }, []);
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
+  const activeQ = useQuery({
+    queryKey: ['admin', 'reports', 'campaign-rollup', 'active'],
+    queryFn: () => api('/admin/reports/campaign-rollup?scope=active'),
+  });
+  const archivedQ = useQuery({
+    queryKey: ['admin', 'reports', 'campaign-rollup', 'archived'],
+    queryFn: () => api('/admin/reports/campaign-rollup?scope=archived'),
+    enabled: archivedOpen,
   });
 
-  // If no campaign is active, default to the first active one we find.
-  useEffect(() => {
-    if (activeCampaign !== null) return;
-    const list = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
-    if (list.length === 0) return;
-    const first = {
-      id: String(list[0]._id),
-      name: list[0].name,
-      type: list[0].type,
-      state: list[0].state,
-    };
-    setActiveCampaign(first);
-    saveActiveCampaign(first);
-  }, [activeCampaign, campaignsQ.data]);
+  const cumulative = activeQ.data?.cumulative || {};
+  const campaigns = activeQ.data?.campaigns || [];
+  const archived = archivedQ.data?.campaigns || [];
 
-  const cId = activeCampaign?.id;
-
-  const overviewQ = useQuery({
-    queryKey: ['admin', 'reports', 'overview', cId],
-    queryFn: () => api(`/admin/reports/overview?campaignId=${cId}`),
-    enabled: !!cId,
-  });
-
-  const canvassersQ = useQuery({
-    queryKey: ['admin', 'reports', 'canvassers', cId, 'today'],
-    queryFn: () =>
-      api(
-        `/admin/reports/canvassers?campaignId=${cId}&from=${encodeURIComponent(startOfTodayISO())}`
-      ),
-    enabled: !!cId,
-  });
-
-  async function pickCampaign(c) {
-    const next = {
-      id: String(c._id),
-      name: c.name,
-      type: c.type,
-      state: c.state,
-    };
-    await saveActiveCampaign(next);
-    await clearBootstrap();
-    qc.removeQueries({ queryKey: ['bootstrap'] });
-    setActiveCampaign(next);
-    setCampaignMenuOpen(false);
-  }
-
-  async function onLogout() {
-    qc.clear();
-    await signOut();
-  }
-
-  async function onSwitchOrg() {
-    qc.clear();
-    await clearActiveOrgId();
-    await saveActiveCampaign(null);
-    await clearBootstrap();
-    router.replace('/(app)/select-org');
-  }
-
-  async function onPlatformView() {
-    qc.clear();
-    await clearActiveOrgId();
-    await saveActiveCampaign(null);
-    await clearBootstrap();
-    router.replace('/(app)/super-admin');
-  }
-
-  function goCanvass() {
-    if (!activeCampaign?.id) {
-      router.push('/(app)/campaigns');
-    } else {
-      router.push('/(app)/map');
-    }
-  }
-
-  const totals = overviewQ.data?.totals || {};
-  const events = overviewQ.data?.events || {};
-  const isLitDrop = activeCampaign?.type === 'lit_drop';
-  const topCanvassers = (canvassersQ.data || []).slice(0, 5);
-
-  // Today's totals — sum across the canvasser leaderboard rows already fetched.
-  // canvassersQ is called with from=startOfTodayISO so rows reflect today only.
-  const todayTotals = useMemo(() => {
-    const rows = canvassersQ.data || [];
-    let doors = 0;
-    let surveys = 0;
-    let lit = 0;
-    for (const r of rows) {
-      doors += r.homesKnocked || 0;
-      surveys += r.surveysSubmitted || 0;
-      lit += r.litDropped || 0;
-    }
-    return { doors, surveys, lit };
-  }, [canvassersQ.data]);
-
-  const todayRate = isLitDrop
-    ? getConnectionRate(todayTotals.lit, todayTotals.doors)
-    : getConnectionRate(todayTotals.surveys, todayTotals.doors);
-
-  const overallRate = isLitDrop
-    ? getConnectionRate(events.litDropped || 0, totals.homesKnocked || 0)
-    : getConnectionRate(totals.surveysSubmitted || 0, totals.homesKnocked || 0);
-  const activeCampaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
+  const kpiTiles = [
+    { label: 'Households', value: fmt(cumulative.households) },
+    { label: 'Homes knocked', value: fmt(cumulative.homesKnocked), sub: `${cumulative.knockedPct ?? 0}% of households` },
+    { label: 'Doors knocked', value: fmt(cumulative.doorDays) },
+    { label: 'Surveys', value: fmt(cumulative.surveysSubmitted) },
+    { label: 'Lit drops', value: fmt(cumulative.litDropped) },
+    { label: 'Canvassers', value: fmt(cumulative.activeCanvassers) },
+  ];
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Logo size={26} />
-        <View style={{ flexDirection: 'row', gap: spacing.md }}>
-          {user?.isSuperAdmin && (
-            <Pressable onPress={onPlatformView} hitSlop={8}>
-              <Text style={styles.signOut}>‹ Platform</Text>
-            </Pressable>
-          )}
-          <Pressable onPress={onSwitchOrg} hitSlop={8}>
-            <Text style={styles.signOut}>Switch org</Text>
-          </Pressable>
-          <Pressable onPress={onLogout} hitSlop={8}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </Pressable>
-        </View>
+        <Text style={styles.headerLabel}>Admin{user?.isSuperAdmin ? ' · super' : ''}</Text>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
-        <Text style={styles.greeting}>
-          Hi {user?.firstName || 'there'} 👋
-        </Text>
-        <Text style={styles.subtitle}>Here's how the campaign is doing today.</Text>
+        <Text style={styles.greeting}>Hi {user?.firstName || 'there'} 👋</Text>
+        <Text style={styles.subtitle}>Your active campaigns at a glance.</Text>
 
-        {/* Campaign selector chip */}
-        <Pressable
-          style={styles.campaignChip}
-          onPress={() => setCampaignMenuOpen((v) => !v)}
-        >
-          <View style={styles.campaignDot} />
-          <Text style={styles.campaignChipText} numberOfLines={1}>
-            {activeCampaign?.name || (campaignsQ.isLoading ? 'Loading…' : 'Pick a campaign')}
-          </Text>
-          <Text style={styles.campaignChevron}>{campaignMenuOpen ? '▴' : '▾'}</Text>
-        </Pressable>
+        {activeQ.isLoading ? (
+          <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
+        ) : activeQ.error ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorText}>Couldn't load overview. Pull to retry.</Text>
+          </View>
+        ) : (
+          <>
+            <SectionHeader title="All active campaigns" />
+            <KpiGrid tiles={kpiTiles} columns={2} />
 
-        {campaignMenuOpen && (
-          <View style={styles.campaignMenu}>
-            {activeCampaigns.length === 0 && (
-              <Text style={styles.campaignMenuEmpty}>No active campaigns yet.</Text>
+            <SectionHeader title="Campaigns" />
+            {campaigns.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyText}>No active campaigns yet.</Text>
+              </View>
+            ) : (
+              campaigns.map((c) => (
+                <CampaignCard
+                  key={c.id}
+                  campaign={c}
+                  onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
+                />
+              ))
             )}
-            {activeCampaigns.map((c) => {
-              const selected = String(c._id) === activeCampaign?.id;
-              return (
-                <Pressable
-                  key={c._id}
-                  onPress={() => pickCampaign(c)}
-                  style={[styles.campaignMenuItem, selected && styles.campaignMenuItemActive]}
-                >
-                  <Text style={[styles.campaignMenuItemText, selected && styles.campaignMenuItemTextActive]}>
-                    {c.name}
-                  </Text>
-                  <Text style={styles.campaignMenuItemMeta}>
-                    {c.state} · {c.type === 'lit_drop' ? 'Lit drop' : 'Survey'}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
 
-        {/* Today */}
-        <View style={styles.statsCard}>
-          <Text style={styles.cardTitle}>Today</Text>
-          {canvassersQ.isLoading || overviewQ.isLoading ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-          ) : (
-            <View style={styles.todayRow}>
-              <TodayTile
-                value={todayTotals.doors.toLocaleString()}
-                label="Doors knocked"
-              />
-              <TodayTile
-                value={todayRate?.value}
-                label={isLitDrop ? 'Lit drop rate' : 'Survey rate'}
-                level={todayRate?.level}
-              />
-              <TodayTile
-                value={overallRate?.value}
-                label={isLitDrop ? 'Overall lit rate' : 'Overall connection'}
-                level={overallRate?.level}
-              />
-            </View>
-          )}
-        </View>
-
-        {/* Stats */}
-        <View style={styles.statsCard}>
-          <Text style={styles.cardTitle}>Campaign overview</Text>
-          {overviewQ.isLoading ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-          ) : (
-            <View style={styles.statsRow}>
-              <StatTile
-                pinStatus="unknocked"
-                value={totals.households?.toLocaleString()}
-                label="Households"
-              />
-              <StatTile
-                pinStatus="not_home"
-                value={totals.homesKnocked?.toLocaleString()}
-                label="Knocked"
-              />
-              <StatTile
-                pinStatus={isLitDrop ? 'lit_dropped' : 'surveyed'}
-                value={
-                  isLitDrop
-                    ? events.litDropped?.toLocaleString()
-                    : totals.surveysSubmitted?.toLocaleString()
-                }
-                label={isLitDrop ? 'Lit drops' : 'Surveys'}
-              />
-            </View>
-          )}
-        </View>
-
-        {/* Top canvassers */}
-        <Pressable
-          onPress={() => router.push('/(app)/admin/canvassers')}
-          style={({ pressed }) => [styles.statsCard, pressed && { opacity: 0.85 }]}
-        >
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Top canvassers today</Text>
-            <Text style={styles.cardLink}>See all ›</Text>
-          </View>
-          {canvassersQ.isLoading ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-          ) : topCanvassers.length === 0 ? (
-            <Text style={styles.emptyText}>No activity yet today.</Text>
-          ) : (
-            topCanvassers.map((c, i) => {
-              const isLitDrop = activeCampaign?.type === 'lit_drop';
-              const primary = isLitDrop ? c.litDropped || 0 : c.surveysSubmitted || 0;
-              const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
-              const knocked = c.homesKnocked || 0;
-              const range = formatRange(c.firstActivityAt, c.lastActivityAt);
-              return (
-                <View key={c.userId} style={styles.canvasserRow}>
-                  <Text style={styles.canvasserRank}>{i + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.canvasserName}>
-                      {c.firstName || c.email} {c.lastName || ''}
-                    </Text>
-                    <Text style={styles.canvasserMeta}>
-                      {knocked} houses · {primary} {primaryLabel}
-                    </Text>
-                    {range ? (
-                      <Text style={styles.canvasserShift}>🕘 {range}</Text>
-                    ) : null}
+            {/* Archived (collapsible) */}
+            <Pressable style={styles.archivedToggle} onPress={() => setArchivedOpen((v) => !v)}>
+              <Text style={styles.archivedToggleChevron}>{archivedOpen ? '▾' : '▸'}</Text>
+              <Text style={styles.archivedToggleText}>Archived campaigns</Text>
+            </Pressable>
+            {archivedOpen && (
+              <View style={{ marginTop: spacing.sm }}>
+                {archivedQ.isLoading ? (
+                  <ActivityIndicator color={colors.brand} style={{ marginVertical: spacing.md }} />
+                ) : archived.length === 0 ? (
+                  <View style={styles.emptyCard}>
+                    <Text style={styles.emptyText}>No archived campaigns.</Text>
                   </View>
-                </View>
-              );
-            })
-          )}
-        </Pressable>
-
-        {/* Quick links */}
-        <View style={styles.quickLinkRow}>
-          <Pressable
-            style={styles.quickLink}
-            onPress={() => router.push('/(app)/admin/map')}
-          >
-            <Text style={styles.quickLinkIcon}>🗺️</Text>
-            <Text style={styles.quickLinkText}>Live map</Text>
-          </Pressable>
-          <Pressable
-            style={styles.quickLink}
-            onPress={() => router.push('/(app)/admin/users')}
-          >
-            <Text style={styles.quickLinkIcon}>👥</Text>
-            <Text style={styles.quickLinkText}>Users</Text>
-          </Pressable>
-          <Pressable
-            style={styles.quickLink}
-            onPress={() => {
-              if (cId) router.push(`/(app)/admin/campaign-assignments/${cId}`);
-            }}
-            disabled={!cId}
-          >
-            <Text style={styles.quickLinkIcon}>🔗</Text>
-            <Text style={styles.quickLinkText}>Assignments</Text>
-          </Pressable>
-        </View>
-
-        {/* Switch to canvass mode */}
-        <Pressable
-          onPress={goCanvass}
-          style={({ pressed }) => [
-            styles.canvassButton,
-            { opacity: pressed ? 0.85 : 1 },
-          ]}
-        >
-          <Text style={styles.canvassButtonText}>Switch to canvass mode</Text>
-        </Pressable>
+                ) : (
+                  archived.map((c) => (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
+                      style={({ pressed }) => [styles.archivedRow, pressed && { opacity: 0.85 }]}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.archivedName} numberOfLines={1}>
+                          {c.name}
+                        </Text>
+                        <Text style={styles.archivedMeta}>
+                          {fmt(c.households)} households · {c.knockedPct ?? 0}% knocked · {fmt(c.doorDays)} doors
+                        </Text>
+                      </View>
+                      <View style={styles.archivedBadge}>
+                        <Text style={styles.archivedBadgeText}>Read-only</Text>
+                      </View>
+                    </Pressable>
+                  ))
+                )}
+              </View>
+            )}
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -403,171 +188,83 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  signOut: { color: colors.brand, fontWeight: '600', fontSize: 14 },
-
+  headerLabel: { ...type.caption, color: colors.textSecondary },
   greeting: { ...type.title, marginTop: spacing.xs },
-  subtitle: { ...type.caption, marginTop: spacing.xs, marginBottom: spacing.lg },
+  subtitle: { ...type.caption, marginTop: spacing.xs, marginBottom: spacing.sm },
 
-  campaignChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    marginBottom: spacing.md,
-  },
-  campaignDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.brand,
-    marginRight: spacing.sm,
-  },
-  campaignChipText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  campaignChevron: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginLeft: spacing.sm,
-  },
-  campaignMenu: {
+  errorCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
+    padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: spacing.xs,
-    marginBottom: spacing.md,
-    ...shadow.raised,
+    marginTop: spacing.md,
   },
-  campaignMenuItem: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-  },
-  campaignMenuItemActive: { backgroundColor: colors.brandTint },
-  campaignMenuItemText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  campaignMenuItemTextActive: { color: colors.brand },
-  campaignMenuItemMeta: { ...type.caption, marginTop: 2 },
-  campaignMenuEmpty: { ...type.caption, padding: spacing.md, textAlign: 'center' },
+  errorText: { ...type.caption },
 
-  statsCard: {
+  campaignCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
-  cardTitle: { ...type.h3, marginBottom: spacing.md },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-  },
-  cardLink: {
-    color: colors.brand,
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  statTile: {
+  campaignCardHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-  },
-  statValue: { ...type.h2, fontSize: 20, lineHeight: 22 },
-  statLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
-
-  todayRow: {
-    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
     gap: spacing.sm,
   },
-  todayTile: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    borderRadius: radius.md,
+  campaignName: { ...type.h3, flex: 1 },
+  typePill: { borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  typePillSurvey: { backgroundColor: '#EFF6FF' },
+  typePillLit: { backgroundColor: '#F5F3FF' },
+  typePillText: { fontSize: 11, fontWeight: '700' },
+  typePillTextSurvey: { color: '#1D4ED8' },
+  typePillTextLit: { color: '#6D28D9' },
+
+  campaignStatsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  campaignStat: { flex: 1 },
+  campaignStatValue: { ...type.h3, fontSize: 16, fontVariant: ['tabular-nums'] },
+  campaignStatLabel: { fontSize: 10, color: colors.textSecondary, fontWeight: '600', marginTop: 1 },
+  campaignFoot: { ...type.caption, marginTop: spacing.md, color: colors.textMuted },
+
+  archivedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  archivedToggleChevron: { fontSize: 14, color: colors.textSecondary, width: 16 },
+  archivedToggleText: { ...type.h3 },
+
+  archivedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    alignItems: 'center',
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
   },
-  todayTileValue: {
-    ...type.h2,
-    fontSize: 20,
-    fontVariant: ['tabular-nums'],
-    color: colors.textPrimary,
-  },
-  todayTileLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    fontWeight: '600',
-    marginTop: 2,
-    textAlign: 'center',
-  },
+  archivedName: { ...type.bodyStrong, fontSize: 14 },
+  archivedMeta: { ...type.caption, marginTop: 2 },
+  archivedBadge: { backgroundColor: '#FEF3C7', borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
+  archivedBadgeText: { fontSize: 10, fontWeight: '700', color: '#92400E' },
 
-  emptyText: { ...type.caption, paddingVertical: spacing.md },
-
-  canvasserRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  canvasserRank: {
-    width: 24,
-    fontSize: 14,
-    fontWeight: '800',
-    color: colors.brand,
-  },
-  canvasserName: { ...type.bodyStrong, fontSize: 14 },
-  canvasserMeta: { ...type.caption, marginTop: 1 },
-  canvasserShift: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 2,
-    fontVariant: ['tabular-nums'],
-  },
-
-  quickLinkRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  quickLink: {
-    flex: 1,
+  emptyCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
-    ...shadow.card,
   },
-  quickLinkIcon: { fontSize: 28, marginBottom: spacing.xs },
-  quickLinkText: { ...type.bodyStrong },
-
-  canvassButton: {
-    backgroundColor: colors.brand,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md + 2,
-    alignItems: 'center',
-  },
-  canvassButtonText: {
-    color: colors.textInverse,
-    fontWeight: '700',
-    fontSize: 16,
-  },
+  emptyText: { ...type.caption },
 });
