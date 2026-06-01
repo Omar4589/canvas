@@ -311,7 +311,13 @@ router.get('/doors', async (req, res, next) => {
       if (wl?.householdIds?.length) filter._id = { $in: wl.householdIds };
     }
 
-    const households = await Household.find(filter, { location: 1, turfId: 1 }).lean();
+    const households = await Household.find(
+      filter,
+      { location: 1, turfId: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 }
+    ).lean();
+    // Address fields ride along so the client can group stacked apartment units
+    // (same geocode) into one building marker and render the unit list without a
+    // per-unit fetch.
     const doors = households
       .filter((h) => h.location?.coordinates?.length === 2)
       .map((h) => ({
@@ -319,6 +325,11 @@ router.get('/doors', async (req, res, next) => {
         lng: h.location.coordinates[0],
         lat: h.location.coordinates[1],
         turfId: h.turfId ? String(h.turfId) : null,
+        addressLine1: h.addressLine1 || '',
+        addressLine2: h.addressLine2 || '',
+        city: h.city || '',
+        state: h.state || '',
+        zipCode: h.zipCode || '',
       }));
     res.json({ doors });
   } catch (err) {
@@ -404,6 +415,36 @@ router.post('/move-door', async (req, res, next) => {
       from: from && String(from._id) !== String(to._id) ? { id: String(from._id), doorCount: from.doorCount } : null,
       to: { id: String(to._id), doorCount: to.doorCount },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Move many households (e.g. every unit of an apartment building) into one book
+// at once — pull them out of any other book in the pass, then recompute
+// territories a single time. Mirrors /move-door for the bulk case.
+router.post('/move-doors', async (req, res, next) => {
+  try {
+    const { householdIds, toTurfId } = req.body || {};
+    const ids = (householdIds || []).filter((x) => mongoose.isValidObjectId(x));
+    if (!ids.length || !mongoose.isValidObjectId(toTurfId)) {
+      return res.status(400).json({ error: 'householdIds and toTurfId required' });
+    }
+    const to = await Turf.findOne({ _id: toTurfId, campaignId: req.campaign._id });
+    if (!to) return res.status(404).json({ error: 'Target book not found' });
+
+    const idSet = new Set(ids.map(String));
+    const others = await Turf.find({ campaignId: req.campaign._id, passId: to.passId, _id: { $ne: to._id } });
+    for (const t of others) {
+      const before = t.householdIds.length;
+      t.householdIds = t.householdIds.filter((id) => !idSet.has(String(id)));
+      if (t.householdIds.length !== before) await recomputeTurf(t);
+    }
+    const have = new Set(to.householdIds.map(String));
+    for (const id of ids) if (!have.has(String(id))) to.householdIds.push(id);
+    await recomputeTurf(to);
+    await recomputePassTerritories(to.passId);
+    res.json({ to: { id: String(to._id), doorCount: to.doorCount } });
   } catch (err) {
     next(err);
   }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -53,6 +53,66 @@ function doorsToGeoJSON(doors, colorByTurf) {
       properties: { id: d.id, turfId: d.turfId ? String(d.turfId) : '', color: colorByTurf.get(String(d.turfId)) || '#9ca3af' },
     })),
   };
+}
+
+// Apartment units are each their own household but share one geocode, so on the
+// map their dots stack and only the top one is clickable. Group doors by rounded
+// coordinate (~1.1m): a key with >=2 doors becomes one building marker, lone
+// doors stay as normal dots.
+function doorKey(d) {
+  return `${Math.round(d.lat * 1e5)}|${Math.round(d.lng * 1e5)}`;
+}
+function groupDoors(doors) {
+  const groups = new Map();
+  for (const d of doors || []) {
+    const k = doorKey(d);
+    const arr = groups.get(k) || [];
+    arr.push(d);
+    groups.set(k, arr);
+  }
+  const singles = [];
+  const buildings = [];
+  for (const [key, units] of groups) {
+    if (units.length < 2) {
+      singles.push(units[0]);
+      continue;
+    }
+    const first = units[0];
+    buildings.push({
+      key,
+      lng: first.lng,
+      lat: first.lat,
+      turfId: first.turfId,
+      addressLine1: first.addressLine1,
+      city: first.city,
+      state: first.state,
+      zipCode: first.zipCode,
+      units,
+      total: units.length,
+    });
+  }
+  return { singles, buildings };
+}
+
+// DOM element for a building marker: an SVG apartment glyph (book-colored) + a
+// "{n} units" badge. A building icon — not a numbered bubble — so it never reads
+// as pin clustering.
+function buildingMarkerEl(total, color) {
+  const el = document.createElement('div');
+  el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;';
+  const windows = [];
+  for (let i = 0; i < 12; i++) {
+    const r = Math.floor(i / 3);
+    const c = i % 3;
+    windows.push(`<rect x="${7 + c * 3.6}" y="${5 + r * 3.6}" width="2.2" height="2.2" rx="0.4" fill="#fff" opacity="0.92"/>`);
+  }
+  el.innerHTML =
+    `<svg width="28" height="28" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 1.5px rgba(0,0,0,0.35))">` +
+    `<rect x="5" y="2.5" width="14" height="19" rx="1.4" fill="${color}" stroke="#fff" stroke-width="1.4"/>` +
+    windows.join('') +
+    `</svg>` +
+    `<div style="margin-top:-4px;background:#111827;color:#fff;font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${total} units</div>`;
+  return el;
 }
 function bboxOf(turfs) {
   let a = Infinity; let b = Infinity; let c = -Infinity; let d = -Infinity;
@@ -210,6 +270,74 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
   );
 }
 
+function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose }) {
+  if (!building) return null;
+  const { addressLine1, city, state, zipCode, units, total } = building;
+  return (
+    <div className="absolute right-3 top-3 z-10 w-72 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
+            <span aria-hidden>🏢</span>
+            <span className="truncate">{addressLine1 || 'Apartment building'}</span>
+          </div>
+          <div className="text-xs text-gray-500">{city}, {state} {zipCode}</div>
+          <div className="mt-0.5 text-[11px] font-semibold text-brand-600">{total} units at this location</div>
+        </div>
+        <button onClick={onClose} className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Close">✕</button>
+      </div>
+
+      <div className="mt-2 border-t border-gray-100 pt-2">
+        <select
+          value=""
+          onChange={(e) => { if (e.target.value) onMoveAll(e.target.value); }}
+          disabled={moving}
+          className="w-full rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-60"
+        >
+          <option value="">{moving ? 'Moving…' : 'Move all units to book…'}</option>
+          {books.map((t) => (
+            <option key={t._id} value={t._id}>{t.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mt-2 border-t border-gray-100 pt-2">
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Units</div>
+        <ul className="max-h-56 space-y-1 overflow-auto">
+          {units.map((u) => {
+            const book = u.turfId ? books.find((t) => String(t._id) === String(u.turfId)) : null;
+            const color = u.turfId ? colorByTurf.get(String(u.turfId)) : null;
+            return (
+              <li key={u.id} className="rounded border border-gray-100 p-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium text-gray-800">{u.addressLine2 || u.addressLine1 || 'Unit'}</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {color && <span className="inline-block h-2 w-2 rounded-sm" style={{ background: color }} />}
+                    <span className="text-[10px] text-gray-500">{book ? book.name : 'Unassigned'}</span>
+                  </span>
+                </div>
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
+                  disabled={moving}
+                  className="mt-1 w-full rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-60"
+                >
+                  <option value="">Move to book…</option>
+                  {books
+                    .filter((t) => String(t._id) !== String(u.turfId))
+                    .map((t) => (
+                      <option key={t._id} value={t._id}>{t.name}</option>
+                    ))}
+                </select>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 export default function TurfsPage() {
   const qc = useQueryClient();
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
@@ -231,6 +359,7 @@ export default function TurfsPage() {
   const [lastSnapshotId, setLastSnapshotId] = useState(null);
   const [focusedBookId, setFocusedBookId] = useState(null);
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
+  const [popupBuildingKey, setPopupBuildingKey] = useState(null);
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -240,6 +369,8 @@ export default function TurfsPage() {
   const toggleSelectRef = useRef(() => {});
   const lastFocusRef = useRef(null);
   const openPopupRef = useRef(() => {});
+  const openBuildingPopupRef = useRef(() => {});
+  const buildingMarkersRef = useRef([]);
 
   const tokenQ = useQuery({ queryKey: ['config', 'mapbox-token'], queryFn: () => api('/admin/config/mapbox-token') });
   const turfsQ = useQuery({
@@ -258,12 +389,16 @@ export default function TurfsPage() {
   const turfs = turfsQ.data?.turfs || [];
   const draftCount = turfs.filter((t) => t.status === 'draft').length;
   const publishedCount = turfs.filter((t) => t.status === 'published').length;
-  const colorByTurf = new Map(turfs.map((t, i) => [String(t._id), colorFor(i)]));
+  const colorByTurf = useMemo(() => new Map(turfs.map((t, i) => [String(t._id), colorFor(i)])), [turfsQ.data]);
   const focusedBook = turfs.find((t) => String(t._id) === focusedBookId) || null;
+  // Group stacked apartment units (same geocode) into buildings; lone doors stay
+  // singles. Used for the dot layer, the building markers, and the popup.
+  const grouped = useMemo(() => groupDoors(doorsQ.data?.doors || []), [doorsQ.data]);
   // The popup's house + its current book, derived live from the doors data so it
   // updates after a move.
   const popupDoor = (doorsQ.data?.doors || []).find((d) => String(d.id) === String(popupHouseholdId));
   const popupBook = popupDoor?.turfId ? turfs.find((t) => String(t._id) === String(popupDoor.turfId)) || null : null;
+  const popupBuilding = popupBuildingKey ? grouped.buildings.find((b) => b.key === popupBuildingKey) || null : null;
 
   // Selected pass (shares react-query cache with PassPicker) — for the live flag
   // + whether Discard must confirm an active pass.
@@ -378,6 +513,10 @@ export default function TurfsPage() {
     mutationFn: ({ householdId, toTurfId }) => api(`/admin/campaigns/${campaignId}/turfs/move-door`, { method: 'POST', body: { householdId, toTurfId } }),
     onSuccess: invalidateTurfs,
   });
+  const moveDoors = useMutation({
+    mutationFn: ({ householdIds, toTurfId }) => api(`/admin/campaigns/${campaignId}/turfs/move-doors`, { method: 'POST', body: { householdIds, toTurfId } }),
+    onSuccess: invalidateTurfs,
+  });
   const merge = useMutation({
     mutationFn: (turfIds) => api(`/admin/campaigns/${campaignId}/turfs/merge`, { method: 'POST', body: { turfIds } }),
     onSuccess: () => { setSelectedBooks(new Set()); invalidateTurfs(); },
@@ -392,7 +531,8 @@ export default function TurfsPage() {
   moveDoorRef.current = (householdId, toTurfId) => moveDoor.mutate({ householdId, toTurfId });
   toggleSelectRef.current = (id) =>
     setSelectedBooks((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  openPopupRef.current = (id) => setPopupHouseholdId(id);
+  openPopupRef.current = (id) => { setPopupBuildingKey(null); setPopupHouseholdId(id); };
+  openBuildingPopupRef.current = (key) => { setPopupHouseholdId(null); setPopupBuildingKey(key); };
 
   useEffect(() => {
     if (!tokenQ.data?.isReady || !containerRef.current || mapRef.current) return;
@@ -470,7 +610,7 @@ export default function TurfsPage() {
     if (!map || !map.getSource('books')) return;
     map.getSource('books').setData(booksToFillGeoJSON(turfs, colorByTurf, selectedBooks));
     map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs));
-    map.getSource('doors').setData(doorsToGeoJSON(doorsQ.data?.doors || [], colorByTurf));
+    map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf));
 
     // Per-book focus: filter every layer to the focused book (its doors too) and
     // zoom to it; otherwise clear the filters and fit all books. Re-zoom only when
@@ -499,8 +639,29 @@ export default function TurfsPage() {
     }
   }
   useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, focusedBookId]);
+
+  // Building markers (HTML overlays) for stacked apartment units — synced apart
+  // from paint() so book-select toggles don't churn the DOM. Honors per-book
+  // focus by only showing buildings in the focused book.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    buildingMarkersRef.current.forEach((m) => m.remove());
+    buildingMarkersRef.current = [];
+    const visible = focusedBookId
+      ? grouped.buildings.filter((b) => String(b.turfId) === String(focusedBookId))
+      : grouped.buildings;
+    for (const b of visible) {
+      const color = colorByTurf.get(String(b.turfId)) || '#9ca3af';
+      const el = buildingMarkerEl(b.total, color);
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); openBuildingPopupRef.current(b.key); });
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([b.lng, b.lat]).addTo(map);
+      buildingMarkersRef.current.push(marker);
+    }
+  }, [grouped, colorByTurf, focusedBookId, mapReady]);
+
   // Reset focus when switching pass/campaign (the focused id won't exist there).
-  useEffect(() => { setFocusedBookId(null); setPopupHouseholdId(null); }, [passId, campaignId]);
+  useEffect(() => { setFocusedBookId(null); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
 
   function startDraw() {
     if (drawRef.current) { drawRef.current.deleteAll(); drawRef.current.changeMode('draw_polygon'); }
@@ -751,6 +912,17 @@ export default function TurfsPage() {
               moving={moveDoor.isPending}
               onMove={(toTurfId) => moveDoor.mutate({ householdId: popupHouseholdId, toTurfId })}
               onClose={() => setPopupHouseholdId(null)}
+            />
+          )}
+          {popupBuilding && (
+            <BuildingPopup
+              building={popupBuilding}
+              books={turfs}
+              colorByTurf={colorByTurf}
+              moving={moveDoor.isPending || moveDoors.isPending}
+              onMove={(householdId, toTurfId) => moveDoor.mutate({ householdId, toTurfId })}
+              onMoveAll={(toTurfId) => moveDoors.mutate({ householdIds: popupBuilding.units.map((u) => u.id), toTurfId })}
+              onClose={() => setPopupBuildingKey(null)}
             />
           )}
         </section>
