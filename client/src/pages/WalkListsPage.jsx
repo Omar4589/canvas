@@ -12,11 +12,9 @@ const STATUS_LABEL = {
   lit_dropped: 'Lit dropped',
 };
 
-const csv = (s) => (s || '').split(',').map((x) => x.trim()).filter(Boolean);
-
 const EMPTY = {
-  genders: '', parties: '', precincts: '', congressional: '', stateSenate: '', stateHouse: '',
-  cities: '', zips: '', counties: '', ageMin: '', ageMax: '',
+  genders: [], parties: [], precincts: [], congressional: [], stateSenate: [], stateHouse: [],
+  cities: [], zips: [], counties: [], ageMin: '', ageMax: '',
   priorPassId: '', priorPassStatuses: [], surveyResponse: 'any', combine: 'and',
 };
 
@@ -28,7 +26,7 @@ function buildFilter(f) {
     stateHouseDistricts: f.stateHouse, cities: f.cities, zips: f.zips, counties: f.counties,
   };
   for (const [k, v] of Object.entries(arrs)) {
-    const a = csv(v);
+    const a = (v || []).map((x) => String(x).trim()).filter(Boolean);
     if (a.length) out[k] = a;
   }
   if (f.ageMin) out.ageMin = Number(f.ageMin);
@@ -54,6 +52,66 @@ function TextFilter({ label, value, onChange, placeholder }) {
   );
 }
 
+// Searchable multi-select chips. Suggests the campaign's real values but also
+// accepts a typed custom value (Enter) so empty/odd data is never a dead end.
+function MultiSelect({ label, value, onChange, options = [], placeholder }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const selected = value || [];
+  const add = (v) => {
+    const t = String(v).trim();
+    if (t && !selected.includes(t)) onChange([...selected, t]);
+    setQuery('');
+  };
+  const remove = (v) => onChange(selected.filter((x) => x !== v));
+  const filtered = options
+    .filter((o) => !selected.includes(o))
+    .filter((o) => o.toLowerCase().includes(query.trim().toLowerCase()))
+    .slice(0, 50);
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block text-xs font-medium text-gray-700">{label}</span>
+      <div className="relative">
+        <div className="flex min-h-[34px] flex-wrap items-center gap-1 rounded border border-gray-300 px-1.5 py-1 focus-within:border-brand-600 focus-within:ring-1 focus-within:ring-brand-600">
+          {selected.map((v) => (
+            <span key={v} className="flex items-center gap-1 rounded bg-brand-50 px-1.5 py-0.5 text-xs text-brand-700">
+              {v}
+              <button type="button" onClick={() => remove(v)} className="text-brand-400 hover:text-brand-700" aria-label={`Remove ${v}`}>×</button>
+            </span>
+          ))}
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 120)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); if (query.trim()) add(query); }
+              else if (e.key === 'Backspace' && !query && selected.length) remove(selected[selected.length - 1]);
+            }}
+            placeholder={selected.length ? '' : (placeholder || 'Type or pick…')}
+            className="min-w-[60px] flex-1 border-0 p-0.5 text-sm focus:outline-none focus:ring-0"
+          />
+        </div>
+        {open && filtered.length > 0 && (
+          <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-auto rounded border border-gray-200 bg-white py-1 text-sm shadow-lg">
+            {filtered.map((o) => (
+              <li key={o}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); add(o); }}
+                  className="block w-full px-2 py-1 text-left hover:bg-brand-50"
+                >
+                  {o}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </label>
+  );
+}
+
 export default function WalkListsPage() {
   const qc = useQueryClient();
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
@@ -73,6 +131,13 @@ export default function WalkListsPage() {
   });
   const lists = listsQ.data?.walkLists || [];
   const passes = passesQ.data?.passes || [];
+
+  const distinctQ = useQuery({
+    queryKey: ['admin', 'walklist-distinct', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/walklists/distinct`),
+    enabled: !!campaignId,
+  });
+  const opts = distinctQ.data || {};
 
   const preview = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/walklists/preview`, { method: 'POST', body: { filter: buildFilter(f) } }),
@@ -106,17 +171,17 @@ export default function WalkListsPage() {
         {/* Builder */}
         <section className="rounded-lg border border-gray-200 bg-white p-5">
           <h2 className="mb-1 text-base font-medium">Build a list</h2>
-          <p className="mb-4 text-xs text-gray-500">Comma-separate multiple values. Empty = no restriction. Saved lists are frozen snapshots.</p>
+          <p className="mb-4 text-xs text-gray-500">Pick values from each list (or type a custom one and press Enter). Empty = no restriction. Saved lists are frozen snapshots.</p>
 
           <div className="mb-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Demographics</div>
             <div className="grid gap-3 sm:grid-cols-3">
-              <TextFilter label="Genders" value={f.genders} onChange={(v) => set('genders', v)} placeholder="M, F" />
-              <TextFilter label="Parties" value={f.parties} onChange={(v) => set('parties', v)} placeholder="DEM, REP" />
-              <TextFilter label="Precincts" value={f.precincts} onChange={(v) => set('precincts', v)} placeholder="12, 13" />
-              <TextFilter label="Congressional" value={f.congressional} onChange={(v) => set('congressional', v)} />
-              <TextFilter label="State senate" value={f.stateSenate} onChange={(v) => set('stateSenate', v)} />
-              <TextFilter label="State house" value={f.stateHouse} onChange={(v) => set('stateHouse', v)} />
+              <MultiSelect label="Genders" value={f.genders} onChange={(v) => set('genders', v)} options={opts.genders} placeholder="M, F" />
+              <MultiSelect label="Parties" value={f.parties} onChange={(v) => set('parties', v)} options={opts.parties} placeholder="DEM, REP" />
+              <MultiSelect label="Precincts" value={f.precincts} onChange={(v) => set('precincts', v)} options={opts.precincts} placeholder="12, 13" />
+              <MultiSelect label="Congressional" value={f.congressional} onChange={(v) => set('congressional', v)} options={opts.congressional} />
+              <MultiSelect label="State senate" value={f.stateSenate} onChange={(v) => set('stateSenate', v)} options={opts.stateSenate} />
+              <MultiSelect label="State house" value={f.stateHouse} onChange={(v) => set('stateHouse', v)} options={opts.stateHouse} />
               <div className="grid grid-cols-2 gap-2">
                 <TextFilter label="Age min" value={f.ageMin} onChange={(v) => set('ageMin', v)} placeholder="18" />
                 <TextFilter label="Age max" value={f.ageMax} onChange={(v) => set('ageMax', v)} placeholder="35" />
@@ -127,9 +192,9 @@ export default function WalkListsPage() {
           <div className="mb-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Geography</div>
             <div className="grid gap-3 sm:grid-cols-3">
-              <TextFilter label="Cities" value={f.cities} onChange={(v) => set('cities', v)} />
-              <TextFilter label="ZIPs" value={f.zips} onChange={(v) => set('zips', v)} />
-              <TextFilter label="Counties" value={f.counties} onChange={(v) => set('counties', v)} />
+              <MultiSelect label="Cities" value={f.cities} onChange={(v) => set('cities', v)} options={opts.cities} />
+              <MultiSelect label="ZIPs" value={f.zips} onChange={(v) => set('zips', v)} options={opts.zips} />
+              <MultiSelect label="Counties" value={f.counties} onChange={(v) => set('counties', v)} options={opts.counties} />
             </div>
           </div>
 

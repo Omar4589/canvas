@@ -63,6 +63,15 @@ function bboxOf(turfs) {
   }
   return Number.isFinite(a) ? [[a, b], [c, d]] : null;
 }
+// Bbox of the raw door points — used to frame the houses before any books exist.
+function bboxOfDoors(doors) {
+  let a = Infinity; let b = Infinity; let c = -Infinity; let d = -Infinity;
+  for (const p of doors || []) {
+    const x = p.lng; const y = p.lat;
+    if (x < a) a = x; if (y < b) b = y; if (x > c) c = x; if (y > d) d = y;
+  }
+  return Number.isFinite(a) ? [[a, b], [c, d]] : null;
+}
 
 function PassPicker({ campaignId, passId, onChange }) {
   const passesQ = useQuery({
@@ -475,7 +484,8 @@ export default function TurfsPage() {
       map.setFilter('book-outline', null);
       map.setFilter('book-labels', null);
       map.setFilter('doors', null);
-      const bb = bboxOf(turfs);
+      // Fit to the books, or — before any cut — to the raw house dots.
+      const bb = bboxOf(turfs) || bboxOfDoors(doorsQ.data?.doors);
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }

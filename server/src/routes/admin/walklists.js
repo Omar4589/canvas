@@ -5,6 +5,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { WalkList } from '../../models/WalkList.js';
 import { Household } from '../../models/Household.js';
+import { Voter } from '../../models/Voter.js';
 import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
 
 const router = Router({ mergeParams: true });
@@ -80,6 +81,45 @@ router.post('/', async (req, res, next) => {
     delete obj.householdIds;
     delete obj.voterIds;
     res.status(201).json({ walkList: obj });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Distinct filter values for the campaign, to populate the walk-list value
+// pickers. Voter has no campaignId, so voter fields are scoped via the campaign's
+// households; geo fields read straight off the denormalized Household columns.
+router.get('/distinct', async (req, res, next) => {
+  try {
+    const campaignId = req.campaign._id;
+    const sortVals = (arr) =>
+      arr.filter(Boolean).map(String).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const hhIds = await Household.distinct('_id', { campaignId, isActive: true });
+    const v = (field) => Voter.distinct(field, { householdId: { $in: hhIds } });
+    const h = (col) => Household.distinct(col, { campaignId, isActive: true });
+    const [genders, parties, precincts, congressional, stateSenate, stateHouse, cities, zips, counties] =
+      await Promise.all([
+        v('gender'),
+        v('party'),
+        v('precinct'),
+        v('congressionalDistrict'),
+        v('stateSenateDistrict'),
+        v('stateHouseDistrict'),
+        h('cityValue'),
+        h('zipValue'),
+        h('countyValue'),
+      ]);
+    res.json({
+      genders: sortVals(genders),
+      parties: sortVals(parties),
+      precincts: sortVals(precincts),
+      congressional: sortVals(congressional),
+      stateSenate: sortVals(stateSenate),
+      stateHouse: sortVals(stateHouse),
+      cities: sortVals(cities),
+      zips: sortVals(zips),
+      counties: sortVals(counties),
+    });
   } catch (err) {
     next(err);
   }
