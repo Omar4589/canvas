@@ -146,9 +146,10 @@ function DiscardModal({ isActive, bookCount, clearKnocks, setClearKnocks, pendin
   );
 }
 
-function HousePopup({ data, loading, onClose }) {
+function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose }) {
   const hh = data?.household;
   const voters = data?.voters || [];
+  const currentId = book ? String(book._id) : null;
   return (
     <div className="absolute right-3 top-3 z-10 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
       <div className="flex items-start justify-between gap-2">
@@ -165,6 +166,27 @@ function HousePopup({ data, loading, onClose }) {
         </div>
         <button onClick={onClose} className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Close">✕</button>
       </div>
+      {hh && (
+        <div className="mt-2 border-t border-gray-100 pt-2">
+          <div className="flex items-center gap-1.5 text-xs text-gray-600">
+            {bookColor && <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: bookColor }} />}
+            <span className="font-medium">{book ? book.name : 'Unassigned'}</span>
+          </div>
+          <select
+            value=""
+            onChange={(e) => { if (e.target.value) onMove(e.target.value); }}
+            disabled={moving}
+            className="mt-1.5 w-full rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-60"
+          >
+            <option value="">{moving ? 'Moving…' : 'Move to book…'}</option>
+            {books
+              .filter((t) => String(t._id) !== currentId)
+              .map((t) => (
+                <option key={t._id} value={t._id}>{t.name}</option>
+              ))}
+          </select>
+        </div>
+      )}
       {hh && (
         <div className="mt-2 border-t border-gray-100 pt-2">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
@@ -238,6 +260,10 @@ export default function TurfsPage() {
   const publishedCount = turfs.filter((t) => t.status === 'published').length;
   const colorByTurf = new Map(turfs.map((t, i) => [String(t._id), colorFor(i)]));
   const focusedBook = turfs.find((t) => String(t._id) === focusedBookId) || null;
+  // The popup's house + its current book, derived live from the doors data so it
+  // updates after a move.
+  const popupDoor = (doorsQ.data?.doors || []).find((d) => String(d.id) === String(popupHouseholdId));
+  const popupBook = popupDoor?.turfId ? turfs.find((t) => String(t._id) === String(popupDoor.turfId)) || null : null;
 
   // Selected pass (shares react-query cache with PassPicker) — for the live flag
   // + whether Discard must confirm an active pass.
@@ -415,38 +441,21 @@ export default function TurfsPage() {
         },
       });
 
-      // Merge: click a book to toggle selection (edit mode).
+      // Merge: click a book to toggle selection (edit mode). Skip if a house is
+      // under the click — that's a door tap, handled by the doors layer below.
       map.on('click', 'book-fill', (e) => {
         if (!editModeRef.current) return;
+        if (map.queryRenderedFeatures(e.point, { layers: ['doors'] }).length) return;
         const id = e.features?.[0]?.properties?.id;
         if (id) toggleSelectRef.current(id);
       });
 
-      // Drag a door onto another book to move it.
-      let dragging = null;
-      map.on('mousedown', 'doors', (e) => {
-        if (!editModeRef.current) return;
-        e.preventDefault();
-        dragging = e.features?.[0]?.properties?.id;
-        map.dragPan.disable();
-        map.getCanvas().style.cursor = 'grabbing';
-      });
-      map.on('mouseup', (e) => {
-        if (!dragging) return;
-        const hit = map.queryRenderedFeatures(e.point, { layers: ['book-fill'] });
-        const toTurfId = hit?.[0]?.properties?.id;
-        if (toTurfId) moveDoorRef.current(dragging, toTurfId);
-        dragging = null;
-        map.dragPan.enable();
-        map.getCanvas().style.cursor = '';
-      });
-      // Click a door (outside edit mode) → show the household's address + members.
+      // Click a house (any mode) → popup with address + members + book + move-to-book.
       map.on('click', 'doors', (e) => {
-        if (editModeRef.current) return;
         const id = e.features?.[0]?.properties?.id;
         if (id) openPopupRef.current(id);
       });
-      map.on('mouseenter', 'doors', () => { map.getCanvas().style.cursor = editModeRef.current ? 'grab' : 'pointer'; });
+      map.on('mouseenter', 'doors', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'doors', () => { map.getCanvas().style.cursor = ''; });
 
       mapRef.current = map;
@@ -612,7 +621,7 @@ export default function TurfsPage() {
 
               {editMode && (
                 <div className="mb-2 rounded bg-gray-50 px-2 py-1.5 text-xs text-gray-600">
-                  Drag a door onto another book to move it. Click books to select, then merge.
+                  Click books to select, then merge. Click a house to view it or move it to another book.
                   {selectedBooks.size >= 2 && (
                     <button onClick={() => merge.mutate([...selectedBooks])} className="ml-2 rounded bg-brand-600 px-2 py-0.5 font-semibold text-white">
                       Merge {selectedBooks.size}
@@ -733,7 +742,16 @@ export default function TurfsPage() {
             <div ref={containerRef} className="h-[600px] w-full" />
           )}
           {popupHouseholdId && (
-            <HousePopup data={householdQ.data} loading={householdQ.isLoading} onClose={() => setPopupHouseholdId(null)} />
+            <HousePopup
+              data={householdQ.data}
+              loading={householdQ.isLoading}
+              book={popupBook}
+              bookColor={popupBook ? colorByTurf.get(String(popupBook._id)) : null}
+              books={turfs}
+              moving={moveDoor.isPending}
+              onMove={(toTurfId) => moveDoor.mutate({ householdId: popupHouseholdId, toTurfId })}
+              onClose={() => setPopupHouseholdId(null)}
+            />
           )}
         </section>
       </div>
