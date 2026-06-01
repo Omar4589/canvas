@@ -12,7 +12,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
-import { resolveStatus } from '../../utils/statusPrecedence.js';
+import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -84,24 +84,8 @@ async function resolveTurf(passId, householdId) {
   return turf?._id || null;
 }
 
-// household.status = latest-across-all-passes convenience value, resolved with
-// the sticky-completion precedence rule (decision 2).
-async function recomputeHouseholdStatus(household, campaignType) {
-  const acts = await CanvassActivity.find(
-    { householdId: household._id, actionType: { $ne: 'note_added' } },
-    { actionType: 1, timestamp: 1 }
-  ).lean();
-  household.status = resolveStatus(campaignType, acts);
-}
-
-// "Ever surveyed" — recomputed from existence so a later-pass not_home can't
-// wipe it, and deleting a mistaken survey still corrects it.
-async function recomputeSurveyStatus(voterIds) {
-  for (const vid of voterIds) {
-    const exists = await SurveyResponse.exists({ voterId: vid });
-    await Voter.updateOne({ _id: vid }, { $set: { surveyStatus: exists ? 'surveyed' : 'not_surveyed' } });
-  }
-}
+// recomputeHouseholdStatus / recomputeSurveyStatus now live in
+// services/canvass/status.js so the re-cut "clear knocks" path reuses them.
 
 async function recordHouseholdAction({ req, householdId, actionType, body, requireCampaignType }) {
   const userId = req.user._id;

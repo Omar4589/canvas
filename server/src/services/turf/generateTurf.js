@@ -3,6 +3,7 @@ import { Pass } from '../../models/Pass.js';
 import { WalkList } from '../../models/WalkList.js';
 import { Household } from '../../models/Household.js';
 import { Turf } from '../../models/Turf.js';
+import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { attributeCut } from './attributeCut.js';
 import { geometricCut } from './geometricCut.js';
 import { computeBoundary, computeCentroid } from './boundary.js';
@@ -64,8 +65,17 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   await onProgress?.({ phase: 'boundaries', pct: 55, booksTotal: books.length });
 
-  // Atomic-ish: wipe prior drafts for this pass, then insert fresh.
-  await Turf.deleteMany({ passId, status: 'draft' });
+  // Wipe prior drafts for this pass CLEANLY: drop their assignments and clear the
+  // household mirror for their members before deleting, so a re-cut leaves no
+  // orphaned assignments or stale Household.turfId behind. (The published guard on
+  // /generate means only draft books can exist on the pass at this point.)
+  const priorDrafts = await Turf.find({ passId, status: 'draft' }, { _id: 1 }).lean();
+  if (priorDrafts.length) {
+    const draftIds = priorDrafts.map((d) => d._id);
+    await TurfAssignment.deleteMany({ turfId: { $in: draftIds } });
+    await Household.updateMany({ turfId: { $in: draftIds } }, { $set: { turfId: null, walkOrder: null } });
+    await Turf.deleteMany({ _id: { $in: draftIds } });
+  }
 
   const turfDocs = [];
   let done = 0;

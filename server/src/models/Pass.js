@@ -30,6 +30,11 @@ const passSchema = new mongoose.Schema(
     activatedAt: { type: Date, default: null },
     archivedAt: { type: Date, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Advisory lock so concurrent discard/restore re-cuts can't interleave.
+    recutLock: {
+      lockedAt: { type: Date, default: null },
+      lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    },
   },
   { timestamps: true }
 );

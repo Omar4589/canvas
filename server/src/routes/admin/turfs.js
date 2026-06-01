@@ -8,7 +8,13 @@ import { Turf } from '../../models/Turf.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { Household } from '../../models/Household.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { recomputeTurf } from '../../services/turf/generateTurf.js';
+import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
+import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
+import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -43,6 +49,18 @@ router.post('/generate', async (req, res, next) => {
     }
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).select('_id').lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
+
+    // Block re-generating over accepted books — Discard is the deliberate path to
+    // re-cut an accepted pass. (Regenerate only wipes drafts, so it would leave the
+    // published set + a mismatched household mirror behind and let a re-Accept
+    // create duplicate books.)
+    const published = await Turf.countDocuments({ passId, status: 'published' });
+    if (published > 0) {
+      return res.status(409).json({
+        error: 'This pass has accepted books. Discard them first to re-cut.',
+        code: 'has-published-books',
+      });
+    }
 
     const job = await getQueue(QUEUE_NAMES.TURF).add('generate', {
       campaignId: String(req.campaign._id),
@@ -90,31 +108,145 @@ router.post('/accept', async (req, res, next) => {
   }
 });
 
-// Discard ALL books for a pass (draft + published) so it can be re-cut from
-// scratch. Archived books are left untouched. Clears the household turfId/walkOrder
-// mirror + any canvasser assignments for those books. Blocked on archived passes.
-// (Regenerate only wipes drafts, so this is the escape hatch once books are accepted.)
+// Discard a pass's books so it can be re-cut from scratch. Snapshots everything
+// first (undo), clears the household mirror + assignments, and hard-deletes the
+// draft+published books (archived left untouched). On an ACTIVE pass it requires
+// confirmActive and reverts the pass to draft when it empties, so a campaign is
+// never left "active with zero books". Optionally also clears the pass's knock
+// history (also snapshotted for undo). Serialized per-pass by an advisory lock.
 router.post('/discard', async (req, res, next) => {
+  const { passId, confirmActive, clearKnocks } = req.body || {};
+  let locked = false;
   try {
-    const { passId } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id });
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     if (pass.status === 'archived') return res.status(409).json({ error: 'Pass is archived; create a new pass instead' });
 
+    // Live-pass guard: refuse without explicit confirmation, and report the stakes.
+    if (pass.status === 'active' && !confirmActive) {
+      const knockCount = await CanvassActivity.countDocuments({ passId });
+      const assignmentCount = await TurfAssignment.countDocuments({ passId });
+      return res.status(409).json({
+        error: 'This pass is live. Confirm to discard its books.',
+        code: 'active-pass-confirm-required',
+        knockCount,
+        assignmentCount,
+      });
+    }
+
+    if (!(await acquireRecutLock(passId, req.user._id))) {
+      return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
+    }
+    locked = true;
+
+    // Snapshot FIRST (before any deletion) so a failure here aborts the discard
+    // and nothing is lost.
+    const snapshot = await snapshotPass({
+      campaign: req.campaign,
+      passId,
+      reason: 'discard',
+      includeKnocks: !!clearKnocks,
+      userId: req.user._id,
+    });
+
+    // Optionally clear this pass's knock history (statuses recomputed after).
+    let clearedHouseholds = [];
+    let clearedVoters = [];
+    if (clearKnocks) {
+      clearedHouseholds = await CanvassActivity.distinct('householdId', { passId });
+      clearedVoters = await SurveyResponse.distinct('voterId', { passId });
+      await CanvassActivity.deleteMany({ passId });
+      await SurveyResponse.deleteMany({ passId });
+    }
+
+    // Wipe the books + their household mirror + assignments.
     const books = await Turf.find(
       { campaignId: req.campaign._id, passId, status: { $in: ['draft', 'published'] } },
       { _id: 1 }
     ).lean();
     const turfIds = books.map((b) => b._id);
-    if (!turfIds.length) return res.json({ discarded: 0 });
+    if (turfIds.length) {
+      await Household.updateMany({ turfId: { $in: turfIds } }, { $set: { turfId: null, walkOrder: null } });
+      await TurfAssignment.deleteMany({ turfId: { $in: turfIds } });
+      await Turf.deleteMany({ _id: { $in: turfIds } });
+    }
 
-    await Household.updateMany({ turfId: { $in: turfIds } }, { $set: { turfId: null, walkOrder: null } });
-    await TurfAssignment.deleteMany({ turfId: { $in: turfIds } });
-    const r = await Turf.deleteMany({ _id: { $in: turfIds } });
-    res.json({ discarded: r.deletedCount });
+    // Recompute statuses for the cleared knocks (must run after deletion).
+    if (clearKnocks) {
+      await recomputeHouseholdStatusesByIds(clearedHouseholds, req.campaign.type);
+      await recomputeSurveyStatus(clearedVoters);
+    }
+
+    // An active pass with no books is invalid — revert it to draft.
+    let reverted = false;
+    if (pass.status === 'active') {
+      pass.status = 'draft';
+      await pass.save();
+      if (String(req.campaign.activePassId) === String(pass._id)) {
+        await Campaign.updateOne({ _id: req.campaign._id }, { $set: { activePassId: null } });
+      }
+      reverted = true;
+    }
+
+    res.json({
+      discarded: turfIds.length,
+      clearedKnocks: !!clearKnocks,
+      reverted,
+      snapshotId: String(snapshot._id),
+    });
   } catch (err) {
     next(err);
+  } finally {
+    if (locked) await releaseRecutLock(passId);
+  }
+});
+
+// List recent undo snapshots for a pass (metadata only — heavy arrays omitted).
+router.get('/snapshots', async (req, res, next) => {
+  try {
+    const { passId } = req.query;
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const snapshots = await TurfSnapshot.find({ campaignId: req.campaign._id, passId })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select('reason bookCount knockCount clearedKnocks restoredAt createdAt createdBy')
+      .lean();
+    res.json({ snapshots });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Restore a snapshot (undo a discard/re-cut). Refuses if the pass already has
+// live books — discard them first. Re-creates books + assignments and, if the
+// snapshot captured them, the cleared knocks. Does NOT re-activate the pass.
+router.post('/restore-snapshot', async (req, res, next) => {
+  const { snapshotId } = req.body || {};
+  let lockPassId = null;
+  try {
+    if (!mongoose.isValidObjectId(snapshotId)) return res.status(400).json({ error: 'snapshotId required' });
+    const snapshot = await TurfSnapshot.findOne({ _id: snapshotId, campaignId: req.campaign._id });
+    if (!snapshot) return res.status(404).json({ error: 'Snapshot not found' });
+    const pass = await Pass.findOne({ _id: snapshot.passId, campaignId: req.campaign._id }).select('_id').lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+
+    const liveBooks = await Turf.countDocuments({ passId: snapshot.passId, status: { $in: ['draft', 'published'] } });
+    if (liveBooks > 0) {
+      return res.status(409).json({ error: 'This pass already has books. Discard them before restoring a snapshot.' });
+    }
+
+    if (!(await acquireRecutLock(snapshot.passId, req.user._id))) {
+      return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
+    }
+    lockPassId = snapshot.passId;
+
+    const result = await restoreSnapshot({ campaign: req.campaign, snapshot, userId: req.user._id });
+    res.json({ restored: result.bookCount, restoredKnocks: result.restoredKnocks, snapshotId: String(snapshot._id) });
+  } catch (err) {
+    next(err);
+  } finally {
+    if (lockPassId) await releaseRecutLock(lockPassId);
   }
 });
 

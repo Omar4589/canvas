@@ -6,6 +6,8 @@ import { Campaign } from '../../models/Campaign.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { WalkList } from '../../models/WalkList.js';
+import { Household } from '../../models/Household.js';
+import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
 
 const router = Router({ mergeParams: true });
@@ -36,7 +38,7 @@ router.get('/', async (req, res, next) => {
   try {
     const passes = await Pass.find({ campaignId: req.campaign._id }).sort({ roundNumber: 1 }).lean();
     const counts = await Turf.aggregate([
-      { $match: { campaignId: req.campaign._id } },
+      { $match: { campaignId: req.campaign._id, status: { $ne: 'archived' } } },
       { $group: { _id: '$passId', turfs: { $sum: 1 } } },
     ]);
     const cMap = new Map(counts.map((c) => [String(c._id), c.turfs]));
@@ -145,6 +147,12 @@ router.delete('/:id', async (req, res, next) => {
     const pass = await Pass.findOne({ _id: req.params.id, campaignId: req.campaign._id }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     if (pass.status !== 'draft') return res.status(400).json({ error: 'Only draft passes can be deleted' });
+    const books = await Turf.find({ passId: pass._id }, { _id: 1 }).lean();
+    const turfIds = books.map((b) => b._id);
+    if (turfIds.length) {
+      await Household.updateMany({ turfId: { $in: turfIds } }, { $set: { turfId: null, walkOrder: null } });
+      await TurfAssignment.deleteMany({ turfId: { $in: turfIds } });
+    }
     await Turf.deleteMany({ passId: pass._id });
     await Pass.deleteOne({ _id: pass._id });
     res.json({ deleted: 1 });

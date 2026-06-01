@@ -146,7 +146,7 @@ export default function PassesPage() {
                 <td className="px-4 py-2 text-gray-600">{p.roundNumber}</td>
                 <td className="px-4 py-2">
                   {p.name}
-                  {String(p._id) === String(activePassId) && (
+                  {p.status === 'active' && (
                     <span className="ml-2 rounded bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">ACTIVE</span>
                   )}
                 </td>

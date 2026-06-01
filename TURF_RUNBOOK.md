@@ -60,6 +60,17 @@ npm run dev                                     # terminal 3 (server :4000 + cli
 6. **Passes → Activate** the round (one-way; requires accepted books). Per-pass progress shows on the Passes page.
 7. **Jobs** (super-admin) — Bull Board for import/turf job observability.
 
+## Re-cutting a pass (discard / undo / clear knocks)
+The model: **books are how you slice the work; knocks are what happened.** Re-cutting only re-slices — it never deletes fieldwork unless you explicitly ask.
+
+- **Before Accept** (books still `draft`): just **Generate** again — it cleanly wipes the prior drafts (+ their assignments + the household mirror) and rebuilds.
+- **After Accept** (books `published`): **Generate is blocked** (409 `has-published-books`). Use **Discard** first — the deliberate path to re-cut accepted books (prevents duplicate/overlapping published books).
+- **Discard** snapshots the book layout + assignments first (for undo), clears the household `turfId`/`walkOrder` mirror, deletes assignments, and removes the draft+published books. Archived (merge-stub) books are left alone.
+- On a **LIVE (active) pass**, Discard requires an explicit confirm (`confirmActive`) and **reverts the pass to `draft`** + clears `activePassId` when it empties (so a campaign is never "active with zero books"). Flow: re-cut → re-Accept → re-Activate on the Passes page.
+- **Clear knocks (opt-in checkbox):** Discard keeps knock history by default. Ticking the box also wipes this pass's `CanvassActivity` + `SurveyResponse` (door statuses recomputed). Those are snapshotted, so Undo restores them verbatim.
+- **Undo / Snapshots:** the last ~10 snapshots per pass are listed under the books panel. **Restore** recreates the books, assignments, and (if captured) the cleared knocks. It's blocked while the pass still has live books (discard them first) and does **not** auto-re-activate the pass.
+- Concurrent discard/restore on one pass is serialized by a per-pass advisory lock (`Pass.recutLock`, auto-reclaimed after 5 min). `activatedAt` is preserved across a revert, so a re-cut pass keeps its attribution window — knock history attributes to the pass via `activatedAt`, never a book id, which is why re-cutting is always safe for fieldwork.
+
 ## Notes / gotchas
 - `noeviction` and `worker=1` are mandatory, or jobs sit/evict.
 - County comes from a CSV column (case-insensitive header); re-run `migrate:cut-attributes` after a county-bearing re-import.

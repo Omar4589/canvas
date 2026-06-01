@@ -93,6 +93,50 @@ function PassPicker({ campaignId, passId, onChange }) {
   );
 }
 
+function DiscardModal({ isActive, bookCount, clearKnocks, setClearKnocks, pending, error, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-gray-900">
+          Discard {bookCount} book{bookCount === 1 ? '' : 's'}?
+        </h3>
+        {isActive ? (
+          <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            ⚠️ This pass is <strong>LIVE</strong>. Discarding wipes its books and{' '}
+            <strong>all canvasser assignments</strong>, and reverts the pass to draft. Knock history is kept
+            unless you check the box below.
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-gray-600">
+            This removes the pass's books and canvasser assignments so you can re-cut. Knock history is kept. You
+            can undo this from Snapshots.
+          </p>
+        )}
+        <label className="mt-3 flex items-start gap-2 text-sm text-gray-700">
+          <input type="checkbox" checked={clearKnocks} onChange={(e) => setClearKnocks(e.target.checked)} className="mt-0.5" />
+          <span>
+            Also clear all knock history for this pass — resets door progress.{' '}
+            <span className="text-gray-400">(Snapshotted; undoable.)</span>
+          </span>
+        </label>
+        {error && <div className="mt-2 text-xs text-red-700">{error.message}</div>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onCancel} disabled={pending} className="rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={pending}
+            className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+          >
+            {pending ? 'Discarding…' : clearKnocks ? 'Discard + clear knocks' : 'Discard books'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TurfsPage() {
   const qc = useQueryClient();
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
@@ -109,6 +153,9 @@ export default function TurfsPage() {
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnPolygon, setDrawnPolygon] = useState(null);
   const [mapReady, setMapReady] = useState(false);
+  const [showDiscard, setShowDiscard] = useState(false);
+  const [clearKnocks, setClearKnocks] = useState(false);
+  const [lastSnapshotId, setLastSnapshotId] = useState(null);
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -133,7 +180,25 @@ export default function TurfsPage() {
   });
   const turfs = turfsQ.data?.turfs || [];
   const draftCount = turfs.filter((t) => t.status === 'draft').length;
+  const publishedCount = turfs.filter((t) => t.status === 'published').length;
   const colorByTurf = new Map(turfs.map((t, i) => [String(t._id), colorFor(i)]));
+
+  // Selected pass (shares react-query cache with PassPicker) — for the live flag
+  // + whether Discard must confirm an active pass.
+  const passesQ = useQuery({
+    queryKey: ['admin', 'passes', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
+    enabled: !!campaignId,
+  });
+  const selectedPass = (passesQ.data?.passes || []).find((p) => String(p._id) === String(passId)) || null;
+  const isActivePass = selectedPass?.status === 'active';
+
+  const snapshotsQ = useQuery({
+    queryKey: ['turf-snapshots', campaignId, passId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/snapshots?passId=${passId}`),
+    enabled: !!campaignId && !!passId,
+  });
+  const snapshots = snapshotsQ.data?.snapshots || [];
 
   const jobQ = useQuery({
     queryKey: ['turf-job', campaignId, jobId],
@@ -175,8 +240,31 @@ export default function TurfsPage() {
     onSuccess: invalidateTurfs,
   });
   const discard = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/discard`, { method: 'POST', body: { passId } }),
-    onSuccess: () => { setSelectedBooks(new Set()); setEditMode(false); invalidateTurfs(); },
+    mutationFn: (opts = {}) =>
+      api(`/admin/campaigns/${campaignId}/turfs/discard`, {
+        method: 'POST',
+        body: { passId, confirmActive: !!opts.confirmActive, clearKnocks: !!opts.clearKnocks },
+      }),
+    onSuccess: (res) => {
+      setShowDiscard(false);
+      setClearKnocks(false);
+      setSelectedBooks(new Set());
+      setEditMode(false);
+      setLastSnapshotId(res?.snapshotId || null);
+      invalidateTurfs();
+      qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
+    },
+  });
+  const restore = useMutation({
+    mutationFn: (snapshotId) =>
+      api(`/admin/campaigns/${campaignId}/turfs/restore-snapshot`, { method: 'POST', body: { snapshotId } }),
+    onSuccess: () => {
+      setLastSnapshotId(null);
+      invalidateTurfs();
+      qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
+    },
   });
   const moveDoor = useMutation({
     mutationFn: ({ householdId, toTurfId }) => api(`/admin/campaigns/${campaignId}/turfs/move-door`, { method: 'POST', body: { householdId, toTurfId } }),
@@ -297,7 +385,8 @@ export default function TurfsPage() {
   const jobBusy = jobId && jobQ.data && jobQ.data.status !== 'completed' && jobQ.data.status !== 'failed';
   const progress = jobQ.data?.progress;
   const pct = typeof progress === 'object' ? progress?.pct : progress;
-  const canGenerate = passId && !generate.isPending && !jobBusy && (mode !== 'manual' || drawnPolygon);
+  const canGenerate =
+    passId && !generate.isPending && !jobBusy && publishedCount === 0 && (mode !== 'manual' || drawnPolygon);
 
   return (
     <div>
@@ -306,6 +395,11 @@ export default function TurfsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <CampaignSelector campaignId={campaignId} onChange={(id) => { setCampaignId(id); setPassId(''); }} campaigns={campaigns} isLoading={isLoading} />
           {campaignId && <PassPicker campaignId={campaignId} passId={passId} onChange={setPassId} />}
+          {isActivePass && (
+            <span className="rounded bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-700">
+              ● Live
+            </span>
+          )}
         </div>
       </div>
 
@@ -374,6 +468,9 @@ export default function TurfsPage() {
             </div>
           )}
           {generate.error && <div className="mt-2 text-xs text-red-700">{generate.error.message}</div>}
+          {publishedCount > 0 && (
+            <p className="mt-2 text-xs text-amber-700">This pass has accepted books — Discard them below to re-cut.</p>
+          )}
 
           {!!turfs.length && (
             <div className="mt-5 border-t border-gray-100 pt-4">
@@ -389,7 +486,7 @@ export default function TurfsPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => { if (window.confirm('Discard ALL books for this pass and start over? This cannot be undone.')) discard.mutate(); }}
+                    onClick={() => setShowDiscard(true)}
                     disabled={discard.isPending}
                     className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
                   >
@@ -433,6 +530,44 @@ export default function TurfsPage() {
               </ul>
             </div>
           )}
+
+          {snapshots.length > 0 && (
+            <div className="mt-5 border-t border-gray-100 pt-4">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Undo / snapshots</div>
+              {lastSnapshotId && turfs.length === 0 && (
+                <button
+                  onClick={() => restore.mutate(lastSnapshotId)}
+                  disabled={restore.isPending}
+                  className="mb-2 w-full rounded bg-gray-800 px-2 py-1.5 text-xs font-semibold text-white hover:bg-gray-700 disabled:opacity-60"
+                >
+                  {restore.isPending ? 'Restoring…' : '↩ Undo last discard'}
+                </button>
+              )}
+              <ul className="space-y-1 text-xs">
+                {snapshots.map((s) => (
+                  <li key={s._id} className="flex items-center justify-between gap-2 rounded px-1 py-1">
+                    <span className="min-w-0 truncate text-gray-600">
+                      {new Date(s.createdAt).toLocaleString()} · {s.bookCount} books
+                      {s.clearedKnocks ? ` · ${s.knockCount} knocks` : ''}
+                      {s.restoredAt ? ' · restored' : ''}
+                    </span>
+                    <button
+                      onClick={() => restore.mutate(s._id)}
+                      disabled={restore.isPending || turfs.length > 0}
+                      title={turfs.length > 0 ? 'Discard current books first' : 'Restore this snapshot'}
+                      className="shrink-0 rounded border border-gray-300 px-2 py-0.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Restore
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {turfs.length > 0 && (
+                <p className="mt-1 text-[11px] text-gray-400">Discard the current books to restore an earlier snapshot.</p>
+              )}
+              {restore.error && <div className="mt-1 text-[11px] text-red-700">{restore.error.message}</div>}
+            </div>
+          )}
         </section>
 
         <section className="overflow-hidden rounded-lg border border-gray-200 bg-white">
@@ -446,6 +581,18 @@ export default function TurfsPage() {
         </section>
       </div>
 
+      {showDiscard && (
+        <DiscardModal
+          isActive={isActivePass}
+          bookCount={turfs.length}
+          clearKnocks={clearKnocks}
+          setClearKnocks={setClearKnocks}
+          pending={discard.isPending}
+          error={discard.error}
+          onCancel={() => { setShowDiscard(false); setClearKnocks(false); }}
+          onConfirm={() => discard.mutate({ confirmActive: isActivePass, clearKnocks })}
+        />
+      )}
       {assignTurf && <TurfAssignmentsModal campaignId={campaignId} turf={assignTurf} onClose={() => setAssignTurf(null)} />}
     </div>
   );
