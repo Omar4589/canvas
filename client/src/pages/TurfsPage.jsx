@@ -41,7 +41,7 @@ function booksToLabelGeoJSON(turfs) {
     type: 'FeatureCollection',
     features: turfs
       .filter((t) => t.centroid?.coordinates?.length === 2)
-      .map((t) => ({ type: 'Feature', geometry: t.centroid, properties: { label: `${t.name} · ${t.doorCount}` } })),
+      .map((t) => ({ type: 'Feature', geometry: t.centroid, properties: { id: String(t._id), label: `${t.name} · ${t.doorCount}` } })),
   };
 }
 function doorsToGeoJSON(doors, colorByTurf) {
@@ -50,7 +50,7 @@ function doorsToGeoJSON(doors, colorByTurf) {
     features: doors.map((d) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
-      properties: { id: d.id, color: colorByTurf.get(String(d.turfId)) || '#9ca3af' },
+      properties: { id: d.id, turfId: d.turfId ? String(d.turfId) : '', color: colorByTurf.get(String(d.turfId)) || '#9ca3af' },
     })),
   };
 }
@@ -156,6 +156,7 @@ export default function TurfsPage() {
   const [showDiscard, setShowDiscard] = useState(false);
   const [clearKnocks, setClearKnocks] = useState(false);
   const [lastSnapshotId, setLastSnapshotId] = useState(null);
+  const [focusedBookId, setFocusedBookId] = useState(null);
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -163,6 +164,7 @@ export default function TurfsPage() {
   const editModeRef = useRef(false);
   const moveDoorRef = useRef(() => {});
   const toggleSelectRef = useRef(() => {});
+  const lastFocusRef = useRef(null);
 
   const tokenQ = useQuery({ queryKey: ['config', 'mapbox-token'], queryFn: () => api('/admin/config/mapbox-token') });
   const turfsQ = useQuery({
@@ -182,6 +184,7 @@ export default function TurfsPage() {
   const draftCount = turfs.filter((t) => t.status === 'draft').length;
   const publishedCount = turfs.filter((t) => t.status === 'published').length;
   const colorByTurf = new Map(turfs.map((t, i) => [String(t._id), colorFor(i)]));
+  const focusedBook = turfs.find((t) => String(t._id) === focusedBookId) || null;
 
   // Selected pass (shares react-query cache with PassPicker) — for the live flag
   // + whether Discard must confirm an active pass.
@@ -231,6 +234,7 @@ export default function TurfsPage() {
     },
     onSuccess: (res) => {
       setJobId(res.jobId);
+      setFocusedBookId(null);
       if (drawRef.current) drawRef.current.deleteAll();
       setDrawnPolygon(null);
     },
@@ -250,6 +254,7 @@ export default function TurfsPage() {
       setClearKnocks(false);
       setSelectedBooks(new Set());
       setEditMode(false);
+      setFocusedBookId(null);
       setLastSnapshotId(res?.snapshotId || null);
       invalidateTurfs();
       qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] });
@@ -373,10 +378,35 @@ export default function TurfsPage() {
     map.getSource('books').setData(booksToFillGeoJSON(turfs, colorByTurf, selectedBooks));
     map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs));
     map.getSource('doors').setData(doorsToGeoJSON(doorsQ.data?.doors || [], colorByTurf));
-    const bb = bboxOf(turfs);
-    if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
+
+    // Per-book focus: filter every layer to the focused book (its doors too) and
+    // zoom to it; otherwise clear the filters and fit all books. Re-zoom only when
+    // the focus target actually changes so unrelated repaints don't yank the view.
+    const focused = focusedBookId && turfs.find((t) => String(t._id) === focusedBookId);
+    const focusChanged = lastFocusRef.current !== focusedBookId;
+    lastFocusRef.current = focusedBookId;
+    if (focused) {
+      const onId = ['==', ['get', 'id'], focusedBookId];
+      map.setFilter('book-fill', onId);
+      map.setFilter('book-outline', onId);
+      map.setFilter('book-labels', onId);
+      map.setFilter('doors', ['==', ['get', 'turfId'], focusedBookId]);
+      if (focusChanged) {
+        const bb = bboxOf([focused]);
+        if (bb) map.fitBounds(bb, { padding: 60, maxZoom: 16, duration: 400 });
+      }
+    } else {
+      map.setFilter('book-fill', null);
+      map.setFilter('book-outline', null);
+      map.setFilter('book-labels', null);
+      map.setFilter('doors', null);
+      const bb = bboxOf(turfs);
+      if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
+    }
   }
-  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady]);
+  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, focusedBookId]);
+  // Reset focus when switching pass/campaign (the focused id won't exist there).
+  useEffect(() => { setFocusedBookId(null); }, [passId, campaignId]);
 
   function startDraw() {
     if (drawRef.current) { drawRef.current.deleteAll(); drawRef.current.changeMode('draw_polygon'); }
@@ -506,14 +536,29 @@ export default function TurfsPage() {
                 </div>
               )}
 
+              {focusedBook && (
+                <div className="mb-2 flex items-center justify-between rounded bg-brand-50 px-2 py-1 text-xs text-brand-700">
+                  <span className="truncate">Showing <strong>{focusedBook.name}</strong> only</span>
+                  <button onClick={() => setFocusedBookId(null)} className="ml-2 shrink-0 font-semibold hover:underline">Show all</button>
+                </div>
+              )}
+
               <ul className="max-h-72 space-y-1 overflow-auto text-sm">
                 {turfs.map((t, i) => (
-                  <li key={t._id} className="flex items-center justify-between gap-2 rounded px-1 py-0.5">
+                  <li
+                    key={t._id}
+                    onClick={() => setFocusedBookId((cur) => (cur === String(t._id) ? null : String(t._id)))}
+                    title="Click to show only this book on the map"
+                    className={`flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-0.5 ${
+                      focusedBookId === String(t._id) ? 'bg-brand-50 ring-1 ring-brand-300' : 'hover:bg-gray-50'
+                    }`}
+                  >
                     <span className="flex min-w-0 items-center gap-2 truncate">
                       <span className="inline-block h-3 w-3 shrink-0 rounded-sm" style={{ background: colorFor(i) }} />
                       {editMode ? (
                         <input
                           defaultValue={t.name}
+                          onClick={(e) => e.stopPropagation()}
                           onBlur={(e) => e.target.value.trim() && e.target.value !== t.name && rename.mutate({ turfId: t._id, name: e.target.value.trim() })}
                           className="min-w-0 flex-1 truncate rounded border border-transparent px-1 hover:border-gray-300 focus:border-brand-500 focus:outline-none"
                         />
@@ -523,7 +568,7 @@ export default function TurfsPage() {
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
                       <span className="text-gray-500">{t.doorCount}</span>
-                      <button onClick={() => setAssignTurf(t)} className="text-xs font-medium text-brand-600 hover:underline">Assign</button>
+                      <button onClick={(e) => { e.stopPropagation(); setAssignTurf(t); }} className="text-xs font-medium text-brand-600 hover:underline">Assign</button>
                     </span>
                   </li>
                 ))}

@@ -11,6 +11,7 @@ import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
+import { WalkList } from '../../models/WalkList.js';
 import { recomputeTurf } from '../../services/turf/generateTurf.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
@@ -263,24 +264,35 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// Door points for a pass (for the map: render + drag between books).
+// Door points for a pass. Returns ALL eligible households (mirroring the cut's
+// base filter), each tagged with its book (turfId) or null — so the map shows
+// the full door universe as gray dots BEFORE a cut and colors them in after, and
+// surfaces any house a manual draw left unassigned.
 router.get('/doors', async (req, res, next) => {
   try {
     const { passId } = req.query;
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
-    const turfs = await Turf.find({ campaignId: req.campaign._id, passId }, { _id: 1 }).lean();
-    const turfIds = turfs.map((t) => t._id);
-    const households = await Household.find(
-      { turfId: { $in: turfIds } },
-      { location: 1, turfId: 1 }
-    ).lean();
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+
+    const filter = {
+      campaignId: req.campaign._id,
+      isActive: true,
+      'location.coordinates': { $exists: true, $ne: null },
+    };
+    if (pass.walkListId) {
+      const wl = await WalkList.findById(pass.walkListId, { householdIds: 1 }).lean();
+      if (wl?.householdIds?.length) filter._id = { $in: wl.householdIds };
+    }
+
+    const households = await Household.find(filter, { location: 1, turfId: 1 }).lean();
     const doors = households
       .filter((h) => h.location?.coordinates?.length === 2)
       .map((h) => ({
         id: String(h._id),
         lng: h.location.coordinates[0],
         lat: h.location.coordinates[1],
-        turfId: String(h.turfId),
+        turfId: h.turfId ? String(h.turfId) : null,
       }));
     res.json({ doors });
   } catch (err) {

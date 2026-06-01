@@ -55,7 +55,7 @@ npm run dev                                     # terminal 3 (server :4000 + cli
 1. **CSV Import** — upload → map the vendor's columns (save a profile per vendor: i360, L2, …) → import runs in the background with a progress bar.
 2. **Walk Lists** — build a targeted segment (demographics + prior-round status/answers), preview the count, save it (frozen).
 3. **Passes** — create a round from a walk list (or all voters).
-4. **Turf Cutting** — pick the campaign + pass, choose geometric (max doors, default 65) or attribute (group-by + optional cap-N), Generate → preview books on the map → **Accept**.
+4. **Turf Cutting** — pick the campaign + pass; the map shows every eligible house (gray before a cut). Choose geometric (max doors, default 65 — compact, balanced books via capacity-balanced k-means) or attribute (group-by + optional cap-N), Generate → books render colored on the map → click a book in the list to isolate it on the map → **Accept**.
 5. **Assign** canvassers to each book (multiple per book allowed).
 6. **Passes → Activate** the round (one-way; requires accepted books). Per-pass progress shows on the Passes page.
 7. **Jobs** (super-admin) — Bull Board for import/turf job observability.
