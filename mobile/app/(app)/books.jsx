@@ -1,0 +1,291 @@
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Mapbox from '@rnmapbox/maps';
+import { api } from '../../lib/api';
+import {
+  saveBootstrap,
+  loadBootstrap,
+  loadActiveCampaign,
+  saveActiveCampaign,
+  clearBootstrap,
+} from '../../lib/cache';
+import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
+import Logo from '../../components/Logo';
+import { colors, radius } from '../../lib/theme';
+
+if (MAPBOX_PUBLIC_TOKEN) {
+  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
+}
+
+const DEFAULT_CENTER = [-84.5, 39.0];
+const STATUS_COLOR = { grey: '#9ca3af', yellow: '#f59e0b', green: '#22c55e' };
+
+export default function BooksScreen() {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const cameraRef = useRef(null);
+  const cameraInitRef = useRef(false);
+  const [activeCampaign, setActiveCampaign] = useState(undefined);
+  const [selected, setSelected] = useState(new Set());
+
+  useEffect(() => {
+    let mounted = true;
+    loadActiveCampaign().then((c) => {
+      if (!mounted) return;
+      if (!c) {
+        router.replace('/(app)/campaigns');
+        return;
+      }
+      setActiveCampaign(c);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['bootstrap'],
+    queryFn: async () => {
+      try {
+        const fresh = await api(`/mobile/bootstrap?campaignId=${activeCampaign.id}`);
+        await saveBootstrap(fresh);
+        return fresh;
+      } catch (err) {
+        const cached = await loadBootstrap();
+        if (cached && String(cached.campaign?.id) === String(activeCampaign.id)) return cached;
+        throw err;
+      }
+    },
+    enabled: !!activeCampaign?.id,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const books = data?.books || [];
+  const households = data?.households || [];
+
+  // Admin / non-turf campaign (sees everything, no assigned books) → straight to the map.
+  useEffect(() => {
+    if (!data) return;
+    if (!books.length && households.length) router.replace('/(app)/map');
+  }, [data, books.length, households.length, router]);
+
+  // Status-colored pin per book at its centroid; progress from the houses' status.
+  const bookFeatures = useMemo(
+    () => ({
+      type: 'FeatureCollection',
+      features: books
+        .filter((b) => b.centroid?.coordinates?.length === 2)
+        .map((b) => {
+          const members = households.filter((h) => String(h.turfId) === String(b.id));
+          const total = members.length || b.doorCount || 0;
+          const knocked = members.filter((h) => (h.status || 'unknocked') !== 'unknocked').length;
+          const status = total > 0 && knocked >= total ? 'green' : knocked > 0 ? 'yellow' : 'grey';
+          return {
+            type: 'Feature',
+            id: String(b.id),
+            properties: {
+              id: String(b.id),
+              label: `${b.name}\n${knocked}/${total}`,
+              color: STATUS_COLOR[status],
+              selected: selected.has(String(b.id)) ? 1 : 0,
+            },
+            geometry: b.centroid,
+          };
+        }),
+    }),
+    [books, households, selected]
+  );
+
+  // Frame all the book pins on first load (header/enter-bar padding).
+  useEffect(() => {
+    if (cameraInitRef.current || !cameraRef.current) return;
+    const pts = books.map((b) => b.centroid?.coordinates).filter((c) => c?.length === 2);
+    if (!pts.length) return;
+    if (pts.length === 1) {
+      cameraRef.current.setCamera({ centerCoordinate: pts[0], zoomLevel: 14, animationDuration: 0 });
+    } else {
+      let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+      for (const [lng, lat] of pts) {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [90, 50, 150, 50], 0);
+    }
+    cameraInitRef.current = true;
+  }, [books]);
+
+  const onBookPress = useCallback((e) => {
+    const id = e.features?.[0]?.properties?.id;
+    if (!id) return;
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(String(id)) ? n.delete(String(id)) : n.add(String(id));
+      return n;
+    });
+  }, []);
+
+  function onEnter() {
+    if (!selected.size) return;
+    router.replace({ pathname: '/(app)/map', params: { selectedBooks: [...selected].join(',') } });
+  }
+
+  async function switchCampaign() {
+    await saveActiveCampaign(null);
+    await clearBootstrap();
+    qc.removeQueries({ queryKey: ['bootstrap'] });
+    router.replace('/(app)/campaigns');
+  }
+
+  if (!MAPBOX_PUBLIC_TOKEN) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.errorText}>Map unavailable: missing Mapbox configuration.</Text>
+      </SafeAreaView>
+    );
+  }
+  if (activeCampaign === undefined || (activeCampaign && isLoading)) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <ActivityIndicator color={colors.brand} />
+        <Text style={styles.muted}>Loading your books…</Text>
+      </SafeAreaView>
+    );
+  }
+  if (error) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.errorText}>{error.message}</Text>
+        <Pressable onPress={() => refetch()} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Retry</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+  if (!books.length) {
+    // Has houses but no books → admin/non-turf, redirecting to the full map.
+    if (households.length) {
+      return (
+        <SafeAreaView style={styles.center}>
+          <ActivityIndicator color={colors.brand} />
+        </SafeAreaView>
+      );
+    }
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.emptyTitle}>No turf assigned yet</Text>
+        <Text style={styles.muted}>Your admin will assign you a book to start canvassing.</Text>
+        <Pressable onPress={() => refetch()} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Refresh</Text>
+        </Pressable>
+        <Pressable onPress={switchCampaign} style={[styles.secondaryButton, { marginTop: 10 }]}>
+          <Text style={styles.secondaryButtonText}>Choose a different campaign</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <Mapbox.MapView style={{ flex: 1 }} styleURL={Mapbox.StyleURL.Street}>
+        <Mapbox.Camera ref={cameraRef} defaultSettings={{ centerCoordinate: DEFAULT_CENTER, zoomLevel: 9 }} />
+        <Mapbox.UserLocation visible />
+        <Mapbox.ShapeSource id="books" shape={bookFeatures} onPress={onBookPress}>
+          <Mapbox.CircleLayer
+            id="book-circles"
+            style={{
+              circleColor: ['get', 'color'],
+              circleRadius: ['case', ['==', ['get', 'selected'], 1], 17, 12],
+              circleStrokeColor: ['case', ['==', ['get', 'selected'], 1], '#111827', '#ffffff'],
+              circleStrokeWidth: ['case', ['==', ['get', 'selected'], 1], 3, 2],
+            }}
+          />
+          <Mapbox.SymbolLayer
+            id="book-labels"
+            style={{
+              textField: ['get', 'label'],
+              textSize: 11,
+              textOffset: [0, 1.7],
+              textColor: '#111827',
+              textHaloColor: '#ffffff',
+              textHaloWidth: 1.5,
+              textAllowOverlap: false,
+            }}
+          />
+        </Mapbox.ShapeSource>
+      </Mapbox.MapView>
+
+      <SafeAreaView edges={['top']} style={styles.headerWrap} pointerEvents="box-none">
+        <View style={styles.header}>
+          <Logo size={24} />
+          <Pressable onPress={switchCampaign} hitSlop={8}>
+            <Text style={styles.switch}>Switch campaign</Text>
+          </Pressable>
+        </View>
+        <View style={styles.hint}>
+          <Text style={styles.hintText}>
+            Tap your books to pick where to start. Grey = not started · yellow = in progress · green = done.
+          </Text>
+        </View>
+      </SafeAreaView>
+
+      {selected.size > 0 && (
+        <SafeAreaView edges={['bottom']} style={styles.enterWrap} pointerEvents="box-none">
+          <Pressable onPress={onEnter} style={styles.enterButton}>
+            <Text style={styles.enterButtonText}>
+              Enter {selected.size} book{selected.size === 1 ? '' : 's'} →
+            </Text>
+          </Pressable>
+        </SafeAreaView>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: colors.bg },
+  muted: { color: colors.textSecondary, textAlign: 'center', marginTop: 6 },
+  emptyTitle: { fontWeight: '700', fontSize: 16, color: colors.textPrimary, marginBottom: 4 },
+  errorText: { color: colors.danger, textAlign: 'center' },
+  primaryButton: { backgroundColor: colors.brand, paddingHorizontal: 20, paddingVertical: 10, borderRadius: radius.md, marginTop: 12 },
+  primaryButtonText: { color: colors.textInverse, fontWeight: '600' },
+  secondaryButton: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 20, paddingVertical: 10, borderRadius: radius.md },
+  secondaryButtonText: { color: colors.textPrimary, fontWeight: '600' },
+  headerWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 8,
+  },
+  switch: { color: colors.brand, fontWeight: '600', fontSize: 14 },
+  hint: {
+    marginHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  hintText: { fontSize: 12, color: colors.textSecondary },
+  enterWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, alignItems: 'center' },
+  enterButton: {
+    backgroundColor: colors.brand,
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: radius.pill,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  enterButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
+});

@@ -60,6 +60,30 @@ async function canvasserHouseholdScope(req, campaign) {
   return books.flatMap((b) => b.householdIds || []);
 }
 
+// The canvasser's assigned books on the active pass, with the geometry the mobile
+// "books overview" needs (a status-colored pin per book at its centroid). Empty
+// for admins/super, no active pass, or no assignment.
+async function canvasserBooks(req, campaign) {
+  if (isOrgAdminOrSuper(req)) return [];
+  const passId = campaign.activePassId;
+  if (!passId) return [];
+  const myTurfs = await TurfAssignment.find(
+    { userId: req.user._id, campaignId: campaign._id, passId },
+    { turfId: 1 }
+  ).lean();
+  if (!myTurfs.length) return [];
+  const books = await Turf.find(
+    { _id: { $in: myTurfs.map((a) => a.turfId) } },
+    { name: 1, centroid: 1, doorCount: 1 }
+  ).lean();
+  return books.map((b) => ({
+    id: String(b._id),
+    name: b.name,
+    centroid: b.centroid,
+    doorCount: b.doorCount,
+  }));
+}
+
 router.get('/campaigns', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -121,6 +145,7 @@ router.get('/bootstrap', async (req, res, next) => {
       location: 1,
       status: 1,
       lastActionAt: 1,
+      turfId: 1,
     }).lean();
 
     const householdIds = households.map((h) => h._id);
@@ -161,6 +186,7 @@ router.get('/bootstrap', async (req, res, next) => {
       activeSurvey: survey,
       households,
       voters,
+      books: await canvasserBooks(req, campaign),
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {

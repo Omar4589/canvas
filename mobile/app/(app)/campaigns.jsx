@@ -44,7 +44,7 @@ export default function CampaignsScreen() {
       await saveActiveCampaign(c);
       await clearBootstrap();
       qc.removeQueries({ queryKey: ['bootstrap'] });
-      router.replace('/(app)/map');
+      router.replace('/(app)/books');
     } catch (e) {
       setPicking(null);
     }

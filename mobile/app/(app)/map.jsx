@@ -7,7 +7,7 @@ import {
   StyleSheet,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -291,6 +291,18 @@ export default function MapScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // When entering from the books overview, scope the map to the selected book(s).
+  const params = useLocalSearchParams();
+  const selectedBookSet = useMemo(() => {
+    const p = params.selectedBooks;
+    return p ? new Set(String(p).split(',').filter(Boolean)) : null;
+  }, [params.selectedBooks]);
+  const scopedHouseholds = useMemo(() => {
+    const all = data?.households || [];
+    if (!selectedBookSet) return all;
+    return all.filter((h) => h.turfId && selectedBookSet.has(String(h.turfId)));
+  }, [data, selectedBookSet]);
+
   // When the selection mode changes, animate the sheet to the new
   // peek + expanded heights. Progress mode is short (just stats + legend);
   // house mode is taller (peek with buttons + scrollable voter list).
@@ -309,12 +321,12 @@ export default function MapScreen() {
   // bounds to the assigned households. Runs exactly once per session.
   useEffect(() => {
     if (cameraInitializedRef.current) return;
-    if (!data?.households?.length) return;
+    if (!scopedHouseholds.length) return;
 
     let cancelled = false;
 
     async function setInitialCamera() {
-      const validHouses = data.households.filter(
+      const validHouses = scopedHouseholds.filter(
         (h) => h.location?.coordinates?.length === 2
       );
       if (!validHouses.length) return;
@@ -364,7 +376,7 @@ export default function MapScreen() {
     return () => {
       cancelled = true;
     };
-  }, [data]);
+  }, [scopedHouseholds]);
 
   const todayQ = useQuery({
     queryKey: ['mobile', 'me', 'today', activeCampaign?.id],
@@ -468,7 +480,7 @@ export default function MapScreen() {
     };
   }, []);
 
-  const features = useMemo(() => buildFeatureCollection(data?.households || []), [data]);
+  const features = useMemo(() => buildFeatureCollection(scopedHouseholds), [scopedHouseholds]);
 
   const householdsById = useMemo(() => {
     const m = new Map();
@@ -546,11 +558,14 @@ export default function MapScreen() {
         <Pressable onPress={onRefresh} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>Refresh</Text>
         </Pressable>
+        <Pressable onPress={switchCampaign} style={[styles.secondaryButton, { marginTop: 10 }]}>
+          <Text style={styles.secondaryButtonText}>Choose a different campaign</Text>
+        </Pressable>
       </SafeAreaView>
     );
   }
 
-  const initialCenter = data?.households?.[0]?.location?.coordinates || DEFAULT_CENTER;
+  const initialCenter = scopedHouseholds[0]?.location?.coordinates || DEFAULT_CENTER;
   const today = todayQ.data || {};
   const isLitDrop = activeCampaign?.type === 'lit_drop';
 
@@ -681,6 +696,11 @@ export default function MapScreen() {
                 {activeCampaign.name}
               </Text>
               <Text style={styles.campaignChipSwitch}>Switch</Text>
+            </Pressable>
+          )}
+          {(data?.books?.length || 0) > 0 && (
+            <Pressable onPress={() => router.replace('/(app)/books')} style={styles.filterChip}>
+              <Text style={styles.filterChipText}>◂ Books</Text>
             </Pressable>
           )}
           <Pressable
