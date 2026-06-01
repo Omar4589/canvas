@@ -108,6 +108,7 @@ export default function TurfsPage() {
   const [editMode, setEditMode] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnPolygon, setDrawnPolygon] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -122,10 +123,13 @@ export default function TurfsPage() {
     queryFn: () => api(`/admin/campaigns/${campaignId}/turfs?passId=${passId}`),
     enabled: !!campaignId && !!passId,
   });
+  // Doors load for the whole pass so every household shows on the map as a dot
+  // colored by its book the moment a cut completes — not only in edit mode.
+  // (Drag-to-move is still gated behind editMode in the map handlers below.)
   const doorsQ = useQuery({
     queryKey: ['turf-doors', campaignId, passId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/doors?passId=${passId}`),
-    enabled: !!campaignId && !!passId && editMode,
+    enabled: !!campaignId && !!passId,
   });
   const turfs = turfsQ.data?.turfs || [];
   const draftCount = turfs.filter((t) => t.status === 'draft').length;
@@ -265,10 +269,10 @@ export default function TurfsPage() {
       map.on('mouseleave', 'doors', () => { map.getCanvas().style.cursor = ''; });
 
       mapRef.current = map;
-      paint();
+      setMapReady(true); // re-fires the paint effect now that sources exist
     });
 
-    return () => { map.remove(); mapRef.current = null; drawRef.current = null; };
+    return () => { map.remove(); mapRef.current = null; drawRef.current = null; setMapReady(false); };
   }, [tokenQ.data?.isReady]);
 
   function paint() {
@@ -280,7 +284,7 @@ export default function TurfsPage() {
     const bb = bboxOf(turfs);
     if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
   }
-  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks]);
+  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady]);
 
   function startDraw() {
     if (drawRef.current) { drawRef.current.deleteAll(); drawRef.current.changeMode('draw_polygon'); }
