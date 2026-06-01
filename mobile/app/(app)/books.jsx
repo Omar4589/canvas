@@ -14,6 +14,7 @@ import {
 } from '../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import Logo from '../../components/Logo';
+import BookMarker from '../../components/BookMarker';
 import { colors, radius } from '../../lib/theme';
 
 if (MAPBOX_PUBLIC_TOKEN) {
@@ -21,7 +22,6 @@ if (MAPBOX_PUBLIC_TOKEN) {
 }
 
 const DEFAULT_CENTER = [-84.5, 39.0];
-const STATUS_COLOR = { grey: '#9ca3af', yellow: '#f59e0b', green: '#22c55e' };
 
 export default function BooksScreen() {
   const router = useRouter();
@@ -29,7 +29,8 @@ export default function BooksScreen() {
   const cameraRef = useRef(null);
   const cameraInitRef = useRef(false);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
-  const [selected, setSelected] = useState(new Set());
+  const [selected, setSelected] = useState(null); // a single book id, or null
+  const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -72,37 +73,27 @@ export default function BooksScreen() {
     if (!books.length && households.length) router.replace('/(app)/map');
   }, [data, books.length, households.length, router]);
 
-  // Status-colored pin per book at its centroid; progress from the houses' status.
-  const bookFeatures = useMemo(
-    () => ({
-      type: 'FeatureCollection',
-      features: books
+  // One book marker per book at its centroid; progress from the houses' status.
+  const bookMarkers = useMemo(
+    () =>
+      books
         .filter((b) => b.centroid?.coordinates?.length === 2)
         .map((b) => {
           const members = households.filter((h) => String(h.turfId) === String(b.id));
           const total = members.length || b.doorCount || 0;
           const knocked = members.filter((h) => (h.status || 'unknocked') !== 'unknocked').length;
           const status = total > 0 && knocked >= total ? 'green' : knocked > 0 ? 'yellow' : 'grey';
-          return {
-            type: 'Feature',
-            id: String(b.id),
-            properties: {
-              id: String(b.id),
-              label: `${b.name}\n${knocked}/${total}`,
-              color: STATUS_COLOR[status],
-              selected: selected.has(String(b.id)) ? 1 : 0,
-            },
-            geometry: b.centroid,
-          };
+          return { id: String(b.id), coordinates: b.centroid.coordinates, name: b.name, knocked, total, status };
         }),
-    }),
-    [books, households, selected]
+    [books, households]
   );
+  const selectedBook = bookMarkers.find((b) => b.id === selected) || null;
 
-  // Frame all the book pins on first load (header/enter-bar padding).
+  // Frame all the book markers — but only once the map is ready, otherwise the
+  // camera ref isn't attached yet and we'd silently stay at the default center.
   useEffect(() => {
-    if (cameraInitRef.current || !cameraRef.current) return;
-    const pts = books.map((b) => b.centroid?.coordinates).filter((c) => c?.length === 2);
+    if (cameraInitRef.current || !mapReady || !cameraRef.current) return;
+    const pts = bookMarkers.map((b) => b.coordinates);
     if (!pts.length) return;
     if (pts.length === 1) {
       cameraRef.current.setCamera({ centerCoordinate: pts[0], zoomLevel: 14, animationDuration: 0 });
@@ -114,24 +105,18 @@ export default function BooksScreen() {
         if (lat < minLat) minLat = lat;
         if (lat > maxLat) maxLat = lat;
       }
-      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [90, 50, 150, 50], 0);
+      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [110, 50, 160, 50], 0);
     }
     cameraInitRef.current = true;
-  }, [books]);
+  }, [bookMarkers, mapReady]);
 
-  const onBookPress = useCallback((e) => {
-    const id = e.features?.[0]?.properties?.id;
-    if (!id) return;
-    setSelected((s) => {
-      const n = new Set(s);
-      n.has(String(id)) ? n.delete(String(id)) : n.add(String(id));
-      return n;
-    });
+  const onBookPress = useCallback((id) => {
+    setSelected((cur) => (cur === String(id) ? null : String(id)));
   }, []);
 
   function onEnter() {
-    if (!selected.size) return;
-    router.replace({ pathname: '/(app)/map', params: { selectedBooks: [...selected].join(',') } });
+    if (!selected) return;
+    router.replace({ pathname: '/(app)/map', params: { selectedBooks: selected } });
   }
 
   async function switchCampaign() {
@@ -191,32 +176,25 @@ export default function BooksScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Mapbox.MapView style={{ flex: 1 }} styleURL={Mapbox.StyleURL.Street}>
+      <Mapbox.MapView
+        style={{ flex: 1 }}
+        styleURL={Mapbox.StyleURL.Street}
+        onDidFinishLoadingMap={() => setMapReady(true)}
+      >
         <Mapbox.Camera ref={cameraRef} defaultSettings={{ centerCoordinate: DEFAULT_CENTER, zoomLevel: 9 }} />
         <Mapbox.UserLocation visible />
-        <Mapbox.ShapeSource id="books" shape={bookFeatures} onPress={onBookPress}>
-          <Mapbox.CircleLayer
-            id="book-circles"
-            style={{
-              circleColor: ['get', 'color'],
-              circleRadius: ['case', ['==', ['get', 'selected'], 1], 17, 12],
-              circleStrokeColor: ['case', ['==', ['get', 'selected'], 1], '#111827', '#ffffff'],
-              circleStrokeWidth: ['case', ['==', ['get', 'selected'], 1], 3, 2],
-            }}
-          />
-          <Mapbox.SymbolLayer
-            id="book-labels"
-            style={{
-              textField: ['get', 'label'],
-              textSize: 11,
-              textOffset: [0, 1.7],
-              textColor: '#111827',
-              textHaloColor: '#ffffff',
-              textHaloWidth: 1.5,
-              textAllowOverlap: false,
-            }}
-          />
-        </Mapbox.ShapeSource>
+        {bookMarkers.map((b) => (
+          <Mapbox.MarkerView key={b.id} id={b.id} coordinate={b.coordinates} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+            <BookMarker
+              name={b.name}
+              knocked={b.knocked}
+              total={b.total}
+              status={b.status}
+              selected={selected === b.id}
+              onPress={() => onBookPress(b.id)}
+            />
+          </Mapbox.MarkerView>
+        ))}
       </Mapbox.MapView>
 
       <SafeAreaView edges={['top']} style={styles.headerWrap} pointerEvents="box-none">
@@ -233,11 +211,11 @@ export default function BooksScreen() {
         </View>
       </SafeAreaView>
 
-      {selected.size > 0 && (
+      {selectedBook && (
         <SafeAreaView edges={['bottom']} style={styles.enterWrap} pointerEvents="box-none">
           <Pressable onPress={onEnter} style={styles.enterButton}>
-            <Text style={styles.enterButtonText}>
-              Enter {selected.size} book{selected.size === 1 ? '' : 's'} →
+            <Text style={styles.enterButtonText} numberOfLines={1}>
+              Enter {selectedBook.name} →
             </Text>
           </Pressable>
         </SafeAreaView>
