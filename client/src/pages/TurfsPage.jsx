@@ -137,6 +137,48 @@ function DiscardModal({ isActive, bookCount, clearKnocks, setClearKnocks, pendin
   );
 }
 
+function HousePopup({ data, loading, onClose }) {
+  const hh = data?.household;
+  const voters = data?.voters || [];
+  return (
+    <div className="absolute right-3 top-3 z-10 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          {loading || !hh ? (
+            <div className="text-sm text-gray-500">Loading…</div>
+          ) : (
+            <>
+              <div className="truncate text-sm font-semibold text-gray-900">{hh.addressLine1}</div>
+              {hh.addressLine2 && <div className="truncate text-xs text-gray-500">{hh.addressLine2}</div>}
+              <div className="text-xs text-gray-500">{hh.city}, {hh.state} {hh.zipCode}</div>
+            </>
+          )}
+        </div>
+        <button onClick={onClose} className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Close">✕</button>
+      </div>
+      {hh && (
+        <div className="mt-2 border-t border-gray-100 pt-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+            {voters.length} member{voters.length === 1 ? '' : 's'}
+          </div>
+          <ul className="max-h-40 space-y-0.5 overflow-auto text-sm">
+            {voters.map((v) => (
+              <li key={v.id} className="flex items-center justify-between gap-2">
+                <span className="truncate text-gray-800">{v.fullName}</span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {v.party && <span className="text-[10px] text-gray-400">{v.party}</span>}
+                  {v.surveyStatus === 'surveyed' && <span className="text-[10px] font-semibold text-green-600" title="Surveyed">✓</span>}
+                </span>
+              </li>
+            ))}
+            {!voters.length && <li className="text-xs text-gray-400">No members on file.</li>}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TurfsPage() {
   const qc = useQueryClient();
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
@@ -157,6 +199,7 @@ export default function TurfsPage() {
   const [clearKnocks, setClearKnocks] = useState(false);
   const [lastSnapshotId, setLastSnapshotId] = useState(null);
   const [focusedBookId, setFocusedBookId] = useState(null);
+  const [popupHouseholdId, setPopupHouseholdId] = useState(null);
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -165,6 +208,7 @@ export default function TurfsPage() {
   const moveDoorRef = useRef(() => {});
   const toggleSelectRef = useRef(() => {});
   const lastFocusRef = useRef(null);
+  const openPopupRef = useRef(() => {});
 
   const tokenQ = useQuery({ queryKey: ['config', 'mapbox-token'], queryFn: () => api('/admin/config/mapbox-token') });
   const turfsQ = useQuery({
@@ -202,6 +246,26 @@ export default function TurfsPage() {
     enabled: !!campaignId && !!passId,
   });
   const snapshots = snapshotsQ.data?.snapshots || [];
+
+  // Pass-level assignments → turfId -> [canvassers], for the per-book chips.
+  const assignmentsQ = useQuery({
+    queryKey: ['turf-pass-assignments', campaignId, passId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/assignments?passId=${passId}`),
+    enabled: !!campaignId && !!passId,
+  });
+  const assignedByTurf = new Map();
+  for (const a of assignmentsQ.data?.assignments || []) {
+    const arr = assignedByTurf.get(a.turfId) || [];
+    arr.push(a.user);
+    assignedByTurf.set(a.turfId, arr);
+  }
+
+  // Single household detail for the click-a-dot popup.
+  const householdQ = useQuery({
+    queryKey: ['turf-household', campaignId, popupHouseholdId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/household/${popupHouseholdId}`),
+    enabled: !!campaignId && !!popupHouseholdId,
+  });
 
   const jobQ = useQuery({
     queryKey: ['turf-job', campaignId, jobId],
@@ -271,6 +335,10 @@ export default function TurfsPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
     },
   });
+  const deleteSnapshot = useMutation({
+    mutationFn: (snapshotId) => api(`/admin/campaigns/${campaignId}/turfs/snapshots/${snapshotId}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] }),
+  });
   const moveDoor = useMutation({
     mutationFn: ({ householdId, toTurfId }) => api(`/admin/campaigns/${campaignId}/turfs/move-door`, { method: 'POST', body: { householdId, toTurfId } }),
     onSuccess: invalidateTurfs,
@@ -289,6 +357,7 @@ export default function TurfsPage() {
   moveDoorRef.current = (householdId, toTurfId) => moveDoor.mutate({ householdId, toTurfId });
   toggleSelectRef.current = (id) =>
     setSelectedBooks((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  openPopupRef.current = (id) => setPopupHouseholdId(id);
 
   useEffect(() => {
     if (!tokenQ.data?.isReady || !containerRef.current || mapRef.current) return;
@@ -362,7 +431,13 @@ export default function TurfsPage() {
         map.dragPan.enable();
         map.getCanvas().style.cursor = '';
       });
-      map.on('mouseenter', 'doors', () => { if (editModeRef.current) map.getCanvas().style.cursor = 'grab'; });
+      // Click a door (outside edit mode) → show the household's address + members.
+      map.on('click', 'doors', (e) => {
+        if (editModeRef.current) return;
+        const id = e.features?.[0]?.properties?.id;
+        if (id) openPopupRef.current(id);
+      });
+      map.on('mouseenter', 'doors', () => { map.getCanvas().style.cursor = editModeRef.current ? 'grab' : 'pointer'; });
       map.on('mouseleave', 'doors', () => { map.getCanvas().style.cursor = ''; });
 
       mapRef.current = map;
@@ -406,7 +481,7 @@ export default function TurfsPage() {
   }
   useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, focusedBookId]);
   // Reset focus when switching pass/campaign (the focused id won't exist there).
-  useEffect(() => { setFocusedBookId(null); }, [passId, campaignId]);
+  useEffect(() => { setFocusedBookId(null); setPopupHouseholdId(null); }, [passId, campaignId]);
 
   function startDraw() {
     if (drawRef.current) { drawRef.current.deleteAll(); drawRef.current.changeMode('draw_polygon'); }
@@ -567,6 +642,20 @@ export default function TurfsPage() {
                       )}
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
+                      {(() => {
+                        const asg = assignedByTurf.get(String(t._id)) || [];
+                        if (!asg.length) return null;
+                        return (
+                          <span className="flex -space-x-1" title={asg.map((u) => `${u.firstName} ${u.lastName}`).join(', ')}>
+                            {asg.slice(0, 3).map((u) => (
+                              <span key={u.id} className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-brand-100 text-[8px] font-semibold text-brand-700 ring-1 ring-white">
+                                {(u.firstName?.[0] || '') + (u.lastName?.[0] || '')}
+                              </span>
+                            ))}
+                            {asg.length > 3 && <span className="pl-1 text-[9px] text-gray-400">+{asg.length - 3}</span>}
+                          </span>
+                        );
+                      })()}
                       <span className="text-gray-500">{t.doorCount}</span>
                       <button onClick={(e) => { e.stopPropagation(); setAssignTurf(t); }} className="text-xs font-medium text-brand-600 hover:underline">Assign</button>
                     </span>
@@ -596,14 +685,24 @@ export default function TurfsPage() {
                       {s.clearedKnocks ? ` · ${s.knockCount} knocks` : ''}
                       {s.restoredAt ? ' · restored' : ''}
                     </span>
-                    <button
-                      onClick={() => restore.mutate(s._id)}
-                      disabled={restore.isPending || turfs.length > 0}
-                      title={turfs.length > 0 ? 'Discard current books first' : 'Restore this snapshot'}
-                      className="shrink-0 rounded border border-gray-300 px-2 py-0.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Restore
-                    </button>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <button
+                        onClick={() => restore.mutate(s._id)}
+                        disabled={restore.isPending || turfs.length > 0}
+                        title={turfs.length > 0 ? 'Discard current books first' : 'Restore this snapshot'}
+                        className="rounded border border-gray-300 px-2 py-0.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        Restore
+                      </button>
+                      <button
+                        onClick={() => { if (window.confirm('Delete this snapshot? It can no longer be restored.')) deleteSnapshot.mutate(s._id); }}
+                        disabled={deleteSnapshot.isPending}
+                        title="Delete snapshot"
+                        className="rounded px-1.5 py-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      >
+                        ✕
+                      </button>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -615,13 +714,16 @@ export default function TurfsPage() {
           )}
         </section>
 
-        <section className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <section className="relative overflow-hidden rounded-lg border border-gray-200 bg-white">
           {!tokenQ.data?.isReady ? (
             <div className="flex h-[600px] items-center justify-center text-sm text-gray-500">
               {tokenQ.isLoading ? 'Loading map…' : 'Set MAPBOX_PUBLIC_TOKEN to enable the map.'}
             </div>
           ) : (
             <div ref={containerRef} className="h-[600px] w-full" />
+          )}
+          {popupHouseholdId && (
+            <HousePopup data={householdQ.data} loading={householdQ.isLoading} onClose={() => setPopupHouseholdId(null)} />
           )}
         </section>
       </div>
@@ -638,7 +740,13 @@ export default function TurfsPage() {
           onConfirm={() => discard.mutate({ confirmActive: isActivePass, clearKnocks })}
         />
       )}
-      {assignTurf && <TurfAssignmentsModal campaignId={campaignId} turf={assignTurf} onClose={() => setAssignTurf(null)} />}
+      {assignTurf && (
+        <TurfAssignmentsModal
+          campaignId={campaignId}
+          turf={assignTurf}
+          onClose={() => { setAssignTurf(null); qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] }); }}
+        />
+      )}
     </div>
   );
 }

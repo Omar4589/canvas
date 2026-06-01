@@ -6,7 +6,7 @@ import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { attributeCut } from './attributeCut.js';
 import { geometricCut } from './geometricCut.js';
-import { computeBoundary, computeCentroid } from './boundary.js';
+import { computeBoundary, computeCentroid, computeTerritories } from './boundary.js';
 import { computeWalkOrder } from './walkOrder.js';
 
 const CUT_COLUMNS = {
@@ -78,10 +78,12 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
   }
 
   const turfDocs = [];
+  const bookData = [];
   let done = 0;
   for (const book of books) {
     const members = book.households;
     const ordered = computeWalkOrder(members, { optimize: params.optimizeWalk !== false });
+    const centroid = computeCentroid(members);
     turfDocs.push({
       organizationId: campaign.organizationId,
       campaignId,
@@ -89,14 +91,15 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
       name: book.name,
       mode,
       params,
-      boundary: book.boundary || computeBoundary(members),
-      centroid: computeCentroid(members),
+      boundary: book.boundary || null,
+      centroid,
       householdIds: ordered,
       doorCount: ordered.length,
       status: 'draft',
       generationJobId,
       generatedBy,
     });
+    bookData.push({ centroid, households: members });
     done += 1;
     if (onProgress && done % 5 === 0) {
       await onProgress({
@@ -107,6 +110,11 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
       });
     }
   }
+
+  // Non-overlapping territory outlines: each book's hull clipped to its Voronoi
+  // cell. Manual mode supplies its own drawn polygon — leave those untouched.
+  const territories = computeTerritories(bookData);
+  turfDocs.forEach((d, i) => { if (!d.boundary) d.boundary = territories[i] || null; });
 
   await onProgress?.({ phase: 'saving', pct: 90 });
   const inserted = await Turf.insertMany(turfDocs);
@@ -147,4 +155,28 @@ export async function recomputeTurf(turfDoc) {
     await Household.bulkWrite(ops.slice(i, i + 2000), { ordered: false });
   }
   return turfDoc;
+}
+
+// Re-tessellate ALL of a pass's books into non-overlapping territories (each
+// book's hull clipped to its Voronoi cell). Call AFTER an edit shifts a book's
+// centroid/members — the shared seams move, so the whole pass re-tessellates.
+// Uses the books' stored centroids, so run it after the per-book recomputeTurf.
+export async function recomputePassTerritories(passId) {
+  const turfs = await Turf.find(
+    { passId, status: { $in: ['draft', 'published'] } },
+    { _id: 1, centroid: 1, householdIds: 1 }
+  ).lean();
+  if (!turfs.length) return;
+  const allIds = turfs.flatMap((t) => t.householdIds || []);
+  const households = await Household.find({ _id: { $in: allIds } }, { location: 1 }).lean();
+  const hhById = new Map(households.map((h) => [String(h._id), h]));
+  const books = turfs.map((t) => ({
+    centroid: t.centroid,
+    households: (t.householdIds || []).map((id) => hhById.get(String(id))).filter(Boolean),
+  }));
+  const territories = computeTerritories(books);
+  const bulk = turfs.map((t, i) => ({
+    updateOne: { filter: { _id: t._id }, update: { $set: { boundary: territories[i] || null } } },
+  }));
+  if (bulk.length) await Turf.bulkWrite(bulk, { ordered: false });
 }

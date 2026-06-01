@@ -12,7 +12,8 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { WalkList } from '../../models/WalkList.js';
-import { recomputeTurf } from '../../services/turf/generateTurf.js';
+import { Voter } from '../../models/Voter.js';
+import { recomputeTurf, recomputePassTerritories } from '../../services/turf/generateTurf.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
@@ -172,6 +173,8 @@ router.post('/discard', async (req, res, next) => {
       await TurfAssignment.deleteMany({ turfId: { $in: turfIds } });
       await Turf.deleteMany({ _id: { $in: turfIds } });
     }
+    // Sweep any archived merge-stubs for the pass (legacy; merge now hard-deletes).
+    await Turf.deleteMany({ campaignId: req.campaign._id, passId, status: 'archived' });
 
     // Recompute statuses for the cleared knocks (must run after deletion).
     if (clearKnocks) {
@@ -251,12 +254,35 @@ router.post('/restore-snapshot', async (req, res, next) => {
   }
 });
 
+// Delete a snapshot the admin no longer needs. Lock-guarded so it can't be
+// removed out from under an in-flight restore.
+router.delete('/snapshots/:id', async (req, res, next) => {
+  const { id } = req.params;
+  let lockPassId = null;
+  try {
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ error: 'invalid id' });
+    const snapshot = await TurfSnapshot.findOne({ _id: id, campaignId: req.campaign._id }).select('_id passId').lean();
+    if (!snapshot) return res.status(404).json({ error: 'Snapshot not found' });
+    if (!(await acquireRecutLock(snapshot.passId, req.user._id))) {
+      return res.status(409).json({ error: 'A re-cut/restore is in progress for this pass; try again shortly.' });
+    }
+    lockPassId = snapshot.passId;
+    await TurfSnapshot.deleteOne({ _id: id, campaignId: req.campaign._id });
+    res.json({ deleted: 1 });
+  } catch (err) {
+    next(err);
+  } finally {
+    if (lockPassId) await releaseRecutLock(lockPassId);
+  }
+});
+
 // List books for a pass (preview / map).
 router.get('/', async (req, res, next) => {
   try {
     const filter = { campaignId: req.campaign._id };
     if (req.query.passId && mongoose.isValidObjectId(req.query.passId)) filter.passId = req.query.passId;
     if (req.query.status) filter.status = req.query.status;
+    else filter.status = { $ne: 'archived' }; // hide merge-absorbed stubs by default
     const turfs = await Turf.find(filter).sort({ createdAt: 1 }).lean();
     res.json({ turfs });
   } catch (err) {
@@ -300,6 +326,59 @@ router.get('/doors', async (req, res, next) => {
   }
 });
 
+// Single household detail (address + members) for the map popup.
+router.get('/household/:householdId', async (req, res, next) => {
+  try {
+    const { householdId } = req.params;
+    if (!mongoose.isValidObjectId(householdId)) return res.status(400).json({ error: 'invalid householdId' });
+    const hh = await Household.findOne({ _id: householdId, campaignId: req.campaign._id }).lean();
+    if (!hh) return res.status(404).json({ error: 'Household not found' });
+    const voters = await Voter.find({ householdId: hh._id }, { fullName: 1, party: 1, surveyStatus: 1 })
+      .sort({ fullName: 1 })
+      .lean();
+    res.json({
+      household: {
+        id: String(hh._id),
+        addressLine1: hh.addressLine1,
+        addressLine2: hh.addressLine2 || null,
+        city: hh.city,
+        state: hh.state,
+        zipCode: hh.zipCode,
+        county: hh.county || null,
+        status: hh.status,
+      },
+      voters: voters.map((v) => ({
+        id: String(v._id),
+        fullName: v.fullName,
+        party: v.party || null,
+        surveyStatus: v.surveyStatus,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// All canvasser assignments for a pass (book -> canvassers), for at-a-glance chips.
+router.get('/assignments', async (req, res, next) => {
+  try {
+    const { passId } = req.query;
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const rows = await TurfAssignment.find({ campaignId: req.campaign._id, passId })
+      .populate('userId', 'firstName lastName')
+      .lean();
+    const assignments = rows
+      .filter((a) => a.userId)
+      .map((a) => ({
+        turfId: String(a.turfId),
+        user: { id: String(a.userId._id), firstName: a.userId.firstName, lastName: a.userId.lastName },
+      }));
+    res.json({ assignments });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Move a single door from one book to another (both recompute).
 router.post('/move-door', async (req, res, next) => {
   try {
@@ -320,6 +399,7 @@ router.post('/move-door', async (req, res, next) => {
     }
     if (!to.householdIds.map(String).includes(String(householdId))) to.householdIds.push(householdId);
     await recomputeTurf(to);
+    await recomputePassTerritories(to.passId);
     res.json({
       from: from && String(from._id) !== String(to._id) ? { id: String(from._id), doorCount: from.doorCount } : null,
       to: { id: String(to._id), doorCount: to.doorCount },
@@ -359,8 +439,11 @@ router.post('/merge', async (req, res, next) => {
       );
     }
     await TurfAssignment.deleteMany({ turfId: { $in: absorbedIds } });
-    await Turf.updateMany({ _id: { $in: absorbedIds } }, { $set: { status: 'archived', householdIds: [] } });
+    // Hard-delete absorbed books (their assignments are folded into primary above);
+    // archiving left ghost stubs that lingered in the list and survived discard.
+    await Turf.deleteMany({ _id: { $in: absorbedIds } });
     await recomputeTurf(primary);
+    await recomputePassTerritories(primary.passId);
     res.json({ turf: { id: String(primary._id), doorCount: primary.doorCount } });
   } catch (err) {
     next(err);
@@ -395,6 +478,7 @@ router.post('/:turfId/split', async (req, res, next) => {
     });
     await recomputeTurf(src);
     await recomputeTurf(newTurf);
+    await recomputePassTerritories(src.passId);
     res.json({
       source: { id: String(src._id), doorCount: src.doorCount },
       created: { id: String(newTurf._id), doorCount: newTurf.doorCount },
