@@ -43,21 +43,19 @@ async function assertCampaignAccess(req, campaignId) {
 }
 
 // M5: a canvasser only sees households in the books ASSIGNED to them on the
-// campaign's active pass — and only once the pass is turf-managed (has published
-// books). Returns:
-//   null  -> no restriction (admin/super, or campaign not turf-managed yet)
-//   [...] -> the allowed household ids (an empty array ⇒ they see nothing)
+// campaign's ACTIVE pass. Returns:
+//   null  -> no restriction (admin/super see everything)
+//   [...] -> the allowed household ids; an EMPTY array ⇒ they see nothing
+//            (no active pass, or no book assigned → "No turf assigned yet").
 async function canvasserHouseholdScope(req, campaign) {
   if (isOrgAdminOrSuper(req)) return null;
   const passId = campaign.activePassId;
-  if (!passId) return null;
-  const turfManaged = await Turf.exists({ campaignId: campaign._id, passId, status: 'published' });
-  if (!turfManaged) return null;
+  if (!passId) return []; // campaign not live (no active pass) → see nothing
   const myTurfs = await TurfAssignment.find(
     { userId: req.user._id, campaignId: campaign._id, passId },
     { turfId: 1 }
   ).lean();
-  if (!myTurfs.length) return [];
+  if (!myTurfs.length) return []; // not assigned a book on the active pass → see nothing
   const books = await Turf.find({ _id: { $in: myTurfs.map((a) => a.turfId) } }, { householdIds: 1 }).lean();
   return books.flatMap((b) => b.householdIds || []);
 }
