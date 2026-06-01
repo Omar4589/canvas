@@ -7,6 +7,8 @@ import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
+import { Turf } from '../../models/Turf.js';
+import { TurfAssignment } from '../../models/TurfAssignment.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -38,6 +40,26 @@ async function assertCampaignAccess(req, campaignId) {
   const assigned = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.user._id });
   if (!assigned) return { error: 403, message: 'Not assigned to this campaign' };
   return { campaign };
+}
+
+// M5: a canvasser only sees households in the books ASSIGNED to them on the
+// campaign's active pass — and only once the pass is turf-managed (has published
+// books). Returns:
+//   null  -> no restriction (admin/super, or campaign not turf-managed yet)
+//   [...] -> the allowed household ids (an empty array ⇒ they see nothing)
+async function canvasserHouseholdScope(req, campaign) {
+  if (isOrgAdminOrSuper(req)) return null;
+  const passId = campaign.activePassId;
+  if (!passId) return null;
+  const turfManaged = await Turf.exists({ campaignId: campaign._id, passId, status: 'published' });
+  if (!turfManaged) return null;
+  const myTurfs = await TurfAssignment.find(
+    { userId: req.user._id, campaignId: campaign._id, passId },
+    { turfId: 1 }
+  ).lean();
+  if (!myTurfs.length) return [];
+  const books = await Turf.find({ _id: { $in: myTurfs.map((a) => a.turfId) } }, { householdIds: 1 }).lean();
+  return books.flatMap((b) => b.householdIds || []);
 }
 
 router.get('/campaigns', async (req, res, next) => {
@@ -83,24 +105,25 @@ router.get('/bootstrap', async (req, res, next) => {
     const campaign = access.campaign;
     if (!campaign.isActive) return res.status(404).json({ error: 'Campaign inactive' });
 
-    const households = await Household.find(
-      {
-        campaignId: campaign._id,
-        organizationId: orgId,
-        isActive: true,
-        'location.coordinates': { $exists: true, $ne: null },
-      },
-      {
-        addressLine1: 1,
-        addressLine2: 1,
-        city: 1,
-        state: 1,
-        zipCode: 1,
-        location: 1,
-        status: 1,
-        lastActionAt: 1,
-      }
-    ).lean();
+    const householdFilter = {
+      campaignId: campaign._id,
+      organizationId: orgId,
+      isActive: true,
+      'location.coordinates': { $exists: true, $ne: null },
+    };
+    const scope = await canvasserHouseholdScope(req, campaign);
+    if (scope !== null) householdFilter._id = { $in: scope };
+
+    const households = await Household.find(householdFilter, {
+      addressLine1: 1,
+      addressLine2: 1,
+      city: 1,
+      state: 1,
+      zipCode: 1,
+      location: 1,
+      status: 1,
+      lastActionAt: 1,
+    }).lean();
 
     const householdIds = households.map((h) => h._id);
 
@@ -165,14 +188,20 @@ router.get('/changes', async (req, res, next) => {
     const sinceDate = new Date(sinceMs);
     const cId = access.campaign._id;
 
-    const changedHouseholds = await Household.find(
-      {
-        campaignId: cId,
-        organizationId: orgId,
-        updatedAt: { $gt: sinceDate },
-      },
-      { _id: 1, status: 1, lastActionAt: 1, isActive: 1 }
-    ).lean();
+    const changedFilter = {
+      campaignId: cId,
+      organizationId: orgId,
+      updatedAt: { $gt: sinceDate },
+    };
+    const scope = await canvasserHouseholdScope(req, access.campaign);
+    if (scope !== null) changedFilter._id = { $in: scope };
+
+    const changedHouseholds = await Household.find(changedFilter, {
+      _id: 1,
+      status: 1,
+      lastActionAt: 1,
+      isActive: 1,
+    }).lean();
 
     let changedVoters = [];
     if (changedHouseholds.length > 0) {

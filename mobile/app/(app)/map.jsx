@@ -538,6 +538,17 @@ export default function MapScreen() {
       </SafeAreaView>
     );
   }
+  if (activeCampaign && data && (data.households?.length || 0) === 0) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={[styles.loadingText, { fontWeight: '700', fontSize: 16 }]}>No turf assigned yet</Text>
+        <Text style={styles.loadingText}>Your admin will assign you a book to start canvassing.</Text>
+        <Pressable onPress={onRefresh} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Refresh</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
 
   const initialCenter = data?.households?.[0]?.location?.coordinates || DEFAULT_CENTER;
   const today = todayQ.data || {};
