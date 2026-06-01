@@ -72,7 +72,7 @@ export default function BuildingScreen() {
           return (
             <View key={u._id} style={styles.unitCard}>
               <Pressable style={styles.unitMain} onPress={() => router.push(`/(app)/household/${u._id}`)}>
-                <Text style={styles.unitTitle}>{u.addressLine2 || 'Unit —'}</Text>
+                <Text style={styles.unitTitle}>{u.addressLine2 || u.addressLine1}</Text>
                 <View style={styles.unitMetaRow}>
                   <View style={[styles.dot, { backgroundColor: colors.status[status] || colors.textMuted }]} />
                   <Text style={styles.unitMeta}>
