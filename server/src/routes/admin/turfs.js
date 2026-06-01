@@ -90,6 +90,34 @@ router.post('/accept', async (req, res, next) => {
   }
 });
 
+// Discard ALL books for a pass (draft + published) so it can be re-cut from
+// scratch. Archived books are left untouched. Clears the household turfId/walkOrder
+// mirror + any canvasser assignments for those books. Blocked on archived passes.
+// (Regenerate only wipes drafts, so this is the escape hatch once books are accepted.)
+router.post('/discard', async (req, res, next) => {
+  try {
+    const { passId } = req.body || {};
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id });
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    if (pass.status === 'archived') return res.status(409).json({ error: 'Pass is archived; create a new pass instead' });
+
+    const books = await Turf.find(
+      { campaignId: req.campaign._id, passId, status: { $in: ['draft', 'published'] } },
+      { _id: 1 }
+    ).lean();
+    const turfIds = books.map((b) => b._id);
+    if (!turfIds.length) return res.json({ discarded: 0 });
+
+    await Household.updateMany({ turfId: { $in: turfIds } }, { $set: { turfId: null, walkOrder: null } });
+    await TurfAssignment.deleteMany({ turfId: { $in: turfIds } });
+    const r = await Turf.deleteMany({ _id: { $in: turfIds } });
+    res.json({ discarded: r.deletedCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // List books for a pass (preview / map).
 router.get('/', async (req, res, next) => {
   try {

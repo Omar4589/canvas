@@ -174,6 +174,10 @@ export default function TurfsPage() {
     mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/accept`, { method: 'POST', body: { passId } }),
     onSuccess: invalidateTurfs,
   });
+  const discard = useMutation({
+    mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/discard`, { method: 'POST', body: { passId } }),
+    onSuccess: () => { setSelectedBooks(new Set()); setEditMode(false); invalidateTurfs(); },
+  });
   const moveDoor = useMutation({
     mutationFn: ({ householdId, toTurfId }) => api(`/admin/campaigns/${campaignId}/turfs/move-door`, { method: 'POST', body: { householdId, toTurfId } }),
     onSuccess: invalidateTurfs,
@@ -384,6 +388,13 @@ export default function TurfsPage() {
                       {accept.isPending ? 'Accepting…' : 'Accept'}
                     </button>
                   )}
+                  <button
+                    onClick={() => { if (window.confirm('Discard ALL books for this pass and start over? This cannot be undone.')) discard.mutate(); }}
+                    disabled={discard.isPending}
+                    className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                  >
+                    {discard.isPending ? 'Discarding…' : 'Discard'}
+                  </button>
                 </div>
               </div>
 
