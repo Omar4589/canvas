@@ -35,6 +35,8 @@ import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { ensureLocationPermission } from '../../lib/location';
 import Logo from '../../components/Logo';
 import PinIcon from '../../components/PinIcon';
+import BuildingMarker from '../../components/BuildingMarker';
+import { groupBuildings } from '../../lib/buildings';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
@@ -480,7 +482,10 @@ export default function MapScreen() {
     };
   }, []);
 
-  const features = useMemo(() => buildFeatureCollection(scopedHouseholds), [scopedHouseholds]);
+  // Group stacked apartment units into one building marker; lone households stay
+  // as ordinary house pins.
+  const { buildings, singles } = useMemo(() => groupBuildings(scopedHouseholds), [scopedHouseholds]);
+  const features = useMemo(() => buildFeatureCollection(singles), [singles]);
 
   const householdsById = useMemo(() => {
     const m = new Map();
@@ -649,6 +654,16 @@ export default function MapScreen() {
             }}
           />
         </Mapbox.ShapeSource>
+        {buildings.map((b) => (
+          <Mapbox.MarkerView key={b.key} id={b.key} coordinate={b.coordinates} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+            <BuildingMarker
+              total={b.total}
+              done={b.done}
+              status={b.status}
+              onPress={() => router.push({ pathname: '/(app)/building', params: { bkey: b.key } })}
+            />
+          </Mapbox.MarkerView>
+        ))}
       </Mapbox.MapView>
 
       {/* Top chrome */}

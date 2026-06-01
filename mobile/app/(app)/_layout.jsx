@@ -14,6 +14,7 @@ export default function AppLayout() {
       <Stack.Screen name="campaigns" />
       <Stack.Screen name="books" />
       <Stack.Screen name="map" />
+      <Stack.Screen name="building" />
       <Stack.Screen name="household/[id]" />
       <Stack.Screen name="voter/[id]/survey" />
       <Stack.Screen name="admin" />
