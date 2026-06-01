@@ -19,6 +19,10 @@ export function createApp() {
   const app = express();
   const isProd = process.env.NODE_ENV === 'production';
 
+  // Behind Heroku's single router/proxy — trust it so req.ip reflects the real
+  // client IP (required for express-rate-limit to key correctly).
+  app.set('trust proxy', 1);
+
   app.use(
     helmet({
       // Loosen CSP defaults so the React bundle and Mapbox tile fetches load.

@@ -13,7 +13,8 @@
     "migrate:voter-scope": "node src/migrations/migrateVoterScope.js",
     "migrate:passes": "node src/migrations/migratePasses.js",
     "migrate:cut-attributes": "node src/migrations/migrateCutAttributes.js",
-    "migrate:activity-turf-tags": "node src/migrations/migrateActivityTurfTags.js"
+    "migrate:activity-turf-tags": "node src/migrations/migrateActivityTurfTags.js",
+    "migrate:turf-indexes": "node src/migrations/migrateTurfIndexes.js"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",

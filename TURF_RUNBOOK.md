@@ -39,6 +39,8 @@ Each supports a dry run (no flag) then `--apply`. Locally `npm --prefix server r
 3. `migrate:cut-attributes --apply` — denormalize precinct/districts/city/zip/county onto households (modal voter value + conflict flags).
 4. **After** generating + accepting Pass-1 books for a campaign: `migrate:activity-turf-tags --apply` — backfill `passId`/`turfId` onto pre-existing canvass history so prior knocks show as Pass-1 progress.
 
+> **Hotfix — only for envs first deployed before this fix:** `migrate:turf-indexes --apply` drops the stale `boundary_2dsphere`/`centroid_2dsphere` indexes the old Turf schema created. Those fields are display-only and never geo-queried; the S2 index rejected valid self-touching concave-hull rings (`Can't extract geo keys … Loop is not valid`) and failed turf generation at the save step. The schema no longer declares them, so **fresh deploys never build them and don't need this** — it's purely to clean an already-built index. Run it once after deploying the fix, **before** re-generating turf.
+
 `reconcile:counts --apply` stays available and is now pass-aware (sticky precedence + pass-scoped dedup).
 
 ## Local dev

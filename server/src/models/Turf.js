@@ -59,7 +59,12 @@ const turfSchema = new mongoose.Schema(
 
 turfSchema.index({ campaignId: 1, passId: 1 });
 turfSchema.index({ passId: 1, householdIds: 1 }); // submit-time "which turf is this household in"
-turfSchema.index({ boundary: '2dsphere' });
-turfSchema.index({ centroid: '2dsphere' });
+// boundary/centroid are display-only (the book outline drawn on the map) and are
+// never geo-queried: point-in-polygon + nearest-centroid run in memory (turf.js),
+// and manual-draw queries Household.location, not these. We deliberately do NOT
+// 2dsphere-index them — Mongo's S2 engine rejects the self-touching rings that
+// concave hulls legitimately produce ("Can't extract geo keys … Loop is not valid:
+// Duplicate vertices"), which would fail otherwise-valid generations at save time.
+// Stored as plain GeoJSON purely for rendering.
 
 export const Turf = mongoose.model('Turf', turfSchema);
