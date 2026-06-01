@@ -9,7 +9,10 @@ import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
+import { Pass } from '../../models/Pass.js';
+import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
+import { resolveStatus } from '../../utils/statusPrecedence.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -59,7 +62,48 @@ function distanceFromHouse(household, location) {
 
 const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
 
-async function recordHouseholdAction({ req, householdId, actionType, status, body, requireCampaignType }) {
+// Resolve which pass an action belongs to from its (knock-time) timestamp: the
+// latest pass activated at or before ts (half-open windows), so an offline
+// Pass-1 knock synced after Pass 2 goes live still counts for Pass 1. Falls
+// back to the campaign's active pass.
+async function resolvePassForTimestamp(campaign, ts) {
+  const pass = await Pass.findOne({
+    campaignId: campaign._id,
+    activatedAt: { $ne: null, $lte: ts },
+  })
+    .sort({ activatedAt: -1 })
+    .select('_id')
+    .lean();
+  return pass?._id || campaign.activePassId || null;
+}
+
+// Best-effort turf tag (metadata only); null when not in exactly one pass turf.
+async function resolveTurf(passId, householdId) {
+  if (!passId) return null;
+  const turf = await Turf.findOne({ passId, householdIds: householdId }).select('_id').lean();
+  return turf?._id || null;
+}
+
+// household.status = latest-across-all-passes convenience value, resolved with
+// the sticky-completion precedence rule (decision 2).
+async function recomputeHouseholdStatus(household, campaignType) {
+  const acts = await CanvassActivity.find(
+    { householdId: household._id, actionType: { $ne: 'note_added' } },
+    { actionType: 1, timestamp: 1 }
+  ).lean();
+  household.status = resolveStatus(campaignType, acts);
+}
+
+// "Ever surveyed" — recomputed from existence so a later-pass not_home can't
+// wipe it, and deleting a mistaken survey still corrects it.
+async function recomputeSurveyStatus(voterIds) {
+  for (const vid of voterIds) {
+    const exists = await SurveyResponse.exists({ voterId: vid });
+    await Voter.updateOne({ _id: vid }, { $set: { surveyStatus: exists ? 'surveyed' : 'not_surveyed' } });
+  }
+}
+
+async function recordHouseholdAction({ req, householdId, actionType, body, requireCampaignType }) {
   const userId = req.user._id;
   const household = await Household.findById(householdId);
   if (!household) return { error: { status: 404, message: 'Household not found' } };
@@ -67,39 +111,30 @@ async function recordHouseholdAction({ req, householdId, actionType, status, bod
   const access = await assertHouseholdAccess(req, household);
   if (access.error) return access;
 
-  if (requireCampaignType) {
-    const campaign = await Campaign.findById(household.campaignId).lean();
-    if (!campaign) return { error: { status: 404, message: 'Campaign not found' } };
-    if (campaign.type !== requireCampaignType) {
-      return {
-        error: {
-          status: 400,
-          message: `Action not valid for campaign type "${campaign.type}".`,
-        },
-      };
-    }
+  const campaign = await Campaign.findById(household.campaignId).lean();
+  if (!campaign) return { error: { status: 404, message: 'Campaign not found' } };
+  if (requireCampaignType && campaign.type !== requireCampaignType) {
+    return { error: { status: 400, message: `Action not valid for campaign type "${campaign.type}".` } };
   }
 
   const data = baseActionSchema.parse(body);
   const ts = data.timestamp ? new Date(data.timestamp) : new Date();
   const distance = distanceFromHouse(household, data.location);
+  const passId = await resolvePassForTimestamp(campaign, ts);
+  const turfId = await resolveTurf(passId, household._id);
 
+  // Replace this canvasser's prior action at this house for THIS pass.
   await CanvassActivity.deleteMany({
     userId,
     householdId,
+    passId,
     actionType: { $in: REPLACEABLE_ACTIONS },
   });
 
-  const priorSurveys = await SurveyResponse.find(
-    { userId, householdId },
-    'voterId'
-  ).lean();
+  const priorSurveys = await SurveyResponse.find({ userId, householdId, passId }, 'voterId').lean();
   if (priorSurveys.length) {
-    await SurveyResponse.deleteMany({ userId, householdId });
-    await Voter.updateMany(
-      { _id: { $in: priorSurveys.map((s) => s.voterId) } },
-      { $set: { surveyStatus: 'not_surveyed' } }
-    );
+    await SurveyResponse.deleteMany({ userId, householdId, passId });
+    await recomputeSurveyStatus(priorSurveys.map((s) => s.voterId));
   }
 
   const activity = await CanvassActivity.create({
@@ -108,6 +143,8 @@ async function recordHouseholdAction({ req, householdId, actionType, status, bod
     householdId,
     userId,
     actionType,
+    passId,
+    turfId,
     note: data.note ?? null,
     location: data.location,
     distanceFromHouseMeters: distance,
@@ -115,7 +152,7 @@ async function recordHouseholdAction({ req, householdId, actionType, status, bod
     wasOfflineSubmission: !!data.wasOfflineSubmission,
   });
 
-  household.status = status;
+  await recomputeHouseholdStatus(household, campaign.type);
   household.lastActionAt = ts;
   household.lastActionBy = userId;
   await household.save();
@@ -230,8 +267,11 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
 
     const ts = data.timestamp ? new Date(data.timestamp) : new Date();
     const distance = distanceFromHouse(household, data.location);
+    const passId = await resolvePassForTimestamp(campaign, ts);
+    const turfId = await resolveTurf(passId, household._id);
 
-    await SurveyResponse.deleteMany({ voterId: voter._id });
+    // One survey per voter PER PASS (prior-pass surveys are preserved).
+    await SurveyResponse.deleteMany({ voterId: voter._id, passId });
 
     const surveyResponse = await SurveyResponse.create({
       organizationId: household.organizationId,
@@ -246,12 +286,15 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       location: data.location,
       distanceFromHouseMeters: distance,
       submittedAt: ts,
+      passId,
+      turfId,
       wasOfflineSubmission: !!data.wasOfflineSubmission,
     });
 
     await CanvassActivity.deleteMany({
       userId: req.user._id,
       householdId: household._id,
+      passId,
       actionType: { $in: REPLACEABLE_ACTIONS },
     });
 
@@ -262,6 +305,8 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       voterId: voter._id,
       userId: req.user._id,
       actionType: 'survey_submitted',
+      passId,
+      turfId,
       note: data.note ?? null,
       location: data.location,
       distanceFromHouseMeters: distance,
@@ -272,7 +317,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     voter.surveyStatus = 'surveyed';
     await voter.save();
 
-    household.status = 'surveyed';
+    await recomputeHouseholdStatus(household, campaign.type);
     household.lastActionAt = ts;
     household.lastActionBy = req.user._id;
     await household.save();

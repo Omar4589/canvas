@@ -28,6 +28,7 @@ const householdSchema = new mongoose.Schema(
     city: { type: String, required: true, trim: true },
     state: { type: String, required: true, trim: true, uppercase: true },
     zipCode: { type: String, required: true, trim: true },
+    county: { type: String, default: null, trim: true },
 
     normalizedAddress: { type: String, required: true, index: true },
 
@@ -43,11 +44,30 @@ const householdSchema = new mongoose.Schema(
 
     lastActionAt: { type: Date, default: null },
     lastActionBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
+    // Denormalized cut attributes (turf-cutting). *Value = modal voter value;
+    // cutConflicts flags attributes where the household's voters disagree.
+    precinctValue: { type: String, default: null },
+    congressionalValue: { type: String, default: null },
+    stateSenateValue: { type: String, default: null },
+    stateHouseValue: { type: String, default: null },
+    cityValue: { type: String, default: null },
+    zipValue: { type: String, default: null },
+    countyValue: { type: String, default: null },
+    cutConflicts: { type: mongoose.Schema.Types.Mixed, default: {} },
+
+    // Turf membership mirror (set by turf generation / edits).
+    turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },
+    walkOrder: { type: Number, default: null },
   },
   { timestamps: true }
 );
 
 householdSchema.index({ location: '2dsphere' });
 householdSchema.index({ campaignId: 1, normalizedAddress: 1 }, { unique: true });
+householdSchema.index({ campaignId: 1, precinctValue: 1 });
+householdSchema.index({ campaignId: 1, countyValue: 1 });
+householdSchema.index({ campaignId: 1, cityValue: 1 });
+householdSchema.index({ turfId: 1, walkOrder: 1 });
 
 export const Household = mongoose.model('Household', householdSchema);

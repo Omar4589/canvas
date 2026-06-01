@@ -74,6 +74,25 @@ function dayBucketExpr(field, tz) {
   return { $dateToString: { format: '%Y-%m-%d', date: `$${field}`, timezone: tz } };
 }
 
+// "A day" follows the campaign's timezone (decision 9) when a campaign is
+// selected; otherwise the admin's ?tz= (or UTC).
+async function resolveDayTz(req) {
+  if (req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)) {
+    const c = await Campaign.findById(req.query.campaignId, { timeZone: 1 }).lean();
+    if (c?.timeZone) return c.timeZone;
+  }
+  return tzOf(req);
+}
+
+function dayKey(ts, tz) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ts));
+}
+
 function csvCell(v) {
   if (v === null || v === undefined) return '';
   const s = String(v);
@@ -101,6 +120,7 @@ router.get('/overview', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const cFilter = baseFilter(req);
     const householdMatch = { isActive: true, ...cFilter };
+    const tz = await resolveDayTz(req);
 
     const memberCountPromise = Membership.countDocuments({
       organizationId: orgId,
@@ -115,6 +135,7 @@ router.get('/overview', async (req, res, next) => {
       homesKnocked,
       statusAgg,
       eventAgg,
+      doorDayAgg,
     ] = await Promise.all([
       Household.countDocuments(householdMatch),
       Household.find(householdMatch, { _id: 1 }).lean(),
@@ -128,6 +149,14 @@ router.get('/overview', async (req, res, next) => {
       CanvassActivity.aggregate([
         { $match: cFilter },
         { $group: { _id: '$actionType', count: { $sum: 1 } } },
+      ]),
+      // Per-day door dedup (decision 1c): a door knocked >1× in a day counts as
+      // 1 door-day, but each canvasser still keeps an individual knock credit
+      // (the per-canvasser counts in /canvassers are unchanged).
+      CanvassActivity.aggregate([
+        { $match: { ...cFilter, actionType: { $in: KNOCK_ACTIONS } } },
+        { $group: { _id: { householdId: '$householdId', day: dayBucketExpr('timestamp', tz) } } },
+        { $count: 'doorDays' },
       ]),
     ]);
 
@@ -154,8 +183,10 @@ router.get('/overview', async (req, res, next) => {
       else if (r._id === 'lit_dropped') events.litDropped = r.count;
     }
 
+    const doorDays = doorDayAgg[0]?.doorDays || 0;
+
     res.json({
-      totals: { households, voters, activeUsers, surveysSubmitted, homesKnocked },
+      totals: { households, voters, activeUsers, surveysSubmitted, homesKnocked, doorDays },
       canvass,
       events,
     });
@@ -635,6 +666,7 @@ router.get('/overlaps', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
     const cFilter = baseFilter(req);
+    const tz = await resolveDayTz(req);
     const dateRange = parseDateRange(req, 'timestamp');
     const match = {
       ...cFilter,
@@ -688,7 +720,21 @@ router.get('/overlaps', async (req, res, next) => {
       .map((o) => {
         const h = hMap.get(String(o._id));
         if (!h) return null;
+        // Same-day collision (decision 1b): a day on which >1 distinct canvasser
+        // hit this door (bucketed in the campaign's timezone).
+        const byDay = new Map();
+        for (const c of o.canvassers) {
+          const day = dayKey(c.timestamp, tz);
+          if (!byDay.has(day)) byDay.set(day, new Set());
+          byDay.get(day).add(String(c.userId));
+        }
+        const sameDayDates = [...byDay.entries()]
+          .filter(([, set]) => set.size > 1)
+          .map(([day]) => day)
+          .sort();
         return {
+          sameDayCollision: sameDayDates.length > 0,
+          sameDayDates,
           household: {
             id: String(h._id),
             addressLine1: h.addressLine1,

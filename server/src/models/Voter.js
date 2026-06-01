@@ -15,7 +15,7 @@ const voterSchema = new mongoose.Schema(
       index: true,
     },
 
-    stateVoterId: { type: String, required: true, unique: true, index: true, trim: true },
+    stateVoterId: { type: String, required: true, index: true, trim: true },
     uid: { type: String, default: null, index: true, trim: true },
 
     firstName: { type: String, required: true, trim: true },
@@ -49,5 +49,8 @@ const voterSchema = new mongoose.Schema(
 );
 
 voterSchema.index({ householdId: 1, surveyStatus: 1 });
+// Voter identity is scoped per-org (decision 13): one org's import never
+// clobbers another's. Replaces the old global-unique index on stateVoterId.
+voterSchema.index({ organizationId: 1, stateVoterId: 1 }, { unique: true });
 
 export const Voter = mongoose.model('Voter', voterSchema);

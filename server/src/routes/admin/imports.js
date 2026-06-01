@@ -1,9 +1,20 @@
 import { Router } from 'express';
 import multer from 'multer';
+import mongoose from 'mongoose';
+import Papa from 'papaparse';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
-import { runImport } from '../../services/import/csvImporter.js';
 import { ImportJob } from '../../models/ImportJob.js';
+import { ImportProfile } from '../../models/ImportProfile.js';
+import { Campaign } from '../../models/Campaign.js';
+import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
+import { saveRawImport } from '../../services/import/rawImportStore.js';
+import {
+  CANONICAL_FIELDS,
+  REQUIRED_FIELDS,
+  DEFAULT_PROFILE_MAPPING,
+  suggestMapping,
+} from '../../services/import/canonicalFields.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -25,26 +36,118 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
+// Canonical schema + the built-in default mapping (for the mapping UI).
+router.get('/fields', (req, res) => {
+  res.json({ fields: CANONICAL_FIELDS, required: REQUIRED_FIELDS, defaultMapping: DEFAULT_PROFILE_MAPPING });
+});
+
+// Read a file's headers + a few sample rows and auto-suggest a mapping.
+router.post('/preview-headers', upload.single('file'), (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
+    const csv = req.file.buffer.toString('utf8');
+    const parsed = Papa.parse(csv, {
+      header: true,
+      skipEmptyLines: true,
+      preview: 5,
+      transformHeader: (h) => h.trim(),
+    });
+    const columns = parsed.meta?.fields || [];
+    res.json({ columns, sample: parsed.data, suggestedMapping: suggestMapping(columns) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Saved import profiles (reusable column mappings per vendor).
+router.get('/profiles', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const profiles = await ImportProfile.find({ organizationId: activeOrgId(req) }).sort({ name: 1 });
+    res.json({ profiles });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/profiles', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const { name, mapping } = req.body || {};
+    if (!name || !mapping || typeof mapping !== 'object') {
+      return res.status(400).json({ error: 'name and mapping are required' });
+    }
+    const profile = await ImportProfile.findOneAndUpdate(
+      { organizationId: activeOrgId(req), name: String(name).trim() },
+      { $set: { mapping }, $setOnInsert: { createdBy: req.user._id } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.status(201).json({ profile });
+  } catch (err) {
+    next(err);
+  }
+});
+
+function missingMappingFields(mapping) {
+  return REQUIRED_FIELDS.filter((f) => !mapping?.[f]);
+}
+
+// Enqueue a CSV import: validate synchronously, stash the file in GridFS, queue it.
 router.post('/csv', upload.single('file'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
     const campaignId = req.body?.campaignId;
-    if (!campaignId) {
+    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
       return res.status(400).json({ error: 'campaignId is required' });
     }
-    const job = await runImport({
-      buffer: req.file.buffer,
-      filename: req.file.originalname,
-      userId: req.user._id,
-      campaignId,
+
+    // Resolve the field mapping: inline JSON, a saved profile, or the default.
+    let mapping = DEFAULT_PROFILE_MAPPING;
+    let importProfileId = null;
+    if (req.body?.mapping) {
+      try {
+        mapping = JSON.parse(req.body.mapping);
+      } catch {
+        return res.status(400).json({ error: 'mapping must be valid JSON' });
+      }
+    } else if (req.body?.importProfileId) {
+      const profile = await ImportProfile.findOne({
+        _id: req.body.importProfileId,
+        organizationId: activeOrgId(req),
+      });
+      if (!profile) return res.status(400).json({ error: 'Import profile not found' });
+      mapping = profile.mapping;
+      importProfileId = profile._id;
+    }
+    const missing = missingMappingFields(mapping);
+    if (missing.length) {
+      return res.status(400).json({ error: `Mapping is missing required fields: ${missing.join(', ')}` });
+    }
+
+    // Campaign must exist + belong to the active org (preserves today's 400).
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
+    if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
+
+    const job = await ImportJob.create({
       organizationId: activeOrgId(req),
+      campaignId: campaign._id,
+      filename: req.file.originalname,
+      uploadedBy: req.user._id,
+      status: 'pending',
+      fieldMapping: mapping,
+      importProfileId,
     });
+    await saveRawImport(job._id, req.file.originalname, req.file.buffer);
+    await getQueue(QUEUE_NAMES.IMPORT).add(
+      'csv-import',
+      { importJobId: String(job._id) },
+      { jobId: String(job._id) }
+    );
+
     res.status(201).json({ job });
   } catch (err) {
-    if (err.message === 'Campaign not found' || err.message === 'campaignId is required') {
-      return res.status(400).json({ error: err.message });
-    }
     next(err);
   }
 });

@@ -22,6 +22,10 @@ const campaignSchema = new mongoose.Schema(
     },
     isActive: { type: Boolean, default: true, index: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Multi-pass canvassing + the project's timezone (defines "a day" for the
+    // same-day collision / per-day knock reporting). Admin-set in the UI.
+    activePassId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', default: null },
+    timeZone: { type: String, default: 'America/New_York' },
   },
   { timestamps: true }
 );

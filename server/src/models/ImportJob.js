@@ -33,6 +33,13 @@ const importJobSchema = new mongoose.Schema(
     errorCount: { type: Number, default: 0 },
     startedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
+    // Async queue execution (M1).
+    progress: { type: Number, default: 0 },
+    processedRows: { type: Number, default: 0 },
+    queueJobId: { type: String, default: null },
+    // Column mapping used for this import (resolved canonical -> vendor column).
+    importProfileId: { type: mongoose.Schema.Types.ObjectId, ref: 'ImportProfile', default: null },
+    fieldMapping: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );

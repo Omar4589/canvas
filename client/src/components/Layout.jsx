@@ -8,6 +8,9 @@ import Logo from './Logo.jsx';
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/map', label: 'Map' },
+  { to: '/turfs', label: 'Turf Cutting' },
+  { to: '/passes', label: 'Passes' },
+  { to: '/walklists', label: 'Walk Lists' },
   { to: '/campaigns', label: 'Campaigns' },
   { to: '/import', label: 'CSV Import' },
   { to: '/users', label: 'Users' },
@@ -18,6 +21,7 @@ const SUPER_NAV = [
   { to: '/super-admin', label: 'Control Room' },
   { to: '/super-admin/users', label: 'All Users' },
   { to: '/organizations', label: 'Organizations' },
+  { to: '/queues', label: 'Jobs' },
 ];
 
 function navClass({ isActive }) {
@@ -149,7 +153,7 @@ function OrgSwitcher() {
 export default function Layout() {
   const { user, logout, isSuperAdmin } = useAuth();
   const location = useLocation();
-  const isFullBleed = location.pathname === '/map';
+  const isFullBleed = location.pathname === '/map' || location.pathname === '/queues';
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <aside className="flex w-60 flex-col border-r border-gray-200 bg-white px-4 py-5">

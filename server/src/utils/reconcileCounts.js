@@ -2,12 +2,12 @@
 // overwrite rules in the mobile canvass route. Brings the database into the same
 // invariants the live writes now enforce:
 //
-//   1. Each voter has at most ONE SurveyResponse (the most recently submitted).
+//   1. Each voter has at most ONE SurveyResponse PER PASS (the most recent).
 //   2. Each (canvasser, household) pair has at most ONE CanvassActivity row
-//      (across not_home / wrong_address / survey_submitted).
-//   3. voter.surveyStatus is `surveyed` iff a SurveyResponse exists for them.
-//   4. household.status reflects the latest CanvassActivity at the house, or
-//      `unknocked` when there is none.
+//      PER PASS (not_home / wrong_address / survey_submitted / lit_dropped).
+//   3. voter.surveyStatus is `surveyed` iff any SurveyResponse exists for them.
+//   4. household.status follows sticky-completion precedence (a survey/lit-drop
+//      can't be downgraded; otherwise latest wins), or `unknocked` when none.
 //
 // Usage (from server/):
 //   node src/utils/reconcileCounts.js               # preview only — no writes
@@ -26,6 +26,8 @@ import { SurveyResponse } from '../models/SurveyResponse.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
 import { Voter } from '../models/Voter.js';
 import { Household } from '../models/Household.js';
+import { Campaign } from '../models/Campaign.js';
+import { ACTION_TO_STATUS } from './statusPrecedence.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, '../../.env') });
@@ -37,11 +39,11 @@ function header(s) {
 }
 
 async function dedupSurveyResponses() {
-  header('1. Dedup SurveyResponses (keep newest per voter)');
+  header('1. Dedup SurveyResponses (keep newest per voter PER PASS)');
   const dupes = await SurveyResponse.aggregate([
     {
       $group: {
-        _id: '$voterId',
+        _id: { voterId: '$voterId', passId: '$passId' },
         count: { $sum: 1 },
         ids: { $push: { _id: '$_id', submittedAt: '$submittedAt' } },
       },
@@ -71,7 +73,7 @@ async function dedupSurveyResponses() {
 }
 
 async function dedupCanvassActivities() {
-  header('2. Dedup CanvassActivity (keep newest per canvasser × household)');
+  header('2. Dedup CanvassActivity (keep newest per canvasser × household × pass)');
   const dupes = await CanvassActivity.aggregate([
     {
       $match: {
@@ -80,7 +82,7 @@ async function dedupCanvassActivities() {
     },
     {
       $group: {
-        _id: { userId: '$userId', householdId: '$householdId' },
+        _id: { userId: '$userId', householdId: '$householdId', passId: '$passId' },
         count: { $sum: 1 },
         ids: { $push: { _id: '$_id', timestamp: '$timestamp' } },
       },
@@ -144,39 +146,43 @@ async function reconcileVoterStatus() {
 }
 
 async function reconcileHouseholdStatus() {
-  header('4. Reconcile household.status to latest activity (or unknocked)');
-  const latestByHousehold = await CanvassActivity.aggregate([
-    {
-      $match: {
-        actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'] },
-      },
-    },
+  header('4. Reconcile household.status with sticky-completion precedence');
+  const aggByHousehold = await CanvassActivity.aggregate([
+    { $match: { actionType: { $ne: 'note_added' } } },
     { $sort: { timestamp: -1 } },
     {
       $group: {
         _id: '$householdId',
-        actionType: { $first: '$actionType' },
-        timestamp: { $first: '$timestamp' },
-        userId: { $first: '$userId' },
+        actions: { $addToSet: '$actionType' },
+        latestActionType: { $first: '$actionType' },
+        latestTimestamp: { $first: '$timestamp' },
+        latestUserId: { $first: '$userId' },
       },
     },
   ]);
-  const latestMap = new Map(latestByHousehold.map((a) => [String(a._id), a]));
+  const aggMap = new Map(aggByHousehold.map((a) => [String(a._id), a]));
 
-  const households = await Household.find(
-    {},
-    { _id: 1, status: 1, lastActionAt: 1, lastActionBy: 1 }
-  ).lean();
+  const campaigns = await Campaign.find({}, { type: 1 }).lean();
+  const typeByCampaign = new Map(campaigns.map((c) => [String(c._id), c.type]));
+
+  const households = await Household.find({}, { _id: 1, campaignId: 1, status: 1 }).lean();
 
   let needsUpdate = 0;
   const ops = [];
   for (const h of households) {
-    const latest = latestMap.get(String(h._id));
-    const newStatus = latest
-      ? latest.actionType === 'survey_submitted'
-        ? 'surveyed'
-        : latest.actionType
-      : 'unknocked';
+    const agg = aggMap.get(String(h._id));
+    const type = typeByCampaign.get(String(h.campaignId));
+    let newStatus = 'unknocked';
+    let latest = null;
+    if (agg) {
+      latest = { timestamp: agg.latestTimestamp, userId: agg.latestUserId };
+      const completion = type === 'lit_drop' ? 'lit_dropped' : 'survey_submitted';
+      if (agg.actions.includes(completion)) {
+        newStatus = type === 'lit_drop' ? 'lit_dropped' : 'surveyed';
+      } else {
+        newStatus = ACTION_TO_STATUS[agg.latestActionType] || 'unknocked';
+      }
+    }
     if (h.status !== newStatus) {
       needsUpdate++;
       ops.push({

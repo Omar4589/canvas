@@ -48,8 +48,15 @@ const surveyResponseSchema = new mongoose.Schema(
     submittedAt: { type: Date, required: true },
     syncedAt: { type: Date, default: () => new Date() },
     wasOfflineSubmission: { type: Boolean, default: false },
+
+    // Pass/turf tags — metadata only (null = pre-turf history).
+    passId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', default: null },
+    turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },
   },
   { timestamps: true }
 );
+
+surveyResponseSchema.index({ voterId: 1, passId: 1 }); // within-pass survey dedup
+surveyResponseSchema.index({ householdId: 1, passId: 1 }); // per-pass survey existence
 
 export const SurveyResponse = mongoose.model('SurveyResponse', surveyResponseSchema);

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import routes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
+import { requireBullBoardAuth, createBullBoardRouter } from './queues/bullBoard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Resolves to <repo>/client/dist when running from server/src/.
@@ -45,6 +46,10 @@ export function createApp() {
   app.use('/api/auth/login', authLimiter);
 
   app.use('/api', routes);
+
+  // Bull Board (super-admin job console). Must be mounted BEFORE the SPA
+  // fallback below, whose /^(?!\/api).*/ matcher would otherwise swallow it.
+  app.use('/admin/queues', requireBullBoardAuth, createBullBoardRouter());
 
   // Serve the built React admin dashboard from the same origin in production.
   // Heroku's heroku-postbuild produces client/dist before the server boots.

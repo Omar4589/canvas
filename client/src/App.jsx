@@ -10,6 +10,10 @@ const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
+const TurfsPage = lazy(() => import('./pages/TurfsPage.jsx'));
+const PassesPage = lazy(() => import('./pages/PassesPage.jsx'));
+const WalkListsPage = lazy(() => import('./pages/WalkListsPage.jsx'));
+const QueuesPage = lazy(() => import('./pages/QueuesPage.jsx'));
 const PrivacyPolicyPage = lazy(() => import('./pages/PrivacyPolicyPage.jsx'));
 const SelectOrgPage = lazy(() => import('./pages/SelectOrgPage.jsx'));
 const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage.jsx'));
@@ -56,6 +60,10 @@ export default function App() {
         >
           <Route path="/" element={<DashboardPage />} />
           <Route path="/map" element={<MapPage />} />
+          <Route path="/turfs" element={<TurfsPage />} />
+          <Route path="/passes" element={<PassesPage />} />
+          <Route path="/walklists" element={<WalkListsPage />} />
+          <Route path="/queues" element={<QueuesPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
