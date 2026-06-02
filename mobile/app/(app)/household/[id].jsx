@@ -91,7 +91,14 @@ function VoterCard({ voter, onPress }) {
         </Text>
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.voterName}>{voter.fullName}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={styles.voterName}>{voter.fullName}</Text>
+          {voter.voted && (
+            <View style={styles.votedPill}>
+              <Text style={styles.votedPillText}>✓ Voted</Text>
+            </View>
+          )}
+        </View>
         {meta ? <Text style={styles.voterMeta}>{meta}</Text> : null}
         <View style={styles.voterStatusRow}>
           <View
@@ -452,6 +459,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   voterName: { ...type.bodyStrong, fontSize: 15 },
+  votedPill: {
+    backgroundColor: colors.successBg,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 1,
+  },
+  votedPillText: { fontSize: 10, fontWeight: '700', color: colors.success },
   voterMeta: { ...type.caption, marginTop: 2 },
   voterStatusRow: {
     flexDirection: 'row',

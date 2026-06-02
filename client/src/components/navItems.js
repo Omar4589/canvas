@@ -8,6 +8,7 @@ export const NAV = [
   { to: '/walklists', label: 'Walk Lists' },
   { to: '/campaigns', label: 'Campaigns' },
   { to: '/import', label: 'CSV Import' },
+  { to: '/early-voting', label: 'Early Voting' },
   { to: '/users', label: 'Users' },
   { to: '/surveys', label: 'Surveys' },
 ];

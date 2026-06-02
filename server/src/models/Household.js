@@ -59,6 +59,10 @@ const householdSchema = new mongoose.Schema(
     // Turf membership mirror (set by turf generation / edits).
     turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },
     walkOrder: { type: Number, default: null },
+
+    // Early voting: true when EVERY voter at this address has already voted, so
+    // the door drops off the canvasser's map/books (recomputed on voted-import).
+    fullyVoted: { type: Boolean, default: false, index: true },
   },
   { timestamps: true }
 );

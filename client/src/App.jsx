@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage.jsx';
 const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
+const EarlyVotingPage = lazy(() => import('./pages/EarlyVotingPage.jsx'));
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
@@ -67,6 +68,7 @@ export default function App() {
           <Route path="/walklists" element={<WalkListsPage />} />
           <Route path="/queues" element={<QueuesPage />} />
           <Route path="/import" element={<ImportPage />} />
+          <Route path="/early-voting" element={<EarlyVotingPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
           <Route path="/campaigns" element={<CampaignsPage />} />

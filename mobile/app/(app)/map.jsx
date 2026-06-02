@@ -431,13 +431,13 @@ export default function MapScreen() {
             .map((h) => {
               const c = hMap.get(String(h._id));
               if (!c) return h;
-              if (c.isActive === false) return null; // archived — drop from map
+              if (c.isActive === false || c.fullyVoted === true) return null; // archived or everyone voted — drop
               return { ...h, status: c.status, lastActionAt: c.lastActionAt };
             })
             .filter(Boolean),
           voters: prev.voters.map((v) => {
             const c = vMap.get(String(v._id));
-            return c ? { ...v, surveyStatus: c.surveyStatus } : v;
+            return c ? { ...v, surveyStatus: c.surveyStatus, voted: c.voted ?? v.voted } : v;
           }),
         };
         saveBootstrap(next);
@@ -1105,9 +1105,12 @@ function SelectedHouseSheetContent({
             return (
               <View key={v._id} style={styles.voterRow}>
                 <View style={styles.voterMain}>
-                  <Text style={styles.voterName} numberOfLines={1}>
-                    {v.fullName}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.voterName} numberOfLines={1}>
+                      {v.fullName}
+                    </Text>
+                    {v.voted && <Text style={styles.votedTag}>✓ Voted</Text>}
+                  </View>
                   {metaParts.length > 0 && (
                     <Text style={styles.voterMeta} numberOfLines={1}>
                       {metaParts.join(' · ')}
@@ -1555,6 +1558,11 @@ const styles = StyleSheet.create({
   voterMeta: {
     ...type.caption,
     marginTop: 1,
+  },
+  votedTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.success,
   },
   voterStatus: {
     fontSize: 11,

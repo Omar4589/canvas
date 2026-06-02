@@ -9,6 +9,7 @@ import { Voter } from '../../models/Voter.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
+import { VotedVoter } from '../../models/VotedVoter.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -74,13 +75,23 @@ async function canvasserBooks(req, campaign) {
   if (!myTurfs.length) return [];
   const books = await Turf.find(
     { _id: { $in: myTurfs.map((a) => a.turfId) } },
-    { name: 1, centroid: 1, doorCount: 1 }
+    { name: 1, centroid: 1, doorCount: 1, householdIds: 1 }
   ).lean();
+  // doorCount reflects REMAINING doors — exclude fully-voted (and inactive) households.
+  const allHhIds = books.flatMap((b) => b.householdIds || []);
+  const eligible = new Set(
+    (
+      await Household.find(
+        { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true } },
+        { _id: 1 }
+      ).lean()
+    ).map((h) => String(h._id))
+  );
   return books.map((b) => ({
     id: String(b._id),
     name: b.name,
     centroid: b.centroid,
-    doorCount: b.doorCount,
+    doorCount: (b.householdIds || []).filter((id) => eligible.has(String(id))).length,
   }));
 }
 
@@ -131,6 +142,7 @@ router.get('/bootstrap', async (req, res, next) => {
       campaignId: campaign._id,
       organizationId: orgId,
       isActive: true,
+      fullyVoted: { $ne: true }, // drop doors where everyone has already voted
       'location.coordinates': { $exists: true, $ne: null },
     };
     const scope = await canvasserHouseholdScope(req, campaign);
@@ -150,7 +162,7 @@ router.get('/bootstrap', async (req, res, next) => {
 
     const householdIds = households.map((h) => h._id);
 
-    const [voters, survey] = await Promise.all([
+    const [votersRaw, survey, votedRecs] = await Promise.all([
       campaign.type === 'survey'
         ? Voter.find(
             { householdId: { $in: householdIds }, organizationId: orgId },
@@ -173,7 +185,12 @@ router.get('/bootstrap', async (req, res, next) => {
             organizationId: orgId,
           }).lean()
         : Promise.resolve(null),
+      VotedVoter.find({ campaignId: campaign._id }, { voterId: 1 }).lean(),
     ]);
+    // Early voting: flag (not hide) voters who already voted so the app can show
+    // a ✓ next to their name. Fully-voted doors were already dropped above.
+    const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
+    const voters = votersRaw.map((v) => ({ ...v, voted: votedSet.has(String(v._id)) }));
 
     res.json({
       user: req.user.toSafeJSON(),
@@ -225,18 +242,26 @@ router.get('/changes', async (req, res, next) => {
       status: 1,
       lastActionAt: 1,
       isActive: 1,
+      fullyVoted: 1, // client drops doors where everyone has now voted
     }).lean();
 
     let changedVoters = [];
     if (changedHouseholds.length > 0) {
-      changedVoters = await Voter.find(
-        {
-          householdId: { $in: changedHouseholds.map((h) => h._id) },
-          organizationId: orgId,
-          updatedAt: { $gt: sinceDate },
-        },
+      const hhIds = changedHouseholds.map((h) => h._id);
+      // Re-send ALL voters of the changed households (not only docs whose own
+      // updatedAt moved): marking a voter voted writes a VotedVoter row, not the
+      // Voter doc, so an updatedAt filter would miss the ✓. The recompute bumps
+      // each affected household's updatedAt, so its door is already in this delta.
+      const raw = await Voter.find(
+        { householdId: { $in: hhIds }, organizationId: orgId },
         { _id: 1, householdId: 1, surveyStatus: 1 }
       ).lean();
+      const votedRecs = await VotedVoter.find(
+        { campaignId: cId, voterId: { $in: raw.map((v) => v._id) } },
+        { voterId: 1 }
+      ).lean();
+      const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
+      changedVoters = raw.map((v) => ({ ...v, voted: votedSet.has(String(v._id)) }));
     }
 
     res.json({

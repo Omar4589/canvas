@@ -4,6 +4,8 @@ import { Campaign } from '../../models/Campaign.js';
 import { loadRawImport, deleteRawImport } from './rawImportStore.js';
 import { parseAndValidate, applyImport } from './csvImporter.js';
 import { recomputeCutAttributesForCampaign } from '../turf/computeCutAttributes.js';
+import { Household } from '../../models/Household.js';
+import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
 
 // BullMQ processor for the `import-queue`. Idempotent: household upserts on
 // {campaignId, normalizedAddress} and voter upserts on {organizationId,
@@ -54,6 +56,11 @@ export async function processImportJob(job) {
     // Denormalize cut attributes onto households (modal voter value + conflict
     // flags) so attribute-cut turf generation can group by them.
     await recomputeCutAttributesForCampaign(campaign._id);
+
+    // Early voting: adding a new (un-voted) voter to a door that had been
+    // fully-voted must re-open it. Only the currently-dropped doors can flip.
+    const droppedDoors = await Household.find({ campaignId: campaign._id, fullyVoted: true }).distinct('_id');
+    if (droppedDoors.length) await recomputeFullyVoted(campaign._id, droppedDoors);
 
     await ImportJob.updateOne(
       { _id: importJobId },
