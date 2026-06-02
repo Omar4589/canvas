@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,36 +12,38 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
 import { saveActiveCampaign, clearBootstrap } from '../../../../lib/cache';
-import PinIcon from '../../../../components/PinIcon';
+import CoverageBar from '../../../../components/CoverageBar';
+import VoterRow from '../../../../components/VoterRow';
+import SectionHeader from '../../../../components/SectionHeader';
+import DateRangeBar from '../../../../components/DateRangeBar';
+import { rangeFor, deviceTimezone } from '../../../../lib/dateRanges';
 import { formatRange } from '../../../../lib/datetime';
 import { getConnectionRate, RATE_COLORS } from '../../../../lib/rates';
 import { colors, radius, spacing, type, shadow } from '../../../../lib/theme';
 
-function startOfTodayISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
-function StatTile({ pinStatus, value, label }) {
+function StatTile({ value, label, level }) {
+  const palette = level ? RATE_COLORS[level] : null;
   return (
-    <View style={styles.statTile}>
-      <PinIcon status={pinStatus} size={26} />
-      <View style={{ marginLeft: spacing.sm }}>
-        <Text style={styles.statValue}>{value ?? '—'}</Text>
-        <Text style={styles.statLabel}>{label}</Text>
-      </View>
+    <View style={[styles.statTile, palette && { backgroundColor: palette.bg, borderColor: palette.bg }]}>
+      <Text style={[styles.statTileValue, palette && { color: palette.fg }]}>{value ?? '—'}</Text>
+      <Text style={[styles.statTileLabel, palette && { color: palette.fg }]}>{label}</Text>
     </View>
   );
 }
 
-function TodayTile({ value, label, level }) {
-  const palette = level ? RATE_COLORS[level] : null;
+function OptionRow({ option, count, percent, onPress }) {
   return (
-    <View style={[styles.todayTile, palette && { backgroundColor: palette.bg, borderColor: palette.bg }]}>
-      <Text style={[styles.todayTileValue, palette && { color: palette.fg }]}>{value ?? '—'}</Text>
-      <Text style={[styles.todayTileLabel, palette && { color: palette.fg }]}>{label}</Text>
-    </View>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.optRow, pressed && { opacity: 0.7 }]}>
+      <View style={styles.optTop}>
+        <Text style={styles.optLabel} numberOfLines={1}>{String(option)}</Text>
+        <Text style={styles.optCount}>
+          {count} · {percent}% ›
+        </Text>
+      </View>
+      <View style={styles.optTrack}>
+        <View style={[styles.optFill, { width: `${Math.max(2, Math.min(100, percent))}%` }]} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -50,6 +52,17 @@ export default function CampaignDetail() {
   const qc = useQueryClient();
   const { campaignId } = useLocalSearchParams();
   const cId = Array.isArray(campaignId) ? campaignId[0] : campaignId;
+  const tz = deviceTimezone();
+
+  const [range, setRange] = useState(() => {
+    const r = rangeFor('today');
+    return { preset: 'today', from: r.from, to: r.to };
+  });
+  const touchedRef = useRef(false);
+  function onRangeChange(v) {
+    touchedRef.current = true;
+    setRange(v);
+  }
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -59,51 +72,74 @@ export default function CampaignDetail() {
   const isLitDrop = campaign?.type === 'lit_drop';
   const isArchived = campaign && campaign.isActive === false;
 
+  // Archived campaigns have no recent activity → default the range to all-time
+  // (unless the admin picks one).
+  useEffect(() => {
+    if (touchedRef.current || !campaign) return;
+    if (campaign.isActive === false) {
+      const r = rangeFor('all');
+      setRange({ preset: 'all', from: r.from, to: r.to });
+    }
+  }, [campaign]);
+
+  function rangeParams(extra = {}) {
+    const p = new URLSearchParams({ campaignId: cId, tz, ...extra });
+    if (range.from) p.set('from', range.from);
+    if (range.to) p.set('to', range.to);
+    return p;
+  }
+
   const overviewQ = useQuery({
     queryKey: ['admin', 'reports', 'overview', cId],
     queryFn: () => api(`/admin/reports/overview?campaignId=${cId}`),
     enabled: !!cId,
   });
-
   const canvassersQ = useQuery({
-    queryKey: ['admin', 'reports', 'canvassers', cId, 'today'],
-    queryFn: () =>
-      api(`/admin/reports/canvassers?campaignId=${cId}&from=${encodeURIComponent(startOfTodayISO())}`),
+    queryKey: ['admin', 'reports', 'canvassers', cId, range.from, range.to],
+    queryFn: () => api(`/admin/reports/canvassers?${rangeParams().toString()}`),
+    enabled: !!cId,
+  });
+  const surveyResultsQ = useQuery({
+    queryKey: ['admin', 'reports', 'survey-results', cId, range.from, range.to],
+    queryFn: () => api(`/admin/reports/survey-results?${rangeParams({ voterPreview: '5' }).toString()}`),
+    enabled: !!cId && !isLitDrop,
+  });
+  // In-range totals from the same rollup the landing uses (deduped door-days),
+  // so the detail's numbers match the Overview exactly.
+  const rollupQ = useQuery({
+    queryKey: ['admin', 'reports', 'campaign-rollup', 'one', cId, range.from, range.to],
+    queryFn: () => api(`/admin/reports/campaign-rollup?${rangeParams().toString()}`),
     enabled: !!cId,
   });
 
   const totals = overviewQ.data?.totals || {};
-  const events = overviewQ.data?.events || {};
+  const canvass = overviewQ.data?.canvass || {};
   const topCanvassers = (canvassersQ.data || []).slice(0, 5);
+  const rangeStats = rollupQ.data?.campaigns?.[0] || {};
+  const rangeDoors = rangeStats.doorDays || 0;
+  const rangePrimary = isLitDrop ? rangeStats.litDropped || 0 : rangeStats.surveysSubmitted || 0;
+  const rangeRate = getConnectionRate(rangePrimary, rangeDoors);
 
-  const todayTotals = useMemo(() => {
-    const rows = canvassersQ.data || [];
-    let doors = 0;
-    let surveys = 0;
-    let lit = 0;
-    for (const r of rows) {
-      doors += r.homesKnocked || 0;
-      surveys += r.surveysSubmitted || 0;
-      lit += r.litDropped || 0;
-    }
-    return { doors, surveys, lit };
-  }, [canvassersQ.data]);
+  const questions = surveyResultsQ.data?.questions || [];
+  const highlightQuestions = questions.filter((q) => q.type === 'multiple_choice' && q.options?.length);
 
-  const todayRate = isLitDrop
-    ? getConnectionRate(todayTotals.lit, todayTotals.doors)
-    : getConnectionRate(todayTotals.surveys, todayTotals.doors);
-  const overallRate = isLitDrop
-    ? getConnectionRate(events.litDropped || 0, totals.homesKnocked || 0)
-    : getConnectionRate(totals.surveysSubmitted || 0, totals.homesKnocked || 0);
+  function goVoters(qn, opt) {
+    router.push({
+      pathname: '/(app)/admin/answer-voters',
+      params: {
+        campaignId: cId,
+        questionKey: qn.key,
+        option: String(opt.option),
+        label: qn.label,
+        ...(range.from ? { from: range.from } : {}),
+        ...(range.to ? { to: range.to } : {}),
+      },
+    });
+  }
 
   async function goCanvass() {
     if (!campaign) return;
-    await saveActiveCampaign({
-      id: String(campaign._id),
-      name: campaign.name,
-      type: campaign.type,
-      state: campaign.state,
-    });
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state });
     await clearBootstrap();
     qc.removeQueries({ queryKey: ['bootstrap'] });
     router.push('/(app)/map');
@@ -130,126 +166,164 @@ export default function CampaignDetail() {
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Text style={styles.back}>‹ Overview</Text>
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {campaign?.name || 'Campaign'}
-        </Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>{campaign?.name || 'Campaign'}</Text>
         <View style={{ width: 64 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
         {isArchived && (
-          <View style={styles.banner}>
+          <View style={[styles.banner, { marginHorizontal: spacing.lg }]}>
             <Text style={styles.bannerText}>
               This campaign is archived — data is read-only. Reactivate it from the web to resume canvassing.
             </Text>
           </View>
         )}
 
-        {/* Today */}
-        <View style={styles.statsCard}>
-          <Text style={styles.cardTitle}>Today</Text>
-          {canvassersQ.isLoading || overviewQ.isLoading ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-          ) : (
-            <View style={styles.todayRow}>
-              <TodayTile value={todayTotals.doors.toLocaleString()} label="Doors knocked" />
-              <TodayTile
-                value={todayRate?.value}
-                label={isLitDrop ? 'Lit drop rate' : 'Survey rate'}
-                level={todayRate?.level}
-              />
-              <TodayTile
-                value={overallRate?.value}
-                label={isLitDrop ? 'Overall lit rate' : 'Overall connection'}
-                level={overallRate?.level}
-              />
-            </View>
-          )}
-        </View>
+        <DateRangeBar value={range} onChange={onRangeChange} />
 
-        {/* Campaign overview */}
-        <View style={styles.statsCard}>
-          <Text style={styles.cardTitle}>Campaign overview</Text>
-          {overviewQ.isLoading ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-          ) : (
-            <View style={styles.statsRow}>
-              <StatTile pinStatus="unknocked" value={totals.households?.toLocaleString()} label="Households" />
-              <StatTile pinStatus="not_home" value={totals.homesKnocked?.toLocaleString()} label="Knocked" />
-              <StatTile
-                pinStatus={isLitDrop ? 'lit_dropped' : 'surveyed'}
-                value={isLitDrop ? events.litDropped?.toLocaleString() : totals.surveysSubmitted?.toLocaleString()}
-                label={isLitDrop ? 'Lit drops' : 'Surveys'}
-              />
-            </View>
-          )}
-        </View>
-
-        {/* Top canvassers */}
-        <Pressable
-          onPress={() => router.push('/(app)/admin/canvassers')}
-          style={({ pressed }) => [styles.statsCard, pressed && { opacity: 0.85 }]}
-        >
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Top canvassers today</Text>
-            <Text style={styles.cardLink}>See all ›</Text>
+        <View style={{ paddingHorizontal: spacing.lg }}>
+          {/* Activity in range */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Activity</Text>
+            {rollupQ.isLoading ? (
+              <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
+            ) : (
+              <View style={styles.tileRow}>
+                <StatTile value={rangeDoors.toLocaleString()} label="Doors knocked" />
+                <StatTile value={rangePrimary.toLocaleString()} label={isLitDrop ? 'Lit drops' : 'Surveys'} />
+                <StatTile value={rangeRate?.value} label={isLitDrop ? 'Lit rate' : 'Survey rate'} level={rangeRate?.level} />
+              </View>
+            )}
           </View>
-          {canvassersQ.isLoading ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-          ) : topCanvassers.length === 0 ? (
-            <Text style={styles.emptyText}>No activity yet today.</Text>
-          ) : (
-            topCanvassers.map((c, i) => {
-              const primary = isLitDrop ? c.litDropped || 0 : c.surveysSubmitted || 0;
-              const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
-              const knocked = c.homesKnocked || 0;
-              const range = formatRange(c.firstActivityAt, c.lastActivityAt);
-              return (
-                <View key={c.userId} style={styles.canvasserRow}>
-                  <Text style={styles.canvasserRank}>{i + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.canvasserName}>
-                      {c.firstName || c.email} {c.lastName || ''}
-                    </Text>
-                    <Text style={styles.canvasserMeta}>
-                      {knocked} houses · {primary} {primaryLabel}
-                    </Text>
-                    {range ? <Text style={styles.canvasserShift}>🕘 {range}</Text> : null}
+
+          {/* Coverage (all-time) */}
+          <SectionHeader title="Coverage" subtitle="All-time campaign progress" />
+          <View style={styles.card}>
+            <Text style={styles.coverageSummary}>
+              {(totals.households ?? 0).toLocaleString()} households · {(totals.homesKnocked ?? 0).toLocaleString()} knocked
+            </Text>
+            <CoverageBar canvass={canvass} />
+          </View>
+
+          {/* Top canvassers (range) */}
+          <Pressable
+            onPress={() => router.push('/(app)/admin/canvassers')}
+            style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
+          >
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.cardTitle}>Top canvassers</Text>
+              <Text style={styles.cardLink}>See all ›</Text>
+            </View>
+            {canvassersQ.isLoading ? (
+              <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
+            ) : topCanvassers.length === 0 ? (
+              <Text style={styles.muted}>No activity in this range.</Text>
+            ) : (
+              topCanvassers.map((c, i) => {
+                const primary = isLitDrop ? c.litDropped || 0 : c.surveysSubmitted || 0;
+                const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
+                const range2 = formatRange(c.firstActivityAt, c.lastActivityAt);
+                return (
+                  <View key={c.userId} style={styles.canvasserRow}>
+                    <Text style={styles.canvasserRank}>{i + 1}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.canvasserName}>{c.firstName || c.email} {c.lastName || ''}</Text>
+                      <Text style={styles.muted}>{c.homesKnocked || 0} houses · {primary} {primaryLabel}</Text>
+                      {range2 ? <Text style={styles.canvasserShift}>🕘 {range2}</Text> : null}
+                    </View>
                   </View>
+                );
+              })
+            )}
+          </Pressable>
+
+          {/* Voter highlights */}
+          {!isLitDrop && highlightQuestions.length > 0 && (
+            <>
+              <SectionHeader title="Voter highlights" subtitle="Latest voters per option" />
+              {highlightQuestions.map((qn) => (
+                <View key={qn.key} style={styles.card}>
+                  <Text style={styles.qLabel}>{qn.label}</Text>
+                  {qn.options.map((o) => (
+                    <View key={String(o.option)} style={styles.highlightOpt}>
+                      <View style={styles.highlightHead}>
+                        <Text style={styles.highlightOptName} numberOfLines={1}>{String(o.option)}</Text>
+                        <Text style={styles.highlightCount}>{o.count}</Text>
+                      </View>
+                      {(o.voters || []).slice(0, 3).map((v) => (
+                        <VoterRow key={v.responseId} v={v} showCanvasser />
+                      ))}
+                      {o.count > (o.voters?.length || 0) && (
+                        <Pressable onPress={() => goVoters(qn, o)} hitSlop={6}>
+                          <Text style={styles.seeAll}>See all {o.count} ›</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  ))}
                 </View>
-              );
-            })
+              ))}
+            </>
           )}
-        </Pressable>
 
-        {/* Quick links */}
-        <View style={styles.quickLinkRow}>
-          <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/map')}>
-            <Text style={styles.quickLinkIcon}>🗺️</Text>
-            <Text style={styles.quickLinkText}>Live map</Text>
-          </Pressable>
-          <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/users')}>
-            <Text style={styles.quickLinkIcon}>👥</Text>
-            <Text style={styles.quickLinkText}>Users</Text>
-          </Pressable>
-          <Pressable
-            style={styles.quickLink}
-            onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}
-          >
-            <Text style={styles.quickLinkIcon}>🔗</Text>
-            <Text style={styles.quickLinkText}>Assignments</Text>
-          </Pressable>
+          {/* Survey results */}
+          {!isLitDrop && questions.length > 0 && (
+            <>
+              <SectionHeader title="Survey results" subtitle={`${surveyResultsQ.data?.totalResponses ?? 0} responses`} />
+              {questions.map((qn) => (
+                <View key={qn.key} style={styles.card}>
+                  <Text style={styles.qLabel}>{qn.label}</Text>
+                  {qn.type === 'text' ? (
+                    qn.options.length === 0 ? (
+                      <Text style={styles.muted}>No free-text answers.</Text>
+                    ) : (
+                      qn.options.slice(0, 10).map((o, i) => (
+                        <View key={i} style={styles.verbatim}>
+                          <Text style={styles.verbatimText}>“{o.option}”</Text>
+                          <Text style={styles.muted}>{o.count} {o.count === 1 ? 'response' : 'responses'}</Text>
+                        </View>
+                      ))
+                    )
+                  ) : (
+                    qn.options.map((o) => (
+                      <OptionRow
+                        key={String(o.option)}
+                        option={o.option}
+                        count={o.count}
+                        percent={o.percent}
+                        onPress={() => goVoters(qn, o)}
+                      />
+                    ))
+                  )}
+                </View>
+              ))}
+            </>
+          )}
+
+          {/* Quick links */}
+          <View style={styles.quickLinkRow}>
+            <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/map')}>
+              <Text style={styles.quickLinkIcon}>🗺️</Text>
+              <Text style={styles.quickLinkText}>Live map</Text>
+            </Pressable>
+            <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/users')}>
+              <Text style={styles.quickLinkIcon}>👥</Text>
+              <Text style={styles.quickLinkText}>Users</Text>
+            </Pressable>
+            <Pressable
+              style={styles.quickLink}
+              onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}
+            >
+              <Text style={styles.quickLinkIcon}>🔗</Text>
+              <Text style={styles.quickLinkText}>Assignments</Text>
+            </Pressable>
+          </View>
+
+          {!isArchived && (
+            <Pressable onPress={goCanvass} style={({ pressed }) => [styles.canvassButton, { opacity: pressed ? 0.85 : 1 }]}>
+              <Text style={styles.canvassButtonText}>Switch to canvass mode</Text>
+            </Pressable>
+          )}
         </View>
-
-        {/* Switch to canvass mode — active campaigns only */}
-        {!isArchived && (
-          <Pressable
-            onPress={goCanvass}
-            style={({ pressed }) => [styles.canvassButton, { opacity: pressed ? 0.85 : 1 }]}
-          >
-            <Text style={styles.canvassButtonText}>Switch to canvass mode</Text>
-          </Pressable>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -275,29 +349,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: radius.md,
     padding: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   bannerText: { fontSize: 13, color: '#92400E', fontWeight: '600' },
 
-  statsCard: {
+  card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   cardTitle: { ...type.h3, marginBottom: spacing.md },
-  cardHeaderRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  cardHeaderRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: spacing.sm },
   cardLink: { color: colors.brand, fontWeight: '700', fontSize: 13 },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  statTile: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  statValue: { ...type.h2, fontSize: 20, lineHeight: 22 },
-  statLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
+  muted: { ...type.caption },
 
-  todayRow: { flexDirection: 'row', gap: spacing.sm },
-  todayTile: {
+  tileRow: { flexDirection: 'row', gap: spacing.sm },
+  statTile: {
     flex: 1,
     backgroundColor: colors.bg,
     borderRadius: radius.md,
@@ -307,24 +378,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     alignItems: 'center',
   },
-  todayTileValue: { ...type.h2, fontSize: 20, fontVariant: ['tabular-nums'], color: colors.textPrimary },
-  todayTileLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', marginTop: 2, textAlign: 'center' },
+  statTileValue: { ...type.h2, fontSize: 20, fontVariant: ['tabular-nums'], color: colors.textPrimary },
+  statTileLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', marginTop: 2, textAlign: 'center' },
 
-  emptyText: { ...type.caption, paddingVertical: spacing.md },
+  coverageSummary: { ...type.caption, marginBottom: spacing.sm, color: colors.textPrimary, fontWeight: '600' },
 
-  canvasserRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
+  canvasserRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   canvasserRank: { width: 24, fontSize: 14, fontWeight: '800', color: colors.brand },
   canvasserName: { ...type.bodyStrong, fontSize: 14 },
-  canvasserMeta: { ...type.caption, marginTop: 1 },
   canvasserShift: { fontSize: 11, color: colors.textMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
 
-  quickLinkRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
+  qLabel: { ...type.bodyStrong, fontSize: 14, marginBottom: spacing.sm },
+
+  optRow: { paddingVertical: spacing.sm },
+  optTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 },
+  optLabel: { ...type.body, fontSize: 14, flex: 1, marginRight: spacing.sm },
+  optCount: { fontSize: 12, color: colors.textSecondary, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  optTrack: { height: 8, borderRadius: radius.pill, backgroundColor: colors.bg, overflow: 'hidden' },
+  optFill: { height: 8, backgroundColor: colors.brand, borderRadius: radius.pill },
+
+  highlightOpt: { marginBottom: spacing.md },
+  highlightHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
+  highlightOptName: { ...type.bodyStrong, fontSize: 14, flex: 1, marginRight: spacing.sm },
+  highlightCount: { fontSize: 12, fontWeight: '700', color: colors.brand },
+  seeAll: { color: colors.brand, fontWeight: '700', fontSize: 13, marginTop: spacing.xs },
+
+  verbatim: { marginBottom: spacing.sm, paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  verbatimText: { ...type.body, fontSize: 14, fontStyle: 'italic' },
+
+  quickLinkRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm, marginBottom: spacing.lg },
   quickLink: {
     flex: 1,
     backgroundColor: colors.card,

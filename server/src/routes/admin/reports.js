@@ -204,7 +204,12 @@ router.get('/campaign-rollup', async (req, res, next) => {
     const scope = req.query.scope || 'active';
 
     const filter = { organizationId };
-    if (scope === 'active') filter.isActive = true;
+    // Optional campaignId scopes the rollup to one campaign (used by the mobile
+    // detail so its in-range numbers match the landing exactly). Otherwise scope
+    // by active/archived/all.
+    if (req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)) {
+      filter._id = new mongoose.Types.ObjectId(req.query.campaignId);
+    } else if (scope === 'active') filter.isActive = true;
     else if (scope === 'archived') filter.isActive = false;
 
     const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1 }).lean();
@@ -229,7 +234,11 @@ router.get('/campaign-rollup', async (req, res, next) => {
     }
 
     const tz = tzOf(req);
+    // Activity counts (doors/surveys/canvassers) honor an optional from/to range;
+    // households + coverage stay current-state (all-time).
+    const tsRange = parseDateRange(req, 'timestamp');
     const match = { organizationId, campaignId: { $in: ids } };
+    const activityMatch = { ...match, ...tsRange };
 
     const [coverageAgg, eventAgg, doorDayAgg, canvasserAgg, cumulativeCanvassers] =
       await Promise.all([
@@ -243,7 +252,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           },
         ]),
         CanvassActivity.aggregate([
-          { $match: match },
+          { $match: activityMatch },
           {
             $group: {
               _id: { campaignId: '$campaignId', actionType: '$actionType' },
@@ -255,7 +264,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
         // detailed dashboard's resolveDayTz), falling back to tz for campaigns
         // without one. A single tz can't be right across mixed-timezone campaigns.
         CanvassActivity.aggregate([
-          { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },
+          { $match: { ...activityMatch, actionType: { $in: KNOCK_ACTIONS } } },
           {
             $lookup: {
               from: Campaign.collection.name,
@@ -277,7 +286,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           { $group: { _id: '$_id.campaignId', doorDays: { $sum: 1 } } },
         ]),
         CanvassActivity.aggregate([
-          { $match: match },
+          { $match: activityMatch },
           {
             $group: {
               _id: '$campaignId',
@@ -287,7 +296,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           },
           { $project: { activeCanvassers: { $size: '$users' }, last: 1 } },
         ]),
-        CanvassActivity.distinct('userId', match),
+        CanvassActivity.distinct('userId', activityMatch),
       ]);
 
     const byCampaign = new Map();
@@ -375,6 +384,13 @@ router.get('/campaign-rollup', async (req, res, next) => {
       cumulative.households > 0
         ? Math.round((cumulative.homesKnocked / cumulative.households) * 100)
         : 0;
+    cumulative.coverage = rows.reduce(
+      (acc, r) => {
+        for (const k of Object.keys(acc)) acc[k] += r.coverage?.[k] || 0;
+        return acc;
+      },
+      { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, lit_dropped: 0 }
+    );
 
     res.json({ scope, cumulative, campaigns: rows });
   } catch (err) {

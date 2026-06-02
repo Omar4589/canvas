@@ -120,6 +120,7 @@ export default function AdminLayout() {
 
       {/* Hidden from the bar, still navigable via push */}
       <Tabs.Screen name="users" options={{ href: null }} />
+      <Tabs.Screen name="answer-voters" options={{ href: null }} />
       <Tabs.Screen name="users/[id]" options={{ href: null }} />
       <Tabs.Screen name="overlaps" options={{ href: null }} />
       <Tabs.Screen name="campaign/[campaignId]" options={{ href: null }} />
