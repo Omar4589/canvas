@@ -5,12 +5,14 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  RefreshControl,
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { useRefresh } from '../../../lib/useRefresh';
 import { signOut } from '../../../lib/authState';
 import {
   loadCurrentUser,
@@ -79,6 +81,8 @@ export default function SuperAdminHome() {
     refetchInterval: 30_000,
   });
 
+  const { refreshing, onRefresh } = useRefresh([overviewQ.refetch, feedQ.refetch]);
+
   async function pickOrg(orgId) {
     qc.clear();
     await saveActiveOrgId(orgId);
@@ -105,7 +109,17 @@ export default function SuperAdminHome() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brand}
+            colors={[colors.brand]}
+          />
+        }
+      >
         <Text style={styles.greeting}>Hi {user?.firstName || 'super'} 🌐</Text>
         <Text style={styles.subtitle}>
           Platform control room. Active-now = activity in the last 15 min.

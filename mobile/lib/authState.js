@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getToken, setToken as persistToken } from './auth';
-import { clearCurrentUser, clearActiveCampaign, clearBootstrap } from './cache';
+import { clearCurrentUser, clearActiveCampaign, clearBootstrap, clearSelectedBooks } from './cache';
 
 // Tiny subscriber-based store. Token is the single source of truth for
 // auth across screens, so login/logout updates propagate synchronously.
@@ -44,6 +44,7 @@ export async function signOut() {
     clearCurrentUser(),
     clearActiveCampaign(),
     clearBootstrap(),
+    clearSelectedBooks(),
   ]);
   _token = null;
   emit();

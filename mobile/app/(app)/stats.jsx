@@ -5,12 +5,14 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  RefreshControl,
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import { useRefresh } from '../../lib/useRefresh';
 import { loadActiveCampaign } from '../../lib/cache';
 import { getConnectionRate, RATE_COLORS } from '../../lib/rates';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
@@ -129,6 +131,8 @@ export default function StatsScreen() {
     staleTime: 30 * 1000,
   });
 
+  const { refreshing, onRefresh } = useRefresh([refetch]);
+
   if (activeCampaign === undefined || (activeCampaign && isLoading)) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -172,7 +176,17 @@ export default function StatsScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <Header onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brand}
+            colors={[colors.brand]}
+          />
+        }
+      >
         <Text style={styles.title}>My Stats</Text>
         <Text style={styles.subtitle}>{activeCampaign.name}</Text>
 

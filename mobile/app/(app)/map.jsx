@@ -28,6 +28,8 @@ import {
   saveActiveCampaign,
   clearBootstrap,
   loadCurrentUser,
+  loadSelectedBooks,
+  clearSelectedBooks,
 } from '../../lib/cache';
 import { loadRoleContext } from '../../lib/role';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
@@ -35,7 +37,6 @@ import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { ensureLocationPermission } from '../../lib/location';
 import Logo from '../../components/Logo';
 import PinIcon from '../../components/PinIcon';
-import BuildingMarker from '../../components/BuildingMarker';
 import { groupBuildings } from '../../lib/buildings';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
@@ -120,6 +121,28 @@ function buildFeatureCollection(households) {
           addressLine1: h.addressLine1,
         },
         geometry: { type: 'Point', coordinates: h.location.coordinates },
+      })),
+  };
+}
+
+// Apartment buildings (>=2 stacked units) as native symbol features, so they
+// render inside the GL canvas instead of as MarkerView overlays that would
+// intercept pinch-zoom touches.
+function buildBuildingFeatureCollection(buildings) {
+  return {
+    type: 'FeatureCollection',
+    features: buildings
+      .filter((b) => b.coordinates?.length === 2)
+      .map((b) => ({
+        type: 'Feature',
+        id: String(b.key),
+        properties: {
+          key: String(b.key),
+          status: b.status || 'grey',
+          total: b.total,
+          done: b.done,
+        },
+        geometry: { type: 'Point', coordinates: b.coordinates },
       })),
   };
 }
@@ -227,6 +250,10 @@ export default function MapScreen() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
   const [currentUser, setCurrentUser] = useState(null);
+  // Last selected book(s) restored from storage. undefined = not resolved yet,
+  // null = none saved, string = the saved book id(s). Used to re-scope the map
+  // on cold start when there's no live `selectedBooks` nav param.
+  const [restoredBooks, setRestoredBooks] = useState(undefined);
 
   // Sheet animation state. translateY: 0 = expanded, snapDelta = peek.
   // sheetHeight is the rendered height of the sheet (changes with selection).
@@ -251,6 +278,11 @@ export default function MapScreen() {
         return;
       }
       setActiveCampaign(c);
+      // Re-scope to the last book this canvasser was working (cold start has no
+      // `selectedBooks` nav param). Scoped to the active campaign in cache.
+      loadSelectedBooks(c.id).then((books) => {
+        if (mounted) setRestoredBooks(books);
+      });
     });
     loadRoleContext().then((ctx) => {
       if (!mounted) return;
@@ -293,17 +325,35 @@ export default function MapScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // When entering from the books overview, scope the map to the selected book(s).
+  // Scope the map to the selected book(s): the live nav param when entering from
+  // the books overview, otherwise the last selection restored from storage on
+  // cold start. `restoredBooks` is undefined until that async load resolves.
   const params = useLocalSearchParams();
+  const effectiveBooks = params.selectedBooks ?? (restoredBooks || null);
   const selectedBookSet = useMemo(() => {
-    const p = params.selectedBooks;
+    const p = effectiveBooks;
     return p ? new Set(String(p).split(',').filter(Boolean)) : null;
-  }, [params.selectedBooks]);
+  }, [effectiveBooks]);
   const scopedHouseholds = useMemo(() => {
     const all = data?.households || [];
     if (!selectedBookSet) return all;
     return all.filter((h) => h.turfId && selectedBookSet.has(String(h.turfId)));
   }, [data, selectedBookSet]);
+
+  // If this canvasser has books but no valid one is selected (first launch, or
+  // the saved book was reassigned/removed), send them to the books overview to
+  // pick — never leave them on an unfiltered all-houses map. The no-books case
+  // (admin / non-turf campaign) intentionally falls through to show-all.
+  useEffect(() => {
+    if (restoredBooks === undefined) return; // selection not restored yet
+    if (!data) return;
+    const books = data.books || [];
+    if (!books.length) return;
+    const validIds = new Set(books.map((b) => String(b.id)));
+    const hasValidSelection =
+      selectedBookSet && [...selectedBookSet].some((id) => validIds.has(id));
+    if (!hasValidSelection) router.replace('/(app)/books');
+  }, [restoredBooks, data, selectedBookSet, router]);
 
   // When the selection mode changes, animate the sheet to the new
   // peek + expanded heights. Progress mode is short (just stats + legend);
@@ -461,6 +511,7 @@ export default function MapScreen() {
   async function switchCampaign() {
     await saveActiveCampaign(null);
     await clearBootstrap();
+    await clearSelectedBooks();
     qc.removeQueries({ queryKey: ['bootstrap'] });
     router.replace('/(app)/campaigns');
   }
@@ -486,6 +537,7 @@ export default function MapScreen() {
   // as ordinary house pins.
   const { buildings, singles } = useMemo(() => groupBuildings(scopedHouseholds), [scopedHouseholds]);
   const features = useMemo(() => buildFeatureCollection(singles), [singles]);
+  const buildingFeatures = useMemo(() => buildBuildingFeatureCollection(buildings), [buildings]);
 
   const householdsById = useMemo(() => {
     const m = new Map();
@@ -509,6 +561,14 @@ export default function MapScreen() {
       }
     },
     [householdsById]
+  );
+
+  const onBuildingPress = useCallback(
+    (e) => {
+      const key = e.features?.[0]?.properties?.key;
+      if (key) router.push({ pathname: '/(app)/building', params: { bkey: key } });
+    },
+    [router]
   );
 
   async function onLogout() {
@@ -537,7 +597,11 @@ export default function MapScreen() {
       </SafeAreaView>
     );
   }
-  if (activeCampaign === undefined || (activeCampaign && isLoading)) {
+  if (
+    activeCampaign === undefined ||
+    (activeCampaign && isLoading) ||
+    (!params.selectedBooks && restoredBooks === undefined)
+  ) {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator color={colors.brand} />
@@ -570,6 +634,21 @@ export default function MapScreen() {
     );
   }
 
+  // Canvasser has books but none is validly selected → the effect above is
+  // redirecting to the books overview. Hold the loader so the unfiltered
+  // all-houses map never flashes for a frame.
+  const booksList = data?.books || [];
+  const hasValidBook =
+    selectedBookSet && booksList.some((b) => selectedBookSet.has(String(b.id)));
+  if (booksList.length > 0 && !hasValidBook) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <ActivityIndicator color={colors.brand} />
+        <Text style={styles.loadingText}>Opening your book…</Text>
+      </SafeAreaView>
+    );
+  }
+
   const initialCenter = scopedHouseholds[0]?.location?.coordinates || DEFAULT_CENTER;
   const today = todayQ.data || {};
   const isLitDrop = activeCampaign?.type === 'lit_drop';
@@ -586,7 +665,14 @@ export default function MapScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Mapbox.MapView style={{ flex: 1 }} styleURL={Mapbox.StyleURL.Street}>
+      <Mapbox.MapView
+        style={{ flex: 1 }}
+        styleURL={Mapbox.StyleURL.Street}
+        zoomEnabled
+        scrollEnabled
+        pitchEnabled
+        rotateEnabled
+      >
         <Mapbox.Camera
           ref={cameraRef}
           defaultSettings={{ centerCoordinate: initialCenter, zoomLevel: 12 }}
@@ -604,6 +690,9 @@ export default function MapScreen() {
             'house-surveyed': require('../../assets/icons/house-surveyed.png'),
             'house-wrong_address': require('../../assets/icons/house-wrong_address.png'),
             'house-lit_dropped': require('../../assets/icons/house-surveyed.png'),
+            'building-grey': require('../../assets/icons/building-grey.png'),
+            'building-yellow': require('../../assets/icons/building-yellow.png'),
+            'building-green': require('../../assets/icons/building-green.png'),
           }}
         />
         <Mapbox.ShapeSource id="households" shape={features} onPress={onPinPress}>
@@ -654,16 +743,42 @@ export default function MapScreen() {
             }}
           />
         </Mapbox.ShapeSource>
-        {buildings.map((b) => (
-          <Mapbox.MarkerView key={b.key} id={b.key} coordinate={b.coordinates} anchor={{ x: 0.5, y: 1 }} allowOverlap>
-            <BuildingMarker
-              total={b.total}
-              done={b.done}
-              status={b.status}
-              onPress={() => router.push({ pathname: '/(app)/building', params: { bkey: b.key } })}
-            />
-          </Mapbox.MarkerView>
-        ))}
+        {/* Apartment buildings as native symbols (not MarkerView overlays, which
+            would swallow a pinch-zoom finger). Colored glyph + haloed label. */}
+        <Mapbox.ShapeSource id="buildings" shape={buildingFeatures} onPress={onBuildingPress} cluster={false}>
+          <Mapbox.SymbolLayer
+            id="building-markers"
+            style={{
+              iconImage: [
+                'match',
+                ['get', 'status'],
+                'green', 'building-green',
+                'yellow', 'building-yellow',
+                'building-grey',
+              ],
+              iconSize: [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                10, 0.18,
+                14, 0.26,
+                17, 0.36,
+              ],
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              textField: '{total} units · {done} done',
+              textSize: 11,
+              textColor: '#111827',
+              textHaloColor: '#ffffff',
+              textHaloWidth: 1.6,
+              textAnchor: 'top',
+              textOffset: [0, 1.2],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+              textOptional: true,
+            }}
+          />
+        </Mapbox.ShapeSource>
       </Mapbox.MapView>
 
       {/* Top chrome */}

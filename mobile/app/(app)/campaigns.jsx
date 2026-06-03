@@ -6,13 +6,15 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import { useRefresh } from '../../lib/useRefresh';
 import { signOut } from '../../lib/authState';
-import { saveActiveCampaign, clearBootstrap } from '../../lib/cache';
+import { saveActiveCampaign, clearBootstrap, clearSelectedBooks } from '../../lib/cache';
 import { loadRoleContext } from '../../lib/role';
 import Logo from '../../components/Logo';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
@@ -38,11 +40,14 @@ export default function CampaignsScreen() {
     queryFn: () => api('/mobile/campaigns'),
   });
 
+  const { refreshing, onRefresh } = useRefresh([refetch]);
+
   async function pick(c) {
     setPicking(c.id);
     try {
       await saveActiveCampaign(c);
       await clearBootstrap();
+      await clearSelectedBooks();
       qc.removeQueries({ queryKey: ['bootstrap'] });
       router.replace('/(app)/books');
     } catch (e) {
@@ -99,6 +104,14 @@ export default function CampaignsScreen() {
           paddingHorizontal: spacing.lg,
           paddingBottom: spacing.xl,
         }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brand}
+            colors={[colors.brand]}
+          />
+        }
       >
         {(data?.campaigns || []).map((c) => {
           const isLitDrop = c.type === 'lit_drop';

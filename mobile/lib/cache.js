@@ -5,6 +5,7 @@ const CAMPAIGN_KEY = 'canvass.activeCampaign';
 const USER_KEY = 'canvass.currentUser';
 const MEMBERSHIPS_KEY = 'canvass.memberships';
 const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
+const SELECTED_BOOKS_KEY = 'canvass.selectedBooks';
 
 export async function saveBootstrap(data) {
   await AsyncStorage.setItem(KEY, JSON.stringify({ ...data, cachedAt: new Date().toISOString() }));
@@ -104,4 +105,37 @@ export async function loadActiveOrgId() {
 
 export async function clearActiveOrgId() {
   await AsyncStorage.removeItem(ACTIVE_ORG_KEY);
+}
+
+// Which book(s) the canvasser is currently working. Persisted so the map can
+// re-scope to the last selection on cold start instead of falling open to all
+// houses. Scoped to a campaign so a stale book never leaks across campaigns —
+// `books` is the comma-joinable id string the map's `selectedBooks` param uses,
+// so single- and (future) multi-select share one storage shape.
+export async function saveSelectedBooks(campaignId, books) {
+  if (!campaignId || !books) {
+    await AsyncStorage.removeItem(SELECTED_BOOKS_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(
+    SELECTED_BOOKS_KEY,
+    JSON.stringify({ campaignId: String(campaignId), books: String(books) })
+  );
+}
+
+export async function loadSelectedBooks(campaignId) {
+  const raw = await AsyncStorage.getItem(SELECTED_BOOKS_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    // Ignore a selection saved under a different campaign.
+    if (String(parsed.campaignId) !== String(campaignId)) return null;
+    return parsed.books || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearSelectedBooks() {
+  await AsyncStorage.removeItem(SELECTED_BOOKS_KEY);
 }

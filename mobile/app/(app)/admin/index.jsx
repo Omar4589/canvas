@@ -5,12 +5,14 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  RefreshControl,
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { useRefresh } from '../../../lib/useRefresh';
 import { loadCurrentUser } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
 import CoverageBar from '../../../components/CoverageBar';
@@ -106,6 +108,7 @@ export default function AdminOverview() {
       if (range.to) p.set('to', range.to);
       return api(`/admin/reports/campaign-rollup?${p.toString()}`);
     },
+    refetchInterval: 30 * 1000,
   });
   // Archived is reviewed as historical data → always all-time.
   const archivedQ = useQuery({
@@ -113,6 +116,11 @@ export default function AdminOverview() {
     queryFn: () => api(`/admin/reports/campaign-rollup?scope=archived&tz=${tz}`),
     enabled: archivedOpen,
   });
+
+  const { refreshing, onRefresh } = useRefresh([
+    activeQ.refetch,
+    archivedOpen ? archivedQ.refetch : null,
+  ]);
 
   const cumulative = activeQ.data?.cumulative || {};
   const campaigns = activeQ.data?.campaigns || [];
@@ -125,7 +133,17 @@ export default function AdminOverview() {
         <Text style={styles.headerLabel}>Admin{user?.isSuperAdmin ? ' · super' : ''}</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: spacing.xxl }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brand}
+            colors={[colors.brand]}
+          />
+        }
+      >
         <View style={{ paddingHorizontal: spacing.lg }}>
           <Text style={styles.greeting}>Hi {user?.firstName || 'there'} 👋</Text>
         </View>

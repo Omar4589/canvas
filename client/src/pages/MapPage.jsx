@@ -299,9 +299,9 @@ export default function MapPage() {
           ],
           'icon-size': [
             'interpolate', ['linear'], ['zoom'],
-            10, 0.32,
-            14, 0.5,
-            17, 0.7,
+            10, 0.22,
+            14, 0.34,
+            17, 0.48,
           ],
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,

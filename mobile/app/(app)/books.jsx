@@ -11,10 +11,11 @@ import {
   loadActiveCampaign,
   saveActiveCampaign,
   clearBootstrap,
+  saveSelectedBooks,
+  clearSelectedBooks,
 } from '../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import Logo from '../../components/Logo';
-import BookMarker from '../../components/BookMarker';
 import { colors, radius } from '../../lib/theme';
 
 if (MAPBOX_PUBLIC_TOKEN) {
@@ -114,14 +115,48 @@ export default function BooksScreen() {
     setSelected((cur) => (cur === String(id) ? null : String(id)));
   }, []);
 
-  function onEnter() {
+  // Book markers as native symbol features (not MarkerView overlays, which would
+  // block pinch-zoom). `selected` rides along so the chosen book's glyph grows.
+  const bookFeatures = useMemo(
+    () => ({
+      type: 'FeatureCollection',
+      features: bookMarkers.map((b) => ({
+        type: 'Feature',
+        id: b.id,
+        properties: {
+          id: b.id,
+          name: b.name,
+          knocked: b.knocked,
+          total: b.total,
+          status: b.status,
+          selected: selected === b.id,
+        },
+        geometry: { type: 'Point', coordinates: b.coordinates },
+      })),
+    }),
+    [bookMarkers, selected]
+  );
+
+  const onBookMarkerPress = useCallback(
+    (e) => {
+      const id = e.features?.[0]?.properties?.id;
+      if (id) onBookPress(id);
+    },
+    [onBookPress]
+  );
+
+  async function onEnter() {
     if (!selected) return;
+    // Persist the choice so a cold start can re-scope the map to this book
+    // instead of falling open to all houses.
+    await saveSelectedBooks(activeCampaign?.id, selected);
     router.replace({ pathname: '/(app)/map', params: { selectedBooks: selected } });
   }
 
   async function switchCampaign() {
     await saveActiveCampaign(null);
     await clearBootstrap();
+    await clearSelectedBooks();
     qc.removeQueries({ queryKey: ['bootstrap'] });
     router.replace('/(app)/campaigns');
   }
@@ -180,21 +215,49 @@ export default function BooksScreen() {
         style={{ flex: 1 }}
         styleURL={Mapbox.StyleURL.Street}
         onDidFinishLoadingMap={() => setMapReady(true)}
+        zoomEnabled
+        scrollEnabled
+        pitchEnabled
+        rotateEnabled
       >
         <Mapbox.Camera ref={cameraRef} defaultSettings={{ centerCoordinate: DEFAULT_CENTER, zoomLevel: 9 }} />
         <Mapbox.UserLocation visible />
-        {bookMarkers.map((b) => (
-          <Mapbox.MarkerView key={b.id} id={b.id} coordinate={b.coordinates} anchor={{ x: 0.5, y: 1 }} allowOverlap>
-            <BookMarker
-              name={b.name}
-              knocked={b.knocked}
-              total={b.total}
-              status={b.status}
-              selected={selected === b.id}
-              onPress={() => onBookPress(b.id)}
-            />
-          </Mapbox.MarkerView>
-        ))}
+        <Mapbox.Images
+          images={{
+            'book-grey': require('../../assets/icons/book-grey.png'),
+            'book-yellow': require('../../assets/icons/book-yellow.png'),
+            'book-green': require('../../assets/icons/book-green.png'),
+          }}
+        />
+        {/* Book markers as native symbols + haloed label. Tap selects; the
+            selected glyph grows via the `selected` feature property. */}
+        <Mapbox.ShapeSource id="books" shape={bookFeatures} onPress={onBookMarkerPress} cluster={false}>
+          <Mapbox.SymbolLayer
+            id="book-markers"
+            style={{
+              iconImage: [
+                'match',
+                ['get', 'status'],
+                'green', 'book-green',
+                'yellow', 'book-yellow',
+                'book-grey',
+              ],
+              iconSize: ['case', ['get', 'selected'], 0.42, 0.3],
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              textField: '{name} · {knocked}/{total}',
+              textSize: 11,
+              textColor: '#111827',
+              textHaloColor: '#ffffff',
+              textHaloWidth: 1.6,
+              textAnchor: 'top',
+              textOffset: [0, 1.1],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+              textOptional: true,
+            }}
+          />
+        </Mapbox.ShapeSource>
       </Mapbox.MapView>
 
       <SafeAreaView edges={['top']} style={styles.headerWrap} pointerEvents="box-none">

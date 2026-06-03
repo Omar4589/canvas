@@ -4,12 +4,14 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  RefreshControl,
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { useRefresh } from '../../../lib/useRefresh';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 const ACTION_LABEL = {
@@ -48,6 +50,8 @@ export default function ActivityScreen() {
     refetchInterval: 30_000,
   });
 
+  const { refreshing, onRefresh } = useRefresh([feedQ.refetch]);
+
   const events = feedQ.data?.events || [];
 
   return (
@@ -60,7 +64,17 @@ export default function ActivityScreen() {
         <View style={{ width: 80 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
+      <ScrollView
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brand}
+            colors={[colors.brand]}
+          />
+        }
+      >
         {feedQ.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : events.length === 0 ? (

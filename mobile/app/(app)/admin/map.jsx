@@ -42,6 +42,14 @@ function householdsToFeatures(households) {
   };
 }
 
+function initialsFor(canvasser) {
+  if (!canvasser) return '';
+  const f = (canvasser.firstName || '').trim();
+  const l = (canvasser.lastName || '').trim();
+  const initials = `${f[0] || ''}${l[0] || ''}`.toUpperCase();
+  return initials || (f[0] || l[0] || '').toUpperCase();
+}
+
 function pingsToFeatures(activities) {
   return {
     type: 'FeatureCollection',
@@ -50,7 +58,7 @@ function pingsToFeatures(activities) {
       .map((a) => ({
         type: 'Feature',
         id: String(a.id),
-        properties: { id: String(a.id), actionType: a.actionType },
+        properties: { id: String(a.id), actionType: a.actionType, initials: initialsFor(a.canvasser) },
         geometry: {
           type: 'Point',
           coordinates: [a.location.lng, a.location.lat],
@@ -230,7 +238,7 @@ export default function AdminMap() {
                 'lit_dropped', 'house-lit_dropped',
                 'house-unknocked',
               ],
-              iconSize: ['interpolate', ['linear'], ['zoom'], 10, 0.13, 14, 0.2, 17, 0.28],
+              iconSize: ['interpolate', ['linear'], ['zoom'], 10, 0.09, 14, 0.14, 17, 0.2],
               iconAllowOverlap: true,
               iconIgnorePlacement: true,
             }}
@@ -242,7 +250,7 @@ export default function AdminMap() {
             <Mapbox.CircleLayer
               id="admin-ping-dots"
               style={{
-                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 7, 17, 9],
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 12, 17, 15],
                 circleColor: [
                   'match',
                   ['get', 'actionType'],
@@ -254,6 +262,18 @@ export default function AdminMap() {
                 ],
                 circleStrokeColor: '#ffffff',
                 circleStrokeWidth: 2,
+              }}
+            />
+            <Mapbox.SymbolLayer
+              id="admin-ping-labels"
+              style={{
+                textField: ['get', 'initials'],
+                textSize: ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 11, 17, 13],
+                textColor: '#ffffff',
+                textHaloColor: 'rgba(0,0,0,0.35)',
+                textHaloWidth: 0.8,
+                textAllowOverlap: true,
+                textIgnorePlacement: true,
               }}
             />
           </Mapbox.ShapeSource>

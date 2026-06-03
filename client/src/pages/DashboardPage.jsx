@@ -60,6 +60,7 @@ export default function DashboardPage() {
     queryFn: () =>
       api(`/admin/reports/overview${buildQuery({ campaignId })}`),
     enabled: !!campaignId,
+    refetchInterval: 30_000,
   });
 
   // Range-scoped activity (knocks/surveys/rate). Coverage stays all-time from /overview.
@@ -74,6 +75,7 @@ export default function DashboardPage() {
         })}`
       ),
     enabled: !!campaignId,
+    refetchInterval: 30_000,
   });
 
   const surveysQ = useQuery({
@@ -94,6 +96,7 @@ export default function DashboardPage() {
         })}`
       ),
     enabled: !!campaignId,
+    refetchInterval: 30_000,
   });
 
   const surveyResultsQ = useQuery({
@@ -116,6 +119,7 @@ export default function DashboardPage() {
         })}`
       ),
     enabled: !!campaignId && selectedCampaign?.type !== 'lit_drop',
+    refetchInterval: 30_000,
   });
 
   const surveyResultsRef = useRef(null);

@@ -145,7 +145,13 @@ export default function MapScreen() {
               <Mapbox.CircleLayer
                 id="path-points-layer"
                 style={{
-                  circleRadius: 6,
+                  circleRadius: [
+                    'interpolate', ['linear'], ['zoom'],
+                    10, 7,
+                    13, 10,
+                    16, 13,
+                    18, 15,
+                  ],
                   circleColor: [
                     'match',
                     ['get', 'actionType'],

@@ -195,7 +195,13 @@ export default function DayDetail() {
                 <Mapbox.CircleLayer
                   id="day-points-layer"
                   style={{
-                    circleRadius: 6,
+                    circleRadius: [
+                      'interpolate', ['linear'], ['zoom'],
+                      10, 7,
+                      13, 10,
+                      16, 13,
+                      18, 15,
+                    ],
                     circleColor: [
                       'match',
                       ['get', 'actionType'],
