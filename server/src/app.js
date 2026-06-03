@@ -18,6 +18,11 @@ const HAS_CLIENT_DIST = fs.existsSync(path.join(CLIENT_DIST, 'index.html'));
 export function createApp() {
   const app = express();
   const isProd = process.env.NODE_ENV === 'production';
+  // Custom-domain hosts: the API-only host (api.doorline.app) redirects non-API
+  // paths to the web app at WEB_ORIGIN. Both come from config so nothing is
+  // hardcoded; when API_HOST is unset the redirect guard below is a no-op.
+  const API_HOST = process.env.API_HOST;
+  const WEB_ORIGIN = process.env.WEB_ORIGIN || 'https://doorline.app';
 
   // Behind Heroku's single router/proxy — trust it so req.ip reflects the real
   // client IP (required for express-rate-limit to key correctly).
@@ -41,6 +46,20 @@ export function createApp() {
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan(isProd ? 'combined' : 'dev'));
 
+  // Lock the API host to /api/* only. On api.doorline.app every non-API path
+  // (web routes, static assets, even /admin/queues) belongs on the web app, so
+  // redirect it to WEB_ORIGIN. Mounted before the API routes and Bull Board so
+  // it catches every non-API path. 302 (not 301) keeps the behavior changeable
+  // — a 301 would be cached near-permanently by browsers. No-op in local dev.
+  if (API_HOST) {
+    app.use((req, res, next) => {
+      if (req.hostname === API_HOST && !req.path.startsWith('/api')) {
+        return res.redirect(302, `${WEB_ORIGIN}${req.originalUrl}`);
+      }
+      next();
+    });
+  }
+
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 50,
@@ -58,20 +77,6 @@ export function createApp() {
   // Serve the built React admin dashboard from the same origin in production.
   // Heroku's heroku-postbuild produces client/dist before the server boots.
   if (isProd && HAS_CLIENT_DIST) {
-    // The API and web app share one dyno, so api.doorline.app would otherwise
-    // also serve the SPA. Keep that host API-only: real /api/* requests are
-    // handled above (and unknown /api/* still 404 via notFound below), while any
-    // web path is redirected to the dashboard. API_HOST (e.g. 'api.doorline.app')
-    // is read from config so nothing is hardcoded.
-    const API_HOST = process.env.API_HOST;
-    if (API_HOST) {
-      app.use((req, res, next) => {
-        if (req.hostname === API_HOST && !req.path.startsWith('/api')) {
-          return res.redirect(301, `https://doorline.app${req.originalUrl}`);
-        }
-        next();
-      });
-    }
     app.use(express.static(CLIENT_DIST));
     // Unknown /api paths still 404; everything else falls back to the SPA.
     app.use('/api', notFound);

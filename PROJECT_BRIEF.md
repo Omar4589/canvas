@@ -13,7 +13,7 @@ canvass-app/
 
 ## Deployment
 
-- **Server + admin dashboard** → Heroku app named **`canvass`** (URL: `https://canvass-c038d2d7dc96.herokuapp.com`). Single dyno serves API at `/api/*` and built React at `/`. Deploy via `git push heroku main` from repo root. GitHub repo is `Omar4589/canvas`.
+- **Server + admin dashboard** → Heroku app named **`doorline-test`** (URL `https://doorline-test-33a9431a3e3c.herokuapp.com`), served on custom domains: web at `https://doorline.app`, API at `https://api.doorline.app` (the API host is locked to `/api/*` and 302-redirects all other paths to the web app). Single dyno serves API at `/api/*` and built React at `/`. Deploy via `git push heroku main` from repo root (the `heroku` git remote should point at `doorline-test`). An older `canvass` app (`canvass-c038d2d7dc96.herokuapp.com`) also exists but is not the live backend. GitHub repo is `Omar4589/canvas`.
 - **Mobile** → EAS Build for iOS (TestFlight) and Android (Play Console **Internal testing**). EAS Update for OTA JS-only changes (`eas update --branch production`). Project ID: `4d913345-676f-4240-8f9a-6e8cafdda04c`. Bundle ID: `com.canvassapp.mobile`.
 
 ## Stack details
@@ -46,7 +46,7 @@ canvass-app/
 
 ## Privacy + compliance
 
-- Public privacy policy at `https://canvass-c038d2d7dc96.herokuapp.com/privacy`. Required by both Apple and Google Play. Contact email: omar@foxbryant.com.
+- Public privacy policy at `https://doorline.app/privacy`. Required by both Apple and Google Play. Contact email: omar@foxbryant.com.
 
 ## Operational quirks / known issues
 

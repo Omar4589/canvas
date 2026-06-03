@@ -47,8 +47,8 @@ eas init        # links this directory to a new EAS project, sets the project ID
 Open `mobile/eas.json` and replace the placeholders:
 
 - `development.env.EXPO_PUBLIC_API_BASE_URL` → your Mac's LAN IP for hot-reload dev (e.g. `http://192.168.1.42:4000`). Find with `ipconfig getifaddr en0`.
-- `preview.env.EXPO_PUBLIC_API_BASE_URL` → your Heroku HTTPS URL (e.g. `https://canvass-app.herokuapp.com`)
-- `production.env.EXPO_PUBLIC_API_BASE_URL` → same Heroku URL
+- `preview.env.EXPO_PUBLIC_API_BASE_URL` → your API URL (e.g. `https://api.doorline.app`)
+- `production.env.EXPO_PUBLIC_API_BASE_URL` → same API URL
 
 The Mapbox public token is already pre-filled with yours.
 

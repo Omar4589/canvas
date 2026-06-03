@@ -95,7 +95,7 @@ heroku run npm run seed:admin
 heroku logs --tail
 ```
 
-Visit `https://canvass-app.herokuapp.com` to log in.
+Visit `https://doorline.app` to log in.
 
 ### Re-uploading the CSV on production
 
@@ -116,7 +116,7 @@ eas login
 eas init                                    # one-time, creates EAS project
 eas secret:create --scope project --name RNMAPBOX_MAPS_DOWNLOAD_TOKEN --value sk.xxxxx
 
-# Edit eas.json: replace REPLACE_WITH_HEROKU_HTTPS_URL with your Heroku URL
+# Set EXPO_PUBLIC_API_BASE_URL=https://api.doorline.app in the EAS env (preview + production)
 
 eas build --profile preview --platform ios          # ~10 min, emails you a link
 eas submit --profile production --platform ios --latest  # uploads to TestFlight
