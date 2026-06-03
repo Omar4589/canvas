@@ -19,6 +19,7 @@ export default function EarlyVotingPage() {
   const qc = useQueryClient();
   const [campaignId, setCampaignId] = useState('');
   const [file, setFile] = useState(null);
+  const [unmarkId, setUnmarkId] = useState('');
 
   const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
   const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
@@ -55,11 +56,32 @@ export default function EarlyVotingPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['voted', campaignId] }),
   });
 
+  const unmark = useMutation({
+    mutationFn: (stateVoterId) =>
+      api(`/admin/campaigns/${campaignId}/voted/unmark`, { method: 'POST', body: { stateVoterId } }),
+    onSuccess: () => {
+      setUnmarkId('');
+      qc.invalidateQueries({ queryKey: ['voted', campaignId] });
+    },
+  });
+
   function onPickFile(f) {
     setFile(f);
     apply.reset();
     if (f && campaignId) preview.mutate(f);
     else preview.reset();
+  }
+
+  function downloadUnmatched() {
+    const ids = preview.data?.notFoundIds || [];
+    if (!ids.length) return;
+    const blob = new Blob([`voterId\n${ids.join('\n')}\n`], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'unmatched-voter-ids.csv';
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   const pv = preview.data;
@@ -116,6 +138,15 @@ export default function EarlyVotingPage() {
               <div><span className="text-gray-500">Doors that will drop</span><div className="text-lg font-semibold text-amber-700">{fmt(pv.doorsWillDrop)}</div></div>
               <div><span className="text-gray-500">Not in this campaign</span><div className="text-lg font-semibold text-gray-400">{fmt(pv.notFound)}</div></div>
             </div>
+            {pv.notFound > 0 && (
+              <button
+                type="button"
+                onClick={downloadUnmatched}
+                className="mt-3 text-xs font-semibold text-brand-700 hover:underline"
+              >
+                Download {fmt(pv.notFound)} unmatched ID{pv.notFound === 1 ? '' : 's'}
+              </button>
+            )}
           </div>
         )}
 
@@ -186,6 +217,35 @@ export default function EarlyVotingPage() {
               </tbody>
             </table>
           </div>
+
+          <section className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
+            <h2 className="mb-1 text-base font-medium">Un-mark a voter</h2>
+            <p className="mb-3 text-xs text-gray-600">
+              Marked someone voted by mistake? Enter their Voter ID to un-mark them — the door
+              re-opens if everyone there is no longer voted.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={unmarkId}
+                onChange={(e) => setUnmarkId(e.target.value)}
+                placeholder="Voter ID"
+                className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+              />
+              <button
+                onClick={() => unmarkId.trim() && unmark.mutate(unmarkId.trim())}
+                disabled={!unmarkId.trim() || unmark.isPending}
+                className="rounded-md bg-gray-800 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-700 disabled:opacity-60"
+              >
+                {unmark.isPending ? 'Un-marking…' : 'Un-mark'}
+              </button>
+            </div>
+            {unmark.error && <p className="mt-2 text-xs text-red-700">{unmark.error.message}</p>}
+            {unmark.data && (
+              <p className="mt-2 text-xs text-green-700">
+                Un-marked.{unmark.data.reopened ? ' Door re-opened.' : ''}
+              </p>
+            )}
+          </section>
         </>
       )}
     </div>

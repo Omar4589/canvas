@@ -68,9 +68,21 @@ async function parseAndMatch(campaign, fileBuffer, idColumn) {
   );
   const inCampaign = voters.filter((v) => inCampaignHh.has(String(v.householdId)));
   const matchedSvids = new Set(inCampaign.map((v) => v.stateVoterId));
-  const notFound = ids.filter((id) => !matchedSvids.has(id)).length;
-  return { columns, col, totalRows: parsed.data.length, csvCount: csvIds.size, inCampaign, notFound };
+  const notFoundIds = ids.filter((id) => !matchedSvids.has(id));
+  return {
+    columns,
+    col,
+    totalRows: parsed.data.length,
+    csvCount: csvIds.size,
+    inCampaign,
+    notFound: notFoundIds.length,
+    notFoundIds,
+  };
 }
+
+// IDs in the file that didn't match a voter in this campaign — capped so the response
+// stays small; the admin downloads these to fix and re-upload.
+const NOT_FOUND_CAP = 10000;
 
 // Split matched voters into newly-voting vs already-voted, and count how many
 // doors would become fully-voted (dry-run union).
@@ -130,6 +142,7 @@ router.post('/preview', upload.single('file'), async (req, res, next) => {
       willMark: newly.length,
       alreadyVoted: alreadyCount,
       notFound: m.notFound,
+      notFoundIds: m.notFoundIds.slice(0, NOT_FOUND_CAP),
       doorsWillDrop,
     });
   } catch (err) {
@@ -191,6 +204,7 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
       marked: newly.length,
       alreadyVoted: alreadyCount,
       notFound: m.notFound,
+      notFoundIds: m.notFoundIds.slice(0, NOT_FOUND_CAP),
       doorsDropped,
       totalRows: m.totalRows,
     });
@@ -233,6 +247,34 @@ router.post('/undo', async (req, res, next) => {
     await VotedUpload.updateOne({ _id: uploadDoc._id }, { $set: { undone: true, undoneAt: new Date() } });
 
     res.json({ ok: true, removed: rows.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Un-mark a single voter who was marked voted by mistake (regardless of which upload added
+// them). Re-opens the door if it had been fully-voted.
+router.post('/unmark', async (req, res, next) => {
+  try {
+    const stateVoterId = String(req.body?.stateVoterId || '').trim();
+    if (!stateVoterId) return res.status(400).json({ error: 'stateVoterId required' });
+
+    const voter = await Voter.findOne(
+      { organizationId: req.campaign.organizationId, stateVoterId },
+      { _id: 1, householdId: 1 }
+    ).lean();
+    if (!voter) return res.status(404).json({ error: 'No voter with that ID in this organization' });
+    const inCampaign = await Household.exists({ _id: voter.householdId, campaignId: req.campaign._id });
+    if (!inCampaign) return res.status(404).json({ error: 'That voter is not in this campaign' });
+
+    const del = await VotedVoter.deleteMany({ campaignId: req.campaign._id, voterId: voter._id });
+    if (!del.deletedCount) return res.status(404).json({ error: 'That voter was not marked voted' });
+
+    const wasFully = await Household.exists({ _id: voter.householdId, fullyVoted: true });
+    await recomputeFullyVoted(req.campaign._id, [String(voter.householdId)]);
+    const stillFully = await Household.exists({ _id: voter.householdId, fullyVoted: true });
+
+    res.json({ ok: true, removed: del.deletedCount, reopened: !!wasFully && !stillFully });
   } catch (err) {
     next(err);
   }

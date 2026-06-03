@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { NAV, SUPER_NAV } from './navItems.js';
+import { IconDashboard, IconPin, IconFlag, IconUser } from './navIcons.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import Logo from './Logo.jsx';
@@ -14,44 +15,6 @@ const PRIMARY = [
   { to: '/campaigns', label: 'Campaigns', icon: IconFlag },
   { to: '/users', label: 'Users', icon: IconUser },
 ];
-
-function IconDashboard() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5" />
-    </svg>
-  );
-}
-
-function IconPin() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11Z" />
-      <circle cx="12" cy="10" r="2.5" />
-    </svg>
-  );
-}
-
-function IconFlag() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5 21V4" />
-      <path d="M5 4h11l-1.5 3.5L16 11H5" />
-    </svg>
-  );
-}
-
-function IconUser() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="8" r="3.5" />
-      <path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6" />
-    </svg>
-  );
-}
 
 function IconMore() {
   return (

@@ -43,7 +43,7 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Assign canvassers</h2>
             <p className="text-sm text-gray-500">
-              Book: <span className="font-medium">{turf.name}</span> · {turf.doorCount} doors
+              Book: <span className="font-medium">{turf.name}</span> · {turf.eligibleDoorCount ?? turf.doorCount} doors
             </p>
             <p className="mt-1 text-xs text-gray-500">Multiple canvassers can share a book.</p>
           </div>

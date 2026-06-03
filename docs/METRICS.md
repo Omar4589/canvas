@@ -68,10 +68,11 @@ a subset of Knocks → **the rate is always ≤ 100%.** (Lit-drop campaigns use 
 and label it "Lit rate"; the value is computed the same way.) Field: `connectionRate`.
 
 ### Coverage funnel (the colored bar)
-Each household sits in exactly one bucket based on its **current** status — `surveyed`,
-`lit_dropped`, `not_home`, `wrong_address`, or `unknocked` — so the bar sums to the total number
-of households. `unknocked` = houses not yet knocked at all. This is a coverage lens, separate
-from Knocks (activity). Field: `canvass` / `coverage`.
+Each household sits in exactly one bucket — `surveyed`, `lit_dropped`, `not_home`,
+`wrong_address`, `voted`, or `unknocked` — so the bar sums to the total number of households.
+`unknocked` = houses not yet knocked at all; `voted` = early-voting doors that dropped off the
+canvasser's list (pulled out of `unknocked`, see early-voting doc). This is a coverage lens,
+separate from Knocks (activity). Field: `canvass` / `coverage`.
 
 ## Coverage vs. Knocks — worked example
 
@@ -268,6 +269,11 @@ summable — it uses a separate org-wide `distinct('userId')`.
   back-compat **alias of `knocks`**. New code should read `knocks`.
 - **Org knocks ≤ Σ per-canvasser knocks** when overlaps exist (each canvasser keeps personal
   credit; the org dedups the house-pass).
+- **Early-voting doors get their own "Voted" coverage segment.** A household marked `fullyVoted`
+  drops off the *canvasser's* map/books and, in reports, is pulled out of `unknocked` into a
+  dedicated **`voted`** coverage bucket (`coverageBucketExpr` in reports.js). It still counts in
+  **Households**; `homesKnocked`/knocks are unaffected. Only otherwise-`unknocked` doors move — a
+  door knocked before it went fully-voted keeps its knocked status. See [docs/EARLY_VOTING.md](EARLY_VOTING.md).
 
 ## G. Frontend mapping
 

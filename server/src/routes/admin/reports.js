@@ -94,6 +94,18 @@ function connectionRate({ knocks = 0, surveyedKnocks = 0, litKnocks = 0 } = {}) 
   return Math.round(((surveyedKnocks + litKnocks) / knocks) * 100);
 }
 
+// Coverage-funnel bucket. Doors that are fully early-voted AND otherwise unknocked are pulled
+// out of `unknocked` into their own `voted` segment, so early voting doesn't inflate "unknocked"
+// (those doors dropped off the canvasser's list and will never be knocked). Knocked doors keep
+// their real status. Used by the status group-by in /overview and /campaign-rollup.
+const coverageBucketExpr = {
+  $cond: [
+    { $and: [{ $eq: ['$fullyVoted', true] }, { $eq: ['$status', 'unknocked'] }] },
+    'voted',
+    '$status',
+  ],
+};
+
 function parseUserIdParam(req, res) {
   const { userId } = req.params;
   if (!mongoose.isValidObjectId(userId)) {
@@ -165,7 +177,7 @@ router.get('/overview', async (req, res, next) => {
       Household.countDocuments({ ...householdMatch, status: { $ne: 'unknocked' } }),
       Household.aggregate([
         { $match: householdMatch },
-        { $group: { _id: '$status', count: { $sum: 1 } } },
+        { $group: { _id: coverageBucketExpr, count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
         { $match: cFilter },
@@ -187,6 +199,7 @@ router.get('/overview', async (req, res, next) => {
       surveyed: 0,
       wrong_address: 0,
       lit_dropped: 0,
+      voted: 0,
     };
     for (const r of statusAgg) canvass[r._id] = r.count;
 
@@ -278,7 +291,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           { $match: { organizationId, campaignId: { $in: ids }, isActive: true } },
           {
             $group: {
-              _id: { campaignId: '$campaignId', status: '$status' },
+              _id: { campaignId: '$campaignId', bucket: coverageBucketExpr },
               count: { $sum: 1 },
             },
           },
@@ -331,6 +344,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           surveyed: 0,
           wrong_address: 0,
           lit_dropped: 0,
+          voted: 0,
         },
         surveysSubmitted: 0,
         surveyedVoters: 0,
@@ -346,9 +360,11 @@ router.get('/campaign-rollup', async (req, res, next) => {
     for (const r of coverageAgg) {
       const c = byCampaign.get(String(r._id.campaignId));
       if (!c) continue;
+      const bucket = r._id.bucket;
       c.households += r.count;
-      if (r._id.status !== 'unknocked') c.homesKnocked += r.count;
-      if (r._id.status in c.coverage) c.coverage[r._id.status] = r.count;
+      // 'voted' (early-voted, never knocked) and 'unknocked' are not "homes knocked".
+      if (bucket !== 'unknocked' && bucket !== 'voted') c.homesKnocked += r.count;
+      if (bucket in c.coverage) c.coverage[bucket] = r.count;
     }
     for (const r of eventAgg) {
       const c = byCampaign.get(String(r._id.campaignId));
@@ -431,7 +447,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
         for (const k of Object.keys(acc)) acc[k] += r.coverage?.[k] || 0;
         return acc;
       },
-      { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, lit_dropped: 0 }
+      { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, lit_dropped: 0, voted: 0 }
     );
 
     res.json({ scope, cumulative, campaigns: rows });

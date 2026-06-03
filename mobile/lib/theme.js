@@ -38,6 +38,7 @@ export const colors = {
     surveyed: '#22C55E',
     wrong_address: '#EF4444',
     lit_dropped: '#A855F7',
+    voted: '#14B8A6',
   },
   statusLabels: {
     unknocked: 'Unknocked',
@@ -45,6 +46,7 @@ export const colors = {
     surveyed: 'Surveyed',
     wrong_address: 'Wrong address',
     lit_dropped: 'Lit dropped',
+    voted: 'Voted',
   },
 };
 

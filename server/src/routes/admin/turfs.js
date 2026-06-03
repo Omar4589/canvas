@@ -284,7 +284,24 @@ router.get('/', async (req, res, next) => {
     if (req.query.status) filter.status = req.query.status;
     else filter.status = { $ne: 'archived' }; // hide merge-absorbed stubs by default
     const turfs = await Turf.find(filter).sort({ createdAt: 1 }).lean();
-    res.json({ turfs });
+    // Live "eligible" door count per book — active & not-fully-voted — mirroring what the
+    // mobile bootstrap serves canvassers, so admin counts don't drift after early voting.
+    const allHhIds = [...new Set(turfs.flatMap((t) => (t.householdIds || []).map(String)))];
+    const eligible = new Set(
+      allHhIds.length
+        ? (
+            await Household.find(
+              { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true } },
+              { _id: 1 }
+            ).lean()
+          ).map((h) => String(h._id))
+        : []
+    );
+    const withCounts = turfs.map((t) => ({
+      ...t,
+      eligibleDoorCount: (t.householdIds || []).filter((id) => eligible.has(String(id))).length,
+    }));
+    res.json({ turfs: withCounts });
   } catch (err) {
     next(err);
   }

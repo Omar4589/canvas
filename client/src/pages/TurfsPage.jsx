@@ -41,7 +41,7 @@ function booksToLabelGeoJSON(turfs) {
     type: 'FeatureCollection',
     features: turfs
       .filter((t) => t.centroid?.coordinates?.length === 2)
-      .map((t) => ({ type: 'Feature', geometry: t.centroid, properties: { id: String(t._id), label: `${t.name} · ${t.doorCount}` } })),
+      .map((t) => ({ type: 'Feature', geometry: t.centroid, properties: { id: String(t._id), label: `${t.name} · ${t.eligibleDoorCount ?? t.doorCount}` } })),
   };
 }
 function doorsToGeoJSON(doors, colorByTurf) {
@@ -836,7 +836,7 @@ export default function TurfsPage() {
                           </span>
                         );
                       })()}
-                      <span className="text-gray-500">{t.doorCount}</span>
+                      <span className="text-gray-500">{t.eligibleDoorCount ?? t.doorCount}</span>
                       <button onClick={(e) => { e.stopPropagation(); setAssignTurf(t); }} className="text-xs font-medium text-brand-600 hover:underline">Assign</button>
                     </span>
                   </li>
