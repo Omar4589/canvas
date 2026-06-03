@@ -21,7 +21,13 @@ import { timeAgo } from '../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 function fmt(n) {
-  return n == null ? '—' : Number(n).toLocaleString();
+  if (n == null) return '—';
+  if (typeof n === 'string') return n;
+  return Number(n).toLocaleString();
+}
+
+function pct(n) {
+  return n == null ? '—' : `${n}%`;
 }
 
 function Stat({ value, label }) {
@@ -46,14 +52,25 @@ function CampaignCard({ campaign, onPress }) {
           </Text>
         </View>
       </View>
-      <CoverageBar canvass={c.coverage} compact />
+      <CoverageBar canvass={c.coverage} />
+      <Text style={styles.coverageLine}>
+        {fmt(c.households)} households · {fmt(c.homesKnocked)} knocked ({c.knockedPct ?? 0}%)
+      </Text>
       <View style={styles.inlineRow}>
         <Text style={styles.inlineStat}>
-          <Text style={styles.inlineStatVal}>{fmt(c.doorDays)}</Text> doors
+          <Text style={styles.inlineStatVal}>{fmt(c.knocks)}</Text> knocks
         </Text>
         <Text style={styles.inlineStat}>
           <Text style={styles.inlineStatVal}>{fmt(isLitDrop ? c.litDropped : c.surveysSubmitted)}</Text>{' '}
           {isLitDrop ? 'lit' : 'surveys'}
+        </Text>
+        {!isLitDrop && (
+          <Text style={styles.inlineStat}>
+            <Text style={styles.inlineStatVal}>{fmt(c.surveyedVoters)}</Text> voters
+          </Text>
+        )}
+        <Text style={styles.inlineStat}>
+          <Text style={styles.inlineStatVal}>{pct(c.connectionRate)}</Text> conn
         </Text>
         <Text style={styles.inlineStat}>
           <Text style={styles.inlineStatVal}>{fmt(c.activeCanvassers)}</Text> canv
@@ -128,8 +145,12 @@ export default function AdminOverview() {
               <CoverageBar canvass={cumulative.coverage} />
               <View style={styles.divider} />
               <View style={styles.statRow}>
-                <Stat value={cumulative.doorDays} label="Doors" />
+                <Stat value={cumulative.knocks} label="Knocks" />
                 <Stat value={cumulative.surveysSubmitted} label="Surveys" />
+                <Stat value={cumulative.surveyedVoters} label="Surveyed" />
+              </View>
+              <View style={[styles.statRow, { marginTop: spacing.md }]}>
+                <Stat value={pct(cumulative.connectionRate)} label="Connection" />
                 <Stat value={cumulative.litDropped} label="Lit" />
                 <Stat value={cumulative.activeCanvassers} label="Canvassers" />
               </View>
@@ -168,7 +189,7 @@ export default function AdminOverview() {
                       <View style={{ flex: 1 }}>
                         <Text style={styles.archivedName} numberOfLines={1}>{c.name}</Text>
                         <Text style={styles.archivedMeta}>
-                          {fmt(c.households)} households · {c.knockedPct ?? 0}% knocked · {fmt(c.doorDays)} doors
+                          {fmt(c.households)} households · {c.knockedPct ?? 0}% knocked · {fmt(c.knocks)} knocks
                         </Text>
                       </View>
                       <View style={styles.archivedBadge}>
@@ -238,6 +259,7 @@ const styles = StyleSheet.create({
   typePillText: { fontSize: 10, fontWeight: '700' },
   typePillTextSurvey: { color: '#1D4ED8' },
   typePillTextLit: { color: '#6D28D9' },
+  coverageLine: { ...type.caption, color: colors.textSecondary, marginTop: spacing.sm },
   inlineRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm, gap: spacing.md },
   inlineStat: { fontSize: 12, color: colors.textSecondary },
   inlineStatVal: { fontWeight: '700', color: colors.textPrimary, fontVariant: ['tabular-nums'] },

@@ -104,7 +104,7 @@ export default function DaysScreen() {
                   {d.hoursOnDoors.toFixed(1)}h on doors
                 </Text>
                 <View style={styles.statsRow}>
-                  <Stat label="Doors" value={d.homesKnocked} />
+                  <Stat label="Knocks" value={d.homesKnocked} />
                   {isLitDrop ? (
                     <Stat label="Lit drops" value={d.litDropped} />
                   ) : (

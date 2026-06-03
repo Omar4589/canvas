@@ -9,6 +9,7 @@ import CanvasserTable from '../components/CanvasserTable.jsx';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.jsx';
 import VoterHighlights from '../components/VoterHighlights.jsx';
+import { rateAccent, ratePct } from '../lib/rates.js';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -58,6 +59,20 @@ export default function DashboardPage() {
     queryKey: ['reports', 'overview', campaignId],
     queryFn: () =>
       api(`/admin/reports/overview${buildQuery({ campaignId })}`),
+    enabled: !!campaignId,
+  });
+
+  // Range-scoped activity (knocks/surveys/rate). Coverage stays all-time from /overview.
+  const rollupQ = useQuery({
+    queryKey: ['reports', 'campaign-rollup', campaignId, dateRange.from, dateRange.to],
+    queryFn: () =>
+      api(
+        `/admin/reports/campaign-rollup${buildQuery({
+          campaignId,
+          from: dateRange.from,
+          to: dateRange.to,
+        })}`
+      ),
     enabled: !!campaignId,
   });
 
@@ -114,7 +129,8 @@ export default function DashboardPage() {
   const overview = overviewQ.data || {};
   const totals = overview.totals || {};
   const canvass = overview.canvass || {};
-  const events = overview.events || {};
+  const rangeStats = rollupQ.data?.cumulative || {};
+  const isLitDrop = selectedCampaign?.type === 'lit_drop';
 
   const knockedPct = totals.households
     ? Math.round((100 * (totals.homesKnocked || 0)) / totals.households)
@@ -195,92 +211,90 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {overviewQ.isLoading ? (
-        <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
-          Loading overview…
-        </div>
-      ) : overviewQ.error ? (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          Error loading overview: {overviewQ.error.message}
-        </div>
-      ) : (
-        <>
-          <section className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+      {/* Activity — honors the selected date range */}
+      <section className="mb-6">
+        <SectionHeading
+          title="Activity"
+          right={<span className="text-xs text-gray-500">Selected range</span>}
+        />
+        {rollupQ.isLoading ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+            Loading…
+          </div>
+        ) : rollupQ.error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            Error: {rollupQ.error.message}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <StatCard
-              label="Households"
-              value={totals.households?.toLocaleString()}
-              hint="unique addresses"
-            />
-            <StatCard
-              label={selectedCampaign?.type === 'lit_drop' ? 'Homes visited' : 'Homes knocked'}
-              value={totals.homesKnocked?.toLocaleString()}
-              hint={`${knockedPct}% of households · unique`}
+              label="Knocks"
+              value={rangeStats.knocks?.toLocaleString()}
+              hint="billable · per house-pass"
               accent="brand"
             />
-            {selectedCampaign?.type === 'lit_drop' ? (
+            {isLitDrop ? (
               <StatCard
                 label="Lit drops"
-                value={events.litDropped?.toLocaleString()}
+                value={rangeStats.litDropped?.toLocaleString()}
                 hint="events"
                 accent="green"
               />
             ) : (
-              <StatCard
-                label="Surveys submitted"
-                value={totals.surveysSubmitted?.toLocaleString()}
-                hint="per voter"
-                accent="green"
-              />
-            )}
-            <StatCard
-              label="Active canvassers"
-              value={totals.activeUsers?.toLocaleString()}
-            />
-          </section>
-
-          {selectedCampaign?.type !== 'lit_drop' && (
-            <section className="mb-6">
-              <div className="mb-2 flex items-baseline justify-between">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Canvasser activity
-                </h2>
-                <span className="text-xs text-gray-400">
-                  events · sums to leaderboard
-                </span>
-              </div>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <>
                 <StatCard
-                  label="Surveys submitted"
-                  value={events.surveySubmitted?.toLocaleString()}
+                  label="Surveys"
+                  value={rangeStats.surveysSubmitted?.toLocaleString()}
                   hint="per voter"
                   accent="green"
                 />
                 <StatCard
-                  label="Not home"
-                  value={events.notHome?.toLocaleString()}
-                  hint="events"
-                  accent="blue"
+                  label="Surveyed voters"
+                  value={rangeStats.surveyedVoters?.toLocaleString()}
+                  hint="distinct voters reached"
                 />
-                <StatCard
-                  label="Wrong addresses"
-                  value={events.wrongAddress?.toLocaleString()}
-                  hint="events"
-                  accent="red"
-                />
-              </div>
-            </section>
-          )}
-        </>
-      )}
+              </>
+            )}
+            <StatCard
+              label={isLitDrop ? 'Lit rate' : 'Connection rate'}
+              value={ratePct(rangeStats.connectionRate)}
+              hint={isLitDrop ? 'lit knocks ÷ knocks' : 'surveyed knocks ÷ knocks'}
+              accent={rateAccent(rangeStats.connectionRate)}
+            />
+          </div>
+        )}
+      </section>
 
+      {/* Coverage — current-state, all-time */}
       <section className="mb-8">
-        <SectionHeading title="Canvass coverage" />
+        <SectionHeading
+          title="Coverage"
+          right={<span className="text-xs text-gray-500">All-time</span>}
+        />
         {overviewQ.isLoading ? (
           <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
             Loading…
           </div>
+        ) : overviewQ.error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            Error loading coverage: {overviewQ.error.message}
+          </div>
         ) : (
-          <CoverageBar canvass={canvass} />
+          <>
+            <p className="mb-2 text-sm text-gray-700">
+              <span className="font-semibold text-gray-900">
+                {(totals.households || 0).toLocaleString()}
+              </span>{' '}
+              households
+              <span className="mx-2 text-gray-300">·</span>
+              <span className="font-semibold text-gray-900">
+                {(totals.homesKnocked || 0).toLocaleString()}
+              </span>{' '}
+              knocked
+              <span className="text-gray-400"> ({knockedPct}%)</span>
+            </p>
+            <CoverageBar canvass={canvass} />
+          </>
         )}
       </section>
 

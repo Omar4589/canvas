@@ -22,7 +22,7 @@ import DateRangeBar from '../../../../components/DateRangeBar';
 const KPIS = [
   {
     key: 'homesKnocked',
-    label: 'Houses knocked',
+    label: 'Knocks',
     accessor: (s) => s?.kpi.homesKnocked || 0,
     format: (v) => v.toLocaleString(),
     higherIsBetter: true,
@@ -57,7 +57,7 @@ const KPIS = [
   },
   {
     key: 'doorsPerHour',
-    label: 'Doors / hour',
+    label: 'Knocks / hour',
     accessor: (s) => s?.kpi.doorsPerHour || 0,
     format: (v) => v.toFixed(1),
     higherIsBetter: true,

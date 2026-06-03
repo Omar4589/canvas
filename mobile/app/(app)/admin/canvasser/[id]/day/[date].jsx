@@ -156,7 +156,7 @@ export default function DayDetail() {
           <ActivityIndicator color={colors.brand} />
         ) : !s ? null : (
           <View style={styles.statsCard}>
-            <Stat label="Doors" value={s.kpi.homesKnocked} />
+            <Stat label="Knocks" value={s.kpi.homesKnocked} />
             <Stat
               label="Surveys"
               value={s.kpi.surveysSubmitted}

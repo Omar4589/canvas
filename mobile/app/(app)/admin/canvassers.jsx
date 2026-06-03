@@ -24,10 +24,10 @@ import { downloadCsv } from '../../../lib/csv';
 
 const SORT_OPTIONS = [
   { key: 'surveys', label: 'Surveys' },
-  { key: 'doors', label: 'Doors knocked' },
+  { key: 'knocks', label: 'Knocks' },
   { key: 'connection', label: 'Connection rate' },
   { key: 'hours', label: 'Hours on doors' },
-  { key: 'doorsPerHour', label: 'Doors / hour' },
+  { key: 'knocksPerHour', label: 'Knocks / hour' },
   { key: 'surveysPerHour', label: 'Surveys / hour' },
 ];
 
@@ -42,7 +42,7 @@ function initials(name) {
 }
 
 function rowDerived(r) {
-  const homesKnocked = r.homesKnocked ?? 0;
+  const knocks = r.knocks ?? r.homesKnocked ?? 0;
   const hours =
     r.firstActivityAt && r.lastActivityAt
       ? (new Date(r.lastActivityAt) - new Date(r.firstActivityAt)) / 3600000
@@ -50,9 +50,11 @@ function rowDerived(r) {
   const surveys = r.surveysSubmitted || 0;
   return {
     ...r,
+    knocks,
     hours,
-    connection: homesKnocked > 0 ? surveys / homesKnocked : 0,
-    doorsPerHour: hours > 0 ? homesKnocked / hours : 0,
+    // Server-computed: completion knocks ÷ knocks (integer %, capped at 100).
+    connection: r.connectionRate ?? 0,
+    knocksPerHour: hours > 0 ? knocks / hours : 0,
     surveysPerHour: hours > 0 ? surveys / hours : 0,
   };
 }
@@ -114,21 +116,21 @@ export default function AdminCanvassers() {
     }
     rows.sort((a, b) => {
       switch (sortKey) {
-        case 'doors':
-          return (b.homesKnocked || 0) - (a.homesKnocked || 0);
+        case 'knocks':
+          return (b.knocks || 0) - (a.knocks || 0);
         case 'connection':
           return (b.connection || 0) - (a.connection || 0);
         case 'hours':
           return (b.hours || 0) - (a.hours || 0);
-        case 'doorsPerHour':
-          return (b.doorsPerHour || 0) - (a.doorsPerHour || 0);
+        case 'knocksPerHour':
+          return (b.knocksPerHour || 0) - (a.knocksPerHour || 0);
         case 'surveysPerHour':
           return (b.surveysPerHour || 0) - (a.surveysPerHour || 0);
         case 'surveys':
         default:
           return (
             (b.surveysSubmitted || 0) - (a.surveysSubmitted || 0) ||
-            (b.homesKnocked || 0) - (a.homesKnocked || 0)
+            (b.knocks || 0) - (a.knocks || 0)
           );
       }
     });
@@ -138,14 +140,15 @@ export default function AdminCanvassers() {
   const totals = useMemo(() => {
     return filteredSorted.reduce(
       (acc, r) => {
-        acc.houses += r.homesKnocked || 0;
+        acc.knocks += r.knocks || 0;
+        acc.completionKnocks += (r.surveyKnocks || 0) + (r.litDropped || 0);
         acc.surveys += r.surveysSubmitted || 0;
         acc.litDrops += r.litDropped || 0;
         acc.notHome += r.notHome || 0;
         acc.wrongAddr += r.wrongAddress || 0;
         return acc;
       },
-      { houses: 0, surveys: 0, litDrops: 0, notHome: 0, wrongAddr: 0 }
+      { knocks: 0, completionKnocks: 0, surveys: 0, litDrops: 0, notHome: 0, wrongAddr: 0 }
     );
   }, [filteredSorted]);
 
@@ -291,7 +294,7 @@ export default function AdminCanvassers() {
             <View style={{ flex: 1 }}>
               <Text style={styles.overlapBannerTitle}>
                 {overlapsQ.data.total}{' '}
-                {overlapsQ.data.total === 1 ? 'house' : 'houses'} hit by 2+ canvassers
+                {overlapsQ.data.total === 1 ? 'house' : 'houses'} hit by 2+ canvassers in the same pass
               </Text>
               <Text style={styles.overlapBannerSub}>Tap to review overlap</Text>
             </View>
@@ -306,8 +309,8 @@ export default function AdminCanvassers() {
           </Text>
           <View style={styles.totalsRow}>
             <View style={styles.totalsCol}>
-              <Text style={styles.totalsValue}>{totals.houses.toLocaleString()}</Text>
-              <Text style={styles.totalsLabel}>Houses</Text>
+              <Text style={styles.totalsValue}>{totals.knocks.toLocaleString()}</Text>
+              <Text style={styles.totalsLabel}>Knocks</Text>
             </View>
             <View style={styles.totalsDivider} />
             {isLitDrop ? (
@@ -324,8 +327,8 @@ export default function AdminCanvassers() {
             <View style={styles.totalsDivider} />
             <View style={styles.totalsCol}>
               <Text style={styles.totalsValue}>
-                {totals.houses > 0
-                  ? `${Math.round((totals.surveys / totals.houses) * 100)}%`
+                {totals.knocks > 0
+                  ? `${Math.round((totals.completionKnocks / totals.knocks) * 100)}%`
                   : '—'}
               </Text>
               <Text style={styles.totalsLabel}>Connection</Text>
@@ -376,8 +379,8 @@ export default function AdminCanvassers() {
                   </Text>
                   <Text style={styles.meta}>{r.email}</Text>
                   <View style={styles.statsLine}>
-                    <Text style={styles.statBold}>{r.homesKnocked || 0}</Text>
-                    <Text style={styles.stat}> houses · </Text>
+                    <Text style={styles.statBold}>{r.knocks || 0}</Text>
+                    <Text style={styles.stat}> knocks · </Text>
                     <Text style={styles.statBold}>{primary}</Text>
                     <Text style={styles.stat}> {primaryLabel}</Text>
                     {!isLitDrop && (r.notHome || r.wrongAddress) ? (
@@ -391,13 +394,13 @@ export default function AdminCanvassers() {
                     {r.hours > 0 ? (
                       <Text style={styles.metaSmall}>
                         {r.hours.toFixed(1)}h ·{' '}
-                        {r.doorsPerHour.toFixed(1)} doors/hr
+                        {r.knocksPerHour.toFixed(1)} knocks/hr
                       </Text>
                     ) : null}
-                    {r.homesKnocked > 0 ? (
+                    {r.knocks > 0 ? (
                       <Text style={styles.metaSmall}>
                         {' · '}
-                        {Math.round(r.connection * 100)}% connection
+                        {r.connection}% connection
                       </Text>
                     ) : null}
                   </View>

@@ -1,9 +1,20 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
+import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.jsx';
+import { rateAccent, ratePct } from '../lib/rates.js';
+
+function buildQuery(params) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== null && v !== undefined && v !== '') sp.set(k, v);
+  }
+  const s = sp.toString();
+  return s ? `?${s}` : '';
+}
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -45,12 +56,17 @@ function CampaignCard({ campaign, onClick }) {
 
       <div className="space-y-1.5">
         <StatRow label="Households" value={fmt(c.households)} />
-        <StatRow label="Knocked" value={`${c.knockedPct ?? 0}%`} />
+        <StatRow label="Houses knocked" value={`${fmt(c.homesKnocked)} (${c.knockedPct ?? 0}%)`} />
+        <StatRow label="Knocks" value={fmt(c.knocks)} />
         {c.type === 'lit_drop' ? (
           <StatRow label="Lit drops" value={fmt(c.litDropped)} />
         ) : (
-          <StatRow label="Surveys" value={fmt(c.surveysSubmitted)} />
+          <>
+            <StatRow label="Surveys" value={fmt(c.surveysSubmitted)} />
+            <StatRow label="Surveyed voters" value={fmt(c.surveyedVoters)} />
+          </>
         )}
+        <StatRow label={c.type === 'lit_drop' ? 'Lit rate' : 'Connection'} value={ratePct(c.connectionRate)} />
         <StatRow label="Canvassers" value={fmt(c.activeCanvassers)} />
         <StatRow
           label="Last activity"
@@ -87,12 +103,22 @@ function ChevronIcon({ open }) {
 export default function OverviewPage() {
   const navigate = useNavigate();
   const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const [rangeId, setRangeId] = useState('today');
+  const dateRange = useMemo(() => rangeFromId(rangeId), [rangeId]);
 
   const activeQ = useQuery({
-    queryKey: ['campaign-rollup', 'active'],
-    queryFn: () => api('/admin/reports/campaign-rollup?scope=active'),
+    queryKey: ['campaign-rollup', 'active', dateRange.from, dateRange.to],
+    queryFn: () =>
+      api(
+        `/admin/reports/campaign-rollup${buildQuery({
+          scope: 'active',
+          from: dateRange.from,
+          to: dateRange.to,
+        })}`
+      ),
   });
 
+  // Archived is reviewed as historical data → always all-time.
   const archivedQ = useQuery({
     queryKey: ['campaign-rollup', 'archived'],
     queryFn: () => api('/admin/reports/campaign-rollup?scope=archived'),
@@ -105,8 +131,9 @@ export default function OverviewPage() {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-gray-900">Overview</h1>
+        <DateRangeSelector value={rangeId} onChange={setRangeId} />
       </div>
 
       {activeQ.isLoading ? (
@@ -123,25 +150,41 @@ export default function OverviewPage() {
             <h2 className="mb-3 text-lg font-semibold text-gray-900">
               All active campaigns
             </h2>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+            <div className="mb-4">
+              <CoverageBar canvass={cumulative.coverage} />
+            </div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               <StatCard
                 label="Households"
                 value={cumulative.households?.toLocaleString()}
               />
               <StatCard
-                label="Homes knocked"
+                label="Houses knocked"
                 value={cumulative.homesKnocked?.toLocaleString()}
                 hint={`${cumulative.knockedPct ?? 0}% of households`}
                 accent="brand"
               />
               <StatCard
-                label="Doors knocked"
-                value={cumulative.doorDays?.toLocaleString()}
+                label="Knocks"
+                value={cumulative.knocks?.toLocaleString()}
+                hint="billable · per house-pass"
               />
               <StatCard
-                label="Surveys submitted"
+                label="Surveys"
                 value={cumulative.surveysSubmitted?.toLocaleString()}
+                hint="per voter"
                 accent="green"
+              />
+              <StatCard
+                label="Surveyed voters"
+                value={cumulative.surveyedVoters?.toLocaleString()}
+                hint="distinct voters reached"
+              />
+              <StatCard
+                label="Connection rate"
+                value={ratePct(cumulative.connectionRate)}
+                hint="surveyed knocks ÷ knocks"
+                accent={rateAccent(cumulative.connectionRate)}
               />
               <StatCard
                 label="Lit drops"
@@ -229,9 +272,9 @@ export default function OverviewPage() {
                             </span>
                           </span>
                           <span>
-                            <span className="text-gray-400">Doors</span>{' '}
+                            <span className="text-gray-400">Knocks</span>{' '}
                             <span className="font-medium text-gray-900">
-                              {fmt(c.doorDays)}
+                              {fmt(c.knocks)}
                             </span>
                           </span>
                         </span>

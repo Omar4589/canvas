@@ -18,7 +18,7 @@ import SectionHeader from '../../../../components/SectionHeader';
 import DateRangeBar from '../../../../components/DateRangeBar';
 import { rangeFor, deviceTimezone } from '../../../../lib/dateRanges';
 import { formatRange } from '../../../../lib/datetime';
-import { getConnectionRate, RATE_COLORS } from '../../../../lib/rates';
+import { rateFromPct, RATE_COLORS } from '../../../../lib/rates';
 import { colors, radius, spacing, type, shadow } from '../../../../lib/theme';
 
 function StatTile({ value, label, level }) {
@@ -116,9 +116,9 @@ export default function CampaignDetail() {
   const canvass = overviewQ.data?.canvass || {};
   const topCanvassers = (canvassersQ.data || []).slice(0, 5);
   const rangeStats = rollupQ.data?.campaigns?.[0] || {};
-  const rangeDoors = rangeStats.doorDays || 0;
+  const rangeKnocks = rangeStats.knocks || 0;
   const rangePrimary = isLitDrop ? rangeStats.litDropped || 0 : rangeStats.surveysSubmitted || 0;
-  const rangeRate = getConnectionRate(rangePrimary, rangeDoors);
+  const rangeRate = rateFromPct(rangeStats.connectionRate);
 
   const questions = surveyResultsQ.data?.questions || [];
   const highlightQuestions = questions.filter((q) => q.type === 'multiple_choice' && q.options?.length);
@@ -189,9 +189,12 @@ export default function CampaignDetail() {
               <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
             ) : (
               <View style={styles.tileRow}>
-                <StatTile value={rangeDoors.toLocaleString()} label="Doors knocked" />
+                <StatTile value={rangeKnocks.toLocaleString()} label="Knocks" />
                 <StatTile value={rangePrimary.toLocaleString()} label={isLitDrop ? 'Lit drops' : 'Surveys'} />
-                <StatTile value={rangeRate?.value} label={isLitDrop ? 'Lit rate' : 'Survey rate'} level={rangeRate?.level} />
+                {!isLitDrop && (
+                  <StatTile value={(rangeStats.surveyedVoters || 0).toLocaleString()} label="Surveyed voters" />
+                )}
+                <StatTile value={rangeRate?.value} label={isLitDrop ? 'Lit rate' : 'Connection rate'} level={rangeRate?.level} />
               </View>
             )}
           </View>
@@ -228,7 +231,7 @@ export default function CampaignDetail() {
                     <Text style={styles.canvasserRank}>{i + 1}</Text>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.canvasserName}>{c.firstName || c.email} {c.lastName || ''}</Text>
-                      <Text style={styles.muted}>{c.homesKnocked || 0} houses · {primary} {primaryLabel}</Text>
+                      <Text style={styles.muted}>{c.homesKnocked || 0} knocks · {primary} {primaryLabel}</Text>
                       {range2 ? <Text style={styles.canvasserShift}>🕘 {range2}</Text> : null}
                     </View>
                   </View>

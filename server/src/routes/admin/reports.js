@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
+import { Pass } from '../../models/Pass.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { User } from '../../models/User.js';
@@ -55,6 +56,44 @@ function baseFilter(req) {
 // because it can be left without an actual visit decision.
 const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
 
+// Billable "knock" = one distinct (household, pass). Re-knocking a house within the SAME
+// pass (a correction, or a second/overlapping canvasser) counts once; going back in a NEW
+// pass counts again. passId:null collapses to a single legacy bucket per household (pre-turf
+// data = one knock/house). The pipeline also tallies how many of those knocks landed a
+// survey / lit drop, so the connection rate's numerator is always a subset of knocks.
+function knocksPipeline(match, { byCampaign = false } = {}) {
+  const inner = { householdId: '$householdId', passId: '$passId' };
+  if (byCampaign) inner.campaignId = '$campaignId';
+  return [
+    { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },
+    {
+      $group: {
+        _id: inner,
+        hasSurvey: { $max: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
+        hasLit: { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
+      },
+    },
+    {
+      $group: {
+        _id: byCampaign ? '$_id.campaignId' : null,
+        knocks: { $sum: 1 },
+        surveyedKnocks: { $sum: '$hasSurvey' },
+        litKnocks: { $sum: '$hasLit' },
+      },
+    },
+  ];
+}
+
+// Connection rate = of the knocks we made, how many landed a completion action (a survey, or
+// a lit drop). Survey/lit completions are mutually exclusive within a campaign, so the
+// numerator is just their sum; it's always a subset of knocks, so the rate is always <= 100.
+// Returns an integer percentage. (The UI labels it "Survey rate" / "Lit rate" by campaign type;
+// the value is identical either way.)
+function connectionRate({ knocks = 0, surveyedKnocks = 0, litKnocks = 0 } = {}) {
+  if (!knocks) return 0;
+  return Math.round(((surveyedKnocks + litKnocks) / knocks) * 100);
+}
+
 function parseUserIdParam(req, res) {
   const { userId } = req.params;
   if (!mongoose.isValidObjectId(userId)) {
@@ -72,25 +111,6 @@ function tzOf(req) {
 
 function dayBucketExpr(field, tz) {
   return { $dateToString: { format: '%Y-%m-%d', date: `$${field}`, timezone: tz } };
-}
-
-// "A day" follows the campaign's timezone (decision 9) when a campaign is
-// selected; otherwise the admin's ?tz= (or UTC).
-async function resolveDayTz(req) {
-  if (req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)) {
-    const c = await Campaign.findById(req.query.campaignId, { timeZone: 1 }).lean();
-    if (c?.timeZone) return c.timeZone;
-  }
-  return tzOf(req);
-}
-
-function dayKey(ts, tz) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(ts));
 }
 
 function csvCell(v) {
@@ -120,7 +140,6 @@ router.get('/overview', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const cFilter = baseFilter(req);
     const householdMatch = { isActive: true, ...cFilter };
-    const tz = await resolveDayTz(req);
 
     const memberCountPromise = Membership.countDocuments({
       organizationId: orgId,
@@ -132,15 +151,17 @@ router.get('/overview', async (req, res, next) => {
       voterDocs,
       activeUsers,
       surveysSubmitted,
+      surveyedVoterIds,
       homesKnocked,
       statusAgg,
       eventAgg,
-      doorDayAgg,
+      knockAgg,
     ] = await Promise.all([
       Household.countDocuments(householdMatch),
       Household.find(householdMatch, { _id: 1 }).lean(),
       memberCountPromise,
       SurveyResponse.countDocuments(cFilter),
+      SurveyResponse.distinct('voterId', cFilter),
       Household.countDocuments({ ...householdMatch, status: { $ne: 'unknocked' } }),
       Household.aggregate([
         { $match: householdMatch },
@@ -150,14 +171,8 @@ router.get('/overview', async (req, res, next) => {
         { $match: cFilter },
         { $group: { _id: '$actionType', count: { $sum: 1 } } },
       ]),
-      // Per-day door dedup (decision 1c): a door knocked >1× in a day counts as
-      // 1 door-day, but each canvasser still keeps an individual knock credit
-      // (the per-canvasser counts in /canvassers are unchanged).
-      CanvassActivity.aggregate([
-        { $match: { ...cFilter, actionType: { $in: KNOCK_ACTIONS } } },
-        { $group: { _id: { householdId: '$householdId', day: dayBucketExpr('timestamp', tz) } } },
-        { $count: 'doorDays' },
-      ]),
+      // Billable knocks: distinct (household, pass). See knocksPipeline.
+      CanvassActivity.aggregate(knocksPipeline(cFilter)),
     ]);
 
     const voterIds = voterDocs.map((h) => h._id);
@@ -183,10 +198,22 @@ router.get('/overview', async (req, res, next) => {
       else if (r._id === 'lit_dropped') events.litDropped = r.count;
     }
 
-    const doorDays = doorDayAgg[0]?.doorDays || 0;
+    const k = knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0 };
+    const surveyedVoters = surveyedVoterIds.length;
 
     res.json({
-      totals: { households, voters, activeUsers, surveysSubmitted, homesKnocked, doorDays },
+      totals: {
+        households,
+        voters,
+        activeUsers,
+        surveysSubmitted,
+        surveyedVoters,
+        homesKnocked,
+        knocks: k.knocks,
+        surveyedKnocks: k.surveyedKnocks,
+        litKnocks: k.litKnocks,
+        connectionRate: connectionRate(k),
+      },
       canvass,
       events,
     });
@@ -223,9 +250,13 @@ router.get('/campaign-rollup', async (req, res, next) => {
           households: 0,
           homesKnocked: 0,
           knockedPct: 0,
-          doorDays: 0,
+          knocks: 0,
+          surveyedKnocks: 0,
+          litKnocks: 0,
           surveysSubmitted: 0,
+          surveyedVoters: 0,
           litDropped: 0,
+          connectionRate: 0,
           activeCanvassers: 0,
           lastActivityAt: null,
         },
@@ -233,14 +264,15 @@ router.get('/campaign-rollup', async (req, res, next) => {
       });
     }
 
-    const tz = tzOf(req);
-    // Activity counts (doors/surveys/canvassers) honor an optional from/to range;
-    // households + coverage stay current-state (all-time).
+    // Activity counts (knocks/surveys/canvassers) honor an optional from/to range;
+    // households + coverage stay current-state (all-time). Knocks range on `timestamp`,
+    // surveys on `submittedAt` (matching /canvassers).
     const tsRange = parseDateRange(req, 'timestamp');
     const match = { organizationId, campaignId: { $in: ids } };
     const activityMatch = { ...match, ...tsRange };
+    const surveyMatch = { ...match, ...parseDateRange(req, 'submittedAt') };
 
-    const [coverageAgg, eventAgg, doorDayAgg, canvasserAgg, cumulativeCanvassers] =
+    const [coverageAgg, eventAgg, knockAgg, surveyAgg, canvasserAgg, cumulativeCanvassers] =
       await Promise.all([
         Household.aggregate([
           { $match: { organizationId, campaignId: { $in: ids }, isActive: true } },
@@ -260,30 +292,19 @@ router.get('/campaign-rollup', async (req, res, next) => {
             },
           },
         ]),
-        // Door-days bucket by each campaign's own timeZone (parity with the
-        // detailed dashboard's resolveDayTz), falling back to tz for campaigns
-        // without one. A single tz can't be right across mixed-timezone campaigns.
-        CanvassActivity.aggregate([
-          { $match: { ...activityMatch, actionType: { $in: KNOCK_ACTIONS } } },
-          {
-            $lookup: {
-              from: Campaign.collection.name,
-              localField: 'campaignId',
-              foreignField: '_id',
-              as: 'campaign',
-            },
-          },
-          { $set: { dayTz: { $ifNull: [{ $arrayElemAt: ['$campaign.timeZone', 0] }, tz] } } },
+        // Billable knocks per campaign: distinct (household, pass). See knocksPipeline.
+        CanvassActivity.aggregate(knocksPipeline(activityMatch, { byCampaign: true })),
+        // Surveys (volume) + surveyed voters (distinct) per campaign, from SurveyResponse.
+        SurveyResponse.aggregate([
+          { $match: surveyMatch },
+          { $group: { _id: { campaignId: '$campaignId', voterId: '$voterId' }, responses: { $sum: 1 } } },
           {
             $group: {
-              _id: {
-                campaignId: '$campaignId',
-                householdId: '$householdId',
-                day: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: '$dayTz' } },
-              },
+              _id: '$_id.campaignId',
+              surveyedVoters: { $sum: 1 },
+              surveysSubmitted: { $sum: '$responses' },
             },
           },
-          { $group: { _id: '$_id.campaignId', doorDays: { $sum: 1 } } },
         ]),
         CanvassActivity.aggregate([
           { $match: activityMatch },
@@ -312,8 +333,11 @@ router.get('/campaign-rollup', async (req, res, next) => {
           lit_dropped: 0,
         },
         surveysSubmitted: 0,
+        surveyedVoters: 0,
         litDropped: 0,
-        doorDays: 0,
+        knocks: 0,
+        surveyedKnocks: 0,
+        litKnocks: 0,
         activeCanvassers: 0,
         lastActivityAt: null,
       });
@@ -329,13 +353,21 @@ router.get('/campaign-rollup', async (req, res, next) => {
     for (const r of eventAgg) {
       const c = byCampaign.get(String(r._id.campaignId));
       if (!c) continue;
-      if (r._id.actionType === 'survey_submitted') c.surveysSubmitted = r.count;
-      else if (r._id.actionType === 'lit_dropped') c.litDropped = r.count;
+      // Lit drops are a volume count (every drop); Surveys come from SurveyResponse below.
+      if (r._id.actionType === 'lit_dropped') c.litDropped = r.count;
     }
-    for (const r of doorDayAgg) {
+    for (const r of knockAgg) {
       const c = byCampaign.get(String(r._id));
       if (!c) continue;
-      c.doorDays = r.doorDays;
+      c.knocks = r.knocks;
+      c.surveyedKnocks = r.surveyedKnocks;
+      c.litKnocks = r.litKnocks;
+    }
+    for (const r of surveyAgg) {
+      const c = byCampaign.get(String(r._id));
+      if (!c) continue;
+      c.surveysSubmitted = r.surveysSubmitted;
+      c.surveyedVoters = r.surveyedVoters;
     }
     for (const r of canvasserAgg) {
       const c = byCampaign.get(String(r._id));
@@ -355,9 +387,13 @@ router.get('/campaign-rollup', async (req, res, next) => {
           households: c.households,
           homesKnocked: c.homesKnocked,
           knockedPct: c.households > 0 ? Math.round((c.homesKnocked / c.households) * 100) : 0,
-          doorDays: c.doorDays,
+          knocks: c.knocks,
+          surveyedKnocks: c.surveyedKnocks,
+          litKnocks: c.litKnocks,
           surveysSubmitted: c.surveysSubmitted,
+          surveyedVoters: c.surveyedVoters,
           litDropped: c.litDropped,
+          connectionRate: connectionRate(c),
           activeCanvassers: c.activeCanvassers,
           lastActivityAt: c.lastActivityAt,
           coverage: c.coverage,
@@ -365,14 +401,19 @@ router.get('/campaign-rollup', async (req, res, next) => {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    const sum = (key) => rows.reduce((acc, r) => acc + (r[key] || 0), 0);
     const cumulative = {
       campaigns: ids.length,
-      households: rows.reduce((acc, r) => acc + r.households, 0),
-      homesKnocked: rows.reduce((acc, r) => acc + r.homesKnocked, 0),
+      households: sum('households'),
+      homesKnocked: sum('homesKnocked'),
       knockedPct: 0,
-      doorDays: rows.reduce((acc, r) => acc + r.doorDays, 0),
-      surveysSubmitted: rows.reduce((acc, r) => acc + r.surveysSubmitted, 0),
-      litDropped: rows.reduce((acc, r) => acc + r.litDropped, 0),
+      knocks: sum('knocks'),
+      surveyedKnocks: sum('surveyedKnocks'),
+      litKnocks: sum('litKnocks'),
+      surveysSubmitted: sum('surveysSubmitted'),
+      surveyedVoters: sum('surveyedVoters'),
+      litDropped: sum('litDropped'),
+      connectionRate: 0,
       activeCanvassers: cumulativeCanvassers.length,
       lastActivityAt: rows.reduce(
         (acc, r) =>
@@ -384,6 +425,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
       cumulative.households > 0
         ? Math.round((cumulative.homesKnocked / cumulative.households) * 100)
         : 0;
+    cumulative.connectionRate = connectionRate(cumulative);
     cumulative.coverage = rows.reduce(
       (acc, r) => {
         for (const k of Object.keys(acc)) acc[k] += r.coverage?.[k] || 0;
@@ -445,6 +487,7 @@ router.get('/canvassers', async (req, res, next) => {
         byUser.set(key, {
           userId: key,
           surveysSubmitted: 0,
+          surveyKnocks: 0,
           notHome: 0,
           wrongAddress: 0,
           litDropped: 0,
@@ -467,6 +510,9 @@ router.get('/canvassers', async (req, res, next) => {
       if (row._id.actionType === 'not_home') u.notHome = row.count;
       else if (row._id.actionType === 'wrong_address') u.wrongAddress = row.count;
       else if (row._id.actionType === 'lit_dropped') u.litDropped = row.count;
+      // survey_submitted activities are deduped to one per (user, household, pass), so this
+      // is the canvasser's count of distinct surveyed door-passes (the rate's numerator).
+      else if (row._id.actionType === 'survey_submitted') u.surveyKnocks = row.count;
       if (row.lastAt && (!u.lastActivityAt || row.lastAt > u.lastActivityAt)) {
         u.lastActivityAt = row.lastAt;
       }
@@ -492,6 +538,10 @@ router.get('/canvassers', async (req, res, next) => {
     const rows = Array.from(byUser.values())
       .map((u) => {
         const info = userMap.get(u.userId);
+        // Billable knocks = this canvasser's distinct (household, pass) door interactions.
+        // surveyKnocks/litDropped are mutually exclusive by campaign type, so they're the
+        // completion-action numerator for the connection rate.
+        const knocks = u.notHome + u.wrongAddress + u.litDropped + u.surveyKnocks;
         return {
           userId: u.userId,
           firstName: info?.firstName || '',
@@ -499,18 +549,25 @@ router.get('/canvassers', async (req, res, next) => {
           email: info?.email || '',
           isActive: info?.isActive ?? false,
           surveysSubmitted: u.surveysSubmitted,
+          surveyKnocks: u.surveyKnocks,
           notHome: u.notHome,
           wrongAddress: u.wrongAddress,
           litDropped: u.litDropped,
-          homesKnocked:
-            u.surveysSubmitted + u.notHome + u.wrongAddress + u.litDropped,
+          knocks,
+          // homesKnocked kept as an alias of knocks for back-compat with un-updated callers.
+          homesKnocked: knocks,
+          connectionRate: connectionRate({
+            knocks,
+            surveyedKnocks: u.surveyKnocks,
+            litKnocks: u.litDropped,
+          }),
           firstActivityAt: u.firstActivityAt,
           lastActivityAt: u.lastActivityAt,
         };
       })
       .sort((a, b) => {
         if (b.surveysSubmitted !== a.surveysSubmitted) return b.surveysSubmitted - a.surveysSubmitted;
-        return b.homesKnocked - a.homesKnocked;
+        return b.knocks - a.knocks;
       });
 
     res.json(rows);
@@ -864,105 +921,121 @@ router.get('/voters-by-answer', async (req, res, next) => {
   }
 });
 
+// A house is an "overlap" only when 2+ DISTINCT canvassers knocked it within the SAME pass.
+// Once a house is knocked in a pass nobody should return until the next pass, so a single
+// canvasser revisiting — or different canvassers across DIFFERENT passes (a legitimate 2nd-pass
+// sweep of not-homes/undecideds) — is not an overlap. passId:null is its own bucket (legacy
+// data: 2+ distinct canvassers there still collide).
 router.get('/overlaps', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
     const cFilter = baseFilter(req);
-    const tz = await resolveDayTz(req);
     const dateRange = parseDateRange(req, 'timestamp');
     const match = {
       ...cFilter,
       ...dateRange,
-      actionType: { $in: ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'] },
+      actionType: { $in: KNOCK_ACTIONS },
     };
 
-    const overlaps = await CanvassActivity.aggregate([
+    const collisions = await CanvassActivity.aggregate([
       { $match: match },
       {
         $group: {
-          _id: '$householdId',
-          canvassers: {
-            $push: {
-              userId: '$userId',
-              actionType: '$actionType',
-              timestamp: '$timestamp',
-            },
+          _id: { householdId: '$householdId', passId: '$passId' },
+          canvassers: { $addToSet: '$userId' },
+          events: {
+            $push: { userId: '$userId', actionType: '$actionType', timestamp: '$timestamp' },
           },
-          count: { $sum: 1 },
         },
       },
-      { $match: { count: { $gt: 1 } } },
-      { $sort: { count: -1 } },
+      { $set: { distinctCount: { $size: '$canvassers' } } },
+      { $match: { distinctCount: { $gt: 1 } } },
+      { $sort: { distinctCount: -1 } },
       { $limit: 200 },
     ]);
 
-    if (!overlaps.length) {
+    if (!collisions.length) {
       return res.json({ overlaps: [], total: 0 });
     }
 
-    const householdIds = overlaps.map((o) => o._id);
+    const householdIds = [...new Set(collisions.map((c) => String(c._id.householdId)))];
+    const passIds = [
+      ...new Set(collisions.map((c) => c._id.passId).filter(Boolean).map(String)),
+    ];
     const userIds = [
-      ...new Set(
-        overlaps.flatMap((o) => o.canvassers.map((c) => String(c.userId)))
-      ),
-    ].map((id) => new mongoose.Types.ObjectId(id));
+      ...new Set(collisions.flatMap((c) => c.events.map((e) => String(e.userId)))),
+    ];
 
-    const [households, users] = await Promise.all([
+    const [households, users, passes] = await Promise.all([
       Household.find(
         { _id: { $in: householdIds }, organizationId: orgId },
         'addressLine1 addressLine2 city state zipCode location'
       ).lean(),
       User.find({ _id: { $in: userIds } }, 'firstName lastName email').lean(),
+      passIds.length
+        ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean()
+        : [],
     ]);
 
     const hMap = new Map(households.map((h) => [String(h._id), h]));
     const uMap = new Map(users.map((u) => [String(u._id), u]));
+    const pMap = new Map(passes.map((p) => [String(p._id), p]));
 
-    const result = overlaps
-      .map((o) => {
-        const h = hMap.get(String(o._id));
-        if (!h) return null;
-        // Same-day collision (decision 1b): a day on which >1 distinct canvasser
-        // hit this door (bucketed in the campaign's timezone).
-        const byDay = new Map();
-        for (const c of o.canvassers) {
-          const day = dayKey(c.timestamp, tz);
-          if (!byDay.has(day)) byDay.set(day, new Set());
-          byDay.get(day).add(String(c.userId));
-        }
-        const sameDayDates = [...byDay.entries()]
-          .filter(([, set]) => set.size > 1)
-          .map(([day]) => day)
-          .sort();
-        return {
-          sameDayCollision: sameDayDates.length > 0,
-          sameDayDates,
+    // Roll the (household, pass) collisions up into one card per household, listing each
+    // colliding pass and the canvassers who knocked that door in it.
+    const byHousehold = new Map();
+    for (const c of collisions) {
+      const h = hMap.get(String(c._id.householdId));
+      if (!h) continue;
+      const hid = String(c._id.householdId);
+      if (!byHousehold.has(hid)) {
+        byHousehold.set(hid, {
           household: {
-            id: String(h._id),
+            id: hid,
             addressLine1: h.addressLine1,
             addressLine2: h.addressLine2 || null,
             city: h.city,
             state: h.state,
             zipCode: h.zipCode,
           },
-          count: o.count,
-          canvassers: o.canvassers
-            .map((c) => {
-              const u = uMap.get(String(c.userId));
-              return {
-                userId: String(c.userId),
-                firstName: u?.firstName || '',
-                lastName: u?.lastName || '',
-                email: u?.email || '',
-                actionType: c.actionType,
-                timestamp: c.timestamp,
-              };
-            })
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
-        };
-      })
-      .filter(Boolean);
+          passes: [],
+          canvasserSet: new Set(),
+        });
+      }
+      const entry = byHousehold.get(hid);
+      const pass = c._id.passId ? pMap.get(String(c._id.passId)) : null;
+      const roundNumber = pass?.roundNumber ?? null;
+      entry.passes.push({
+        passId: c._id.passId ? String(c._id.passId) : null,
+        roundNumber,
+        roundLabel: pass ? `Round ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
+        canvassers: c.events
+          .map((e) => {
+            const u = uMap.get(String(e.userId));
+            return {
+              userId: String(e.userId),
+              firstName: u?.firstName || '',
+              lastName: u?.lastName || '',
+              email: u?.email || '',
+              actionType: e.actionType,
+              timestamp: e.timestamp,
+            };
+          })
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
+      });
+      for (const e of c.events) entry.canvasserSet.add(String(e.userId));
+    }
+
+    const result = [...byHousehold.values()]
+      .map((e) => ({
+        household: e.household,
+        passes: e.passes.sort(
+          (a, b) => (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity)
+        ),
+        totalCanvassers: e.canvasserSet.size,
+      }))
+      .sort((a, b) => b.totalCanvassers - a.totalCanvassers);
 
     res.json({ overlaps: result, total: result.length });
   } catch (err) {
@@ -1099,6 +1172,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
         byUser.set(key, {
           userId: key,
           surveysSubmitted: 0,
+          surveyKnocks: 0,
           notHome: 0,
           wrongAddress: 0,
           litDropped: 0,
@@ -1116,6 +1190,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       if (r._id.actionType === 'not_home') u.notHome = r.count;
       else if (r._id.actionType === 'wrong_address') u.wrongAddress = r.count;
       else if (r._id.actionType === 'lit_dropped') u.litDropped = r.count;
+      else if (r._id.actionType === 'survey_submitted') u.surveyKnocks = r.count;
       if (!u.firstActivityAt || r.firstAt < u.firstActivityAt) u.firstActivityAt = r.firstAt;
       if (!u.lastActivityAt || r.lastAt > u.lastActivityAt) u.lastActivityAt = r.lastAt;
     }
@@ -1134,16 +1209,21 @@ router.get('/canvassers.csv', async (req, res, next) => {
 
     const headers = [
       'Rank', 'First name', 'Last name', 'Email', 'Phone', 'Active',
-      'Houses knocked', 'Surveys', 'Lit drops', 'Not home', 'Wrong address',
-      'Connection rate %', 'Hours on doors', 'Days active', 'Doors/hr', 'Surveys/hr',
+      'Knocks', 'Surveys', 'Lit drops', 'Not home', 'Wrong address',
+      'Connection rate %', 'Hours on doors', 'Days active', 'Knocks/hr', 'Surveys/hr',
       'First activity', 'Last activity',
     ];
     const enriched = Array.from(byUser.values())
       .map((u) => {
         const info = userMap.get(u.userId) || {};
-        const homesKnocked = u.surveysSubmitted + u.notHome + u.wrongAddress + u.litDropped;
-        const connection = homesKnocked > 0 ? (u.surveysSubmitted / homesKnocked) * 100 : 0;
-        const doorsPerHour = u.hoursOnDoors > 0 ? homesKnocked / u.hoursOnDoors : 0;
+        // Billable knocks = distinct (household, pass). Connection = completion knocks / knocks.
+        const knocks = u.notHome + u.wrongAddress + u.litDropped + u.surveyKnocks;
+        const connection = connectionRate({
+          knocks,
+          surveyedKnocks: u.surveyKnocks,
+          litKnocks: u.litDropped,
+        });
+        const doorsPerHour = u.hoursOnDoors > 0 ? knocks / u.hoursOnDoors : 0;
         const surveysPerHour = u.hoursOnDoors > 0 ? u.surveysSubmitted / u.hoursOnDoors : 0;
         return {
           ...u,
@@ -1152,7 +1232,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
           email: info.email || '',
           phone: info.phone || '',
           isActive: info.isActive ?? false,
-          homesKnocked,
+          knocks,
           connection,
           doorsPerHour,
           surveysPerHour,
@@ -1160,7 +1240,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       })
       .sort(
         (a, b) =>
-          b.surveysSubmitted - a.surveysSubmitted || b.homesKnocked - a.homesKnocked
+          b.surveysSubmitted - a.surveysSubmitted || b.knocks - a.knocks
       );
 
     const rows = enriched.map((u, i) => [
@@ -1170,12 +1250,12 @@ router.get('/canvassers.csv', async (req, res, next) => {
       u.email,
       u.phone,
       u.isActive ? 'yes' : 'no',
-      u.homesKnocked,
+      u.knocks,
       u.surveysSubmitted,
       u.litDropped,
       u.notHome,
       u.wrongAddress,
-      Math.round(u.connection * 10) / 10,
+      u.connection,
       Math.round(u.hoursOnDoors * 100) / 100,
       u.daysActive,
       Math.round(u.doorsPerHour * 100) / 100,
@@ -1208,7 +1288,14 @@ router.get('/team-averages', async (req, res, next) => {
     const [perUserActivity, perUserSurveys, perUserHours] = await Promise.all([
       CanvassActivity.aggregate([
         { $match: { ...activityMatch, actionType: { $in: KNOCK_ACTIONS } } },
-        { $group: { _id: '$userId', homesKnocked: { $sum: 1 } } },
+        {
+          $group: {
+            _id: '$userId',
+            homesKnocked: { $sum: 1 },
+            surveyedKnocks: { $sum: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
+            litKnocks: { $sum: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
+          },
+        },
       ]),
       SurveyResponse.aggregate([
         { $match: surveyMatch },
@@ -1235,16 +1322,19 @@ router.get('/team-averages', async (req, res, next) => {
       ]),
     ]);
 
+    const blank = () => ({ homesKnocked: 0, completionKnocks: 0, surveysSubmitted: 0, hoursOnDoors: 0, daysActive: 0 });
     const byUser = new Map();
-    for (const r of perUserActivity) byUser.set(String(r._id), { homesKnocked: r.homesKnocked, surveysSubmitted: 0, hoursOnDoors: 0, daysActive: 0 });
+    for (const r of perUserActivity) {
+      byUser.set(String(r._id), { ...blank(), homesKnocked: r.homesKnocked, completionKnocks: r.surveyedKnocks + r.litKnocks });
+    }
     for (const r of perUserSurveys) {
       const k = String(r._id);
-      if (!byUser.has(k)) byUser.set(k, { homesKnocked: 0, surveysSubmitted: 0, hoursOnDoors: 0, daysActive: 0 });
+      if (!byUser.has(k)) byUser.set(k, blank());
       byUser.get(k).surveysSubmitted = r.surveysSubmitted;
     }
     for (const r of perUserHours) {
       const k = String(r._id);
-      if (!byUser.has(k)) byUser.set(k, { homesKnocked: 0, surveysSubmitted: 0, hoursOnDoors: 0, daysActive: 0 });
+      if (!byUser.has(k)) byUser.set(k, blank());
       const u = byUser.get(k);
       u.hoursOnDoors = r.hoursOnDoors;
       u.daysActive = r.daysActive;
@@ -1280,7 +1370,7 @@ router.get('/team-averages', async (req, res, next) => {
         surveysPerHour:
           Math.round(avgRate('surveysSubmitted', 'hoursOnDoors') * 100) / 100,
         connectionRatePct:
-          Math.round(avgRate('surveysSubmitted', 'homesKnocked') * 1000) / 10,
+          Math.round(avgRate('completionKnocks', 'homesKnocked') * 1000) / 10,
       },
     });
   } catch (err) {
@@ -1457,7 +1547,12 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
     const surveysPerHour = hoursOnDoors > 0 ? surveysSubmitted / hoursOnDoors : 0;
     const avgMinutesPerDoor =
       homesKnocked > 0 && hoursOnDoors > 0 ? (hoursOnDoors * 60) / homesKnocked : 0;
-    const connectionRatePct = homesKnocked > 0 ? (surveysSubmitted / homesKnocked) * 100 : 0;
+    // Of this canvasser's knocks, how many landed a completion action (survey/lit). The
+    // numerator is door-pass-level (survey_submitted/lit_dropped activities), so it caps at 100%.
+    const connectionRatePct =
+      homesKnocked > 0
+        ? ((actions.survey_submitted + actions.lit_dropped) / homesKnocked) * 100
+        : 0;
 
     res.json({
       user: {
@@ -1559,6 +1654,7 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
         byDay.set(date, {
           date,
           surveysSubmitted: 0,
+          surveyKnocks: 0,
           notHome: 0,
           wrongAddress: 0,
           litDropped: 0,
@@ -1577,9 +1673,7 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
       else if (at === 'wrong_address') d.wrongAddress = r.count;
       else if (at === 'lit_dropped') d.litDropped = r.count;
       else if (at === 'note_added') d.notesAdded = r.count;
-      else if (at === 'survey_submitted') {
-        // homesKnocked from activities side will use the agg below
-      }
+      else if (at === 'survey_submitted') d.surveyKnocks = r.count;
       if (KNOCK_ACTIONS.includes(at)) d.homesKnocked += r.count;
       if (!d.firstActivityAt || r.first < d.firstActivityAt) d.firstActivityAt = r.first;
       if (!d.lastActivityAt || r.last > d.lastActivityAt) d.lastActivityAt = r.last;
@@ -1596,7 +1690,9 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
             ? (new Date(d.lastActivityAt) - new Date(d.firstActivityAt)) / 3600000
             : 0;
         const connectionRatePct =
-          d.homesKnocked > 0 ? (d.surveysSubmitted / d.homesKnocked) * 100 : 0;
+          d.homesKnocked > 0
+            ? ((d.surveyKnocks + d.litDropped) / d.homesKnocked) * 100
+            : 0;
         return {
           ...d,
           hoursOnDoors: Math.round(hoursOnDoors * 100) / 100,

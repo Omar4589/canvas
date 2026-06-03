@@ -1,3 +1,5 @@
+import { ratePct } from '../lib/rates.js';
+
 function formatDate(d) {
   if (!d) return '—';
   const date = new Date(d);
@@ -29,7 +31,8 @@ export default function CanvasserTable({ rows = [], onRowClick }) {
             <th className="px-4 py-2 text-right font-medium">Lit drops</th>
             <th className="px-4 py-2 text-right font-medium">Not home</th>
             <th className="px-4 py-2 text-right font-medium">Wrong addr</th>
-            <th className="px-4 py-2 text-right font-medium">Homes knocked</th>
+            <th className="px-4 py-2 text-right font-medium">Knocks</th>
+            <th className="px-4 py-2 text-right font-medium">Connection</th>
             <th className="px-4 py-2 text-right font-medium">Last activity</th>
           </tr>
         </thead>
@@ -57,7 +60,12 @@ export default function CanvasserTable({ rows = [], onRowClick }) {
               <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.litDropped || 0}</td>
               <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.notHome}</td>
               <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.wrongAddress}</td>
-              <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.homesKnocked}</td>
+              <td className="px-4 py-2 text-right tabular-nums font-semibold text-gray-900">
+                {r.knocks ?? r.homesKnocked}
+              </td>
+              <td className="px-4 py-2 text-right tabular-nums text-gray-700">
+                {r.connectionRate != null ? ratePct(r.connectionRate) : '—'}
+              </td>
               <td className="px-4 py-2 text-right text-xs text-gray-500">
                 {formatDate(r.lastActivityAt)}
               </td>

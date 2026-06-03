@@ -97,7 +97,7 @@ export default function AdminOverlaps() {
       </View>
 
       <Text style={styles.intro}>
-        Houses recorded by 2+ canvassers in this range.
+        Houses knocked by 2+ canvassers within the same pass.
       </Text>
 
       <ScrollView
@@ -157,38 +157,43 @@ export default function AdminOverlaps() {
                     </Text>
                   </View>
                   <View style={styles.countBadge}>
-                    <Text style={styles.countBadgeText}>{o.count}×</Text>
+                    <Text style={styles.countBadgeText}>{o.totalCanvassers} canvassers</Text>
                   </View>
                 </View>
 
-                <View style={styles.canvassers}>
-                  {o.canvassers.map((c, i) => (
-                    <View key={`${c.userId}-${i}`} style={styles.canvasserRow}>
-                      <View
-                        style={[
-                          styles.actionDot,
-                          { backgroundColor: actionColor(c.actionType) },
-                        ]}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <View style={styles.canvasserTopLine}>
-                          <Text style={styles.canvasserName} numberOfLines={1}>
-                            {c.firstName} {c.lastName}
-                          </Text>
-                          <Text style={styles.canvasserAction}>
-                            {actionLabel(c.actionType)}
-                          </Text>
-                          <Text style={styles.canvasserTimeAgo}>
-                            {timeAgo(c.timestamp)}
-                          </Text>
+                {o.passes.map((p) => (
+                  <View key={p.passId || 'none'} style={styles.passBlock}>
+                    <Text style={styles.passLabel}>{p.roundLabel}</Text>
+                    <View style={styles.canvassers}>
+                      {p.canvassers.map((c, i) => (
+                        <View key={`${c.userId}-${i}`} style={styles.canvasserRow}>
+                          <View
+                            style={[
+                              styles.actionDot,
+                              { backgroundColor: actionColor(c.actionType) },
+                            ]}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <View style={styles.canvasserTopLine}>
+                              <Text style={styles.canvasserName} numberOfLines={1}>
+                                {c.firstName} {c.lastName}
+                              </Text>
+                              <Text style={styles.canvasserAction}>
+                                {actionLabel(c.actionType)}
+                              </Text>
+                              <Text style={styles.canvasserTimeAgo}>
+                                {timeAgo(c.timestamp)}
+                              </Text>
+                            </View>
+                            <Text style={styles.canvasserTimestamp}>
+                              {formatExact(c.timestamp)}
+                            </Text>
+                          </View>
                         </View>
-                        <Text style={styles.canvasserTimestamp}>
-                          {formatExact(c.timestamp)}
-                        </Text>
-                      </View>
+                      ))}
                     </View>
-                  ))}
-                </View>
+                  </View>
+                ))}
               </View>
             ))}
           </>
@@ -292,6 +297,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 
+  passBlock: { marginTop: spacing.sm },
+  passLabel: {
+    ...type.caption,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
   canvassers: {
     marginTop: spacing.sm,
     paddingTop: spacing.sm,

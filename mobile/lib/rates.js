@@ -13,6 +13,18 @@ export function getConnectionRate(numerator, denominator) {
   return { value: `${pct}%`, level, pct };
 }
 
+// Same tiered shape, built from a precomputed percentage (the server's connectionRate,
+// which is already "completion knocks ÷ knocks" and capped at 100). Returns null when the
+// server has no rate yet (null), so we show "—" rather than a misleading 0%.
+export function rateFromPct(pct) {
+  if (pct == null) return null;
+  let level;
+  if (pct >= 20) level = 'good';
+  else if (pct >= 10) level = 'caution';
+  else level = 'low';
+  return { value: `${pct}%`, level, pct };
+}
+
 export const RATE_COLORS = {
   good: { bg: colors.successBg, fg: colors.success },
   caution: { bg: colors.warnBg, fg: '#92400E' },

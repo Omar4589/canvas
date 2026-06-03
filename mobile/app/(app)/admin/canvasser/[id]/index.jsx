@@ -14,7 +14,7 @@ import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../../lib/dateRanges';
 import { formatRange, timeAgo } from '../../../../../lib/datetime';
-import { getConnectionRate } from '../../../../../lib/rates';
+import { rateFromPct } from '../../../../../lib/rates';
 import { colors, radius, spacing, type, shadow } from '../../../../../lib/theme';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import KpiGrid from '../../../../../components/KpiGrid';
@@ -108,12 +108,13 @@ export default function CanvasserOverview() {
   const kpiTiles = useMemo(() => {
     if (!s) return [];
     const k = s.kpi;
-    const cr = getConnectionRate(k.surveysSubmitted, k.homesKnocked);
+    // Server-computed connection rate (completion knocks ÷ knocks, capped at 100).
+    const cr = rateFromPct(k.connectionRatePct);
     const primaryLabel = isLitDrop ? 'Lit drops' : 'Surveys';
     const primaryValue = isLitDrop ? k.litDropped : k.surveysSubmitted;
     return [
       {
-        label: 'Houses knocked',
+        label: 'Knocks',
         value: (k.homesKnocked || 0).toLocaleString(),
         delta: team ? delta(k.homesKnocked, team.homesKnocked) : null,
       },
@@ -139,7 +140,7 @@ export default function CanvasserOverview() {
         delta: team ? delta(k.hoursOnDoors, team.hoursOnDoors, 'h') : null,
       },
       {
-        label: 'Doors / hour',
+        label: 'Knocks / hour',
         value: (k.doorsPerHour || 0).toFixed(1),
         delta: team ? delta(k.doorsPerHour, team.doorsPerHour) : null,
       },
@@ -272,7 +273,7 @@ export default function CanvasserOverview() {
             title="Best day"
             value={
               s.highlights.bestDay
-                ? `${s.highlights.bestDay.homesKnocked} doors`
+                ? `${s.highlights.bestDay.homesKnocked} knocks`
                 : '—'
             }
             sub={
@@ -332,7 +333,7 @@ export default function CanvasserOverview() {
                   {d.hoursOnDoors.toFixed(1)}h
                 </Text>
               </View>
-              <Text style={styles.dayDoors}>{d.homesKnocked} doors</Text>
+              <Text style={styles.dayDoors}>{d.homesKnocked} knocks</Text>
               <Text style={styles.chev}>›</Text>
             </Pressable>
           ))
