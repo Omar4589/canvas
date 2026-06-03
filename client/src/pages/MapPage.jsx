@@ -142,6 +142,14 @@ function householdsToGeoJSON(households) {
   };
 }
 
+function initialsFor(canvasser) {
+  if (!canvasser) return '';
+  const f = (canvasser.firstName || '').trim();
+  const l = (canvasser.lastName || '').trim();
+  const initials = `${f[0] || ''}${l[0] || ''}`.toUpperCase();
+  return initials || (f[0] || l[0] || '').toUpperCase();
+}
+
 function activitiesToPingsGeoJSON(activities) {
   return {
     type: 'FeatureCollection',
@@ -156,6 +164,7 @@ function activitiesToPingsGeoJSON(activities) {
         properties: {
           activityId: a.id,
           actionType: a.actionType,
+          initials: initialsFor(a.canvasser),
         },
       })),
   };
@@ -345,9 +354,10 @@ export default function MapPage() {
           paint: {
             'circle-radius': [
               'interpolate', ['linear'], ['zoom'],
-              10, 3,
-              14, 5,
-              17, 7,
+              10, 7,
+              13, 10,
+              16, 13,
+              18, 15,
             ],
             'circle-color': [
               'match', ['get', 'actionType'],
@@ -359,6 +369,34 @@ export default function MapPage() {
             ],
             'circle-stroke-color': '#ffffff',
             'circle-stroke-width': 1.5,
+          },
+        },
+        'households-symbols'
+      );
+
+      // Canvasser initials over each ping, so admins can see who logged it at a
+      // glance. Shares the canvasser-pings source; empty initials render nothing.
+      map.addLayer(
+        {
+          id: 'canvasser-labels',
+          type: 'symbol',
+          source: 'canvasser-pings',
+          layout: {
+            'text-field': ['get', 'initials'],
+            'text-size': [
+              'interpolate', ['linear'], ['zoom'],
+              10, 8,
+              13, 11,
+              16, 13,
+            ],
+            'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+            'text-allow-overlap': true,
+            'text-ignore-placement': true,
+          },
+          paint: {
+            'text-color': '#ffffff',
+            'text-halo-color': 'rgba(0, 0, 0, 0.35)',
+            'text-halo-width': 0.8,
           },
         },
         'households-symbols'
@@ -427,11 +465,10 @@ export default function MapPage() {
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const vis = showCanvasserPins ? 'visible' : 'none';
-    if (mapRef.current.getLayer('canvasser-pings')) {
-      mapRef.current.setLayoutProperty('canvasser-pings', 'visibility', vis);
-    }
-    if (mapRef.current.getLayer('canvasser-lines')) {
-      mapRef.current.setLayoutProperty('canvasser-lines', 'visibility', vis);
+    for (const id of ['canvasser-pings', 'canvasser-lines', 'canvasser-labels']) {
+      if (mapRef.current.getLayer(id)) {
+        mapRef.current.setLayoutProperty(id, 'visibility', vis);
+      }
     }
   }, [showCanvasserPins, mapReady]);
 

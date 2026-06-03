@@ -91,7 +91,8 @@ export default function MapFilters({
           <span className="text-gray-800">Show canvasser locations</span>
         </label>
         <div className="mt-1 text-xs text-gray-500">
-          Where each survey, not-home, or wrong-address was submitted from.
+          Where each survey, not-home, or wrong-address was submitted from, labeled
+          with the canvasser&apos;s initials.
         </div>
       </div>
 
