@@ -44,11 +44,17 @@ const voterSchema = new mongoose.Schema(
       default: 'not_surveyed',
       index: true,
     },
+
+    // Admin edit stamp (the voter directory lets an admin correct voter fields).
+    lastEditedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    lastEditedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
 voterSchema.index({ householdId: 1, surveyStatus: 1 });
+// Paginated, name-sorted org-wide directory listing.
+voterSchema.index({ organizationId: 1, lastName: 1, firstName: 1 });
 // Voter identity is scoped per-org (decision 13): one org's import never
 // clobbers another's. Replaces the old global-unique index on stateVoterId.
 voterSchema.index({ organizationId: 1, stateVoterId: 1 }, { unique: true });

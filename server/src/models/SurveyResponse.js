@@ -52,6 +52,10 @@ const surveyResponseSchema = new mongoose.Schema(
     // Pass/turf tags — metadata only (null = pre-turf history).
     passId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', default: null },
     turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },
+
+    // Audit trail for in-place edits from the admin voter profile (null = never edited).
+    editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    editedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

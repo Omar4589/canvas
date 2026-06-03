@@ -6,6 +6,7 @@ import { parseAndValidate, applyImport } from './csvImporter.js';
 import { recomputeCutAttributesForCampaign } from '../turf/computeCutAttributes.js';
 import { Household } from '../../models/Household.js';
 import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
+import { reapplyVotedLists } from '../voted/reapplyVotedLists.js';
 
 // BullMQ processor for the `import-queue`. Idempotent: household upserts on
 // {campaignId, normalizedAddress} and voter upserts on {organizationId,
@@ -57,10 +58,15 @@ export async function processImportJob(job) {
     // flags) so attribute-cut turf generation can group by them.
     await recomputeCutAttributesForCampaign(campaign._id);
 
-    // Early voting: adding a new (un-voted) voter to a door that had been
-    // fully-voted must re-open it. Only the currently-dropped doors can flip.
+    // Early voting (sticky): first re-apply prior voted-list ids to voters that have only now
+    // been imported, then recompute fullyVoted for those doors plus any currently-dropped door.
+    // Net effect: a genuinely-new un-voted voter re-opens its door, but a voter who was already on
+    // a voted list stays marked — so the door doesn't wrongly re-open, and brand-new all-voted
+    // households drop.
+    const { householdIds: reappliedHh } = await reapplyVotedLists(campaign._id);
     const droppedDoors = await Household.find({ campaignId: campaign._id, fullyVoted: true }).distinct('_id');
-    if (droppedDoors.length) await recomputeFullyVoted(campaign._id, droppedDoors);
+    const toRecompute = [...new Set([...droppedDoors.map(String), ...reappliedHh])];
+    if (toRecompute.length) await recomputeFullyVoted(campaign._id, toRecompute);
 
     await ImportJob.updateOne(
       { _id: importJobId },

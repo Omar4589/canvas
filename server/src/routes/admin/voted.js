@@ -9,6 +9,7 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { VotedUpload } from '../../models/VotedUpload.js';
+import { VotedPendingId } from '../../models/VotedPendingId.js';
 import { suggestMapping } from '../../services/import/canonicalFields.js';
 import { recomputeFullyVoted } from '../../services/voted/recomputeFullyVoted.js';
 
@@ -198,6 +199,25 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
 
     await VotedUpload.updateOne({ _id: uploadDoc._id }, { $set: { matched: newly.length, doorsDropped } });
 
+    // Sticky early voting: remember ids that didn't match yet (the voter isn't in the universe),
+    // so a later universe import can mark them; and clear any stale pending ids for voters that
+    // DID match (they're present now).
+    if (m.notFoundIds.length) {
+      const pendingDocs = m.notFoundIds.map((stateVoterId) => ({
+        organizationId: req.campaign.organizationId,
+        campaignId: req.campaign._id,
+        uploadId: uploadDoc._id,
+        stateVoterId,
+      }));
+      for (let i = 0; i < pendingDocs.length; i += 2000) {
+        await VotedPendingId.insertMany(pendingDocs.slice(i, i + 2000), { ordered: false });
+      }
+    }
+    const matchedSvids = m.inCampaign.map((v) => v.stateVoterId);
+    if (matchedSvids.length) {
+      await VotedPendingId.deleteMany({ campaignId: req.campaign._id, stateVoterId: { $in: matchedSvids } });
+    }
+
     res.json({
       uploadId: String(uploadDoc._id),
       matched: m.inCampaign.length,
@@ -243,6 +263,8 @@ router.post('/undo', async (req, res, next) => {
     const rows = await VotedVoter.find({ uploadId: uploadDoc._id }, { householdId: 1 }).lean();
     const affected = [...new Set(rows.map((r) => String(r.householdId)))];
     await VotedVoter.deleteMany({ uploadId: uploadDoc._id });
+    // Drop this upload's not-yet-matched ids too, so an undone list never re-applies on import.
+    await VotedPendingId.deleteMany({ uploadId: uploadDoc._id });
     await recomputeFullyVoted(req.campaign._id, affected);
     await VotedUpload.updateOne({ _id: uploadDoc._id }, { $set: { undone: true, undoneAt: new Date() } });
 

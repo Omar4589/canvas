@@ -83,9 +83,12 @@ End to end, from upload to what everyone sees:
    map and book counts; still-open doors show a ✓ on voted residents.
 5. **Admin view updates.** Reports move those doors into the **Voted** coverage segment (out of
    `unknocked`); admin book/turf lists show the live eligible door count.
-6. **Corrections.** Undo a whole upload (`/voted/undo`) or un-mark one voter (`/voted/unmark`); both
-   call `recomputeFullyVoted` to re-open doors as needed. Importing a new un-voted voter into a
-   dropped door also re-opens it.
+6. **Re-import the universe (sticky).** If you later import more voters, anyone who was on a prior
+   (non-undone) voted list is **automatically re-marked** when they land — so doors don't wrongly
+   re-open and brand-new all-voted households drop. A genuinely new, *un-voted* voter added to a
+   dropped door correctly re-opens it.
+7. **Corrections.** Undo a whole upload (`/voted/undo`) or un-mark one voter (`/voted/unmark`); both
+   call `recomputeFullyVoted` to re-open doors as needed.
 
 ---
 
@@ -98,6 +101,7 @@ End to end, from upload to what everyone sees:
 | `VotedUpload` | [models/VotedUpload.js](../server/src/models/VotedUpload.js) | Audit record + **unit of undo** for one CSV: `organizationId`, `campaignId`, `fileName`, `uploadedBy`, `totalRows`, `matched` (newly marked), `alreadyVoted`, `notFound`, `doorsDropped`, `undone`/`undoneAt`. Index `{campaignId, createdAt:-1}`. |
 | `VotedVoter` | [models/VotedVoter.js](../server/src/models/VotedVoter.js) | The mark — **one row per voter per campaign**: `organizationId`, `campaignId`, `voterId`, `householdId`, `stateVoterId`, `voteMethod`, `votedAt`, `uploadId`. **Unique index `{campaignId, voterId}`**; `uploadId` indexed for undo. |
 | `Household.fullyVoted` | [models/Household.js:65](../server/src/models/Household.js#L65) | Derived `Boolean` (indexed, default `false`): everyone at this address has voted → the door drops. |
+| `VotedPendingId` | [models/VotedPendingId.js](../server/src/models/VotedPendingId.js) | A `stateVoterId` from an upload that didn't match a voter **yet** (voter not in the universe): `organizationId`, `campaignId`, `uploadId`, `stateVoterId`. Index `{campaignId, stateVoterId}`. Makes early voting "sticky" — graduates to a `VotedVoter` when the voter is later imported; deleted on graduation or undo. |
 
 Notes:
 - **There is no `voted` field on `Voter`.** The mark lives in `VotedVoter` precisely because it's
@@ -123,12 +127,18 @@ Notes:
    this campaign)`. Bulk, chunked at 2000.
 5. **Import** = create `VotedUpload` → bulk **upsert** `VotedVoter` (`$setOnInsert`, so re-marking
    is idempotent) → `recomputeFullyVoted(affected)` → write `matched`/`doorsDropped`
-   (`afterFully − beforeFully`) back to the upload.
-6. **Undo** = find `VotedVoter` rows by `uploadId` → `deleteMany` → `recomputeFullyVoted(affected)`
-   → set `undone:true, undoneAt`. Soft on the upload, hard on its rows.
-7. **Re-open on regular import** — [importProcessor.js:62-63](../server/src/services/import/importProcessor.js#L62)
-   recomputes `fullyVoted` for currently-dropped doors after a normal CSV import, so **adding a new
-   un-voted voter to a dropped household re-opens it**.
+   (`afterFully − beforeFully`) back to the upload → persist every **unmatched** id as a
+   `VotedPendingId` (and clear stale pending ids for ids that matched this time).
+6. **Undo** = find `VotedVoter` rows by `uploadId` → `deleteMany` → `deleteMany VotedPendingId` by
+   `uploadId` → `recomputeFullyVoted(affected)` → set `undone:true, undoneAt`. Soft on the upload,
+   hard on its rows + pending ids.
+7. **Sticky re-apply on regular import** — [importProcessor.js](../server/src/services/import/importProcessor.js)
+   calls [`reapplyVotedLists(campaignId)`](../server/src/services/voted/reapplyVotedLists.js): any
+   `VotedPendingId` (from a non-undone upload) whose voter has **now** been imported graduates into a
+   `VotedVoter` (pending row deleted). Then `recomputeFullyVoted` runs over the union of those doors
+   and the currently-dropped doors. So a voter who was on a prior list stays marked (the door doesn't
+   wrongly re-open, and a brand-new all-voted household drops), while a **genuinely new, un-voted**
+   voter still re-opens its door.
 
 ## C. Endpoint reference
 
@@ -183,15 +193,20 @@ Resolved (kept here so the history is clear):
   (re-opening the door if needed), in addition to whole-upload undo.
 - **Unmatched rows are downloadable.** Preview/import return `notFoundIds`; the Early Voting page
   offers a "Download unmatched" CSV so the admin can fix the file and re-upload.
+- **Early voting is sticky across universe re-imports.** Unmatched ids are persisted as
+  `VotedPendingId`; a regular import graduates any that now match (`reapplyVotedLists`), so a voter
+  who was on a prior list and is imported later is still marked — the door doesn't wrongly re-open,
+  and a brand-new all-voted household drops. Only a genuinely **new, un-voted** voter re-opens a door.
+  Undoing an upload also clears its pending ids so they never re-apply.
 
 Still true:
 
 - **Matching is `stateVoterId`-only.** Voters without a `stateVoterId`, or a CSV with no detectable
-  Voter ID column, won't match (they land in `notFound` → download & fix).
+  Voter ID column, won't match (they land in `notFound` → download & fix). Sticky re-apply also keys
+  on `stateVoterId`.
 - **Undo is per-upload and soft.** A voter marked by two uploads stays voted until both are undone
   (or use per-voter unmark). The `VotedUpload` is flagged `undone`, not deleted.
-- **Re-opening on import.** Importing new voters into a fully-voted household flips it back open
-  automatically (the new voter hasn't voted) — expected, but worth knowing when reconciling counts.
 - **Campaign-scoped.** Uploading to the wrong campaign marks no one useful (matches are filtered to
   that campaign's households); re-upload to the correct campaign.
+- **`voteMethod` is unused.** The schema field exists but the CSV import doesn't populate it.
 - **`voteMethod` is unused.** The schema field exists but the CSV import doesn't populate it.

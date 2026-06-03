@@ -9,6 +9,8 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
 const EarlyVotingPage = lazy(() => import('./pages/EarlyVotingPage.jsx'));
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
+const VotersPage = lazy(() => import('./pages/VotersPage.jsx'));
+const VoterDetailPage = lazy(() => import('./pages/VoterDetailPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
@@ -70,6 +72,8 @@ export default function App() {
           <Route path="/import" element={<ImportPage />} />
           <Route path="/early-voting" element={<EarlyVotingPage />} />
           <Route path="/users" element={<UsersPage />} />
+          <Route path="/voters" element={<VotersPage />} />
+          <Route path="/voters/:voterId" element={<VoterDetailPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
           <Route path="/campaigns" element={<CampaignsPage />} />
         </Route>

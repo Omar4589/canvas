@@ -200,9 +200,14 @@ export default function BooksScreen() {
       <SafeAreaView edges={['top']} style={styles.headerWrap} pointerEvents="box-none">
         <View style={styles.header}>
           <Logo size={24} />
-          <Pressable onPress={switchCampaign} hitSlop={8}>
-            <Text style={styles.switch}>Switch campaign</Text>
-          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <Pressable onPress={() => router.push('/(app)/voters')} hitSlop={8}>
+              <Text style={styles.switch}>Voters</Text>
+            </Pressable>
+            <Pressable onPress={switchCampaign} hitSlop={8}>
+              <Text style={styles.switch}>Switch campaign</Text>
+            </Pressable>
+          </View>
         </View>
         <View style={styles.hint}>
           <Text style={styles.hintText}>

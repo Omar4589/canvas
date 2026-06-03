@@ -13,6 +13,7 @@ import adminQueuesRouter from './admin/queues.js';
 import adminTurfsRouter from './admin/turfs.js';
 import adminWalkListsRouter from './admin/walklists.js';
 import adminVotedRouter from './admin/voted.js';
+import adminVotersRouter from './admin/voters.js';
 import adminPassesRouter from './admin/passes.js';
 import adminTurfAssignmentsRouter from './admin/turfAssignments.js';
 import superAdminOrganizationsRouter from './superAdmin/organizations.js';
@@ -21,6 +22,7 @@ import superAdminPlatformRouter from './superAdmin/platform.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
 import mobileMeRouter from './mobile/me.js';
+import mobileVotersRouter from './mobile/voters.js';
 
 const router = Router();
 
@@ -40,6 +42,7 @@ router.use('/admin/reports', adminReportsRouter);
 router.use('/admin/surveys', adminSurveysRouter);
 router.use('/admin/config', adminConfigRouter);
 router.use('/admin/households', adminHouseholdsRouter);
+router.use('/admin/voters', adminVotersRouter);
 router.use('/admin/campaigns', adminCampaignsRouter);
 router.use('/admin/campaigns/:campaignId/assignments', adminAssignmentsRouter);
 router.use('/admin/campaigns/:campaignId/walklists', adminWalkListsRouter);
@@ -52,6 +55,7 @@ router.use('/admin/queues', adminQueuesRouter);
 
 router.use('/mobile', mobileBootstrapRouter);
 router.use('/mobile', mobileCanvassRouter);
+router.use('/mobile', mobileVotersRouter);
 router.use('/mobile/me', mobileMeRouter);
 
 export default router;

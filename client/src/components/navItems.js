@@ -10,6 +10,7 @@ export const NAV = [
   { to: '/import', label: 'CSV Import' },
   { to: '/early-voting', label: 'Early Voting' },
   { to: '/users', label: 'Users' },
+  { to: '/voters', label: 'Voters' },
   { to: '/surveys', label: 'Surveys' },
 ];
 

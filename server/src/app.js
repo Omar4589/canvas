@@ -58,6 +58,20 @@ export function createApp() {
   // Serve the built React admin dashboard from the same origin in production.
   // Heroku's heroku-postbuild produces client/dist before the server boots.
   if (isProd && HAS_CLIENT_DIST) {
+    // The API and web app share one dyno, so api.doorline.app would otherwise
+    // also serve the SPA. Keep that host API-only: real /api/* requests are
+    // handled above (and unknown /api/* still 404 via notFound below), while any
+    // web path is redirected to the dashboard. API_HOST (e.g. 'api.doorline.app')
+    // is read from config so nothing is hardcoded.
+    const API_HOST = process.env.API_HOST;
+    if (API_HOST) {
+      app.use((req, res, next) => {
+        if (req.hostname === API_HOST && !req.path.startsWith('/api')) {
+          return res.redirect(301, `https://doorline.app${req.originalUrl}`);
+        }
+        next();
+      });
+    }
     app.use(express.static(CLIENT_DIST));
     // Unknown /api paths still 404; everything else falls back to the SPA.
     app.use('/api', notFound);
