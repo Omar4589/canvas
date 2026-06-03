@@ -10,10 +10,12 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
+import { useMapStyle } from '../../../lib/mapStyles';
+import MapStyleControl from '../../../components/MapStyleControl';
 import CampaignChip from '../../../components/CampaignChip';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { timeAgo, formatExact } from '../../../lib/datetime';
@@ -92,6 +94,8 @@ function formatAnswer(answer) {
 
 export default function AdminMap() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { styleId, styleURL, setStyle } = useMapStyle();
   const cameraRef = useRef(null);
   const [campaign, setCampaign] = useState(undefined);
   const [showPings, setShowPings] = useState(false);
@@ -205,14 +209,15 @@ export default function AdminMap() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Mapbox.MapView style={{ flex: 1 }} styleURL={Mapbox.StyleURL.Street}>
+      <Mapbox.MapView style={{ flex: 1 }} styleURL={styleURL}>
         <Mapbox.Camera
           ref={cameraRef}
           defaultSettings={{ centerCoordinate: initialCenter, zoomLevel: 12 }}
           animationMode="flyTo"
           animationDuration={500}
         />
-        <Mapbox.UserLocation visible androidRenderMode="compass" />
+        {/* Plain location dot (no compass) to avoid continuous magnetometer use. */}
+        <Mapbox.UserLocation visible />
 
         <Mapbox.Images
           images={{
@@ -305,6 +310,15 @@ export default function AdminMap() {
           </View>
         </View>
       </SafeAreaView>
+
+      {/* Base-map picker, bottom-right. Rendered before the selection sheet so it
+          tucks behind it when a household is open. */}
+      <MapStyleControl
+        value={styleId}
+        onChange={setStyle}
+        menuDirection="up"
+        style={{ position: 'absolute', right: spacing.lg, bottom: insets.bottom + spacing.lg }}
+      />
 
       {selected && (
         <SafeAreaView edges={['bottom']} style={styles.sheet}>

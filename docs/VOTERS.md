@@ -7,7 +7,8 @@ about them.
 - **Part 2 — Technical reference** is for developers (and Claude): models, endpoints, the audit
   fields, and the components.
 
-Related: [EARLY_VOTING.md](EARLY_VOTING.md) (voted status), [METRICS.md](METRICS.md).
+Related: [EARLY_VOTING.md](EARLY_VOTING.md) (voted status), [METRICS.md](METRICS.md),
+[SURVEYS.md](SURVEYS.md) (the surveys whose responses appear on a voter's profile).
 
 ---
 

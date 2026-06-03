@@ -14,9 +14,21 @@ export async function getCurrentLocation() {
     err.code = 'PERMISSION_DENIED';
     throw err;
   }
-  const pos = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.High,
+  // Reuse a recent OS-level fix when one is fresh and accurate enough, so
+  // back-to-back actions at the same door (knock + survey + lit-drop) don't
+  // each power up the GPS radio. The requiredAccuracy gate keeps audit stamps
+  // at door-level precision; if no good-enough recent fix exists we fall back
+  // to a fresh high-accuracy read. (The Mapbox puck keeps location warm while
+  // the map is open, so the cached fix is usually very recent.)
+  const recent = await Location.getLastKnownPositionAsync({
+    maxAge: 15000, // only reuse a fix from the last 15s
+    requiredAccuracy: 20, // ...and only if it was accurate to ~20m or better
   });
+  const pos =
+    recent ??
+    (await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+    }));
   return {
     lat: pos.coords.latitude,
     lng: pos.coords.longitude,

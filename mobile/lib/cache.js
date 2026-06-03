@@ -6,6 +6,7 @@ const USER_KEY = 'canvass.currentUser';
 const MEMBERSHIPS_KEY = 'canvass.memberships';
 const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
 const SELECTED_BOOKS_KEY = 'canvass.selectedBooks';
+const MAP_STYLE_KEY = 'canvass.mapStyle';
 
 export async function saveBootstrap(data) {
   await AsyncStorage.setItem(KEY, JSON.stringify({ ...data, cachedAt: new Date().toISOString() }));
@@ -138,4 +139,20 @@ export async function loadSelectedBooks(campaignId) {
 
 export async function clearSelectedBooks() {
   await AsyncStorage.removeItem(SELECTED_BOOKS_KEY);
+}
+
+// Which base map style the user last picked (id from lib/mapStyles). Persisted
+// globally (not per-campaign) so the map opens on their preferred style. Street
+// is the default; satellite/hybrid are heavier on data + battery, so they only
+// apply when the user opts in.
+export async function saveMapStyle(styleId) {
+  if (!styleId) {
+    await AsyncStorage.removeItem(MAP_STYLE_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(MAP_STYLE_KEY, String(styleId));
+}
+
+export async function loadMapStyle() {
+  return AsyncStorage.getItem(MAP_STYLE_KEY);
 }

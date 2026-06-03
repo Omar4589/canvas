@@ -10,6 +10,9 @@ dashboards (web and mobile show the same set), and for the duplicate-knock ("ove
 
 The implementation lives in [`server/src/routes/admin/reports.js`](../server/src/routes/admin/reports.js).
 
+Related: [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (a "pass" is the billing unit; coverage vs. passes),
+[SURVEYS.md](SURVEYS.md) (what "Surveys" / "Surveyed voters" count).
+
 ---
 
 # Part 1 — For everyone

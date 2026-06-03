@@ -6,8 +6,9 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  AppState,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -38,6 +39,8 @@ import { ensureLocationPermission } from '../../lib/location';
 import Logo from '../../components/Logo';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
+import { useMapStyle } from '../../lib/mapStyles';
+import MapStyleControl from '../../components/MapStyleControl';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
@@ -241,6 +244,7 @@ function PullableSheet({ translateY, snapDelta, sheetHeight, children }) {
 export default function MapScreen() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { styleId, styleURL, setStyle } = useMapStyle();
   const cameraRef = useRef(null);
   const cameraInitializedRef = useRef(false);
   const [selected, setSelected] = useState(null);
@@ -443,7 +447,10 @@ export default function MapScreen() {
     },
     enabled: !!activeCampaign?.id,
     staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
+    // These are the canvasser's own stats and already refetch the moment they
+    // submit an action, so a slow background poll is plenty — keeps the radio
+    // asleep longer without the user ever waiting on it.
+    refetchInterval: 120 * 1000,
   });
 
   // Delta polling: every 30s, ask the server for any household/voter changes
@@ -516,21 +523,52 @@ export default function MapScreen() {
     router.replace('/(app)/campaigns');
   }
 
+  // Offline-queue badge. Driven by events rather than a clock: the queue only
+  // changes when the user records an action or the app returns to the
+  // foreground, so polling it on an interval just burns CPU/AsyncStorage while
+  // idle on the map. We refresh the count on focus and flush on foreground.
+  const refreshPending = useCallback(async () => {
+    setPendingCount(await getPendingCount());
+  }, []);
+
+  // Update the badge whenever the map regains focus — e.g. returning from a
+  // knock/survey/lit-drop screen that just enqueued (offline) or flushed.
+  useFocusEffect(
+    useCallback(() => {
+      refreshPending();
+    }, [refreshPending])
+  );
+
+  // On mount and whenever the app comes back to the foreground, try to drain
+  // the queue (e.g. connectivity returned while away) and refresh the badge.
   useEffect(() => {
-    let mounted = true;
-    async function refreshPending() {
-      const c = await getPendingCount();
-      if (mounted) setPendingCount(c);
+    flushQueue().then(refreshPending).catch(() => {});
+    const sub = AppState.addEventListener('change', (status) => {
+      if (status === 'active') {
+        flushQueue().then(refreshPending).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, [refreshPending]);
+
+  // Follow mode adds continuous GPS + a camera animation on every location
+  // update, so we keep it from lingering on unintentionally. A real finger
+  // pan/zoom/rotate breaks follow (standard map behavior); programmatic follow
+  // moves aren't gestures, so they don't trip this.
+  const onCameraChanged = useCallback((state) => {
+    if (state?.gestures?.isGestureActive) {
+      setFollowing((f) => (f ? false : f));
     }
-    refreshPending();
-    flushQueue()
-      .then(refreshPending)
-      .catch(() => {});
-    const interval = setInterval(refreshPending, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
+  }, []);
+
+  // Leaving the foreground also drops follow, so it can't resume burning battery
+  // when the user returns without re-enabling it. Only true backgrounding counts
+  // (not the transient 'inactive' from a notification banner / control center).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (status) => {
+      if (status === 'background') setFollowing((f) => (f ? false : f));
+    });
+    return () => sub.remove();
   }, []);
 
   // Group stacked apartment units into one building marker; lone households stay
@@ -582,7 +620,7 @@ export default function MapScreen() {
     } catch {}
     await refetch();
     todayQ.refetch();
-    setPendingCount(await getPendingCount());
+    await refreshPending();
   }
 
   if (!MAPBOX_PUBLIC_TOKEN) {
@@ -667,11 +705,12 @@ export default function MapScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <Mapbox.MapView
         style={{ flex: 1 }}
-        styleURL={Mapbox.StyleURL.Street}
+        styleURL={styleURL}
         zoomEnabled
         scrollEnabled
         pitchEnabled
         rotateEnabled
+        onCameraChanged={onCameraChanged}
       >
         <Mapbox.Camera
           ref={cameraRef}
@@ -681,7 +720,10 @@ export default function MapScreen() {
           animationMode="flyTo"
           animationDuration={500}
         />
-        <Mapbox.UserLocation visible androidRenderMode="compass" />
+        {/* Plain location dot. We deliberately don't use androidRenderMode="compass":
+            the compass puck keeps the magnetometer polling the whole time the map is
+            open (the primary screen), which is a real battery drain for little gain. */}
+        <Mapbox.UserLocation visible />
 
         <Mapbox.Images
           images={{
@@ -903,6 +945,8 @@ export default function MapScreen() {
         sheetHeight={sheetHeight}
         following={following}
         onPress={() => setFollowing((v) => !v)}
+        styleId={styleId}
+        onStyleChange={setStyle}
       />
 
       {/* Bottom sheet. Always rendered; content branches on `selected`. The
@@ -938,12 +982,20 @@ export default function MapScreen() {
   );
 }
 
-function RecenterButton({ translateY, sheetHeight, following, onPress }) {
+function RecenterButton({ translateY, sheetHeight, following, onPress, styleId, onStyleChange }) {
   const animatedStyle = useAnimatedStyle(() => ({
     bottom: sheetHeight.value - translateY.value + spacing.lg,
   }));
   return (
     <Animated.View style={[styles.recenterButtonWrap, animatedStyle]}>
+      {/* Base-map picker sits on top of the recenter control as a vertical stack
+          in the bottom-right corner; its menu opens upward so it stays in view. */}
+      <MapStyleControl
+        value={styleId}
+        onChange={onStyleChange}
+        menuDirection="up"
+        style={styles.mapStyleControl}
+      />
       <Pressable
         onPress={onPress}
         style={[styles.recenterButton, following && styles.recenterButtonActive]}
@@ -1439,7 +1491,9 @@ const styles = StyleSheet.create({
   recenterButtonWrap: {
     position: 'absolute',
     right: spacing.lg,
+    alignItems: 'flex-end',
   },
+  mapStyleControl: { marginBottom: spacing.sm },
   recenterButton: {
     width: 48,
     height: 48,
