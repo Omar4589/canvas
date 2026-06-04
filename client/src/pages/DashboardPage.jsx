@@ -36,6 +36,14 @@ export default function DashboardPage() {
   const dateRange = useMemo(() => rangeFromId(rangeId), [rangeId]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [selectedCanvasser, setSelectedCanvasser] = useState(null);
+  const [effortId, setEffortId] = useState('');
+
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId,
+  });
+  const efforts = effortsQ.data?.efforts || [];
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -56,20 +64,21 @@ export default function DashboardPage() {
       : activeCampaigns;
 
   const overviewQ = useQuery({
-    queryKey: ['reports', 'overview', campaignId],
+    queryKey: ['reports', 'overview', campaignId, effortId],
     queryFn: () =>
-      api(`/admin/reports/overview${buildQuery({ campaignId })}`),
+      api(`/admin/reports/overview${buildQuery({ campaignId, effortId: effortId || undefined })}`),
     enabled: !!campaignId,
     refetchInterval: 30_000,
   });
 
   // Range-scoped activity (knocks/surveys/rate). Coverage stays all-time from /overview.
   const rollupQ = useQuery({
-    queryKey: ['reports', 'campaign-rollup', campaignId, dateRange.from, dateRange.to],
+    queryKey: ['reports', 'campaign-rollup', campaignId, effortId, dateRange.from, dateRange.to],
     queryFn: () =>
       api(
         `/admin/reports/campaign-rollup${buildQuery({
           campaignId,
+          effortId: effortId || undefined,
           from: dateRange.from,
           to: dateRange.to,
         })}`
@@ -86,11 +95,12 @@ export default function DashboardPage() {
   });
 
   const canvassersQ = useQuery({
-    queryKey: ['reports', 'canvassers', campaignId, dateRange.from, dateRange.to],
+    queryKey: ['reports', 'canvassers', campaignId, effortId, dateRange.from, dateRange.to],
     queryFn: () =>
       api(
         `/admin/reports/canvassers${buildQuery({
           campaignId,
+          effortId: effortId || undefined,
           from: dateRange.from,
           to: dateRange.to,
         })}`
@@ -104,6 +114,7 @@ export default function DashboardPage() {
       'reports',
       'survey-results',
       campaignId,
+      effortId,
       selectedTemplateId,
       dateRange.from,
       dateRange.to,
@@ -112,6 +123,7 @@ export default function DashboardPage() {
       api(
         `/admin/reports/survey-results${buildQuery({
           campaignId,
+          effortId: effortId || undefined,
           surveyTemplateId: selectedTemplateId,
           from: dateRange.from,
           to: dateRange.to,
@@ -204,6 +216,19 @@ export default function DashboardPage() {
               ))}
             </select>
           </div>
+          {efforts.length > 1 && (
+            <select
+              value={effortId}
+              onChange={(e) => setEffortId(e.target.value)}
+              title="Filter to one effort"
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            >
+              <option value="">All efforts</option>
+              {efforts.map((ef) => (
+                <option key={ef._id} value={ef._id}>{ef.name}</option>
+              ))}
+            </select>
+          )}
           <DateRangeSelector value={rangeId} onChange={setRangeId} />
         </div>
       </div>

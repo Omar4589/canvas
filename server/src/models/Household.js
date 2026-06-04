@@ -56,6 +56,11 @@ const householdSchema = new mongoose.Schema(
     countyValue: { type: String, default: null },
     cutConflicts: { type: mongoose.Schema.Types.Mixed, default: {} },
 
+    // Which EFFORT owns this door (null = Intake — newly imported / unassigned,
+    // not yet canvassable). Source of truth for door ownership + per-effort
+    // coverage; a door belongs to at most one effort (disjointness).
+    effortId: { type: mongoose.Schema.Types.ObjectId, ref: 'Effort', default: null, index: true },
+
     // Turf membership mirror (set by turf generation / edits).
     turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },
     walkOrder: { type: Number, default: null },
@@ -73,5 +78,6 @@ householdSchema.index({ campaignId: 1, precinctValue: 1 });
 householdSchema.index({ campaignId: 1, countyValue: 1 });
 householdSchema.index({ campaignId: 1, cityValue: 1 });
 householdSchema.index({ turfId: 1, walkOrder: 1 });
+householdSchema.index({ campaignId: 1, effortId: 1 }); // per-effort ownership / coverage / intake
 
 export const Household = mongoose.model('Household', householdSchema);

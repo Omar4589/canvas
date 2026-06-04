@@ -49,6 +49,12 @@ function baseFilter(req) {
   if (req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)) {
     filter.campaignId = new mongoose.Types.ObjectId(req.query.campaignId);
   }
+  // Optional per-effort scoping. effortId is denormalized onto CanvassActivity,
+  // SurveyResponse, and Household, so this one filter scopes knocks, surveys, and
+  // coverage alike. Omit it for whole-campaign totals (the sum across efforts).
+  if (req.query.effortId && mongoose.isValidObjectId(req.query.effortId)) {
+    filter.effortId = new mongoose.Types.ObjectId(req.query.effortId);
+  }
   return filter;
 }
 

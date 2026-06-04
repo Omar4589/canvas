@@ -6,6 +6,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
+import { activePassIds } from '../../services/passes/activePasses.js';
 import { Turf } from '../../models/Turf.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
@@ -52,14 +53,14 @@ async function resolveCampaign(req, res) {
   return campaign;
 }
 
-// Household ids a canvasser may look up: their assigned books on the active pass.
-// null = no restriction (admin/super). Empty array = sees nothing.
+// Household ids a canvasser may look up: their assigned books across all active
+// rounds. null = no restriction (admin/super). Empty array = sees nothing.
 async function scopeHouseholdIds(req, campaign) {
   if (isAdminOrSuper(req)) return null;
-  const passId = campaign.activePassId;
-  if (!passId) return [];
+  const passIds = await activePassIds(campaign._id);
+  if (!passIds.length) return [];
   const myTurfs = await TurfAssignment.find(
-    { userId: req.user._id, campaignId: campaign._id, passId },
+    { userId: req.user._id, campaignId: campaign._id, passId: { $in: passIds } },
     { turfId: 1 }
   ).lean();
   if (!myTurfs.length) return [];

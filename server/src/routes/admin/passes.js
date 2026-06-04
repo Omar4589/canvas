@@ -4,11 +4,12 @@ import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Pass } from '../../models/Pass.js';
+import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
-import { WalkList } from '../../models/WalkList.js';
 import { Household } from '../../models/Household.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
+import { activePassIds } from '../../services/passes/activePasses.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -34,49 +35,54 @@ async function loadCampaign(req, res, next) {
 }
 router.use(loadCampaign);
 
+// List a campaign's rounds, optionally scoped to one effort. roundNumber sorts
+// per effort. Returns the campaign's active round ids (one per active effort).
 router.get('/', async (req, res, next) => {
   try {
-    const passes = await Pass.find({ campaignId: req.campaign._id }).sort({ roundNumber: 1 }).lean();
+    const filter = { campaignId: req.campaign._id };
+    if (req.query.effortId && mongoose.isValidObjectId(req.query.effortId)) {
+      filter.effortId = new mongoose.Types.ObjectId(req.query.effortId);
+    }
+    const passes = await Pass.find(filter).sort({ roundNumber: 1 }).lean();
     const counts = await Turf.aggregate([
       { $match: { campaignId: req.campaign._id, status: { $ne: 'archived' } } },
       { $group: { _id: '$passId', turfs: { $sum: 1 } } },
     ]);
     const cMap = new Map(counts.map((c) => [String(c._id), c.turfs]));
+    const activeIds = await activePassIds(req.campaign._id);
     res.json({
       passes: passes.map((p) => ({ ...p, turfCount: cMap.get(String(p._id)) || 0 })),
-      activePassId: req.campaign.activePassId,
+      activePassIds: activeIds.map(String),
     });
   } catch (err) {
     next(err);
   }
 });
 
+// Create a round within an effort. roundNumber auto-increments PER EFFORT.
 router.post('/', async (req, res, next) => {
   try {
-    const { name, walkListId } = req.body || {};
+    const { name, effortId } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
-    let wl = null;
-    if (walkListId) {
-      if (!mongoose.isValidObjectId(walkListId)) return res.status(400).json({ error: 'Invalid walkListId' });
-      wl = await WalkList.findOne({ _id: walkListId, campaignId: req.campaign._id }).select('_id').lean();
-      if (!wl) return res.status(404).json({ error: 'Walk list not found' });
-    }
+    if (!mongoose.isValidObjectId(effortId)) return res.status(400).json({ error: 'effortId is required' });
+    const effort = await Effort.findOne({ _id: effortId, campaignId: req.campaign._id }).select('_id').lean();
+    if (!effort) return res.status(404).json({ error: 'Effort not found' });
     let pass;
     for (let attempt = 0; attempt < 5 && !pass; attempt += 1) {
-      const last = await Pass.findOne({ campaignId: req.campaign._id }).sort({ roundNumber: -1 }).select('roundNumber').lean();
+      const last = await Pass.findOne({ effortId }).sort({ roundNumber: -1 }).select('roundNumber').lean();
       const roundNumber = (last?.roundNumber || 0) + 1;
       try {
         pass = await Pass.create({
           organizationId: req.campaign.organizationId,
           campaignId: req.campaign._id,
+          effortId,
           roundNumber,
           name: String(name).trim(),
-          walkListId: wl?._id || null,
           status: 'draft',
           createdBy: req.user._id,
         });
       } catch (err) {
-        if (err.code === 11000) continue; // roundNumber race — retry
+        if (err.code === 11000) continue; // (effortId, roundNumber) race — retry
         throw err;
       }
     }
@@ -93,7 +99,6 @@ router.patch('/:id', async (req, res, next) => {
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     if (pass.status !== 'draft') return res.status(400).json({ error: 'Only draft passes can be edited' });
     if (req.body.name) pass.name = String(req.body.name).trim();
-    if (req.body.walkListId !== undefined) pass.walkListId = req.body.walkListId || null;
     await pass.save();
     res.json({ pass });
   } catch (err) {
@@ -112,14 +117,15 @@ router.post('/:id/activate', async (req, res, next) => {
     if (!published) return res.status(400).json({ error: 'Generate and accept books before activating this pass' });
 
     const now = new Date();
+    // Archive only other active rounds OF THE SAME EFFORT — other efforts keep
+    // their active rounds (a campaign can have several active rounds at once).
     await Pass.updateMany(
-      { campaignId: req.campaign._id, status: 'active', _id: { $ne: pass._id } },
+      { campaignId: req.campaign._id, effortId: pass.effortId, status: 'active', _id: { $ne: pass._id } },
       { $set: { status: 'archived', archivedAt: now } }
     );
     pass.status = 'active';
     if (!pass.activatedAt) pass.activatedAt = now;
     await pass.save();
-    await Campaign.updateOne({ _id: req.campaign._id }, { $set: { activePassId: pass._id } });
     res.json({ pass });
   } catch (err) {
     next(err);
@@ -133,9 +139,6 @@ router.post('/:id/archive', async (req, res, next) => {
     pass.status = 'archived';
     pass.archivedAt = new Date();
     await pass.save();
-    if (String(req.campaign.activePassId) === String(pass._id)) {
-      await Campaign.updateOne({ _id: req.campaign._id }, { $set: { activePassId: null } });
-    }
     res.json({ pass });
   } catch (err) {
     next(err);

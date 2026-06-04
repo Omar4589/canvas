@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 
@@ -41,7 +41,7 @@ function deriveKey(q, index, allQuestions) {
   return key;
 }
 
-function TypePills({ value, onChange }) {
+function TypePills({ value, onChange, disabled }) {
   return (
     <div className="inline-flex rounded-md border border-gray-300 bg-gray-50 p-0.5">
       {QUESTION_TYPES.map((t) => {
@@ -51,11 +51,12 @@ function TypePills({ value, onChange }) {
             key={t.value}
             type="button"
             onClick={() => onChange(t.value)}
+            disabled={disabled && !active}
             className={
               'rounded px-3 py-1.5 text-xs font-medium transition ' +
               (active
                 ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900')
+                : 'text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-gray-600')
             }
           >
             {t.label}
@@ -66,7 +67,7 @@ function TypePills({ value, onChange }) {
   );
 }
 
-function OptionRow({ index, value, onChange, onRemove, canRemove }) {
+function OptionRow({ index, value, onChange, onRemove, canRemove, locked }) {
   return (
     <div className="flex items-center gap-2">
       <span className="w-6 text-right text-xs font-medium text-gray-400">
@@ -75,15 +76,19 @@ function OptionRow({ index, value, onChange, onRemove, canRemove }) {
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        readOnly={locked}
         placeholder={`Option ${index + 1}`}
-        className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+        className={
+          'flex-1 rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 ' +
+          (locked ? 'bg-gray-50 text-gray-500' : '')
+        }
       />
       <button
         type="button"
         onClick={onRemove}
-        disabled={!canRemove}
+        disabled={!canRemove || locked}
         className="rounded p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
-        title="Remove option"
+        title={locked ? 'Locked — survey has responses' : 'Remove option'}
       >
         ×
       </button>
@@ -99,6 +104,8 @@ function QuestionCard({
   onRemove,
   onMoveUp,
   onMoveDown,
+  locked = false,
+  lockedOptionCount = 0,
 }) {
   const isChoice = value.type === 'single_choice' || value.type === 'multiple_choice';
 
@@ -160,7 +167,9 @@ function QuestionCard({
           <button
             type="button"
             onClick={onRemove}
-            className="ml-2 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+            disabled={locked}
+            className="ml-2 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent"
+            title={locked ? 'Locked — survey has responses (Duplicate to remove)' : 'Remove question'}
           >
             Remove
           </button>
@@ -185,7 +194,7 @@ function QuestionCard({
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
               Type
             </label>
-            <TypePills value={value.type} onChange={setType} />
+            <TypePills value={value.type} onChange={setType} disabled={locked} />
           </div>
           <label className="flex cursor-pointer items-center gap-2 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
             <input
@@ -211,6 +220,7 @@ function QuestionCard({
                   onChange={(v) => updateOption(i, v)}
                   onRemove={() => removeOption(i)}
                   canRemove={value.options.length > 1}
+                  locked={locked && i < lockedOptionCount}
                 />
               ))}
             </div>
@@ -239,6 +249,20 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
     setIntro(initial?.intro || '');
     setClosing(initial?.closing || '');
     setQuestions(initial?.questions || []);
+  }, [initial?._id]);
+
+  // Once responses exist, the existing question structure is locked to protect
+  // reports (mirrors the server guard). Safe edits stay open: rename, greeting/
+  // closing, label/required, reorder, ADD questions, ADD options. Destructive
+  // ones (remove question/option, rename option, change type) are locked per
+  // existing question; brand-new questions added here are fully editable.
+  const locked = !!initial?.hasResponses;
+  const originalByKey = useMemo(() => {
+    const m = new Map();
+    if (initial?.hasResponses) {
+      for (const q of initial.questions || []) m.set(q.key, q);
+    }
+    return m;
   }, [initial?._id]);
 
   function updateQuestion(index, q) {
@@ -278,6 +302,21 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
 
   return (
     <form onSubmit={submit} className="space-y-6 pb-24">
+      {locked && (
+        <div className="rounded-lg border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-medium">
+            This survey has {initial.responseCount} response
+            {initial.responseCount === 1 ? '' : 's'} — question structure is locked to protect existing
+            reports.
+          </p>
+          <p className="mt-1 text-amber-800">
+            You can still rename it, edit the greeting/closing, reword a question, toggle Required,
+            reorder, add new questions, and add new options. To remove a question or option, change a
+            question's type, or rename an option, use <strong>Duplicate</strong> from the survey list to
+            edit a fresh copy.
+          </p>
+        </div>
+      )}
       <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
           Survey settings
@@ -325,18 +364,23 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
           </span>
         </div>
         <div className="space-y-3">
-          {questions.map((q, i) => (
-            <QuestionCard
-              key={i}
-              index={i}
-              total={questions.length}
-              value={q}
-              onChange={(next) => updateQuestion(i, next)}
-              onRemove={() => removeQuestion(i)}
-              onMoveUp={() => move(i, -1)}
-              onMoveDown={() => move(i, 1)}
-            />
-          ))}
+          {questions.map((q, i) => {
+            const original = originalByKey.get(q.key);
+            return (
+              <QuestionCard
+                key={i}
+                index={i}
+                total={questions.length}
+                value={q}
+                onChange={(next) => updateQuestion(i, next)}
+                onRemove={() => removeQuestion(i)}
+                onMoveUp={() => move(i, -1)}
+                onMoveDown={() => move(i, 1)}
+                locked={locked && !!original}
+                lockedOptionCount={original?.options?.length || 0}
+              />
+            );
+          })}
           {!questions.length && (
             <div className="rounded-lg border-2 border-dashed border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500">
               No questions yet. Add your first one below.
@@ -416,6 +460,15 @@ export default function SurveysPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['surveys'] }),
   });
 
+  const duplicate = useMutation({
+    mutationFn: (id) => api(`/admin/surveys/${id}/duplicate`, { method: 'POST' }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['surveys'] });
+      setCreating(false);
+      setSelectedId(res.survey._id);
+    },
+  });
+
   const isEditing = creating || !!selected;
 
   function closeEditor() {
@@ -450,6 +503,7 @@ export default function SurveysPage() {
                 <th className="px-4 py-3 text-left">Name</th>
                 <th className="px-4 py-3 text-left">Used by campaigns</th>
                 <th className="px-4 py-3 text-right">Questions</th>
+                <th className="px-4 py-3 text-right">Responses</th>
                 <th className="px-4 py-3 text-right">Version</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -464,20 +518,38 @@ export default function SurveysPage() {
                       : <span className="text-gray-400">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right">{s.questions?.length || 0}</td>
+                  <td className="px-4 py-3 text-right text-gray-600">
+                    {s.responseCount > 0 ? (
+                      <span title="Editing question structure is locked while responses exist">
+                        {s.responseCount.toLocaleString()}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right text-gray-500">v{s.version || 1}</td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setSelectedId(s._id)}
-                      className="text-xs font-medium text-brand-700 hover:underline"
-                    >
-                      Edit
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => setSelectedId(s._id)}
+                        className="text-xs font-medium text-brand-700 hover:underline"
+                      >
+                        {s.responseCount > 0 ? 'View / edit' : 'Edit'}
+                      </button>
+                      <button
+                        onClick={() => duplicate.mutate(s._id)}
+                        disabled={duplicate.isPending}
+                        className="text-xs font-medium text-gray-600 hover:underline disabled:opacity-50"
+                      >
+                        Duplicate
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {!surveys.length && (
                 <tr>
-                  <td colSpan="5" className="px-4 py-10 text-center text-gray-500">
+                  <td colSpan="6" className="px-4 py-10 text-center text-gray-500">
                     No surveys yet. Click <strong>New survey</strong> to get started.
                   </td>
                 </tr>
@@ -511,7 +583,14 @@ export default function SurveysPage() {
           )}
           {(create.error || update.error) && (
             <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {(create.error || update.error).message}
+              <p>{(create.error || update.error).message}</p>
+              {(update.error?.data?.reasons?.length > 0) && (
+                <ul className="mt-1 list-inside list-disc text-red-600">
+                  {update.error.data.reasons.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </div>

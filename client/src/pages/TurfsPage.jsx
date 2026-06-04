@@ -139,23 +139,31 @@ function PassPicker({ campaignId, passId, onChange }) {
     queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
     enabled: !!campaignId,
   });
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId,
+  });
   const passes = passesQ.data?.passes || [];
-  const activeId = passesQ.data?.activePassId;
+  const activeIds = passesQ.data?.activePassIds || [];
+  const effortName = new Map((effortsQ.data?.efforts || []).map((e) => [String(e._id), e.name]));
   useEffect(() => {
     if (passId || !passes.length) return;
-    onChange(String(activeId || passes[0]._id));
-  }, [passId, passes, activeId]);
+    onChange(String(activeIds[0] || passes[0]._id));
+  }, [passId, passes, activeIds]);
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Pass</span>
+      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Round</span>
       <select
         value={passId || ''}
         onChange={(e) => onChange(e.target.value)}
         className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
       >
-        {!passes.length && <option value="">No passes</option>}
+        {!passes.length && <option value="">No rounds</option>}
         {passes.map((p) => (
-          <option key={p._id} value={p._id}>Round {p.roundNumber} · {p.name} ({p.status})</option>
+          <option key={p._id} value={p._id}>
+            {effortName.get(String(p.effortId)) || 'Effort'} · Round {p.roundNumber} · {p.name} ({p.status})
+          </option>
         ))}
       </select>
     </div>
@@ -394,6 +402,8 @@ export default function TurfsPage() {
   // Group stacked apartment units (same geocode) into buildings; lone doors stay
   // singles. Used for the dot layer, the building markers, and the popup.
   const grouped = useMemo(() => groupDoors(doorsQ.data?.doors || []), [doorsQ.data]);
+  // Doors not yet in any book — e.g. voters imported after this pass was cut.
+  const unassignedCount = (doorsQ.data?.doors || []).filter((d) => !d.turfId).length;
   // The popup's house + its current book, derived live from the doors data so it
   // updates after a move.
   const popupDoor = (doorsQ.data?.doors || []).find((d) => String(d.id) === String(popupHouseholdId));
@@ -523,6 +533,12 @@ export default function TurfsPage() {
   });
   const rename = useMutation({
     mutationFn: ({ turfId, name }) => api(`/admin/campaigns/${campaignId}/turfs/${turfId}`, { method: 'PATCH', body: { name } }),
+    onSuccess: invalidateTurfs,
+  });
+  // Fold voters imported after this pass was cut (currently unassigned to any
+  // book) into the pass as new draft book(s) — no recut, no archive.
+  const addSupplemental = useMutation({
+    mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/add-supplemental`, { method: 'POST', body: { passId } }),
     onSuccess: invalidateTurfs,
   });
 
@@ -755,6 +771,31 @@ export default function TurfsPage() {
           {generate.error && <div className="mt-2 text-xs text-red-700">{generate.error.message}</div>}
           {publishedCount > 0 && (
             <p className="mt-2 text-xs text-amber-700">This pass has accepted books — Discard them below to re-cut.</p>
+          )}
+
+          {!!turfs.length && unassignedCount > 0 && (
+            <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs">
+              <p className="font-medium text-sky-900">
+                {unassignedCount.toLocaleString()} door{unassignedCount === 1 ? '' : 's'} not in any book
+              </p>
+              <p className="mt-0.5 text-sky-800">
+                Voters added since this pass was cut. Add them as new book(s) without recutting — then
+                Accept and assign as usual.
+              </p>
+              <button
+                onClick={() => addSupplemental.mutate()}
+                disabled={addSupplemental.isPending}
+                className="mt-2 rounded bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
+              >
+                {addSupplemental.isPending ? 'Adding…' : 'Add as new book'}
+              </button>
+              {addSupplemental.error && (
+                <div className="mt-1 text-red-700">{addSupplemental.error.message}</div>
+              )}
+              {addSupplemental.data?.added === 0 && (
+                <div className="mt-1 text-sky-800">No eligible doors to add (walk-list passes only include their saved list).</div>
+              )}
+            </div>
           )}
 
           {!!turfs.length && (

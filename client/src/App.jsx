@@ -16,6 +16,7 @@ const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
 const TurfsPage = lazy(() => import('./pages/TurfsPage.jsx'));
 const PassesPage = lazy(() => import('./pages/PassesPage.jsx'));
+const EffortsPage = lazy(() => import('./pages/EffortsPage.jsx'));
 const WalkListsPage = lazy(() => import('./pages/WalkListsPage.jsx'));
 const QueuesPage = lazy(() => import('./pages/QueuesPage.jsx'));
 const PrivacyPolicyPage = lazy(() => import('./pages/PrivacyPolicyPage.jsx'));
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/" element={<OverviewPage />} />
           <Route path="/dashboard/:campaignId" element={<DashboardPage />} />
           <Route path="/map" element={<MapPage />} />
+          <Route path="/efforts" element={<EffortsPage />} />
           <Route path="/turfs" element={<TurfsPage />} />
           <Route path="/passes" element={<PassesPage />} />
           <Route path="/walklists" element={<WalkListsPage />} />

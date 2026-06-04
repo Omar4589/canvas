@@ -10,6 +10,9 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
+import { Pass } from '../../models/Pass.js';
+import { Effort } from '../../models/Effort.js';
+import { activePassIds } from '../../services/passes/activePasses.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -43,40 +46,54 @@ async function assertCampaignAccess(req, campaignId) {
   return { campaign };
 }
 
-// M5: a canvasser only sees households in the books ASSIGNED to them on the
-// campaign's ACTIVE pass. Returns:
+// A canvasser only sees households in the books ASSIGNED to them on the
+// campaign's ACTIVE rounds — UNIONED across all active efforts (a canvasser can
+// be on more than one effort). Returns:
 //   null  -> no restriction (admin/super see everything)
-//   [...] -> the allowed household ids; an EMPTY array ⇒ they see nothing
-//            (no active pass, or no book assigned → "No turf assigned yet").
+//   [...] -> the allowed household ids; an EMPTY array ⇒ they see nothing.
 async function canvasserHouseholdScope(req, campaign) {
   if (isOrgAdminOrSuper(req)) return null;
-  const passId = campaign.activePassId;
-  if (!passId) return []; // campaign not live (no active pass) → see nothing
+  const passIds = await activePassIds(campaign._id);
+  if (!passIds.length) return []; // no active round anywhere → see nothing
   const myTurfs = await TurfAssignment.find(
-    { userId: req.user._id, campaignId: campaign._id, passId },
+    { userId: req.user._id, campaignId: campaign._id, passId: { $in: passIds } },
     { turfId: 1 }
   ).lean();
-  if (!myTurfs.length) return []; // not assigned a book on the active pass → see nothing
+  if (!myTurfs.length) return []; // not assigned a book on any active round
   const books = await Turf.find({ _id: { $in: myTurfs.map((a) => a.turfId) } }, { householdIds: 1 }).lean();
   return books.flatMap((b) => b.householdIds || []);
 }
 
-// The canvasser's assigned books on the active pass, with the geometry the mobile
-// "books overview" needs (a status-colored pin per book at its centroid). Empty
-// for admins/super, no active pass, or no assignment.
+// The canvasser's assigned books across ALL active rounds, each tagged with its
+// effortId + resolved surveyTemplateId (effort override || campaign default) so
+// the app can render the right survey per door. Empty for admins/super or when
+// nothing is assigned.
 async function canvasserBooks(req, campaign) {
   if (isOrgAdminOrSuper(req)) return [];
-  const passId = campaign.activePassId;
-  if (!passId) return [];
+  const passIds = await activePassIds(campaign._id);
+  if (!passIds.length) return [];
   const myTurfs = await TurfAssignment.find(
-    { userId: req.user._id, campaignId: campaign._id, passId },
+    { userId: req.user._id, campaignId: campaign._id, passId: { $in: passIds } },
     { turfId: 1 }
   ).lean();
   if (!myTurfs.length) return [];
   const books = await Turf.find(
     { _id: { $in: myTurfs.map((a) => a.turfId) } },
-    { name: 1, centroid: 1, doorCount: 1, householdIds: 1 }
+    { name: 1, centroid: 1, doorCount: 1, householdIds: 1, passId: 1 }
   ).lean();
+
+  // book → round (pass) → effort → survey override (falls back to campaign default).
+  const passes = await Pass.find({ _id: { $in: books.map((b) => b.passId) } }, { effortId: 1 }).lean();
+  const passEffort = new Map(passes.map((p) => [String(p._id), p.effortId ? String(p.effortId) : null]));
+  const efforts = await Effort.find(
+    { _id: { $in: passes.map((p) => p.effortId).filter(Boolean) } },
+    { surveyTemplateId: 1 }
+  ).lean();
+  const effortSurvey = new Map(
+    efforts.map((e) => [String(e._id), e.surveyTemplateId ? String(e.surveyTemplateId) : null])
+  );
+  const campaignSurvey = campaign.surveyTemplateId ? String(campaign.surveyTemplateId) : null;
+
   // doorCount reflects REMAINING doors — exclude fully-voted (and inactive) households.
   const allHhIds = books.flatMap((b) => b.householdIds || []);
   const eligible = new Set(
@@ -87,12 +104,18 @@ async function canvasserBooks(req, campaign) {
       ).lean()
     ).map((h) => String(h._id))
   );
-  return books.map((b) => ({
-    id: String(b._id),
-    name: b.name,
-    centroid: b.centroid,
-    doorCount: (b.householdIds || []).filter((id) => eligible.has(String(id))).length,
-  }));
+  return books.map((b) => {
+    const effortId = passEffort.get(String(b.passId)) || null;
+    const surveyTemplateId = (effortId && effortSurvey.get(effortId)) || campaignSurvey;
+    return {
+      id: String(b._id),
+      name: b.name,
+      centroid: b.centroid,
+      doorCount: (b.householdIds || []).filter((id) => eligible.has(String(id))).length,
+      effortId,
+      surveyTemplateId,
+    };
+  });
 }
 
 router.get('/campaigns', async (req, res, next) => {
@@ -192,6 +215,20 @@ router.get('/bootstrap', async (req, res, next) => {
     const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
     const voters = votersRaw.map((v) => ({ ...v, voted: votedSet.has(String(v._id)) }));
 
+    const books = await canvasserBooks(req, campaign);
+    // Per-effort surveys: every survey a door in scope might need (effort
+    // overrides + campaign default), keyed by id. The app resolves a voter's
+    // survey via household → book → surveyTemplateId → surveys[id], falling back
+    // to activeSurvey (the campaign default).
+    const surveyIds = new Set();
+    if (campaign.surveyTemplateId) surveyIds.add(String(campaign.surveyTemplateId));
+    for (const b of books) if (b.surveyTemplateId) surveyIds.add(String(b.surveyTemplateId));
+    const surveyTemplates = surveyIds.size
+      ? await SurveyTemplate.find({ _id: { $in: [...surveyIds] }, organizationId: orgId }).lean()
+      : [];
+    const surveys = {};
+    for (const t of surveyTemplates) surveys[String(t._id)] = t;
+
     res.json({
       user: req.user.toSafeJSON(),
       campaign: {
@@ -201,9 +238,10 @@ router.get('/bootstrap', async (req, res, next) => {
         state: campaign.state,
       },
       activeSurvey: survey,
+      surveys,
       households,
       voters,
-      books: await canvasserBooks(req, campaign),
+      books,
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {

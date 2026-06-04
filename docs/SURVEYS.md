@@ -10,6 +10,8 @@ do to a survey that's already collecting answers.
 
 Related: [METRICS.md](METRICS.md) ("Surveys" and "Surveyed voters" definitions),
 [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (one survey per voter **per pass**),
+[EFFORTS.md](EFFORTS.md) (an **effort can override** the campaign survey — the door's effort survey
+wins, falling back to the campaign default),
 [VOTERS.md](VOTERS.md) (editing a single response on a voter's profile).
 
 ---
@@ -51,30 +53,35 @@ and sync later. **One survey is kept per voter, per pass** — if a canvasser re
 voter in the same pass, the new one replaces the old. A house with three voters surveyed in one
 visit produces **three survey responses but counts as one knock** (see [METRICS.md](METRICS.md)).
 
-## Editing a survey — read this before you change a live one
+## Editing a survey — what's allowed once it has answers
 
-You **can** edit any survey at any time — the app won't stop you. That's convenient before a survey
-goes out, but **dangerous once responses exist**, because changing the questions can silently
-corrupt the reports for answers already collected.
+Before a survey collects any answers, edit it freely. **Once it has responses, the app protects
+your reports**: you can still make safe edits, but the changes that would corrupt past results are
+blocked, and the Surveys list shows a response count so you know which surveys are "live."
 
-Think of it this way: every answer is filed under a question's short **id** (not its full text).
-Reporting reads your **current** questions and pulls answers that match those ids. So:
+Why the protection exists: every answer is filed under a question's short **id** (not its full
+text), and reporting reads your **current** questions and pulls answers that match those ids. Change
+the questions out from under the stored answers and the charts quietly go wrong.
 
-- **Safe edits at any time** — fixing the **intro** or **closing** text, or correcting a typo that
-  doesn't change what a question *means* or change its options.
-- **Dangerous once answers exist** — changing a question's **options**, changing its **type**,
-  rewording it so it means something different, or **deleting / reordering / replacing** questions.
+Once a survey has responses:
 
-Why it's dangerous, concretely: say 100 people answered "What's your top issue?" with options
-*Economy / Schools / Crime*. You later reuse that question slot for "Most important race?" with
-options *Mayor / Council / Judge*. Reporting now mixes the old 100 answers in with the new ones
-under the same slot, and any old answer whose option text no longer exists just **disappears from
-the charts** — with no warning. The numbers look fine; they're wrong.
+- **Still allowed (safe):** rename the survey, edit the **intro/closing**, reword a question, toggle
+  **Required**, **reorder** questions, **add** a new question, and **add** a new option. These don't
+  disturb stored answers.
+- **Blocked (would corrupt reports):** **deleting** a question, **changing a question's type**, and
+  **removing or renaming** an existing option. The builder locks these controls and the server
+  rejects them with a clear reason.
 
-**The rule of thumb:** once a survey is attached to a campaign and collecting answers, treat its
-questions as frozen. If you need different questions, **create a new survey** and point the campaign
-at it, rather than editing the live one. (We may add guardrails so the app enforces this — see the
-note at the end of Part 2.)
+Why those are blocked, concretely: say 100 people answered "What's your top issue?" with options
+*Economy / Schools / Crime*. If you renamed *Economy* to *The Economy*, every stored "Economy"
+answer would no longer match an option and would **drop off the chart** — silently. So that edit is
+refused.
+
+**Need to change the locked parts?** Use **Duplicate** on the Surveys list. It makes a fresh,
+fully-editable copy (reset to v1); point your campaign at the copy on the Campaigns page. The
+original stays intact so its existing reports keep working. Note: after you repoint a campaign, that
+campaign's new answers report under the **copy**, separate from the answers already gathered under
+the original — the Campaigns page shows a heads-up when you pick a survey that already has responses.
 
 ---
 
@@ -104,18 +111,23 @@ All under `/admin/surveys`, guarded by `requireAuth, orgContext, requireOrgRole(
 
 | Method · path | Purpose | Guard on used surveys? |
 |---|---|---|
-| `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` ([surveys.js:39](../server/src/routes/admin/surveys.js)). | n/a |
-| `POST /admin/surveys` | Create (Zod `upsertSchema`); sets `version: 1`, `createdBy` ([surveys.js:66](../server/src/routes/admin/surveys.js)). | n/a |
-| `PATCH /admin/surveys/:surveyId` | Update; `Object.assign(existing, data)`; if `data.questions` present, `version = (version||1) + 1` ([surveys.js:83](../server/src/routes/admin/surveys.js)). | **None.** |
+| `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` plus **`responseCount`** / **`hasResponses`** (one `SurveyResponse.aggregate` count per template). | n/a |
+| `POST /admin/surveys` | Create (Zod `upsertSchema`); sets `version: 1`, `createdBy`. | n/a |
+| `PATCH /admin/surveys/:surveyId` | Update; if `data.questions` present, diff vs the stored questions and **block destructive edits** when responses exist; else apply and bump `version`. | **Yes** (see below). |
+| `POST /admin/surveys/:surveyId/duplicate` | Clone into a fresh template (`name: "<name> (Copy)"`, `version: 1`, `isActive: false`, no campaign link). | n/a |
 
-> **There is no edit guard.** `PATCH` does not check `SurveyResponse` count, campaign usage, or any
-> lock/`isLocked`/published flag. The admin UI ([client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx))
-> displays `usedByCampaigns` but never disables the Edit button and shows no warning. `version` is
-> incremented on question changes but is **informational only** — nothing reads it to protect data.
+> **Edit guard (implemented).** When the survey has responses and the PATCH includes `questions`,
+> `classifyQuestionEdits(old, new)` ([services/surveys/diffQuestions.js](../server/src/services/surveys/diffQuestions.js))
+> flags **destructive** changes — a question removed or its `key` changed, a `type` change, or an
+> existing `option` removed/renamed. Any of those → **`409 { code: 'survey-has-responses', reasons }`**.
+> Safe changes (name/intro/closing, add question, add option, label/`required`, reorder) pass through
+> and still bump `version`. The builder ([client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx))
+> mirrors this — it shows the response count, locks the destructive controls on existing questions,
+> and offers **Duplicate** — with the server as the source of truth (it surfaces the `409` reasons).
 
-## C. The edit-after-use integrity risk
+## C. Why those edits are blocked (the integrity risk being guarded)
 
-Reporting (`GET /admin/reports/survey-results`,
+The guard in §B exists because reporting (`GET /admin/reports/survey-results`,
 [reports.js:636](../server/src/routes/admin/reports.js)) joins answers to the **current** template by
 `questionKey`, ignoring the stored `surveyTemplateVersion` and `questionLabel` snapshot:
 
@@ -133,8 +145,8 @@ for (const q of sortedQs) {
 }
 ```
 
-Because the join is `key`-only against the live questions, editing a used survey produces these
-failure modes:
+Because the join is `key`-only against the live questions, the following edits would corrupt reports
+if they were allowed — which is exactly why the PATCH guard refuses them once responses exist:
 
 | Edit after responses exist | Effect on reporting |
 |---|---|
@@ -145,15 +157,16 @@ failure modes:
 | **Delete a question** | Its `key` is gone from `sortedQs`, so those answers are **never queried** — they vanish from reports while still sitting in the database. |
 | **Reuse a `key` for a different question** | Worst case: two semantically different questions share a `key`; their answers are silently pooled. |
 
-Mitigation that *exists*: every response snapshots `surveyTemplateVersion` and `questionLabel`, so
-the raw data is recoverable. Mitigation that is *missing*: nothing in the read path uses those
-snapshots, and nothing in the write path blocks the destructive edit.
+Each response also snapshots `surveyTemplateVersion` and `questionLabel`, so the raw data is
+recoverable even if a destructive change somehow lands (e.g. via a direct DB write).
 
-> **Known gap / potential follow-up (not yet built).** Options, roughly in order of effort:
-> (1) UI warning + confirm when editing a survey with `usedByCampaigns` / existing responses;
-> (2) block destructive question edits server-side once `SurveyResponse.countDocuments({surveyTemplateId}) > 0` (allow intro/closing/typo-only changes);
-> (3) "duplicate as new version" — clone the template, repoint the campaign, leave the old version immutable;
-> (4) make `survey-results` version-aware (join answers to the question set of their `surveyTemplateVersion`, which requires storing per-version question snapshots).
+> **What's implemented vs. still open.** The write path now **blocks** the destructive edits above
+> once responses exist (§B), and **Duplicate** is the supported way to evolve a live survey's
+> questions. Still *not* done (intentionally, for now): making the **read path version-aware** — the
+> report still joins to the current questions by `key`, so it can't render answers from two different
+> question-sets of the *same* template side by side. With the write guard + Duplicate in place this
+> is largely moot (structural change ⇒ a new template), but a future "duplicate as new version" that
+> keeps both under one campaign report would need per-version question snapshots in `survey-results`.
 
 ## D. Submission & dedup invariants
 
@@ -172,7 +185,8 @@ snapshots, and nothing in the write path blocks the destructive edit.
 
 | File | Renders |
 |---|---|
-| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`); derives `key` from label with collision suffixes; shows `usedByCampaigns`; Edit always enabled. |
+| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`); derives `key` from label with collision suffixes; shows `usedByCampaigns` + **response count**; when a survey has responses, locks destructive controls on existing questions and surfaces PATCH `409` reasons; **Duplicate** action per row. |
+| [client/src/pages/CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) | Survey-template dropdown shows a heads-up when the chosen survey already has responses (repointing reports new answers separately). |
 | [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results`. |
 | [client/src/components/CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx) | A canvasser's individual responses (shows template `version`). |
 | [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | The at-the-door survey form (single/multiple/text), required-validation, note, offline queue. |

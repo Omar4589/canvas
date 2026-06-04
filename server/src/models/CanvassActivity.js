@@ -42,9 +42,10 @@ const canvassActivitySchema = new mongoose.Schema(
     timestamp: { type: Date, required: true, index: true },
     wasOfflineSubmission: { type: Boolean, default: false },
 
-    // Pass/turf tags — metadata only (null = pre-turf history).
+    // Pass/turf/effort tags — metadata only (null = pre-turf history).
     passId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', default: null },
     turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },
+    effortId: { type: mongoose.Schema.Types.ObjectId, ref: 'Effort', default: null, index: true },
   },
   { timestamps: true }
 );

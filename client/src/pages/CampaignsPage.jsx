@@ -111,6 +111,16 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
               No surveys exist yet. Create one on the Surveys page first.
             </p>
           )}
+          {(() => {
+            const chosen = (surveys || []).find((s) => s._id === surveyTemplateId);
+            return chosen?.responseCount > 0 ? (
+              <p className="mt-1 text-xs text-amber-700">
+                Heads up: this survey already has {chosen.responseCount.toLocaleString()} response
+                {chosen.responseCount === 1 ? '' : 's'}. New answers will report under it alongside the
+                existing ones. To run different questions, duplicate it on the Surveys page and pick the copy.
+              </p>
+            ) : null;
+          })()}
         </div>
       )}
 

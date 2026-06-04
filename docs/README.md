@@ -22,8 +22,10 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | Doc | What it covers |
 |---|---|
 | [METRICS.md](METRICS.md) | Every number on the dashboards — knocks, surveys, coverage, connection rate — and the duplicate-knock ("overlap") warning. The source of truth for counting. |
-| [PASSES_AND_TURF.md](PASSES_AND_TURF.md) | Passes (canvassing rounds), books (walkable turf), turf-cutting & recutting, the one-active-pass rule, and what happens when you import new voters. |
-| [SURVEYS.md](SURVEYS.md) | Building, running, and reporting surveys — and the risk of editing a survey that's already collecting answers. |
+| [EFFORTS.md](EFFORTS.md) | Parallel canvassing within a campaign: efforts (areas/teams) that own disjoint doors, a survey, and a crew, each with its own rounds. Door ownership + Intake, per-effort survey/reporting, concurrency. |
+| [PASSES_AND_TURF.md](PASSES_AND_TURF.md) | Rounds (a "pass" within an effort), books (walkable turf), turf-cutting & recutting, and the mechanics that apply per round. |
+| [SURVEYS.md](SURVEYS.md) | Building, running, and reporting surveys — per-effort overrides, and the guardrails on editing a survey that's already collecting answers. |
+| [IMPORTS.md](IMPORTS.md) | Voter uploads: how rows match, what goes live, and how new addresses reach the field through Intake. |
 | [VOTERS.md](VOTERS.md) | The voter directory and profile: where voters live (org vs campaign), what's editable, and mobile lookup. |
 | [EARLY_VOTING.md](EARLY_VOTING.md) | Early/already-voted marking and how "voted" doors drop off the canvasser's list and show as their own coverage bucket. |
 

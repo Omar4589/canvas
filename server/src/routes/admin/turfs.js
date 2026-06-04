@@ -13,7 +13,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { WalkList } from '../../models/WalkList.js';
 import { Voter } from '../../models/Voter.js';
-import { recomputeTurf, recomputePassTerritories } from '../../services/turf/generateTurf.js';
+import { recomputeTurf, recomputePassTerritories, addSupplementalBooks } from '../../services/turf/generateTurf.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
@@ -110,6 +110,40 @@ router.post('/accept', async (req, res, next) => {
   }
 });
 
+// Add supplemental book(s) to a pass from its currently-unassigned households
+// (voters imported after the pass was cut) WITHOUT a recut or archive. New books
+// come in as drafts → use the normal Accept + Assign flow. Non-destructive, so it
+// works on an active pass with published books (unlike /generate, which 409s).
+router.post('/add-supplemental', async (req, res, next) => {
+  try {
+    const { passId, name, maxDoors } = req.body || {};
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    if (pass.status === 'archived') {
+      return res.status(400).json({ error: 'Cannot add books to an archived pass' });
+    }
+
+    const locked = await acquireRecutLock(pass._id, req.user._id);
+    if (!locked) {
+      return res.status(409).json({ error: 'A re-cut or restore is in progress on this pass. Try again shortly.' });
+    }
+    try {
+      const result = await addSupplementalBooks({
+        campaignId: req.campaign._id,
+        passId,
+        name: (name && String(name).trim()) || 'New voters',
+        maxDoors: Number(maxDoors) > 0 ? Number(maxDoors) : 65,
+      });
+      return res.status(result.added ? 201 : 200).json(result);
+    } finally {
+      await releaseRecutLock(pass._id);
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Discard a pass's books so it can be re-cut from scratch. Snapshots everything
 // first (undo), clears the household mirror + assignments, and hard-deletes the
 // draft+published books (archived left untouched). On an ACTIVE pass it requires
@@ -182,14 +216,12 @@ router.post('/discard', async (req, res, next) => {
       await recomputeSurveyStatus(clearedVoters);
     }
 
-    // An active pass with no books is invalid — revert it to draft.
+    // An active round with no books is invalid — revert it to draft. (Active
+    // rounds are derived from Pass.status, so there's no campaign cache to clear.)
     let reverted = false;
     if (pass.status === 'active') {
       pass.status = 'draft';
       await pass.save();
-      if (String(req.campaign.activePassId) === String(pass._id)) {
-        await Campaign.updateOne({ _id: req.campaign._id }, { $set: { activePassId: null } });
-      }
       reverted = true;
     }
 

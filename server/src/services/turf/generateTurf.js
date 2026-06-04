@@ -1,6 +1,5 @@
 import { Campaign } from '../../models/Campaign.js';
 import { Pass } from '../../models/Pass.js';
-import { WalkList } from '../../models/WalkList.js';
 import { Household } from '../../models/Household.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
@@ -33,15 +32,13 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   await onProgress?.({ phase: 'loading', pct: 5 });
 
-  let baseFilter = {
+  // A round cuts from its EFFORT's owned households (Household.effortId).
+  const baseFilter = {
     campaignId,
     isActive: true,
+    effortId: pass.effortId,
     'location.coordinates': { $exists: true, $ne: null },
   };
-  if (pass.walkListId) {
-    const wl = await WalkList.findById(pass.walkListId, { householdIds: 1 }).lean();
-    if (wl?.householdIds?.length) baseFilter = { _id: { $in: wl.householdIds }, ...baseFilter };
-  }
 
   let books;
   if (mode === 'manual') {
@@ -132,6 +129,67 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   await onProgress?.({ phase: 'done', pct: 100, booksTotal: inserted.length });
   return { bookCount: inserted.length };
+}
+
+// Add supplemental book(s) to an existing pass from its currently-UNASSIGNED
+// households (e.g. voters imported after the pass was cut) WITHOUT wiping or
+// recutting the existing books. New books are inserted as drafts (so they flow
+// through the normal Accept → Assign steps) and the whole pass is re-tessellated
+// so territories stay non-overlapping. Walk-list passes only consider the frozen
+// list, so imports outside that list won't be picked up (documented limitation).
+export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65 }) {
+  const campaign = await Campaign.findById(campaignId).lean();
+  if (!campaign) throw new Error('Campaign not found');
+  const pass = await Pass.findOne({ _id: passId, campaignId }).lean();
+  if (!pass) throw new Error('Pass not found');
+
+  // Supplemental books come from the effort's OWNED doors not yet in a book.
+  const baseFilter = {
+    campaignId,
+    isActive: true,
+    effortId: pass.effortId,
+    turfId: null,
+    'location.coordinates': { $exists: true, $ne: null },
+  };
+
+  const households = await Household.find(baseFilter, CUT_COLUMNS).lean();
+  if (!households.length) return { added: 0, bookCount: 0, bookIds: [] };
+
+  const books = geometricCut(households, { maxDoors });
+  const turfDocs = books.map((book, i) => {
+    const ordered = computeWalkOrder(book.households, { optimize: true });
+    return {
+      organizationId: campaign.organizationId,
+      campaignId,
+      passId,
+      name: books.length > 1 ? `${name} ${i + 1}` : name,
+      mode: 'geometric',
+      params: { supplemental: true, maxDoors },
+      boundary: null, // filled by recomputePassTerritories below
+      centroid: computeCentroid(book.households),
+      householdIds: ordered,
+      doorCount: ordered.length,
+      status: 'draft',
+    };
+  });
+
+  const inserted = await Turf.insertMany(turfDocs);
+
+  const mirrorOps = [];
+  for (const t of inserted) {
+    t.householdIds.forEach((hid, idx) => {
+      mirrorOps.push({ updateOne: { filter: { _id: hid }, update: { $set: { turfId: t._id, walkOrder: idx } } } });
+    });
+  }
+  for (let i = 0; i < mirrorOps.length; i += 2000) {
+    await Household.bulkWrite(mirrorOps.slice(i, i + 2000), { ordered: false });
+  }
+
+  // Re-tessellate the whole pass (new drafts + existing live books) so the new
+  // territories slot in without overlapping the existing ones.
+  await recomputePassTerritories(passId);
+
+  return { added: households.length, bookCount: inserted.length, bookIds: inserted.map((t) => String(t._id)) };
 }
 
 // Recompute a turf's geometry + walk order after an edit changes its members,

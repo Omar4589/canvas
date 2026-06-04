@@ -22,9 +22,11 @@ const campaignSchema = new mongoose.Schema(
     },
     isActive: { type: Boolean, default: true, index: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    // Multi-pass canvassing + the project's timezone (defines "a day" for the
-    // same-day collision / per-day knock reporting). Admin-set in the UI.
-    activePassId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', default: null },
+    // The project's timezone (defines "a day" for the same-day collision /
+    // per-day knock reporting). Admin-set in the UI.
+    // NOTE: active rounds are NOT cached here — a campaign can have several active
+    // rounds (one per active effort). Derive them via activePassIds() from
+    // Pass.status === 'active' (services/passes/activePasses.js).
     timeZone: { type: String, default: 'America/New_York' },
   },
   { timestamps: true }

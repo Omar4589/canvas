@@ -92,28 +92,35 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
   }
 
   let answerBreakdown = [];
-  if (campaign?.surveyTemplateId) {
-    const [template, todaysResponses] = await Promise.all([
-      SurveyTemplate.findOne({
-        _id: campaign.surveyTemplateId,
-        organizationId: orgId,
-      })
-        .select('questions')
-        .lean(),
-      SurveyResponse.find({
-        userId,
-        campaignId,
-        organizationId: orgId,
-        submittedAt: submittedAtQuery,
-      })
-        .select('answers')
-        .lean(),
-    ]);
+  const todaysResponses = await SurveyResponse.find({
+    userId,
+    campaignId,
+    organizationId: orgId,
+    submittedAt: submittedAtQuery,
+  })
+    .select('answers surveyTemplateId')
+    .lean();
+
+  if (todaysResponses.length) {
+    // Per-effort surveys: pull choice-question keys from EVERY survey the day's
+    // responses actually used (effort overrides), plus the campaign default —
+    // not just the campaign survey.
+    const templateIds = new Set(
+      todaysResponses.map((r) => String(r.surveyTemplateId)).filter(Boolean)
+    );
+    if (campaign?.surveyTemplateId) templateIds.add(String(campaign.surveyTemplateId));
+    const templates = templateIds.size
+      ? await SurveyTemplate.find({ _id: { $in: [...templateIds] }, organizationId: orgId })
+          .select('questions')
+          .lean()
+      : [];
 
     const choiceKeys = new Set(
-      (template?.questions || [])
-        .filter((q) => q.type === 'single_choice' || q.type === 'multiple_choice')
-        .map((q) => q.key)
+      templates.flatMap((t) =>
+        (t.questions || [])
+          .filter((q) => q.type === 'single_choice' || q.type === 'multiple_choice')
+          .map((q) => q.key)
+      )
     );
 
     const counts = {};

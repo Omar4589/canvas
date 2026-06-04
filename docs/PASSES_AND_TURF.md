@@ -9,9 +9,19 @@ the numbers.
 - **Part 2 — Technical reference** is for developers (and Claude): models, the generation pipeline,
   the lifecycle routes, and where passes do (and don't) affect aggregation.
 
-Related: [METRICS.md](METRICS.md) (how knocks/coverage count — a pass is the billing unit),
-[TURF_RUNBOOK.md](../TURF_RUNBOOK.md) (step-by-step operational runbook for cutting/recutting),
+Related: [EFFORTS.md](EFFORTS.md) (the layer above — see banner), [METRICS.md](METRICS.md) (a pass is
+the billing unit), [TURF_RUNBOOK.md](../TURF_RUNBOOK.md) (operational runbook),
 [SURVEYS.md](SURVEYS.md) (one survey per voter per pass), [VOTERS.md](VOTERS.md).
+
+> **Updated — passes are now "Rounds" inside Efforts.** A campaign is split into **efforts** (areas
+> or teams), and a "pass" is now one **Round** within an effort (still the cut/assign/billing unit).
+> The mechanics below — generating books, accept/discard, move/merge/split, supplemental books — are
+> unchanged and apply **per round**. What changed: (1) a campaign can have **several active rounds at
+> once** (one per active effort), not one; (2) a round's door-set comes from its **effort's owned
+> doors** (`Household.effortId`), not a walk list; (3) knock attribution is **deterministic by
+> door → book → effort**, not the `activatedAt` time-window; (4) new-address imports go to **Intake**
+> until assigned to an effort. See [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md). The
+> per-pass details below remain correct read as "per round."
 
 ---
 
@@ -100,12 +110,18 @@ happens?
 
 Your options:
 
-1. **Recut the same pass.** Discard its books (this resets the pass to draft), then generate again.
+1. **Add them to the live pass as a supplemental book (recommended).** On the Turf page, when there
+   are doors "not in any book," click **Add as new book** — the unassigned households are cut into
+   new draft book(s) on the *current* pass without touching the existing books or knocks. Then
+   **Accept** and **assign** them like any other book. No recut, no archive; canvassers see the new
+   doors on their next refresh. → keeps the round running.
+2. **Recut the same pass.** Discard its books (this resets the pass to draft), then generate again.
    Because this pass is "all voters," regeneration pulls in **all** current households, so the new
-   addresses are **included**. → This is the "remove all existing books and recut" path.
-2. **Create a new pass** for the updated voter universe and cut fresh books there. The old pass and
-   its knocks stay exactly as they were. → This is the "keep them and make a new pass" path.
-3. **Manually** move the new households into existing books one at a time (books editor). Fine for a
+   addresses are **included**. → the "remove all existing books and recut" path; use when you also
+   want the whole pass re-balanced.
+3. **Create a new pass** for the updated voter universe and cut fresh books there. The old pass and
+   its knocks stay exactly as they were. → the "keep them and make a new pass" path.
+4. **Manually** move the new households into existing books one at a time (books editor). Fine for a
    few; impractical for a bulk import.
 
 > **Walk-list gotcha.** The above "recut includes new addresses" only holds for an **all-voters**
@@ -173,6 +189,7 @@ The route enqueues this as an async job and returns a `jobId` to poll
 |---|---|
 | `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. |
 | `POST .../turfs/accept` ([:99](../server/src/routes/admin/turfs.js#L99)) | Draft → published for the pass. |
+| `POST .../turfs/add-supplemental` | **Non-destructive add.** Cut the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirror `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`); serialized by `Pass.recutLock`. New books then use Accept + Assign. Body `{ passId, name?, maxDoors? }` → `{ added, bookCount, bookIds }`. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
 | `POST .../turfs/discard` ([:113](../server/src/routes/admin/turfs.js#L113)) | Snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` and clear `activePassId`; optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse`. Serialized by `Pass.recutLock`. |
 | `POST .../turfs/restore-snapshot` | Re-create books + assignments from a snapshot (blocked if live books exist; does not auto-reactivate the pass). |
 | move/merge/split door endpoints | Manual book edits; re-tessellate via `recomputeTurf` / `recomputePassTerritories`. |

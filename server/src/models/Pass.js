@@ -1,8 +1,9 @@
 import mongoose from 'mongoose';
 
-// A canvassing round over a campaign. One-way lifecycle (decision 10):
-// draft -> active -> archived, never reopened; roundNumber auto-increments and
-// is never reused; the name is free-form. Only one pass is active at a time.
+// A canvassing ROUND within an effort. One-way lifecycle (decision 10):
+// draft -> active -> archived, never reopened; roundNumber auto-increments per
+// EFFORT and is never reused; the name is free-form. At most one round is active
+// per effort (a campaign can have several active rounds — one per active effort).
 const passSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -17,8 +18,18 @@ const passSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // The effort this round belongs to. The round's door-set is the effort's
+    // owned households (Household.effortId), not walkListId (which is retired).
+    effortId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Effort',
+      required: true,
+      index: true,
+    },
     roundNumber: { type: Number, required: true },
     name: { type: String, required: true, trim: true },
+    // Deprecated: door-set now comes from the effort's owned households. Kept on
+    // existing docs for history; new rounds leave it null.
     walkListId: { type: mongoose.Schema.Types.ObjectId, ref: 'WalkList', default: null },
     status: {
       type: String,
@@ -39,7 +50,8 @@ const passSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-passSchema.index({ campaignId: 1, roundNumber: 1 }, { unique: true });
+passSchema.index({ effortId: 1, roundNumber: 1 }, { unique: true }); // roundNumber resets per effort
 passSchema.index({ campaignId: 1, status: 1 });
+passSchema.index({ effortId: 1, status: 1 });
 
 export const Pass = mongoose.model('Pass', passSchema);

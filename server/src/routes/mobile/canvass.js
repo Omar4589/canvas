@@ -9,10 +9,11 @@ import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
-import { Pass } from '../../models/Pass.js';
+import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
+import { activePassIds } from '../../services/passes/activePasses.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -62,26 +63,20 @@ function distanceFromHouse(household, location) {
 
 const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
 
-// Resolve which pass an action belongs to from its (knock-time) timestamp: the
-// latest pass activated at or before ts (half-open windows), so an offline
-// Pass-1 knock synced after Pass 2 goes live still counts for Pass 1. Falls
-// back to the campaign's active pass.
-async function resolvePassForTimestamp(campaign, ts) {
-  const pass = await Pass.findOne({
-    campaignId: campaign._id,
-    activatedAt: { $ne: null, $lte: ts },
-  })
-    .sort({ activatedAt: -1 })
-    .select('_id')
-    .lean();
-  return pass?._id || campaign.activePassId || null;
-}
-
-// Best-effort turf tag (metadata only); null when not in exactly one pass turf.
-async function resolveTurf(passId, householdId) {
-  if (!passId) return null;
-  const turf = await Turf.findOne({ passId, householdIds: householdId }).select('_id').lean();
-  return turf?._id || null;
+// Deterministic attribution: a door belongs to its book on one of the campaign's
+// ACTIVE rounds. Efforts are door-disjoint, so a household is in at most one
+// active round's books — no time-window guessing needed (works with several
+// concurrent active rounds). effortId comes from the door's owner; passId/turfId
+// from its published book on an active round (null = legacy / not yet booked).
+async function resolveAttribution(campaign, household) {
+  const effortId = household.effortId || null;
+  const passIds = await activePassIds(campaign._id);
+  if (!passIds.length) return { passId: null, turfId: null, effortId };
+  const turf = await Turf.findOne(
+    { campaignId: campaign._id, passId: { $in: passIds }, status: 'published', householdIds: household._id },
+    { _id: 1, passId: 1 }
+  ).lean();
+  return { passId: turf?.passId || null, turfId: turf?._id || null, effortId };
 }
 
 // recomputeHouseholdStatus / recomputeSurveyStatus now live in
@@ -104,8 +99,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   const data = baseActionSchema.parse(body);
   const ts = data.timestamp ? new Date(data.timestamp) : new Date();
   const distance = distanceFromHouse(household, data.location);
-  const passId = await resolvePassForTimestamp(campaign, ts);
-  const turfId = await resolveTurf(passId, household._id);
+  const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
 
   // Replace this canvasser's prior action at this house for THIS pass.
   await CanvassActivity.deleteMany({
@@ -129,6 +123,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     actionType,
     passId,
     turfId,
+    effortId,
     note: data.note ?? null,
     location: data.location,
     distanceFromHouseMeters: distance,
@@ -240,19 +235,22 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       organizationId: household.organizationId,
     });
     if (!template) return res.status(404).json({ error: 'Survey template not found' });
-    if (
-      campaign.surveyTemplateId &&
-      String(campaign.surveyTemplateId) !== String(template._id)
-    ) {
+
+    // Per-effort survey: the door's effort overrides the campaign default.
+    let effectiveSurveyId = campaign.surveyTemplateId;
+    if (household.effortId) {
+      const effort = await Effort.findById(household.effortId).select('surveyTemplateId').lean();
+      if (effort?.surveyTemplateId) effectiveSurveyId = effort.surveyTemplateId;
+    }
+    if (effectiveSurveyId && String(effectiveSurveyId) !== String(template._id)) {
       return res
         .status(400)
-        .json({ error: "Survey template doesn't match the campaign's active survey." });
+        .json({ error: "Survey template doesn't match this door's effort survey." });
     }
 
     const ts = data.timestamp ? new Date(data.timestamp) : new Date();
     const distance = distanceFromHouse(household, data.location);
-    const passId = await resolvePassForTimestamp(campaign, ts);
-    const turfId = await resolveTurf(passId, household._id);
+    const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
 
     // One survey per voter PER PASS (prior-pass surveys are preserved).
     await SurveyResponse.deleteMany({ voterId: voter._id, passId });
@@ -272,6 +270,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       submittedAt: ts,
       passId,
       turfId,
+      effortId,
       wasOfflineSubmission: !!data.wasOfflineSubmission,
     });
 
@@ -291,6 +290,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       actionType: 'survey_submitted',
       passId,
       turfId,
+      effortId,
       note: data.note ?? null,
       location: data.location,
       distanceFromHouseMeters: distance,

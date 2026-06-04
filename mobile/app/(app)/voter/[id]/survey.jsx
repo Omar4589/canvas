@@ -125,7 +125,17 @@ export default function VoterSurvey() {
       ),
     [bootstrap, voter]
   );
-  const survey = bootstrap?.activeSurvey;
+  // Per-effort survey: resolve via the door's book → effort survey override,
+  // falling back to the campaign default (activeSurvey).
+  const survey = useMemo(() => {
+    const books = bootstrap?.books || [];
+    const surveys = bootstrap?.surveys || {};
+    const book = household?.turfId
+      ? books.find((b) => String(b.id) === String(household.turfId))
+      : null;
+    const sid = book?.surveyTemplateId;
+    return (sid && surveys[String(sid)]) || bootstrap?.activeSurvey || null;
+  }, [bootstrap, household]);
 
   const [answers, setAnswers] = useState({});
   const [note, setNote] = useState('');

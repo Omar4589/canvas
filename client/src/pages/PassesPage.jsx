@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
@@ -50,28 +51,35 @@ function PassProgress({ campaignId, passId }) {
 export default function PassesPage() {
   const qc = useQueryClient();
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
+  const [searchParams] = useSearchParams();
   const [name, setName] = useState('');
-  const [walkListId, setWalkListId] = useState('');
+  const [effortId, setEffortId] = useState(searchParams.get('effortId') || '');
+
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId,
+  });
+  const efforts = (effortsQ.data?.efforts || []).filter((e) => e.status !== 'archived');
+
+  // Default the effort once efforts load (URL ?effortId wins, else first effort).
+  useEffect(() => {
+    if (effortId || !efforts.length) return;
+    setEffortId(String(efforts[0]._id));
+  }, [effortId, efforts]);
 
   const passesQ = useQuery({
-    queryKey: ['admin', 'passes', campaignId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
-    enabled: !!campaignId,
-  });
-  const walkListsQ = useQuery({
-    queryKey: ['admin', 'walklists', campaignId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/walklists`),
-    enabled: !!campaignId,
+    queryKey: ['admin', 'passes', campaignId, effortId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/passes?effortId=${effortId}`),
+    enabled: !!campaignId && !!effortId,
   });
   const passes = passesQ.data?.passes || [];
-  const activePassId = passesQ.data?.activePassId;
-  const walkLists = walkListsQ.data?.walkLists || [];
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
 
   const create = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/passes`, { method: 'POST', body: { name, walkListId: walkListId || undefined } }),
-    onSuccess: () => { setName(''); setWalkListId(''); invalidate(); },
+    mutationFn: () => api(`/admin/campaigns/${campaignId}/passes`, { method: 'POST', body: { name, effortId } }),
+    onSuccess: () => { setName(''); invalidate(); },
   });
   const action = useMutation({
     mutationFn: ({ id, op }) => api(`/admin/campaigns/${campaignId}/passes/${id}/${op}`, { method: 'POST' }),
@@ -85,12 +93,25 @@ export default function PassesPage() {
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Passes</h1>
-        <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
+        <h1 className="text-2xl font-semibold">Rounds</h1>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Effort</span>
+            <select
+              value={effortId}
+              onChange={(e) => setEffortId(e.target.value)}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            >
+              <option value="">Choose an effort…</option>
+              {efforts.map((ef) => <option key={ef._id} value={ef._id}>{ef.name}</option>)}
+            </select>
+          </label>
+          <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
+        </div>
       </div>
 
       <section className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
-        <h2 className="mb-3 text-base font-medium">New pass</h2>
+        <h2 className="mb-3 text-base font-medium">New round</h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
             <span className="mb-1 block text-xs font-medium text-gray-700">Name</span>
@@ -101,30 +122,17 @@ export default function PassesPage() {
               className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
             />
           </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-700">Walk list</span>
-            <select
-              value={walkListId}
-              onChange={(e) => setWalkListId(e.target.value)}
-              className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
-            >
-              <option value="">All voters</option>
-              {walkLists.map((w) => (
-                <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh)</option>
-              ))}
-            </select>
-          </label>
           <button
-            onClick={() => name && create.mutate()}
-            disabled={!name || create.isPending}
+            onClick={() => name && effortId && create.mutate()}
+            disabled={!name || !effortId || create.isPending}
             className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
           >
-            {create.isPending ? 'Creating…' : 'Create pass'}
+            {create.isPending ? 'Creating…' : 'Create round'}
           </button>
         </div>
         {create.error && <div className="mt-2 text-xs text-red-700">{create.error.message}</div>}
         <p className="mt-2 text-xs text-gray-500">
-          Create a round → cut its books on the Turf Cutting page → Activate it here. Passes are one-way (draft → active → archived).
+          Rounds belong to the selected effort. Create a round → cut its books on the Turf Cutting page → Activate it here. Rounds are one-way (draft → active → archived); each effort can have one active round.
         </p>
       </section>
 

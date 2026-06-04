@@ -3,8 +3,9 @@
 export const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/map', label: 'Map' },
+  { to: '/efforts', label: 'Efforts' },
   { to: '/turfs', label: 'Turf Cutting' },
-  { to: '/passes', label: 'Passes' },
+  { to: '/passes', label: 'Rounds' },
   { to: '/walklists', label: 'Walk Lists' },
   { to: '/campaigns', label: 'Campaigns' },
   { to: '/import', label: 'CSV Import' },

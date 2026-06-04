@@ -1,5 +1,12 @@
 # Turf Cutting / Walk Lists / Passes / Job Queue — Ops Runbook
 
+> **Updated — "passes" are now "Rounds" inside Efforts.** A campaign is split into **efforts**
+> (areas/teams), and a pass is one **Round** within an effort. The turf-cutting / accept / discard /
+> assign steps below still apply **per round**; what changed is that a campaign can have several active
+> rounds at once (one per effort), a round's door-set comes from its effort's owned doors (not a walk
+> list), and attribution is door→book→effort. See [docs/EFFORTS.md](docs/EFFORTS.md) (concepts +
+> deploy/migrate runbook) and [docs/IMPORTS.md](docs/IMPORTS.md) (Intake). Read "pass" below as "round."
+
 Everything needed to deploy and operate the turf-cutting feature. Built on a feature branch for an isolated Heroku app (no impact on the current production app). Mobile is **not** part of this change.
 
 ## What shipped
