@@ -9,7 +9,9 @@ voters, passes, campaigns, and the counts**.
   endpoints, the cross-effects, and the components.
 
 Server entry point: [`server/src/routes/admin/voted.js`](../server/src/routes/admin/voted.js).
-Related: the [metrics doc](METRICS.md), [MAPS.md](MAPS.md) (voted doors dropping off the map).
+Related: the [metrics doc](METRICS.md), [MAPS.md](MAPS.md) (voted doors dropping off the map),
+[EFFORTS.md](EFFORTS.md) (marking is campaign-wide / effort-independent; new voters reach efforts via
+Intake), [IMPORTS.md](IMPORTS.md) (the import that triggers the sticky re-apply).
 
 ---
 
@@ -48,6 +50,34 @@ These are two different things:
    dropped.
 5. The page keeps an **upload history** with **Voters marked voted** and **Doors fully voted**
    totals, and an **Undo** button per upload.
+
+## What "Not found" means — and that it's remembered
+
+The preview's **Not in this campaign** count (and the **Not found** column in the upload history) is
+about the **universe, not your efforts or books**: those Voter IDs simply aren't in *this campaign's*
+voter list yet — they haven't been imported, or they belong to a different campaign. It does **not**
+mean "those homes aren't in the active effort." A voter who *is* in the campaign matches no matter
+which effort their door is in (or if it's still in Intake).
+
+Those IDs aren't thrown away — they're **remembered**. The next time you **import voters** and one of
+them lands in the campaign, they're **automatically marked voted**, and their door drops once everyone
+there has voted (this is the "sticky" behavior — see the Lifecycle below). So a normal flow is: upload
+the voted list now (some land in *Not found*), import the new voters later, and the overlap gets marked
+on that import — no re-upload needed.
+
+You can upload **as many voted lists as you want** to the same campaign. **Each upload remembers its
+own unmatched IDs**, so the remembered set **grows** — it's the union across all your (non-undone)
+uploads. Re-listing the same ID in two uploads is harmless: it still becomes a single mark when the
+voter finally arrives.
+
+## Early voting + efforts / Intake
+
+Marking and door-dropping are **campaign-wide** — you don't target them per effort. A voted voter is
+marked across the whole campaign, and a fully-voted door drops from **every** effort's map/books and
+from **Intake** alike. New addresses you import later sit in **Intake** until you assign them to an
+effort; if those voters were on a voted list, they're already marked when they land, so when you
+**claim** them into an effort they arrive already-handled (fully-voted doors never reach the field).
+See [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md).
 
 ## What canvassers see
 
@@ -163,6 +193,7 @@ admin-only, campaign loaded/validated per request.
 | **Books / turf** | Book door counts are computed **live** as "active & not-fully-voted" — on mobile *and* now in the admin turf list (`eligibleDoorCount`), so a book's count shrinks as doors drop. **`Turf.householdIds` is not mutated and turfs are not re-cut**; the stored `Turf.doorCount` is kept for snapshots/splits but no longer shown to admins. | [bootstrap.js:80-94](../server/src/routes/mobile/bootstrap.js#L80), [turfs.js:280](../server/src/routes/admin/turfs.js#L280) |
 | **Voters** | Not hidden — flagged `voted: true` in the bootstrap payload and shown with a ✓ badge. No write to the `Voter` doc. | [bootstrap.js:190-193](../server/src/routes/mobile/bootstrap.js#L190) |
 | **Passes** | No interaction — voted filtering is campaign-wide, not pass-specific. Passes/knocks are unaffected. | — |
+| **Efforts / Intake** | No interaction with ownership — voted filtering is campaign-wide and **effort-independent** (like passes); a fully-voted door drops from every effort and from Intake. New voters land in **Intake**; the sticky re-apply marks them on the next import, and **claiming** doors into an effort carries the marks (fully-voted doors are excluded from the effort's cuts/maps). | [reapplyVotedLists.js](../server/src/services/voted/reapplyVotedLists.js), [importProcessor.js:66](../server/src/services/import/importProcessor.js#L66) |
 | **Campaigns** | The mark is per-campaign; the same voter is tracked independently per campaign. | [VotedVoter.js](../server/src/models/VotedVoter.js) |
 | **Canvass status** | Independent. `fullyVoted` is separate from `status` (`unknocked`/`not_home`/…); a dropped door keeps whatever status it had — it just isn't shown. | [Household.js](../server/src/models/Household.js) |
 | **Admin reports/metrics** | Fully-voted doors are pulled out of `unknocked` into a dedicated **Voted** coverage segment (they still count in Households; `homesKnocked`/knocks unchanged). | [reports.js](../server/src/routes/admin/reports.js) (`coverageBucketExpr`) |
@@ -198,6 +229,12 @@ Resolved (kept here so the history is clear):
   who was on a prior list and is imported later is still marked — the door doesn't wrongly re-open,
   and a brand-new all-voted household drops. Only a genuinely **new, un-voted** voter re-opens a door.
   Undoing an upload also clears its pending ids so they never re-apply.
+- **Multiple uploads accumulate pending ids.** `VotedPendingId`'s `{campaignId, stateVoterId}` index is
+  **non-unique**, so each upload banks its **own** unmatched ids (one row per upload); the pending pool
+  is the **union** across non-undone uploads, so re-uploading another list grows it. `reapplyVotedLists`
+  graduates by **distinct `stateVoterId`** and deletes **every** pending row for a graduated id, so the
+  same id listed by two uploads **collapses to a single `VotedVoter`** mark. Undo removes only that
+  upload's pending rows (others survive).
 
 Still true:
 
@@ -208,5 +245,4 @@ Still true:
   (or use per-voter unmark). The `VotedUpload` is flagged `undone`, not deleted.
 - **Campaign-scoped.** Uploading to the wrong campaign marks no one useful (matches are filtered to
   that campaign's households); re-upload to the correct campaign.
-- **`voteMethod` is unused.** The schema field exists but the CSV import doesn't populate it.
 - **`voteMethod` is unused.** The schema field exists but the CSV import doesn't populate it.
