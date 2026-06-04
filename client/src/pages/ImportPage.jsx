@@ -22,6 +22,96 @@ function StatusBadge({ job }) {
   );
 }
 
+const addr1 = (norm) => String(norm || '').split('|')[0];
+
+function DiffStat({ label, value, amber }) {
+  const hot = amber && value > 0;
+  return (
+    <div className={`rounded border p-3 ${hot ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`}>
+      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
+      <div className={`mt-1 text-xl font-semibold ${hot ? 'text-amber-700' : 'text-gray-900'}`}>{fmt(value)}</div>
+    </div>
+  );
+}
+
+function SampleList({ title, count, children }) {
+  if (!count) return null;
+  return (
+    <details className="rounded border border-gray-200 bg-white">
+      <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{title} ({fmt(count)})</summary>
+      <div className="border-t border-gray-100 px-3 py-2 text-xs text-gray-700">{children}</div>
+    </details>
+  );
+}
+
+function ReviewPanel({ diff }) {
+  const { totals, rowIssues, samples } = diff;
+  const skipped = rowIssues.missingRequired + rowIssues.noCoordinates + rowIssues.duplicateInFile;
+  const hasWarnings = totals.movedVoters > 0 || totals.orphanedDoors > 0 || totals.nearDuplicates > 0;
+  return (
+    <div className="mb-4 rounded border border-gray-200 bg-gray-50 p-4">
+      <h3 className="mb-3 text-sm font-medium">Review changes before importing</h3>
+      <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        <DiffStat label="New doors" value={totals.newDoors} />
+        <DiffStat label="Existing doors" value={totals.existingDoors} />
+        <DiffStat label="New voters" value={totals.newVoters} />
+        <DiffStat label="Updated voters" value={totals.updatedVoters} />
+        <DiffStat label="Voters moving doors" value={totals.movedVoters} amber />
+        <DiffStat label="Doors emptied" value={totals.orphanedDoors} amber />
+        <DiffStat label="Near-dup addresses" value={totals.nearDuplicates} amber />
+        <DiffStat label="Rows skipped" value={skipped} amber />
+      </div>
+
+      {hasWarnings && (
+        <p className="mt-3 text-xs text-amber-700">
+          Amber items are worth a look before you confirm: voters changing addresses, doors that will be
+          emptied (and dropped from the field), and addresses that look like re-spellings of existing ones.
+        </p>
+      )}
+
+      <div className="mt-3 space-y-2">
+        <SampleList title="Voters moving to a different door" count={totals.movedVoters}>
+          <ul className="space-y-1">
+            {samples.moved.map((m, i) => (
+              <li key={i}>
+                <span className="font-medium">{m.name || m.stateVoterId}</span>: {addr1(m.fromAddress)} → {addr1(m.toAddress)}{m.toIsNew ? ' (new door → Intake)' : ''}
+              </li>
+            ))}
+            {totals.movedVoters > samples.moved.length && (
+              <li className="text-gray-400">+{fmt(totals.movedVoters - samples.moved.length)} more</li>
+            )}
+          </ul>
+        </SampleList>
+        <SampleList title="Doors that will be emptied" count={totals.orphanedDoors}>
+          <ul className="space-y-1">
+            {samples.orphans.map((o, i) => (
+              <li key={i}>{addr1(o.address)} ({fmt(o.voterCount)} voter{o.voterCount === 1 ? '' : 's'} leaving)</li>
+            ))}
+            {totals.orphanedDoors > samples.orphans.length && (
+              <li className="text-gray-400">+{fmt(totals.orphanedDoors - samples.orphans.length)} more</li>
+            )}
+          </ul>
+        </SampleList>
+        <SampleList title="Near-duplicate addresses (won't merge)" count={totals.nearDuplicates}>
+          <ul className="space-y-1">
+            {samples.nearDups.map((n, i) => (
+              <li key={i}>{addr1(n.newAddress)} ↔ {addr1(n.existingAddress)}</li>
+            ))}
+            {totals.nearDuplicates > samples.nearDups.length && (
+              <li className="text-gray-400">+{fmt(totals.nearDuplicates - samples.nearDups.length)} more</li>
+            )}
+          </ul>
+        </SampleList>
+        <SampleList title="Rows skipped" count={skipped}>
+          {rowIssues.missingRequired > 0 && <div>{fmt(rowIssues.missingRequired)} missing required fields</div>}
+          {rowIssues.noCoordinates > 0 && <div>{fmt(rowIssues.noCoordinates)} missing/invalid coordinates</div>}
+          {rowIssues.duplicateInFile > 0 && <div>{fmt(rowIssues.duplicateInFile)} duplicate Voter IDs within the file (first kept)</div>}
+        </SampleList>
+      </div>
+    </div>
+  );
+}
+
 export default function ImportPage() {
   const queryClient = useQueryClient();
   const [file, setFile] = useState(null);
@@ -29,7 +119,7 @@ export default function ImportPage() {
   const [columns, setColumns] = useState([]);
   const [mapping, setMapping] = useState({});
   const [profileName, setProfileName] = useState('');
-  const [step, setStep] = useState('select'); // 'select' | 'map'
+  const [step, setStep] = useState('select'); // 'select' | 'map' | 'review'
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -77,6 +167,17 @@ export default function ImportPage() {
     },
   });
 
+  const previewDiff = useMutation({
+    mutationFn: async ({ file, campaignId, mapping }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('campaignId', campaignId);
+      fd.append('mapping', JSON.stringify(mapping));
+      return api('/admin/imports/csv/preview', { method: 'POST', formData: fd });
+    },
+    onSuccess: () => setStep('review'),
+  });
+
   const upload = useMutation({
     mutationFn: async ({ file, campaignId, mapping }) => {
       const fd = new FormData();
@@ -96,6 +197,13 @@ export default function ImportPage() {
     setColumns([]);
     setMapping({});
     setStep('select');
+    previewDiff.reset();
+  }
+
+  // Any change to the inputs makes a computed diff stale — drop back to mapping.
+  function dropReview() {
+    previewDiff.reset();
+    setStep((s) => (s === 'review' ? 'map' : s));
   }
 
   function onPickFile(f) {
@@ -111,11 +219,12 @@ export default function ImportPage() {
       if (columns.includes(col)) filtered[k] = col;
     }
     setMapping(filtered);
+    dropReview();
   }
 
   const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
   const requiredUnmapped = requiredKeys.filter((k) => !mapping[k]);
-  const canImport = file && campaignId && step === 'map' && requiredUnmapped.length === 0 && !upload.isPending;
+  const canPreview = file && campaignId && step === 'map' && requiredUnmapped.length === 0 && !previewDiff.isPending;
 
   return (
     <div>
@@ -134,7 +243,7 @@ export default function ImportPage() {
             <label className="mb-1 block text-xs font-medium text-gray-700">Campaign</label>
             <select
               value={campaignId}
-              onChange={(e) => setCampaignId(e.target.value)}
+              onChange={(e) => { setCampaignId(e.target.value); dropReview(); }}
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
             >
               <option value="">— Choose a campaign —</option>
@@ -204,7 +313,7 @@ export default function ImportPage() {
                     </label>
                     <select
                       value={mapping[f.key] || ''}
-                      onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value || undefined }))}
+                      onChange={(e) => { setMapping((m) => ({ ...m, [f.key]: e.target.value || undefined })); dropReview(); }}
                       className={`min-w-0 flex-1 rounded border px-2 py-1 text-xs ${
                         isReqUnmapped ? 'border-red-300 bg-red-50' : 'border-gray-300'
                       }`}
@@ -243,13 +352,38 @@ export default function ImportPage() {
           </div>
         )}
 
-        <button
-          onClick={() => canImport && upload.mutate({ file, campaignId, mapping })}
-          disabled={!canImport}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
-        >
-          {upload.isPending ? 'Queuing…' : 'Import'}
-        </button>
+        {step === 'review' && previewDiff.data?.diff && <ReviewPanel diff={previewDiff.data.diff} />}
+
+        {step === 'review' ? (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setStep('map')}
+              className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Back
+            </button>
+            <button
+              onClick={() => upload.mutate({ file, campaignId, mapping })}
+              disabled={upload.isPending}
+              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+            >
+              {upload.isPending ? 'Importing…' : 'Confirm & import'}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => canPreview && previewDiff.mutate({ file, campaignId, mapping })}
+            disabled={!canPreview}
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+          >
+            {previewDiff.isPending ? 'Analyzing…' : 'Preview changes'}
+          </button>
+        )}
+        {previewDiff.error && (
+          <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {previewDiff.error.message}
+          </div>
+        )}
         {upload.error && (
           <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {upload.error.message}
@@ -277,6 +411,7 @@ export default function ImportPage() {
                 <th className="px-4 py-2 text-right">Voters</th>
                 <th className="px-4 py-2 text-right">Households</th>
                 <th className="px-4 py-2 text-right">New</th>
+                <th className="px-4 py-2 text-right">Moved / Emptied</th>
                 <th className="px-4 py-2 text-right">Errors</th>
               </tr>
             </thead>
@@ -290,12 +425,13 @@ export default function ImportPage() {
                   <td className="px-4 py-2 text-right">{fmt(j.uniqueVoters)}</td>
                   <td className="px-4 py-2 text-right">{fmt(j.uniqueHouseholds)}</td>
                   <td className="px-4 py-2 text-right">{fmt(j.newVoters)} v / {fmt(j.newHouseholds)} h</td>
+                  <td className="px-4 py-2 text-right">{fmt(j.movedVoters)} / {fmt(j.deactivatedDoors)}</td>
                   <td className="px-4 py-2 text-right">{fmt(j.errorCount)}</td>
                 </tr>
               ))}
               {!data?.jobs?.length && (
                 <tr>
-                  <td colSpan="8" className="px-4 py-6 text-center text-gray-500">No imports yet.</td>
+                  <td colSpan="9" className="px-4 py-6 text-center text-gray-500">No imports yet.</td>
                 </tr>
               )}
             </tbody>

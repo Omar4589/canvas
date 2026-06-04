@@ -9,6 +9,8 @@ import { ImportProfile } from '../../models/ImportProfile.js';
 import { Campaign } from '../../models/Campaign.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { saveRawImport } from '../../services/import/rawImportStore.js';
+import { parseAndValidate } from '../../services/import/csvImporter.js';
+import { computeImportDiff } from '../../services/import/computeImportDiff.js';
 import {
   CANONICAL_FIELDS,
   REQUIRED_FIELDS,
@@ -93,6 +95,34 @@ function missingMappingFields(mapping) {
   return REQUIRED_FIELDS.filter((f) => !mapping?.[f]);
 }
 
+// Resolve the field mapping (inline JSON → saved profile → default) and validate
+// required fields. Shared by /csv and /csv/preview. Returns { mapping, importProfileId }
+// or { error } for the caller to 400.
+async function resolveImportMapping(req) {
+  let mapping = DEFAULT_PROFILE_MAPPING;
+  let importProfileId = null;
+  if (req.body?.mapping) {
+    try {
+      mapping = JSON.parse(req.body.mapping);
+    } catch {
+      return { error: 'mapping must be valid JSON' };
+    }
+  } else if (req.body?.importProfileId) {
+    const profile = await ImportProfile.findOne({
+      _id: req.body.importProfileId,
+      organizationId: activeOrgId(req),
+    });
+    if (!profile) return { error: 'Import profile not found' };
+    mapping = profile.mapping;
+    importProfileId = profile._id;
+  }
+  const missing = missingMappingFields(mapping);
+  if (missing.length) {
+    return { error: `Mapping is missing required fields: ${missing.join(', ')}` };
+  }
+  return { mapping, importProfileId };
+}
+
 // Enqueue a CSV import: validate synchronously, stash the file in GridFS, queue it.
 router.post('/csv', upload.single('file'), async (req, res, next) => {
   try {
@@ -104,27 +134,9 @@ router.post('/csv', upload.single('file'), async (req, res, next) => {
     }
 
     // Resolve the field mapping: inline JSON, a saved profile, or the default.
-    let mapping = DEFAULT_PROFILE_MAPPING;
-    let importProfileId = null;
-    if (req.body?.mapping) {
-      try {
-        mapping = JSON.parse(req.body.mapping);
-      } catch {
-        return res.status(400).json({ error: 'mapping must be valid JSON' });
-      }
-    } else if (req.body?.importProfileId) {
-      const profile = await ImportProfile.findOne({
-        _id: req.body.importProfileId,
-        organizationId: activeOrgId(req),
-      });
-      if (!profile) return res.status(400).json({ error: 'Import profile not found' });
-      mapping = profile.mapping;
-      importProfileId = profile._id;
-    }
-    const missing = missingMappingFields(mapping);
-    if (missing.length) {
-      return res.status(400).json({ error: `Mapping is missing required fields: ${missing.join(', ')}` });
-    }
+    const resolved = await resolveImportMapping(req);
+    if (resolved.error) return res.status(400).json({ error: resolved.error });
+    const { mapping, importProfileId } = resolved;
 
     // Campaign must exist + belong to the active org (preserves today's 400).
     const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
@@ -147,6 +159,30 @@ router.post('/csv', upload.single('file'), async (req, res, next) => {
     );
 
     res.status(201).json({ job });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Dry-run: parse + diff the file against the campaign's current data. No writes —
+// powers the "review before you import" step. Apply is the unchanged POST /csv.
+router.post('/csv/preview', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
+    const campaignId = req.body?.campaignId;
+    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+      return res.status(400).json({ error: 'campaignId is required' });
+    }
+    const resolved = await resolveImportMapping(req);
+    if (resolved.error) return res.status(400).json({ error: resolved.error });
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
+    if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
+
+    const csv = req.file.buffer.toString('utf8');
+    const { totalRows, errors, validRows, householdMap, dupSvids } = parseAndValidate(csv, resolved.mapping);
+    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows });
+    res.json({ diff });
   } catch (err) {
     next(err);
   }

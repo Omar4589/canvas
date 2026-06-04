@@ -5,8 +5,10 @@ import { loadRawImport, deleteRawImport } from './rawImportStore.js';
 import { parseAndValidate, applyImport } from './csvImporter.js';
 import { recomputeCutAttributesForCampaign } from '../turf/computeCutAttributes.js';
 import { Household } from '../../models/Household.js';
+import { Voter } from '../../models/Voter.js';
 import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
 import { reapplyVotedLists } from '../voted/reapplyVotedLists.js';
+import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 
 // BullMQ processor for the `import-queue`. Idempotent: household upserts on
 // {campaignId, normalizedAddress} and voter upserts on {organizationId,
@@ -39,6 +41,17 @@ export async function processImportJob(job) {
       importJob.fieldMapping || {}
     );
 
+    // Re-housing audit: capture each incoming voter's CURRENT household BEFORE the
+    // upsert reassigns it, so we can detect moves + emptied doors afterward.
+    const svids = validRows.map((r) => r.voter.stateVoterId);
+    const priorVoters = await Voter.find(
+      { organizationId: orgId, stateVoterId: { $in: svids } },
+      { stateVoterId: 1, householdId: 1 }
+    ).lean();
+    const priorHhBySvid = new Map(
+      priorVoters.map((v) => [v.stateVoterId, v.householdId ? String(v.householdId) : null])
+    );
+
     const counts = await applyImport({
       campaign,
       orgId,
@@ -68,6 +81,29 @@ export async function processImportJob(job) {
     const toRecompute = [...new Set([...droppedDoors.map(String), ...reappliedHh])];
     if (toRecompute.length) await recomputeFullyVoted(campaign._id, toRecompute);
 
+    // Re-house cleanup: count voters that changed doors, then deactivate doors this
+    // import emptied (and reactivate any refilled) — bounded to the touched households.
+    const postVoters = await Voter.find(
+      { organizationId: orgId, stateVoterId: { $in: svids } },
+      { stateVoterId: 1, householdId: 1 }
+    ).lean();
+    let movedVoters = 0;
+    for (const v of postVoters) {
+      const prior = priorHhBySvid.get(v.stateVoterId);
+      if (prior && prior !== String(v.householdId)) movedVoters += 1;
+    }
+    const destHouseholds = await Household.find(
+      { campaignId: campaign._id, normalizedAddress: { $in: [...householdMap.keys()] } },
+      { _id: 1 }
+    ).lean();
+    const touchedHhIds = [
+      ...new Set([
+        ...priorVoters.map((v) => v.householdId).filter(Boolean).map(String),
+        ...destHouseholds.map((h) => String(h._id)),
+      ]),
+    ];
+    const { deactivated: deactivatedDoors } = await recomputeHouseholdActive(campaign._id, touchedHhIds);
+
     await ImportJob.updateOne(
       { _id: importJobId },
       {
@@ -78,6 +114,8 @@ export async function processImportJob(job) {
         newVoters: counts.newVoters,
         updatedVoters: counts.updatedVoters,
         newHouseholds: counts.newHouseholds,
+        movedVoters,
+        deactivatedDoors,
         duplicateStateVoterIds: Array.from(dupSvids),
         errors: errors.slice(0, 100),
         errorCount: errors.length,

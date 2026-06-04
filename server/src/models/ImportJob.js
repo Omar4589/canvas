@@ -28,6 +28,9 @@ const importJobSchema = new mongoose.Schema(
     newVoters: { type: Number, default: 0 },
     updatedVoters: { type: Number, default: 0 },
     newHouseholds: { type: Number, default: 0 },
+    // Re-housing audit: voters whose household changed, and doors emptied + deactivated by it.
+    movedVoters: { type: Number, default: 0 },
+    deactivatedDoors: { type: Number, default: 0 },
     duplicateStateVoterIds: { type: [String], default: [] },
     errors: { type: [mongoose.Schema.Types.Mixed], default: [] },
     errorCount: { type: Number, default: 0 },

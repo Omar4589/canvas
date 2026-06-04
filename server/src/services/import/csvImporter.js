@@ -127,6 +127,7 @@ export function parseAndValidate(csvString, mapping) {
     if (missing.length) {
       errors.push({
         rowIndex: i + 2, // +1 header, +1 1-based
+        code: 'missing_required',
         reason: `Missing required: ${missing.join(', ')}`,
         stateVoterId: mapped.voter.stateVoterId || null,
       });
@@ -135,6 +136,7 @@ export function parseAndValidate(csvString, mapping) {
     if (mapped.household.latitude == null || mapped.household.longitude == null) {
       errors.push({
         rowIndex: i + 2,
+        code: 'bad_coords',
         reason: 'Missing or invalid latitude/longitude',
         stateVoterId: mapped.voter.stateVoterId || null,
       });
