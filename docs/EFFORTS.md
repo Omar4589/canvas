@@ -132,7 +132,7 @@ effort-scoped), [services/passes/activePasses.js](../server/src/services/passes/
 | Model | File | Notes |
 |---|---|---|
 | `Effort` | [models/Effort.js](../server/src/models/Effort.js) | `campaignId`, `name`, `color`, `surveyTemplateId?` (override → falls back to `Campaign.surveyTemplateId`), `seededFromWalkListId?` (audit), `status` (draft/active/archived). |
-| `EffortMember` | [models/EffortMember.js](../server/src/models/EffortMember.js) | **Manual pre-stage list only**, unique `{effortId, userId}`. The displayed "crew" is *derived* (next), not this — see §H. |
+| `EffortMember` | [models/EffortMember.js](../server/src/models/EffortMember.js) | **Manual pre-stage list only**, unique `{effortId, userId}`. The displayed "crew" is *derived* (see §G), not this. |
 | `Household.effortId` | [models/Household.js](../server/src/models/Household.js) | **Source of truth for door ownership.** `null` = Intake. Index `{campaignId, effortId}`. Disjointness = one effortId per door. |
 | `Pass` (= Round) | [models/Pass.js](../server/src/models/Pass.js) | Gains `effortId` (required); `roundNumber` unique **per effort** (`{effortId, roundNumber}`); `walkListId` retired (door-set comes from the effort). |
 | `Campaign` | [models/Campaign.js](../server/src/models/Campaign.js) | **`activePassId` dropped.** Active rounds derive from `Pass.status === 'active'` via `activePassIds()`. |
@@ -208,7 +208,7 @@ Run without `--apply` first for a zero-write **dry run** (prints per-campaign co
 The dry run is for the manual/local path — with release phase the real migration runs automatically on
 deploy, so a separate dry run isn't needed.
 
-## H. Crew (derived, not stored)
+## G. Crew (derived, not stored)
 
 The displayed crew is computed in [efforts.js](../server/src/routes/admin/efforts.js), never synced:
 
@@ -225,7 +225,7 @@ The displayed crew is computed in [efforts.js](../server/src/routes/admin/effort
   person leaves the crew by being unassigned from the book (Turf page). The UI hides the remove `×` for
   anyone who is `viaAssignment`.
 
-## G. Frontend
+## H. Frontend
 
 | File | Renders |
 |---|---|
