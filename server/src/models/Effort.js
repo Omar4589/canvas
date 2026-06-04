@@ -20,7 +20,6 @@ const effortSchema = new mongoose.Schema(
       index: true,
     },
     name: { type: String, required: true, trim: true },
-    color: { type: String, default: null },
     // Optional per-effort survey; falls back to Campaign.surveyTemplateId.
     // Only meaningful for survey-type campaigns (lit-drop efforts carry none).
     surveyTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: 'SurveyTemplate', default: null },

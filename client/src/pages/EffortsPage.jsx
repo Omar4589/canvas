@@ -119,10 +119,7 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, onUpd
     <>
       <tr className="border-t border-gray-100">
         <td className="px-4 py-2">
-          <span className="inline-flex items-center gap-2">
-            {effort.color && <span className="inline-block h-3 w-3 rounded-sm" style={{ background: effort.color }} />}
-            <span className="font-medium text-gray-900">{effort.name}</span>
-          </span>
+          <span className="font-medium text-gray-900">{effort.name}</span>
         </td>
         <td className="px-4 py-2"><span className={`rounded px-2 py-0.5 text-xs ${STATUS_BADGE[effort.status] || ''}`}>{effort.status}</span></td>
         <td className="px-4 py-2 text-right">{(effort.doorCount || 0).toLocaleString()}</td>
@@ -148,13 +145,6 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, onUpd
                 onBlur={(e) => e.target.value.trim() && e.target.value !== effort.name && onUpdate(effort, { name: e.target.value.trim() })}
                 className="rounded border border-gray-300 px-2 py-1 text-xs"
               />
-              <input
-                type="color"
-                defaultValue={effort.color || '#2563eb'}
-                onBlur={(e) => onUpdate(effort, { color: e.target.value })}
-                title="Effort color"
-                className="h-7 w-10 rounded border border-gray-300"
-              />
               {isSurveyType && (
                 <select
                   defaultValue={effort.surveyTemplateId || ''}
@@ -179,7 +169,6 @@ export default function EffortsPage() {
   const { campaignId, setCampaignId, campaigns, selected, isLoading } = useCampaignSelection();
   const isSurveyType = selected?.type === 'survey';
   const [name, setName] = useState('');
-  const [color, setColor] = useState('#2563eb');
   const [surveyTemplateId, setSurveyTemplateId] = useState('');
   const [seedWalkListId, setSeedWalkListId] = useState('');
 
@@ -202,7 +191,7 @@ export default function EffortsPage() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
   const create = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/efforts`, { method: 'POST', body: { name, color, surveyTemplateId: surveyTemplateId || undefined, seedWalkListId: seedWalkListId || undefined } }),
+    mutationFn: () => api(`/admin/campaigns/${campaignId}/efforts`, { method: 'POST', body: { name, surveyTemplateId: surveyTemplateId || undefined, seedWalkListId: seedWalkListId || undefined } }),
     onSuccess: () => { setName(''); setSurveyTemplateId(''); setSeedWalkListId(''); invalidate(); },
   });
   const update = useMutation({ mutationFn: ({ id, body }) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'PATCH', body }), onSuccess: invalidate });
@@ -234,10 +223,6 @@ export default function EffortsPage() {
           <label className="text-sm">
             <span className="mb-1 block text-xs font-medium text-gray-700">Name</span>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="rounded border border-gray-300 px-3 py-2 text-sm" />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-700">Color</span>
-            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-9 w-12 rounded border border-gray-300" />
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-xs font-medium text-gray-700">Seed door-set (walk list)</span>

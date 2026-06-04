@@ -113,13 +113,12 @@ router.get('/', async (req, res, next) => {
 // list's Intake households) — see /:id/claim for the full claim/re-carve flow.
 router.post('/', async (req, res, next) => {
   try {
-    const { name, color, surveyTemplateId, seedWalkListId } = req.body || {};
+    const { name, surveyTemplateId, seedWalkListId } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
     const effort = await Effort.create({
       organizationId: req.campaign.organizationId,
       campaignId: req.campaign._id,
       name: String(name).trim(),
-      color: color || null,
       // Lit-drop campaigns never carry a survey (mirrors Campaign type rule).
       surveyTemplateId:
         req.campaign.type === 'survey' && surveyTemplateId ? surveyTemplateId : null,
@@ -145,9 +144,8 @@ router.post('/', async (req, res, next) => {
 
 router.patch('/:id', loadEffort, async (req, res, next) => {
   try {
-    const { name, color, surveyTemplateId } = req.body || {};
+    const { name, surveyTemplateId } = req.body || {};
     if (name) req.effort.name = String(name).trim();
-    if (color !== undefined) req.effort.color = color || null;
     if (surveyTemplateId !== undefined) {
       req.effort.surveyTemplateId =
         req.campaign.type === 'survey' && surveyTemplateId ? surveyTemplateId : null;

@@ -93,7 +93,7 @@ people leave when you unassign their book on the Turf page).
    **filter builder** (precinct, party, district, etc.) or by **uploading a Voter-ID CSV** (an exact
    list you already have) — and save it. See [WALKLISTS.md](WALKLISTS.md). *(Skip if you'll claim doors
    another way.)*
-2. **Efforts** page → **New effort** → enter a name and color; if it's a survey campaign, optionally
+2. **Efforts** page → **New effort** → enter a name; if it's a survey campaign, optionally
    pick a **survey override** (else it uses the campaign's survey); pick the walk list under **Seed
    door-set**.
 3. Click **Create effort**. It now owns that list's unclaimed (Intake) doors.
@@ -142,7 +142,7 @@ effort-scoped), [services/passes/activePasses.js](../server/src/services/passes/
 
 | Model | File | Notes |
 |---|---|---|
-| `Effort` | [models/Effort.js](../server/src/models/Effort.js) | `campaignId`, `name`, `color`, `surveyTemplateId?` (override → falls back to `Campaign.surveyTemplateId`), `seededFromWalkListId?` (audit), `status` (draft/active/archived). |
+| `Effort` | [models/Effort.js](../server/src/models/Effort.js) | `campaignId`, `name`, `surveyTemplateId?` (override → falls back to `Campaign.surveyTemplateId`), `seededFromWalkListId?` (audit), `status` (draft/active/archived). |
 | `EffortMember` | [models/EffortMember.js](../server/src/models/EffortMember.js) | **Manual pre-stage list only**, unique `{effortId, userId}`. The displayed "crew" is *derived* (see §G), not this. |
 | `Household.effortId` | [models/Household.js](../server/src/models/Household.js) | **Source of truth for door ownership.** `null` = Intake. Index `{campaignId, effortId}`. Disjointness = one effortId per door. |
 | `Pass` (= Round) | [models/Pass.js](../server/src/models/Pass.js) | Gains `effortId` (required); `roundNumber` unique **per effort** (`{effortId, roundNumber}`); `walkListId` retired (door-set comes from the effort). |
