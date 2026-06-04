@@ -7,7 +7,8 @@ immediately, and how new doors reach the field through **Intake**.
 - **Part 2 — Technical reference** is for developers (and Claude): the upsert keys, normalization,
   and the known data-quality gaps (a documented follow-up).
 
-Related: [EFFORTS.md](EFFORTS.md) (Intake → assign to an effort), [VOTERS.md](VOTERS.md).
+Related: [EFFORTS.md](EFFORTS.md) (Intake → assign to an effort), [WALKLISTS.md](WALKLISTS.md) (turn a
+Voter-ID CSV into a walk list without re-importing the universe), [VOTERS.md](VOTERS.md).
 
 ---
 
@@ -65,6 +66,11 @@ match only (no fuzzy / "St" vs "Street").
 `Household.effortId` defaults to `null` and the upsert never writes it, so **new-address doors are in
 Intake by construction** — no import-processor change was needed. They become canvassable only once an
 effort claims them (`POST .../efforts/:id/claim`, then a supplemental cut). See [EFFORTS.md](EFFORTS.md) §B.
+
+Separately, an uploaded **Voter-ID CSV** can be turned directly into a walk list (matched by
+`stateVoterId`, no universe re-import) and used to seed/claim an effort — handy when you already have an
+exact list of people. IDs not already in the universe simply won't match; import them first. See
+[WALKLISTS.md](WALKLISTS.md).
 
 ## C. Coverage / cut visibility
 

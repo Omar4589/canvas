@@ -91,7 +91,7 @@ function ClaimPanel({ campaignId, effort, walkLists }) {
         <select value={walkListId} onChange={(e) => setWalkListId(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs">
           <option value="">From a walk list…</option>
           {walkLists.map((w) => (
-            <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh)</option>
+            <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>
           ))}
         </select>
         <button onClick={() => walkListId && claim.mutate({ body: { walkListId } })} disabled={!walkListId || claim.isPending} className="rounded bg-brand-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">Claim list</button>
@@ -243,7 +243,7 @@ export default function EffortsPage() {
             <span className="mb-1 block text-xs font-medium text-gray-700">Seed door-set (walk list)</span>
             <select value={seedWalkListId} onChange={(e) => setSeedWalkListId(e.target.value)} className="rounded border border-gray-300 px-3 py-2 text-sm">
               <option value="">None (claim doors later)</option>
-              {walkLists.map((w) => <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh)</option>)}
+              {walkLists.map((w) => <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>)}
             </select>
           </label>
           {isSurveyType && (
@@ -260,7 +260,7 @@ export default function EffortsPage() {
           </button>
         </div>
         {create.error && <div className="mt-2 text-xs text-red-700">{create.error.message}</div>}
-        <p className="mt-2 text-xs text-gray-500">Seeding from a walk list claims that list's <em>unowned</em> doors. To move doors already in another effort, open the effort → Claim → Re-carve.</p>
+        <p className="mt-2 text-xs text-gray-500">Walk lists can be built from filters or an uploaded Voter-ID CSV (Walk Lists page). Seeding from either claims only that list's <em>unowned</em> doors; to move doors already in another effort, open the effort → Claim → Re-carve.</p>
       </section>
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">

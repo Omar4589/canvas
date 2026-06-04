@@ -8,9 +8,11 @@ rounds. This supersedes the old "one active pass per campaign" model.
 - **Part 2 — Technical reference** is for developers (and Claude): models, ownership/intake,
   attribution, per-effort survey/reporting, and the migration.
 
-Related: [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (rounds + turf cutting — a "pass" is now a Round
-within an effort), [METRICS.md](METRICS.md) (per-effort reporting), [SURVEYS.md](SURVEYS.md)
-(per-effort survey), [IMPORTS.md](IMPORTS.md) (how new voters reach an effort via Intake).
+Related: [WALKLISTS.md](WALKLISTS.md) (build a list — by filter or uploaded Voter-ID CSV — to
+seed/claim an effort's doors), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (rounds + turf cutting — a
+"pass" is now a Round within an effort), [METRICS.md](METRICS.md) (per-effort reporting),
+[SURVEYS.md](SURVEYS.md) (per-effort survey), [IMPORTS.md](IMPORTS.md) (how new voters reach an effort
+via Intake).
 
 ---
 
@@ -87,8 +89,10 @@ people leave when you unassign their book on the Turf page).
 ## Step-by-step
 
 ### Create an effort
-1. **Walk Lists** page → build a list for the area/voters this effort covers (filter by precinct,
-   party, district, etc.) and save it. *(Skip if you'll claim doors another way.)*
+1. **Walk Lists** page → build a list for the area/voters this effort covers — either with the
+   **filter builder** (precinct, party, district, etc.) or by **uploading a Voter-ID CSV** (an exact
+   list you already have) — and save it. See [WALKLISTS.md](WALKLISTS.md). *(Skip if you'll claim doors
+   another way.)*
 2. **Efforts** page → **New effort** → enter a name and color; if it's a survey campaign, optionally
    pick a **survey override** (else it uses the campaign's survey); pick the walk list under **Seed
    door-set**.
@@ -147,6 +151,15 @@ effort-scoped), [services/passes/activePasses.js](../server/src/services/passes/
   `Household.effortId`. By default claims only Intake doors; doors owned by another effort return a
   `409 doors-owned` unless `force:true` (re-carve), which also clears their `turfId`/`walkOrder` and
   pulls them from their old book (`recomputeTurf`). Disjointness can never be violated silently.
+- **Walk lists are source-agnostic here.** A list from the filter builder and one from an uploaded
+  Voter-ID CSV are both just frozen `householdIds` (`WalkList.source` = `'filter' | 'csv'`), so
+  seed/claim/re-carve treat them identically. See [WALKLISTS.md](WALKLISTS.md).
+- **Archiving doesn't release doors.** Archive is only a status flag — it does **not** set `effortId`
+  back to `null` (only **deleting** an effort does, and an effort with non-draft rounds can't be
+  deleted). So a newly imported voter at an address an archived effort already owns stays on that effort
+  (the importer never re-owns a door). To move such doors into a new effort, claim them with a
+  **re-carve** — precisely targetable by uploading that voter list as a walk list
+  ([WALKLISTS.md](WALKLISTS.md)).
 
 ## C. Rounds & "active"
 

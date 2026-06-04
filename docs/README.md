@@ -23,6 +23,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 |---|---|
 | [METRICS.md](METRICS.md) | Every number on the dashboards — knocks, surveys, coverage, connection rate — and the duplicate-knock ("overlap") warning. The source of truth for counting. |
 | [EFFORTS.md](EFFORTS.md) | Parallel canvassing within a campaign: efforts (areas/teams) that own disjoint doors, a survey, and a crew, each with its own rounds. Door ownership + Intake, per-effort survey/reporting, concurrency. |
+| [WALKLISTS.md](WALKLISTS.md) | Saved, frozen door sets you carve efforts from — built from the filter builder or an uploaded Voter-ID CSV — and how a list seeds/claims an effort's doors. |
 | [PASSES_AND_TURF.md](PASSES_AND_TURF.md) | Rounds (a "pass" within an effort), books (walkable turf), turf-cutting & recutting, and the mechanics that apply per round. |
 | [SURVEYS.md](SURVEYS.md) | Building, running, and reporting surveys — per-effort overrides, and the guardrails on editing a survey that's already collecting answers. |
 | [IMPORTS.md](IMPORTS.md) | Voter uploads: how rows match, what goes live, and how new addresses reach the field through Intake. |

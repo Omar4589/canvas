@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
 import mongoose from 'mongoose';
-import Papa from 'papaparse';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
@@ -10,7 +9,7 @@ import { Voter } from '../../models/Voter.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { VotedUpload } from '../../models/VotedUpload.js';
 import { VotedPendingId } from '../../models/VotedPendingId.js';
-import { suggestMapping } from '../../services/import/canonicalFields.js';
+import { parseAndMatch, NOT_FOUND_CAP } from '../../services/import/parseVoterIdList.js';
 import { recomputeFullyVoted } from '../../services/voted/recomputeFullyVoted.js';
 
 const router = Router({ mergeParams: true });
@@ -34,56 +33,6 @@ async function loadCampaign(req, res, next) {
   }
 }
 router.use(loadCampaign);
-
-// Parse the CSV, find the voter-id column, and resolve which of this campaign's
-// voters it matches. Voters are matched org-wide by stateVoterId (indexed) then
-// filtered to those living in THIS campaign's households.
-async function parseAndMatch(campaign, fileBuffer, idColumn) {
-  const csv = fileBuffer.toString('utf8');
-  const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() });
-  const columns = parsed.meta?.fields || [];
-  const col =
-    (idColumn && columns.includes(idColumn) && idColumn) ||
-    suggestMapping(columns).stateVoterId ||
-    columns.find((c) => /voter\s*id/i.test(c)) ||
-    null;
-  if (!col) return { error: 'Could not detect a Voter ID column — pick one with idColumn.', columns };
-
-  const csvIds = new Set();
-  for (const row of parsed.data) {
-    const raw = row[col];
-    if (raw == null) continue;
-    const id = String(raw).trim();
-    if (id) csvIds.add(id);
-  }
-  const ids = [...csvIds];
-  const voters = ids.length
-    ? await Voter.find(
-        { organizationId: campaign.organizationId, stateVoterId: { $in: ids } },
-        { _id: 1, stateVoterId: 1, householdId: 1 }
-      ).lean()
-    : [];
-  const hhIds = [...new Set(voters.map((v) => String(v.householdId)))];
-  const inCampaignHh = new Set(
-    (await Household.find({ _id: { $in: hhIds }, campaignId: campaign._id }, { _id: 1 }).lean()).map((h) => String(h._id))
-  );
-  const inCampaign = voters.filter((v) => inCampaignHh.has(String(v.householdId)));
-  const matchedSvids = new Set(inCampaign.map((v) => v.stateVoterId));
-  const notFoundIds = ids.filter((id) => !matchedSvids.has(id));
-  return {
-    columns,
-    col,
-    totalRows: parsed.data.length,
-    csvCount: csvIds.size,
-    inCampaign,
-    notFound: notFoundIds.length,
-    notFoundIds,
-  };
-}
-
-// IDs in the file that didn't match a voter in this campaign — capped so the response
-// stays small; the admin downloads these to fix and re-upload.
-const NOT_FOUND_CAP = 10000;
 
 // Split matched voters into newly-voting vs already-voted, and count how many
 // doors would become fully-voted (dry-run union).

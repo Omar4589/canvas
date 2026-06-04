@@ -117,6 +117,9 @@ export default function WalkListsPage() {
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
   const [f, setF] = useState(EMPTY);
   const [name, setName] = useState('');
+  const [mode, setMode] = useState('filter');
+  const [csvFile, setCsvFile] = useState(null);
+  const [idColumn, setIdColumn] = useState('');
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
   const listsQ = useQuery({
@@ -154,6 +157,55 @@ export default function WalkListsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'walklists', campaignId] }),
   });
 
+  // Build a frozen list by uploading a CSV of Voter IDs (matched by stateVoterId).
+  const csvPreview = useMutation({
+    mutationFn: ({ file, idColumn: col }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (col) fd.append('idColumn', col);
+      return api(`/admin/campaigns/${campaignId}/walklists/from-csv/preview`, { method: 'POST', formData: fd });
+    },
+  });
+  const csvSave = useMutation({
+    mutationFn: ({ file, name: listName, idColumn: col }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('name', listName);
+      if (col) fd.append('idColumn', col);
+      return api(`/admin/campaigns/${campaignId}/walklists/from-csv`, { method: 'POST', formData: fd });
+    },
+    onSuccess: () => {
+      setName('');
+      setCsvFile(null);
+      setIdColumn('');
+      csvPreview.reset();
+      qc.invalidateQueries({ queryKey: ['admin', 'walklists', campaignId] });
+    },
+  });
+
+  // When the server can't auto-detect the Voter-ID column it 400s with the column list.
+  const colError = csvPreview.error?.data?.columns ? csvPreview.error.data : null;
+
+  function onPickCsv(file) {
+    setCsvFile(file);
+    setIdColumn('');
+    csvSave.reset();
+    if (file && campaignId) csvPreview.mutate({ file });
+    else csvPreview.reset();
+  }
+
+  function downloadUnmatched() {
+    const ids = csvPreview.data?.notFoundIds || [];
+    if (!ids.length) return;
+    const blob = new Blob([`voterId\n${ids.join('\n')}\n`], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'unmatched-voter-ids.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function toggleStatus(s) {
     set('priorPassStatuses', f.priorPassStatuses.includes(s)
       ? f.priorPassStatuses.filter((x) => x !== s)
@@ -171,7 +223,24 @@ export default function WalkListsPage() {
         {/* Builder */}
         <section className="rounded-lg border border-gray-200 bg-white p-5">
           <h2 className="mb-1 text-base font-medium">Build a list</h2>
-          <p className="mb-4 text-xs text-gray-500">Pick values from each list (or type a custom one and press Enter). Empty = no restriction. Saved lists are frozen snapshots.</p>
+          <p className="mb-3 text-xs text-gray-500">Build from demographic/geographic filters, or upload a CSV of Voter IDs. Saved lists are frozen snapshots.</p>
+
+          <div className="mb-4 inline-flex rounded-md border border-gray-300 p-0.5 text-sm">
+            {[['filter', 'Filter builder'], ['csv', 'Upload CSV']].map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`rounded px-3 py-1 font-medium ${mode === m ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'filter' && (
+          <>
+          <p className="mb-4 text-xs text-gray-500">Pick values from each list (or type a custom one and press Enter). Empty = no restriction.</p>
 
           <div className="mb-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Demographics</div>
@@ -266,6 +335,92 @@ export default function WalkListsPage() {
           {(save.error || preview.error) && (
             <div className="mt-2 text-xs text-red-700">{(save.error || preview.error).message}</div>
           )}
+          </>
+          )}
+
+          {mode === 'csv' && (
+            <div>
+              <p className="mb-3 text-xs text-gray-500">
+                Upload a CSV of Voter IDs (any column that looks like a Voter ID is auto-detected). We match them to
+                this campaign's voters and freeze the doors they live at into a list. A door joins the list if <em>any</em> of
+                its voters is in your file — claiming the door later moves <em>all</em> voters there. IDs not yet imported
+                into this campaign won't match.
+              </p>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-medium text-gray-700">Voter-ID CSV</span>
+                <input
+                  type="file"
+                  accept=".csv"
+                  disabled={!campaignId}
+                  onChange={(e) => onPickCsv(e.target.files?.[0] || null)}
+                  className="block w-full text-sm disabled:opacity-50"
+                />
+              </label>
+              {csvPreview.isPending && <p className="mt-2 text-xs text-gray-500">Matching…</p>}
+
+              {colError && (
+                <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  Couldn't auto-detect a Voter ID column. Pick the column that holds Voter IDs:
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <select value={idColumn} onChange={(e) => setIdColumn(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-sm">
+                      <option value="">— Choose column —</option>
+                      {colError.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => idColumn && csvFile && csvPreview.mutate({ file: csvFile, idColumn })}
+                      disabled={!idColumn}
+                      className="rounded border border-gray-300 px-2 py-1 text-sm font-medium hover:bg-white disabled:opacity-50"
+                    >
+                      Match column
+                    </button>
+                  </div>
+                </div>
+              )}
+              {csvPreview.error && !colError && <p className="mt-2 text-xs text-red-700">{csvPreview.error.message}</p>}
+
+              {csvPreview.data && (
+                <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-4 text-sm">
+                  <div className="mb-2 text-xs text-gray-500">
+                    Matched on column <span className="font-mono font-medium">{csvPreview.data.idColumn}</span> · {csvPreview.data.idsInFile?.toLocaleString()} IDs in file
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div><span className="text-gray-500">Matched voters</span><div className="text-lg font-semibold text-green-700">{csvPreview.data.matched?.toLocaleString()}</div></div>
+                    <div><span className="text-gray-500">Doors (households)</span><div className="text-lg font-semibold text-gray-900">{csvPreview.data.householdCount?.toLocaleString()}</div></div>
+                    <div><span className="text-gray-500">Voters at those doors</span><div className="text-lg font-semibold text-gray-700">{csvPreview.data.voterCount?.toLocaleString()}</div></div>
+                    <div><span className="text-gray-500">Not in this campaign</span><div className="text-lg font-semibold text-gray-400">{csvPreview.data.notFound?.toLocaleString()}</div></div>
+                  </div>
+                  {csvPreview.data.ownedDoors > 0 && (
+                    <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <strong>{csvPreview.data.ownedDoors.toLocaleString()}</strong> of these doors are already in another effort
+                      {csvPreview.data.ownedByEffort?.length ? ` (${csvPreview.data.ownedByEffort.map((o) => `${o.name}: ${o.count}`).join(', ')})` : ''}.
+                      You can still save this list — but claiming it into an effort will ask you to move (re-carve) those doors.
+                    </div>
+                  )}
+                  {csvPreview.data.noCoordinates > 0 && (
+                    <p className="mt-2 text-xs text-gray-500">{csvPreview.data.noCoordinates.toLocaleString()} matched door(s) have no map coordinates and were left out (they can't be cut).</p>
+                  )}
+                  {csvPreview.data.notFound > 0 && (
+                    <button type="button" onClick={downloadUnmatched} className="mt-3 text-xs font-semibold text-brand-700 hover:underline">
+                      Download {csvPreview.data.notFound.toLocaleString()} unmatched ID{csvPreview.data.notFound === 1 ? '' : 's'}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-4 flex items-center gap-2">
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. First-election voters)" className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600" />
+                <button
+                  onClick={() => name && csvFile && csvSave.mutate({ file: csvFile, name, idColumn: idColumn || undefined })}
+                  disabled={!name || !csvFile || !csvPreview.data?.householdCount || csvSave.isPending}
+                  className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+                >
+                  {csvSave.isPending ? 'Saving…' : 'Save list'}
+                </button>
+              </div>
+              {csvSave.error && <div className="mt-2 text-xs text-red-700">{csvSave.error.message}</div>}
+            </div>
+          )}
         </section>
 
         {/* Saved lists */}
@@ -280,8 +435,13 @@ export default function WalkListsPage() {
               {lists.map((w) => (
                 <li key={w._id} className="rounded border border-gray-100 p-2 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="truncate font-medium">{w.name}</span>
-                    <button onClick={() => del.mutate(w._id)} className="text-xs text-red-600 hover:underline">Delete</button>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-medium">{w.name}</span>
+                      {w.source === 'csv' && (
+                        <span className="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700" title={w.sourceMeta?.fileName || 'Built from an uploaded Voter-ID CSV'}>from CSV</span>
+                      )}
+                    </span>
+                    <button onClick={() => del.mutate(w._id)} className="shrink-0 text-xs text-red-600 hover:underline">Delete</button>
                   </div>
                   <div className="text-xs text-gray-500">
                     {w.householdCount?.toLocaleString()} hh · {w.voterCount?.toLocaleString()} voters · {new Date(w.createdAt).toLocaleDateString()}
