@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId } from '../api/client.js';
@@ -9,12 +9,16 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from?.pathname || '/';
+  const from = location.state?.from?.pathname || '/admin';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    document.title = 'Sign in — Doorline';
+  }, []);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -31,7 +35,7 @@ export default function LoginPage() {
       const memberships = res.memberships || [];
       if (res.user.isSuperAdmin) {
         const savedOrgId = getActiveOrgId();
-        navigate(savedOrgId ? '/' : '/super-admin', { replace: true });
+        navigate(savedOrgId ? '/admin' : '/super-admin', { replace: true });
         return;
       }
       if (memberships.length > 1) {

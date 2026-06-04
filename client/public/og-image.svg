@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#ffffff"/>
+
+  <!-- soft brand wash, top-right -->
+  <circle cx="1120" cy="100" r="250" fill="#FEF2F2"/>
+
+  <!-- large decorative location pin, upper-right -->
+  <g transform="translate(905,150) scale(3.4)">
+    <path d="M18 0 C8.06 0 0 8.06 0 18 C0 29.5 12 36.5 17 43.2 C17.5 43.9 18.5 43.9 19 43.2 C24 36.5 36 29.5 36 18 C36 8.06 27.94 0 18 0 Z" fill="#DC2626"/>
+    <circle cx="18" cy="17" r="6.4" fill="#ffffff"/>
+  </g>
+
+  <!-- brand lockup: door-pin mark + wordmark -->
+  <g transform="translate(96,86) scale(2.3)">
+    <path d="M18 0 C8.06 0 0 8.06 0 18 C0 29.5 12 36.5 17 43.2 C17.5 43.9 18.5 43.9 19 43.2 C24 36.5 36 29.5 36 18 C36 8.06 27.94 0 18 0 Z" fill="#DC2626"/>
+    <path d="M12 11 L12 26 L24 26 L24 11 C24 8.79 22.21 7 20 7 L16 7 C13.79 7 12 8.79 12 11 Z" fill="#ffffff"/>
+    <rect x="20.4" y="17.2" width="1.8" height="1.8" rx="0.9" fill="#DC2626"/>
+  </g>
+  <text x="190" y="170" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="700" letter-spacing="-2" fill="#111827">Doorline</text>
+
+  <!-- headline -->
+  <text x="100" y="332" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="700" letter-spacing="-1" fill="#111827">Door-to-door canvassing</text>
+  <text x="100" y="410" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="700" letter-spacing="-1" fill="#111827">for campaigns &amp; organizers</text>
+
+  <!-- tagline -->
+  <text x="102" y="472" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="400" fill="#6B7280">Turf cutting &#183; walk lists &#183; live map &#183; offline field app</text>
+
+  <!-- footer: turf-color dots + url -->
+  <g transform="translate(113,552)">
+    <circle cx="0" cy="0" r="11" fill="#2563eb"/>
+    <circle cx="34" cy="0" r="11" fill="#16a34a"/>
+    <circle cx="68" cy="0" r="11" fill="#db2777"/>
+    <circle cx="102" cy="0" r="11" fill="#ea580c"/>
+  </g>
+  <text x="100" y="602" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700" fill="#DC2626">doorline.app</text>
+</svg>

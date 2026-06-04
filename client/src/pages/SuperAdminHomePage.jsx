@@ -46,7 +46,7 @@ export default function SuperAdminHomePage() {
   function pickOrg(orgId) {
     switchOrg(orgId);
     qc.clear();
-    navigate('/');
+    navigate('/admin');
   }
 
   const totals = overviewQ.data?.totals;

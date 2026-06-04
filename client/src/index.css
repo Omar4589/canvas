@@ -8,6 +8,13 @@ body,
   height: 100%;
 }
 
+/* Smooth in-page anchor scrolling, but instant for reduced-motion users. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: #f9fafb;

@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import LandingPage from './pages/LandingPage.jsx';
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
@@ -35,6 +36,7 @@ export default function App() {
   return (
     <Suspense fallback={<PageFallback />}>
       <Routes>
+        <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route
@@ -63,7 +65,7 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route path="/" element={<OverviewPage />} />
+          <Route path="/admin" element={<OverviewPage />} />
           <Route path="/dashboard/:campaignId" element={<DashboardPage />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/efforts" element={<EffortsPage />} />

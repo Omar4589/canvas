@@ -1,8 +1,14 @@
+import { useEffect } from 'react';
+
 const LAST_UPDATED = 'April 29, 2026';
 const CONTACT_EMAIL = 'omar@foxbryant.com';
 const APP_NAME = 'Doorline';
 
 export default function PrivacyPolicyPage() {
+  useEffect(() => {
+    document.title = 'Privacy Policy — Doorline';
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4">
       <div className="mx-auto max-w-3xl rounded-lg bg-white p-8 shadow-sm">

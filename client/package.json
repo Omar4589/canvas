@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "og:image": "node scripts/genOgImage.js"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-draw": "^1.5.1",
@@ -23,6 +24,7 @@
     "@vitejs/plugin-react": "^4.3.2",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.13",
     "vite": "^5.4.8"
   }

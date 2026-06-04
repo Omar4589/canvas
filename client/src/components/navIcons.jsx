@@ -183,7 +183,7 @@ export function IconChevron({ size = 18 }) {
 
 // Route path -> icon component. Joined to navItems.js NAV/SUPER_NAV at render time.
 export const NAV_ICONS = {
-  '/': IconDashboard,
+  '/admin': IconDashboard,
   '/map': IconPin,
   '/turfs': IconScissors,
   '/passes': IconRouteCheck,

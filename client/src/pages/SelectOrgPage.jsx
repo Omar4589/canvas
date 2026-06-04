@@ -8,7 +8,7 @@ export default function SelectOrgPage() {
   const { user, memberships, isSuperAdmin, switchOrg, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from?.pathname || '/';
+  const from = location.state?.from?.pathname || '/admin';
 
   const [allOrgs, setAllOrgs] = useState([]);
   const [loadingOrgs, setLoadingOrgs] = useState(false);
@@ -24,7 +24,7 @@ export default function SelectOrgPage() {
 
   function pick(orgId) {
     switchOrg(orgId);
-    navigate(from === '/select-org' ? '/' : from, { replace: true });
+    navigate(from === '/select-org' ? '/admin' : from, { replace: true });
   }
 
   function pickPlatform() {

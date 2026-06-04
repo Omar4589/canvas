@@ -1,20 +1,15 @@
 import { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { NAV, SUPER_NAV } from './navItems.js';
-import { IconDashboard, IconPin, IconFlag, IconUser } from './navIcons.jsx';
+import { navIcon } from './navIcons.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import Logo from './Logo.jsx';
 
-// Routes that live in the primary tab bar — everything else goes in the More sheet.
-const PRIMARY_PATHS = ['/', '/map', '/campaigns', '/users'];
-
-const PRIMARY = [
-  { to: '/', label: 'Dashboard', end: true, icon: IconDashboard },
-  { to: '/map', label: 'Map', icon: IconPin },
-  { to: '/campaigns', label: 'Campaigns', icon: IconFlag },
-  { to: '/users', label: 'Users', icon: IconUser },
-];
+// Primary tabs vs. the "More" sheet are both derived from NAV (single source of
+// truth): items flagged `primary` are tabs, the rest go in the sheet.
+const primaryItems = NAV.filter((n) => n.primary);
+const moreItems = NAV.filter((n) => !n.primary);
 
 function IconMore() {
   return (
@@ -44,10 +39,7 @@ function sheetLinkClass({ isActive }) {
 
 export default function BottomNav() {
   const { user, logout, isSuperAdmin } = useAuth();
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-
-  const moreItems = NAV.filter((n) => !PRIMARY_PATHS.includes(n.to));
 
   function close() {
     setOpen(false);
@@ -56,8 +48,8 @@ export default function BottomNav() {
   return (
     <>
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 flex border-t border-gray-200 bg-white py-1">
-        {PRIMARY.map((n) => {
-          const Icon = n.icon;
+        {primaryItems.map((n) => {
+          const Icon = navIcon(n.to);
           return (
             <NavLink key={n.to} to={n.to} end={n.end} className={tabClass}>
               <Icon />

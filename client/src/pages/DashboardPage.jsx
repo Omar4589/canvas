@@ -163,7 +163,7 @@ export default function DashboardPage() {
           Pick a campaign from the Overview to view its dashboard.
         </p>
         <Link
-          to="/"
+          to="/admin"
           className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
         >
           Go to Overview
@@ -177,7 +177,7 @@ export default function DashboardPage() {
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <Link
-            to="/"
+            to="/admin"
             className="text-sm font-medium text-brand-700 hover:underline"
           >
             ‹ Overview

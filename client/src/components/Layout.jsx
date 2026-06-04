@@ -38,6 +38,12 @@ export default function Layout() {
     }
   }, [collapsed]);
 
+  // The static index.html title is marketing copy for the public landing page;
+  // reset it to the console title once we're inside the authenticated app.
+  useEffect(() => {
+    document.title = 'Doorline Admin';
+  }, []);
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <aside
