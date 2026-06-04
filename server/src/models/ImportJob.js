@@ -31,6 +31,10 @@ const importJobSchema = new mongoose.Schema(
     // Re-housing audit: voters whose household changed, and doors emptied + deactivated by it.
     movedVoters: { type: Number, default: 0 },
     deactivatedDoors: { type: Number, default: 0 },
+    // Households the incoming voters lived at BEFORE this import (captured pre-apply).
+    // Persisted so a BullMQ retry — which would re-read post-move state — still knows
+    // which doors to re-check for emptiness. Source of retry-safe orphan deactivation.
+    sourceHouseholdIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Household', default: [] },
     duplicateStateVoterIds: { type: [String], default: [] },
     errors: { type: [mongoose.Schema.Types.Mixed], default: [] },
     errorCount: { type: Number, default: 0 },

@@ -188,6 +188,31 @@ router.post('/csv/preview', upload.single('file'), async (req, res, next) => {
   }
 });
 
+// Health: is a worker actually consuming the import queue? Powers the Import
+// page's "worker offline" banner so a stopped worker dyno isn't a silent failure.
+// Registered BEFORE `/:importId` so the literal path wins over the param route.
+router.get('/worker-status', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const q = getQueue(QUEUE_NAMES.IMPORT);
+    let workers = null;
+    try {
+      const list = await q.getWorkers();
+      workers = Array.isArray(list) ? list.length : null;
+    } catch {
+      workers = null; // some managed Redis restrict the CLIENT introspection getWorkers uses
+    }
+    const counts = await q.getJobCounts('waiting', 'active', 'delayed', 'failed');
+    const waiting = counts.waiting || 0;
+    const active = counts.active || 0;
+    // With a worker count, trust it; otherwise flag only a genuine stuck backlog.
+    const online = workers != null ? workers > 0 : !(waiting > 0 && active === 0);
+    res.json({ online, workers, waiting, active });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;

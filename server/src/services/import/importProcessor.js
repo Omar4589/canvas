@@ -51,6 +51,15 @@ export async function processImportJob(job) {
     const priorHhBySvid = new Map(
       priorVoters.map((v) => [v.stateVoterId, v.householdId ? String(v.householdId) : null])
     );
+    // Source doors = where the incoming voters live now (pre-apply). Persist once so a
+    // BullMQ retry — which re-reads post-move state — still re-checks the right doors.
+    let sourceHhIds = (importJob.sourceHouseholdIds || []).map(String);
+    if (!sourceHhIds.length) {
+      sourceHhIds = [...new Set(priorVoters.map((v) => v.householdId).filter(Boolean).map(String))];
+      if (sourceHhIds.length) {
+        await ImportJob.updateOne({ _id: importJobId }, { $set: { sourceHouseholdIds: sourceHhIds } });
+      }
+    }
 
     const counts = await applyImport({
       campaign,
@@ -96,32 +105,30 @@ export async function processImportJob(job) {
       { campaignId: campaign._id, normalizedAddress: { $in: [...householdMap.keys()] } },
       { _id: 1 }
     ).lean();
-    const touchedHhIds = [
-      ...new Set([
-        ...priorVoters.map((v) => v.householdId).filter(Boolean).map(String),
-        ...destHouseholds.map((h) => String(h._id)),
-      ]),
-    ];
+    const touchedHhIds = [...new Set([...sourceHhIds, ...destHouseholds.map((h) => String(h._id))])];
     const { deactivated: deactivatedDoors } = await recomputeHouseholdActive(campaign._id, touchedHhIds);
 
     await ImportJob.updateOne(
       { _id: importJobId },
       {
-        status: 'completed',
-        totalRows,
-        uniqueVoters: counts.uniqueVoters,
-        uniqueHouseholds: counts.uniqueHouseholds,
-        newVoters: counts.newVoters,
-        updatedVoters: counts.updatedVoters,
-        newHouseholds: counts.newHouseholds,
-        movedVoters,
-        deactivatedDoors,
-        duplicateStateVoterIds: Array.from(dupSvids),
-        errors: errors.slice(0, 100),
-        errorCount: errors.length,
-        processedRows: totalRows,
-        progress: 100,
-        completedAt: new Date(),
+        $set: {
+          status: 'completed',
+          totalRows,
+          uniqueVoters: counts.uniqueVoters,
+          uniqueHouseholds: counts.uniqueHouseholds,
+          newVoters: counts.newVoters,
+          updatedVoters: counts.updatedVoters,
+          newHouseholds: counts.newHouseholds,
+          duplicateStateVoterIds: Array.from(dupSvids),
+          errors: errors.slice(0, 100),
+          errorCount: errors.length,
+          processedRows: totalRows,
+          progress: 100,
+          completedAt: new Date(),
+        },
+        // A retry recomputes these as 0 (voters already moved) — $max keeps the real
+        // first-attempt counts so the audit trail never regresses.
+        $max: { movedVoters, deactivatedDoors },
       }
     );
 

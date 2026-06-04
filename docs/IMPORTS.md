@@ -117,3 +117,14 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
   step (no deactivation), same as it skips the other post-apply recomputes.
 
 Still open (not built): reopening an already-knocked door when a new voter is added there.
+
+## E. Operations — the import worker
+
+Imports (and turf cuts) run in a **separate `worker` dyno** ([Procfile](../Procfile)
+`worker: npm --prefix server run worker` → [worker.js](../server/src/worker.js)), not the web dyno. If
+that dyno is scaled to 0, the web app still **enqueues** jobs but nothing **consumes** them — they sit in
+BullMQ **"waiting"** forever. `GET /admin/imports/worker-status`
+([routes/admin/imports.js](../server/src/routes/admin/imports.js)) reports whether a worker is consuming
+the queue (`queue.getWorkers()` + job counts) and drives an **"import worker offline" banner** on the
+Import page, so a stopped worker is obvious instead of a silent stuck "pending". Keep the `worker` dyno
+on (a Basic, always-on dyno) so imports always process.

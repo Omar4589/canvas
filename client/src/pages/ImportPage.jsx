@@ -142,6 +142,12 @@ export default function ImportPage() {
       return jobs.some((j) => j.status === 'pending' || j.status === 'parsing') ? 1500 : false;
     },
   });
+  const workerStatusQ = useQuery({
+    queryKey: ['admin', 'imports', 'worker-status'],
+    queryFn: () => api('/admin/imports/worker-status'),
+    refetchInterval: 15000,
+  });
+  const workerOffline = workerStatusQ.data?.online === false;
 
   const fields = fieldsQ.data?.fields || [];
   const requiredKeys = fieldsQ.data?.required || [];
@@ -224,11 +230,21 @@ export default function ImportPage() {
 
   const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
   const requiredUnmapped = requiredKeys.filter((k) => !mapping[k]);
-  const canPreview = file && campaignId && step === 'map' && requiredUnmapped.length === 0 && !previewDiff.isPending;
+  // Not gated on step === 'map': if a race leaves step === 'review' with the diff
+  // cleared, the fallback "Preview changes" button must still be usable to recover.
+  const canPreview = file && campaignId && requiredUnmapped.length === 0 && !previewDiff.isPending;
 
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold">CSV Import</h1>
+
+      {workerOffline && (
+        <div className="mb-6 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <strong>The import worker appears to be offline.</strong> Queued imports won't run until the
+          worker dyno is back on (Heroku → Resources → <code className="rounded bg-red-100 px-1">worker</code>).
+          {workerStatusQ.data?.waiting > 0 && ` ${fmt(workerStatusQ.data.waiting)} import(s) waiting.`}
+        </div>
+      )}
 
       <section className="mb-8 rounded-lg border border-gray-200 bg-white p-5">
         <h2 className="mb-3 text-base font-medium">Upload voter CSV</h2>
@@ -354,7 +370,7 @@ export default function ImportPage() {
 
         {step === 'review' && previewDiff.data?.diff && <ReviewPanel diff={previewDiff.data.diff} />}
 
-        {step === 'review' ? (
+        {step === 'review' && previewDiff.data?.diff ? (
           <div className="flex items-center gap-2">
             <button
               onClick={() => setStep('map')}
