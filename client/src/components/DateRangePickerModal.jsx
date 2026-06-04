@@ -49,12 +49,13 @@ export default function DateRangePickerModal({
   }, [open, initialFrom, initialTo]);
 
   useEffect(() => {
+    if (!open) return;
     function onKey(e) {
       if (e.key === 'Escape') onClose();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [open, onClose]);
 
   if (!open) return null;
 

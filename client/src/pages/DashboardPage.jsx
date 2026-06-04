@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -33,6 +33,11 @@ export default function DashboardPage() {
   const { campaignId } = useParams();
   const navigate = useNavigate();
   const [dateRange, setDateRange] = useState(() => defaultRange('today'));
+  const rangeTouchedRef = useRef(false);
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setDateRange(next);
+  }
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [selectedCanvasser, setSelectedCanvasser] = useState(null);
   const [effortId, setEffortId] = useState('');
@@ -61,6 +66,13 @@ export default function DashboardPage() {
     current && current.isActive === false
       ? [...activeCampaigns, current]
       : activeCampaigns;
+
+  // Archived campaigns have no recent activity → default the range to all-time
+  // (unless the admin has already picked one). Mirrors the mobile campaign view.
+  useEffect(() => {
+    if (rangeTouchedRef.current || !current) return;
+    if (current.isActive === false) setDateRange(defaultRange('all'));
+  }, [current]);
 
   const overviewQ = useQuery({
     queryKey: ['reports', 'overview', campaignId, effortId],
@@ -228,7 +240,7 @@ export default function DashboardPage() {
               ))}
             </select>
           )}
-          <DateRangeSelector value={dateRange} onChange={setDateRange} />
+          <DateRangeSelector value={dateRange} onChange={onRangeChange} />
         </div>
       </div>
 

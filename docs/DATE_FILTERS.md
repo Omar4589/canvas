@@ -46,7 +46,7 @@ All windows are measured in **your local day** — "Today" means your today, whe
 | Page | Opens on | Why |
 |---|---|---|
 | **Overview** (org-wide) | **Today** | Admins want "what happened today" at a glance. |
-| **Campaign dashboard** | **Today** | Same — recent activity first; switch to a wider window when you want the campaign-to-date picture. |
+| **Campaign dashboard** | **Today** (active) / **All time** (archived) | Active campaigns lead with recent activity; an **archived** campaign has none today, so it opens on All time to show its full history (until you pick a window). |
 | **Admin map** | **All time** | A date range on the map *hides* every door you didn't touch in that window (see below), so it opens showing the full turf. |
 
 You can always change the window; the page just picks a sensible starting point.
@@ -114,8 +114,9 @@ custom     → { from: custom.from || null,     to: custom.to || null }
 ```
 
 `startOfDay` is `new Date(d); x.setHours(0,0,0,0)` — local midnight. The web and mobile helpers are
-byte-for-byte equivalent here (the web `7d`/`30d` were aligned to mobile's calendar-day math during
-this change).
+behaviorally equivalent here (the web factors local midnight into a `startOfDay()` helper, mobile
+inlines `setHours`, but the boundaries are identical; the web `7d`/`30d` were aligned to mobile's
+calendar-day math during this change).
 
 > **Boundary edge case:** the helpers treat `to` as exclusive, but the backend compares with `$lte`
 > (inclusive — see §D). A record stamped at *exactly* the millisecond of midnight would match both
@@ -176,7 +177,7 @@ ISO uses **local** dates (`new Date(y, m-1, d)`, and local getters when formatti
 | [components/DateRangeSelector.jsx](../client/src/components/DateRangeSelector.jsx) | Presets + helpers + the controlled button bar. |
 | [components/DateRangePickerModal.jsx](../client/src/components/DateRangePickerModal.jsx) | Custom From/To picker + quick chips. |
 | [pages/OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) | Default **Today**; range → `/campaign-rollup?scope=active`. |
-| [pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Default **Today**; range → `/campaign-rollup`, `/canvassers`, `/survey-results`. Coverage stays all-time from `/overview`. |
+| [pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Default **Today**; range → `/campaign-rollup`, `/canvassers`, `/survey-results`. Coverage stays all-time from `/overview`. An untouched **archived** campaign auto-switches to All time (a `rangeTouchedRef` guard + effect, mirroring the mobile campaign view). |
 | [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Default **All time**; range → `/admin/households/map` (narrows pins, see §D). |
 
 ### Mobile ([mobile](../mobile))
