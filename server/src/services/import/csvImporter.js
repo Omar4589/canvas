@@ -204,8 +204,10 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
       upsert: true,
     },
   }));
+  const insertedHouseholdIds = [];
   for (let i = 0; i < householdOps.length; i += batchSize) {
-    await Household.bulkWrite(householdOps.slice(i, i + batchSize), { ordered: false });
+    const res = await Household.bulkWrite(householdOps.slice(i, i + batchSize), { ordered: false });
+    if (res?.upsertedIds) insertedHouseholdIds.push(...Object.values(res.upsertedIds));
     if (onProgress) {
       await onProgress({
         phase: 'households',
@@ -236,8 +238,10 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
       },
     };
   });
+  const insertedVoterIds = [];
   for (let i = 0; i < voterOps.length; i += batchSize) {
-    await Voter.bulkWrite(voterOps.slice(i, i + batchSize), { ordered: false });
+    const res = await Voter.bulkWrite(voterOps.slice(i, i + batchSize), { ordered: false });
+    if (res?.upsertedIds) insertedVoterIds.push(...Object.values(res.upsertedIds));
     if (onProgress) {
       await onProgress({
         phase: 'voters',
@@ -258,6 +262,9 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
     newHouseholds,
     newVoters,
     updatedVoters: Math.max(0, validRows.length - newVoters),
+    // Exact docs inserted this run (for "undo import"). Empty on an idempotent retry.
+    insertedHouseholdIds,
+    insertedVoterIds,
   };
 }
 

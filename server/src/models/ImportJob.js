@@ -35,6 +35,19 @@ const importJobSchema = new mongoose.Schema(
     // Persisted so a BullMQ retry — which would re-read post-move state — still knows
     // which doors to re-check for emptiness. Source of retry-safe orphan deactivation.
     sourceHouseholdIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Household', default: [] },
+    // Exact docs this import INSERTED (net-new), captured from the upsert's upsertedIds.
+    // Power the "undo import" — only these, and only if still untouched, can be removed.
+    insertedHouseholdIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Household', default: [] },
+    insertedVoterIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Voter', default: [] },
+    undone: { type: Boolean, default: false },
+    undoneAt: { type: Date, default: null },
+    undoneBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    undoResult: {
+      doorsDeleted: { type: Number, default: 0 },
+      doorsSkipped: { type: Number, default: 0 },
+      votersDeleted: { type: Number, default: 0 },
+      votersSkipped: { type: Number, default: 0 },
+    },
     duplicateStateVoterIds: { type: [String], default: [] },
     errors: { type: [mongoose.Schema.Types.Mixed], default: [] },
     errorCount: { type: Number, default: 0 },

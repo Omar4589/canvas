@@ -30,6 +30,16 @@ that would change doors** (re-housing), **near-duplicate addresses** (formatting
 Voter IDs). Review it, then **Confirm & import** to apply (or **Back** to fix the mapping). Each finished
 import also records how many voters moved doors and how many doors were emptied, in the history table.
 
+## Undo an import
+
+Uploaded the wrong file? Each completed import has an **Undo** button in the history. Undo removes the
+**net-new doors and voters that import added** — but only ones still **untouched**: it **skips** (and
+reports) anything already **claimed into an effort, cut into a book, canvassed, surveyed, or marked
+voted**, plus any new door that now shares its address with other voters. It does **not** revert *updates*
+to people who already existed (a re-housing, or a refreshed phone/party) — the **preview** is the guard
+for those. So the clean case ("wrong file, nothing worked yet") fully reverses; once doors are claimed or
+knocked, those are kept and you're told how many.
+
 ## What goes live, and what waits in Intake
 
 Where a voter ends up depends on the door:
@@ -128,3 +138,18 @@ BullMQ **"waiting"** forever. `GET /admin/imports/worker-status`
 the queue (`queue.getWorkers()` + job counts) and drives an **"import worker offline" banner** on the
 Import page, so a stopped worker is obvious instead of a silent stuck "pending". Keep the `worker` dyno
 on (a Basic, always-on dyno) so imports always process.
+
+## F. Undo (`POST /admin/imports/:importId/undo`)
+
+`applyImport` captures the docs it **inserted** (each `bulkWrite`'s `upsertedIds` →
+`ImportJob.insertedHouseholdIds`/`insertedVoterIds`, persisted once in the worker — retry-safe, since an
+idempotent retry inserts nothing). Undo
+([services/import/undoImport.js](../server/src/services/import/undoImport.js)) deletes those that are
+still untouched: a voter is **kept** if it has a `VotedVoter`/`SurveyResponse`/`CanvassActivity`; a
+household is **kept** if `effortId`/`turfId` is set, `status != 'unknocked'`, `fullyVoted`, it has any
+household-level activity/survey/voted, or it holds a voter not from this import. It deletes voters, then
+the now-empty deletable households, then runs `recomputeHouseholdActive` over existing doors that lost a
+voter. **Conservative — it only ever deletes net-new, untouched records and never reverts updates.**
+Idempotent: `undone` blocks a second run. The result
+(`doorsDeleted`/`doorsSkipped`/`votersDeleted`/`votersSkipped`) is stored on the `ImportJob` and shown in
+the Recent-imports history.

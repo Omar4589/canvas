@@ -11,6 +11,7 @@ import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { saveRawImport } from '../../services/import/rawImportStore.js';
 import { parseAndValidate } from '../../services/import/csvImporter.js';
 import { computeImportDiff } from '../../services/import/computeImportDiff.js';
+import { undoImport } from '../../services/import/undoImport.js';
 import {
   CANONICAL_FIELDS,
   REQUIRED_FIELDS,
@@ -252,6 +253,60 @@ router.get('/:importId/errors', async (req, res, next) => {
     );
     if (!job) return res.status(404).json({ error: 'Import not found' });
     res.json({ errors: job.errors, total: job.errorCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Undo an import: delete the records it inserted that are still untouched (not claimed,
+// cut, canvassed, surveyed, voted, or sharing a door). Skips + reports the rest. Does
+// not revert updates to pre-existing records.
+router.post('/:importId/undo', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.importId)) {
+      return res.status(400).json({ error: 'Invalid import id' });
+    }
+    // Atomically claim the undo (compare-and-set on `undone`) so two concurrent
+    // requests can't both run it — only the winner gets a non-null job.
+    const job = await ImportJob.findOneAndUpdate(
+      { _id: req.params.importId, organizationId: activeOrgId(req), status: 'completed', undone: { $ne: true } },
+      { $set: { undone: true, undoneAt: new Date(), undoneBy: req.user._id } },
+      { new: true }
+    );
+    if (!job) {
+      const exists = await ImportJob.findOne(
+        { _id: req.params.importId, organizationId: activeOrgId(req) },
+        { status: 1, undone: 1 }
+      );
+      if (!exists) return res.status(404).json({ error: 'Import not found' });
+      if (exists.status !== 'completed') return res.status(400).json({ error: 'Only a completed import can be undone' });
+      return res.status(400).json({ error: 'This import was already undone' });
+    }
+    try {
+      const result = await undoImport(job);
+      await ImportJob.updateOne(
+        { _id: job._id },
+        {
+          $set: {
+            undoResult: {
+              doorsDeleted: result.doorsDeleted,
+              doorsSkipped: result.doorsSkipped,
+              votersDeleted: result.votersDeleted,
+              votersSkipped: result.votersSkipped,
+            },
+          },
+        }
+      );
+      res.json(result);
+    } catch (err) {
+      // Roll the claim back so the admin can retry.
+      await ImportJob.updateOne(
+        { _id: job._id },
+        { $set: { undone: false, undoneAt: null, undoneBy: null } }
+      );
+      throw err;
+    }
   } catch (err) {
     next(err);
   }

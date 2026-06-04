@@ -76,6 +76,24 @@ export async function processImportJob(job) {
       },
     });
 
+    // Persist the net-new doc ids for "undo import" — only once. A BullMQ retry's
+    // idempotent upsert inserts nothing (empty lists), so don't overwrite a prior capture.
+    if (
+      !importJob.insertedHouseholdIds?.length &&
+      !importJob.insertedVoterIds?.length &&
+      (counts.insertedHouseholdIds?.length || counts.insertedVoterIds?.length)
+    ) {
+      await ImportJob.updateOne(
+        { _id: importJobId },
+        {
+          $set: {
+            insertedHouseholdIds: counts.insertedHouseholdIds || [],
+            insertedVoterIds: counts.insertedVoterIds || [],
+          },
+        }
+      );
+    }
+
     // Denormalize cut attributes onto households (modal voter value + conflict
     // flags) so attribute-cut turf generation can group by them.
     await recomputeCutAttributesForCampaign(campaign._id);

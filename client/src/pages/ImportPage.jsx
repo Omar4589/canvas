@@ -198,6 +198,21 @@ export default function ImportPage() {
     },
   });
 
+  const undo = useMutation({
+    mutationFn: (importId) => api(`/admin/imports/${importId}/undo`, { method: 'POST' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['imports'] }),
+  });
+
+  function onUndo(job) {
+    if (
+      !window.confirm(
+        'Undo this import? It removes the net-new doors and voters it added that haven’t been claimed, ' +
+          'cut, canvassed, surveyed, or voted. Anything already in use is kept. This cannot be re-done.'
+      )
+    ) return;
+    undo.mutate(job._id);
+  }
+
   function resetSelection() {
     setFile(null);
     setColumns([]);
@@ -413,6 +428,17 @@ export default function ImportPage() {
       </section>
 
       <h2 className="mb-3 text-base font-medium">Recent imports</h2>
+      {undo.data && (
+        <div className="mb-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+          Undo complete — removed {fmt(undo.data.doorsDeleted)} door(s) and {fmt(undo.data.votersDeleted)} voter(s).
+          {(undo.data.doorsSkipped > 0 || undo.data.votersSkipped > 0)
+            ? ` Kept ${fmt(undo.data.doorsSkipped)} door(s) and ${fmt(undo.data.votersSkipped)} voter(s) already in use.`
+            : ''}
+        </div>
+      )}
+      {undo.error && (
+        <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{undo.error.message}</div>
+      )}
       {isLoading ? (
         <div>Loading…</div>
       ) : (
@@ -429,6 +455,7 @@ export default function ImportPage() {
                 <th className="px-4 py-2 text-right">New</th>
                 <th className="px-4 py-2 text-right">Moved / Emptied</th>
                 <th className="px-4 py-2 text-right">Errors</th>
+                <th className="px-4 py-2 text-right"></th>
               </tr>
             </thead>
             <tbody>
@@ -443,11 +470,20 @@ export default function ImportPage() {
                   <td className="px-4 py-2 text-right">{fmt(j.newVoters)} v / {fmt(j.newHouseholds)} h</td>
                   <td className="px-4 py-2 text-right">{fmt(j.movedVoters)} / {fmt(j.deactivatedDoors)}</td>
                   <td className="px-4 py-2 text-right">{fmt(j.errorCount)}</td>
+                  <td className="px-4 py-2 text-right">
+                    {j.status === 'completed' && !j.undone ? (
+                      <button onClick={() => onUndo(j)} disabled={undo.isPending} className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-60">
+                        Undo
+                      </button>
+                    ) : j.undone ? (
+                      <span className="text-xs italic text-gray-400">undone</span>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
               {!data?.jobs?.length && (
                 <tr>
-                  <td colSpan="9" className="px-4 py-6 text-center text-gray-500">No imports yet.</td>
+                  <td colSpan="10" className="px-4 py-6 text-center text-gray-500">No imports yet.</td>
                 </tr>
               )}
             </tbody>
