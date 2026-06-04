@@ -1,4 +1,4 @@
-// HowItWorks — three numbered steps from voter file to a mapped canvass.
+// HowItWorks — three numbered steps from voter file to a live, mapped canvass.
 const STEPS = [
   {
     n: 1,
@@ -16,7 +16,7 @@ const STEPS = [
     n: 3,
     title: 'Track your canvass',
     body:
-      'Back in the console, see canvasser activity and door results on your map, track early and already-voted status, and re-cut turf for the next pass.',
+      'Back in the console, watch your live map fill in as your team works — track coverage and door results, mark early and already-voted status, and re-cut turf for the next pass.',
   },
 ];
 
@@ -30,7 +30,7 @@ export default function HowItWorks() {
               How Doorline works
             </h2>
             <p className="mt-3 text-base text-gray-600">
-              From raw voter file to a mapped, walkable canvass in three steps.
+              From raw voter file to a live map of your canvass in three steps.
             </p>
           </div>
 

@@ -28,6 +28,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | [IMPORTS.md](IMPORTS.md) | Voter uploads: how rows match, what goes live, and how new addresses reach the field through Intake. |
 | [VOTERS.md](VOTERS.md) | The voter directory and profile: where voters live (org vs campaign), what's editable, and mobile lookup. |
 | [EARLY_VOTING.md](EARLY_VOTING.md) | Early/already-voted marking and how "voted" doors drop off the canvasser's list and show as their own coverage bucket. |
+| [MAPS.md](MAPS.md) | Every map (mobile field app + web admin): reading the pins, where coordinates come from, how a knock becomes a "ping," rendering, and the live-refresh intervals. |
 
 ### Related references (repo root)
 

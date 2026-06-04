@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
@@ -9,6 +9,7 @@ import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
 import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import LiveStatus from '../components/LiveStatus.jsx';
 
 const STATUS_COLORS = {
   unknocked: '#9ca3af',
@@ -204,6 +205,9 @@ export default function MapPage() {
   const [canvasserId, setCanvasserId] = useState('');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '' });
   const [showCanvasserPins, setShowCanvasserPins] = useState(false);
+  // Live auto-refresh of the map (web admins are at a desk + connected). Gates
+  // the poll interval below; pauses automatically when the tab is backgrounded.
+  const [live, setLive] = useState(true);
 
   const {
     campaignId,
@@ -252,6 +256,12 @@ export default function MapPage() {
     ],
     queryFn: () => api(`/admin/households/map${queryString}`),
     enabled: !!campaignId,
+    // Live polling: refresh pins/pings on a timer when "Live" is on. Pauses in a
+    // backgrounded tab; keepPreviousData avoids blanking the map during a poll
+    // (or a filter change) — the Mapbox sources just setData the new features.
+    refetchInterval: live ? 20000 : false,
+    refetchIntervalInBackground: false,
+    placeholderData: keepPreviousData,
   });
 
   const households = householdsQ.data?.households || [];
@@ -523,10 +533,20 @@ export default function MapPage() {
       >
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Map</h1>
-          <div className="text-xs text-gray-500">
-            {householdsQ.isLoading
-              ? 'Loading households…'
-              : `${households.length.toLocaleString()} households shown`}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <span>
+              {householdsQ.isLoading
+                ? 'Loading households…'
+                : `${households.length.toLocaleString()} households shown`}
+            </span>
+            <span className="text-gray-300" aria-hidden="true">·</span>
+            <LiveStatus
+              live={live}
+              onToggle={() => setLive((v) => !v)}
+              isFetching={householdsQ.isFetching}
+              updatedAt={householdsQ.dataUpdatedAt}
+              onRefresh={() => householdsQ.refetch()}
+            />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">

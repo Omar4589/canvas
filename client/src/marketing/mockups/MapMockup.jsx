@@ -1,4 +1,4 @@
-// MapMockup — standalone, decorative map panel (no browser chrome).
+// MapMockup — standalone, decorative live-map panel (no browser chrome).
 // Pure CSS/SVG, brand palette only, no external images, no real voter data.
 // Reusable building block: DashboardMockup frames it in browser chrome, and it
 // can stand on its own inside other marketing sections. Abstract/placeholder
@@ -38,7 +38,7 @@ export default function MapMockup() {
     <div
       className="relative h-full w-full overflow-hidden rounded-lg bg-gray-50"
       role="img"
-      aria-label="Canvassing map showing turf areas, door locations, and canvasser positions"
+      aria-label="Live canvassing map showing turf areas, door locations, and canvasser positions"
     >
       {/* Subtle map grid */}
       <svg
@@ -91,13 +91,12 @@ export default function MapMockup() {
         </div>
       ))}
 
-      {/* Floating zoom control, top-right (decorative, map-authentic) */}
-      <div
-        className="absolute right-3 top-3 flex flex-col overflow-hidden rounded-md border border-gray-200 bg-white text-gray-500 shadow-sm"
-        aria-hidden="true"
-      >
-        <span className="px-2 py-0.5 text-sm leading-tight">+</span>
-        <span className="border-t border-gray-200 px-2 py-0.5 text-sm leading-tight">−</span>
+      {/* Floating Live pill, top-right */}
+      <div className="absolute right-3 top-3">
+        <span className="inline-flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-700">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-600" />
+          Live
+        </span>
       </div>
 
       {/* Floating HousePopup card, bottom-left */}

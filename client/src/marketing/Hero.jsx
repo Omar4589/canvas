@@ -3,7 +3,7 @@ import { demoMailto } from './contact.js';
 import DashboardMockup from './mockups/DashboardMockup.jsx';
 
 // Hero — top of the marketing landing page. Owns the page's single <h1>.
-// Copy left, browser-framed map mockup right; stacks on mobile.
+// Copy left, browser-framed live-map mockup right; stacks on mobile.
 export default function Hero() {
   return (
     <section className="bg-white">
@@ -22,8 +22,8 @@ export default function Hero() {
                 Doorline is the all-in-one door-to-door canvassing platform for
                 campaigns and field organizers. Cut turf and build walk lists in
                 the web console, knock with a GPS-stamped, offline-ready mobile
-                app, and bring every canvasser and every door onto one shared
-                map.
+                app, and watch every canvasser and every door land on one live,
+                shared map as your team works.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <a

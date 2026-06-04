@@ -11,7 +11,8 @@ the numbers.
 
 Related: [EFFORTS.md](EFFORTS.md) (the layer above — see banner), [METRICS.md](METRICS.md) (a pass is
 the billing unit), [TURF_RUNBOOK.md](../TURF_RUNBOOK.md) (operational runbook),
-[SURVEYS.md](SURVEYS.md) (one survey per voter per pass), [VOTERS.md](VOTERS.md).
+[SURVEYS.md](SURVEYS.md) (one survey per voter per pass), [VOTERS.md](VOTERS.md),
+[MAPS.md](MAPS.md) (how books/turf show on the map).
 
 > **Updated — passes are now "Rounds" inside Efforts.** A campaign is split into **efforts** (areas
 > or teams), and a "pass" is now one **Round** within an effort (still the cut/assign/billing unit).

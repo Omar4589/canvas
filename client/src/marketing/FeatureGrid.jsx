@@ -13,9 +13,9 @@ import {
 const FEATURES = [
   {
     Icon: IconPin,
-    title: 'Canvasser map',
+    title: 'Live canvasser map',
     blurb:
-      'Turf, households, and canvasser activity on one shared map — color-coded by status so you can see coverage at a glance.',
+      'Turf, households, and canvasser pings on one live, auto-refreshing map — color-coded by status so you can watch coverage fill in as your team works.',
   },
   {
     Icon: IconScissors,
@@ -72,7 +72,7 @@ export default function FeatureGrid() {
             </h2>
             <p className="mt-3 text-base text-gray-600">
               One platform for cutting turf, sending canvassers to the door, and
-              bringing the results back onto one shared map.
+              watching the results land on your map as your team works.
             </p>
           </div>
 

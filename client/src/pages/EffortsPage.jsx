@@ -11,15 +11,15 @@ const STATUS_BADGE = {
 
 function RosterPanel({ campaignId, effort }) {
   const qc = useQueryClient();
-  const membersQ = useQuery({
-    queryKey: ['effort-members', effort._id],
+  const crewQ = useQuery({
+    queryKey: ['effort-crew', effort._id],
     queryFn: () => api(`/admin/campaigns/${campaignId}/efforts/${effort._id}/members`),
   });
   const orgQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
   const [userId, setUserId] = useState('');
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['effort-members', effort._id] });
+    qc.invalidateQueries({ queryKey: ['effort-crew', effort._id] });
     qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
   };
   const add = useMutation({
@@ -31,25 +31,32 @@ function RosterPanel({ campaignId, effort }) {
     onSuccess: invalidate,
   });
 
-  const members = membersQ.data?.members || [];
-  const memberIds = new Set(members.map((m) => String(m.userId?._id || m.userId)));
+  const crew = crewQ.data?.crew || [];
+  const crewIds = new Set(crew.map((c) => String(c.user.id)));
   const canvassers = (orgQ.data?.members || []).filter((m) => m.role === 'canvasser' && m.user.isActive && m.isActive);
-  const addable = canvassers.filter((m) => !memberIds.has(String(m.user.id)));
+  const addable = canvassers.filter((m) => !crewIds.has(String(m.user.id)));
 
   return (
     <div className="rounded border border-gray-200 bg-gray-50 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Roster</div>
-      {members.length === 0 ? (
-        <p className="text-xs text-gray-500">No canvassers on this effort yet.</p>
+      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Crew</div>
+      <p className="mb-2 text-[11px] text-gray-500">
+        Fills in automatically from book assignments. Add people here to pre-stage them before assigning.
+      </p>
+      {crew.length === 0 ? (
+        <p className="text-xs text-gray-500">No one yet — assign books on the Turf page, or pre-add someone below.</p>
       ) : (
         <ul className="mb-2 flex flex-wrap gap-1.5">
-          {members.map((m) => {
-            const u = m.userId || {};
-            const uid = String(u._id || m.userId);
+          {crew.map((c) => {
+            const manualOnly = c.viaRoster && !c.viaAssignment;
             return (
-              <li key={uid} className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">
-                {u.firstName} {u.lastName}
-                <button onClick={() => remove.mutate(uid)} className="text-gray-400 hover:text-red-600" title="Remove">×</button>
+              <li key={c.user.id} className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">
+                {c.user.firstName} {c.user.lastName}
+                <span className={c.viaAssignment ? 'text-[10px] font-medium text-green-600' : 'text-[10px] text-gray-400'}>
+                  {c.viaAssignment ? 'assigned' : 'added'}
+                </span>
+                {manualOnly && (
+                  <button onClick={() => remove.mutate(c.user.id)} className="text-gray-400 hover:text-red-600" title="Remove (pre-staged only — assigned people leave when unassigned on the Turf page)">×</button>
+                )}
               </li>
             );
           })}
@@ -57,7 +64,7 @@ function RosterPanel({ campaignId, effort }) {
       )}
       <div className="flex items-center gap-2">
         <select value={userId} onChange={(e) => setUserId(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs">
-          <option value="">Add canvasser…</option>
+          <option value="">Pre-add canvasser…</option>
           {addable.map((m) => (
             <option key={m.user.id} value={m.user.id}>{m.user.firstName} {m.user.lastName}</option>
           ))}
@@ -119,7 +126,7 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, onUpd
         </td>
         <td className="px-4 py-2"><span className={`rounded px-2 py-0.5 text-xs ${STATUS_BADGE[effort.status] || ''}`}>{effort.status}</span></td>
         <td className="px-4 py-2 text-right">{(effort.doorCount || 0).toLocaleString()}</td>
-        <td className="px-4 py-2 text-right">{effort.memberCount || 0}</td>
+        <td className="px-4 py-2 text-right">{effort.crewCount || 0}</td>
         <td className="px-4 py-2">{effort.activeRound ? `Round ${effort.activeRound.roundNumber} · ${effort.activeRound.name}` : <span className="text-gray-400">—</span>}</td>
         <td className="px-4 py-2 text-gray-600">{isSurveyType ? (survey ? survey.name : <span className="text-gray-400">campaign default</span>) : <span className="text-gray-400">n/a</span>}</td>
         <td className="space-x-2 px-4 py-2 text-right">

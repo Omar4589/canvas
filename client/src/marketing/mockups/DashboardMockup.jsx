@@ -1,4 +1,4 @@
-// DashboardMockup — hero mockup: a browser-framed admin map.
+// DashboardMockup — hero mockup: a browser-framed live admin map.
 // Proves the "console + field app on one shared map" promise on sight.
 // Pure CSS/SVG, brand palette only, no external images, no real voter data.
 // Wraps MapMockup (the standalone map panel) in slim browser chrome.
@@ -10,7 +10,7 @@ export default function DashboardMockup() {
     <div
       className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
       role="img"
-      aria-label="Doorline admin console showing a canvassing map with turf, doors, and canvasser pings"
+      aria-label="Doorline admin console showing a live canvassing map with turf, doors, and canvasser pings"
     >
       {/* Slim browser-style top chrome: three dots + a muted URL pill */}
       <div className="flex items-center gap-2 border-b border-gray-200 bg-white px-3 py-2">

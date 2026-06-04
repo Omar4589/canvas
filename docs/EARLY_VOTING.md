@@ -9,7 +9,7 @@ voters, passes, campaigns, and the counts**.
   endpoints, the cross-effects, and the components.
 
 Server entry point: [`server/src/routes/admin/voted.js`](../server/src/routes/admin/voted.js).
-Related: the [metrics doc](METRICS.md).
+Related: the [metrics doc](METRICS.md), [MAPS.md](MAPS.md) (voted doors dropping off the map).
 
 ---
 

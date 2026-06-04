@@ -21,7 +21,7 @@ canvass-app/
 - **MongoDB**: GeoJSON `Point` location on Household with `[lng, lat]` order and 2dsphere index. Voters keyed by `stateVoterId`. Households keyed by a normalized address string (uppercase, trimmed, joined with `|`).
 - **Auth**: long-lived JWT (30d), stored on mobile in `expo-secure-store`. Global subscriber-based store at `mobile/lib/authState.js` — single source of truth for token; eliminates auth-gate race conditions.
 - **Mobile state**: TanStack Query for the bootstrap endpoint (`/mobile/bootstrap` returns all households + voters + active survey). Cached to AsyncStorage so the app works offline. Offline submission queue at `mobile/lib/offlineQueue.js` — actions get queued when offline, flushed on reconnect with `wasOfflineSubmission: true` flag.
-- **Map**: Mapbox vector tiles with a single `ShapeSource` + `CircleLayer` + `SymbolLayer` driven by one GeoJSON feature collection (NOT 5,840 individual MarkerView components — would melt the device). No clustering. Status colors live in `mobile/components/StatusColor.js`.
+- **Map**: Mapbox vector tiles with a single `ShapeSource` + `CircleLayer` + `SymbolLayer` driven by one GeoJSON feature collection (NOT 5,840 individual MarkerView components — would melt the device). No clustering. Status colors live in `mobile/lib/theme.js` (`colors.status`). Full reference: [docs/MAPS.md](docs/MAPS.md).
 
 ## Non-obvious decisions
 

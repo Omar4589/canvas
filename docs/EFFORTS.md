@@ -27,9 +27,24 @@ Campaign
 ```
 
 An **effort** is the persistent thing — "North Dallas", "the volunteer crew". It **owns a disjoint
-set of doors**, an optional **survey**, and a **roster** of canvassers. Inside it you run **Rounds**
+set of doors**, an optional **survey**, and a **crew** of canvassers. Inside it you run **Rounds**
 (Round 1, Round 2, …) — each round is cut into **books** and assigned, exactly like passes worked
 before. Round numbers restart per effort (North Round 1, South Round 1).
+
+## How the pieces relate — and the order you build them
+
+Each piece depends on the one above it, so you build top-down:
+
+1. **Effort** — create it first (it owns the doors + survey + crew). Nothing else can exist without it.
+2. **Doors** — give the effort its doors by claiming a **walk list** or **Intake** (see below). An
+   effort with no doors has nothing to cut.
+3. **Round** — make a round *inside* the effort. A round can't exist on its own; it belongs to one
+   effort. (Round 2 later = a new round in the same effort.)
+4. **Books** — cut the round into books (turf). A book belongs to one round; re-cutting makes new books.
+5. **Assignment** — assign a book to a canvasser. This is the link between a person and a book — and
+   it's what fills the effort's **crew** automatically (next section).
+
+In short: **effort → doors → round → books → assign**. The step-by-step below walks each one.
 
 ## Door ownership and Intake
 
@@ -48,6 +63,19 @@ See [IMPORTS.md](IMPORTS.md) for the full import behavior.
 A campaign can have **many active efforts**, each with its **one active round**. Canvassers see only
 the books assigned to them, across whatever efforts they're on. Activating a round only archives the
 *previous round of that same effort* — other efforts keep running.
+
+## The crew
+
+An effort's **crew** (the "Crew" count on the Efforts page) is **automatically whoever is assigned to
+its current round's books**. You don't maintain it — assign a book to someone and they're on the crew;
+unassign them and they drop off; re-carve doors into a different effort and the crews follow the
+assignments. It's always an accurate picture of who's actually working the effort, and it does **not**
+restrict who you can assign (any active canvasser is still assignable to any book).
+
+You can also **pre-add** people to a crew on the Efforts page (open an effort → Crew → *Pre-add*) —
+handy for lining up a team *before* you've cut/assigned their books. In the crew list, people show as
+**assigned** (from a book) or **added** (pre-staged); you can only remove the pre-staged ones (assigned
+people leave when you unassign their book on the Turf page).
 
 ## Per-effort survey and reporting
 
@@ -104,7 +132,7 @@ effort-scoped), [services/passes/activePasses.js](../server/src/services/passes/
 | Model | File | Notes |
 |---|---|---|
 | `Effort` | [models/Effort.js](../server/src/models/Effort.js) | `campaignId`, `name`, `color`, `surveyTemplateId?` (override → falls back to `Campaign.surveyTemplateId`), `seededFromWalkListId?` (audit), `status` (draft/active/archived). |
-| `EffortMember` | [models/EffortMember.js](../server/src/models/EffortMember.js) | Roster: unique `{effortId, userId}`. Persists across rounds; per-round book assignment still uses `TurfAssignment`. |
+| `EffortMember` | [models/EffortMember.js](../server/src/models/EffortMember.js) | **Manual pre-stage list only**, unique `{effortId, userId}`. The displayed "crew" is *derived* (next), not this — see §H. |
 | `Household.effortId` | [models/Household.js](../server/src/models/Household.js) | **Source of truth for door ownership.** `null` = Intake. Index `{campaignId, effortId}`. Disjointness = one effortId per door. |
 | `Pass` (= Round) | [models/Pass.js](../server/src/models/Pass.js) | Gains `effortId` (required); `roundNumber` unique **per effort** (`{effortId, roundNumber}`); `walkListId` retired (door-set comes from the effort). |
 | `Campaign` | [models/Campaign.js](../server/src/models/Campaign.js) | **`activePassId` dropped.** Active rounds derive from `Pass.status === 'active'` via `activePassIds()`. |
@@ -180,11 +208,28 @@ Run without `--apply` first for a zero-write **dry run** (prints per-campaign co
 The dry run is for the manual/local path — with release phase the real migration runs automatically on
 deploy, so a separate dry run isn't needed.
 
+## H. Crew (derived, not stored)
+
+The displayed crew is computed in [efforts.js](../server/src/routes/admin/efforts.js), never synced:
+
+- **`GET /efforts`** returns `crewCount` per effort = `|`(`EffortMember` users) ∪ (distinct
+  `TurfAssignment.userId` on the effort's **active round's** books)`|`. Reuses the active-round lookup
+  already in that handler; one `TurfAssignment.aggregate` keyed by `passId ∈ activePassIds`.
+- **`GET /efforts/:id/members`** returns `crew: [{ user, viaRoster, viaAssignment }]` — the union of the
+  manual roster and the active round's assignees, flagged by source.
+- **Why derived:** it's always accurate and self-corrects on unassign / re-carve with no write-path
+  hook and **no backfill** of pre-existing assignments. `EffortMember` is only the manual pre-stage
+  layer; the real driver is `TurfAssignment` (per book, per round, created by
+  [turfAssignments.js](../server/src/routes/admin/turfAssignments.js) — unchanged).
+- **Removal:** the roster `DELETE …/members/:userId` removes only a manual `EffortMember`; an assigned
+  person leaves the crew by being unassigned from the book (Turf page). The UI hides the remove `×` for
+  anyone who is `viaAssignment`.
+
 ## G. Frontend
 
 | File | Renders |
 |---|---|
-| [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | Efforts list/create, roster, claim/re-carve, Intake banner + assign, survey override. |
+| [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | Efforts list/create, crew (derived) + pre-add, claim/re-carve, Intake banner + assign, survey override. |
 | [client/src/pages/PassesPage.jsx](../client/src/pages/PassesPage.jsx) | "Rounds" — effort-scoped (selector + `?effortId=`); create a round in an effort. |
 | [client/src/pages/TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) | Turf cutting; PassPicker labels rounds by effort and defaults to an active round. |
 | [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Effort filter → passes `effortId` to the reports endpoints. |

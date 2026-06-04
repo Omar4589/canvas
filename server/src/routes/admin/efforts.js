@@ -7,6 +7,7 @@ import { Effort } from '../../models/Effort.js';
 import { EffortMember } from '../../models/EffortMember.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
+import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Household } from '../../models/Household.js';
 import { WalkList } from '../../models/WalkList.js';
 import { Membership } from '../../models/Membership.js';
@@ -54,26 +55,51 @@ router.get('/', async (req, res, next) => {
   try {
     const cId = req.campaign._id;
     const efforts = await Effort.find({ campaignId: cId }).sort({ createdAt: 1 }).lean();
-    const [doorCounts, activeRounds, memberCounts, intakeCount] = await Promise.all([
+    const activeRounds = await Pass.find(
+      { campaignId: cId, status: 'active' },
+      { effortId: 1, roundNumber: 1, name: 1 }
+    ).lean();
+    const activePassIds = activeRounds.map((p) => p._id);
+    const passToEffort = new Map(activeRounds.map((p) => [String(p._id), String(p.effortId)]));
+
+    // "Crew" is DERIVED: manual roster members ∪ canvassers assigned to the
+    // effort's active round's books. So it always reflects who's actually working
+    // and self-corrects on unassign / re-carve (no stored sync needed).
+    const [doorCounts, memberSets, assignSets, intakeCount] = await Promise.all([
       Household.aggregate([
         { $match: { campaignId: cId, isActive: true, effortId: { $ne: null } } },
         { $group: { _id: '$effortId', n: { $sum: 1 } } },
       ]),
-      Pass.find({ campaignId: cId, status: 'active' }, { effortId: 1, roundNumber: 1, name: 1 }).lean(),
       EffortMember.aggregate([
         { $match: { campaignId: cId } },
-        { $group: { _id: '$effortId', n: { $sum: 1 } } },
+        { $group: { _id: '$effortId', users: { $addToSet: '$userId' } } },
       ]),
+      activePassIds.length
+        ? TurfAssignment.aggregate([
+            { $match: { passId: { $in: activePassIds } } },
+            { $group: { _id: '$passId', users: { $addToSet: '$userId' } } },
+          ])
+        : Promise.resolve([]),
       Household.countDocuments({ campaignId: cId, isActive: true, effortId: null }),
     ]);
+
     const doorMap = new Map(doorCounts.map((d) => [String(d._id), d.n]));
-    const memberMap = new Map(memberCounts.map((m) => [String(m._id), m.n]));
     const activeMap = new Map(activeRounds.map((p) => [String(p.effortId), p]));
+    const crewByEffort = new Map(); // effortId -> Set(userId)
+    for (const m of memberSets) crewByEffort.set(String(m._id), new Set(m.users.map(String)));
+    for (const a of assignSets) {
+      const effId = passToEffort.get(String(a._id));
+      if (!effId) continue;
+      const set = crewByEffort.get(effId) || new Set();
+      for (const u of a.users) set.add(String(u));
+      crewByEffort.set(effId, set);
+    }
+
     res.json({
       efforts: efforts.map((e) => ({
         ...e,
         doorCount: doorMap.get(String(e._id)) || 0,
-        memberCount: memberMap.get(String(e._id)) || 0,
+        crewCount: crewByEffort.get(String(e._id))?.size || 0,
         activeRound: activeMap.get(String(e._id)) || null,
       })),
       intakeCount,
@@ -225,12 +251,38 @@ router.get('/intake', async (req, res, next) => {
 });
 
 // Roster.
+// The effort's crew = manual roster members (pre-staged) ∪ canvassers assigned
+// to its active round's books. Each entry flags how they're on the crew so the UI
+// can tag them and only offer to remove the manual-only ones.
 router.get('/:id/members', loadEffort, async (req, res, next) => {
   try {
-    const members = await EffortMember.find({ effortId: req.effort._id })
-      .populate('userId', 'firstName lastName email')
-      .lean();
-    res.json({ members });
+    const activePass = await Pass.findOne(
+      { effortId: req.effort._id, status: 'active' },
+      { _id: 1 }
+    ).lean();
+    const [roster, assigned] = await Promise.all([
+      EffortMember.find({ effortId: req.effort._id })
+        .populate('userId', 'firstName lastName email')
+        .lean(),
+      activePass
+        ? TurfAssignment.find({ passId: activePass._id })
+            .populate('userId', 'firstName lastName email')
+            .lean()
+        : Promise.resolve([]),
+    ]);
+
+    const byUser = new Map(); // userId -> { user, viaRoster, viaAssignment }
+    const upsert = (u, key) => {
+      if (!u) return;
+      const id = String(u._id);
+      const entry = byUser.get(id) || { user: { id, firstName: u.firstName, lastName: u.lastName, email: u.email }, viaRoster: false, viaAssignment: false };
+      entry[key] = true;
+      byUser.set(id, entry);
+    };
+    for (const m of roster) upsert(m.userId, 'viaRoster');
+    for (const a of assigned) upsert(a.userId, 'viaAssignment');
+
+    res.json({ crew: [...byUser.values()] });
   } catch (err) {
     next(err);
   }
