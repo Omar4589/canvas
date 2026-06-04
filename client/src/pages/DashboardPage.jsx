@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -7,7 +7,7 @@ import CoverageBar from '../components/CoverageBar.jsx';
 import QuestionResults from '../components/QuestionResults.jsx';
 import CanvasserTable from '../components/CanvasserTable.jsx';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
-import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.jsx';
+import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import VoterHighlights from '../components/VoterHighlights.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
 
@@ -32,8 +32,7 @@ function SectionHeading({ title, right }) {
 export default function DashboardPage() {
   const { campaignId } = useParams();
   const navigate = useNavigate();
-  const [rangeId, setRangeId] = useState('all');
-  const dateRange = useMemo(() => rangeFromId(rangeId), [rangeId]);
+  const [dateRange, setDateRange] = useState(() => defaultRange('today'));
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [selectedCanvasser, setSelectedCanvasser] = useState(null);
   const [effortId, setEffortId] = useState('');
@@ -229,7 +228,7 @@ export default function DashboardPage() {
               ))}
             </select>
           )}
-          <DateRangeSelector value={rangeId} onChange={setRangeId} />
+          <DateRangeSelector value={dateRange} onChange={setDateRange} />
         </div>
       </div>
 

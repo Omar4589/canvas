@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
-import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.jsx';
+import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
 
 function buildQuery(params) {
@@ -103,8 +103,7 @@ function ChevronIcon({ open }) {
 export default function OverviewPage() {
   const navigate = useNavigate();
   const [archivedExpanded, setArchivedExpanded] = useState(false);
-  const [rangeId, setRangeId] = useState('today');
-  const dateRange = useMemo(() => rangeFromId(rangeId), [rangeId]);
+  const [dateRange, setDateRange] = useState(() => defaultRange('today'));
 
   const activeQ = useQuery({
     queryKey: ['campaign-rollup', 'active', dateRange.from, dateRange.to],
@@ -133,7 +132,7 @@ export default function OverviewPage() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-gray-900">Overview</h1>
-        <DateRangeSelector value={rangeId} onChange={setRangeId} />
+        <DateRangeSelector value={dateRange} onChange={setDateRange} />
       </div>
 
       {activeQ.isLoading ? (

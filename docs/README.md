@@ -22,6 +22,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | Doc | What it covers |
 |---|---|
 | [METRICS.md](METRICS.md) | Every number on the dashboards — knocks, surveys, coverage, connection rate — and the duplicate-knock ("overlap") warning. The source of truth for counting. |
+| [DATE_FILTERS.md](DATE_FILTERS.md) | The date-range control on the dashboards (and map): presets, what each page defaults to, the custom picker, the boundary math, and why the map narrows its pins. |
 | [EFFORTS.md](EFFORTS.md) | Parallel canvassing within a campaign: efforts (areas/teams) that own disjoint doors, a survey, and a crew, each with its own rounds. Door ownership + Intake, per-effort survey/reporting, concurrency. |
 | [WALKLISTS.md](WALKLISTS.md) | Saved, frozen door sets you carve efforts from — built from the filter builder or an uploaded Voter-ID CSV — and how a list seeds/claims an effort's doors. |
 | [PASSES_AND_TURF.md](PASSES_AND_TURF.md) | Rounds (a "pass" within an effort), books (walkable turf), turf-cutting & recutting, and the mechanics that apply per round. |

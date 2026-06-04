@@ -9,7 +9,8 @@ canvasser knocking a door turns into a pin you can see on a screen.
 
 Related: [IMPORTS.md](IMPORTS.md) (where coordinates come from), [PASSES_AND_TURF.md](PASSES_AND_TURF.md)
 (books/turf the maps are scoped to), [EARLY_VOTING.md](EARLY_VOTING.md) (voted doors dropping off the
-map), [METRICS.md](METRICS.md) (the numbers behind the pins).
+map), [METRICS.md](METRICS.md) (the numbers behind the pins), [DATE_FILTERS.md](DATE_FILTERS.md)
+(the date-range control — on the map a window narrows the pins to interacted-with doors).
 
 ---
 

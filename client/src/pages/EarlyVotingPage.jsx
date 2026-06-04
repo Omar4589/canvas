@@ -139,13 +139,19 @@ export default function EarlyVotingPage() {
               <div><span className="text-gray-500">Not in this campaign</span><div className="text-lg font-semibold text-gray-400">{fmt(pv.notFound)}</div></div>
             </div>
             {pv.notFound > 0 && (
-              <button
-                type="button"
-                onClick={downloadUnmatched}
-                className="mt-3 text-xs font-semibold text-brand-700 hover:underline"
-              >
-                Download {fmt(pv.notFound)} unmatched ID{pv.notFound === 1 ? '' : 's'}
-              </button>
+              <div className="mt-3">
+                <p className="text-xs text-gray-500">
+                  Not in this campaign yet — these are <strong>saved</strong>. If those voters get imported into this
+                  campaign later, they're marked voted automatically (and their door drops once everyone there has voted).
+                </p>
+                <button
+                  type="button"
+                  onClick={downloadUnmatched}
+                  className="mt-1 text-xs font-semibold text-brand-700 hover:underline"
+                >
+                  Download {fmt(pv.notFound)} unmatched ID{pv.notFound === 1 ? '' : 's'}
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -164,6 +170,12 @@ export default function EarlyVotingPage() {
           <div className="mt-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
             Marked {fmt(apply.data.marked)} voters voted · {fmt(apply.data.doorsDropped)} doors dropped
             {apply.data.notFound ? ` · ${fmt(apply.data.notFound)} not in this campaign` : ''}.
+            {apply.data.notFound ? (
+              <span className="mt-1 block text-xs text-green-700">
+                The {fmt(apply.data.notFound)} not in this campaign are saved — they'll be marked automatically when
+                those voters are imported into this campaign.
+              </span>
+            ) : null}
           </div>
         )}
       </section>
@@ -217,6 +229,10 @@ export default function EarlyVotingPage() {
               </tbody>
             </table>
           </div>
+          <p className="mt-2 text-xs text-gray-500">
+            <strong>Not found</strong> voters aren't lost — they're saved and marked automatically if those voters are
+            later imported into this campaign.
+          </p>
 
           <section className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
             <h2 className="mb-1 text-base font-medium">Un-mark a voter</h2>

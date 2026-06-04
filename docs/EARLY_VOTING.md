@@ -202,7 +202,9 @@ admin-only, campaign loaded/validated per request.
 
 - **Web** — [pages/EarlyVotingPage.jsx](../client/src/pages/EarlyVotingPage.jsx): campaign picker,
   CSV upload (auto-previews on pick), preview stats, **Mark these voters voted**, and the history
-  table (`Voters marked voted` / `Doors fully voted` + per-upload **Undo**). Routed at
+  table (`Voters marked voted` / `Doors fully voted` + per-upload **Undo**). The preview, the apply
+  result, and a footnote under the history all explain that **"Not found" voters are saved** and
+  auto-marked if those voters are later imported into this campaign (the sticky behavior). Routed at
   `/early-voting`, admin-only ([App.jsx](../client/src/App.jsx)), nav item in
   [navItems.js](../client/src/components/navItems.js).
 - **Mobile** — bootstrap derives the per-voter `voted` flag and drops fully-voted doors (§D). The

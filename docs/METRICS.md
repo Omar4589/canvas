@@ -12,7 +12,9 @@ The implementation lives in [`server/src/routes/admin/reports.js`](../server/src
 
 Related: [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (a "pass"/round is the billing unit; coverage vs.
 passes), [EFFORTS.md](EFFORTS.md) (reports can be scoped to one effort via `effortId`; "All efforts" =
-the whole-campaign totals below), [SURVEYS.md](SURVEYS.md) (what "Surveys" / "Surveyed voters" count).
+the whole-campaign totals below), [SURVEYS.md](SURVEYS.md) (what "Surveys" / "Surveyed voters" count),
+[DATE_FILTERS.md](DATE_FILTERS.md) (the date-range control that scopes these numbers — presets,
+defaults, and boundary math).
 
 ---
 

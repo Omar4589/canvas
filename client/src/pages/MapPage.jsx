@@ -3,7 +3,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
-import DateRangeSelector, { rangeFromId } from '../components/DateRangeSelector.jsx';
+import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import HouseholdDetailPanel from '../components/HouseholdDetailPanel.jsx';
 import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
@@ -199,8 +199,7 @@ export default function MapPage() {
   const [selected, setSelected] = useState(null);
   const [selectedActivityId, setSelectedActivityId] = useState(null);
 
-  const [rangeId, setRangeId] = useState('all');
-  const dateRange = useMemo(() => rangeFromId(rangeId), [rangeId]);
+  const [dateRange, setDateRange] = useState(() => defaultRange('all'));
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState('');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '' });
@@ -557,7 +556,7 @@ export default function MapPage() {
             isLoading={campaignsLoading}
           />
           <AddressSearch households={households} onSelect={flyToHousehold} />
-          <DateRangeSelector value={rangeId} onChange={setRangeId} />
+          <DateRangeSelector value={dateRange} onChange={setDateRange} />
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
