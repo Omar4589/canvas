@@ -116,12 +116,19 @@ Your campaign starts as one default effort ("Main") owning every door.
 3. Repeat for each area. Rename or delete the leftover "Main" effort when it's empty.
 
 ### Assign new voters (Intake)
-1. After a voter upload, the **Efforts** page shows an **Intake** count (new addresses).
-2. Open the effort that should own them → **Claim** → either claim a specific walk list or
-   **Claim all Intake**.
-3. **Turf Cutting** → that round → **Add new doors → supplemental book** → **Accept** → **Assign**.
-   The new doors are now in the field. (New voters at addresses an effort *already* owns appear
-   automatically — no steps needed.)
+1. After a voter upload, the **Efforts** page shows an **Intake** count (new addresses). The import
+   never assigns an effort — new addresses always wait in Intake until you claim them. (The same import
+   also auto-applies any pending early-voter marks for those voters — see [EARLY_VOTING.md](EARLY_VOTING.md).)
+2. Decide who owns them — an **existing** effort, or a **new effort** you create for these doors (make
+   it first on the Efforts page, then claim). Open that effort → **Claim** → either claim a specific
+   **walk list** or **Claim all Intake**.
+   - To route **exactly this CSV's** doors to their own effort, build a **Walk List from that CSV** after
+     the import (it matches by Voter ID — see [WALKLISTS.md](WALKLISTS.md)) and seed/claim the new effort
+     from it. **Claim all Intake** is the quick path *only* when all current Intake is just these new
+     addresses — it grabs **every** unowned door, so use a walk list when other Intake is mixed in.
+3. **Turf Cutting** → that effort's round → **Add new doors → supplemental book** → **Accept** →
+   **Assign** (a brand-new effort needs a round created first). The new doors are now in the field.
+   (New voters at addresses an effort *already* owns appear automatically — no steps needed.)
 
 ---
 
