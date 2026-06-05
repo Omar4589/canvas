@@ -1,20 +1,20 @@
-// Date-range presets computed in a FIXED anchor timezone (the campaign's) — NEVER the
-// device clock. Every builder takes `tz` and returns **date-only** 'YYYY-MM-DD' bounds
-// (or null = open); the server interprets those days in the same anchor tz, so "Yesterday"
-// means the campaign's yesterday for an admin in any timezone. `from`/`to` are BOTH
-// inclusive days (the server window covers the whole `to` day). Mirrors the web
-// client/src/lib/datePresets.js.
+// Date-range presets computed in a FIXED anchor timezone (the campaign's, or the org's
+// for org-wide views) — NEVER the viewer's device clock. Every builder takes `tz` and
+// returns **date-only** 'YYYY-MM-DD' bounds (or null = open); the server interprets those
+// days in the same anchor tz, so "Yesterday" means the campaign's yesterday for every
+// admin in any timezone. `from`/`to` are BOTH inclusive days (the server window covers
+// the whole `to` day).
 
-export const PRESETS = [
-  { key: 'today', label: 'Today' },
-  { key: 'yesterday', label: 'Yesterday' },
-  { key: '7d', label: '7 days' },
-  { key: '30d', label: '30 days' },
-  { key: 'all', label: 'All time' },
-  { key: 'custom', label: 'Custom' },
+export const RANGE_PRESETS = [
+  { id: 'today', label: 'Today' },
+  { id: 'yesterday', label: 'Yesterday' },
+  { id: '7d', label: '7 days' },
+  { id: '30d', label: '30 days' },
+  { id: 'all', label: 'All time' },
+  { id: 'custom', label: 'Custom' },
 ];
 
-// Current date in `tz` as 'YYYY-MM-DD'.
+// Current date in `tz` as 'YYYY-MM-DD' (en-CA gives ISO order).
 export function todayInTz(tz) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: tz || 'UTC',
@@ -24,17 +24,19 @@ export function todayInTz(tz) {
   }).format(new Date());
 }
 
-// Add n calendar days to a 'YYYY-MM-DD' via UTC math (no tz/DST drift).
+// Add n calendar days to a 'YYYY-MM-DD' using UTC math (pure calendar arithmetic, no tz/DST drift).
 export function shiftDays(ymd, n) {
   const [y, m, d] = ymd.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
+// Day of week (0=Sun..6=Sat) for a 'YYYY-MM-DD'.
 function dayOfWeek(ymd) {
   const [y, m, d] = ymd.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
+// First day of the month containing `ymd`.
 function firstOfMonth(ymd) {
   const [y, m] = ymd.split('-').map(Number);
   return `${y}-${String(m).padStart(2, '0')}-01`;
@@ -50,7 +52,7 @@ export function rangeFor(preset, custom, tz) {
   if (preset === '7d') return { from: shiftDays(today, -6), to: null };
   if (preset === '30d') return { from: shiftDays(today, -29), to: null };
   if (preset === 'custom' && custom) return { from: custom.from || null, to: custom.to || null };
-  return { from: null, to: null };
+  return { from: null, to: null }; // all
 }
 
 // Quick chips inside the custom picker (Monday-as-week-start).
@@ -63,7 +65,7 @@ export function quickRangeFor(key, tz) {
   if (key === 'lastWeek') {
     const back = (dayOfWeek(today) + 6) % 7;
     const thisMon = shiftDays(today, -back);
-    return { from: shiftDays(thisMon, -7), to: shiftDays(thisMon, -1) };
+    return { from: shiftDays(thisMon, -7), to: shiftDays(thisMon, -1) }; // last Mon..last Sun
   }
   if (key === 'thisMonth') return { from: firstOfMonth(today), to: null };
   if (key === 'lastMonth') {
@@ -73,15 +75,20 @@ export function quickRangeFor(key, tz) {
   return { from: null, to: null };
 }
 
+// Initialize page state in one line. `tz` is the anchor (campaign/org) timezone.
+export function defaultRange(preset, tz) {
+  return { preset, ...rangeFor(preset, undefined, tz) };
+}
+
 // Parse a date-only 'YYYY-MM-DD' as a LOCAL Date for display (avoids the UTC-midnight
-// off-by-one in behind-UTC zones).
+// off-by-one that `new Date('2026-06-04')` causes in behind-UTC zones).
 function ymdToLocal(ymd) {
   const [y, m, d] = String(ymd).split('-').map(Number);
   return new Date(y, m - 1, d);
 }
 
 export function labelForRange({ preset, from, to }) {
-  const p = PRESETS.find((x) => x.key === preset);
+  const p = RANGE_PRESETS.find((x) => x.id === preset);
   if (p && preset !== 'custom') return p.label;
   if (preset === 'custom') {
     const opts = { month: 'short', day: 'numeric' };
@@ -96,13 +103,4 @@ export function labelForRange({ preset, from, to }) {
     if (t) return `Until ${t.toLocaleDateString(undefined, opts)}`;
   }
   return 'All time';
-}
-
-// Best-guess IANA timezone of the device (kept for any non-anchored uses).
-export function deviceTimezone() {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
 }

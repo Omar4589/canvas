@@ -25,7 +25,7 @@ const changePasswordSchema = z.object({
 
 async function loadMembershipsForUser(userId) {
   return Membership.find({ userId, isActive: true })
-    .populate({ path: 'organizationId', select: 'name slug isActive' })
+    .populate({ path: 'organizationId', select: 'name slug isActive timeZone' })
     .lean()
     .then((rows) =>
       rows
@@ -35,6 +35,7 @@ async function loadMembershipsForUser(userId) {
           organizationId: String(m.organizationId._id),
           organizationName: m.organizationId.name,
           organizationSlug: m.organizationId.slug,
+          organizationTimeZone: m.organizationId.timeZone || 'America/New_York',
           role: m.role,
           // null acknowledgedAt = the user hasn't dismissed the "added to org" banner yet.
           isNew: !m.acknowledgedAt,

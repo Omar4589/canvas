@@ -6,6 +6,8 @@ import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
+import { formatInTz } from '../lib/datetime.js';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -35,6 +37,7 @@ function StatRow({ label, value }) {
 
 function CampaignCard({ campaign, onClick }) {
   const c = campaign;
+  const tz = useOrgTimeZone();
   return (
     <button
       type="button"
@@ -72,7 +75,7 @@ function CampaignCard({ campaign, onClick }) {
           label="Last activity"
           value={
             c.lastActivityAt
-              ? new Date(c.lastActivityAt).toLocaleDateString()
+              ? formatInTz(c.lastActivityAt, tz, { month: 'numeric', day: 'numeric', year: 'numeric' }, false)
               : '—'
           }
         />
@@ -102,8 +105,11 @@ function ChevronIcon({ open }) {
 
 export default function OverviewPage() {
   const navigate = useNavigate();
+  // Org-wide rollup → anchor presets to the org tz (available at login; campaigns may span
+  // zones, so no single campaign tz applies here).
+  const orgTz = useOrgTimeZone();
   const [archivedExpanded, setArchivedExpanded] = useState(false);
-  const [dateRange, setDateRange] = useState(() => defaultRange('today'));
+  const [dateRange, setDateRange] = useState(() => defaultRange('today', orgTz));
 
   const activeQ = useQuery({
     queryKey: ['campaign-rollup', 'active', dateRange.from, dateRange.to],
@@ -132,7 +138,14 @@ export default function OverviewPage() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-gray-900">Overview</h1>
-        <DateRangeSelector value={dateRange} onChange={setDateRange} />
+        <div className="flex items-center gap-2">
+          <DateRangeSelector value={dateRange} onChange={setDateRange} tz={orgTz} />
+          {activeQ.data?.tzAbbrev && (
+            <span className="self-center text-xs font-medium text-gray-400" title={`Dates & times in ${activeQ.data.timeZone}`}>
+              {activeQ.data.tzAbbrev}
+            </span>
+          )}
+        </div>
       </div>
 
       {activeQ.isLoading ? (

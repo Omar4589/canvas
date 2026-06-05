@@ -32,10 +32,9 @@ const ACTION_COLOR = {
 };
 
 function dayBounds(dateStr) {
-  // Treat as local day; round to UTC ISO for the API.
-  const start = new Date(`${dateStr}T00:00:00`);
-  const end = new Date(start.getTime() + 86400000);
-  return { from: start.toISOString(), to: end.toISOString() };
+  // One campaign-tz day, inclusive. dateStr is already a 'YYYY-MM-DD' campaign-tz day (from
+  // the days list); the server reads these date-only bounds in the campaign tz → just that day.
+  return { from: dateStr, to: dateStr };
 }
 
 function fmtDate(dateStr) {
@@ -170,7 +169,7 @@ export default function DayDetail() {
         )}
         {s?.highlights?.firstActivityAt ? (
           <Text style={styles.shiftLine}>
-            🕘 {formatRange(s.highlights.firstActivityAt, s.highlights.lastActivityAt)}
+            🕘 {formatRange(s.highlights.firstActivityAt, s.highlights.lastActivityAt, campaign?.timeZone)}
           </Text>
         ) : null}
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -57,49 +57,61 @@ export default function CanvasserOverview() {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
 
+  const tz = campaign?.timeZone;
+
   const [range, setRange] = useState(() => {
-    const incomingPreset = params.preset || '7d';
     if (params.from || params.to) {
       return {
-        preset: incomingPreset,
+        preset: params.preset || '7d',
         from: params.from || null,
         to: params.to || null,
       };
     }
-    const r = rangeFor(incomingPreset);
-    return { preset: incomingPreset, from: r.from, to: r.to };
+    return null;
   });
+
+  const rangeTouchedRef = useRef(!!(params?.from || params?.to));
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = params?.preset || '7d';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
+
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setRange(next);
+  }
 
   const cId = campaign?.id;
   const isLitDrop = campaign?.type === 'lit_drop';
-  const tz = deviceTimezone();
 
   const qsBase = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
-    p.set('tz', tz);
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
+    p.set('tz', deviceTimezone());
     return p.toString();
-  }, [cId, range.from, range.to, tz]);
+  }, [cId, range?.from, range?.to]);
 
   const summaryQ = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'summary', qsBase],
     queryFn: () => api(`/admin/reports/canvassers/${userId}/summary?${qsBase}`),
-    enabled: !!cId && !!userId,
+    enabled: !!cId && !!userId && !!range,
   });
 
   const teamQ = useQuery({
     queryKey: ['admin', 'canvasser', 'team-avg', qsBase],
     queryFn: () => api(`/admin/reports/team-averages?${qsBase}`),
-    enabled: !!cId,
+    enabled: !!cId && !!range,
   });
 
   const answersQ = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'answers', qsBase],
     queryFn: () =>
       api(`/admin/reports/survey-results?${qsBase}&userId=${userId}&compareToOrg=true`),
-    enabled: !!cId && !!userId && !isLitDrop,
+    enabled: !!cId && !!userId && !isLitDrop && !!range,
   });
 
   const s = summaryQ.data;
@@ -190,7 +202,7 @@ export default function CanvasserOverview() {
     );
   }
 
-  if (summaryQ.isLoading) {
+  if (!range || summaryQ.isLoading) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
         <Header onBack={() => router.back()} />
@@ -223,7 +235,7 @@ export default function CanvasserOverview() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <Header onBack={() => router.back()} title={fullName} />
 
-      <DateRangeBar value={range} onChange={setRange} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Identity */}
@@ -296,7 +308,7 @@ export default function CanvasserOverview() {
             }
             sub={
               s.highlights.firstActivityAt
-                ? `since ${formatRange(s.highlights.firstActivityAt, null)}`
+                ? `since ${formatRange(s.highlights.firstActivityAt, null, campaign?.timeZone)}`
                 : ''
             }
           />
@@ -329,7 +341,7 @@ export default function CanvasserOverview() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.dayDate}>{fmtDate(d.date)}</Text>
                 <Text style={styles.dayMeta}>
-                  {formatRange(d.firstActivityAt, d.lastActivityAt)} ·{' '}
+                  {formatRange(d.firstActivityAt, d.lastActivityAt, campaign?.timeZone)} ·{' '}
                   {d.hoursOnDoors.toFixed(1)}h
                 </Text>
               </View>

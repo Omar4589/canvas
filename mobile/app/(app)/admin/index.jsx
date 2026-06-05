@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
-import { loadCurrentUser } from '../../../lib/cache';
+import { loadCurrentUser, loadActiveCampaign } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
 import CoverageBar from '../../../components/CoverageBar';
 import SectionHeader from '../../../components/SectionHeader';
@@ -90,30 +90,46 @@ export default function AdminOverview() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
-  const [range, setRange] = useState(() => {
-    const r = rangeFor('today');
-    return { preset: 'today', from: r.from, to: r.to };
-  });
-  const tz = deviceTimezone();
+
+  // Anchor date presets to the org's active campaign timezone (not the device clock).
+  const [tzCampaign, setTzCampaign] = useState(undefined);
+  const tz = tzCampaign?.timeZone;
+
+  const [range, setRange] = useState(null);
+  const rangeTouchedRef = useRef(false);
+  function onRangeChange(v) {
+    rangeTouchedRef.current = true;
+    setRange(v);
+  }
 
   useEffect(() => {
     loadCurrentUser().then((u) => setUser(u));
+    loadActiveCampaign().then((c) => setTzCampaign(c || null));
   }, []);
 
+  // Once the anchor tz is known, resolve the default preset in that clock.
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = 'today';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
+
   const activeQ = useQuery({
-    queryKey: ['admin', 'reports', 'campaign-rollup', 'active', range.from, range.to],
+    queryKey: ['admin', 'reports', 'campaign-rollup', 'active', range?.from, range?.to],
     queryFn: () => {
-      const p = new URLSearchParams({ scope: 'active', tz });
-      if (range.from) p.set('from', range.from);
-      if (range.to) p.set('to', range.to);
+      const p = new URLSearchParams({ scope: 'active', tz: deviceTimezone() });
+      if (range?.from) p.set('from', range.from);
+      if (range?.to) p.set('to', range.to);
       return api(`/admin/reports/campaign-rollup?${p.toString()}`);
     },
+    enabled: !!range,
     refetchInterval: 30 * 1000,
   });
   // Archived is reviewed as historical data → always all-time.
   const archivedQ = useQuery({
     queryKey: ['admin', 'reports', 'campaign-rollup', 'archived'],
-    queryFn: () => api(`/admin/reports/campaign-rollup?scope=archived&tz=${tz}`),
+    queryFn: () => api(`/admin/reports/campaign-rollup?scope=archived&tz=${deviceTimezone()}`),
     enabled: archivedOpen,
   });
 
@@ -148,7 +164,12 @@ export default function AdminOverview() {
           <Text style={styles.greeting}>Hi {user?.firstName || 'there'} 👋</Text>
         </View>
 
-        <DateRangeBar value={range} onChange={setRange} />
+        <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
+        {activeQ.data?.tzAbbrev ? (
+          <Text style={{ paddingHorizontal: spacing.lg, marginTop: 2, fontSize: 11, color: colors.textSecondary }}>
+            Dates &amp; times in {activeQ.data.tzAbbrev}
+          </Text>
+        ) : null}
 
         {activeQ.isLoading ? (
           <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />

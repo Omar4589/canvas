@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -37,30 +37,42 @@ export default function DaysScreen() {
   useEffect(() => {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
+  const tz = campaign?.timeZone;
 
   const [range, setRange] = useState(() => {
-    const preset = params.preset || '30d';
-    if (params.from || params.to) return { preset, from: params.from || null, to: params.to || null };
-    const r = rangeFor(preset);
-    return { preset, from: r.from, to: r.to };
+    if (params.from || params.to) {
+      return { preset: params.preset || '30d', from: params.from || null, to: params.to || null };
+    }
+    return null;
   });
+  const rangeTouchedRef = useRef(!!(params?.from || params?.to));
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = params?.preset || '30d';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setRange(next);
+  }
 
   const cId = campaign?.id;
-  const tz = deviceTimezone();
+  const deviceTz = deviceTimezone();
 
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
-    p.set('tz', tz);
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
+    p.set('tz', deviceTz);
     return p.toString();
-  }, [cId, range.from, range.to, tz]);
+  }, [cId, range?.from, range?.to, deviceTz]);
 
   const dailyQ = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'daily', qs],
     queryFn: () => api(`/admin/reports/canvassers/${userId}/daily?${qs}`),
-    enabled: !!cId && !!userId,
+    enabled: !!cId && !!userId && !!range,
   });
 
   const days = dailyQ.data?.days || [];
@@ -76,7 +88,7 @@ export default function DaysScreen() {
         <View style={{ width: 80 }} />
       </View>
 
-      <DateRangeBar value={range} onChange={setRange} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         {dailyQ.isLoading ? (
@@ -92,7 +104,7 @@ export default function DaysScreen() {
               onPress={() =>
                 router.push({
                   pathname: `/(app)/admin/canvasser/${userId}/day/${d.date}`,
-                  params: { preset: range.preset },
+                  params: { preset: range?.preset },
                 })
               }
               style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
@@ -100,7 +112,7 @@ export default function DaysScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.date}>{fmtDate(d.date)}</Text>
                 <Text style={styles.shift}>
-                  {formatRange(d.firstActivityAt, d.lastActivityAt)} ·{' '}
+                  {formatRange(d.firstActivityAt, d.lastActivityAt, campaign?.timeZone)} ·{' '}
                   {d.hoursOnDoors.toFixed(1)}h on doors
                 </Text>
                 <View style={styles.statsRow}>

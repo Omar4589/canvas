@@ -120,7 +120,7 @@ router.get('/campaigns', async (req, res, next) => {
     }
     const campaigns = await Campaign.find(campaignFilter)
       .sort({ createdAt: -1 })
-      .select('name type state surveyTemplateId')
+      .select('name type state surveyTemplateId timeZone')
       .lean();
     res.json({
       user: req.user.toSafeJSON(),
@@ -129,6 +129,7 @@ router.get('/campaigns', async (req, res, next) => {
         name: c.name,
         type: c.type,
         state: c.state,
+        timeZone: c.timeZone || 'America/New_York',
       })),
     });
   } catch (err) {
@@ -224,6 +225,7 @@ router.get('/bootstrap', async (req, res, next) => {
         name: campaign.name,
         type: campaign.type,
         state: campaign.state,
+        timeZone: campaign.timeZone || 'America/New_York',
       },
       activeSurvey: survey,
       surveys,

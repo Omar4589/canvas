@@ -9,6 +9,8 @@ import CampaignSelector, { useCampaignSelection } from '../components/CampaignSe
 import TurfAssignmentsModal from '../components/TurfAssignmentsModal.jsx';
 import BulkAssignModal from '../components/BulkAssignModal.jsx';
 import InfoHint from '../components/InfoHint.jsx';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
 // Geometric book-size flex → tolerance (how much book sizes may vary from the target
 // to stay compact). Default Compact (0.4); consumed by balancedKMeans via params.
@@ -358,7 +360,10 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
 
 export default function TurfsPage() {
   const qc = useQueryClient();
+  const orgTz = useOrgTimeZone();
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
+  // Turf snapshots belong to the selected campaign → show times in its tz (fallback org).
+  const tz = campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
   const [passId, setPassId] = useState('');
 
   const [mode, setMode] = useState('geometric');
@@ -944,7 +949,7 @@ export default function TurfsPage() {
                 {snapshots.map((s) => (
                   <li key={s._id} className="flex items-center justify-between gap-2 rounded px-1 py-1">
                     <span className="min-w-0 truncate text-gray-600">
-                      {new Date(s.createdAt).toLocaleString()} · {s.bookCount} books
+                      {formatInTz(s.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)} · {s.bookCount} books
                       {s.clearedKnocks ? ` · ${s.knockCount} knocks` : ''}
                       {s.restoredAt ? ' · restored' : ''}
                     </span>

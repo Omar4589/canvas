@@ -10,6 +10,7 @@ import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import VoterHighlights from '../components/VoterHighlights.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -32,7 +33,10 @@ function SectionHeading({ title, right }) {
 export default function DashboardPage() {
   const { campaignId } = useParams();
   const navigate = useNavigate();
-  const [dateRange, setDateRange] = useState(() => defaultRange('today'));
+  const orgTz = useOrgTimeZone();
+  // dateRange stays null until the campaign's timezone is known, so presets resolve in
+  // the campaign's clock (not the device's) and range queries never fetch a device-tz window.
+  const [dateRange, setDateRange] = useState(null);
   const rangeTouchedRef = useRef(false);
   function onRangeChange(next) {
     rangeTouchedRef.current = true;
@@ -60,6 +64,10 @@ export default function DashboardPage() {
   const current =
     campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
   const selectedCampaign = current || null;
+  // Anchor timezone for date presets + the report window: the campaign's, falling back to
+  // the org's. tzReady flips once the campaigns list has loaded (so `current.timeZone` is known).
+  const tz = current?.timeZone || orgTz;
+  const tzReady = !campaignsLoading;
   const activeCampaigns = campaigns.filter((c) => c.isActive);
   // Active campaigns plus the current one (even when archived) for the switcher.
   const switcherCampaigns =
@@ -67,12 +75,14 @@ export default function DashboardPage() {
       ? [...activeCampaigns, current]
       : activeCampaigns;
 
-  // Archived campaigns have no recent activity → default the range to all-time
-  // (unless the admin has already picked one). Mirrors the mobile campaign view.
+  // Once the campaign's timezone is known, compute the default range in THAT clock so
+  // "Today"/"Yesterday" mean the campaign's day for every admin. Archived campaigns have
+  // no recent activity → default to all-time. Range queries are gated on dateRange below,
+  // so they never fetch a device-tz window. Skips if the admin already picked a range.
   useEffect(() => {
-    if (rangeTouchedRef.current || !current) return;
-    if (current.isActive === false) setDateRange(defaultRange('all'));
-  }, [current]);
+    if (rangeTouchedRef.current || !tzReady) return;
+    setDateRange(defaultRange(current && current.isActive === false ? 'all' : 'today', tz));
+  }, [tzReady, tz, current]);
 
   const overviewQ = useQuery({
     queryKey: ['reports', 'overview', campaignId, effortId],
@@ -84,17 +94,17 @@ export default function DashboardPage() {
 
   // Range-scoped activity (knocks/surveys/rate). Coverage stays all-time from /overview.
   const rollupQ = useQuery({
-    queryKey: ['reports', 'campaign-rollup', campaignId, effortId, dateRange.from, dateRange.to],
+    queryKey: ['reports', 'campaign-rollup', campaignId, effortId, dateRange?.from, dateRange?.to],
     queryFn: () =>
       api(
         `/admin/reports/campaign-rollup${buildQuery({
           campaignId,
           effortId: effortId || undefined,
-          from: dateRange.from,
-          to: dateRange.to,
+          from: dateRange?.from,
+          to: dateRange?.to,
         })}`
       ),
-    enabled: !!campaignId,
+    enabled: !!campaignId && !!dateRange,
     refetchInterval: 30_000,
   });
 
@@ -106,17 +116,17 @@ export default function DashboardPage() {
   });
 
   const canvassersQ = useQuery({
-    queryKey: ['reports', 'canvassers', campaignId, effortId, dateRange.from, dateRange.to],
+    queryKey: ['reports', 'canvassers', campaignId, effortId, dateRange?.from, dateRange?.to],
     queryFn: () =>
       api(
         `/admin/reports/canvassers${buildQuery({
           campaignId,
           effortId: effortId || undefined,
-          from: dateRange.from,
-          to: dateRange.to,
+          from: dateRange?.from,
+          to: dateRange?.to,
         })}`
       ),
-    enabled: !!campaignId,
+    enabled: !!campaignId && !!dateRange,
     refetchInterval: 30_000,
   });
 
@@ -127,8 +137,8 @@ export default function DashboardPage() {
       campaignId,
       effortId,
       selectedTemplateId,
-      dateRange.from,
-      dateRange.to,
+      dateRange?.from,
+      dateRange?.to,
     ],
     queryFn: () =>
       api(
@@ -136,12 +146,12 @@ export default function DashboardPage() {
           campaignId,
           effortId: effortId || undefined,
           surveyTemplateId: selectedTemplateId,
-          from: dateRange.from,
-          to: dateRange.to,
+          from: dateRange?.from,
+          to: dateRange?.to,
           voterPreview: 5,
         })}`
       ),
-    enabled: !!campaignId && selectedCampaign?.type !== 'lit_drop',
+    enabled: !!campaignId && !!dateRange && selectedCampaign?.type !== 'lit_drop',
     refetchInterval: 30_000,
   });
 
@@ -240,7 +250,12 @@ export default function DashboardPage() {
               ))}
             </select>
           )}
-          <DateRangeSelector value={dateRange} onChange={onRangeChange} />
+          <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} />
+          {overview.tzAbbrev && (
+            <span className="self-center text-xs font-medium text-gray-400" title={`Dates & times in ${overview.timeZone}`}>
+              {overview.tzAbbrev}
+            </span>
+          )}
         </div>
       </div>
 
@@ -352,6 +367,7 @@ export default function DashboardPage() {
             <VoterHighlights
               surveyResults={surveyResultsQ.data}
               onSeeAll={scrollToOption}
+              tz={tz}
             />
           </section>
         )}
@@ -407,6 +423,7 @@ export default function DashboardPage() {
                     surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
                     dateRange={dateRange}
                     campaignId={campaignId}
+                    tz={tz}
                   />
                 </div>
               ))}
@@ -436,6 +453,7 @@ export default function DashboardPage() {
           <CanvasserTable
             rows={canvassersQ.data || []}
             onRowClick={setSelectedCanvasser}
+            tz={tz}
           />
         )}
       </section>
@@ -445,6 +463,7 @@ export default function DashboardPage() {
           canvasser={selectedCanvasser}
           dateRange={dateRange}
           campaignId={campaignId}
+          tz={tz}
           onClose={() => setSelectedCanvasser(null)}
         />
       )}

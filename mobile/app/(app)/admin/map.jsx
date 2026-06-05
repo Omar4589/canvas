@@ -353,7 +353,7 @@ export default function AdminMap() {
                 </Text>
               </Text>
               <Text style={styles.lastActionTimestamp}>
-                {formatExact(selected.lastAction.timestamp)}
+                {formatExact(selected.lastAction.timestamp, campaign?.timeZone)}
               </Text>
             </View>
           )}
@@ -402,7 +402,7 @@ export default function AdminMap() {
                   )}
                   <Text style={styles.pingTimeAgo}>{timeAgo(a.timestamp)}</Text>
                   <Text style={styles.pingTimestamp}>
-                    {formatExact(a.timestamp)}
+                    {formatExact(a.timestamp, campaign?.timeZone)}
                   </Text>
                 </View>
               </View>

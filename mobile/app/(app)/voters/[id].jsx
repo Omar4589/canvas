@@ -155,7 +155,7 @@ export default function VoterProfile() {
             {p.notes.admin.map((n) => (
               <View key={n.id} style={styles.noteItem}>
                 <Text style={styles.noteBody}>{n.body}</Text>
-                <Text style={styles.noteMeta}>{n.author ? n.author.name : 'Unknown'} · {formatExact(n.createdAt)}</Text>
+                <Text style={styles.noteMeta}>{n.author ? n.author.name : 'Unknown'} · {formatExact(n.createdAt, campaign?.timeZone)}</Text>
               </View>
             ))}
             {p.notes.field.map((n) => (

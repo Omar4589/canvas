@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor } from '../../../../../lib/dateRanges';
-import { formatExact, timeAgo } from '../../../../../lib/datetime';
+import { formatExact, formatInTz, timeAgo } from '../../../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../../../lib/theme';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import BarChart from '../../../../../components/BarChart';
@@ -31,26 +31,41 @@ export default function QualityScreen() {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
 
+  const tz = campaign?.timeZone;
+
   const [range, setRange] = useState(() => {
-    const preset = params.preset || '30d';
-    if (params.from || params.to) return { preset, from: params.from || null, to: params.to || null };
-    const r = rangeFor(preset);
-    return { preset, from: r.from, to: r.to };
+    if (params.from || params.to) {
+      return { preset: params.preset || '30d', from: params.from || null, to: params.to || null };
+    }
+    return null;
   });
+
+  const rangeTouchedRef = useRef(!!(params?.from || params?.to));
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = params?.preset || '30d';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
+
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setRange(next);
+  }
 
   const cId = campaign?.id;
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
     return p.toString();
-  }, [cId, range.from, range.to]);
+  }, [cId, range?.from, range?.to]);
 
   const q = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'quality', qs],
     queryFn: () => api(`/admin/reports/canvassers/${userId}/quality?${qs}`),
-    enabled: !!cId && !!userId,
+    enabled: !!cId && !!userId && !!range,
   });
 
   const data = q.data;
@@ -65,7 +80,7 @@ export default function QualityScreen() {
         <View style={{ width: 80 }} />
       </View>
 
-      <DateRangeBar value={range} onChange={setRange} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         {q.isLoading || !data ? (
@@ -106,7 +121,7 @@ export default function QualityScreen() {
                   label: 'Last sync',
                   value: data.lastSyncAt ? timeAgo(data.lastSyncAt) : '—',
                   sub: data.lastSyncAt
-                    ? new Date(data.lastSyncAt).toLocaleDateString()
+                    ? formatInTz(data.lastSyncAt, campaign?.timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)
                     : null,
                 },
               ]}

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
 const STATUSES = ['unknocked', 'not_home', 'surveyed', 'wrong_address', 'lit_dropped'];
 const STATUS_LABEL = {
@@ -114,7 +116,10 @@ function MultiSelect({ label, value, onChange, options = [], placeholder }) {
 
 export default function WalkListsPage() {
   const qc = useQueryClient();
+  const orgTz = useOrgTimeZone();
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
+  // Walk lists belong to the selected campaign → show times in its tz (fallback org).
+  const tz = campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
   const [f, setF] = useState(EMPTY);
   const [name, setName] = useState('');
   const [mode, setMode] = useState('filter');
@@ -444,7 +449,7 @@ export default function WalkListsPage() {
                     <button onClick={() => del.mutate(w._id)} className="shrink-0 text-xs text-red-600 hover:underline">Delete</button>
                   </div>
                   <div className="text-xs text-gray-500">
-                    {w.householdCount?.toLocaleString()} hh · {w.voterCount?.toLocaleString()} voters · {new Date(w.createdAt).toLocaleDateString()}
+                    {w.householdCount?.toLocaleString()} hh · {w.voterCount?.toLocaleString()} voters · {formatInTz(w.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)}
                   </div>
                 </li>
               ))}

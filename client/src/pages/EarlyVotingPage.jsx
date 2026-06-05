@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -17,12 +19,15 @@ function Stat({ label, value, accent }) {
 
 export default function EarlyVotingPage() {
   const qc = useQueryClient();
+  const orgTz = useOrgTimeZone();
   const [campaignId, setCampaignId] = useState('');
   const [file, setFile] = useState(null);
   const [unmarkId, setUnmarkId] = useState('');
 
   const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
   const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
+  // Early-voting uploads belong to the selected campaign → show times in its tz (fallback org).
+  const tz = campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
 
   const historyQ = useQuery({
     queryKey: ['voted', campaignId],
@@ -203,7 +208,7 @@ export default function EarlyVotingPage() {
               <tbody>
                 {(historyQ.data?.uploads || []).map((u) => (
                   <tr key={u._id} className={`border-t border-gray-100 ${u.undone ? 'text-gray-400' : ''}`}>
-                    <td className="px-4 py-2">{new Date(u.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-2">{formatInTz(u.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
                     <td className="px-4 py-2">{u.fileName || '—'}</td>
                     <td className="px-4 py-2 text-right">{fmt(u.matched)}</td>
                     <td className="px-4 py-2 text-right">{fmt(u.doorsDropped)}</td>

@@ -1,18 +1,7 @@
 import { ratePct } from '../lib/rates.js';
+import { formatInTz } from '../lib/datetime.js';
 
-function formatDate(d) {
-  if (!d) return '—';
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
-export default function CanvasserTable({ rows = [], onRowClick }) {
+export default function CanvasserTable({ rows = [], onRowClick, tz }) {
   if (!rows.length) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">
@@ -67,7 +56,7 @@ export default function CanvasserTable({ rows = [], onRowClick }) {
                 {r.connectionRate != null ? ratePct(r.connectionRate) : '—'}
               </td>
               <td className="px-4 py-2 text-right text-xs text-gray-500">
-                {formatDate(r.lastActivityAt)}
+                {formatInTz(r.lastActivityAt, tz) || '—'}
               </td>
             </tr>
           ))}

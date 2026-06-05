@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
+import { Organization } from '../../models/Organization.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
@@ -348,7 +349,11 @@ router.get('/:userId/stats', async (req, res, next) => {
     }
     const orgId = activeOrgId(req);
     const userId = new mongoose.Types.ObjectId(req.params.userId);
-    const tz = req.query.tz || 'UTC';
+    // Day-bucket in the ORG's timezone (this stat spans the user's activity across all
+    // campaigns, so no single campaign tz applies) — not the viewer's device tz, so the
+    // per-day chart matches the dashboard and reads the same for every admin.
+    const org = await Organization.findById(orgId, { timeZone: 1 }).lean();
+    const tz = org?.timeZone || 'America/New_York';
 
     let dayFormatter;
     try {

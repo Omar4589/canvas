@@ -1,11 +1,12 @@
-function formatDate(d) {
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
+
+function formatDate(d, tz) {
   if (!d) return '';
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return formatInTz(d, tz, { month: 'short', day: 'numeric' }, false);
 }
 
-function VoterRow({ v }) {
+function VoterRow({ v, tz }) {
   return (
     <li className="flex items-baseline justify-between gap-2 py-1.5 text-sm">
       <div className="min-w-0">
@@ -29,13 +30,13 @@ function VoterRow({ v }) {
             {v.canvasser.firstName} {v.canvasser.lastName[0]}.
           </div>
         )}
-        <div>{formatDate(v.submittedAt)}</div>
+        <div>{formatDate(v.submittedAt, tz)}</div>
       </div>
     </li>
   );
 }
 
-function OptionCard({ option, count, voters = [], onSeeAll }) {
+function OptionCard({ option, count, voters = [], onSeeAll, tz }) {
   return (
     <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-3">
       <div className="mb-2 flex items-baseline justify-between gap-2 border-b border-gray-100 pb-2">
@@ -51,7 +52,7 @@ function OptionCard({ option, count, voters = [], onSeeAll }) {
       ) : (
         <ul className="divide-y divide-gray-100">
           {voters.map((v) => (
-            <VoterRow key={v.responseId} v={v} />
+            <VoterRow key={v.responseId} v={v} tz={tz} />
           ))}
         </ul>
       )}
@@ -68,7 +69,9 @@ function OptionCard({ option, count, voters = [], onSeeAll }) {
   );
 }
 
-export default function VoterHighlights({ surveyResults, onSeeAll }) {
+export default function VoterHighlights({ surveyResults, onSeeAll, tz }) {
+  const orgTz = useOrgTimeZone();
+  const zone = tz || orgTz;
   const questions = (surveyResults?.questions || []).filter(
     (q) => q.type === 'multiple_choice' && q.options.length > 0
   );
@@ -93,6 +96,7 @@ export default function VoterHighlights({ surveyResults, onSeeAll }) {
                 count={opt.count}
                 voters={opt.voters || []}
                 onSeeAll={() => onSeeAll?.(q.key, opt.option)}
+                tz={zone}
               />
             ))}
           </div>

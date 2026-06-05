@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -57,12 +57,27 @@ export default function MapScreen() {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
 
+  const tz = campaign?.timeZone;
+
   const [range, setRange] = useState(() => {
-    const preset = params.preset || '7d';
-    if (params.from || params.to) return { preset, from: params.from || null, to: params.to || null };
-    const r = rangeFor(preset);
-    return { preset, from: r.from, to: r.to };
+    if (params.from || params.to) {
+      return { preset: params.preset || '7d', from: params.from || null, to: params.to || null };
+    }
+    return null;
   });
+
+  const rangeTouchedRef = useRef(!!(params?.from || params?.to));
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = params?.preset || '7d';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
+
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setRange(next);
+  }
 
   const [actionFilter, setActionFilter] = useState('all');
   const [selected, setSelected] = useState(null);
@@ -71,17 +86,17 @@ export default function MapScreen() {
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
     if (actionFilter !== 'all') p.set('actionType', actionFilter);
     p.set('limit', '2000');
     return p.toString();
-  }, [cId, range.from, range.to, actionFilter]);
+  }, [cId, range?.from, range?.to, actionFilter]);
 
   const q = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'path', qs],
     queryFn: () => api(`/admin/reports/canvassers/${userId}/path?${qs}`),
-    enabled: !!cId && !!userId,
+    enabled: !!cId && !!userId && !!range,
   });
 
   const points = q.data?.points || [];
@@ -118,11 +133,11 @@ export default function MapScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <Header onBack={() => router.back()} />
-      <DateRangeBar value={range} onChange={setRange} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
       <TabSwitcher tabs={ACTION_TABS} activeKey={actionFilter} onChange={setActionFilter} />
 
       <View style={{ flex: 1 }}>
-        {q.isLoading ? (
+        {!range || q.isLoading ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.brand} />
           </View>
@@ -192,7 +207,7 @@ export default function MapScreen() {
                     {selected.household.city ? `, ${selected.household.city}` : ''}
                   </Text>
                 ) : null}
-                <Text style={styles.detailMeta}>{formatExact(selected.timestamp)}</Text>
+                <Text style={styles.detailMeta}>{formatExact(selected.timestamp, campaign?.timeZone)}</Text>
                 {selected.distanceFromHouseMeters != null ? (
                   <Text style={styles.detailMeta}>
                     {Math.round(selected.distanceFromHouseMeters)}m from house

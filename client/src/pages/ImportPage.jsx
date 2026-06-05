@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -114,6 +116,7 @@ function ReviewPanel({ diff }) {
 
 export default function ImportPage() {
   const queryClient = useQueryClient();
+  const orgTz = useOrgTimeZone();
   const [file, setFile] = useState(null);
   const [campaignId, setCampaignId] = useState('');
   const [columns, setColumns] = useState([]);
@@ -461,7 +464,7 @@ export default function ImportPage() {
             <tbody>
               {(data?.jobs || []).map((j) => (
                 <tr key={j._id} className="border-t border-gray-100">
-                  <td className="px-4 py-2 text-gray-600">{new Date(j.createdAt).toLocaleString()}</td>
+                  <td className="px-4 py-2 text-gray-600">{formatInTz(j.createdAt, orgTz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
                   <td className="px-4 py-2">{j.campaignId?.name || '—'}</td>
                   <td className="px-4 py-2">{j.filename || '—'}</td>
                   <td className="px-4 py-2"><StatusBadge job={j} /></td>

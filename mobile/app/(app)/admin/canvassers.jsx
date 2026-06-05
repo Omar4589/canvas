@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -63,10 +63,23 @@ export default function AdminCanvassers() {
   const router = useRouter();
   const [campaign, setCampaign] = useState(undefined);
 
-  const [range, setRange] = useState(() => {
-    const r = rangeFor('today');
-    return { preset: 'today', from: r.from, to: r.to };
-  });
+  // Anchor date presets to the selected campaign's timezone (not the device clock).
+  const tz = campaign?.timeZone;
+
+  const [range, setRange] = useState(null);
+  const rangeTouchedRef = useRef(false);
+  function onRangeChange(v) {
+    rangeTouchedRef.current = true;
+    setRange(v);
+  }
+
+  // Once the campaign tz is known, resolve the default preset in that clock.
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = 'today';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
 
   const [sortKey, setSortKey] = useState('surveys');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
@@ -79,27 +92,27 @@ export default function AdminCanvassers() {
   const cId = campaign?.id;
 
   const canvassersQ = useQuery({
-    queryKey: ['admin', 'reports', 'canvassers', cId, range.from, range.to],
+    queryKey: ['admin', 'reports', 'canvassers', cId, range?.from, range?.to],
     queryFn: () => {
       const params = new URLSearchParams();
       if (cId) params.set('campaignId', cId);
-      if (range.from) params.set('from', range.from);
-      if (range.to) params.set('to', range.to);
+      if (range?.from) params.set('from', range.from);
+      if (range?.to) params.set('to', range.to);
       return api(`/admin/reports/canvassers?${params.toString()}`);
     },
-    enabled: !!cId,
+    enabled: !!cId && !!range,
   });
 
   const overlapsQ = useQuery({
-    queryKey: ['admin', 'reports', 'overlaps', cId, range.from, range.to],
+    queryKey: ['admin', 'reports', 'overlaps', cId, range?.from, range?.to],
     queryFn: () => {
       const p = new URLSearchParams();
       if (cId) p.set('campaignId', cId);
-      if (range.from) p.set('from', range.from);
-      if (range.to) p.set('to', range.to);
+      if (range?.from) p.set('from', range.from);
+      if (range?.to) p.set('to', range.to);
       return api(`/admin/reports/overlaps?${p.toString()}`);
     },
-    enabled: !!cId,
+    enabled: !!cId && !!range,
   });
 
   const isLitDrop = campaign?.type === 'lit_drop';
@@ -171,9 +184,9 @@ export default function AdminCanvassers() {
       pathname: '/(app)/admin/canvasser/compare',
       params: {
         ids: Array.from(selectedIds).join(','),
-        from: range.from || '',
-        to: range.to || '',
-        preset: range.preset,
+        from: range?.from || '',
+        to: range?.to || '',
+        preset: range?.preset,
       },
     });
   }
@@ -186,9 +199,9 @@ export default function AdminCanvassers() {
     router.push({
       pathname: `/(app)/admin/canvasser/${r.userId}`,
       params: {
-        from: range.from || '',
-        to: range.to || '',
-        preset: range.preset,
+        from: range?.from || '',
+        to: range?.to || '',
+        preset: range?.preset,
       },
     });
   }
@@ -196,8 +209,8 @@ export default function AdminCanvassers() {
   function exportCsv() {
     const params = new URLSearchParams();
     if (cId) params.set('campaignId', cId);
-    if (range.from) params.set('from', range.from);
-    if (range.to) params.set('to', range.to);
+    if (range?.from) params.set('from', range.from);
+    if (range?.to) params.set('to', range.to);
     params.set('tz', deviceTimezone());
     const name = `canvassers-${new Date().toISOString().slice(0, 10)}.csv`;
     downloadCsv(`/admin/reports/canvassers.csv?${params.toString()}`, name);
@@ -216,7 +229,7 @@ export default function AdminCanvassers() {
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
 
-      <DateRangeBar value={range} onChange={setRange} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
       <View style={styles.filterRow}>
         <View style={styles.searchWrap}>
@@ -282,7 +295,7 @@ export default function AdminCanvassers() {
             onPress={() =>
               router.push({
                 pathname: '/(app)/admin/overlaps',
-                params: { preset: range.preset },
+                params: { preset: range?.preset },
               })
             }
             style={({ pressed }) => [
@@ -350,7 +363,7 @@ export default function AdminCanvassers() {
               `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.email;
             const primary = isLitDrop ? r.litDropped || 0 : r.surveysSubmitted || 0;
             const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
-            const rangeStr = formatRange(r.firstActivityAt, r.lastActivityAt);
+            const rangeStr = formatRange(r.firstActivityAt, r.lastActivityAt, campaign?.timeZone);
             const checked = selectedIds.has(r.userId);
             return (
               <Pressable

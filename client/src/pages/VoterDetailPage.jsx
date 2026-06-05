@@ -2,12 +2,21 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
-function fmtDate(d, withTime = true) {
+function fmtDate(d, tz, withTime = true) {
   if (!d) return '—';
-  const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) return '—';
-  return withTime ? dt.toLocaleString() : dt.toLocaleDateString();
+  return (
+    formatInTz(
+      d,
+      tz,
+      withTime
+        ? { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+        : { year: 'numeric', month: 'numeric', day: 'numeric' },
+      withTime
+    ) || '—'
+  );
 }
 function answerText(a) {
   if (a == null || a === '') return '—';
@@ -35,7 +44,7 @@ const EDIT_FIELDS = [
   ['stateHouseDistrict', 'State house district'], ['precinct', 'Precinct'],
 ];
 
-function VoterFields({ voter, onSave, saving }) {
+function VoterFields({ voter, onSave, saving, tz }) {
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({});
 
@@ -65,11 +74,11 @@ function VoterFields({ voter, onSave, saving }) {
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3">
           <Detail label="Voter ID" value={voter.stateVoterId} mono />
           {EDIT_FIELDS.map(([k, label]) => <Detail key={k} label={label} value={voter[k]} />)}
-          <Detail label="Date of birth" value={fmtDate(voter.dateOfBirth, false)} />
+          <Detail label="Date of birth" value={fmtDate(voter.dateOfBirth, tz, false)} />
         </dl>
         {voter.lastEditedAt && (
           <p className="mt-3 text-xs text-gray-400">
-            Last edited {fmtDate(voter.lastEditedAt)}{voter.lastEditedBy ? ` by ${voter.lastEditedBy.name}` : ''}
+            Last edited {fmtDate(voter.lastEditedAt, tz)}{voter.lastEditedBy ? ` by ${voter.lastEditedBy.name}` : ''}
           </p>
         )}
       </Section>
@@ -113,7 +122,7 @@ function Detail({ label, value, mono }) {
   );
 }
 
-function SurveyCard({ survey, onSave, onDelete, busy }) {
+function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
   const [edit, setEdit] = useState(false);
   const [vals, setVals] = useState({});
   const [note, setNote] = useState('');
@@ -144,7 +153,7 @@ function SurveyCard({ survey, onSave, onDelete, busy }) {
     <div className="rounded-lg border border-gray-200 p-4">
       <div className="mb-2 flex items-center justify-between">
         <div className="text-sm font-medium text-gray-900">
-          {survey.templateName || 'Survey'} <span className="text-xs font-normal text-gray-400">· {fmtDate(survey.submittedAt)}{survey.by ? ` · ${survey.by.name}` : ''}</span>
+          {survey.templateName || 'Survey'} <span className="text-xs font-normal text-gray-400">· {fmtDate(survey.submittedAt, tz)}{survey.by ? ` · ${survey.by.name}` : ''}</span>
         </div>
         {!edit && (
           <div className="flex gap-3 text-sm">
@@ -166,7 +175,7 @@ function SurveyCard({ survey, onSave, onDelete, busy }) {
           </dl>
           {survey.note && <p className="mt-2 rounded bg-gray-50 p-2 text-sm text-gray-700">📝 {survey.note}</p>}
           {survey.editedAt && (
-            <p className="mt-2 text-xs text-amber-600">Edited {fmtDate(survey.editedAt)}{survey.editedBy ? ` by ${survey.editedBy.name}` : ''}</p>
+            <p className="mt-2 text-xs text-amber-600">Edited {fmtDate(survey.editedAt, tz)}{survey.editedBy ? ` by ${survey.editedBy.name}` : ''}</p>
           )}
         </>
       ) : (
@@ -217,6 +226,7 @@ function SurveyCard({ survey, onSave, onDelete, busy }) {
 
 export default function VoterDetailPage() {
   const { voterId } = useParams();
+  const orgTz = useOrgTimeZone();
   const qc = useQueryClient();
   const [newNote, setNewNote] = useState('');
   const [err, setErr] = useState('');
@@ -276,6 +286,7 @@ export default function VoterDetailPage() {
         voter={v}
         saving={saveVoter.isPending}
         onSave={(body, done) => saveVoter.mutate(body, { onSuccess: done })}
+        tz={orgTz}
       />
 
       <Section title="Household & campaign">
@@ -316,6 +327,7 @@ export default function VoterDetailPage() {
                 busy={editSurvey.isPending || delSurvey.isPending}
                 onSave={(body, done) => editSurvey.mutate({ responseId: s.id, body }, { onSuccess: done })}
                 onDelete={() => { if (window.confirm('Delete this survey response?')) delSurvey.mutate(s.id); }}
+                tz={orgTz}
               />
             ))}
           </div>
@@ -347,7 +359,7 @@ export default function VoterDetailPage() {
                   <p className="whitespace-pre-wrap text-gray-800">{n.body}</p>
                   <button onClick={() => delNote.mutate(n.id)} className="shrink-0 text-xs text-red-600 hover:underline">Delete</button>
                 </div>
-                <p className="mt-1 text-xs text-gray-400">{n.author ? n.author.name : 'Unknown'} · {fmtDate(n.createdAt)}{n.editedAt ? ' · edited' : ''}</p>
+                <p className="mt-1 text-xs text-gray-400">{n.author ? n.author.name : 'Unknown'} · {fmtDate(n.createdAt, orgTz)}{n.editedAt ? ' · edited' : ''}</p>
               </li>
             ))}
           </ul>
@@ -359,7 +371,7 @@ export default function VoterDetailPage() {
               {p.notes.field.map((n) => (
                 <li key={`${n.source}-${n.id}`} className="rounded border border-gray-100 p-3 text-sm">
                   <p className="whitespace-pre-wrap text-gray-800">{n.note}</p>
-                  <p className="mt-1 text-xs text-gray-400">{n.source === 'survey' ? 'Survey' : n.actionType} · {n.by ? n.by.name : 'Unknown'} · {fmtDate(n.timestamp)}</p>
+                  <p className="mt-1 text-xs text-gray-400">{n.source === 'survey' ? 'Survey' : n.actionType} · {n.by ? n.by.name : 'Unknown'} · {fmtDate(n.timestamp, orgTz)}</p>
                 </li>
               ))}
             </ul>
@@ -375,7 +387,7 @@ export default function VoterDetailPage() {
             {p.activity.map((a) => (
               <li key={a.id} className="flex flex-wrap gap-x-2 text-gray-700">
                 <span className="font-medium text-gray-900">{a.actionType.replace('_', ' ')}</span>
-                <span className="text-gray-400">· {fmtDate(a.timestamp)}{a.by ? ` · ${a.by.name}` : ''}</span>
+                <span className="text-gray-400">· {fmtDate(a.timestamp, orgTz)}{a.by ? ` · ${a.by.name}` : ''}</span>
                 {a.note && <span className="text-gray-500">— {a.note}</span>}
               </li>
             ))}

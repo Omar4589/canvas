@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -115,41 +115,56 @@ export default function Compare() {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
 
+  const tz = campaign?.timeZone;
+
   const [range, setRange] = useState(() => {
-    const preset = params.preset || '7d';
-    if (params.from || params.to) return { preset, from: params.from || null, to: params.to || null };
-    const r = rangeFor(preset);
-    return { preset, from: r.from, to: r.to };
+    if (params.from || params.to) {
+      return { preset: params.preset || '7d', from: params.from || null, to: params.to || null };
+    }
+    return null;
   });
+
+  const rangeTouchedRef = useRef(!!(params?.from || params?.to));
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = params?.preset || '7d';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
+
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setRange(next);
+  }
 
   const cId = campaign?.id;
   const qsBase = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
     p.set('tz', deviceTimezone());
     return p.toString();
-  }, [cId, range.from, range.to]);
+  }, [cId, range?.from, range?.to]);
 
   // One summary query per selected canvasser
   const summaryQs = useQueries({
     queries: ids.map((id) => ({
       queryKey: ['admin', 'canvasser', id, 'summary-compare', qsBase],
       queryFn: () => api(`/admin/reports/canvassers/${id}/summary?${qsBase}`),
-      enabled: !!cId && !!id,
+      enabled: !!cId && !!id && !!range,
     })),
   });
 
   const teamQ = useQuery({
     queryKey: ['admin', 'canvasser', 'team-avg-compare', qsBase],
     queryFn: () => api(`/admin/reports/team-averages?${qsBase}`),
-    enabled: !!cId,
+    enabled: !!cId && !!range,
   });
 
   const summaries = summaryQs.map((q) => q.data).filter(Boolean);
   const loading =
-    summaryQs.some((q) => q.isLoading) || teamQ.isLoading;
+    !range || summaryQs.some((q) => q.isLoading) || teamQ.isLoading;
   const team = teamQ.data?.avg;
 
   // For each KPI, identify the index of the "best" value among loaded summaries
@@ -175,7 +190,7 @@ export default function Compare() {
         <View style={{ width: 80 }} />
       </View>
 
-      <DateRangeBar value={range} onChange={setRange} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
       {loading ? (
         <View style={styles.center}>

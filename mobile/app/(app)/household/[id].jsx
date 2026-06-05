@@ -238,7 +238,7 @@ export default function HouseholdDetail() {
                   </Text>
                 </Text>
                 <Text style={styles.lastVisitTimestamp}>
-                  {formatExact(household.lastActionAt)}
+                  {formatExact(household.lastActionAt, bootstrap?.campaign?.timeZone)}
                 </Text>
               </View>
             )}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -39,13 +39,25 @@ export default function ActivityFeed() {
   useEffect(() => {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
+  const tz = campaign?.timeZone;
 
   const [range, setRange] = useState(() => {
-    const preset = params.preset || '7d';
-    if (params.from || params.to) return { preset, from: params.from || null, to: params.to || null };
-    const r = rangeFor(preset);
-    return { preset, from: r.from, to: r.to };
+    if (params.from || params.to) {
+      return { preset: params.preset || '7d', from: params.from || null, to: params.to || null };
+    }
+    return null;
   });
+  const rangeTouchedRef = useRef(!!(params?.from || params?.to));
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = params?.preset || '7d';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setRange(next);
+  }
 
   const [actionTab, setActionTab] = useState('all');
   const [flaggedOnly, setFlaggedOnly] = useState(false);
@@ -60,20 +72,20 @@ export default function ActivityFeed() {
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
     if (actionTab !== 'all') p.set('actionType', actionTab);
     if (flaggedOnly) p.set('flaggedOnly', 'true');
     p.set('limit', String(PAGE_SIZE));
     p.set('skip', String(skip));
     p.set('tz', deviceTimezone());
     return p.toString();
-  }, [cId, range.from, range.to, actionTab, flaggedOnly, skip]);
+  }, [cId, range?.from, range?.to, actionTab, flaggedOnly, skip]);
 
   const q = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'activities-feed', qs],
     queryFn: () => api(`/admin/reports/canvassers/${userId}/activities?${qs}`),
-    enabled: !!cId && !!userId,
+    enabled: !!cId && !!userId && !!range,
     keepPreviousData: true,
   });
 
@@ -84,8 +96,8 @@ export default function ActivityFeed() {
   function exportCsv() {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
     p.set('tz', deviceTimezone());
     downloadCsv(
       `/admin/reports/canvassers/${userId}/export.csv?${p.toString()}`,
@@ -105,7 +117,7 @@ export default function ActivityFeed() {
         </Pressable>
       </View>
 
-      <DateRangeBar value={range} onChange={setRange} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
       <TabSwitcher tabs={ACTION_TABS} activeKey={actionTab} onChange={setActionTab} />
 
       <View style={styles.toggleRow}>

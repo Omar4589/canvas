@@ -999,6 +999,7 @@ export default function MapScreen() {
             surveyedCount={selectedSurveyedCount}
             lastSeen={selectedLastSeen}
             isLitDrop={isLitDrop}
+            timeZone={activeCampaign?.timeZone}
             onOpen={() => {
               setSelected(null);
               router.push(`/(app)/household/${selected._id}`);
@@ -1223,6 +1224,7 @@ function SelectedHouseSheetContent({
   surveyedCount,
   lastSeen,
   isLitDrop,
+  timeZone,
   onOpen,
   onClose,
 }) {
@@ -1266,7 +1268,7 @@ function SelectedHouseSheetContent({
                 <Text style={styles.sheetMetaSub}>{lastSeen}</Text>
               </Text>
               <Text style={styles.sheetTimestamp}>
-                {formatExact(selected.lastActionAt)}
+                {formatExact(selected.lastActionAt, timeZone)}
               </Text>
             </View>
           </View>

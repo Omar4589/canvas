@@ -1,8 +1,16 @@
-function formatDateTime(d) {
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
+
+function formatDateTime(d, tz) {
   if (!d) return '—';
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
+  return (
+    formatInTz(
+      d,
+      tz,
+      { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+      true
+    ) || '—'
+  );
 }
 
 function actionLabel(t) {
@@ -30,7 +38,9 @@ const ACTION_COLORS = {
   note_added: '#9ca3af',
 };
 
-export default function CanvasserPingPanel({ activity, household, onOpenHousehold, onClose }) {
+export default function CanvasserPingPanel({ activity, household, onOpenHousehold, onClose, tz }) {
+  const orgTz = useOrgTimeZone();
+  const zone = tz || orgTz;
   if (!activity) return null;
   const dist = activity.distanceFromHouseMeters;
   const distFar = dist != null && dist > 100;
@@ -53,7 +63,7 @@ export default function CanvasserPingPanel({ activity, household, onOpenHousehol
               {activity.canvasser.firstName} {activity.canvasser.lastName}
             </div>
           )}
-          <div className="text-xs text-gray-500">{formatDateTime(activity.timestamp)}</div>
+          <div className="text-xs text-gray-500">{formatDateTime(activity.timestamp, zone)}</div>
         </div>
         <button
           type="button"

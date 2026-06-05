@@ -28,33 +28,50 @@ function fmt(d) {
   });
 }
 
-// Custom from/to range picker. Visible-controlled. onApply receives
-// { from: ISOString|null, to: ISOString|null }.
+// 'yyyy-mm-dd' (or legacy ISO) -> a LOCAL Date at start-of-day (for the native picker). Null -> null.
+function parseYmd(v) {
+  if (!v) return null;
+  const [y, m, d] = String(v).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
+// local Date -> 'yyyy-mm-dd' (the calendar day the user picked; never toISOString/UTC).
+function ymdLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Custom from/to range picker. Visible-controlled. `tz` anchors the quick chips to the
+// campaign clock. onApply receives { from: 'yyyy-mm-dd'|null, to: 'yyyy-mm-dd'|null }.
 export default function DateRangePickerModal({
   visible,
   initialFrom,
   initialTo,
+  tz,
   onClose,
   onApply,
 }) {
-  const [from, setFrom] = useState(initialFrom ? new Date(initialFrom) : null);
-  const [to, setTo] = useState(initialTo ? new Date(initialTo) : null);
+  const [from, setFrom] = useState(parseYmd(initialFrom));
+  const [to, setTo] = useState(parseYmd(initialTo));
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
 
   useEffect(() => {
     if (visible) {
-      setFrom(initialFrom ? new Date(initialFrom) : null);
-      setTo(initialTo ? new Date(initialTo) : null);
+      setFrom(parseYmd(initialFrom));
+      setTo(parseYmd(initialTo));
       setShowFromPicker(false);
       setShowToPicker(false);
     }
   }, [visible, initialFrom, initialTo]);
 
   function applyQuick(key) {
-    const r = quickRangeFor(key);
-    setFrom(r.from ? new Date(r.from) : null);
-    setTo(r.to ? new Date(r.to) : null);
+    const r = quickRangeFor(key, tz);
+    setFrom(parseYmd(r.from));
+    setTo(parseYmd(r.to));
   }
 
   function apply() {
@@ -65,8 +82,8 @@ export default function DateRangePickerModal({
       [f, t] = [t, f];
     }
     onApply({
-      from: f ? f.toISOString() : null,
-      to: t ? t.toISOString() : null,
+      from: f ? ymdLocal(f) : null,
+      to: t ? ymdLocal(t) : null,
     });
   }
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -11,16 +13,14 @@ function buildQuery(params) {
   return s ? `?${s}` : '';
 }
 
-function formatDate(d) {
+function formatDate(d, tz) {
   if (!d) return '';
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return formatInTz(d, tz, { month: 'short', day: 'numeric' }, false);
 }
 
 const PAGE_SIZE = 25;
 
-function VoterList({ questionKey, option, surveyTemplateId, dateRange, campaignId }) {
+function VoterList({ questionKey, option, surveyTemplateId, dateRange, campaignId, tz }) {
   const [skip, setSkip] = useState(0);
   const [accumulated, setAccumulated] = useState([]);
 
@@ -103,7 +103,7 @@ function VoterList({ questionKey, option, surveyTemplateId, dateRange, campaignI
                   {v.canvasser.firstName} {v.canvasser.lastName}
                 </div>
               )}
-              <div>{formatDate(v.submittedAt)}</div>
+              <div>{formatDate(v.submittedAt, tz)}</div>
             </div>
           </li>
         ))}
@@ -195,7 +195,10 @@ export default function QuestionResults({
   surveyTemplateId,
   dateRange,
   campaignId,
+  tz,
 }) {
+  const orgTz = useOrgTimeZone();
+  const zone = tz || orgTz;
   const { key, label, type, options = [] } = question;
   const totalAnswered = options.reduce((sum, o) => sum + (o.count || 0), 0);
   const [expandedOption, setExpandedOption] = useState(null);
@@ -233,6 +236,7 @@ export default function QuestionResults({
                       surveyTemplateId={surveyTemplateId}
                       dateRange={dateRange}
                       campaignId={campaignId}
+                      tz={zone}
                     />
                   </div>
                 )}

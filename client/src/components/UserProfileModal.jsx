@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import PasswordInput from './PasswordInput.jsx';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
 const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
@@ -78,6 +79,7 @@ function Stat({ label, value }) {
 
 export default function UserProfileModal({ membership, onClose }) {
   const qc = useQueryClient();
+  const orgTz = useOrgTimeZone();
   const { user: currentUser, isSuperAdmin } = useAuth();
   const user = membership.user;
   const isSelf = currentUser?.id === user?.id;
@@ -291,7 +293,7 @@ export default function UserProfileModal({ membership, onClose }) {
                   </span>
                 )}
                 <span className="text-xs text-gray-500">
-                  Joined org {formatDate(membership.addedAt)}
+                  Joined org {membership.addedAt ? formatInTz(membership.addedAt, orgTz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : '—'}
                 </span>
                 <span className="text-xs text-gray-400">·</span>
                 <span className="text-xs text-gray-500">

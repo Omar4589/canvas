@@ -36,7 +36,7 @@ export default function CampaignChip({ value, onChange }) {
     if (valid) return;
     if (activeCampaigns.length) {
       const c = activeCampaigns[0];
-      const next = { id: String(c._id), name: c.name, type: c.type, state: c.state };
+      const next = { id: String(c._id), name: c.name, type: c.type, state: c.state, timeZone: c.timeZone };
       saveActiveCampaign(next);
       onChange?.(next);
     } else if (value !== null) {
@@ -46,7 +46,7 @@ export default function CampaignChip({ value, onChange }) {
   }, [restored, value, campaignsQ.data]);
 
   async function pick(c) {
-    const next = { id: String(c._id), name: c.name, type: c.type, state: c.state };
+    const next = { id: String(c._id), name: c.name, type: c.type, state: c.state, timeZone: c.timeZone };
     await saveActiveCampaign(next);
     await clearBootstrap();
     qc.removeQueries({ queryKey: ['bootstrap'] });

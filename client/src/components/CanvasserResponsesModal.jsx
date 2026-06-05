@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
 const PAGE_SIZE = 50;
 
@@ -13,11 +15,14 @@ function formatAnswer(answer) {
   return String(answer);
 }
 
-function formatDateTime(d) {
+function formatDateTime(d, tz) {
   if (!d) return '';
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString();
+  return formatInTz(
+    d,
+    tz,
+    { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+    true
+  );
 }
 
 function buildQuery(params) {
@@ -29,7 +34,7 @@ function buildQuery(params) {
   return s ? `?${s}` : '';
 }
 
-function ResponseCard({ r }) {
+function ResponseCard({ r, tz }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -44,7 +49,7 @@ function ResponseCard({ r }) {
           </div>
         </div>
         <div className="text-right text-xs text-gray-500">
-          <div>{formatDateTime(r.submittedAt)}</div>
+          <div>{formatDateTime(r.submittedAt, tz)}</div>
           {r.surveyTemplate && (
             <div className="mt-0.5">
               {r.surveyTemplate.name} v{r.surveyTemplate.version}
@@ -72,7 +77,9 @@ function ResponseCard({ r }) {
   );
 }
 
-export default function CanvasserResponsesModal({ canvasser, dateRange, campaignId, onClose }) {
+export default function CanvasserResponsesModal({ canvasser, dateRange, campaignId, onClose, tz }) {
+  const orgTz = useOrgTimeZone();
+  const zone = tz || orgTz;
   const [skip, setSkip] = useState(0);
   const [accumulated, setAccumulated] = useState([]);
 
@@ -171,7 +178,7 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, campaign
             </div>
           )}
           {accumulated.map((r) => (
-            <ResponseCard key={r.id} r={r} />
+            <ResponseCard key={r.id} r={r} tz={zone} />
           ))}
           {hasMore && (
             <div className="flex justify-center pt-2">

@@ -9,6 +9,7 @@ import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
 import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
 
 const STATUS_COLORS = {
@@ -207,6 +208,7 @@ export default function MapPage() {
   // Live auto-refresh of the map (web admins are at a desk + connected). Gates
   // the poll interval below; pauses automatically when the tab is backgrounded.
   const [live, setLive] = useState(true);
+  const orgTz = useOrgTimeZone();
 
   const {
     campaignId,
@@ -215,6 +217,8 @@ export default function MapPage() {
     selected: selectedCampaign,
     isLoading: campaignsLoading,
   } = useCampaignSelection();
+  // Anchor presets to the selected campaign's tz (default range is all-time, which needs none).
+  const tz = selectedCampaign?.timeZone || orgTz;
 
   const tokenQ = useQuery({
     queryKey: ['config', 'mapbox-token'],
@@ -556,7 +560,7 @@ export default function MapPage() {
             isLoading={campaignsLoading}
           />
           <AddressSearch households={households} onSelect={flyToHousehold} />
-          <DateRangeSelector value={dateRange} onChange={setDateRange} />
+          <DateRangeSelector value={dateRange} onChange={setDateRange} tz={tz} />
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -600,6 +604,7 @@ export default function MapPage() {
                 onClose={() => setSelected(null)}
                 statusColors={STATUS_COLORS}
                 statusLabels={STATUS_LABELS}
+                tz={tz}
               />
             </div>
           )}
@@ -625,6 +630,7 @@ export default function MapPage() {
                   setSelected(id);
                 }}
                 onClose={() => setSelectedActivityId(null)}
+                tz={tz}
               />
             </div>
           )}

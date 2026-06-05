@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { quickRangeFor } from './DateRangeSelector.jsx';
+import { quickRangeFor } from '../lib/datePresets.js';
 
 const QUICK_CHIPS = [
   { key: 'thisWeek', label: 'This week' },
@@ -8,33 +8,19 @@ const QUICK_CHIPS = [
   { key: 'lastMonth', label: 'Last month' },
 ];
 
-// ISO string -> 'yyyy-mm-dd' using LOCAL getters (never toISOString, which is UTC
-// and can shift a day). Empty/null -> ''.
-function toInputDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+// Boundaries are date-only 'yyyy-mm-dd' (what <input type=date> uses, and what the
+// server interprets in the campaign tz). No ISO/UTC conversion → no day shift.
+function toInputDate(v) {
+  return v ? String(v).slice(0, 10) : '';
 }
 
-// 'yyyy-mm-dd' -> ISO at LOCAL start-of-day. This keeps custom boundaries
-// consistent with rangeFor's local start-of-day convention. Empty -> null.
-function toIso(input) {
-  if (!input) return null;
-  const [y, m, d] = input.split('-').map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d).toISOString();
-}
-
-// Custom from/to range picker. Open-controlled. onApply receives
-// { from: ISOString|null, to: ISOString|null }.
+// Custom from/to range picker. Open-controlled. `tz` anchors the quick chips to the
+// campaign/org clock. onApply receives { from: 'yyyy-mm-dd'|null, to: 'yyyy-mm-dd'|null }.
 export default function DateRangePickerModal({
   open,
   initialFrom,
   initialTo,
+  tz,
   onClose,
   onApply,
 }) {
@@ -60,16 +46,16 @@ export default function DateRangePickerModal({
   if (!open) return null;
 
   function applyQuick(key) {
-    const r = quickRangeFor(key);
-    setFrom(toInputDate(r.from));
-    setTo(toInputDate(r.to));
+    const r = quickRangeFor(key, tz);
+    setFrom(r.from || '');
+    setTo(r.to || '');
   }
 
   function apply() {
-    let f = toIso(from);
-    let t = toIso(to);
-    if (f && t && new Date(f) > new Date(t)) {
-      [f, t] = [t, f];
+    let f = from || null;
+    let t = to || null;
+    if (f && t && f > t) {
+      [f, t] = [t, f]; // lexical compare works for yyyy-mm-dd
     }
     onApply({ from: f, to: t });
   }

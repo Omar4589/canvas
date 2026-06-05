@@ -90,6 +90,9 @@ export function AuthProvider({ children }) {
   const isSuperAdmin = !!user?.isSuperAdmin;
   const isOrgAdmin = isSuperAdmin || activeMembership?.role === 'admin';
   const mustChangePassword = !!user?.mustChangePassword;
+  // Org-wide audit timestamps (imports, walk lists, turf snapshots, user profiles) render
+  // in the active org's timezone so they read the same for every admin.
+  const orgTimeZone = activeMembership?.organizationTimeZone || 'America/New_York';
 
   return (
     <AuthContext.Provider
@@ -98,6 +101,7 @@ export function AuthProvider({ children }) {
         memberships,
         activeOrgId,
         activeMembership,
+        orgTimeZone,
         isSuperAdmin,
         isOrgAdmin,
         mustChangePassword,
@@ -118,4 +122,10 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
   return ctx;
+}
+
+// The active org's IANA timezone — use for org-wide audit timestamps so they read the
+// same for every admin regardless of their own device timezone.
+export function useOrgTimeZone() {
+  return useAuth().orgTimeZone;
 }

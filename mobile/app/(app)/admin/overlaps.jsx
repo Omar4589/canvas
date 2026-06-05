@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
+import { rangeFor } from '../../../lib/dateRanges';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
@@ -22,28 +23,6 @@ const PRESETS = [
   { key: '30d', label: '30 days' },
   { key: 'all', label: 'All time' },
 ];
-
-function rangeFor(preset) {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  if (preset === 'today') return { from: start.toISOString(), to: null };
-  if (preset === 'yesterday') {
-    const yStart = new Date(start);
-    yStart.setDate(yStart.getDate() - 1);
-    return { from: yStart.toISOString(), to: start.toISOString() };
-  }
-  if (preset === '7d') {
-    const s = new Date(start);
-    s.setDate(s.getDate() - 6);
-    return { from: s.toISOString(), to: null };
-  }
-  if (preset === '30d') {
-    const s = new Date(start);
-    s.setDate(s.getDate() - 29);
-    return { from: s.toISOString(), to: null };
-  }
-  return { from: null, to: null };
-}
 
 function actionLabel(t) {
   if (t === 'survey_submitted') return 'Surveyed';
@@ -69,8 +48,10 @@ export default function AdminOverlaps() {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
 
-  const range = useMemo(() => rangeFor(preset), [preset]);
   const cId = campaign?.id;
+  // Anchor presets to the campaign's tz; the query is already gated on cId (campaign loaded),
+  // so it never fetches a device-tz window.
+  const range = useMemo(() => rangeFor(preset, null, campaign?.timeZone), [preset, campaign?.timeZone]);
 
   const overlapsQ = useQuery({
     queryKey: ['admin', 'reports', 'overlaps', cId, range.from, range.to],
@@ -186,7 +167,7 @@ export default function AdminOverlaps() {
                               </Text>
                             </View>
                             <Text style={styles.canvasserTimestamp}>
-                              {formatExact(c.timestamp)}
+                              {formatExact(c.timestamp, campaign?.timeZone)}
                             </Text>
                           </View>
                         </View>

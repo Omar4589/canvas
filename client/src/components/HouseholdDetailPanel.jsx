@@ -1,8 +1,16 @@
-function formatDateTime(d) {
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
+
+function formatDateTime(d, tz) {
   if (!d) return '—';
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
+  return (
+    formatInTz(
+      d,
+      tz,
+      { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+      true
+    ) || '—'
+  );
 }
 
 function formatAnswer(answer) {
@@ -33,7 +41,10 @@ export default function HouseholdDetailPanel({
   onClose,
   statusColors,
   statusLabels,
+  tz,
 }) {
+  const orgTz = useOrgTimeZone();
+  const zone = tz || orgTz;
   const h = household;
   return (
     <div>
@@ -73,7 +84,7 @@ export default function HouseholdDetailPanel({
           <div className="text-xs uppercase tracking-wide text-gray-500">Last action</div>
           <div className="mt-1 text-gray-900">{actionLabel(h.lastAction.actionType)}</div>
           <div className="text-xs text-gray-500">
-            {formatDateTime(h.lastAction.timestamp)}
+            {formatDateTime(h.lastAction.timestamp, zone)}
             {h.lastAction.canvasser && (
               <>
                 {' · '}
@@ -130,7 +141,7 @@ export default function HouseholdDetailPanel({
                     {s.voter?.fullName || 'Unknown voter'}
                   </div>
                   <div className="text-xs text-gray-500">
-                    {formatDateTime(s.submittedAt)}
+                    {formatDateTime(s.submittedAt, zone)}
                   </div>
                 </div>
                 {s.canvasser && (

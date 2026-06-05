@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -26,29 +26,41 @@ export default function AnswersScreen() {
   useEffect(() => {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
+  const tz = campaign?.timeZone;
 
   const [range, setRange] = useState(() => {
-    const preset = params.preset || '30d';
-    if (params.from || params.to) return { preset, from: params.from || null, to: params.to || null };
-    const r = rangeFor(preset);
-    return { preset, from: r.from, to: r.to };
+    if (params.from || params.to) {
+      return { preset: params.preset || '30d', from: params.from || null, to: params.to || null };
+    }
+    return null;
   });
+  const rangeTouchedRef = useRef(!!(params?.from || params?.to));
+  useEffect(() => {
+    if (rangeTouchedRef.current || range || !tz) return;
+    const preset = params?.preset || '30d';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range]);
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setRange(next);
+  }
 
   const cId = campaign?.id;
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
     p.set('userId', userId);
     p.set('compareToOrg', 'true');
     return p.toString();
-  }, [cId, range.from, range.to, userId]);
+  }, [cId, range?.from, range?.to, userId]);
 
   const q = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'answers', qs],
     queryFn: () => api(`/admin/reports/survey-results?${qs}`),
-    enabled: !!cId && !!userId,
+    enabled: !!cId && !!userId && !!range,
   });
 
   const data = q.data;
@@ -64,7 +76,7 @@ export default function AnswersScreen() {
         <View style={{ width: 80 }} />
       </View>
 
-      <DateRangeBar value={range} onChange={setRange} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         {q.isLoading ? (

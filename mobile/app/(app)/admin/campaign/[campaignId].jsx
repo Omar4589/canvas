@@ -52,17 +52,6 @@ export default function CampaignDetail() {
   const qc = useQueryClient();
   const { campaignId } = useLocalSearchParams();
   const cId = Array.isArray(campaignId) ? campaignId[0] : campaignId;
-  const tz = deviceTimezone();
-
-  const [range, setRange] = useState(() => {
-    const r = rangeFor('today');
-    return { preset: 'today', from: r.from, to: r.to };
-  });
-  const touchedRef = useRef(false);
-  function onRangeChange(v) {
-    touchedRef.current = true;
-    setRange(v);
-  }
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -72,20 +61,29 @@ export default function CampaignDetail() {
   const isLitDrop = campaign?.type === 'lit_drop';
   const isArchived = campaign && campaign.isActive === false;
 
-  // Archived campaigns have no recent activity → default the range to all-time
-  // (unless the admin picks one).
+  // Anchor date presets to THIS campaign's timezone (not the device clock).
+  const tz = campaign?.timeZone;
+
+  const [range, setRange] = useState(null);
+  const rangeTouchedRef = useRef(false);
+  function onRangeChange(v) {
+    rangeTouchedRef.current = true;
+    setRange(v);
+  }
+
+  // Once the campaign tz is known, resolve the default preset in that clock.
+  // Archived campaigns have no recent activity → default to all-time; active → today.
   useEffect(() => {
-    if (touchedRef.current || !campaign) return;
-    if (campaign.isActive === false) {
-      const r = rangeFor('all');
-      setRange({ preset: 'all', from: r.from, to: r.to });
-    }
-  }, [campaign]);
+    if (rangeTouchedRef.current || range || !tz || !campaign) return;
+    const preset = campaign.isActive === false ? 'all' : 'today';
+    const r = rangeFor(preset, null, tz);
+    setRange({ preset, from: r.from, to: r.to });
+  }, [tz, range, campaign]);
 
   function rangeParams(extra = {}) {
-    const p = new URLSearchParams({ campaignId: cId, tz, ...extra });
-    if (range.from) p.set('from', range.from);
-    if (range.to) p.set('to', range.to);
+    const p = new URLSearchParams({ campaignId: cId, tz: deviceTimezone(), ...extra });
+    if (range?.from) p.set('from', range.from);
+    if (range?.to) p.set('to', range.to);
     return p;
   }
 
@@ -95,21 +93,21 @@ export default function CampaignDetail() {
     enabled: !!cId,
   });
   const canvassersQ = useQuery({
-    queryKey: ['admin', 'reports', 'canvassers', cId, range.from, range.to],
+    queryKey: ['admin', 'reports', 'canvassers', cId, range?.from, range?.to],
     queryFn: () => api(`/admin/reports/canvassers?${rangeParams().toString()}`),
-    enabled: !!cId,
+    enabled: !!cId && !!range,
   });
   const surveyResultsQ = useQuery({
-    queryKey: ['admin', 'reports', 'survey-results', cId, range.from, range.to],
+    queryKey: ['admin', 'reports', 'survey-results', cId, range?.from, range?.to],
     queryFn: () => api(`/admin/reports/survey-results?${rangeParams({ voterPreview: '5' }).toString()}`),
-    enabled: !!cId && !isLitDrop,
+    enabled: !!cId && !isLitDrop && !!range,
   });
   // In-range totals from the same rollup the landing uses (deduped door-days),
   // so the detail's numbers match the Overview exactly.
   const rollupQ = useQuery({
-    queryKey: ['admin', 'reports', 'campaign-rollup', 'one', cId, range.from, range.to],
+    queryKey: ['admin', 'reports', 'campaign-rollup', 'one', cId, range?.from, range?.to],
     queryFn: () => api(`/admin/reports/campaign-rollup?${rangeParams().toString()}`),
-    enabled: !!cId,
+    enabled: !!cId && !!range,
   });
 
   const totals = overviewQ.data?.totals || {};
@@ -131,15 +129,15 @@ export default function CampaignDetail() {
         questionKey: qn.key,
         option: String(opt.option),
         label: qn.label,
-        ...(range.from ? { from: range.from } : {}),
-        ...(range.to ? { to: range.to } : {}),
+        ...(range?.from ? { from: range.from } : {}),
+        ...(range?.to ? { to: range.to } : {}),
       },
     });
   }
 
   async function goCanvass() {
     if (!campaign) return;
-    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state });
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
     await clearBootstrap();
     qc.removeQueries({ queryKey: ['bootstrap'] });
     // Enter the canvasser flow (book picker), scoped to this admin's own books.
@@ -180,7 +178,7 @@ export default function CampaignDetail() {
           </View>
         )}
 
-        <DateRangeBar value={range} onChange={onRangeChange} />
+        <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
         <View style={{ paddingHorizontal: spacing.lg }}>
           {/* Activity in range */}
@@ -226,7 +224,7 @@ export default function CampaignDetail() {
               topCanvassers.map((c, i) => {
                 const primary = isLitDrop ? c.litDropped || 0 : c.surveysSubmitted || 0;
                 const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
-                const range2 = formatRange(c.firstActivityAt, c.lastActivityAt);
+                const range2 = formatRange(c.firstActivityAt, c.lastActivityAt, campaign?.timeZone);
                 return (
                   <View key={c.userId} style={styles.canvasserRow}>
                     <Text style={styles.canvasserRank}>{i + 1}</Text>

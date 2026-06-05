@@ -9,7 +9,7 @@ import DateRangePickerModal from './DateRangePickerModal';
 // value: { preset, from, to } where preset is one of PRESETS keys.
 // onChange({ preset, from, to }) fires whenever a preset or custom range is
 // chosen. Caller is responsible for re-fetching with the new range.
-export default function DateRangeBar({ value, onChange }) {
+export default function DateRangeBar({ value, onChange, tz }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   function selectPreset(key) {
@@ -17,7 +17,7 @@ export default function DateRangeBar({ value, onChange }) {
       setPickerOpen(true);
       return;
     }
-    const r = rangeFor(key);
+    const r = rangeFor(key, null, tz);
     onChange({ preset: key, from: r.from, to: r.to });
   }
 
@@ -59,6 +59,7 @@ export default function DateRangeBar({ value, onChange }) {
         visible={pickerOpen}
         initialFrom={value?.from || null}
         initialTo={value?.to || null}
+        tz={tz}
         onClose={() => setPickerOpen(false)}
         onApply={applyCustom}
       />
