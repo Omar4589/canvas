@@ -98,39 +98,39 @@ export default function BookAssignmentPanel({
   }
 
   return (
-    <div className="absolute left-3 top-3 z-10 flex max-h-[calc(100%-1.5rem)] w-80 flex-col rounded-xl border border-gray-200 bg-white shadow-xl">
-      <div className="flex items-start justify-between gap-2 border-b border-gray-100 px-4 py-3">
+    <div className="absolute left-3 top-3 z-10 flex max-h-[calc(100%-1.5rem)] w-80 flex-col rounded-xl border border-border bg-card shadow-xl">
+      <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
         <div>
-          <div className="text-sm font-semibold text-gray-900">
+          <div className="text-sm font-semibold text-fg">
             {books.length} book{books.length === 1 ? '' : 's'} selected
           </div>
-          <div className="text-xs text-gray-500">{totalDoors.toLocaleString()} doors</div>
+          <div className="text-xs text-fg-muted">{totalDoors.toLocaleString()} doors</div>
         </div>
-        <button onClick={onClear} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Clear selection">✕</button>
+        <button onClick={onClear} className="rounded p-1 text-fg-subtle hover:bg-sunken hover:text-fg-muted" aria-label="Clear selection">✕</button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
         <div className="mb-3">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
             Assigned{single ? '' : ' across selection'}
           </div>
           {union.length === 0 ? (
-            <p className="text-xs text-gray-400">No one assigned yet.</p>
+            <p className="text-xs text-fg-subtle">No one assigned yet.</p>
           ) : (
             <ul className="space-y-1">
               {union.map((e) => (
                 <li key={e.user.id} className="flex items-center justify-between gap-2 text-sm">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-100 text-[9px] font-semibold text-brand-700">
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-tint text-[9px] font-semibold text-brand-accent">
                       {initials(e.user)}
                     </span>
-                    <span className="truncate text-gray-800">{e.user.firstName} {e.user.lastName}</span>
-                    {!single && <span className="shrink-0 text-[10px] text-gray-400">in {e.inBooks.size}/{books.length}</span>}
+                    <span className="truncate text-fg">{e.user.firstName} {e.user.lastName}</span>
+                    {!single && <span className="shrink-0 text-[10px] text-fg-subtle">in {e.inBooks.size}/{books.length}</span>}
                   </span>
                   <button
                     onClick={() => (single ? toggleSingle(e.user.id) : unassignEverywhere(e))}
                     disabled={busy}
-                    className="shrink-0 rounded-md border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                    className="shrink-0 rounded-md border border-danger/30 bg-danger-tint px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
                   >
                     Unassign
                   </button>
@@ -140,18 +140,18 @@ export default function BookAssignmentPanel({
           )}
         </div>
 
-        <div className="border-t border-gray-100 pt-3">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+        <div className="border-t border-border pt-3">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
             {single ? 'People' : 'Add people'}
           </div>
 
           {!single && (
-            <div className="mb-2 flex rounded-md border border-gray-300 p-0.5 text-[11px]">
+            <div className="mb-2 flex rounded-md border border-border-strong p-0.5 text-[11px]">
               {[{ key: 'distribute', label: 'Distribute' }, { key: 'everyone', label: 'Everyone' }].map((o) => (
                 <button
                   key={o.key}
                   onClick={() => setMode(o.key)}
-                  className={['flex-1 rounded px-2 py-1 font-medium transition-colors', mode === o.key ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'].join(' ')}
+                  className={['flex-1 rounded px-2 py-1 font-medium transition-colors', mode === o.key ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken'].join(' ')}
                 >
                   {o.label}
                 </button>
@@ -165,29 +165,29 @@ export default function BookAssignmentPanel({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search people…"
-              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+              className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
             {single
               ? filtered.some((m) => !assignedSet.has(m.user.id)) && (
-                  <button onClick={assignAllShownSingle} disabled={busy} className="shrink-0 rounded-md border border-brand-200 bg-brand-50 px-2 py-1.5 text-[11px] font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50">
+                  <button onClick={assignAllShownSingle} disabled={busy} className="shrink-0 rounded-md border border-brand-accent/30 bg-brand-tint px-2 py-1.5 text-[11px] font-semibold text-brand-accent hover:bg-brand-tint disabled:opacity-50">
                     Assign all
                   </button>
                 )
               : (
-                <button onClick={selectAllShown} className="shrink-0 rounded-md border border-gray-300 px-2 py-1.5 text-[11px] font-medium text-gray-700 hover:bg-gray-50">
+                <button onClick={selectAllShown} className="shrink-0 rounded-md border border-border-strong px-2 py-1.5 text-[11px] font-medium text-fg-muted hover:bg-sunken">
                   Select all
                 </button>
               )}
           </div>
 
           {membersQ.isLoading ? (
-            <div className="py-6 text-center text-xs text-gray-500">Loading…</div>
+            <div className="py-6 text-center text-xs text-fg-muted">Loading…</div>
           ) : !members.length ? (
-            <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-500">
+            <div className="rounded border border-dashed border-border bg-sunken px-3 py-4 text-center text-xs text-fg-muted">
               No members in this org yet.
             </div>
           ) : (
-            <ul className="max-h-56 divide-y divide-gray-100 overflow-auto rounded-md border border-gray-200">
+            <ul className="max-h-56 divide-y divide-border overflow-auto rounded-md border border-border">
               {filtered.map((m) => {
                 const u = m.user;
                 if (single) {
@@ -195,13 +195,13 @@ export default function BookAssignmentPanel({
                   return (
                     <li key={u.id} className="flex items-center justify-between px-2.5 py-1.5 text-sm">
                       <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="truncate font-medium text-gray-900">{u.firstName} {u.lastName}</span>
-                        {m.role === 'admin' && <span className="rounded bg-gray-100 px-1 text-[9px] font-semibold uppercase text-gray-500">admin</span>}
+                        <span className="truncate font-medium text-fg">{u.firstName} {u.lastName}</span>
+                        {m.role === 'admin' && <span className="rounded bg-sunken px-1 text-[9px] font-semibold uppercase text-fg-muted">admin</span>}
                       </span>
                       <button
                         onClick={() => toggleSingle(u.id)}
                         disabled={busy}
-                        className={(on ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100' : 'border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100') + ' shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-semibold disabled:opacity-50'}
+                        className={(on ? 'border-danger/30 bg-danger-tint text-danger hover:bg-danger-tint' : 'border-brand-accent/30 bg-brand-tint text-brand-accent hover:bg-brand-tint') + ' shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-semibold disabled:opacity-50'}
                       >
                         {on ? 'Unassign' : 'Assign'}
                       </button>
@@ -213,24 +213,24 @@ export default function BookAssignmentPanel({
                   <li key={u.id}>
                     <button
                       onClick={() => togglePick(u.id)}
-                      className={['flex w-full items-center justify-between px-2.5 py-1.5 text-left text-sm', on ? 'bg-brand-50' : 'hover:bg-gray-50'].join(' ')}
+                      className={['flex w-full items-center justify-between px-2.5 py-1.5 text-left text-sm', on ? 'bg-brand-tint' : 'hover:bg-sunken'].join(' ')}
                     >
                       <span className="flex min-w-0 items-center gap-1.5">
-                        <span className={['flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px]', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-gray-300'].join(' ')}>{on ? '✓' : ''}</span>
-                        <span className="truncate font-medium text-gray-900">{u.firstName} {u.lastName}</span>
-                        {m.role === 'admin' && <span className="rounded bg-gray-100 px-1 text-[9px] font-semibold uppercase text-gray-500">admin</span>}
+                        <span className={['flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px]', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-border-strong'].join(' ')}>{on ? '✓' : ''}</span>
+                        <span className="truncate font-medium text-fg">{u.firstName} {u.lastName}</span>
+                        {m.role === 'admin' && <span className="rounded bg-sunken px-1 text-[9px] font-semibold uppercase text-fg-muted">admin</span>}
                       </span>
                     </button>
                   </li>
                 );
               })}
-              {!filtered.length && <li className="px-2.5 py-2 text-center text-xs text-gray-500">No matches.</li>}
+              {!filtered.length && <li className="px-2.5 py-2 text-center text-xs text-fg-muted">No matches.</li>}
             </ul>
           )}
 
           {!single && (
             <>
-              <label className="mt-2 flex items-center gap-2 text-[11px] text-gray-600">
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-fg-muted">
                 <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
                 Replace current assignments first
               </label>
@@ -241,7 +241,7 @@ export default function BookAssignmentPanel({
               >
                 {bulk.isPending ? 'Assigning…' : `Apply to ${books.length} books`}
               </button>
-              <p className="mt-1 text-[11px] text-gray-500">
+              <p className="mt-1 text-[11px] text-fg-muted">
                 {picked.size === 0
                   ? 'Pick people to assign.'
                   : mode === 'distribute'
@@ -254,11 +254,11 @@ export default function BookAssignmentPanel({
       </div>
 
       {books.length >= 2 && (
-        <div className="border-t border-gray-100 px-4 py-2">
+        <div className="border-t border-border px-4 py-2">
           <button
             onClick={onMerge}
             disabled={mergePending}
-            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
           >
             Merge {books.length} books into one
           </button>

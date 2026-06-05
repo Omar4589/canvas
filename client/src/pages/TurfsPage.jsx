@@ -303,7 +303,7 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
             <span className="truncate">{addressLine1 || 'Apartment building'}</span>
           </div>
           <div className="text-xs text-fg-muted">{city}, {state} {zipCode}</div>
-          <div className="mt-0.5 text-[11px] font-semibold text-brand-600">{total} units at this location</div>
+          <div className="mt-0.5 text-[11px] font-semibold text-brand-accent">{total} units at this location</div>
         </div>
         <button onClick={onClose} className="shrink-0 rounded p-0.5 text-fg-subtle hover:bg-sunken hover:text-fg-muted" aria-label="Close">✕</button>
       </div>
@@ -896,7 +896,7 @@ export default function TurfsPage() {
               </div>
 
               <div className="mb-2 flex items-center gap-3 text-xs">
-                <button onClick={() => setSelectedBooks(new Set(turfs.map((t) => String(t._id))))} className="font-medium text-brand-700 hover:underline">Select all</button>
+                <button onClick={() => setSelectedBooks(new Set(turfs.map((t) => String(t._id))))} className="font-medium text-brand-accent hover:underline">Select all</button>
                 {selectedBooks.size > 0 && (
                   <button onClick={() => setSelectedBooks(new Set())} className="font-medium text-fg-muted hover:underline">Clear ({selectedBooks.size})</button>
                 )}
@@ -918,7 +918,7 @@ export default function TurfsPage() {
                     onClick={() => toggleBook(t._id)}
                     title="Click to select this book (assign on the panel); click again to deselect"
                     className={`flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-0.5 ${
-                      selected ? 'bg-brand-50 ring-1 ring-brand-300' : 'hover:bg-sunken'
+                      selected ? 'bg-brand-tint ring-1 ring-brand-accent/30' : 'hover:bg-sunken'
                     }`}
                   >
                     <span className="flex min-w-0 items-center gap-2 truncate">
@@ -928,7 +928,7 @@ export default function TurfsPage() {
                           defaultValue={t.name}
                           onClick={(e) => e.stopPropagation()}
                           onBlur={(e) => e.target.value.trim() && e.target.value !== t.name && rename.mutate({ turfId: t._id, name: e.target.value.trim() })}
-                          className="min-w-0 flex-1 truncate rounded border border-transparent px-1 hover:border-border-strong focus:border-brand-500 focus:outline-none"
+                          className="min-w-0 flex-1 truncate rounded border border-transparent px-1 hover:border-border-strong focus:border-brand-accent focus:outline-none"
                         />
                       ) : (
                         <span className="truncate">{t.name}</span>

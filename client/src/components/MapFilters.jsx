@@ -8,8 +8,8 @@ function StatusChip({ status, active, count, onClick, color, label }) {
       className={
         'flex w-full items-center justify-between gap-2 rounded border px-2 py-1.5 text-sm transition-colors ' +
         (active
-          ? 'border-brand-600 bg-brand-50 text-brand-700'
-          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50')
+          ? 'border-brand-600 bg-brand-tint text-brand-accent'
+          : 'border-border bg-card text-fg-muted hover:bg-sunken')
       }
     >
       <span className="flex items-center gap-2">
@@ -19,14 +19,14 @@ function StatusChip({ status, active, count, onClick, color, label }) {
         />
         {label}
       </span>
-      {count != null && <span className="text-xs text-gray-500">{count}</span>}
+      {count != null && <span className="text-xs text-fg-muted">{count}</span>}
     </button>
   );
 }
 
 function SectionLabel({ children }) {
   return (
-    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">
       {children}
     </div>
   );
@@ -86,23 +86,23 @@ export default function MapFilters({
             type="checkbox"
             checked={showCanvasserPins}
             onChange={(e) => onShowCanvasserPinsChange?.(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-600"
+            className="h-4 w-4 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
           />
-          <span className="text-gray-800">Show canvasser locations</span>
+          <span className="text-fg">Show canvasser locations</span>
         </label>
-        <div className="mt-1 text-xs text-gray-500">
+        <div className="mt-1 text-xs text-fg-muted">
           Where each survey, not-home, or wrong-address was submitted from, labeled
           with the canvasser&apos;s initials.
         </div>
       </div>
 
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-900">Filters</h3>
+        <h3 className="text-sm font-semibold text-fg">Filters</h3>
         {hasActiveFilters && (
           <button
             type="button"
             onClick={clearAll}
-            className="text-xs text-brand-600 hover:underline"
+            className="text-xs text-brand-accent hover:underline"
           >
             Clear all
           </button>
@@ -130,7 +130,7 @@ export default function MapFilters({
         <select
           value={canvasserId}
           onChange={(e) => onCanvasserChange(e.target.value)}
-          className="w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          className="w-full rounded border border-border bg-card px-2 py-1.5 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <option value="">Any canvasser</option>
           {canvassers.map((c) => (
@@ -147,7 +147,7 @@ export default function MapFilters({
           <div className="space-y-3">
             {choiceQuestions.map((q) => (
               <div key={q.key}>
-                <div className="mb-1 text-xs font-medium text-gray-700">{q.label}</div>
+                <div className="mb-1 text-xs font-medium text-fg-muted">{q.label}</div>
                 <div className="flex flex-wrap gap-1">
                   {q.options.map((opt) => {
                     const active =
@@ -161,12 +161,12 @@ export default function MapFilters({
                           'rounded-full px-2.5 py-1 text-xs transition-colors ' +
                           (active
                             ? 'bg-brand-600 text-white'
-                            : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50')
+                            : 'border border-border bg-card text-fg-muted hover:bg-sunken')
                         }
                         title={`${opt.count} responses`}
                       >
                         {opt.option}
-                        <span className={active ? 'ml-1 opacity-80' : 'ml-1 text-gray-500'}>
+                        <span className={active ? 'ml-1 opacity-80' : 'ml-1 text-fg-muted'}>
                           {opt.count}
                         </span>
                       </button>

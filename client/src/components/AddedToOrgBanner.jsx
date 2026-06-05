@@ -31,7 +31,7 @@ export default function AddedToOrgBanner() {
       {fresh.map((m) => (
         <div
           key={m.membershipId}
-          className="flex items-start justify-between gap-3 rounded-md border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-800"
+          className="flex items-start justify-between gap-3 rounded-md border border-brand-accent/30 bg-brand-tint px-4 py-3 text-sm text-brand-accent"
         >
           <div>
             You've been added to{' '}
@@ -45,7 +45,7 @@ export default function AddedToOrgBanner() {
             type="button"
             onClick={() => onDismiss(m.membershipId)}
             disabled={!!dismissing[m.membershipId]}
-            className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50"
+            className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-brand-accent hover:bg-brand-tint disabled:opacity-50"
           >
             Dismiss
           </button>

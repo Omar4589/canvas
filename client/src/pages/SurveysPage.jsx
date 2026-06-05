@@ -43,7 +43,7 @@ function deriveKey(q, index, allQuestions) {
 
 function TypePills({ value, onChange, disabled }) {
   return (
-    <div className="inline-flex rounded-md border border-gray-300 bg-gray-50 p-0.5">
+    <div className="inline-flex rounded-md border border-border-strong bg-sunken p-0.5">
       {QUESTION_TYPES.map((t) => {
         const active = value === t.value;
         return (
@@ -55,8 +55,8 @@ function TypePills({ value, onChange, disabled }) {
             className={
               'rounded px-3 py-1.5 text-xs font-medium transition ' +
               (active
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-gray-600')
+                ? 'bg-card text-fg shadow-sm'
+                : 'text-fg-muted hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-fg-muted')
             }
           >
             {t.label}
@@ -70,7 +70,7 @@ function TypePills({ value, onChange, disabled }) {
 function OptionRow({ index, value, onChange, onRemove, canRemove, locked }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-6 text-right text-xs font-medium text-gray-400">
+      <span className="w-6 text-right text-xs font-medium text-fg-subtle">
         {index + 1}.
       </span>
       <input
@@ -79,15 +79,15 @@ function OptionRow({ index, value, onChange, onRemove, canRemove, locked }) {
         readOnly={locked}
         placeholder={`Option ${index + 1}`}
         className={
-          'flex-1 rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 ' +
-          (locked ? 'bg-gray-50 text-gray-500' : '')
+          'flex-1 rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ' +
+          (locked ? 'bg-sunken text-fg-muted' : '')
         }
       />
       <button
         type="button"
         onClick={onRemove}
         disabled={!canRemove || locked}
-        className="rounded p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+        className="rounded p-2 text-fg-subtle hover:bg-danger-tint hover:text-danger disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-fg-subtle"
         title={locked ? 'Locked — survey has responses' : 'Remove option'}
       >
         ×
@@ -135,13 +135,13 @@ function QuestionCard({
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2.5">
+    <div className="rounded-lg border border-border bg-card shadow-sm">
+      <div className="flex items-center justify-between border-b border-border bg-sunken px-4 py-2.5">
         <div className="flex items-center gap-3">
           <span className="rounded bg-brand-600 px-2 py-0.5 text-xs font-semibold text-white">
             Q{index + 1}
           </span>
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-fg-muted">
             {QUESTION_TYPES.find((t) => t.value === value.type)?.hint}
           </span>
         </div>
@@ -150,7 +150,7 @@ function QuestionCard({
             type="button"
             onClick={onMoveUp}
             disabled={index === 0}
-            className="rounded px-2 py-1 text-sm text-gray-500 hover:bg-white hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent"
+            className="rounded px-2 py-1 text-sm text-fg-muted hover:bg-card hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent"
             title="Move up"
           >
             ↑
@@ -159,7 +159,7 @@ function QuestionCard({
             type="button"
             onClick={onMoveDown}
             disabled={index === total - 1}
-            className="rounded px-2 py-1 text-sm text-gray-500 hover:bg-white hover:text-gray-900 disabled:opacity-30 disabled:hover:bg-transparent"
+            className="rounded px-2 py-1 text-sm text-fg-muted hover:bg-card hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent"
             title="Move down"
           >
             ↓
@@ -168,7 +168,7 @@ function QuestionCard({
             type="button"
             onClick={onRemove}
             disabled={locked}
-            className="ml-2 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent"
+            className="ml-2 rounded px-2 py-1 text-xs text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:text-fg-subtle disabled:hover:bg-transparent"
             title={locked ? 'Locked — survey has responses (Duplicate to remove)' : 'Remove question'}
           >
             Remove
@@ -178,25 +178,25 @@ function QuestionCard({
 
       <div className="space-y-4 p-4">
         <div>
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
+          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-muted">
             Question
           </label>
           <input
             value={value.label}
             onChange={(e) => onChange({ ...value, label: e.target.value })}
             placeholder="What is your top issue?"
-            className="w-full rounded border border-gray-300 px-3 py-2 text-base focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            className="w-full rounded border border-border-strong px-3 py-2 text-base focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-muted">
               Type
             </label>
             <TypePills value={value.type} onChange={setType} disabled={locked} />
           </div>
-          <label className="flex cursor-pointer items-center gap-2 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+          <label className="flex cursor-pointer items-center gap-2 rounded border border-border bg-sunken px-3 py-2 text-sm">
             <input
               type="checkbox"
               checked={value.required}
@@ -208,7 +208,7 @@ function QuestionCard({
 
         {isChoice && (
           <div>
-            <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-gray-500">
+            <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-fg-muted">
               Answer options
             </label>
             <div className="space-y-2">
@@ -227,7 +227,7 @@ function QuestionCard({
             <button
               type="button"
               onClick={addOption}
-              className="mt-3 inline-flex items-center gap-1 rounded border border-dashed border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-brand-600 hover:text-brand-700"
+              className="mt-3 inline-flex items-center gap-1 rounded border border-dashed border-border-strong px-3 py-1.5 text-xs font-medium text-fg-muted hover:border-brand-600 hover:text-brand-accent"
             >
               + Add option
             </button>
@@ -303,13 +303,13 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
   return (
     <form onSubmit={submit} className="space-y-6 pb-24">
       {locked && (
-        <div className="rounded-lg border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="rounded-lg border-l-4 border-warning/40 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
           <p className="font-medium">
             This survey has {initial.responseCount} response
             {initial.responseCount === 1 ? '' : 's'} — question structure is locked to protect existing
             reports.
           </p>
-          <p className="mt-1 text-amber-800">
+          <p className="mt-1 text-warning-fg">
             You can still rename it, edit the greeting/closing, reword a question, toggle Required,
             reorder, add new questions, and add new options. To remove a question or option, change a
             question's type, or rename an option, use <strong>Duplicate</strong> from the survey list to
@@ -317,12 +317,12 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
           </p>
         </div>
       )}
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-fg-muted">
           Survey settings
         </h2>
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-700">
+          <label className="mb-1 block text-xs font-medium text-fg-muted">
             Survey name
           </label>
           <input
@@ -330,19 +330,19 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
             onChange={(e) => setName(e.target.value)}
             required
             placeholder="Scott Berger Door-to-Door Survey"
-            className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
-          <p className="mt-2 text-xs text-gray-500">
+          <p className="mt-2 text-xs text-fg-muted">
             Surveys are linked to campaigns on the Campaigns page.
           </p>
         </div>
       </section>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-gray-500">
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-fg-muted">
           Greeting
         </h2>
-        <p className="mb-3 text-xs text-gray-500">
+        <p className="mb-3 text-xs text-fg-muted">
           Shown to canvassers at the top of the survey. This is the script they read at the door.
         </p>
         <textarea
@@ -350,16 +350,16 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
           onChange={(e) => setIntro(e.target.value)}
           rows={4}
           placeholder="Hi, I'm out talking with voters today on behalf of…"
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm leading-relaxed focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          className="w-full rounded border border-border-strong px-3 py-2 text-sm leading-relaxed focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
       </section>
 
       <section>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">
             Questions
           </h2>
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-fg-muted">
             {questions.length} {questions.length === 1 ? 'question' : 'questions'}
           </span>
         </div>
@@ -382,7 +382,7 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
             );
           })}
           {!questions.length && (
-            <div className="rounded-lg border-2 border-dashed border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500">
+            <div className="rounded-lg border-2 border-dashed border-border bg-card px-4 py-10 text-center text-sm text-fg-muted">
               No questions yet. Add your first one below.
             </div>
           )}
@@ -390,17 +390,17 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
         <button
           type="button"
           onClick={addQuestion}
-          className="mt-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-3 text-sm font-medium text-gray-600 hover:border-brand-600 hover:bg-brand-50 hover:text-brand-700"
+          className="mt-3 w-full rounded-lg border-2 border-dashed border-border-strong px-4 py-3 text-sm font-medium text-fg-muted hover:border-brand-600 hover:bg-brand-tint hover:text-brand-accent"
         >
           + Add question
         </button>
       </section>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-gray-500">
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-fg-muted">
           Closing
         </h2>
-        <p className="mb-3 text-xs text-gray-500">
+        <p className="mb-3 text-xs text-fg-muted">
           Optional sign-off line shown to canvassers after the last question.
         </p>
         <textarea
@@ -408,16 +408,16 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
           onChange={(e) => setClosing(e.target.value)}
           rows={3}
           placeholder="Thanks so much for your time. Have a great day!"
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm leading-relaxed focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          className="w-full rounded border border-border-strong px-3 py-2 text-sm leading-relaxed focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
       </section>
 
-      <div className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white px-6 py-3 shadow-lg">
+      <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-card px-6 py-3 shadow-lg">
         <div className="mx-auto flex max-w-5xl items-center justify-end gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            className="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-sunken"
           >
             Cancel
           </button>
@@ -494,11 +494,11 @@ export default function SurveysPage() {
       </div>
 
       {isLoading ? (
-        <div className="text-sm text-gray-500">Loading…</div>
+        <div className="text-sm text-fg-muted">Loading…</div>
       ) : !isEditing ? (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+            <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
               <tr>
                 <th className="px-4 py-3 text-left">Name</th>
                 <th className="px-4 py-3 text-left">Used by campaigns</th>
@@ -510,36 +510,36 @@ export default function SurveysPage() {
             </thead>
             <tbody>
               {surveys.map((s) => (
-                <tr key={s._id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
-                  <td className="px-4 py-3 text-gray-600">
+                <tr key={s._id} className="border-t border-border hover:bg-sunken">
+                  <td className="px-4 py-3 font-medium text-fg">{s.name}</td>
+                  <td className="px-4 py-3 text-fg-muted">
                     {s.usedByCampaigns?.length
                       ? s.usedByCampaigns.map((c) => c.name).join(', ')
-                      : <span className="text-gray-400">—</span>}
+                      : <span className="text-fg-subtle">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right">{s.questions?.length || 0}</td>
-                  <td className="px-4 py-3 text-right text-gray-600">
+                  <td className="px-4 py-3 text-right text-fg-muted">
                     {s.responseCount > 0 ? (
                       <span title="Editing question structure is locked while responses exist">
                         {s.responseCount.toLocaleString()}
                       </span>
                     ) : (
-                      <span className="text-gray-400">—</span>
+                      <span className="text-fg-subtle">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-500">v{s.version || 1}</td>
+                  <td className="px-4 py-3 text-right text-fg-muted">v{s.version || 1}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-3">
                       <button
                         onClick={() => setSelectedId(s._id)}
-                        className="text-xs font-medium text-brand-700 hover:underline"
+                        className="text-xs font-medium text-brand-accent hover:underline"
                       >
                         {s.responseCount > 0 ? 'View / edit' : 'Edit'}
                       </button>
                       <button
                         onClick={() => duplicate.mutate(s._id)}
                         disabled={duplicate.isPending}
-                        className="text-xs font-medium text-gray-600 hover:underline disabled:opacity-50"
+                        className="text-xs font-medium text-fg-muted hover:underline disabled:opacity-50"
                       >
                         Duplicate
                       </button>
@@ -549,7 +549,7 @@ export default function SurveysPage() {
               ))}
               {!surveys.length && (
                 <tr>
-                  <td colSpan="6" className="px-4 py-10 text-center text-gray-500">
+                  <td colSpan="6" className="px-4 py-10 text-center text-fg-muted">
                     No surveys yet. Click <strong>New survey</strong> to get started.
                   </td>
                 </tr>
@@ -561,7 +561,7 @@ export default function SurveysPage() {
         <div>
           <button
             onClick={closeEditor}
-            className="mb-4 text-sm text-brand-700 hover:underline"
+            className="mb-4 text-sm text-brand-accent hover:underline"
           >
             ← Back to list
           </button>
@@ -582,10 +582,10 @@ export default function SurveysPage() {
             />
           )}
           {(create.error || update.error) && (
-            <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
               <p>{(create.error || update.error).message}</p>
               {(update.error?.data?.reasons?.length > 0) && (
-                <ul className="mt-1 list-inside list-disc text-red-600">
+                <ul className="mt-1 list-inside list-disc text-danger">
                   {update.error.data.reasons.map((r, i) => (
                     <li key={i}>{r}</li>
                   ))}

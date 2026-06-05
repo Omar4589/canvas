@@ -34,7 +34,7 @@ export default function DateRangeSelector({ value, onChange, tz }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className="inline-flex rounded-md border border-gray-200 bg-white p-0.5 text-sm shadow-sm">
+      <div className="inline-flex rounded-md border border-border bg-card p-0.5 text-sm shadow-sm">
         {RANGE_PRESETS.map((p) => {
           const active = p.id === activePreset;
           return (
@@ -46,7 +46,7 @@ export default function DateRangeSelector({ value, onChange, tz }) {
                 'rounded px-3 py-1 transition-colors ' +
                 (active
                   ? 'bg-brand-600 text-white'
-                  : 'text-gray-700 hover:bg-gray-100')
+                  : 'text-fg-muted hover:bg-sunken')
               }
             >
               {p.label}
@@ -55,7 +55,7 @@ export default function DateRangeSelector({ value, onChange, tz }) {
         })}
       </div>
       {activePreset === 'custom' ? (
-        <div className="text-xs italic text-gray-500">{labelForRange(value)}</div>
+        <div className="text-xs italic text-fg-muted">{labelForRange(value)}</div>
       ) : null}
 
       <DateRangePickerModal

@@ -42,9 +42,9 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-5 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+    <form onSubmit={submit} className="space-y-5 rounded-lg border border-border bg-card p-5 shadow-sm">
       <div>
-        <label className="mb-1 block text-xs font-medium text-gray-700">
+        <label className="mb-1 block text-xs font-medium text-fg-muted">
           Campaign name
         </label>
         <input
@@ -52,13 +52,13 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
           onChange={(e) => setName(e.target.value)}
           required
           placeholder="Kentucky 2026"
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-700">Type</label>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">Type</label>
           <div className="flex gap-2">
             {[
               { value: 'survey', label: 'Survey' },
@@ -68,8 +68,8 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
                 key={t.value}
                 className={`flex flex-1 cursor-pointer items-center justify-center rounded border px-3 py-2 text-sm ${
                   type === t.value
-                    ? 'border-brand-600 bg-brand-50 text-brand-700'
-                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                    ? 'border-brand-600 bg-brand-tint text-brand-accent'
+                    : 'border-border-strong text-fg-muted hover:bg-sunken'
                 }`}
               >
                 <input
@@ -86,7 +86,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-700">
+          <label className="mb-1 block text-xs font-medium text-fg-muted">
             State (2-letter)
           </label>
           <input
@@ -95,24 +95,24 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
             required
             maxLength={2}
             placeholder="KY"
-            className="w-full rounded border border-gray-300 px-3 py-2 text-sm uppercase focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            className="w-full rounded border border-border-strong px-3 py-2 text-sm uppercase focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
         </div>
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-gray-700">Timezone</label>
+        <label className="mb-1 block text-xs font-medium text-fg-muted">Timezone</label>
         <select
           value={timeZone}
           onChange={(e) => setTimeZone(e.target.value)}
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <option value="">Auto (from state)</option>
           {US_TIMEZONES.map((t) => (
             <option key={t.value} value={t.value}>{t.label}</option>
           ))}
         </select>
-        <p className="mt-1 text-xs text-gray-500">
+        <p className="mt-1 text-xs text-fg-muted">
           Anchors every date &amp; time for this campaign — all admins see the same numbers and clock times,
           regardless of their own timezone.
         </p>
@@ -120,14 +120,14 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
 
       {type === 'survey' && (
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-700">
+          <label className="mb-1 block text-xs font-medium text-fg-muted">
             Survey template
           </label>
           <select
             value={surveyTemplateId}
             onChange={(e) => setSurveyTemplateId(e.target.value)}
             required
-            className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
             <option value="">— Choose a survey —</option>
             {(surveys || []).map((s) => (
@@ -137,14 +137,14 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
             ))}
           </select>
           {!surveys?.length && (
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-fg-muted">
               No surveys exist yet. Create one on the Surveys page first.
             </p>
           )}
           {(() => {
             const chosen = (surveys || []).find((s) => s._id === surveyTemplateId);
             return chosen?.responseCount > 0 ? (
-              <p className="mt-1 text-xs text-amber-700">
+              <p className="mt-1 text-xs text-warning-fg">
                 Heads up: this survey already has {chosen.responseCount.toLocaleString()} response
                 {chosen.responseCount === 1 ? '' : 's'}. New answers will report under it alongside the
                 existing ones. To run different questions, duplicate it on the Surveys page and pick the copy.
@@ -164,7 +164,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
       </label>
 
       {error && (
-        <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
           {error.message}
         </div>
       )}
@@ -173,7 +173,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          className="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-sunken"
         >
           Cancel
         </button>
@@ -266,11 +266,11 @@ export default function CampaignsPage() {
       )}
 
       {campaignsQ.isLoading ? (
-        <div className="text-sm text-gray-500">Loading…</div>
+        <div className="text-sm text-fg-muted">Loading…</div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+            <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
               <tr>
                 <th className="px-4 py-3 text-left">Name</th>
                 <th className="px-4 py-3 text-left">Type</th>
@@ -286,21 +286,21 @@ export default function CampaignsPage() {
             </thead>
             <tbody>
               {campaigns.map((c) => (
-                <tr key={c._id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
+                <tr key={c._id} className="border-t border-border hover:bg-sunken">
+                  <td className="px-4 py-3 font-medium text-fg">{c.name}</td>
                   <td className="px-4 py-3">
                     <span
                       className={
                         c.type === 'survey'
-                          ? 'rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700'
-                          : 'rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700'
+                          ? 'rounded-full bg-info-tint px-2 py-0.5 text-xs font-medium text-info-fg'
+                          : 'rounded-full bg-purple-500/15 px-2 py-0.5 text-xs font-medium text-purple-500'
                       }
                     >
                       {c.type === 'survey' ? 'Survey' : 'Lit drop'}
                     </span>
                   </td>
                   <td className="px-4 py-3">{c.state}</td>
-                  <td className="px-4 py-3 text-gray-700">
+                  <td className="px-4 py-3 text-fg-muted">
                     {c.surveyTemplateId?.name || (c.type === 'lit_drop' ? '—' : '⚠️ none')}
                   </td>
                   <td className="px-4 py-3 text-right">{fmt(c.counts?.households)}</td>
@@ -315,8 +315,8 @@ export default function CampaignsPage() {
                     <span
                       className={
                         c.isActive
-                          ? 'rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700'
-                          : 'rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600'
+                          ? 'rounded-full bg-success-tint px-2.5 py-0.5 text-xs font-medium text-success'
+                          : 'rounded-full bg-sunken px-2.5 py-0.5 text-xs font-medium text-fg-muted'
                       }
                     >
                       {c.isActive ? 'Active' : 'Archived'}
@@ -325,19 +325,19 @@ export default function CampaignsPage() {
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     <Link
                       to={`/dashboard/${c._id}`}
-                      className="mr-3 text-xs font-medium text-brand-700 hover:underline"
+                      className="mr-3 text-xs font-medium text-brand-accent hover:underline"
                     >
                       View data
                     </Link>
                     <button
                       onClick={() => setAssigningCampaign(c)}
-                      className="mr-3 text-xs font-medium text-brand-700 hover:underline"
+                      className="mr-3 text-xs font-medium text-brand-accent hover:underline"
                     >
                       Assignments
                     </button>
                     <button
                       onClick={() => setEditing(c)}
-                      className="text-xs font-medium text-brand-700 hover:underline"
+                      className="text-xs font-medium text-brand-accent hover:underline"
                     >
                       Edit
                     </button>
@@ -346,7 +346,7 @@ export default function CampaignsPage() {
               ))}
               {!campaigns.length && (
                 <tr>
-                  <td colSpan="10" className="px-4 py-10 text-center text-gray-500">
+                  <td colSpan="10" className="px-4 py-10 text-center text-fg-muted">
                     No campaigns yet. Click <strong>New campaign</strong> to create one.
                   </td>
                 </tr>

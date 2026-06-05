@@ -64,20 +64,20 @@ export default function ChangePasswordPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-50 px-4">
+    <div className="flex h-screen items-center justify-center bg-sunken px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
           <Logo size={40} />
-          <p className="mt-3 text-center text-sm text-gray-500">
+          <p className="mt-3 text-center text-sm text-fg-muted">
             For security, set a new password before continuing.
           </p>
         </div>
 
         <form
           onSubmit={onSubmit}
-          className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+          className="rounded-xl border border-border bg-card p-6 shadow-sm"
         >
-          <label className="block text-xs font-semibold text-gray-700">
+          <label className="block text-xs font-semibold text-fg-muted">
             Current (temporary) password
           </label>
           <div className="mt-1">
@@ -89,7 +89,7 @@ export default function ChangePasswordPage() {
             />
           </div>
 
-          <label className="mt-4 block text-xs font-semibold text-gray-700">
+          <label className="mt-4 block text-xs font-semibold text-fg-muted">
             New password (min 8 chars)
           </label>
           <div className="mt-1">
@@ -101,7 +101,7 @@ export default function ChangePasswordPage() {
             />
           </div>
 
-          <label className="mt-4 block text-xs font-semibold text-gray-700">
+          <label className="mt-4 block text-xs font-semibold text-fg-muted">
             Confirm new password
           </label>
           <div className="mt-1">
@@ -114,7 +114,7 @@ export default function ChangePasswordPage() {
           </div>
 
           {error && (
-            <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mt-4 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
               {error}
             </div>
           )}

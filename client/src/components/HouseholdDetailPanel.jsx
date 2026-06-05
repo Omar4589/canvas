@@ -48,29 +48,29 @@ export default function HouseholdDetailPanel({
   const h = household;
   return (
     <div>
-      <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 py-3">
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span
               className="inline-block h-2.5 w-2.5 rounded-full"
               style={{ backgroundColor: statusColors[h.status] }}
             />
-            <span className="text-xs uppercase tracking-wide text-gray-500">
+            <span className="text-xs uppercase tracking-wide text-fg-muted">
               {statusLabels[h.status]}
             </span>
           </div>
-          <div className="mt-1 truncate font-medium text-gray-900">{h.addressLine1}</div>
+          <div className="mt-1 truncate font-medium text-fg">{h.addressLine1}</div>
           {h.addressLine2 && (
-            <div className="truncate text-sm text-gray-700">{h.addressLine2}</div>
+            <div className="truncate text-sm text-fg-muted">{h.addressLine2}</div>
           )}
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-fg-muted">
             {h.city}, {h.state} {h.zipCode}
           </div>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+          className="rounded p-1 text-fg-subtle hover:bg-sunken hover:text-fg-muted"
           aria-label="Close"
         >
           <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
@@ -80,10 +80,10 @@ export default function HouseholdDetailPanel({
       </div>
 
       {h.lastAction && (
-        <div className="border-b border-gray-200 px-4 py-3 text-sm">
-          <div className="text-xs uppercase tracking-wide text-gray-500">Last action</div>
-          <div className="mt-1 text-gray-900">{actionLabel(h.lastAction.actionType)}</div>
-          <div className="text-xs text-gray-500">
+        <div className="border-b border-border px-4 py-3 text-sm">
+          <div className="text-xs uppercase tracking-wide text-fg-muted">Last action</div>
+          <div className="mt-1 text-fg">{actionLabel(h.lastAction.actionType)}</div>
+          <div className="text-xs text-fg-muted">
             {formatDateTime(h.lastAction.timestamp, zone)}
             {h.lastAction.canvasser && (
               <>
@@ -95,27 +95,27 @@ export default function HouseholdDetailPanel({
         </div>
       )}
 
-      <div className="border-b border-gray-200 px-4 py-3">
-        <div className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+      <div className="border-b border-border px-4 py-3">
+        <div className="mb-2 text-xs uppercase tracking-wide text-fg-muted">
           Voters ({h.voters?.length || 0})
         </div>
         {h.voters?.length ? (
           <ul className="space-y-1.5">
             {h.voters.map((v) => (
               <li key={v.id} className="flex items-center justify-between gap-2 text-sm">
-                <span className="truncate text-gray-900">{v.fullName}</span>
+                <span className="truncate text-fg">{v.fullName}</span>
                 <span className="flex shrink-0 items-center gap-2 text-xs">
                   {v.party && (
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600">
+                    <span className="rounded bg-sunken px-1.5 py-0.5 text-fg-muted">
                       {v.party}
                     </span>
                   )}
                   {v.surveyStatus === 'surveyed' ? (
-                    <span className="rounded bg-green-100 px-1.5 py-0.5 text-green-700">
+                    <span className="rounded bg-success-tint px-1.5 py-0.5 text-success">
                       surveyed
                     </span>
                   ) : (
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-500">
+                    <span className="rounded bg-sunken px-1.5 py-0.5 text-fg-muted">
                       not surveyed
                     </span>
                   )}
@@ -124,28 +124,28 @@ export default function HouseholdDetailPanel({
             ))}
           </ul>
         ) : (
-          <div className="text-sm text-gray-500">No voters on file.</div>
+          <div className="text-sm text-fg-muted">No voters on file.</div>
         )}
       </div>
 
       <div className="px-4 py-3">
-        <div className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+        <div className="mb-2 text-xs uppercase tracking-wide text-fg-muted">
           Surveys ({h.surveys?.length || 0})
         </div>
         {h.surveys?.length ? (
           <div className="space-y-3">
             {h.surveys.map((s) => (
-              <div key={s.id} className="rounded border border-gray-200 p-3">
+              <div key={s.id} className="rounded border border-border p-3">
                 <div className="flex items-baseline justify-between gap-2 text-sm">
-                  <div className="font-medium text-gray-900">
+                  <div className="font-medium text-fg">
                     {s.voter?.fullName || 'Unknown voter'}
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-fg-muted">
                     {formatDateTime(s.submittedAt, zone)}
                   </div>
                 </div>
                 {s.canvasser && (
-                  <div className="mt-0.5 text-xs text-gray-500">
+                  <div className="mt-0.5 text-xs text-fg-muted">
                     by {s.canvasser.firstName} {s.canvasser.lastName}
                   </div>
                 )}
@@ -153,14 +153,14 @@ export default function HouseholdDetailPanel({
                   <dl className="mt-2 space-y-1">
                     {s.answers.map((a, i) => (
                       <div key={i} className="text-sm">
-                        <dt className="text-xs text-gray-500">{a.questionLabel}</dt>
-                        <dd className="text-gray-900">{formatAnswer(a.answer)}</dd>
+                        <dt className="text-xs text-fg-muted">{a.questionLabel}</dt>
+                        <dd className="text-fg">{formatAnswer(a.answer)}</dd>
                       </div>
                     ))}
                   </dl>
                 )}
                 {s.note && (
-                  <div className="mt-2 rounded bg-gray-50 px-2 py-1 text-xs italic text-gray-700">
+                  <div className="mt-2 rounded bg-sunken px-2 py-1 text-xs italic text-fg-muted">
                     “{s.note}”
                   </div>
                 )}
@@ -168,7 +168,7 @@ export default function HouseholdDetailPanel({
             ))}
           </div>
         ) : (
-          <div className="text-sm text-gray-500">No surveys at this household yet.</div>
+          <div className="text-sm text-fg-muted">No surveys at this household yet.</div>
         )}
       </div>
     </div>

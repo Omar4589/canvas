@@ -50,33 +50,33 @@ export default function OrgSwitcher() {
     <div className="relative mb-4">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-left text-sm hover:border-brand-300"
+        className="flex w-full items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-left text-sm hover:border-brand-accent/40"
       >
         <span className="truncate">
-          <span className="block text-[10px] uppercase tracking-wide text-gray-500">
+          <span className="block text-[10px] uppercase tracking-wide text-fg-muted">
             Organization
           </span>
-          <span className="block truncate font-medium text-gray-900">
+          <span className="block truncate font-medium text-fg">
             {active?.organizationName || 'Select…'}
           </span>
         </span>
-        <span className="ml-2 text-gray-400">▾</span>
+        <span className="ml-2 text-fg-subtle">▾</span>
       </button>
       {open && (
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-md border border-gray-200 bg-white shadow-lg">
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-md border border-border bg-card shadow-lg">
           {isSuperAdmin && (
-            <div className="border-b border-gray-100 px-1 py-1">
+            <div className="border-b border-border px-1 py-1">
               <button
                 onClick={pickPlatform}
                 className={[
                   'flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm',
                   !activeOrgId
-                    ? 'bg-brand-50 font-semibold text-brand-700'
-                    : 'hover:bg-gray-50',
+                    ? 'bg-brand-tint font-semibold text-brand-accent'
+                    : 'hover:bg-sunken',
                 ].join(' ')}
               >
                 <span>🌐 Platform view</span>
-                <span className="ml-2 text-[10px] uppercase tracking-wide text-gray-400">
+                <span className="ml-2 text-[10px] uppercase tracking-wide text-fg-subtle">
                   all orgs
                 </span>
               </button>
@@ -90,12 +90,12 @@ export default function OrgSwitcher() {
                   className={[
                     'flex w-full items-center justify-between px-3 py-2 text-left text-sm',
                     m.organizationId === activeOrgId
-                      ? 'bg-brand-50 text-brand-700'
-                      : 'hover:bg-gray-50',
+                      ? 'bg-brand-tint text-brand-accent'
+                      : 'hover:bg-sunken',
                   ].join(' ')}
                 >
                   <span className="truncate">{m.organizationName}</span>
-                  <span className="ml-2 text-[10px] uppercase tracking-wide text-gray-400">
+                  <span className="ml-2 text-[10px] uppercase tracking-wide text-fg-subtle">
                     {m.role}
                   </span>
                 </button>
@@ -103,13 +103,13 @@ export default function OrgSwitcher() {
             ))}
           </ul>
           {isSuperAdmin && (
-            <div className="border-t border-gray-100 px-1 py-1">
+            <div className="border-t border-border px-1 py-1">
               <button
                 onClick={() => {
                   setOpen(false);
                   navigate('/organizations');
                 }}
-                className="block w-full rounded px-2 py-1.5 text-left text-xs text-brand-600 hover:bg-brand-50"
+                className="block w-full rounded px-2 py-1.5 text-left text-xs text-brand-accent hover:bg-brand-tint"
               >
                 Manage organizations →
               </button>

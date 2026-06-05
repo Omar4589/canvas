@@ -31,10 +31,10 @@ export default function AddressSearch({ households = [], onSelect }) {
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder="Search address…"
-        className="w-full rounded border border-gray-200 bg-white px-3 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+        className="w-full rounded border border-border bg-card px-3 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       />
       {open && matches.length > 0 && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-card shadow-lg">
           {matches.map((h) => (
             <button
               key={h.id}
@@ -45,10 +45,10 @@ export default function AddressSearch({ households = [], onSelect }) {
                 setQ('');
                 setOpen(false);
               }}
-              className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-gray-50"
+              className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-sunken"
             >
-              <div className="truncate font-medium text-gray-900">{h.addressLine1}</div>
-              <div className="truncate text-xs text-gray-500">
+              <div className="truncate font-medium text-fg">{h.addressLine1}</div>
+              <div className="truncate text-xs text-fg-muted">
                 {h.city}, {h.state} {h.zipCode}
               </div>
             </button>

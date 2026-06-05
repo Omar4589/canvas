@@ -581,12 +581,12 @@ export default function MapPage() {
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold text-fg">Map</h1>
             {scopeLabel && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-tint px-2.5 py-0.5 text-xs font-medium text-brand-accent">
                 Showing: {scopeLabel}
                 <button
                   type="button"
                   onClick={clearScope}
-                  className="text-brand-700/70 hover:text-brand-700"
+                  className="text-brand-accent/70 hover:text-brand-accent"
                   aria-label="Clear scope"
                 >
                   ✕

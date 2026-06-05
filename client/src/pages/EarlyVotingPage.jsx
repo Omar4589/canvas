@@ -10,9 +10,9 @@ function fmt(n) {
 
 function Stat({ label, value, accent }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold ${accent || 'text-gray-900'}`}>{value}</div>
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
+      <div className={`mt-1 text-2xl font-semibold ${accent || 'text-fg'}`}>{value}</div>
     </div>
   );
 }
@@ -95,20 +95,20 @@ export default function EarlyVotingPage() {
   return (
     <div className="max-w-4xl">
       <h1 className="mb-2 text-2xl font-semibold">Early Voting</h1>
-      <p className="mb-6 text-sm text-gray-600">
+      <p className="mb-6 text-sm text-fg-muted">
         Upload a list of voters who have <strong>already voted</strong> (matched by Voter ID). They get a ✓ next to
         their name in the app, and a door drops off the books only once <strong>everyone</strong> there has voted.
         Nothing is re-cut — every upload is reversible.
       </p>
 
-      <section className="mb-8 rounded-lg border border-gray-200 bg-white p-5">
+      <section className="mb-8 rounded-lg border border-border bg-card p-5">
         <div className="mb-4 grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-700">Campaign</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Campaign</label>
             <select
               value={campaignId}
               onChange={(e) => { setCampaignId(e.target.value); setFile(null); preview.reset(); apply.reset(); }}
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+              className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">— Choose a campaign —</option>
               {campaigns.map((c) => (
@@ -119,7 +119,7 @@ export default function EarlyVotingPage() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-700">Voted-voters CSV</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Voted-voters CSV</label>
             <input
               type="file"
               accept=".csv"
@@ -127,32 +127,32 @@ export default function EarlyVotingPage() {
               onChange={(e) => onPickFile(e.target.files?.[0] || null)}
               className="block w-full text-sm disabled:opacity-50"
             />
-            {preview.isPending && <p className="mt-1 text-xs text-gray-500">Matching…</p>}
-            {preview.error && <p className="mt-1 text-xs text-red-700">{preview.error.message}</p>}
+            {preview.isPending && <p className="mt-1 text-xs text-fg-muted">Matching…</p>}
+            {preview.error && <p className="mt-1 text-xs text-danger">{preview.error.message}</p>}
           </div>
         </div>
 
         {pv && (
-          <div className="mb-4 rounded border border-gray-200 bg-gray-50 p-4 text-sm">
-            <div className="mb-2 text-xs text-gray-500">
+          <div className="mb-4 rounded border border-border bg-sunken p-4 text-sm">
+            <div className="mb-2 text-xs text-fg-muted">
               Matched on column <span className="font-mono font-medium">{pv.idColumn}</span> · {fmt(pv.idsInFile)} IDs in file
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div><span className="text-gray-500">Will mark voted</span><div className="text-lg font-semibold text-green-700">{fmt(pv.willMark)}</div></div>
-              <div><span className="text-gray-500">Already voted</span><div className="text-lg font-semibold text-gray-700">{fmt(pv.alreadyVoted)}</div></div>
-              <div><span className="text-gray-500">Doors that will drop</span><div className="text-lg font-semibold text-amber-700">{fmt(pv.doorsWillDrop)}</div></div>
-              <div><span className="text-gray-500">Not in this campaign</span><div className="text-lg font-semibold text-gray-400">{fmt(pv.notFound)}</div></div>
+              <div><span className="text-fg-muted">Will mark voted</span><div className="text-lg font-semibold text-success">{fmt(pv.willMark)}</div></div>
+              <div><span className="text-fg-muted">Already voted</span><div className="text-lg font-semibold text-fg-muted">{fmt(pv.alreadyVoted)}</div></div>
+              <div><span className="text-fg-muted">Doors that will drop</span><div className="text-lg font-semibold text-warning-fg">{fmt(pv.doorsWillDrop)}</div></div>
+              <div><span className="text-fg-muted">Not in this campaign</span><div className="text-lg font-semibold text-fg-subtle">{fmt(pv.notFound)}</div></div>
             </div>
             {pv.notFound > 0 && (
               <div className="mt-3">
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-fg-muted">
                   Not in this campaign yet — these are <strong>saved</strong>. If those voters get imported into this
                   campaign later, they're marked voted automatically (and their door drops once everyone there has voted).
                 </p>
                 <button
                   type="button"
                   onClick={downloadUnmatched}
-                  className="mt-1 text-xs font-semibold text-brand-700 hover:underline"
+                  className="mt-1 text-xs font-semibold text-brand-accent hover:underline"
                 >
                   Download {fmt(pv.notFound)} unmatched ID{pv.notFound === 1 ? '' : 's'}
                 </button>
@@ -169,14 +169,14 @@ export default function EarlyVotingPage() {
           {apply.isPending ? 'Applying…' : 'Mark these voters voted'}
         </button>
         {apply.error && (
-          <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{apply.error.message}</div>
+          <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{apply.error.message}</div>
         )}
         {apply.data && (
-          <div className="mt-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+          <div className="mt-3 rounded border border-success/30 bg-success-tint px-3 py-2 text-sm text-green-800">
             Marked {fmt(apply.data.marked)} voters voted · {fmt(apply.data.doorsDropped)} doors dropped
             {apply.data.notFound ? ` · ${fmt(apply.data.notFound)} not in this campaign` : ''}.
             {apply.data.notFound ? (
-              <span className="mt-1 block text-xs text-green-700">
+              <span className="mt-1 block text-xs text-success">
                 The {fmt(apply.data.notFound)} not in this campaign are saved — they'll be marked automatically when
                 those voters are imported into this campaign.
               </span>
@@ -188,14 +188,14 @@ export default function EarlyVotingPage() {
       {campaignId && (
         <>
           <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <Stat label="Voters marked voted" value={fmt(historyQ.data?.totalVoted)} accent="text-green-700" />
-            <Stat label="Doors fully voted" value={fmt(historyQ.data?.fullyVotedDoors)} accent="text-amber-700" />
+            <Stat label="Voters marked voted" value={fmt(historyQ.data?.totalVoted)} accent="text-success" />
+            <Stat label="Doors fully voted" value={fmt(historyQ.data?.fullyVotedDoors)} accent="text-warning-fg" />
           </div>
 
           <h2 className="mb-3 text-base font-medium">Upload history</h2>
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
             <table className="min-w-full text-sm">
-              <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+              <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
                 <tr>
                   <th className="px-4 py-2 text-left">When</th>
                   <th className="px-4 py-2 text-left">File</th>
@@ -207,7 +207,7 @@ export default function EarlyVotingPage() {
               </thead>
               <tbody>
                 {(historyQ.data?.uploads || []).map((u) => (
-                  <tr key={u._id} className={`border-t border-gray-100 ${u.undone ? 'text-gray-400' : ''}`}>
+                  <tr key={u._id} className={`border-t border-border ${u.undone ? 'text-fg-subtle' : ''}`}>
                     <td className="px-4 py-2">{formatInTz(u.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
                     <td className="px-4 py-2">{u.fileName || '—'}</td>
                     <td className="px-4 py-2 text-right">{fmt(u.matched)}</td>
@@ -220,7 +220,7 @@ export default function EarlyVotingPage() {
                         <button
                           onClick={() => undo.mutate(u._id)}
                           disabled={undo.isPending}
-                          className="text-xs font-semibold text-brand-700 hover:underline disabled:opacity-60"
+                          className="text-xs font-semibold text-brand-accent hover:underline disabled:opacity-60"
                         >
                           Undo
                         </button>
@@ -229,19 +229,19 @@ export default function EarlyVotingPage() {
                   </tr>
                 ))}
                 {!historyQ.data?.uploads?.length && (
-                  <tr><td colSpan="6" className="px-4 py-6 text-center text-gray-500">No uploads yet.</td></tr>
+                  <tr><td colSpan="6" className="px-4 py-6 text-center text-fg-muted">No uploads yet.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-xs text-gray-500">
+          <p className="mt-2 text-xs text-fg-muted">
             <strong>Not found</strong> voters aren't lost — they're saved and marked automatically if those voters are
             later imported into this campaign.
           </p>
 
-          <section className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
+          <section className="mt-6 rounded-lg border border-border bg-card p-4">
             <h2 className="mb-1 text-base font-medium">Un-mark a voter</h2>
-            <p className="mb-3 text-xs text-gray-600">
+            <p className="mb-3 text-xs text-fg-muted">
               Marked someone voted by mistake? Enter their Voter ID to un-mark them — the door
               re-opens if everyone there is no longer voted.
             </p>
@@ -250,19 +250,19 @@ export default function EarlyVotingPage() {
                 value={unmarkId}
                 onChange={(e) => setUnmarkId(e.target.value)}
                 placeholder="Voter ID"
-                className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+                className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               />
               <button
                 onClick={() => unmarkId.trim() && unmark.mutate(unmarkId.trim())}
                 disabled={!unmarkId.trim() || unmark.isPending}
-                className="rounded-md bg-gray-800 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-700 disabled:opacity-60"
+                className="rounded-md bg-fg px-3 py-2 text-sm font-semibold text-card transition-colors hover:bg-fg-muted disabled:opacity-60"
               >
                 {unmark.isPending ? 'Un-marking…' : 'Un-mark'}
               </button>
             </div>
-            {unmark.error && <p className="mt-2 text-xs text-red-700">{unmark.error.message}</p>}
+            {unmark.error && <p className="mt-2 text-xs text-danger">{unmark.error.message}</p>}
             {unmark.data && (
-              <p className="mt-2 text-xs text-green-700">
+              <p className="mt-2 text-xs text-success">
                 Un-marked.{unmark.data.reopened ? ' Door re-opened.' : ''}
               </p>
             )}

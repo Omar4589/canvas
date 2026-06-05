@@ -25,9 +25,9 @@ function answerText(a) {
 
 function Section({ title, right, children }) {
   return (
-    <section className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
+    <section className="mb-6 rounded-lg border border-border bg-card p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+        <h2 className="text-base font-semibold text-fg">{title}</h2>
         {right}
       </div>
       {children}
@@ -66,7 +66,7 @@ function VoterFields({ voter, onSave, saving, tz }) {
       <Section
         title="Identity & contact"
         right={
-          <button onClick={startEdit} className="text-sm font-medium text-brand-700 hover:underline">
+          <button onClick={startEdit} className="text-sm font-medium text-brand-accent hover:underline">
             Edit
           </button>
         }
@@ -77,7 +77,7 @@ function VoterFields({ voter, onSave, saving, tz }) {
           <Detail label="Date of birth" value={fmtDate(voter.dateOfBirth, tz, false)} />
         </dl>
         {voter.lastEditedAt && (
-          <p className="mt-3 text-xs text-gray-400">
+          <p className="mt-3 text-xs text-fg-subtle">
             Last edited {fmtDate(voter.lastEditedAt, tz)}{voter.lastEditedBy ? ` by ${voter.lastEditedBy.name}` : ''}
           </p>
         )}
@@ -90,12 +90,12 @@ function VoterFields({ voter, onSave, saving, tz }) {
       <form onSubmit={submit}>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
           {EDIT_FIELDS.map(([k, label]) => (
-            <label key={k} className="block text-xs font-medium text-gray-600">
+            <label key={k} className="block text-xs font-medium text-fg-muted">
               {label}
               <input
                 value={form[k] ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))}
-                className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand-600 focus:outline-none"
+                className="mt-1 w-full rounded border border-border-strong px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none"
               />
             </label>
           ))}
@@ -104,7 +104,7 @@ function VoterFields({ voter, onSave, saving, tz }) {
           <button type="submit" disabled={saving} className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
             {saving ? 'Saving…' : 'Save'}
           </button>
-          <button type="button" onClick={() => setEdit(false)} className="rounded-md border border-gray-300 px-4 py-2 text-sm">
+          <button type="button" onClick={() => setEdit(false)} className="rounded-md border border-border-strong px-4 py-2 text-sm">
             Cancel
           </button>
         </div>
@@ -116,8 +116,8 @@ function VoterFields({ voter, onSave, saving, tz }) {
 function Detail({ label, value, mono }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-gray-400">{label}</dt>
-      <dd className={'text-gray-900 ' + (mono ? 'font-mono text-xs' : '')}>{value || '—'}</dd>
+      <dt className="text-xs uppercase tracking-wide text-fg-subtle">{label}</dt>
+      <dd className={'text-fg ' + (mono ? 'font-mono text-xs' : '')}>{value || '—'}</dd>
     </div>
   );
 }
@@ -150,15 +150,15 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
+    <div className="rounded-lg border border-border p-4">
       <div className="mb-2 flex items-center justify-between">
-        <div className="text-sm font-medium text-gray-900">
-          {survey.templateName || 'Survey'} <span className="text-xs font-normal text-gray-400">· {fmtDate(survey.submittedAt, tz)}{survey.by ? ` · ${survey.by.name}` : ''}</span>
+        <div className="text-sm font-medium text-fg">
+          {survey.templateName || 'Survey'} <span className="text-xs font-normal text-fg-subtle">· {fmtDate(survey.submittedAt, tz)}{survey.by ? ` · ${survey.by.name}` : ''}</span>
         </div>
         {!edit && (
           <div className="flex gap-3 text-sm">
-            <button onClick={startEdit} className="font-medium text-brand-700 hover:underline">Edit</button>
-            <button onClick={() => onDelete()} disabled={busy} className="font-medium text-red-600 hover:underline disabled:opacity-50">Delete</button>
+            <button onClick={startEdit} className="font-medium text-brand-accent hover:underline">Edit</button>
+            <button onClick={() => onDelete()} disabled={busy} className="font-medium text-danger hover:underline disabled:opacity-50">Delete</button>
           </div>
         )}
       </div>
@@ -168,12 +168,12 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
           <dl className="space-y-1.5 text-sm">
             {survey.answers.map((a) => (
               <div key={a.questionKey} className="flex gap-2">
-                <dt className="text-gray-500">{a.questionLabel}:</dt>
-                <dd className="font-medium text-gray-900">{answerText(a.answer)}</dd>
+                <dt className="text-fg-muted">{a.questionLabel}:</dt>
+                <dd className="font-medium text-fg">{answerText(a.answer)}</dd>
               </div>
             ))}
           </dl>
-          {survey.note && <p className="mt-2 rounded bg-gray-50 p-2 text-sm text-gray-700">📝 {survey.note}</p>}
+          {survey.note && <p className="mt-2 rounded bg-sunken p-2 text-sm text-fg-muted">📝 {survey.note}</p>}
           {survey.editedAt && (
             <p className="mt-2 text-xs text-amber-600">Edited {fmtDate(survey.editedAt, tz)}{survey.editedBy ? ` by ${survey.editedBy.name}` : ''}</p>
           )}
@@ -182,12 +182,12 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
         <div className="space-y-3">
           {survey.questions.map((q) => (
             <div key={q.key}>
-              <div className="mb-1 text-xs font-medium text-gray-600">{q.label}</div>
+              <div className="mb-1 text-xs font-medium text-fg-muted">{q.label}</div>
               {q.type === 'single_choice' ? (
                 <select
                   value={vals[q.key] ?? ''}
                   onChange={(e) => setVals((v) => ({ ...v, [q.key]: e.target.value }))}
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                  className="w-full rounded border border-border-strong px-2 py-1.5 text-sm"
                 >
                   <option value="">—</option>
                   {q.options.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -205,18 +205,18 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
                 <input
                   value={vals[q.key] ?? ''}
                   onChange={(e) => setVals((v) => ({ ...v, [q.key]: e.target.value }))}
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                  className="w-full rounded border border-border-strong px-2 py-1.5 text-sm"
                 />
               )}
             </div>
           ))}
-          <label className="block text-xs font-medium text-gray-600">
+          <label className="block text-xs font-medium text-fg-muted">
             Note
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="mt-1 w-full rounded border border-border-strong px-2 py-1.5 text-sm" />
           </label>
           <div className="flex gap-2">
             <button onClick={submit} disabled={busy} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">Save</button>
-            <button onClick={() => setEdit(false)} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm">Cancel</button>
+            <button onClick={() => setEdit(false)} className="rounded-md border border-border-strong px-3 py-1.5 text-sm">Cancel</button>
           </div>
         </div>
       )}
@@ -260,8 +260,8 @@ export default function VoterDetailPage() {
     onSuccess: invalidate, onError: onErr,
   });
 
-  if (profileQ.isLoading) return <div className="p-6 text-sm text-gray-500">Loading…</div>;
-  if (profileQ.error) return <div className="p-6 text-sm text-red-700">Error: {profileQ.error.message}</div>;
+  if (profileQ.isLoading) return <div className="p-6 text-sm text-fg-muted">Loading…</div>;
+  if (profileQ.error) return <div className="p-6 text-sm text-danger">Error: {profileQ.error.message}</div>;
 
   const p = profileQ.data;
   const v = p.voter;
@@ -269,18 +269,18 @@ export default function VoterDetailPage() {
 
   return (
     <div className="max-w-4xl">
-      <Link to="/voters" className="text-sm font-medium text-brand-700 hover:underline">‹ Voters</Link>
+      <Link to="/voters" className="text-sm font-medium text-brand-accent hover:underline">‹ Voters</Link>
       <div className="mb-6 mt-1 flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold text-gray-900">{v.fullName}</h1>
-        <span className="font-mono text-xs text-gray-400">{v.stateVoterId}</span>
-        {v.party && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{v.party}</span>}
-        <span className={'rounded-full px-2 py-0.5 text-xs font-medium ' + (v.surveyStatus === 'surveyed' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500')}>
+        <h1 className="text-2xl font-semibold text-fg">{v.fullName}</h1>
+        <span className="font-mono text-xs text-fg-subtle">{v.stateVoterId}</span>
+        {v.party && <span className="rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted">{v.party}</span>}
+        <span className={'rounded-full px-2 py-0.5 text-xs font-medium ' + (v.surveyStatus === 'surveyed' ? 'bg-success-tint text-success' : 'bg-sunken text-fg-muted')}>
           {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
         </span>
-        {p.voted?.isVoted && <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700">✓ Voted</span>}
+        {p.voted?.isVoted && <span className="rounded-full bg-teal-500/15 px-2 py-0.5 text-xs font-medium text-teal-600">✓ Voted</span>}
       </div>
 
-      {err && <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+      {err && <div className="mb-4 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{err}</div>}
 
       <VoterFields
         voter={v}
@@ -291,33 +291,33 @@ export default function VoterDetailPage() {
 
       <Section title="Household & campaign">
         {h ? (
-          <div className="text-sm text-gray-700">
-            <p className="font-medium text-gray-900">{h.addressLine1}{h.addressLine2 ? `, ${h.addressLine2}` : ''}</p>
+          <div className="text-sm text-fg-muted">
+            <p className="font-medium text-fg">{h.addressLine1}{h.addressLine2 ? `, ${h.addressLine2}` : ''}</p>
             <p>{h.city}, {h.state} {h.zipCode}</p>
-            <p className="mt-1 text-gray-500">
-              Campaign: {h.campaign ? <Link to={`/dashboard/${h.campaign.id}`} className="text-brand-700 hover:underline">{h.campaign.name}</Link> : '—'}
+            <p className="mt-1 text-fg-muted">
+              Campaign: {h.campaign ? <Link to={`/dashboard/${h.campaign.id}`} className="text-brand-accent hover:underline">{h.campaign.name}</Link> : '—'}
               {h.fullyVoted && <span className="ml-2 text-teal-600">· fully voted</span>}
             </p>
             {h.members.length > 0 && (
               <div className="mt-3">
-                <div className="text-xs uppercase tracking-wide text-gray-400">Household members</div>
+                <div className="text-xs uppercase tracking-wide text-fg-subtle">Household members</div>
                 <ul className="mt-1 space-y-1">
                   {h.members.map((m) => (
                     <li key={m.id}>
-                      <Link to={`/voters/${m.id}`} className="text-brand-700 hover:underline">{m.fullName}</Link>
-                      <span className="text-gray-400"> · {m.surveyStatus === 'surveyed' ? 'surveyed' : 'not surveyed'}{m.voted ? ' · voted' : ''}</span>
+                      <Link to={`/voters/${m.id}`} className="text-brand-accent hover:underline">{m.fullName}</Link>
+                      <span className="text-fg-subtle"> · {m.surveyStatus === 'surveyed' ? 'surveyed' : 'not surveyed'}{m.voted ? ' · voted' : ''}</span>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
           </div>
-        ) : <p className="text-sm text-gray-500">No household on file.</p>}
+        ) : <p className="text-sm text-fg-muted">No household on file.</p>}
       </Section>
 
       <Section title={`Survey responses (${p.surveys.length})`}>
         {p.surveys.length === 0 ? (
-          <p className="text-sm text-gray-500">No survey responses.</p>
+          <p className="text-sm text-fg-muted">No survey responses.</p>
         ) : (
           <div className="space-y-3">
             {p.surveys.map((s) => (
@@ -341,7 +341,7 @@ export default function VoterDetailPage() {
             onChange={(e) => setNewNote(e.target.value)}
             rows={2}
             placeholder="Add a note about this voter…"
-            className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none"
+            className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none"
           />
           <button
             onClick={() => newNote.trim() && addNote.mutate(newNote.trim())}
@@ -354,24 +354,24 @@ export default function VoterDetailPage() {
         {p.notes.admin.length > 0 && (
           <ul className="space-y-2">
             {p.notes.admin.map((n) => (
-              <li key={n.id} className="rounded border border-gray-100 bg-gray-50 p-3 text-sm">
+              <li key={n.id} className="rounded border border-border bg-sunken p-3 text-sm">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="whitespace-pre-wrap text-gray-800">{n.body}</p>
-                  <button onClick={() => delNote.mutate(n.id)} className="shrink-0 text-xs text-red-600 hover:underline">Delete</button>
+                  <p className="whitespace-pre-wrap text-fg">{n.body}</p>
+                  <button onClick={() => delNote.mutate(n.id)} className="shrink-0 text-xs text-danger hover:underline">Delete</button>
                 </div>
-                <p className="mt-1 text-xs text-gray-400">{n.author ? n.author.name : 'Unknown'} · {fmtDate(n.createdAt, orgTz)}{n.editedAt ? ' · edited' : ''}</p>
+                <p className="mt-1 text-xs text-fg-subtle">{n.author ? n.author.name : 'Unknown'} · {fmtDate(n.createdAt, orgTz)}{n.editedAt ? ' · edited' : ''}</p>
               </li>
             ))}
           </ul>
         )}
         {p.notes.field.length > 0 && (
           <div className="mt-4">
-            <div className="mb-1 text-xs uppercase tracking-wide text-gray-400">From the field (read-only)</div>
+            <div className="mb-1 text-xs uppercase tracking-wide text-fg-subtle">From the field (read-only)</div>
             <ul className="space-y-2">
               {p.notes.field.map((n) => (
-                <li key={`${n.source}-${n.id}`} className="rounded border border-gray-100 p-3 text-sm">
-                  <p className="whitespace-pre-wrap text-gray-800">{n.note}</p>
-                  <p className="mt-1 text-xs text-gray-400">{n.source === 'survey' ? 'Survey' : n.actionType} · {n.by ? n.by.name : 'Unknown'} · {fmtDate(n.timestamp, orgTz)}</p>
+                <li key={`${n.source}-${n.id}`} className="rounded border border-border p-3 text-sm">
+                  <p className="whitespace-pre-wrap text-fg">{n.note}</p>
+                  <p className="mt-1 text-xs text-fg-subtle">{n.source === 'survey' ? 'Survey' : n.actionType} · {n.by ? n.by.name : 'Unknown'} · {fmtDate(n.timestamp, orgTz)}</p>
                 </li>
               ))}
             </ul>
@@ -381,14 +381,14 @@ export default function VoterDetailPage() {
 
       <Section title="Canvass activity">
         {p.activity.length === 0 ? (
-          <p className="text-sm text-gray-500">No canvass activity at this household.</p>
+          <p className="text-sm text-fg-muted">No canvass activity at this household.</p>
         ) : (
           <ul className="space-y-1.5 text-sm">
             {p.activity.map((a) => (
-              <li key={a.id} className="flex flex-wrap gap-x-2 text-gray-700">
-                <span className="font-medium text-gray-900">{a.actionType.replace('_', ' ')}</span>
-                <span className="text-gray-400">· {fmtDate(a.timestamp, orgTz)}{a.by ? ` · ${a.by.name}` : ''}</span>
-                {a.note && <span className="text-gray-500">— {a.note}</span>}
+              <li key={a.id} className="flex flex-wrap gap-x-2 text-fg-muted">
+                <span className="font-medium text-fg">{a.actionType.replace('_', ' ')}</span>
+                <span className="text-fg-subtle">· {fmtDate(a.timestamp, orgTz)}{a.by ? ` · ${a.by.name}` : ''}</span>
+                {a.note && <span className="text-fg-muted">— {a.note}</span>}
               </li>
             ))}
           </ul>

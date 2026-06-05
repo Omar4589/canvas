@@ -12,14 +12,14 @@ export default function QueuesPage() {
   });
 
   if (ticketQ.isLoading) {
-    return <div className="p-6 text-sm text-gray-500">Loading job console…</div>;
+    return <div className="p-6 text-sm text-fg-muted">Loading job console…</div>;
   }
   if (ticketQ.error) {
     const msg = ticketQ.error.status === 403 ? 'The job console is super-admin only.' : ticketQ.error.message;
     return (
       <div className="p-6">
         <h1 className="mb-3 text-2xl font-semibold">Jobs</h1>
-        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{msg}</div>
+        <div className="rounded border border-warning/30 bg-warning-tint px-3 py-2 text-sm text-warning-fg">{msg}</div>
       </div>
     );
   }

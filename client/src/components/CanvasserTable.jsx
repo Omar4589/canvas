@@ -4,16 +4,16 @@ import { formatInTz } from '../lib/datetime.js';
 export default function CanvasserTable({ rows = [], onRowClick, tz }) {
   if (!rows.length) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">
+      <div className="rounded-lg border border-border bg-card p-6 text-center text-sm text-fg-muted">
         No canvasser activity in this range.
       </div>
     );
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-      <table className="min-w-full divide-y divide-gray-200 text-sm">
-        <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <table className="min-w-full divide-y divide-border text-sm">
+        <thead className="bg-sunken text-left text-xs uppercase tracking-wide text-fg-muted">
           <tr>
             <th className="px-4 py-2 font-medium">Canvasser</th>
             <th className="px-4 py-2 text-right font-medium">Surveys</th>
@@ -25,37 +25,37 @@ export default function CanvasserTable({ rows = [], onRowClick, tz }) {
             <th className="px-4 py-2 text-right font-medium">Last activity</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-border">
           {rows.map((r) => (
             <tr
               key={r.userId}
               onClick={() => onRowClick?.(r)}
-              className="cursor-pointer transition-colors hover:bg-gray-50"
+              className="cursor-pointer transition-colors hover:bg-sunken"
             >
               <td className="px-4 py-2">
-                <div className="font-medium text-gray-900">
+                <div className="font-medium text-fg">
                   {r.firstName} {r.lastName}
                   {!r.isActive && (
-                    <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                    <span className="ml-2 rounded bg-sunken px-1.5 py-0.5 text-xs text-fg-muted">
                       inactive
                     </span>
                   )}
                 </div>
-                <div className="text-xs text-gray-500">{r.email}</div>
+                <div className="text-xs text-fg-muted">{r.email}</div>
               </td>
-              <td className="px-4 py-2 text-right tabular-nums font-semibold text-gray-900">
+              <td className="px-4 py-2 text-right tabular-nums font-semibold text-fg">
                 {r.surveysSubmitted}
               </td>
-              <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.litDropped || 0}</td>
-              <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.notHome}</td>
-              <td className="px-4 py-2 text-right tabular-nums text-gray-700">{r.wrongAddress}</td>
-              <td className="px-4 py-2 text-right tabular-nums font-semibold text-gray-900">
+              <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{r.litDropped || 0}</td>
+              <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{r.notHome}</td>
+              <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{r.wrongAddress}</td>
+              <td className="px-4 py-2 text-right tabular-nums font-semibold text-fg">
                 {r.knocks ?? r.homesKnocked}
               </td>
-              <td className="px-4 py-2 text-right tabular-nums text-gray-700">
+              <td className="px-4 py-2 text-right tabular-nums text-fg-muted">
                 {r.connectionRate != null ? ratePct(r.connectionRate) : '—'}
               </td>
-              <td className="px-4 py-2 text-right text-xs text-gray-500">
+              <td className="px-4 py-2 text-right text-xs text-fg-muted">
                 {formatInTz(r.lastActivityAt, tz) || '—'}
               </td>
             </tr>

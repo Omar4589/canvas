@@ -10,11 +10,11 @@ function fmt(n) {
 
 function StatusBadge({ job }) {
   const cls = {
-    pending: 'bg-gray-100 text-gray-700',
-    parsing: 'bg-yellow-100 text-yellow-800',
-    completed: 'bg-green-100 text-green-700',
-    failed: 'bg-red-100 text-red-700',
-  }[job.status] || 'bg-gray-100 text-gray-700';
+    pending: 'bg-sunken text-fg-muted',
+    parsing: 'bg-warning-tint text-warning-fg',
+    completed: 'bg-success-tint text-success',
+    failed: 'bg-danger-tint text-danger',
+  }[job.status] || 'bg-sunken text-fg-muted';
   const showPct = (job.status === 'parsing' || job.status === 'pending') && job.progress != null;
   return (
     <span className={`rounded px-2 py-0.5 text-xs ${cls}`}>
@@ -29,9 +29,9 @@ const addr1 = (norm) => String(norm || '').split('|')[0];
 function DiffStat({ label, value, amber }) {
   const hot = amber && value > 0;
   return (
-    <div className={`rounded border p-3 ${hot ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`}>
-      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
-      <div className={`mt-1 text-xl font-semibold ${hot ? 'text-amber-700' : 'text-gray-900'}`}>{fmt(value)}</div>
+    <div className={`rounded border p-3 ${hot ? 'border-warning/30 bg-warning-tint' : 'border-border bg-card'}`}>
+      <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
+      <div className={`mt-1 text-xl font-semibold ${hot ? 'text-warning-fg' : 'text-fg'}`}>{fmt(value)}</div>
     </div>
   );
 }
@@ -39,9 +39,9 @@ function DiffStat({ label, value, amber }) {
 function SampleList({ title, count, children }) {
   if (!count) return null;
   return (
-    <details className="rounded border border-gray-200 bg-white">
+    <details className="rounded border border-border bg-card">
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{title} ({fmt(count)})</summary>
-      <div className="border-t border-gray-100 px-3 py-2 text-xs text-gray-700">{children}</div>
+      <div className="border-t border-border px-3 py-2 text-xs text-fg-muted">{children}</div>
     </details>
   );
 }
@@ -51,7 +51,7 @@ function ReviewPanel({ diff }) {
   const skipped = rowIssues.missingRequired + rowIssues.noCoordinates + rowIssues.duplicateInFile;
   const hasWarnings = totals.movedVoters > 0 || totals.orphanedDoors > 0 || totals.nearDuplicates > 0;
   return (
-    <div className="mb-4 rounded border border-gray-200 bg-gray-50 p-4">
+    <div className="mb-4 rounded border border-border bg-sunken p-4">
       <h3 className="mb-3 text-sm font-medium">Review changes before importing</h3>
       <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
         <DiffStat label="New doors" value={totals.newDoors} />
@@ -65,7 +65,7 @@ function ReviewPanel({ diff }) {
       </div>
 
       {hasWarnings && (
-        <p className="mt-3 text-xs text-amber-700">
+        <p className="mt-3 text-xs text-warning-fg">
           Amber items are worth a look before you confirm: voters changing addresses, doors that will be
           emptied (and dropped from the field), and addresses that look like re-spellings of existing ones.
         </p>
@@ -80,7 +80,7 @@ function ReviewPanel({ diff }) {
               </li>
             ))}
             {totals.movedVoters > samples.moved.length && (
-              <li className="text-gray-400">+{fmt(totals.movedVoters - samples.moved.length)} more</li>
+              <li className="text-fg-subtle">+{fmt(totals.movedVoters - samples.moved.length)} more</li>
             )}
           </ul>
         </SampleList>
@@ -90,7 +90,7 @@ function ReviewPanel({ diff }) {
               <li key={i}>{addr1(o.address)} ({fmt(o.voterCount)} voter{o.voterCount === 1 ? '' : 's'} leaving)</li>
             ))}
             {totals.orphanedDoors > samples.orphans.length && (
-              <li className="text-gray-400">+{fmt(totals.orphanedDoors - samples.orphans.length)} more</li>
+              <li className="text-fg-subtle">+{fmt(totals.orphanedDoors - samples.orphans.length)} more</li>
             )}
           </ul>
         </SampleList>
@@ -100,7 +100,7 @@ function ReviewPanel({ diff }) {
               <li key={i}>{addr1(n.newAddress)} ↔ {addr1(n.existingAddress)}</li>
             ))}
             {totals.nearDuplicates > samples.nearDups.length && (
-              <li className="text-gray-400">+{fmt(totals.nearDuplicates - samples.nearDups.length)} more</li>
+              <li className="text-fg-subtle">+{fmt(totals.nearDuplicates - samples.nearDups.length)} more</li>
             )}
           </ul>
         </SampleList>
@@ -257,16 +257,16 @@ export default function ImportPage() {
       <h1 className="mb-6 text-2xl font-semibold">CSV Import</h1>
 
       {workerOffline && (
-        <div className="mb-6 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <div className="mb-6 rounded-md border border-danger/40 bg-danger-tint px-4 py-3 text-sm text-red-800">
           <strong>The import worker appears to be offline.</strong> Queued imports won't run until the
-          worker dyno is back on (Heroku → Resources → <code className="rounded bg-red-100 px-1">worker</code>).
+          worker dyno is back on (Heroku → Resources → <code className="rounded bg-danger-tint px-1">worker</code>).
           {workerStatusQ.data?.waiting > 0 && ` ${fmt(workerStatusQ.data.waiting)} import(s) waiting.`}
         </div>
       )}
 
-      <section className="mb-8 rounded-lg border border-gray-200 bg-white p-5">
+      <section className="mb-8 rounded-lg border border-border bg-card p-5">
         <h2 className="mb-3 text-base font-medium">Upload voter CSV</h2>
-        <p className="mb-4 text-sm text-gray-600">
+        <p className="mb-4 text-sm text-fg-muted">
           Each upload is scoped to a single campaign and runs in the background. Map your vendor's
           columns to our fields (i360, L2, a state file, …) — re-uploading is safe and won't lose
           canvass activity. New households fold in via the books editor, not automatically.
@@ -274,11 +274,11 @@ export default function ImportPage() {
 
         <div className="mb-4 grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-700">Campaign</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Campaign</label>
             <select
               value={campaignId}
               onChange={(e) => { setCampaignId(e.target.value); dropReview(); }}
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+              className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">— Choose a campaign —</option>
               {campaigns.map((c) => (
@@ -288,29 +288,29 @@ export default function ImportPage() {
               ))}
             </select>
             {!campaignsQ.isLoading && !campaigns.length && (
-              <p className="mt-1 text-xs text-amber-700">
+              <p className="mt-1 text-xs text-warning-fg">
                 No active campaigns. Create one on the Campaigns page first.
               </p>
             )}
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-700">CSV file</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">CSV file</label>
             <input
               type="file"
               accept=".csv"
               onChange={(e) => onPickFile(e.target.files?.[0] || null)}
               className="block w-full text-sm"
             />
-            {preview.isPending && <p className="mt-1 text-xs text-gray-500">Reading columns…</p>}
+            {preview.isPending && <p className="mt-1 text-xs text-fg-muted">Reading columns…</p>}
             {preview.error && (
-              <p className="mt-1 text-xs text-red-700">{preview.error.message}</p>
+              <p className="mt-1 text-xs text-danger">{preview.error.message}</p>
             )}
           </div>
         </div>
 
         {step === 'map' && (
-          <div className="mb-4 rounded border border-gray-200 bg-gray-50 p-4">
+          <div className="mb-4 rounded border border-border bg-sunken p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-medium">Map columns → fields</h3>
               <div className="flex items-center gap-2">
@@ -325,7 +325,7 @@ export default function ImportPage() {
                     }
                     e.target.value = '';
                   }}
-                  className="rounded border border-gray-300 px-2 py-1 text-xs"
+                  className="rounded border border-border-strong px-2 py-1 text-xs"
                 >
                   <option value="">Apply a saved mapping…</option>
                   <option value="default">Built-in (current format)</option>
@@ -341,15 +341,15 @@ export default function ImportPage() {
                 const isReqUnmapped = f.required && !mapping[f.key];
                 return (
                   <div key={f.key} className="flex items-center gap-2 text-sm">
-                    <label className="w-40 shrink-0 text-gray-700">
+                    <label className="w-40 shrink-0 text-fg-muted">
                       {f.label}
-                      {f.required && <span className="text-red-600"> *</span>}
+                      {f.required && <span className="text-danger"> *</span>}
                     </label>
                     <select
                       value={mapping[f.key] || ''}
                       onChange={(e) => { setMapping((m) => ({ ...m, [f.key]: e.target.value || undefined })); dropReview(); }}
                       className={`min-w-0 flex-1 rounded border px-2 py-1 text-xs ${
-                        isReqUnmapped ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                        isReqUnmapped ? 'border-danger/40 bg-danger-tint' : 'border-border-strong'
                       }`}
                     >
                       <option value="">— not mapped —</option>
@@ -363,7 +363,7 @@ export default function ImportPage() {
             </div>
 
             {requiredUnmapped.length > 0 && (
-              <p className="mt-3 text-xs text-red-700">
+              <p className="mt-3 text-xs text-danger">
                 Map all required (*) fields to continue: {requiredUnmapped.join(', ')}
               </p>
             )}
@@ -373,12 +373,12 @@ export default function ImportPage() {
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
                 placeholder="Save this mapping as… (e.g. i360)"
-                className="rounded border border-gray-300 px-2 py-1 text-xs"
+                className="rounded border border-border-strong px-2 py-1 text-xs"
               />
               <button
                 onClick={() => profileName.trim() && saveProfile.mutate({ name: profileName.trim(), mapping })}
                 disabled={!profileName.trim() || saveProfile.isPending}
-                className="rounded border border-gray-300 px-3 py-1 text-xs font-medium hover:bg-gray-100 disabled:opacity-60"
+                className="rounded border border-border-strong px-3 py-1 text-xs font-medium hover:bg-sunken disabled:opacity-60"
               >
                 {saveProfile.isPending ? 'Saving…' : 'Save profile'}
               </button>
@@ -392,7 +392,7 @@ export default function ImportPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setStep('map')}
-              className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              className="rounded border border-border-strong px-4 py-2 text-sm font-medium hover:bg-sunken"
             >
               Back
             </button>
@@ -414,17 +414,17 @@ export default function ImportPage() {
           </button>
         )}
         {previewDiff.error && (
-          <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
             {previewDiff.error.message}
           </div>
         )}
         {upload.error && (
-          <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
             {upload.error.message}
           </div>
         )}
         {upload.data?.job && (
-          <div className="mt-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+          <div className="mt-3 rounded border border-success/30 bg-success-tint px-3 py-2 text-sm text-green-800">
             Import queued — processing in the background. Progress shows below.
           </div>
         )}
@@ -432,7 +432,7 @@ export default function ImportPage() {
 
       <h2 className="mb-3 text-base font-medium">Recent imports</h2>
       {undo.data && (
-        <div className="mb-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+        <div className="mb-3 rounded border border-success/30 bg-success-tint px-3 py-2 text-sm text-green-800">
           Undo complete — removed {fmt(undo.data.doorsDeleted)} door(s) and {fmt(undo.data.votersDeleted)} voter(s).
           {(undo.data.doorsSkipped > 0 || undo.data.votersSkipped > 0)
             ? ` Kept ${fmt(undo.data.doorsSkipped)} door(s) and ${fmt(undo.data.votersSkipped)} voter(s) already in use.`
@@ -440,14 +440,14 @@ export default function ImportPage() {
         </div>
       )}
       {undo.error && (
-        <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{undo.error.message}</div>
+        <div className="mb-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{undo.error.message}</div>
       )}
       {isLoading ? (
         <div>Loading…</div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+            <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
               <tr>
                 <th className="px-4 py-2 text-left">When</th>
                 <th className="px-4 py-2 text-left">Campaign</th>
@@ -463,8 +463,8 @@ export default function ImportPage() {
             </thead>
             <tbody>
               {(data?.jobs || []).map((j) => (
-                <tr key={j._id} className="border-t border-gray-100">
-                  <td className="px-4 py-2 text-gray-600">{formatInTz(j.createdAt, orgTz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
+                <tr key={j._id} className="border-t border-border">
+                  <td className="px-4 py-2 text-fg-muted">{formatInTz(j.createdAt, orgTz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
                   <td className="px-4 py-2">{j.campaignId?.name || '—'}</td>
                   <td className="px-4 py-2">{j.filename || '—'}</td>
                   <td className="px-4 py-2"><StatusBadge job={j} /></td>
@@ -475,18 +475,18 @@ export default function ImportPage() {
                   <td className="px-4 py-2 text-right">{fmt(j.errorCount)}</td>
                   <td className="px-4 py-2 text-right">
                     {j.status === 'completed' && !j.undone ? (
-                      <button onClick={() => onUndo(j)} disabled={undo.isPending} className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-60">
+                      <button onClick={() => onUndo(j)} disabled={undo.isPending} className="text-xs font-semibold text-danger hover:underline disabled:opacity-60">
                         Undo
                       </button>
                     ) : j.undone ? (
-                      <span className="text-xs italic text-gray-400">undone</span>
+                      <span className="text-xs italic text-fg-subtle">undone</span>
                     ) : null}
                   </td>
                 </tr>
               ))}
               {!data?.jobs?.length && (
                 <tr>
-                  <td colSpan="10" className="px-4 py-6 text-center text-gray-500">No imports yet.</td>
+                  <td colSpan="10" className="px-4 py-6 text-center text-fg-muted">No imports yet.</td>
                 </tr>
               )}
             </tbody>

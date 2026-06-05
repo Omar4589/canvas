@@ -55,20 +55,20 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-50 px-4">
+    <div className="flex h-screen items-center justify-center bg-sunken px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
           <Logo size={40} />
-          <p className="mt-3 text-sm text-gray-500">
+          <p className="mt-3 text-sm text-fg-muted">
             Door-to-door canvassing made easy.
           </p>
         </div>
 
         <form
           onSubmit={onSubmit}
-          className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+          className="rounded-xl border border-border bg-card p-6 shadow-sm"
         >
-          <label className="block text-xs font-semibold text-gray-700">
+          <label className="block text-xs font-semibold text-fg-muted">
             Email address
           </label>
           <input
@@ -78,10 +78,10 @@ export default function LoginPage() {
             autoComplete="email"
             placeholder="you@example.com"
             required
-            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            className="mt-1 w-full rounded-md border border-border-strong px-3 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
 
-          <label className="mt-4 block text-xs font-semibold text-gray-700">
+          <label className="mt-4 block text-xs font-semibold text-fg-muted">
             Password
           </label>
           <div className="mt-1">
@@ -94,7 +94,7 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mt-4 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
               {error}
             </div>
           )}

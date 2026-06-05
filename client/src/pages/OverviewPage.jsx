@@ -29,8 +29,8 @@ function typeLabel(type) {
 function StatRow({ label, value }) {
   return (
     <div className="flex items-center justify-between text-sm">
-      <span className="text-gray-500">{label}</span>
-      <span className="font-medium text-gray-900">{value}</span>
+      <span className="text-fg-muted">{label}</span>
+      <span className="font-medium text-fg">{value}</span>
     </div>
   );
 }
@@ -42,15 +42,15 @@ function CampaignCard({ campaign, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-brand-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500"
+      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-brand-accent/40 hover:bg-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="font-semibold text-gray-900">{c.name}</div>
+        <div className="font-semibold text-fg">{c.name}</div>
         <span
           className={
             c.type === 'lit_drop'
-              ? 'rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700'
-              : 'rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700'
+              ? 'rounded-full bg-purple-500/15 px-2 py-0.5 text-xs font-medium text-purple-500'
+              : 'rounded-full bg-info-tint px-2 py-0.5 text-xs font-medium text-info-fg'
           }
         >
           {typeLabel(c.type)}
@@ -89,7 +89,7 @@ function CampaignCard({ campaign, onClick }) {
 function ChevronIcon({ open }) {
   return (
     <svg
-      className={`h-4 w-4 text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`}
+      className={`h-4 w-4 text-fg-muted transition-transform ${open ? 'rotate-90' : ''}`}
       viewBox="0 0 20 20"
       fill="currentColor"
       aria-hidden="true"
@@ -150,11 +150,11 @@ export default function OverviewPage() {
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-gray-900">Overview</h1>
+        <h1 className="text-2xl font-semibold text-fg">Overview</h1>
         <div className="flex items-center gap-2">
           <DateRangeSelector value={dateRange} onChange={setDateRange} tz={orgTz} />
           {activeQ.data?.tzAbbrev && (
-            <span className="self-center text-xs font-medium text-gray-400" title={`Dates & times in ${activeQ.data.timeZone}`}>
+            <span className="self-center text-xs font-medium text-fg-subtle" title={`Dates & times in ${activeQ.data.timeZone}`}>
               {activeQ.data.tzAbbrev}
             </span>
           )}
@@ -162,7 +162,7 @@ export default function OverviewPage() {
       </div>
 
       {showDaySeam && (
-        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mb-4 rounded-md border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
           Heads up — it's just past midnight in another time zone.{' '}
           <span className="font-semibold">{seamLabel}</span> {seamPlural ? 'have' : 'has'} already started a new
           day, so {seamPlural ? 'their' : 'its'} numbers in this range may be a day off here. Open{' '}
@@ -171,17 +171,17 @@ export default function OverviewPage() {
       )}
 
       {activeQ.isLoading ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+        <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
           Loading…
         </div>
       ) : activeQ.error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
           Error loading overview: {activeQ.error.message}
         </div>
       ) : (
         <>
           <section className="mb-8">
-            <h2 className="mb-3 text-lg font-semibold text-gray-900">
+            <h2 className="mb-3 text-lg font-semibold text-fg">
               All active campaigns
             </h2>
             <div className="mb-4">
@@ -232,11 +232,11 @@ export default function OverviewPage() {
           </section>
 
           <section className="mb-8">
-            <h2 className="mb-3 text-lg font-semibold text-gray-900">Campaigns</h2>
+            <h2 className="mb-3 text-lg font-semibold text-fg">Campaigns</h2>
             {campaigns.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-500">
+              <div className="rounded-lg border border-dashed border-border bg-sunken p-8 text-center text-sm text-fg-muted">
                 No active campaigns yet.{' '}
-                <Link to="/campaigns" className="font-medium text-brand-700 hover:underline">
+                <Link to="/campaigns" className="font-medium text-brand-accent hover:underline">
                   Create or activate one
                 </Link>{' '}
                 to start canvassing.
@@ -258,7 +258,7 @@ export default function OverviewPage() {
             <button
               type="button"
               onClick={() => setArchivedExpanded((v) => !v)}
-              className="flex w-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-left text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50"
+              className="flex w-full items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm font-semibold text-fg shadow-sm transition-colors hover:bg-sunken"
               aria-expanded={archivedExpanded}
             >
               <ChevronIcon open={archivedExpanded} />
@@ -268,46 +268,46 @@ export default function OverviewPage() {
             {archivedExpanded && (
               <div className="mt-3">
                 {archivedQ.isLoading ? (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+                  <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
                     Loading…
                   </div>
                 ) : archivedQ.error ? (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                  <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
                     Error: {archivedQ.error.message}
                   </div>
                 ) : archivedCampaigns.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+                  <div className="rounded-lg border border-dashed border-border bg-sunken p-6 text-center text-sm text-fg-muted">
                     No archived campaigns.
                   </div>
                 ) : (
-                  <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+                  <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
                     {archivedCampaigns.map((c) => (
                       <button
                         key={c.id}
                         type="button"
                         onClick={() => navigate('/dashboard/' + c.id)}
-                        className="flex w-full flex-wrap items-center gap-x-6 gap-y-1 border-t border-gray-100 px-4 py-3 text-left text-sm transition-colors first:border-t-0 hover:bg-gray-50"
+                        className="flex w-full flex-wrap items-center gap-x-6 gap-y-1 border-t border-border px-4 py-3 text-left text-sm transition-colors first:border-t-0 hover:bg-sunken"
                       >
-                        <span className="font-medium text-gray-900">{c.name}</span>
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                        <span className="font-medium text-fg">{c.name}</span>
+                        <span className="rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-warning-fg">
                           Archived · read-only
                         </span>
-                        <span className="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1 text-gray-600">
+                        <span className="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1 text-fg-muted">
                           <span>
-                            <span className="text-gray-400">Households</span>{' '}
-                            <span className="font-medium text-gray-900">
+                            <span className="text-fg-subtle">Households</span>{' '}
+                            <span className="font-medium text-fg">
                               {fmt(c.households)}
                             </span>
                           </span>
                           <span>
-                            <span className="text-gray-400">Knocked</span>{' '}
-                            <span className="font-medium text-gray-900">
+                            <span className="text-fg-subtle">Knocked</span>{' '}
+                            <span className="font-medium text-fg">
                               {c.knockedPct ?? 0}%
                             </span>
                           </span>
                           <span>
-                            <span className="text-gray-400">Knocks</span>{' '}
-                            <span className="font-medium text-gray-900">
+                            <span className="text-fg-subtle">Knocks</span>{' '}
+                            <span className="font-medium text-fg">
                               {fmt(c.knocks)}
                             </span>
                           </span>

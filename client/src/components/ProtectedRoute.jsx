@@ -14,7 +14,7 @@ export default function ProtectedRoute({
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center text-gray-500">
+      <div className="flex h-screen items-center justify-center text-fg-muted">
         Loading…
       </div>
     );
@@ -30,12 +30,12 @@ export default function ProtectedRoute({
   }
 
   if (requireSuperAdmin && !isSuperAdmin) {
-    return <div className="p-8 text-red-600">Forbidden — super admin access required.</div>;
+    return <div className="p-8 text-danger">Forbidden — super admin access required.</div>;
   }
 
   if (!isSuperAdmin && memberships.length === 0) {
     return (
-      <div className="p-8 text-gray-700">
+      <div className="p-8 text-fg-muted">
         You're not a member of any organization yet. Ask an admin to add you.
       </div>
     );
@@ -52,7 +52,7 @@ export default function ProtectedRoute({
   }
 
   if (requireOrgAdmin && !isOrgAdmin) {
-    return <div className="p-8 text-red-600">Forbidden — admin access required for this org.</div>;
+    return <div className="p-8 text-danger">Forbidden — admin access required for this org.</div>;
   }
 
   return children;

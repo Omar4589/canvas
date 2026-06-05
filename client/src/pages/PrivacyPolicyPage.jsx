@@ -194,7 +194,7 @@ export default function PrivacyPolicyPage() {
             to{' '}
             <a
               href={`mailto:${CONTACT_EMAIL}`}
-              className="text-brand-700 underline hover:text-brand-800"
+              className="text-brand-accent underline hover:text-brand-accent"
             >
               {CONTACT_EMAIL}
             </a>

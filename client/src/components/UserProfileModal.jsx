@@ -21,7 +21,7 @@ const ACTION_DOT_CLS = {
 };
 
 const inputCls =
-  'w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600';
+  'w-full rounded-md border border-border-strong px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
 
 function initials(first, last) {
   return ((first?.[0] || '') + (last?.[0] || '')).toUpperCase() || '?';
@@ -60,7 +60,7 @@ function metersToMiles(m) {
 function Field({ label, children, className = '' }) {
   return (
     <div className={className}>
-      <label className="block text-xs font-medium text-gray-700">{label}</label>
+      <label className="block text-xs font-medium text-fg-muted">{label}</label>
       <div className="mt-1">{children}</div>
     </div>
   );
@@ -68,11 +68,11 @@ function Field({ label, children, className = '' }) {
 
 function Stat({ label, value }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-      <div className="text-2xl font-semibold text-gray-900 tabular-nums">
+    <div className="rounded-lg border border-border bg-sunken p-3">
+      <div className="text-2xl font-semibold text-fg tabular-nums">
         {value}
       </div>
-      <div className="text-xs text-gray-500">{label}</div>
+      <div className="text-xs text-fg-muted">{label}</div>
     </div>
   );
 }
@@ -285,29 +285,29 @@ export default function UserProfileModal({ membership, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8"
+      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-overlay/40 px-4 py-8"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl rounded-xl bg-white shadow-lg"
+        className="w-full max-w-2xl rounded-xl bg-card shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
           <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand-50 text-lg font-bold text-brand-700">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand-tint text-lg font-bold text-brand-accent">
               {initials(user.firstName, user.lastName)}
             </div>
             <div className="min-w-0">
-              <div className="text-lg font-semibold text-gray-900">
+              <div className="text-lg font-semibold text-fg">
                 {user.firstName} {user.lastName}
               </div>
-              <div className="truncate text-sm text-gray-500">{user.email}</div>
+              <div className="truncate text-sm text-fg-muted">{user.email}</div>
               <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                     membership.role === 'admin'
-                      ? 'bg-brand-50 text-brand-700'
-                      : 'bg-gray-100 text-gray-700'
+                      ? 'bg-brand-tint text-brand-accent'
+                      : 'bg-sunken text-fg-muted'
                   }`}
                 >
                   {membership.role === 'admin' ? 'Admin' : 'Canvasser'}
@@ -315,22 +315,22 @@ export default function UserProfileModal({ membership, onClose }) {
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                     membershipActive && user.isActive
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-gray-100 text-gray-500'
+                      ? 'bg-success-tint text-success'
+                      : 'bg-sunken text-fg-muted'
                   }`}
                 >
                   {membershipActive && user.isActive ? 'Active' : 'Inactive'}
                 </span>
                 {user.isSuperAdmin && (
-                  <span className="rounded-full bg-yellow-50 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-yellow-700">
+                  <span className="rounded-full bg-warning-tint px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-warning-fg">
                     super admin
                   </span>
                 )}
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-fg-muted">
                   Joined org {membership.addedAt ? formatInTz(membership.addedAt, orgTz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : '—'}
                 </span>
-                <span className="text-xs text-gray-400">·</span>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-fg-subtle">·</span>
+                <span className="text-xs text-fg-muted">
                   Last seen {formatRelative(user.lastLoginAt)}
                 </span>
               </div>
@@ -339,7 +339,7 @@ export default function UserProfileModal({ membership, onClose }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            className="rounded p-1 text-fg-subtle hover:bg-sunken hover:text-fg-muted"
             aria-label="Close"
           >
             <svg width="22" height="22" viewBox="0 0 20 20" fill="currentColor">
@@ -352,8 +352,8 @@ export default function UserProfileModal({ membership, onClose }) {
           <div
             className={`px-6 py-2 text-sm ${
               feedback.type === 'success'
-                ? 'bg-green-50 text-green-800'
-                : 'bg-red-50 text-red-700'
+                ? 'bg-success-tint text-green-800'
+                : 'bg-danger-tint text-danger'
             }`}
           >
             {feedback.text}
@@ -362,9 +362,9 @@ export default function UserProfileModal({ membership, onClose }) {
 
         <form
           onSubmit={onSaveProfile}
-          className="border-b border-gray-200 px-6 py-5"
+          className="border-b border-border px-6 py-5"
         >
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
             Profile
           </h3>
           <div className="grid grid-cols-2 gap-3">
@@ -397,11 +397,11 @@ export default function UserProfileModal({ membership, onClose }) {
               required
               disabled={emailLocked}
               className={`${inputCls}${
-                emailLocked ? ' cursor-not-allowed bg-gray-100 text-gray-500' : ''
+                emailLocked ? ' cursor-not-allowed bg-sunken text-fg-muted' : ''
               }`}
             />
             {emailLocked && (
-              <p className="mt-1 text-xs italic text-gray-500">
+              <p className="mt-1 text-xs italic text-fg-muted">
                 This user belongs to multiple organizations; their login email can
                 only be changed by the user or a super-admin.
               </p>
@@ -427,12 +427,12 @@ export default function UserProfileModal({ membership, onClose }) {
           </div>
         </form>
 
-        <div className="border-b border-gray-200 px-6 py-5">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="border-b border-border px-6 py-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
             Role in this org
           </h3>
           {isSelf ? (
-            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm italic text-gray-500">
+            <div className="rounded-md border border-border bg-sunken px-3 py-2 text-sm italic text-fg-muted">
               You can&apos;t change your own role. Ask another admin.
             </div>
           ) : (
@@ -443,8 +443,8 @@ export default function UserProfileModal({ membership, onClose }) {
                     key={r}
                     className={`flex flex-1 cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm ${
                       form.role === r
-                        ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700'
-                        : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                        ? 'border-brand-600 bg-brand-tint font-semibold text-brand-accent'
+                        : 'border-border-strong text-fg-muted hover:bg-sunken'
                     }`}
                   >
                     <input
@@ -471,8 +471,8 @@ export default function UserProfileModal({ membership, onClose }) {
           )}
         </div>
 
-        <div className="border-b border-gray-200 px-6 py-5">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="border-b border-border px-6 py-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
             Coordinator
           </h3>
           <select
@@ -488,19 +488,19 @@ export default function UserProfileModal({ membership, onClose }) {
               </option>
             ))}
           </select>
-          <p className="mt-2 text-xs text-gray-500">
+          <p className="mt-2 text-xs text-fg-muted">
             The admin who oversees this member. Saved immediately.
           </p>
         </div>
 
-        <div className="border-b border-gray-200 px-6 py-5">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="border-b border-border px-6 py-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
             Activity (in this org)
           </h3>
           {statsQ.isLoading ? (
-            <div className="text-sm text-gray-500">Loading…</div>
+            <div className="text-sm text-fg-muted">Loading…</div>
           ) : statsQ.error ? (
-            <div className="text-sm text-red-600">
+            <div className="text-sm text-danger">
               Error: {statsQ.error.message}
             </div>
           ) : stats ? (
@@ -523,7 +523,7 @@ export default function UserProfileModal({ membership, onClose }) {
                   value={metersToMiles(stats.distanceMeters)}
                 />
               </div>
-              <div className="mt-3 text-xs text-gray-500">
+              <div className="mt-3 text-xs text-fg-muted">
                 {stats.campaignsWorked || 0}{' '}
                 {stats.campaignsWorked === 1 ? 'campaign' : 'campaigns'} worked
                 {stats.lastActivityAt && (
@@ -534,35 +534,35 @@ export default function UserProfileModal({ membership, onClose }) {
           ) : null}
         </div>
 
-        <div className="border-b border-gray-200 px-6 py-5">
+        <div className="border-b border-border px-6 py-5">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
               Recent activity
             </h3>
             <Link
               to="/map"
-              className="text-xs font-semibold text-brand-600 hover:underline"
+              className="text-xs font-semibold text-brand-accent hover:underline"
               onClick={onClose}
             >
               View on map →
             </Link>
           </div>
           {activityQ.isLoading ? (
-            <div className="text-sm text-gray-500">Loading…</div>
+            <div className="text-sm text-fg-muted">Loading…</div>
           ) : activityQ.error ? (
-            <div className="text-sm text-red-600">
+            <div className="text-sm text-danger">
               Error: {activityQ.error.message}
             </div>
           ) : !activityQ.data?.activities?.length ? (
-            <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+            <div className="rounded-md border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
               No activity yet.
             </div>
           ) : (
-            <ul className="divide-y divide-gray-100 overflow-hidden rounded-md border border-gray-200">
+            <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
               {activityQ.data.activities.map((a) => (
                 <li
                   key={a.id}
-                  className="flex items-start gap-3 bg-white px-3 py-2 text-sm"
+                  className="flex items-start gap-3 bg-card px-3 py-2 text-sm"
                 >
                   <span
                     className={`mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
@@ -570,10 +570,10 @@ export default function UserProfileModal({ membership, onClose }) {
                     }`}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium text-gray-900">
+                    <div className="font-medium text-fg">
                       {ACTION_LABEL[a.actionType] || a.actionType}
                     </div>
-                    <div className="truncate text-xs text-gray-500">
+                    <div className="truncate text-xs text-fg-muted">
                       {a.household
                         ? `${a.household.addressLine1}${
                             a.household.city ? ', ' + a.household.city : ''
@@ -582,13 +582,13 @@ export default function UserProfileModal({ membership, onClose }) {
                       {a.campaign?.name && (
                         <>
                           {' '}
-                          <span className="text-gray-400">·</span>{' '}
+                          <span className="text-fg-subtle">·</span>{' '}
                           {a.campaign.name}
                         </>
                       )}
                     </div>
                   </div>
-                  <div className="shrink-0 text-xs text-gray-500">
+                  <div className="shrink-0 text-xs text-fg-muted">
                     {formatRelative(a.timestamp)}
                   </div>
                 </li>
@@ -598,14 +598,14 @@ export default function UserProfileModal({ membership, onClose }) {
         </div>
 
         <div className="px-6 py-5">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
             Account
           </h3>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setShowResetPw((s) => !s)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              className="rounded-md border border-border-strong px-3 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-sunken"
             >
               {showResetPw ? 'Cancel' : 'Set temporary password'}
             </button>
@@ -617,8 +617,8 @@ export default function UserProfileModal({ membership, onClose }) {
                   disabled={toggleActive.isPending}
                   className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
                     membershipActive
-                      ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                      : 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'
+                      ? 'border-danger/30 bg-danger-tint text-danger hover:bg-danger-tint'
+                      : 'border-success/30 bg-success-tint text-success hover:bg-success-tint'
                   }`}
                 >
                   {membershipActive ? 'Deactivate membership' : 'Reactivate membership'}
@@ -627,7 +627,7 @@ export default function UserProfileModal({ membership, onClose }) {
                   type="button"
                   onClick={onRemove}
                   disabled={removeFromOrg.isPending}
-                  className="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+                  className="rounded-md border border-danger/40 px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-tint disabled:opacity-50"
                 >
                   Remove from org
                 </button>
@@ -637,12 +637,12 @@ export default function UserProfileModal({ membership, onClose }) {
           {showResetPw && (
             <form
               onSubmit={onResetPw}
-              className="mt-4 rounded-md bg-gray-50 p-4"
+              className="mt-4 rounded-md bg-sunken p-4"
             >
-              <label className="block text-xs font-medium text-gray-700">
+              <label className="block text-xs font-medium text-fg-muted">
                 Temporary password (min 8 chars)
               </label>
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-fg-muted">
                 The user will be required to choose a new password the next time
                 they log in.
               </p>

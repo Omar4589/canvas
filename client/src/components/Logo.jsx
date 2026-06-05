@@ -30,7 +30,7 @@ export default function Logo({ size = 28, hideText = false, className = '' }) {
       <LogoMark size={size} />
       {!hideText && (
         <span
-          className="font-bold text-gray-900"
+          className="font-bold text-fg"
           style={{ fontSize: size * 0.78, letterSpacing: '-0.5px' }}
         >
           Doorline

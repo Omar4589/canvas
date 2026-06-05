@@ -37,11 +37,11 @@ export default function CrossOrgActivityFeed({ limit = 50, refetchMs = 30_000 })
   });
 
   if (q.isLoading) {
-    return <div className="p-4 text-sm text-gray-500">Loading activity…</div>;
+    return <div className="p-4 text-sm text-fg-muted">Loading activity…</div>;
   }
   if (q.error) {
     return (
-      <div className="p-4 text-sm text-red-600">
+      <div className="p-4 text-sm text-danger">
         Couldn&apos;t load activity: {q.error.message}
       </div>
     );
@@ -49,14 +49,14 @@ export default function CrossOrgActivityFeed({ limit = 50, refetchMs = 30_000 })
   const events = q.data?.events || [];
   if (!events.length) {
     return (
-      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-500">
+      <div className="rounded-md border border-dashed border-border bg-sunken p-4 text-center text-sm text-fg-muted">
         No activity yet.
       </div>
     );
   }
 
   return (
-    <ul className="divide-y divide-gray-100 overflow-hidden rounded-md border border-gray-200 bg-white">
+    <ul className="divide-y divide-border overflow-hidden rounded-md border border-border bg-card">
       {events.map((e) => (
         <li key={e.id} className="flex items-start gap-3 px-3 py-2 text-sm">
           <span
@@ -66,23 +66,23 @@ export default function CrossOrgActivityFeed({ limit = 50, refetchMs = 30_000 })
           />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-900">
+              <span className="font-medium text-fg">
                 {ACTION_LABEL[e.actionType] || e.actionType}
               </span>
               {e.organization && (
-                <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                <span className="rounded-full bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
                   {e.organization.name}
                 </span>
               )}
             </div>
-            <div className="truncate text-xs text-gray-500">
+            <div className="truncate text-xs text-fg-muted">
               {e.canvasser
                 ? `${e.canvasser.firstName} ${e.canvasser.lastName}`
                 : 'Unknown'}
               {e.household?.addressLine1 && (
                 <>
                   {' '}
-                  <span className="text-gray-400">·</span>{' '}
+                  <span className="text-fg-subtle">·</span>{' '}
                   {e.household.addressLine1}
                   {e.household.city ? `, ${e.household.city}` : ''}
                 </>
@@ -90,12 +90,12 @@ export default function CrossOrgActivityFeed({ limit = 50, refetchMs = 30_000 })
               {e.campaign?.name && (
                 <>
                   {' '}
-                  <span className="text-gray-400">·</span> {e.campaign.name}
+                  <span className="text-fg-subtle">·</span> {e.campaign.name}
                 </>
               )}
             </div>
           </div>
-          <div className="shrink-0 text-xs text-gray-500">
+          <div className="shrink-0 text-xs text-fg-muted">
             {formatRelative(e.timestamp)}
           </div>
         </li>

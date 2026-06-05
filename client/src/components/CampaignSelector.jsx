@@ -62,14 +62,14 @@ export function useCampaignSelection() {
 export default function CampaignSelector({ campaignId, onChange, campaigns, isLoading }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+      <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">
         Campaign
       </span>
       <select
         value={campaignId || ''}
         onChange={(e) => onChange(e.target.value)}
         disabled={isLoading}
-        className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+        className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       >
         {isLoading && <option value="">Loading…</option>}
         {!isLoading && !campaigns?.length && (

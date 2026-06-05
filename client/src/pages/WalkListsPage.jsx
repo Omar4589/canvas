@@ -43,12 +43,12 @@ function buildFilter(f) {
 function TextFilter({ label, value, onChange, placeholder }) {
   return (
     <label className="block text-sm">
-      <span className="mb-1 block text-xs font-medium text-gray-700">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-fg-muted">{label}</span>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+        className="w-full rounded border border-border-strong px-2 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       />
     </label>
   );
@@ -72,13 +72,13 @@ function MultiSelect({ label, value, onChange, options = [], placeholder }) {
     .slice(0, 50);
   return (
     <label className="block text-sm">
-      <span className="mb-1 block text-xs font-medium text-gray-700">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-fg-muted">{label}</span>
       <div className="relative">
-        <div className="flex min-h-[34px] flex-wrap items-center gap-1 rounded border border-gray-300 px-1.5 py-1 focus-within:border-brand-600 focus-within:ring-1 focus-within:ring-brand-600">
+        <div className="flex min-h-[34px] flex-wrap items-center gap-1 rounded border border-border-strong px-1.5 py-1 focus-within:border-brand-accent focus-visible:ring-2 focus-visible:ring-ring/30">
           {selected.map((v) => (
-            <span key={v} className="flex items-center gap-1 rounded bg-brand-50 px-1.5 py-0.5 text-xs text-brand-700">
+            <span key={v} className="flex items-center gap-1 rounded bg-brand-tint px-1.5 py-0.5 text-xs text-brand-accent">
               {v}
-              <button type="button" onClick={() => remove(v)} className="text-brand-400 hover:text-brand-700" aria-label={`Remove ${v}`}>×</button>
+              <button type="button" onClick={() => remove(v)} className="text-brand-accent hover:text-brand-accent" aria-label={`Remove ${v}`}>×</button>
             </span>
           ))}
           <input
@@ -95,13 +95,13 @@ function MultiSelect({ label, value, onChange, options = [], placeholder }) {
           />
         </div>
         {open && filtered.length > 0 && (
-          <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-auto rounded border border-gray-200 bg-white py-1 text-sm shadow-lg">
+          <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-auto rounded border border-border bg-card py-1 text-sm shadow-lg">
             {filtered.map((o) => (
               <li key={o}>
                 <button
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); add(o); }}
-                  className="block w-full px-2 py-1 text-left hover:bg-brand-50"
+                  className="block w-full px-2 py-1 text-left hover:bg-brand-tint"
                 >
                   {o}
                 </button>
@@ -226,17 +226,17 @@ export default function WalkListsPage() {
 
       <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
         {/* Builder */}
-        <section className="rounded-lg border border-gray-200 bg-white p-5">
+        <section className="rounded-lg border border-border bg-card p-5">
           <h2 className="mb-1 text-base font-medium">Build a list</h2>
-          <p className="mb-3 text-xs text-gray-500">Build from demographic/geographic filters, or upload a CSV of Voter IDs. Saved lists are frozen snapshots.</p>
+          <p className="mb-3 text-xs text-fg-muted">Build from demographic/geographic filters, or upload a CSV of Voter IDs. Saved lists are frozen snapshots.</p>
 
-          <div className="mb-4 inline-flex rounded-md border border-gray-300 p-0.5 text-sm">
+          <div className="mb-4 inline-flex rounded-md border border-border-strong p-0.5 text-sm">
             {[['filter', 'Filter builder'], ['csv', 'Upload CSV']].map(([m, label]) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
-                className={`rounded px-3 py-1 font-medium ${mode === m ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                className={`rounded px-3 py-1 font-medium ${mode === m ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken'}`}
               >
                 {label}
               </button>
@@ -245,10 +245,10 @@ export default function WalkListsPage() {
 
           {mode === 'filter' && (
           <>
-          <p className="mb-4 text-xs text-gray-500">Pick values from each list (or type a custom one and press Enter). Empty = no restriction.</p>
+          <p className="mb-4 text-xs text-fg-muted">Pick values from each list (or type a custom one and press Enter). Empty = no restriction.</p>
 
           <div className="mb-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Demographics</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-subtle">Demographics</div>
             <div className="grid gap-3 sm:grid-cols-3">
               <MultiSelect label="Genders" value={f.genders} onChange={(v) => set('genders', v)} options={opts.genders} placeholder="M, F" />
               <MultiSelect label="Parties" value={f.parties} onChange={(v) => set('parties', v)} options={opts.parties} placeholder="DEM, REP" />
@@ -264,7 +264,7 @@ export default function WalkListsPage() {
           </div>
 
           <div className="mb-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Geography</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-subtle">Geography</div>
             <div className="grid gap-3 sm:grid-cols-3">
               <MultiSelect label="Cities" value={f.cities} onChange={(v) => set('cities', v)} options={opts.cities} />
               <MultiSelect label="ZIPs" value={f.zips} onChange={(v) => set('zips', v)} options={opts.zips} />
@@ -273,14 +273,14 @@ export default function WalkListsPage() {
           </div>
 
           <div className="mb-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Prior pass</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-subtle">Prior pass</div>
             <div className="flex flex-wrap items-end gap-4">
               <label className="text-sm">
-                <span className="mb-1 block text-xs font-medium text-gray-700">From pass</span>
+                <span className="mb-1 block text-xs font-medium text-fg-muted">From pass</span>
                 <select
                   value={f.priorPassId}
                   onChange={(e) => set('priorPassId', e.target.value)}
-                  className="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+                  className="rounded border border-border-strong px-2 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 >
                   <option value="">—</option>
                   {passes.map((p) => (
@@ -289,11 +289,11 @@ export default function WalkListsPage() {
                 </select>
               </label>
               <label className="text-sm">
-                <span className="mb-1 block text-xs font-medium text-gray-700">Has survey response</span>
+                <span className="mb-1 block text-xs font-medium text-fg-muted">Has survey response</span>
                 <select
                   value={f.surveyResponse}
                   onChange={(e) => set('surveyResponse', e.target.value)}
-                  className="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+                  className="rounded border border-border-strong px-2 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 >
                   <option value="any">Any</option>
                   <option value="exists">Has a response</option>
@@ -302,7 +302,7 @@ export default function WalkListsPage() {
               </label>
             </div>
             <div className="mt-3 flex flex-wrap gap-3 text-xs">
-              <span className="font-medium text-gray-700">Door status:</span>
+              <span className="font-medium text-fg-muted">Door status:</span>
               {STATUSES.map((s) => (
                 <label key={s} className="flex items-center gap-1">
                   <input type="checkbox" checked={f.priorPassStatuses.includes(s)} onChange={() => toggleStatus(s)} />
@@ -312,47 +312,47 @@ export default function WalkListsPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4">
+          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <label className="flex items-center gap-2 text-sm">
-              <span className="text-xs font-medium text-gray-700">Combine</span>
-              <select value={f.combine} onChange={(e) => set('combine', e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-sm">
+              <span className="text-xs font-medium text-fg-muted">Combine</span>
+              <select value={f.combine} onChange={(e) => set('combine', e.target.value)} className="rounded border border-border-strong px-2 py-1 text-sm">
                 <option value="and">AND (match all)</option>
                 <option value="or">OR (match any)</option>
               </select>
             </label>
-            <button onClick={() => preview.mutate()} disabled={preview.isPending} className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-60">
+            <button onClick={() => preview.mutate()} disabled={preview.isPending} className="rounded border border-border-strong px-3 py-1.5 text-sm font-medium hover:bg-sunken disabled:opacity-60">
               {preview.isPending ? 'Counting…' : 'Preview count'}
             </button>
             {preview.data && (
-              <span className="text-sm text-gray-700">
+              <span className="text-sm text-fg-muted">
                 <b>{preview.data.householdCount?.toLocaleString()}</b> households · <b>{preview.data.voterCount?.toLocaleString()}</b> voters
               </span>
             )}
           </div>
 
           <div className="mt-4 flex items-center gap-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. Undecideds R1)" className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. Undecideds R1)" className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
             <button onClick={() => name && save.mutate()} disabled={!name || save.isPending} className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
               {save.isPending ? 'Saving…' : 'Save list'}
             </button>
-            <button onClick={() => { setF(EMPTY); preview.reset(); }} className="text-xs text-gray-500 hover:underline">Reset</button>
+            <button onClick={() => { setF(EMPTY); preview.reset(); }} className="text-xs text-fg-muted hover:underline">Reset</button>
           </div>
           {(save.error || preview.error) && (
-            <div className="mt-2 text-xs text-red-700">{(save.error || preview.error).message}</div>
+            <div className="mt-2 text-xs text-danger">{(save.error || preview.error).message}</div>
           )}
           </>
           )}
 
           {mode === 'csv' && (
             <div>
-              <p className="mb-3 text-xs text-gray-500">
+              <p className="mb-3 text-xs text-fg-muted">
                 Upload a CSV of Voter IDs (any column that looks like a Voter ID is auto-detected). We match them to
                 this campaign's voters and freeze the doors they live at into a list. A door joins the list if <em>any</em> of
                 its voters is in your file — claiming the door later moves <em>all</em> voters there. IDs not yet imported
                 into this campaign won't match.
               </p>
               <label className="block text-sm">
-                <span className="mb-1 block text-xs font-medium text-gray-700">Voter-ID CSV</span>
+                <span className="mb-1 block text-xs font-medium text-fg-muted">Voter-ID CSV</span>
                 <input
                   type="file"
                   accept=".csv"
@@ -361,13 +361,13 @@ export default function WalkListsPage() {
                   className="block w-full text-sm disabled:opacity-50"
                 />
               </label>
-              {csvPreview.isPending && <p className="mt-2 text-xs text-gray-500">Matching…</p>}
+              {csvPreview.isPending && <p className="mt-2 text-xs text-fg-muted">Matching…</p>}
 
               {colError && (
-                <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <div className="mt-3 rounded border border-warning/30 bg-warning-tint p-3 text-xs text-warning-fg">
                   Couldn't auto-detect a Voter ID column. Pick the column that holds Voter IDs:
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <select value={idColumn} onChange={(e) => setIdColumn(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-sm">
+                    <select value={idColumn} onChange={(e) => setIdColumn(e.target.value)} className="rounded border border-border-strong px-2 py-1 text-sm">
                       <option value="">— Choose column —</option>
                       {colError.columns.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -375,38 +375,38 @@ export default function WalkListsPage() {
                       type="button"
                       onClick={() => idColumn && csvFile && csvPreview.mutate({ file: csvFile, idColumn })}
                       disabled={!idColumn}
-                      className="rounded border border-gray-300 px-2 py-1 text-sm font-medium hover:bg-white disabled:opacity-50"
+                      className="rounded border border-border-strong px-2 py-1 text-sm font-medium hover:bg-card disabled:opacity-50"
                     >
                       Match column
                     </button>
                   </div>
                 </div>
               )}
-              {csvPreview.error && !colError && <p className="mt-2 text-xs text-red-700">{csvPreview.error.message}</p>}
+              {csvPreview.error && !colError && <p className="mt-2 text-xs text-danger">{csvPreview.error.message}</p>}
 
               {csvPreview.data && (
-                <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-4 text-sm">
-                  <div className="mb-2 text-xs text-gray-500">
+                <div className="mt-3 rounded border border-border bg-sunken p-4 text-sm">
+                  <div className="mb-2 text-xs text-fg-muted">
                     Matched on column <span className="font-mono font-medium">{csvPreview.data.idColumn}</span> · {csvPreview.data.idsInFile?.toLocaleString()} IDs in file
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div><span className="text-gray-500">Matched voters</span><div className="text-lg font-semibold text-green-700">{csvPreview.data.matched?.toLocaleString()}</div></div>
-                    <div><span className="text-gray-500">Doors (households)</span><div className="text-lg font-semibold text-gray-900">{csvPreview.data.householdCount?.toLocaleString()}</div></div>
-                    <div><span className="text-gray-500">Voters at those doors</span><div className="text-lg font-semibold text-gray-700">{csvPreview.data.voterCount?.toLocaleString()}</div></div>
-                    <div><span className="text-gray-500">Not in this campaign</span><div className="text-lg font-semibold text-gray-400">{csvPreview.data.notFound?.toLocaleString()}</div></div>
+                    <div><span className="text-fg-muted">Matched voters</span><div className="text-lg font-semibold text-success">{csvPreview.data.matched?.toLocaleString()}</div></div>
+                    <div><span className="text-fg-muted">Doors (households)</span><div className="text-lg font-semibold text-fg">{csvPreview.data.householdCount?.toLocaleString()}</div></div>
+                    <div><span className="text-fg-muted">Voters at those doors</span><div className="text-lg font-semibold text-fg-muted">{csvPreview.data.voterCount?.toLocaleString()}</div></div>
+                    <div><span className="text-fg-muted">Not in this campaign</span><div className="text-lg font-semibold text-fg-subtle">{csvPreview.data.notFound?.toLocaleString()}</div></div>
                   </div>
                   {csvPreview.data.ownedDoors > 0 && (
-                    <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <div className="mt-3 rounded border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
                       <strong>{csvPreview.data.ownedDoors.toLocaleString()}</strong> of these doors are already in another effort
                       {csvPreview.data.ownedByEffort?.length ? ` (${csvPreview.data.ownedByEffort.map((o) => `${o.name}: ${o.count}`).join(', ')})` : ''}.
                       You can still save this list — but claiming it into an effort will ask you to move (re-carve) those doors.
                     </div>
                   )}
                   {csvPreview.data.noCoordinates > 0 && (
-                    <p className="mt-2 text-xs text-gray-500">{csvPreview.data.noCoordinates.toLocaleString()} matched door(s) have no map coordinates and were left out (they can't be cut).</p>
+                    <p className="mt-2 text-xs text-fg-muted">{csvPreview.data.noCoordinates.toLocaleString()} matched door(s) have no map coordinates and were left out (they can't be cut).</p>
                   )}
                   {csvPreview.data.notFound > 0 && (
-                    <button type="button" onClick={downloadUnmatched} className="mt-3 text-xs font-semibold text-brand-700 hover:underline">
+                    <button type="button" onClick={downloadUnmatched} className="mt-3 text-xs font-semibold text-brand-accent hover:underline">
                       Download {csvPreview.data.notFound.toLocaleString()} unmatched ID{csvPreview.data.notFound === 1 ? '' : 's'}
                     </button>
                   )}
@@ -414,7 +414,7 @@ export default function WalkListsPage() {
               )}
 
               <div className="mt-4 flex items-center gap-2">
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. First-election voters)" className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600" />
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. First-election voters)" className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
                 <button
                   onClick={() => name && csvFile && csvSave.mutate({ file: csvFile, name, idColumn: idColumn || undefined })}
                   disabled={!name || !csvFile || !csvPreview.data?.householdCount || csvSave.isPending}
@@ -423,32 +423,32 @@ export default function WalkListsPage() {
                   {csvSave.isPending ? 'Saving…' : 'Save list'}
                 </button>
               </div>
-              {csvSave.error && <div className="mt-2 text-xs text-red-700">{csvSave.error.message}</div>}
+              {csvSave.error && <div className="mt-2 text-xs text-danger">{csvSave.error.message}</div>}
             </div>
           )}
         </section>
 
         {/* Saved lists */}
-        <section className="rounded-lg border border-gray-200 bg-white p-5">
+        <section className="rounded-lg border border-border bg-card p-5">
           <h2 className="mb-3 text-base font-medium">Saved lists</h2>
           {listsQ.isLoading ? (
-            <div className="text-sm text-gray-500">Loading…</div>
+            <div className="text-sm text-fg-muted">Loading…</div>
           ) : !lists.length ? (
-            <div className="text-sm text-gray-500">None yet.</div>
+            <div className="text-sm text-fg-muted">None yet.</div>
           ) : (
             <ul className="space-y-2">
               {lists.map((w) => (
-                <li key={w._id} className="rounded border border-gray-100 p-2 text-sm">
+                <li key={w._id} className="rounded border border-border p-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate font-medium">{w.name}</span>
                       {w.source === 'csv' && (
-                        <span className="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700" title={w.sourceMeta?.fileName || 'Built from an uploaded Voter-ID CSV'}>from CSV</span>
+                        <span className="shrink-0 rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-medium text-brand-accent" title={w.sourceMeta?.fileName || 'Built from an uploaded Voter-ID CSV'}>from CSV</span>
                       )}
                     </span>
-                    <button onClick={() => del.mutate(w._id)} className="shrink-0 text-xs text-red-600 hover:underline">Delete</button>
+                    <button onClick={() => del.mutate(w._id)} className="shrink-0 text-xs text-danger hover:underline">Delete</button>
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-fg-muted">
                     {w.householdCount?.toLocaleString()} hh · {w.voterCount?.toLocaleString()} voters · {formatInTz(w.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)}
                   </div>
                 </li>

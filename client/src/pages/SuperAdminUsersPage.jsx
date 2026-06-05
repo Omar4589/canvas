@@ -60,8 +60,8 @@ export default function SuperAdminUsersPage() {
   return (
     <div>
       <div className="mb-4">
-        <h1 className="text-2xl font-semibold text-gray-900">All users</h1>
-        <p className="text-sm text-gray-500">
+        <h1 className="text-2xl font-semibold text-fg">All users</h1>
+        <p className="text-sm text-fg-muted">
           Every user across every organization. Click a row to see their org memberships;
           toggle the super-admin flag with the button on the right.
         </p>
@@ -73,26 +73,26 @@ export default function SuperAdminUsersPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name or email…"
-          className="flex-1 min-w-[220px] rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          className="flex-1 min-w-[220px] rounded-md border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          className="rounded-md border border-border-strong bg-card px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <option value="all">All</option>
           <option value="super">Super admins</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-fg-muted">
           {visible.length} of {users.length}
         </span>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+          <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
             <tr>
               <th className="px-4 py-3 text-left">Name</th>
               <th className="px-4 py-3 text-left">Email</th>
@@ -102,10 +102,10 @@ export default function SuperAdminUsersPage() {
               <th className="px-4 py-3 text-right"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-border">
             {usersQ.isLoading && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={6} className="px-4 py-8 text-center text-fg-muted">
                   Loading…
                 </td>
               </tr>
@@ -114,21 +114,21 @@ export default function SuperAdminUsersPage() {
               const isSelf = u.id === currentUser?.id;
               return (
                 <tr key={u.id}>
-                  <td className="px-4 py-3 font-medium text-gray-900">
+                  <td className="px-4 py-3 font-medium text-fg">
                     {u.firstName} {u.lastName}
                     {u.isSuperAdmin && (
-                      <span className="ml-2 rounded-full bg-yellow-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-700">
+                      <span className="ml-2 rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
                         super
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{u.email}</td>
+                  <td className="px-4 py-3 text-fg-muted">{u.email}</td>
                   <td className="px-4 py-3">
                     <span
                       className={
                         u.isActive
-                          ? 'rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700'
-                          : 'rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500'
+                          ? 'rounded-full bg-success-tint px-2 py-0.5 text-xs font-medium text-success'
+                          : 'rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted'
                       }
                     >
                       {u.isActive ? 'Active' : 'Inactive'}
@@ -142,8 +142,8 @@ export default function SuperAdminUsersPage() {
                             key={m.organizationId}
                             className={
                               m.role === 'admin'
-                                ? 'rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700'
-                                : 'rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700'
+                                ? 'rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-accent'
+                                : 'rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted'
                             }
                           >
                             {m.organizationName}
@@ -154,10 +154,10 @@ export default function SuperAdminUsersPage() {
                         ))}
                       </div>
                     ) : (
-                      <span className="text-xs text-gray-400">none</span>
+                      <span className="text-xs text-fg-subtle">none</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
+                  <td className="px-4 py-3 text-xs text-fg-muted">
                     {formatRelative(u.lastLoginAt)}
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -166,8 +166,8 @@ export default function SuperAdminUsersPage() {
                       disabled={isSelf || promoteMut.isPending}
                       className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50 ${
                         u.isSuperAdmin
-                          ? 'border-yellow-200 bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
-                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                          ? 'border-warning/30 bg-warning-tint text-warning-fg hover:bg-warning-tint'
+                          : 'border-border bg-card text-fg-muted hover:bg-sunken'
                       }`}
                       title={isSelf ? "You can't change your own super-admin flag" : ''}
                     >
@@ -179,7 +179,7 @@ export default function SuperAdminUsersPage() {
             })}
             {!usersQ.isLoading && visible.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={6} className="px-4 py-8 text-center text-fg-muted">
                   No users match.
                 </td>
               </tr>

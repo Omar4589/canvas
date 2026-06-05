@@ -62,21 +62,21 @@ export default function DateRangePickerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-lg bg-white p-5 shadow-lg"
+        className="w-full max-w-md rounded-lg bg-card p-5 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-4">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-fg">
             Custom date range
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            className="rounded p-1 text-fg-subtle hover:bg-sunken hover:text-fg-muted"
             aria-label="Close"
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -91,7 +91,7 @@ export default function DateRangePickerModal({
               key={c.key}
               type="button"
               onClick={() => applyQuick(c.key)}
-              className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100"
+              className="rounded-full bg-brand-tint px-3 py-1 text-xs font-medium text-brand-accent hover:bg-brand-tint"
             >
               {c.label}
             </button>
@@ -100,7 +100,7 @@ export default function DateRangePickerModal({
 
         <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <label className="w-12 text-sm text-gray-500" htmlFor="range-from">
+            <label className="w-12 text-sm text-fg-muted" htmlFor="range-from">
               From
             </label>
             <input
@@ -109,13 +109,13 @@ export default function DateRangePickerModal({
               value={from}
               max={to || undefined}
               onChange={(e) => setFrom(e.target.value)}
-              className="flex-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
             {from ? (
               <button
                 type="button"
                 onClick={() => setFrom('')}
-                className="px-1 text-gray-400 hover:text-gray-700"
+                className="px-1 text-fg-subtle hover:text-fg-muted"
                 aria-label="Clear from date"
               >
                 ✕
@@ -126,7 +126,7 @@ export default function DateRangePickerModal({
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="w-12 text-sm text-gray-500" htmlFor="range-to">
+            <label className="w-12 text-sm text-fg-muted" htmlFor="range-to">
               To
             </label>
             <input
@@ -135,13 +135,13 @@ export default function DateRangePickerModal({
               value={to}
               min={from || undefined}
               onChange={(e) => setTo(e.target.value)}
-              className="flex-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
             {to ? (
               <button
                 type="button"
                 onClick={() => setTo('')}
-                className="px-1 text-gray-400 hover:text-gray-700"
+                className="px-1 text-fg-subtle hover:text-fg-muted"
                 aria-label="Clear to date"
               >
                 ✕
@@ -152,7 +152,7 @@ export default function DateRangePickerModal({
           </div>
         </div>
 
-        <p className="mt-3 text-xs text-gray-400">
+        <p className="mt-3 text-xs text-fg-subtle">
           Leave either end blank for an open-ended range.
         </p>
 
@@ -160,7 +160,7 @@ export default function DateRangePickerModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="flex-1 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-fg-muted hover:bg-sunken"
           >
             Cancel
           </button>

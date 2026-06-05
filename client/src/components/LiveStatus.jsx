@@ -32,7 +32,7 @@ export default function LiveStatus({ live, onToggle, isFetching, updatedAt, onRe
         onClick={onToggle}
         aria-pressed={live}
         title={live ? 'Pause live refresh' : 'Resume live refresh'}
-        className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-2 py-0.5 font-medium transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+        className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 font-medium transition-colors hover:bg-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <span
           className={[
@@ -42,13 +42,13 @@ export default function LiveStatus({ live, onToggle, isFetching, updatedAt, onRe
           ].join(' ')}
           aria-hidden="true"
         />
-        <span className={live ? 'text-gray-700' : 'text-gray-500'}>{label}</span>
+        <span className={live ? 'text-fg-muted' : 'text-fg-muted'}>{label}</span>
       </button>
       {!live && (
         <button
           type="button"
           onClick={onRefresh}
-          className="rounded font-medium text-brand-700 underline-offset-2 transition-colors hover:text-brand-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+          className="rounded font-medium text-brand-accent underline-offset-2 transition-colors hover:text-brand-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           Refresh
         </button>

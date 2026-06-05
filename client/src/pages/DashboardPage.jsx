@@ -24,7 +24,7 @@ function buildQuery(params) {
 function SectionHeading({ title, right }) {
   return (
     <div className="mb-3 flex items-center justify-between gap-3">
-      <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+      <h2 className="text-lg font-semibold text-fg">{title}</h2>
       {right}
     </div>
   );
@@ -177,10 +177,10 @@ export default function DashboardPage() {
   if (!campaignId || (!campaignsLoading && !current)) {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold text-gray-900">
+        <h1 className="text-xl font-semibold text-fg">
           {!campaignId ? 'No campaign selected' : 'Campaign not found'}
         </h1>
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-fg-muted">
           Pick a campaign from the Overview to view its dashboard.
         </p>
         <Link
@@ -199,30 +199,30 @@ export default function DashboardPage() {
         <div>
           <Link
             to="/admin"
-            className="text-sm font-medium text-brand-700 hover:underline"
+            className="text-sm font-medium text-brand-accent hover:underline"
           >
             ‹ Overview
           </Link>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-900">
+          <h1 className="mt-1 text-2xl font-semibold text-fg">
             {current?.name || 'Dashboard'}
           </h1>
           {selectedCampaign && (
-            <div className="mt-1 text-sm text-gray-600">
+            <div className="mt-1 text-sm text-fg-muted">
               {selectedCampaign.type === 'survey' ? 'Survey' : 'Lit drop'}{' '}
-              <span className="text-gray-400">·</span> {selectedCampaign.state}
+              <span className="text-fg-subtle">·</span> {selectedCampaign.state}
             </div>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">
               Campaign
             </span>
             <select
               value={campaignId}
               onChange={(e) => navigate('/dashboard/' + e.target.value)}
               disabled={campaignsLoading}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+              className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               {!switcherCampaigns.some((c) => String(c._id) === String(campaignId)) && (
                 <option value={campaignId || ''} hidden>
@@ -242,7 +242,7 @@ export default function DashboardPage() {
               value={effortId}
               onChange={(e) => setEffortId(e.target.value)}
               title="Filter to one effort"
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+              className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">All efforts</option>
               {efforts.map((ef) => (
@@ -252,7 +252,7 @@ export default function DashboardPage() {
           )}
           <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} />
           {overview.tzAbbrev && (
-            <span className="self-center text-xs font-medium text-gray-400" title={`Dates & times in ${overview.timeZone}`}>
+            <span className="self-center text-xs font-medium text-fg-subtle" title={`Dates & times in ${overview.timeZone}`}>
               {overview.tzAbbrev}
             </span>
           )}
@@ -260,7 +260,7 @@ export default function DashboardPage() {
       </div>
 
       {current && current.isActive === false && (
-        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+        <div className="mb-6 rounded-md border border-warning/30 bg-warning-tint px-4 py-2 text-sm text-warning-fg">
           This campaign is archived — data is read-only. Reactivate it from
           Campaigns to resume canvassing.
         </div>
@@ -270,14 +270,14 @@ export default function DashboardPage() {
       <section className="mb-6">
         <SectionHeading
           title="Activity"
-          right={<span className="text-xs text-gray-500">Selected range</span>}
+          right={<span className="text-xs text-fg-muted">Selected range</span>}
         />
         {rollupQ.isLoading ? (
-          <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+          <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
             Loading…
           </div>
         ) : rollupQ.error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
             Error: {rollupQ.error.message}
           </div>
         ) : (
@@ -324,29 +324,29 @@ export default function DashboardPage() {
       <section className="mb-8">
         <SectionHeading
           title="Coverage"
-          right={<span className="text-xs text-gray-500">All-time</span>}
+          right={<span className="text-xs text-fg-muted">All-time</span>}
         />
         {overviewQ.isLoading ? (
-          <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+          <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
             Loading…
           </div>
         ) : overviewQ.error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
             Error loading coverage: {overviewQ.error.message}
           </div>
         ) : (
           <>
-            <p className="mb-2 text-sm text-gray-700">
-              <span className="font-semibold text-gray-900">
+            <p className="mb-2 text-sm text-fg-muted">
+              <span className="font-semibold text-fg">
                 {(totals.households || 0).toLocaleString()}
               </span>{' '}
               households
-              <span className="mx-2 text-gray-300">·</span>
-              <span className="font-semibold text-gray-900">
+              <span className="mx-2 text-fg-subtle">·</span>
+              <span className="font-semibold text-fg">
                 {(totals.homesKnocked || 0).toLocaleString()}
               </span>{' '}
               knocked
-              <span className="text-gray-400"> ({knockedPct}%)</span>
+              <span className="text-fg-subtle"> ({knockedPct}%)</span>
             </p>
             <CoverageBar canvass={canvass} />
           </>
@@ -359,7 +359,7 @@ export default function DashboardPage() {
             <SectionHeading
               title="Voter highlights"
               right={
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-fg-muted">
                   Latest voters per option
                 </span>
               }
@@ -381,7 +381,7 @@ export default function DashboardPage() {
                 <select
                   value={selectedTemplateId}
                   onChange={(e) => setSelectedTemplateId(e.target.value)}
-                  className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+                  className="rounded border border-border bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 >
                   <option value="">Campaign survey</option>
                   {(surveysQ.data || []).map((s) => (
@@ -394,19 +394,19 @@ export default function DashboardPage() {
             }
           />
           {surveyResultsQ.isLoading ? (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+            <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
               Loading survey results…
             </div>
           ) : surveyResultsQ.error ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
               Error: {surveyResultsQ.error.message}
             </div>
           ) : !surveyResultsQ.data?.surveyTemplate ? (
-            <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+            <div className="rounded-lg border border-dashed border-border bg-sunken p-6 text-center text-sm text-fg-muted">
               This campaign has no survey linked yet.
             </div>
           ) : surveyResultsQ.data.totalResponses === 0 ? (
-            <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+            <div className="rounded-lg border border-dashed border-border bg-sunken p-6 text-center text-sm text-fg-muted">
               No responses in this range yet.
             </div>
           ) : (
@@ -436,17 +436,17 @@ export default function DashboardPage() {
         <SectionHeading
           title="Canvassers"
           right={
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-fg-muted">
               Click a row to view individual responses
             </span>
           }
         />
         {canvassersQ.isLoading ? (
-          <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+          <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
             Loading canvassers…
           </div>
         ) : canvassersQ.error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
             Error: {canvassersQ.error.message}
           </div>
         ) : (
