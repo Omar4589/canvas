@@ -140,10 +140,15 @@ mitigation envelope.
 ## In-app "added to org" notice
 
 - New memberships start with `acknowledgedAt: null` → `isNew: true` in the login/`/auth/me` payload.
-- The banner ([client/src/components/AddedToOrgBanner.jsx](../client/src/components/AddedToOrgBanner.jsx),
-  mounted in [Layout.jsx](../client/src/components/Layout.jsx)) renders one bar per `isNew` membership.
+- Shown on **both web and mobile**, so admins *and* canvassers are notified (the web console is
+  admin-only; canvassers only see the mobile app):
+  - Web: [AddedToOrgBanner.jsx](../client/src/components/AddedToOrgBanner.jsx), mounted in
+    [Layout.jsx](../client/src/components/Layout.jsx), reads `useAuth().memberships`.
+  - Mobile: [AddedToOrgBanner.jsx](../mobile/components/AddedToOrgBanner.jsx), mounted as a top overlay
+    in [(app)/_layout.jsx](../mobile/app/(app)/_layout.jsx), reads `isNew` memberships from cache.
 - Dismiss → `POST /auth/memberships/:membershipId/acknowledge` (scoped to `userId: req.user._id`), which
-  sets `acknowledgedAt` and flips `isNew` locally in `AuthContext`.
+  sets `acknowledgedAt`. Web flips `isNew` in `AuthContext`; mobile drops it from state and rewrites the
+  cached memberships so it stays gone on cold start.
 
 ## Client gating
 
