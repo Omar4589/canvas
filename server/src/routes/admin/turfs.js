@@ -352,6 +352,7 @@ router.get('/doors', async (req, res, next) => {
 
     const filter = {
       campaignId: req.campaign._id,
+      effortId: pass.effortId, // only the round's effort's doors (mirror the cut base filter)
       isActive: true,
       'location.coordinates': { $exists: true, $ne: null },
     };
@@ -449,6 +450,14 @@ router.post('/move-door', async (req, res, next) => {
     const to = await Turf.findOne({ _id: toTurfId, campaignId: req.campaign._id });
     if (!to) return res.status(404).json({ error: 'Target book not found' });
 
+    // Disjointness: a book may only hold doors owned by the book's effort.
+    const toPass = await Pass.findById(to.passId, { effortId: 1 }).lean();
+    const movingHh = await Household.findById(householdId, { effortId: 1 }).lean();
+    if (!movingHh) return res.status(404).json({ error: 'Household not found' });
+    if (toPass && String(movingHh.effortId) !== String(toPass.effortId)) {
+      return res.status(409).json({ error: 'That door belongs to a different effort and cannot be moved into this book.' });
+    }
+
     const fromQuery = mongoose.isValidObjectId(fromTurfId)
       ? { _id: fromTurfId, campaignId: req.campaign._id }
       : { campaignId: req.campaign._id, passId: to.passId, householdIds: householdId };
@@ -481,6 +490,16 @@ router.post('/move-doors', async (req, res, next) => {
     }
     const to = await Turf.findOne({ _id: toTurfId, campaignId: req.campaign._id });
     if (!to) return res.status(404).json({ error: 'Target book not found' });
+
+    // Disjointness: a book may only hold doors owned by the book's effort.
+    const toPass = await Pass.findById(to.passId, { effortId: 1 }).lean();
+    if (toPass) {
+      const moving = await Household.find({ _id: { $in: ids } }, { effortId: 1 }).lean();
+      const foreign = moving.filter((h) => String(h.effortId) !== String(toPass.effortId)).length;
+      if (foreign) {
+        return res.status(409).json({ error: `${foreign} door(s) belong to a different effort and cannot be moved into this book.` });
+      }
+    }
 
     const idSet = new Set(ids.map(String));
     const others = await Turf.find({ campaignId: req.campaign._id, passId: to.passId, _id: { $ne: to._id } });
