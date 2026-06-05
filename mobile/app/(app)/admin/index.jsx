@@ -140,6 +140,16 @@ export default function AdminOverview() {
 
   const cumulative = activeQ.data?.cumulative || {};
   const campaigns = activeQ.data?.campaigns || [];
+
+  // Heads-up when a relative preset could read a day off for an off-zone campaign near
+  // midnight (server flag). Hidden for All-time / Custom (explicit dates → no seam).
+  const seamNames = activeQ.data?.seamCampaigns || [];
+  const showDaySeam =
+    activeQ.data?.crossZoneDaySeam && range?.preset !== 'all' && range?.preset !== 'custom';
+  const seamLabel =
+    seamNames.length <= 2
+      ? seamNames.join(' and ')
+      : `${seamNames.slice(0, 2).join(', ')} and ${seamNames.length - 2} more`;
   const archived = archivedQ.data?.campaigns || [];
 
   return (
@@ -169,6 +179,17 @@ export default function AdminOverview() {
           <Text style={{ paddingHorizontal: spacing.lg, marginTop: 2, fontSize: 11, color: colors.textSecondary }}>
             Dates &amp; times in {activeQ.data.tzAbbrev}
           </Text>
+        ) : null}
+
+        {showDaySeam ? (
+          <View style={[styles.seamBanner, { marginHorizontal: spacing.lg }]}>
+            <Text style={styles.seamBannerText}>
+              Heads up — it's just past midnight in another time zone. {seamLabel}{' '}
+              {seamNames.length > 1 ? 'have' : 'has'} already started a new day, so{' '}
+              {seamNames.length > 1 ? 'their' : 'its'} numbers in this range may be a day off here. Open{' '}
+              {seamNames.length > 1 ? 'those campaigns' : 'that campaign'} directly for exact figures.
+            </Text>
+          </View>
         ) : null}
 
         {activeQ.isLoading ? (
@@ -269,6 +290,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   errorText: { ...type.caption },
+  seamBanner: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FCD34D',
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+  },
+  seamBannerText: { fontSize: 12, color: '#92400E', lineHeight: 17 },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
   statRow: { flexDirection: 'row', justifyContent: 'space-between' },
   stat: { flex: 1 },

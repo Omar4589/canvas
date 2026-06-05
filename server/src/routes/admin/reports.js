@@ -12,7 +12,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Organization } from '../../models/Organization.js';
-import { zonedDayRange, tzAbbrev } from '../../utils/timezone.js';
+import { zonedDayRange, tzAbbrev, zonedDayStr } from '../../utils/timezone.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -62,6 +62,15 @@ function parseDateRange(req, field) {
   const range = zonedDayRange(fromDay, toDay, tz);
   if (!range.$gte && !range.$lt) return {};
   return { [field]: range };
+}
+
+// Active campaigns whose CURRENT calendar date (in their own tz) differs from the org's
+// right now — the nightly window where a relative preset (Today/Yesterday/…), computed in
+// the org's day, lands on a different day for that campaign than its own dashboard would.
+// Takes `now` so it is deterministic to unit-test.
+function crossZoneSeam(now, orgTz, campaigns) {
+  const orgToday = zonedDayStr(now, orgTz);
+  return campaigns.filter((c) => zonedDayStr(now, c.timeZone || 'America/New_York') !== orgToday);
 }
 
 function baseFilter(req) {
@@ -505,7 +514,19 @@ router.get('/campaign-rollup', async (req, res, next) => {
       { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, lit_dropped: 0, voted: 0 }
     );
 
-    res.json({ scope, cumulative, campaigns: rows, timeZone: req.anchorTz, tzAbbrev: tzAbbrev(req.anchorTz) });
+    // Heads-up flag: are we in the nightly window where a relative preset could read a day
+    // off for an off-zone campaign vs its own dashboard? Only meaningful org-wide.
+    const seam = filter._id ? [] : crossZoneSeam(new Date(), req.anchorTz, campaigns);
+
+    res.json({
+      scope,
+      cumulative,
+      campaigns: rows,
+      timeZone: req.anchorTz,
+      tzAbbrev: tzAbbrev(req.anchorTz),
+      crossZoneDaySeam: seam.length > 0,
+      seamCampaigns: seam.map((c) => c.name),
+    });
   } catch (err) {
     next(err);
   }

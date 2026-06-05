@@ -134,6 +134,19 @@ export default function OverviewPage() {
   const campaigns = activeQ.data?.campaigns || [];
   const archivedCampaigns = archivedQ.data?.campaigns || [];
 
+  // Heads-up when a relative preset could read a day off for an off-zone campaign near
+  // midnight (server flag). Hidden for All-time / Custom (explicit dates → no seam).
+  const seamNames = activeQ.data?.seamCampaigns || [];
+  const showDaySeam =
+    activeQ.data?.crossZoneDaySeam &&
+    dateRange.preset !== 'all' &&
+    dateRange.preset !== 'custom';
+  const seamLabel =
+    seamNames.length <= 2
+      ? seamNames.join(' and ')
+      : `${seamNames.slice(0, 2).join(', ')} and ${seamNames.length - 2} more`;
+  const seamPlural = seamNames.length > 1;
+
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -147,6 +160,15 @@ export default function OverviewPage() {
           )}
         </div>
       </div>
+
+      {showDaySeam && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Heads up — it's just past midnight in another time zone.{' '}
+          <span className="font-semibold">{seamLabel}</span> {seamPlural ? 'have' : 'has'} already started a new
+          day, so {seamPlural ? 'their' : 'its'} numbers in this range may be a day off here. Open{' '}
+          {seamPlural ? 'those campaigns' : 'that campaign'} directly for exact figures.
+        </div>
+      )}
 
       {activeQ.isLoading ? (
         <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
