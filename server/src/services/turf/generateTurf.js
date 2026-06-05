@@ -54,7 +54,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     if (mode === 'attribute') {
       books = attributeCut(households, { attribute: params.attribute, capN: params.capN || null });
     } else if (mode === 'geometric') {
-      books = geometricCut(households, { maxDoors: params.maxDoors || 65 });
+      books = geometricCut(households, { maxDoors: params.maxDoors || 65, tolerance: params.tolerance });
     } else {
       throw new Error(`Unknown mode: ${mode}`);
     }
