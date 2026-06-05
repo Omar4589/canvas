@@ -38,15 +38,25 @@ removes that — the data belongs to the campaign, so it is shown in the campaig
 - **Times** — a knock made at 12:01 PM Central shows as **"12:01 PM CDT"** to everyone, with the
   zone label so it is never ambiguous.
 
-## When the *organization's* timezone is used instead
+## When the *organization's* timezone is used
 
-A campaign's timezone only applies where a single campaign does. Two places use the **org** timezone
-as the shared anchor:
+A campaign's timezone is the primary clock everywhere a single campaign applies — **including the
+Overview's per-campaign rows**, which are each counted in *that campaign's* own zone, so a row matches
+that campaign's own dashboard. The **org's** timezone is the anchor only where no single campaign does:
 
-- The **Overview rollup** (org-wide), which sums campaigns that may span zones — no one campaign's
-  clock applies.
-- **User-level** timestamps — when someone joined the org, last login, an import job — which are not
-  tied to one campaign's wall clock.
+- **Which day a relative preset means.** On the org-wide Overview, "Today" / "Yesterday" pick a calendar
+  *date* in the **org's** clock; each campaign is then counted for that date *in its own zone* (see the
+  heads-up below).
+- **User-level / cross-campaign timestamps** — when someone joined the org, last login, an import job, the
+  cumulative "last activity" — which aren't tied to one campaign's wall clock.
+
+### The night-time heads-up
+Because a relative preset's *date* is the org's, there's a ~1-hour window each night where the org and a
+campaign sit on **different calendar dates** (it's already tomorrow in a Florida/Eastern campaign but still
+today for a Central org). In that window, that campaign's "Today/Yesterday" number on the Overview can read
+a day off from its own dashboard. The Overview detects this and shows a small amber banner — naming the
+campaign(s), only then — so an admin reviewing numbers at that hour knows to open the campaign for exact
+figures. Nothing shows the rest of the time, for single-zone orgs, or for All-time / Custom ranges.
 
 ## Setting a campaign's timezone
 
@@ -107,6 +117,23 @@ So `from` and `to` are **both inclusive days** — the window covers the whole `
 `parseDateRange` slices any incoming value to its first 10 chars before calling `zonedDayRange`, so it
 is robust to a legacy ISO instant, but the clients now send date-only. **No server change is needed
 to add a new date-filtered endpoint** — it inherits `req.anchorTz` from the middleware.
+
+### Org-wide rollup: per-zone windows + the night-time seam
+`/campaign-rollup` with no `campaignId` (the web **Overview** + mobile admin home) spans timezones, so it
+does **not** use one org-tz window. It groups the active campaigns **by timezone** and applies a per-zone
+day window — `{ $or: [{ campaignId: { $in }, timestamp: zonedDayRange(from, to, tz) }, … ] }`, one branch
+per distinct zone (≤ ~6). Every count aggregation already groups by `campaignId` and the cumulative is the
+`sum()` of the rows, so each per-campaign row matches that campaign's own dashboard and the total stays
+consistent. A single-campaign request keeps the simple single-window path (already that campaign's tz via
+`req.anchorTz`); All-time has no window.
+
+Residual + the heads-up: the relative-preset *date* is still the org's, applied to each campaign's zone, so
+in the ~1-hour nightly window where the org and a campaign are on different calendar dates a row can read a
+day off vs that campaign's dashboard. The endpoint flags it with `crossZoneSeam(now, orgTz, campaigns)`
+(campaigns whose `zonedDayStr(now, campaign.tz)` ≠ the org's today) → the response carries
+`crossZoneDaySeam` + `seamCampaigns`, and the Overview / admin home show the amber banner only when that
+flag is true **and** the selected preset is relative (not `all`/`custom`). Fully closing the residual would
+need server-side per-campaign preset resolution — deferred.
 
 ## C. Day bucketing
 
