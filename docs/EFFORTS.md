@@ -66,6 +66,11 @@ A campaign can have **many active efforts**, each with its **one active round**.
 the books assigned to them, across whatever efforts they're on. Activating a round only archives the
 *previous round of that same effort* — other efforts keep running.
 
+Because book numbers restart per effort, a canvasser assigned to two efforts could otherwise see two
+"Book 6"s at once. So when a canvasser is on **more than one** effort, the phone's **Books** screen shows
+an **effort switcher** — they pick an effort and see only that effort's books (the choice is remembered).
+A canvasser on a single effort sees no switcher.
+
 ## The crew
 
 An effort's **crew** (the "Crew" count on the Efforts page) is **automatically whoever is assigned to
@@ -191,7 +196,11 @@ effort-scoped), [services/passes/activePasses.js](../server/src/services/passes/
 - **Bootstrap** ([bootstrap.js](../server/src/routes/mobile/bootstrap.js)): unions the canvasser's
   `TurfAssignment`s across all active rounds; returns each book tagged with `effortId` +
   `surveyTemplateId`, plus a `surveys` map. The app resolves a voter's survey via
-  household → book → `surveyTemplateId` → `surveys[id]`, falling back to `activeSurvey`.
+  household → book → `surveyTemplateId` → `surveys[id]`, falling back to `activeSurvey`. It also returns
+  an **`efforts: [{ id, name }]`** list (the distinct efforts the canvasser has books in) so the Books
+  screen can offer the **effort switcher** ([EffortPicker.jsx](../mobile/components/EffortPicker.jsx))
+  and scope the picker to one effort — see Part 1 §"Several efforts at once". The chosen effort persists
+  via `saveCurrentEffort` ([cache.js](../mobile/lib/cache.js)).
 
 ## E. Reporting
 

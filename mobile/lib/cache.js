@@ -6,6 +6,7 @@ const USER_KEY = 'canvass.currentUser';
 const MEMBERSHIPS_KEY = 'canvass.memberships';
 const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
 const SELECTED_BOOKS_KEY = 'canvass.selectedBooks';
+const CURRENT_EFFORT_KEY = 'canvass.currentEffort';
 const MAP_STYLE_KEY = 'canvass.mapStyle';
 
 export async function saveBootstrap(data) {
@@ -139,6 +140,37 @@ export async function loadSelectedBooks(campaignId) {
 
 export async function clearSelectedBooks() {
   await AsyncStorage.removeItem(SELECTED_BOOKS_KEY);
+}
+
+// Which effort the canvasser is currently working. Book numbers restart per
+// effort, so a canvasser on two efforts could see two "Book 6"s — this scopes
+// the Books picker to one effort at a time. Scoped to a campaign so a stale
+// effort never leaks across campaigns.
+export async function saveCurrentEffort(campaignId, effortId) {
+  if (!campaignId || !effortId) {
+    await AsyncStorage.removeItem(CURRENT_EFFORT_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(
+    CURRENT_EFFORT_KEY,
+    JSON.stringify({ campaignId: String(campaignId), effortId: String(effortId) })
+  );
+}
+
+export async function loadCurrentEffort(campaignId) {
+  const raw = await AsyncStorage.getItem(CURRENT_EFFORT_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (String(parsed.campaignId) !== String(campaignId)) return null;
+    return parsed.effortId || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearCurrentEffort() {
+  await AsyncStorage.removeItem(CURRENT_EFFORT_KEY);
 }
 
 // Which base map style the user last picked (id from lib/mapStyles). Persisted

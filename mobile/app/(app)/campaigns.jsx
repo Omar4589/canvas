@@ -14,7 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useRefresh } from '../../lib/useRefresh';
 import { signOut } from '../../lib/authState';
-import { saveActiveCampaign, clearBootstrap, clearSelectedBooks } from '../../lib/cache';
+import { saveActiveCampaign, clearBootstrap, clearSelectedBooks, clearCurrentEffort } from '../../lib/cache';
 import { loadRoleContext } from '../../lib/role';
 import Logo from '../../components/Logo';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
@@ -48,6 +48,7 @@ export default function CampaignsScreen() {
       await saveActiveCampaign(c);
       await clearBootstrap();
       await clearSelectedBooks();
+      await clearCurrentEffort();
       qc.removeQueries({ queryKey: ['bootstrap'] });
       router.replace('/(app)/books');
     } catch (e) {

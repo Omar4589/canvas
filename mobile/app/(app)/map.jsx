@@ -31,6 +31,7 @@ import {
   loadCurrentUser,
   loadSelectedBooks,
   clearSelectedBooks,
+  clearCurrentEffort,
 } from '../../lib/cache';
 import { loadRoleContext } from '../../lib/role';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
@@ -519,6 +520,7 @@ export default function MapScreen() {
     await saveActiveCampaign(null);
     await clearBootstrap();
     await clearSelectedBooks();
+    await clearCurrentEffort();
     qc.removeQueries({ queryKey: ['bootstrap'] });
     router.replace('/(app)/campaigns');
   }

@@ -13,9 +13,13 @@ import {
   clearBootstrap,
   saveSelectedBooks,
   clearSelectedBooks,
+  saveCurrentEffort,
+  loadCurrentEffort,
+  clearCurrentEffort,
 } from '../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import Logo from '../../components/Logo';
+import EffortPicker from '../../components/EffortPicker';
 import { colors, radius } from '../../lib/theme';
 
 if (MAPBOX_PUBLIC_TOKEN) {
@@ -32,6 +36,8 @@ export default function BooksScreen() {
   const [activeCampaign, setActiveCampaign] = useState(undefined);
   const [selected, setSelected] = useState(null); // a single book id, or null
   const [mapReady, setMapReady] = useState(false);
+  const [currentEffort, setCurrentEffort] = useState(null);
+  const effortResolvedRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -67,6 +73,43 @@ export default function BooksScreen() {
 
   const books = data?.books || [];
   const households = data?.households || [];
+  const efforts = useMemo(() => data?.efforts || [], [data]);
+
+  // Resolve the canvasser's current effort once efforts load — the saved choice
+  // if still valid, else the first effort. Re-resolves if the set ever changes.
+  useEffect(() => {
+    if (!activeCampaign?.id || !efforts.length) return;
+    if (currentEffort && efforts.some((e) => String(e.id) === String(currentEffort))) return;
+    let mounted = true;
+    (async () => {
+      const saved = effortResolvedRef.current ? null : await loadCurrentEffort(activeCampaign.id);
+      effortResolvedRef.current = true;
+      if (!mounted) return;
+      const valid = saved && efforts.some((e) => String(e.id) === String(saved));
+      setCurrentEffort(valid ? saved : efforts[0].id);
+    })();
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCampaign, efforts, currentEffort]);
+
+  // Books shown in the picker, scoped to the chosen effort. Book numbers restart
+  // per effort, so without this a canvasser on two efforts sees two "Book 6"s.
+  const visibleBooks = useMemo(() => {
+    if (efforts.length <= 1 || !currentEffort) return books;
+    return books.filter((b) => String(b.effortId) === String(currentEffort));
+  }, [books, efforts, currentEffort]);
+
+  const onEffortChange = useCallback(
+    (effortId) => {
+      setCurrentEffort(effortId);
+      saveCurrentEffort(activeCampaign?.id, effortId);
+      setSelected(null); // the previously-picked book belonged to the old effort
+      cameraInitRef.current = false; // re-frame the map to the new effort's books
+    },
+    [activeCampaign]
+  );
 
   // Admin / non-turf campaign (sees everything, no assigned books) → straight to the map.
   useEffect(() => {
@@ -77,7 +120,7 @@ export default function BooksScreen() {
   // One book marker per book at its centroid; progress from the houses' status.
   const bookMarkers = useMemo(
     () =>
-      books
+      visibleBooks
         .filter((b) => b.centroid?.coordinates?.length === 2)
         .map((b) => {
           const members = households.filter((h) => String(h.turfId) === String(b.id));
@@ -86,7 +129,7 @@ export default function BooksScreen() {
           const status = total > 0 && knocked >= total ? 'green' : knocked > 0 ? 'yellow' : 'grey';
           return { id: String(b.id), coordinates: b.centroid.coordinates, name: b.name, knocked, total, status };
         }),
-    [books, households]
+    [visibleBooks, households]
   );
   const selectedBook = bookMarkers.find((b) => b.id === selected) || null;
 
@@ -157,6 +200,7 @@ export default function BooksScreen() {
     await saveActiveCampaign(null);
     await clearBootstrap();
     await clearSelectedBooks();
+    await clearCurrentEffort();
     qc.removeQueries({ queryKey: ['bootstrap'] });
     router.replace('/(app)/campaigns');
   }
@@ -272,6 +316,11 @@ export default function BooksScreen() {
             </Pressable>
           </View>
         </View>
+        {efforts.length > 1 && (
+          <View style={styles.effortRow}>
+            <EffortPicker efforts={efforts} value={currentEffort} onChange={onEffortChange} />
+          </View>
+        )}
         <View style={styles.hint}>
           <Text style={styles.hintText}>
             Tap your books to pick where to start. Grey = not started · yellow = in progress · green = done.
@@ -311,6 +360,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   switch: { color: colors.brand, fontWeight: '600', fontSize: 14 },
+  effortRow: { marginHorizontal: 12, marginBottom: 8, zIndex: 10 },
   hint: {
     marginHorizontal: 12,
     backgroundColor: 'rgba(255,255,255,0.92)',

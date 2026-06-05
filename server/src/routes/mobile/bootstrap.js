@@ -87,7 +87,7 @@ async function canvasserBooks(req, campaign) {
   const passEffort = new Map(passes.map((p) => [String(p._id), p.effortId ? String(p.effortId) : null]));
   const efforts = await Effort.find(
     { _id: { $in: passes.map((p) => p.effortId).filter(Boolean) } },
-    { surveyTemplateId: 1 }
+    { name: 1, surveyTemplateId: 1 }
   ).lean();
   const effortSurvey = new Map(
     efforts.map((e) => [String(e._id), e.surveyTemplateId ? String(e.surveyTemplateId) : null])
@@ -104,7 +104,7 @@ async function canvasserBooks(req, campaign) {
       ).lean()
     ).map((h) => String(h._id))
   );
-  return books.map((b) => {
+  const booksOut = books.map((b) => {
     const effortId = passEffort.get(String(b.passId)) || null;
     const surveyTemplateId = (effortId && effortSurvey.get(effortId)) || campaignSurvey;
     return {
@@ -116,6 +116,17 @@ async function canvasserBooks(req, campaign) {
       surveyTemplateId,
     };
   });
+
+  // The distinct efforts the canvasser has books in — so the app can offer an
+  // effort switcher (book numbers restart per effort, so two efforts can both
+  // have a "Book 6"). Only efforts that actually own one of these books.
+  const bookEffortIds = new Set(booksOut.map((b) => b.effortId).filter(Boolean));
+  const effortList = efforts
+    .filter((e) => bookEffortIds.has(String(e._id)))
+    .map((e) => ({ id: String(e._id), name: e.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { books: booksOut, efforts: effortList };
 }
 
 router.get('/campaigns', async (req, res, next) => {
@@ -215,7 +226,7 @@ router.get('/bootstrap', async (req, res, next) => {
     const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
     const voters = votersRaw.map((v) => ({ ...v, voted: votedSet.has(String(v._id)) }));
 
-    const books = await canvasserBooks(req, campaign);
+    const { books, efforts } = await canvasserBooks(req, campaign);
     // Per-effort surveys: every survey a door in scope might need (effort
     // overrides + campaign default), keyed by id. The app resolves a voter's
     // survey via household → book → surveyTemplateId → surveys[id], falling back
@@ -242,6 +253,7 @@ router.get('/bootstrap', async (req, res, next) => {
       households,
       voters,
       books,
+      efforts,
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {
