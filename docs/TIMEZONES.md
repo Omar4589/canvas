@@ -156,13 +156,23 @@ Both expose `todayInTz(tz)` (`Intl … en-CA` → `YYYY-MM-DD`) and UTC-based ca
 custom, tz)` / `quickRangeFor(key, tz)` return date-only bounds (open presets `to: null`; closed
 presets' `to` is the **last included day**).
 
-**The gate.** Each campaign-scoped surface keeps its range **null until the campaign tz is known**
-(the campaigns list / active campaign has loaded), and gates its report queries on it — so a preset
-never resolves in, or fetches with, the device clock. Web pages source the tz from the campaigns
-cache by `campaignId` (or `useCampaignSelection().selected`), falling back to `useOrgTimeZone()`;
-mobile screens pass the active (or route) `campaign?.timeZone`. The custom pickers send the picked
-**calendar dates** as date-only (no `toISOString`, which is UTC and shifts a day in negative-offset
-zones).
+**Anchoring + loading.** A surface needs a tz *before* it can build a preset, and the two platforms
+reach it differently:
+- **Web** sources the campaign tz from the campaigns cache by `campaignId` (or
+  `useCampaignSelection().selected`), falling back to `useOrgTimeZone()`. Since the org tz is always
+  available at login, the page keeps its range **null until the campaigns list has loaded** (a quick
+  round-trip) and gates its queries on it — so it never resolves a preset in, or fetches with, the
+  device clock.
+- **Mobile** has no synchronous org tz, and the active campaign tz is async (from the AsyncStorage
+  cache, which can be **stale or absent**). So each screen **seeds the range with the device tz
+  immediately** (it loads on open) and **refines** to the campaign tz once it resolves —
+  `campaign?.timeZone || deviceTimezone()`, recomputed on tz change until the admin picks a range.
+  For a same-zone admin the device tz *is* the campaign tz, so presets are precise and instant;
+  cross-zone, the first render uses the device day and corrects a beat later. (Hard-gating on mobile
+  would blank the dashboard whenever the cached campaign lacks a `timeZone` — the post-update state.)
+
+The custom pickers send the picked **calendar dates** as date-only (no `toISOString`, which is UTC and
+shifts a day in negative-offset zones).
 
 ## E. Defaulting from state + the migration
 

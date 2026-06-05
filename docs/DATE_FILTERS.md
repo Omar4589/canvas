@@ -127,8 +127,10 @@ into a UTC window in the anchor tz where `to` covers the **whole** day — `zone
 
 ## C. State shape, the tz, & the gate
 
-Each page resolves an **anchor tz** and initializes its range only once that tz is known, so a preset
-never resolves in the device clock:
+This is the **web** pattern (it can gate because the org tz is always available at login). **Mobile**
+seeds the device tz immediately and refines to the campaign tz — see §F and
+[TIMEZONES.md](TIMEZONES.md) §D. Each web page resolves an **anchor tz** and initializes its range only
+once that tz is known, so a preset never resolves in the device clock:
 
 ```js
 const tz = current?.timeZone || orgTz;              // campaign tz, else org (useOrgTimeZone)
@@ -203,8 +205,10 @@ ignores it and uses `req.anchorTz`. The custom pickers emit the picked **calenda
 | [components/DateRangeBar.jsx](../mobile/components/DateRangeBar.jsx) | The scrollable preset bar (admin overview, campaign detail, leaderboard, canvasser drilldowns); takes a `tz` prop. |
 | [components/DateRangePickerModal.jsx](../mobile/components/DateRangePickerModal.jsx) | Native custom picker + quick chips (date-only; takes `tz`). |
 
-Each admin screen feeds its campaign's `timeZone` to the bar/builders and keeps its range null until
-that tz loads, gating its query (the active campaign carries `timeZone`; `campaign/[campaignId]` uses
-its route campaign). Defaults are mostly **Today** (canvasser drilldowns open wider — `7d`/`30d`). The
+Each admin screen feeds its campaign's `timeZone` to the bar/builders. Unlike web (which gates on the
+always-available org tz — §C), mobile has no synchronous org tz and the active campaign tz is async and
+can be stale, so a screen **seeds the device tz immediately** (loads on open) and **refines** to the
+campaign tz once it resolves (`campaign?.timeZone || deviceTimezone()`; `campaign/[campaignId]` uses its
+route campaign). Defaults are mostly **Today** (canvasser drilldowns open wider — `7d`/`30d`). The
 personal canvasser stats screen and the super-admin control room intentionally have **no** date filter
 (personal/all-time / fixed live windows).
