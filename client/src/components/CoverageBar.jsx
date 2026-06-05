@@ -1,28 +1,27 @@
+import Card from './ui/Card.jsx';
+
 // Status colors mirror mobile/lib/theme.js so admin and canvasser see the
-// same color for the same status across surfaces.
+// same color for the same status across surfaces. The vivid 500-level status
+// hues read on both light and dark surfaces; only the chrome uses tokens.
 const SEGMENTS = [
-  { key: 'surveyed', label: 'Surveyed', color: 'bg-green-500', dot: 'bg-green-500' },
-  { key: 'lit_dropped', label: 'Lit dropped', color: 'bg-purple-500', dot: 'bg-purple-500' },
-  { key: 'not_home', label: 'Not home', color: 'bg-blue-500', dot: 'bg-blue-500' },
-  { key: 'wrong_address', label: 'Wrong address', color: 'bg-red-500', dot: 'bg-red-500' },
-  { key: 'voted', label: 'Voted', color: 'bg-teal-500', dot: 'bg-teal-500' },
-  { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-400', dot: 'bg-gray-400' },
+  { key: 'surveyed', label: 'Surveyed', color: 'bg-green-500' },
+  { key: 'lit_dropped', label: 'Lit dropped', color: 'bg-purple-500' },
+  { key: 'not_home', label: 'Not home', color: 'bg-blue-500' },
+  { key: 'wrong_address', label: 'Wrong address', color: 'bg-red-500' },
+  { key: 'voted', label: 'Voted', color: 'bg-teal-500' },
+  { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-400' },
 ];
 
 export default function CoverageBar({ canvass = {} }) {
   const total = SEGMENTS.reduce((sum, s) => sum + (canvass[s.key] || 0), 0);
 
   if (total === 0) {
-    return (
-      <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
-        No households yet.
-      </div>
-    );
+    return <Card className="p-4 text-sm text-fg-muted">No households yet.</Card>;
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="flex h-3 w-full overflow-hidden rounded-full bg-gray-100">
+    <Card className="p-4">
+      <div className="flex h-3 w-full overflow-hidden rounded-full bg-sunken">
         {SEGMENTS.map((s) => {
           const count = canvass[s.key] || 0;
           const pct = (count / total) * 100;
@@ -43,14 +42,14 @@ export default function CoverageBar({ canvass = {} }) {
           const pct = total ? (count / total) * 100 : 0;
           return (
             <div key={s.key} className="flex items-center gap-2">
-              <span className={`inline-block h-2.5 w-2.5 rounded-full ${s.dot}`} />
-              <span className="text-gray-700">{s.label}</span>
-              <span className="font-semibold text-gray-900">{count.toLocaleString()}</span>
-              <span className="text-gray-500">({pct.toFixed(1)}%)</span>
+              <span className={`inline-block h-2.5 w-2.5 rounded-full ${s.color}`} />
+              <span className="text-fg-muted">{s.label}</span>
+              <span className="font-semibold tabular-nums text-fg">{count.toLocaleString()}</span>
+              <span className="tabular-nums text-fg-subtle">({pct.toFixed(1)}%)</span>
             </div>
           );
         })}
       </div>
-    </div>
+    </Card>
   );
 }

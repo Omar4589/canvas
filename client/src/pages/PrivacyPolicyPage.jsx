@@ -10,7 +10,8 @@ export default function PrivacyPolicyPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10 px-4">
+    // Public page — keep light regardless of the app's saved theme.
+    <div className="theme-light min-h-screen bg-gray-50 py-10 px-4 text-gray-900">
       <div className="mx-auto max-w-3xl rounded-lg bg-white p-8 shadow-sm">
         <h1 className="text-3xl font-semibold text-gray-900">Privacy Policy</h1>
         <p className="mt-1 text-sm text-gray-500">Last updated: {LAST_UPDATED}</p>

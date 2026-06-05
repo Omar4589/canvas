@@ -2,6 +2,97 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Semantic design tokens (channel-triplet RGB so Tailwind's
+ * `rgb(var(--x) / <alpha-value>)` opacity utilities work). Light values live in
+ * :root; `.dark` (added to <html> by the theme toggle / no-flash script) flips
+ * them. Components reference these via Tailwind color keys (bg-card, text-fg,
+ * border-border, etc.) — never hard-coded grays — so light/dark is one flip.
+ * `.theme-light` re-pins the light values for the public marketing site, which
+ * stays light regardless of the global theme.
+ */
+@layer base {
+  :root,
+  .theme-light {
+    --surface: 249 250 251; /* #F9FAFB page background */
+    --card: 255 255 255; /* #FFFFFF cards/panels/modals/inputs */
+    --raised: 255 255 255; /* popovers/menus (= card in light) */
+    --sunken: 243 244 246; /* #F3F4F6 table headers, wells, skeletons */
+    --overlay: 0 0 0; /* scrim base, used at /40 */
+
+    --fg: 17 24 39; /* #111827 primary text */
+    --fg-muted: 107 114 128; /* #6B7280 secondary text */
+    --fg-subtle: 156 163 175; /* #9CA3AF tertiary / placeholder */
+    --fg-inverse: 255 255 255;
+
+    --border: 229 231 235; /* #E5E7EB dividers/card borders */
+    --border-strong: 209 213 219; /* #D1D5DB input borders */
+
+    --brand: 220 38 38; /* #DC2626 */
+    --brand-hover: 185 28 28; /* #B91C1C */
+    --brand-fg: 255 255 255;
+    --brand-tint: 254 242 242; /* #FEF2F2 selected washes */
+    --brand-tint-fg: 185 28 28; /* #B91C1C */
+
+    --ring: 220 38 38;
+
+    --success: 22 163 74; /* #16A34A */
+    --success-fg: 21 128 61; /* #15803D */
+    --success-tint: 220 252 231; /* #DCFCE7 */
+    --warning: 217 119 6; /* #D97706 */
+    --warning-fg: 180 83 9; /* #B45309 */
+    --warning-tint: 254 243 199; /* #FEF3C7 */
+    --danger: 220 38 38; /* #DC2626 */
+    --danger-fg: 185 28 28; /* #B91C1C */
+    --danger-tint: 254 226 226; /* #FEE2E2 */
+    --info: 37 99 235; /* #2563EB */
+    --info-fg: 29 78 216; /* #1D4ED8 */
+    --info-tint: 219 234 254; /* #DBEAFE */
+  }
+
+  html.dark {
+    --surface: 11 15 25; /* #0B0F19 */
+    --card: 17 24 39; /* #111827 */
+    --raised: 31 41 55; /* #1F2937 lift above card */
+    --sunken: 15 20 32; /* between surface and card */
+    --overlay: 0 0 0;
+
+    --fg: 229 231 235; /* #E5E7EB */
+    --fg-muted: 156 163 175; /* #9CA3AF */
+    --fg-subtle: 107 114 128; /* #6B7280 */
+    --fg-inverse: 17 24 39;
+
+    --border: 39 46 60; /* ~gray-800, bluer to match surface */
+    --border-strong: 55 65 81; /* #374151 */
+
+    --brand: 239 68 68; /* #EF4444 lifted for dark contrast */
+    --brand-hover: 248 113 113; /* #F87171 */
+    --brand-fg: 255 255 255;
+    --brand-tint: 63 20 20;
+    --brand-tint-fg: 252 165 165; /* #FCA5A5 */
+
+    --ring: 248 113 113; /* #F87171 */
+
+    --success: 34 197 94; /* #22C55E */
+    --success-fg: 134 239 172; /* #86EFAC */
+    --success-tint: 20 50 35;
+    --warning: 245 158 11; /* #F59E0B */
+    --warning-fg: 253 230 138; /* #FDE68A */
+    --warning-tint: 60 45 10;
+    --danger: 248 113 113; /* #F87171 */
+    --danger-fg: 252 165 165; /* #FCA5A5 */
+    --danger-tint: 60 20 20;
+    --info: 59 130 246; /* #3B82F6 */
+    --info-fg: 147 197 253; /* #93C5FD */
+    --info-tint: 20 35 60;
+  }
+
+  /* Default border color → token (shadcn-style), so bare `border` themes too. */
+  * {
+    border-color: rgb(var(--border));
+  }
+}
+
 html,
 body,
 #root {
@@ -17,14 +108,19 @@ body,
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background-color: #f9fafb;
-  color: #111827;
+  background-color: rgb(var(--surface));
+  color: rgb(var(--fg));
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Dark mode (class strategy). The toggle adds `.dark` to <html>; a no-flash
-   script in index.html sets it before first paint. */
-html.dark body {
-  background-color: #0b0f19;
-  color: #e5e7eb;
+/* Respect reduced-motion globally: neutralize token animations + transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

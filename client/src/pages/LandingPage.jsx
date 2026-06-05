@@ -15,7 +15,9 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white">
+    // `theme-light` re-pins light tokens so the public site stays light even when
+    // the app's dark theme is saved globally; bg-white masks the dark body.
+    <div className="theme-light min-h-screen bg-white text-gray-900">
       <MarketingNav />
       <main>
         <Hero />
