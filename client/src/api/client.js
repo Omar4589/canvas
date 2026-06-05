@@ -46,6 +46,16 @@ export async function api(path, { method = 'GET', body, headers = {}, formData }
     }
   }
   if (!res.ok) {
+    // A locked-out user (temp password) gets 403'd on every protected route;
+    // funnel any in-flight call to the forced change-password screen.
+    if (
+      res.status === 403 &&
+      data?.code === 'PASSWORD_CHANGE_REQUIRED' &&
+      typeof window !== 'undefined' &&
+      window.location.pathname !== '/change-password'
+    ) {
+      window.location.assign('/change-password');
+    }
     const err = new Error(data?.error || `Request failed: ${res.status}`);
     err.status = res.status;
     err.data = data;

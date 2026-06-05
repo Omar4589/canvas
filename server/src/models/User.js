@@ -10,6 +10,10 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, required: true },
     isSuperAdmin: { type: Boolean, default: false, index: true },
     isActive: { type: Boolean, default: true },
+    // When true, the user was issued a temporary password (e.g. an admin reset)
+    // and must choose a new one before they can use the app. See passwordGate.js.
+    mustChangePassword: { type: Boolean, default: false },
+    tempPasswordSetAt: { type: Date, default: null },
     passwordResetToken: { type: String, default: null },
     passwordResetExpiresAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
@@ -34,6 +38,7 @@ userSchema.methods.toSafeJSON = function () {
     phone: this.phone,
     isSuperAdmin: !!this.isSuperAdmin,
     isActive: this.isActive,
+    mustChangePassword: !!this.mustChangePassword,
     lastLoginAt: this.lastLoginAt,
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,

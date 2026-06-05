@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import LandingPage from './pages/LandingPage.jsx';
+import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
@@ -39,6 +40,14 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
+        <Route
+          path="/change-password"
+          element={
+            <ProtectedRoute requireActiveOrg={false} allowPasswordChange>
+              <ChangePasswordPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/select-org"
           element={

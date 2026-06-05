@@ -26,6 +26,10 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const res = await login(email, password);
+      if (res.user.mustChangePassword) {
+        navigate('/change-password', { replace: true });
+        return;
+      }
       const adminMemberships = (res.memberships || []).filter((m) => m.role === 'admin');
       const canAccessConsole = res.user.isSuperAdmin || adminMemberships.length > 0;
       if (!canAccessConsole) {

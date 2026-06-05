@@ -159,10 +159,11 @@ router.patch('/:id', loadEffort, async (req, res, next) => {
 
 // Claim households into this effort (materialize Household.effortId).
 //   body: { walkListId?, all?: true, force?: false }
-// Targets = a walk list's households, or (all:true) every Intake door. By default
-// only Intake (unowned) doors are claimed; doors owned by ANOTHER effort are
-// returned as `conflicts` unless force:true (the re-carve path), which also pulls
-// them out of their old effort's books so they re-cut cleanly here.
+// Targets = a walk list's households, or (all:true) every Intake (unowned) door.
+// A walk-list claim may include doors owned by ANOTHER effort — those are returned as
+// `conflicts` unless force:true (the re-carve path), which also pulls them out of their
+// old effort's books so they re-cut cleanly here. "Claim all Intake" only ever touches
+// unowned doors, so it never conflicts.
 router.post('/:id/claim', loadEffort, async (req, res, next) => {
   try {
     const { walkListId, all, force } = req.body || {};
@@ -175,7 +176,7 @@ router.post('/:id/claim', loadEffort, async (req, res, next) => {
       if (!wl) return res.status(404).json({ error: 'Walk list not found' });
       idFilter = { _id: { $in: wl.householdIds || [] } };
     } else if (all) {
-      idFilter = {}; // every eligible household; ownership handled below
+      idFilter = { effortId: null }; // Intake (unowned) doors only — never another effort's doors
     } else {
       return res.status(400).json({ error: 'Provide walkListId or all:true' });
     }

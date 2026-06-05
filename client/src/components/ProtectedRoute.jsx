@@ -6,8 +6,10 @@ export default function ProtectedRoute({
   requireOrgAdmin = false,
   requireSuperAdmin = false,
   requireActiveOrg = true,
+  allowPasswordChange = false,
 }) {
-  const { user, memberships, activeOrgId, isSuperAdmin, isOrgAdmin, loading } = useAuth();
+  const { user, memberships, activeOrgId, isSuperAdmin, isOrgAdmin, mustChangePassword, loading } =
+    useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -20,6 +22,11 @@ export default function ProtectedRoute({
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // A user owing a password change can only reach the change-password screen.
+  if (mustChangePassword && !allowPasswordChange) {
+    return <Navigate to="/change-password" state={{ from: location }} replace />;
   }
 
   if (requireSuperAdmin && !isSuperAdmin) {

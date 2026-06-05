@@ -49,6 +49,10 @@ export default function Index() {
   }
   if (!token) return <Redirect href="/login" />;
 
+  // Admin issued a temporary password — force a change before anything else.
+  // (The server also 403s every protected route until this clears.)
+  if (boot?.user?.mustChangePassword) return <Redirect href="/change-password" />;
+
   const isSuperAdmin = !!boot?.user?.isSuperAdmin;
 
   if (!boot?.activeOrgId) {

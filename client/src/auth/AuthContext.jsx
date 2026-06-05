@@ -63,6 +63,25 @@ export function AuthProvider({ children }) {
     setActiveOrgIdState(orgId);
   }
 
+  async function changePassword(currentPassword, newPassword) {
+    const res = await api('/auth/change-password', {
+      method: 'POST',
+      body: { currentPassword, newPassword },
+    });
+    setUser(res.user);
+    setMemberships(res.memberships || []);
+    return res;
+  }
+
+  async function acknowledgeMembership(membershipId) {
+    await api(`/auth/memberships/${membershipId}/acknowledge`, { method: 'POST' });
+    setMemberships((list) =>
+      list.map((m) =>
+        m.membershipId === membershipId ? { ...m, isNew: false } : m
+      )
+    );
+  }
+
   const activeMembership = useMemo(
     () => memberships.find((m) => m.organizationId === activeOrgId) || null,
     [memberships, activeOrgId]
@@ -70,6 +89,7 @@ export function AuthProvider({ children }) {
 
   const isSuperAdmin = !!user?.isSuperAdmin;
   const isOrgAdmin = isSuperAdmin || activeMembership?.role === 'admin';
+  const mustChangePassword = !!user?.mustChangePassword;
 
   return (
     <AuthContext.Provider
@@ -80,10 +100,13 @@ export function AuthProvider({ children }) {
         activeMembership,
         isSuperAdmin,
         isOrgAdmin,
+        mustChangePassword,
         loading,
         login,
         logout,
         switchOrg,
+        changePassword,
+        acknowledgeMembership,
       }}
     >
       {children}

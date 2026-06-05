@@ -78,10 +78,13 @@ function Stat({ label, value }) {
 
 export default function UserProfileModal({ membership, onClose }) {
   const qc = useQueryClient();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isSuperAdmin } = useAuth();
   const user = membership.user;
   const isSelf = currentUser?.id === user?.id;
   const membershipActive = !!membership.isActive;
+  // The login email is shared across every org this user belongs to, so a plain
+  // org admin can't change it for a multi-org user — only the user or a super-admin.
+  const emailLocked = !!user.isMultiOrg && !isSuperAdmin && !isSelf;
 
   const [form, setForm] = useState({
     firstName: user.firstName || '',
@@ -198,7 +201,7 @@ export default function UserProfileModal({ membership, onClose }) {
   const isProfileDirty =
     form.firstName !== (user.firstName || '') ||
     form.lastName !== (user.lastName || '') ||
-    form.email !== (user.email || '') ||
+    (!emailLocked && form.email !== (user.email || '')) ||
     form.phone !== (user.phone || '');
 
   const isRoleDirty = form.role !== (membership.role || 'canvasser');
@@ -209,7 +212,7 @@ export default function UserProfileModal({ membership, onClose }) {
     const body = {};
     if (form.firstName !== user.firstName) body.firstName = form.firstName;
     if (form.lastName !== user.lastName) body.lastName = form.lastName;
-    if (form.email !== user.email) body.email = form.email;
+    if (!emailLocked && form.email !== user.email) body.email = form.email;
     if (form.phone !== (user.phone || '')) body.phone = form.phone;
     saveProfile.mutate(body);
   }
@@ -356,8 +359,17 @@ export default function UserProfileModal({ membership, onClose }) {
               value={form.email}
               onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
               required
-              className={inputCls}
+              disabled={emailLocked}
+              className={`${inputCls}${
+                emailLocked ? ' cursor-not-allowed bg-gray-100 text-gray-500' : ''
+              }`}
             />
+            {emailLocked && (
+              <p className="mt-1 text-xs italic text-gray-500">
+                This user belongs to multiple organizations; their login email can
+                only be changed by the user or a super-admin.
+              </p>
+            )}
           </Field>
           <Field label="Phone" className="mt-3">
             <input
@@ -537,7 +549,7 @@ export default function UserProfileModal({ membership, onClose }) {
               onClick={() => setShowResetPw((s) => !s)}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
             >
-              {showResetPw ? 'Cancel reset' : 'Reset password'}
+              {showResetPw ? 'Cancel' : 'Set temporary password'}
             </button>
             {!isSelf && (
               <>
@@ -570,8 +582,12 @@ export default function UserProfileModal({ membership, onClose }) {
               className="mt-4 rounded-md bg-gray-50 p-4"
             >
               <label className="block text-xs font-medium text-gray-700">
-                New password (min 8 chars)
+                Temporary password (min 8 chars)
               </label>
+              <p className="mt-1 text-xs text-gray-500">
+                The user will be required to choose a new password the next time
+                they log in.
+              </p>
               <div className="mt-2 flex flex-wrap items-end gap-3">
                 <div className="min-w-[240px] flex-1">
                   <PasswordInput
@@ -586,7 +602,7 @@ export default function UserProfileModal({ membership, onClose }) {
                   disabled={resetPw.isPending || newPassword.length < 8}
                   className="rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50"
                 >
-                  {resetPw.isPending ? 'Saving…' : 'Save password'}
+                  {resetPw.isPending ? 'Saving…' : 'Set password'}
                 </button>
               </div>
             </form>

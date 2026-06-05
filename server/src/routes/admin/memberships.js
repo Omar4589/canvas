@@ -22,6 +22,9 @@ const addSchema = z.object({
   lastName: z.string().min(1).optional(),
   phone: phoneSchema,
   password: z.string().min(8).optional(),
+  // true = the admin intends to link an EXISTING global account by email.
+  // false = create a brand-new account. Lets us give a clear error either way.
+  linkExisting: z.boolean().optional().default(false),
 });
 
 const updateMembershipSchema = z.object({
@@ -68,26 +71,37 @@ router.get('/', async (req, res, next) => {
       .populate({ path: 'userId' })
       .sort({ createdAt: -1 })
       .lean();
+    const members = memberships.filter((m) => m.userId);
+
+    // How many active orgs each member belongs to GLOBALLY — so the UI can lock
+    // the login-email field for multi-org users. We expose only a boolean, never
+    // which other orgs they're in.
+    const userIds = members.map((m) => m.userId._id);
+    const counts = await Membership.aggregate([
+      { $match: { userId: { $in: userIds }, isActive: true } },
+      { $group: { _id: '$userId', count: { $sum: 1 } } },
+    ]);
+    const orgCount = new Map(counts.map((c) => [String(c._id), c.count]));
+
     res.json({
-      members: memberships
-        .filter((m) => m.userId)
-        .map((m) => ({
-          membershipId: String(m._id),
-          role: m.role,
-          isActive: m.isActive,
-          addedAt: m.createdAt,
-          user: {
-            id: String(m.userId._id),
-            firstName: m.userId.firstName,
-            lastName: m.userId.lastName,
-            email: m.userId.email,
-            phone: m.userId.phone,
-            isSuperAdmin: !!m.userId.isSuperAdmin,
-            isActive: m.userId.isActive,
-            lastLoginAt: m.userId.lastLoginAt,
-            createdAt: m.userId.createdAt,
-          },
-        })),
+      members: members.map((m) => ({
+        membershipId: String(m._id),
+        role: m.role,
+        isActive: m.isActive,
+        addedAt: m.createdAt,
+        user: {
+          id: String(m.userId._id),
+          firstName: m.userId.firstName,
+          lastName: m.userId.lastName,
+          email: m.userId.email,
+          phone: m.userId.phone,
+          isSuperAdmin: !!m.userId.isSuperAdmin,
+          isActive: m.userId.isActive,
+          isMultiOrg: (orgCount.get(String(m.userId._id)) || 0) >= 2,
+          lastLoginAt: m.userId.lastLoginAt,
+          createdAt: m.userId.createdAt,
+        },
+      })),
     });
   } catch (err) {
     next(err);
@@ -101,7 +115,23 @@ router.post('/', async (req, res, next) => {
     const email = data.email.toLowerCase().trim();
     let user = await User.findOne({ email });
 
-    if (!user) {
+    if (data.linkExisting) {
+      // Link-an-existing-account intent: there must already be an account.
+      if (!user) {
+        return res.status(404).json({
+          error: "No account exists with that email. Uncheck 'Existing user' to create a new one.",
+          code: 'EMAIL_NOT_FOUND',
+        });
+      }
+    } else if (user) {
+      // Create-new intent but the email is already taken globally — guide the
+      // admin to the link path instead of silently reusing the other account.
+      return res.status(409).json({
+        error:
+          "An account with this email already exists. Check 'Existing user (by email)' to link them to this org instead.",
+        code: 'EMAIL_EXISTS_USE_LINK',
+      });
+    } else {
       if (!data.password || !data.firstName || !data.lastName) {
         return res.status(400).json({
           error: 'New user requires firstName, lastName, and password.',
@@ -212,9 +242,33 @@ router.patch('/:userId/user', async (req, res, next) => {
     });
     if (!membership) return res.status(404).json({ error: 'Member not in this org' });
 
+    const targetUser = await User.findById(req.params.userId);
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
     const data = updateUserSchema.parse(req.body);
     if (data.email) data.email = data.email.toLowerCase();
     if (data.phone === '') data.phone = null;
+
+    // The login email of a multi-org user is shared across every org they belong
+    // to, so only the user themselves or a super-admin may change it. Name/phone
+    // stay editable. (The admin UI also disables the field, but this is the real
+    // guard against a tampered request.)
+    if (data.email && data.email !== targetUser.email) {
+      const isSelf = String(req.params.userId) === String(req.user._id);
+      if (!req.user.isSuperAdmin && !isSelf) {
+        const activeCount = await Membership.countDocuments({
+          userId: req.params.userId,
+          isActive: true,
+        });
+        if (activeCount >= 2) {
+          return res.status(403).json({
+            error:
+              'This user belongs to multiple organizations; their login email can only be changed by the user or a super-admin.',
+            code: 'MULTI_ORG_EMAIL_LOCKED',
+          });
+        }
+      }
+    }
 
     const user = await User.findByIdAndUpdate(req.params.userId, data, { new: true });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -240,7 +294,14 @@ router.patch('/:userId/password', async (req, res, next) => {
 
     const { password } = passwordSchema.parse(req.body);
     const passwordHash = await User.hashPassword(password);
-    const user = await User.findByIdAndUpdate(req.params.userId, { passwordHash }, { new: true });
+    // This is a TEMPORARY password: the user is forced to choose a new one at
+    // their next login, so an admin never holds a working key to the user's
+    // other orgs. See passwordGate.js and POST /auth/change-password.
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { passwordHash, mustChangePassword: true, tempPasswordSetAt: new Date() },
+      { new: true }
+    );
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user: user.toSafeJSON() });
   } catch (err) {

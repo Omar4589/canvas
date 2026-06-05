@@ -155,9 +155,11 @@ effort-scoped), [services/passes/activePasses.js](../server/src/services/passes/
   ([csvImporter.js](../server/src/services/import/csvImporter.js)) never sets `effortId` — so new
   addresses land in Intake with no import-processor change. Existing owned doors keep their effortId.
 - **Claim** (`POST .../efforts/:id/claim`, body `{walkListId? | all? , force?}`): sets
-  `Household.effortId`. By default claims only Intake doors; doors owned by another effort return a
-  `409 doors-owned` unless `force:true` (re-carve), which also clears their `turfId`/`walkOrder` and
-  pulls them from their old book (`recomputeTurf`). Disjointness can never be violated silently.
+  `Household.effortId`. **`all:true` ("Claim all Intake") targets only unowned doors (`effortId: null`)** —
+  it claims every Intake door and **never conflicts**, even in a multi-effort campaign. A **`walkListId`**
+  claim takes that list's Intake doors; any door in the list already owned by **another** effort returns a
+  `409 doors-owned` unless `force:true` (the re-carve path), which also clears their `turfId`/`walkOrder`
+  and pulls them from their old book (`recomputeTurf`). Disjointness can never be violated silently.
 - **Walk lists are source-agnostic here.** A list from the filter builder and one from an uploaded
   Voter-ID CSV are both just frozen `householdIds` (`WalkList.source` = `'filter' | 'csv'`), so
   seed/claim/re-carve treat them identically. See [WALKLISTS.md](WALKLISTS.md).

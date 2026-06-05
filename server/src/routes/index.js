@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { requireAuth } from '../middleware/auth.js';
+import { blockIfMustChangePassword } from '../middleware/passwordGate.js';
 import authRouter from './auth.js';
 import adminMembershipsRouter from './admin/memberships.js';
 import adminAssignmentsRouter from './admin/assignments.js';
@@ -32,6 +34,11 @@ router.get('/health', (req, res) => {
 });
 
 router.use('/auth', authRouter);
+
+// Gate every protected surface for users who owe a password change. Runs before
+// the sub-routers (which re-run requireAuth harmlessly). /auth is excluded above
+// so change-password / me / logout stay reachable while the flag is set.
+router.use(['/super-admin', '/admin', '/mobile'], requireAuth, blockIfMustChangePassword);
 
 router.use('/super-admin/organizations', superAdminOrganizationsRouter);
 router.use('/super-admin/users', superAdminUsersRouter);

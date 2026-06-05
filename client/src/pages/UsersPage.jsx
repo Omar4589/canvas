@@ -68,6 +68,10 @@ export default function UsersPage() {
       setForm(EMPTY_FORM);
       setEmailLookup(false);
     },
+    onError: (err) => {
+      // The email already exists globally — nudge the admin toward the link path.
+      if (err.data?.code === 'EMAIL_EXISTS_USE_LINK') setEmailLookup(true);
+    },
   });
 
   const members = data?.members || [];
@@ -109,6 +113,7 @@ export default function UsersPage() {
     const body = {
       email: form.email.trim(),
       role: form.role,
+      linkExisting: emailLookup,
     };
     if (!emailLookup) {
       body.firstName = form.firstName;

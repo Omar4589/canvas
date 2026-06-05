@@ -389,36 +389,76 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('canvasser');
+  const [linkExisting, setLinkExisting] = useState(false);
 
-  const valid =
-    firstName.trim() && lastName.trim() && email.trim() && password.length >= 8;
+  const valid = linkExisting
+    ? !!email.trim()
+    : firstName.trim() && lastName.trim() && email.trim() && password.length >= 8;
 
   return (
     <ScrollView
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.formTitle}>New user</Text>
+      <Text style={styles.formTitle}>
+        {linkExisting ? 'Link existing user' : 'New user'}
+      </Text>
 
-      <Text style={styles.formLabel}>First name</Text>
-      <TextInput
-        value={firstName}
-        onChangeText={setFirstName}
-        autoCapitalize="words"
-        placeholder="Jane"
-        placeholderTextColor={colors.textMuted}
-        style={styles.textInput}
-      />
+      <Pressable
+        onPress={() => setLinkExisting((v) => !v)}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: spacing.sm,
+          marginBottom: spacing.md,
+        }}
+      >
+        <View
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: linkExisting ? colors.brand : colors.border,
+            backgroundColor: linkExisting ? colors.brand : 'transparent',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {linkExisting && (
+            <Text style={{ color: colors.textInverse, fontWeight: '700', fontSize: 12 }}>
+              ✓
+            </Text>
+          )}
+        </View>
+        <Text style={{ ...type.caption, color: colors.textPrimary, flex: 1 }}>
+          Existing user (by email — link them to this org)
+        </Text>
+      </Pressable>
 
-      <Text style={styles.formLabel}>Last name</Text>
-      <TextInput
-        value={lastName}
-        onChangeText={setLastName}
-        autoCapitalize="words"
-        placeholder="Doe"
-        placeholderTextColor={colors.textMuted}
-        style={styles.textInput}
-      />
+      {!linkExisting && (
+        <>
+          <Text style={styles.formLabel}>First name</Text>
+          <TextInput
+            value={firstName}
+            onChangeText={setFirstName}
+            autoCapitalize="words"
+            placeholder="Jane"
+            placeholderTextColor={colors.textMuted}
+            style={styles.textInput}
+          />
+
+          <Text style={styles.formLabel}>Last name</Text>
+          <TextInput
+            value={lastName}
+            onChangeText={setLastName}
+            autoCapitalize="words"
+            placeholder="Doe"
+            placeholderTextColor={colors.textMuted}
+            style={styles.textInput}
+          />
+        </>
+      )}
 
       <Text style={styles.formLabel}>Email</Text>
       <TextInput
@@ -432,25 +472,29 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
         style={styles.textInput}
       />
 
-      <Text style={styles.formLabel}>
-        Phone <Text style={{ color: colors.textMuted }}>(optional)</Text>
-      </Text>
-      <TextInput
-        value={phone}
-        onChangeText={setPhone}
-        keyboardType="phone-pad"
-        placeholder="(555) 123-4567"
-        placeholderTextColor={colors.textMuted}
-        style={styles.textInput}
-      />
+      {!linkExisting && (
+        <>
+          <Text style={styles.formLabel}>
+            Phone <Text style={{ color: colors.textMuted }}>(optional)</Text>
+          </Text>
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
+            placeholder="(555) 123-4567"
+            placeholderTextColor={colors.textMuted}
+            style={styles.textInput}
+          />
 
-      <Text style={styles.formLabel}>Password (min 8 chars)</Text>
-      <PasswordInput
-        value={password}
-        onChangeText={setPassword}
-        autoComplete="new-password"
-        placeholder="••••••••"
-      />
+          <Text style={styles.formLabel}>Password (min 8 chars)</Text>
+          <PasswordInput
+            value={password}
+            onChangeText={setPassword}
+            autoComplete="new-password"
+            placeholder="••••••••"
+          />
+        </>
+      )}
 
       <Text style={styles.formLabel}>Role</Text>
       <View style={styles.roleRow}>
@@ -493,14 +537,19 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
         </Pressable>
         <Pressable
           onPress={() =>
-            onSubmit({
-              firstName: firstName.trim(),
-              lastName: lastName.trim(),
-              email: email.trim(),
-              phone: phone.trim() || undefined,
-              password,
-              role,
-            })
+            onSubmit(
+              linkExisting
+                ? { email: email.trim(), role, linkExisting: true }
+                : {
+                    firstName: firstName.trim(),
+                    lastName: lastName.trim(),
+                    email: email.trim(),
+                    phone: phone.trim() || undefined,
+                    password,
+                    role,
+                    linkExisting: false,
+                  }
+            )
           }
           disabled={!valid || submitting}
           style={[
@@ -512,7 +561,9 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
           {submitting ? (
             <ActivityIndicator color={colors.textInverse} />
           ) : (
-            <Text style={styles.formBtnPrimaryText}>Create</Text>
+            <Text style={styles.formBtnPrimaryText}>
+              {linkExisting ? 'Link user' : 'Create'}
+            </Text>
           )}
         </Pressable>
       </View>

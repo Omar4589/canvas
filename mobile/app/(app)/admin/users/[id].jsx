@@ -102,6 +102,9 @@ export default function AdminUserDetail() {
       }
     : null;
   const isSelf = currentUser?.id === userId;
+  // Login email is shared across every org this user belongs to — lock it for
+  // multi-org users (only the user or a super-admin may change it). Mirrors web.
+  const emailLocked = !!user?.isMultiOrg && !currentUser?.isSuperAdmin && !isSelf;
 
   const [form, setForm] = useState({
     firstName: '',
@@ -218,7 +221,7 @@ export default function AdminUserDetail() {
   const isProfileDirty =
     form.firstName !== (user.firstName || '') ||
     form.lastName !== (user.lastName || '') ||
-    form.email !== (user.email || '') ||
+    (!emailLocked && form.email !== (user.email || '')) ||
     form.phone !== (user.phone || '');
   const isRoleDirty = form.role !== (user.role || 'canvasser');
   const isDirty = isProfileDirty || isRoleDirty;
@@ -229,7 +232,7 @@ export default function AdminUserDetail() {
       const body = {};
       if (form.firstName !== user.firstName) body.firstName = form.firstName;
       if (form.lastName !== user.lastName) body.lastName = form.lastName;
-      if (form.email !== user.email) body.email = form.email;
+      if (!emailLocked && form.email !== user.email) body.email = form.email;
       if (form.phone !== (user.phone || '')) body.phone = form.phone;
       saveProfile.mutate(body);
     }
@@ -386,8 +389,25 @@ export default function AdminUserDetail() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
-              style={styles.textInput}
+              editable={!emailLocked}
+              style={[
+                styles.textInput,
+                emailLocked && { backgroundColor: colors.bg, color: colors.textMuted },
+              ]}
             />
+            {emailLocked && (
+              <Text
+                style={{
+                  ...type.caption,
+                  color: colors.textMuted,
+                  marginTop: spacing.xs,
+                  fontStyle: 'italic',
+                }}
+              >
+                This user belongs to multiple organizations; their login email can
+                only be changed by the user or a super-admin.
+              </Text>
+            )}
 
             <Text style={styles.formLabel}>
               Phone <Text style={{ color: colors.textMuted }}>(optional)</Text>
@@ -551,13 +571,23 @@ export default function AdminUserDetail() {
               style={styles.secondaryBtn}
             >
               <Text style={styles.secondaryBtnText}>
-                {showResetPw ? 'Cancel reset' : 'Reset password'}
+                {showResetPw ? 'Cancel' : 'Set temporary password'}
               </Text>
             </Pressable>
 
             {showResetPw && (
               <View style={styles.resetPwBox}>
-                <Text style={styles.formLabel}>New password (min 8 chars)</Text>
+                <Text style={styles.formLabel}>Temporary password (min 8 chars)</Text>
+                <Text
+                  style={{
+                    ...type.caption,
+                    color: colors.textMuted,
+                    marginBottom: spacing.sm,
+                  }}
+                >
+                  The user will be required to choose a new password the next time
+                  they log in.
+                </Text>
                 <PasswordInput
                   value={newPassword}
                   onChangeText={setNewPassword}
@@ -579,7 +609,7 @@ export default function AdminUserDetail() {
                   {resetPw.isPending ? (
                     <ActivityIndicator color={colors.textInverse} />
                   ) : (
-                    <Text style={styles.saveBtnText}>Save password</Text>
+                    <Text style={styles.saveBtnText}>Set password</Text>
                   )}
                 </Pressable>
               </View>

@@ -6,6 +6,7 @@ import { NAV, SUPER_NAV } from './navItems.js';
 import { navIcon, IconSignOut, IconChevron } from './navIcons.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import BottomNav from './BottomNav.jsx';
+import AddedToOrgBanner from './AddedToOrgBanner.jsx';
 
 function navClass(collapsed) {
   return ({ isActive }) =>
@@ -169,6 +170,7 @@ export default function Layout() {
           </span>
         </div>
         <main className={isFullBleed ? 'flex-1 overflow-hidden' : 'flex-1 overflow-auto p-6 pb-20 md:pb-6'}>
+          {!isFullBleed && <AddedToOrgBanner />}
           <Outlet />
         </main>
       </div>
