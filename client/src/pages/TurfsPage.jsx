@@ -166,11 +166,11 @@ function PassPicker({ campaignId, passId, onChange }) {
   }, [passId, passes, activeIds]);
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Pass</span>
+      <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">Pass</span>
       <select
         value={passId || ''}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+        className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       >
         {!passes.length && <option value="">No passes</option>}
         {passes.map((p) => (
@@ -185,33 +185,33 @@ function PassPicker({ campaignId, passId, onChange }) {
 
 function DiscardModal({ isActive, bookCount, clearKnocks, setClearKnocks, pending, error, onCancel, onConfirm }) {
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
-      <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-gray-900">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-fg">
           Discard {bookCount} book{bookCount === 1 ? '' : 's'}?
         </h3>
         {isActive ? (
-          <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
             ⚠️ This pass is <strong>LIVE</strong>. Discarding wipes its books and{' '}
             <strong>all canvasser assignments</strong>, and reverts the pass to draft. Knock history is kept
             unless you check the box below.
           </div>
         ) : (
-          <p className="mt-2 text-sm text-gray-600">
+          <p className="mt-2 text-sm text-fg-muted">
             This removes the pass's books and canvasser assignments so you can re-cut. Knock history is kept. You
             can undo this from Snapshots.
           </p>
         )}
-        <label className="mt-3 flex items-start gap-2 text-sm text-gray-700">
+        <label className="mt-3 flex items-start gap-2 text-sm text-fg-muted">
           <input type="checkbox" checked={clearKnocks} onChange={(e) => setClearKnocks(e.target.checked)} className="mt-0.5" />
           <span>
             Also clear all knock history for this pass — resets door progress.{' '}
-            <span className="text-gray-400">(Snapshotted; undoable.)</span>
+            <span className="text-fg-subtle">(Snapshotted; undoable.)</span>
           </span>
         </label>
-        {error && <div className="mt-2 text-xs text-red-700">{error.message}</div>}
+        {error && <div className="mt-2 text-xs text-danger">{error.message}</div>}
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onCancel} disabled={pending} className="rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
+          <button onClick={onCancel} disabled={pending} className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-sunken">
             Cancel
           </button>
           <button
@@ -232,24 +232,24 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
   const voters = data?.voters || [];
   const currentId = book ? String(book._id) : null;
   return (
-    <div className="absolute right-3 top-3 z-10 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+    <div className="absolute right-3 top-3 z-10 w-64 rounded-lg border border-border bg-card p-3 shadow-lg">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           {loading || !hh ? (
-            <div className="text-sm text-gray-500">Loading…</div>
+            <div className="text-sm text-fg-muted">Loading…</div>
           ) : (
             <>
-              <div className="truncate text-sm font-semibold text-gray-900">{hh.addressLine1}</div>
-              {hh.addressLine2 && <div className="truncate text-xs text-gray-500">{hh.addressLine2}</div>}
-              <div className="text-xs text-gray-500">{hh.city}, {hh.state} {hh.zipCode}</div>
+              <div className="truncate text-sm font-semibold text-fg">{hh.addressLine1}</div>
+              {hh.addressLine2 && <div className="truncate text-xs text-fg-muted">{hh.addressLine2}</div>}
+              <div className="text-xs text-fg-muted">{hh.city}, {hh.state} {hh.zipCode}</div>
             </>
           )}
         </div>
-        <button onClick={onClose} className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Close">✕</button>
+        <button onClick={onClose} className="shrink-0 rounded p-0.5 text-fg-subtle hover:bg-sunken hover:text-fg-muted" aria-label="Close">✕</button>
       </div>
       {hh && (
-        <div className="mt-2 border-t border-gray-100 pt-2">
-          <div className="flex items-center gap-1.5 text-xs text-gray-600">
+        <div className="mt-2 border-t border-border pt-2">
+          <div className="flex items-center gap-1.5 text-xs text-fg-muted">
             {bookColor && <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: bookColor }} />}
             <span className="font-medium">{book ? book.name : 'Unassigned'}</span>
           </div>
@@ -257,7 +257,7 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
             value=""
             onChange={(e) => { if (e.target.value) onMove(e.target.value); }}
             disabled={moving}
-            className="mt-1.5 w-full rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-60"
+            className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
           >
             <option value="">{moving ? 'Moving…' : 'Move to book…'}</option>
             {books
@@ -269,21 +269,21 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
         </div>
       )}
       {hh && (
-        <div className="mt-2 border-t border-gray-100 pt-2">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+        <div className="mt-2 border-t border-border pt-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
             {voters.length} member{voters.length === 1 ? '' : 's'}
           </div>
           <ul className="max-h-40 space-y-0.5 overflow-auto text-sm">
             {voters.map((v) => (
               <li key={v.id} className="flex items-center justify-between gap-2">
-                <span className="truncate text-gray-800">{v.fullName}</span>
+                <span className="truncate text-fg">{v.fullName}</span>
                 <span className="flex shrink-0 items-center gap-1">
-                  {v.party && <span className="text-[10px] text-gray-400">{v.party}</span>}
-                  {v.surveyStatus === 'surveyed' && <span className="text-[10px] font-semibold text-green-600" title="Surveyed">✓</span>}
+                  {v.party && <span className="text-[10px] text-fg-subtle">{v.party}</span>}
+                  {v.surveyStatus === 'surveyed' && <span className="text-[10px] font-semibold text-success" title="Surveyed">✓</span>}
                 </span>
               </li>
             ))}
-            {!voters.length && <li className="text-xs text-gray-400">No members on file.</li>}
+            {!voters.length && <li className="text-xs text-fg-subtle">No members on file.</li>}
           </ul>
         </div>
       )}
@@ -295,25 +295,25 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
   if (!building) return null;
   const { addressLine1, city, state, zipCode, units, total } = building;
   return (
-    <div className="absolute right-3 top-3 z-10 w-72 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+    <div className="absolute right-3 top-3 z-10 w-72 rounded-lg border border-border bg-card p-3 shadow-lg">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-fg">
             <span aria-hidden>🏢</span>
             <span className="truncate">{addressLine1 || 'Apartment building'}</span>
           </div>
-          <div className="text-xs text-gray-500">{city}, {state} {zipCode}</div>
+          <div className="text-xs text-fg-muted">{city}, {state} {zipCode}</div>
           <div className="mt-0.5 text-[11px] font-semibold text-brand-600">{total} units at this location</div>
         </div>
-        <button onClick={onClose} className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Close">✕</button>
+        <button onClick={onClose} className="shrink-0 rounded p-0.5 text-fg-subtle hover:bg-sunken hover:text-fg-muted" aria-label="Close">✕</button>
       </div>
 
-      <div className="mt-2 border-t border-gray-100 pt-2">
+      <div className="mt-2 border-t border-border pt-2">
         <select
           value=""
           onChange={(e) => { if (e.target.value) onMoveAll(e.target.value); }}
           disabled={moving}
-          className="w-full rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-60"
+          className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
         >
           <option value="">{moving ? 'Moving…' : 'Move all units to book…'}</option>
           {books.map((t) => (
@@ -322,26 +322,26 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
         </select>
       </div>
 
-      <div className="mt-2 border-t border-gray-100 pt-2">
-        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Units</div>
+      <div className="mt-2 border-t border-border pt-2">
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Units</div>
         <ul className="max-h-56 space-y-1 overflow-auto">
           {units.map((u) => {
             const book = u.turfId ? books.find((t) => String(t._id) === String(u.turfId)) : null;
             const color = u.turfId ? colorByTurf.get(String(u.turfId)) : null;
             return (
-              <li key={u.id} className="rounded border border-gray-100 p-1.5">
+              <li key={u.id} className="rounded border border-border p-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium text-gray-800">{u.addressLine2 || u.addressLine1 || 'Unit'}</span>
+                  <span className="truncate text-sm font-medium text-fg">{u.addressLine2 || u.addressLine1 || 'Unit'}</span>
                   <span className="flex shrink-0 items-center gap-1">
                     {color && <span className="inline-block h-2 w-2 rounded-sm" style={{ background: color }} />}
-                    <span className="text-[10px] text-gray-500">{book ? book.name : 'Unassigned'}</span>
+                    <span className="text-[10px] text-fg-muted">{book ? book.name : 'Unassigned'}</span>
                   </span>
                 </div>
                 <select
                   value=""
                   onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
                   disabled={moving}
-                  className="mt-1 w-full rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-60"
+                  className="mt-1 w-full rounded border border-border px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
                 >
                   <option value="">Move to book…</option>
                   {books
@@ -723,7 +723,7 @@ export default function TurfsPage() {
           <CampaignSelector campaignId={campaignId} onChange={(id) => { setCampaignId(id); setPassId(''); }} campaigns={campaigns} isLoading={isLoading} />
           {campaignId && <PassPicker campaignId={campaignId} passId={passId} onChange={setPassId} />}
           {isActivePass && (
-            <span className="rounded bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-700">
+            <span className="rounded bg-success-tint px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success">
               ● Live
             </span>
           )}
@@ -754,15 +754,15 @@ export default function TurfsPage() {
       )}
 
       <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
-        <section className="rounded-lg border border-gray-200 bg-white p-5">
+        <section className="rounded-lg border border-border bg-card p-5">
           <h2 className="mb-3 text-base font-medium">Generate books</h2>
 
-          <div className="mb-4 flex rounded-md border border-gray-200 p-0.5 text-sm">
+          <div className="mb-4 flex rounded-md border border-border p-0.5 text-sm">
             {['geometric', 'attribute', 'manual'].map((m) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
-                className={['flex-1 rounded px-2 py-1.5 font-medium capitalize transition-colors', mode === m ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'].join(' ')}
+                className={['flex-1 rounded px-2 py-1.5 font-medium capitalize transition-colors', mode === m ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken'].join(' ')}
               >
                 {m}
               </button>
@@ -772,13 +772,13 @@ export default function TurfsPage() {
           {mode === 'geometric' && (
             <div className="mb-4 space-y-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-xs font-medium text-gray-700">Max doors per book</span>
-                <input type="number" min="1" value={maxDoors} onChange={(e) => setMaxDoors(e.target.value)} className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600" />
-                <span className="mt-1 block text-xs text-gray-500">Default 65 — adjust freely.</span>
+                <span className="mb-1 block text-xs font-medium text-fg-muted">Max doors per book</span>
+                <input type="number" min="1" value={maxDoors} onChange={(e) => setMaxDoors(e.target.value)} className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+                <span className="mt-1 block text-xs text-fg-muted">Default 65 — adjust freely.</span>
               </label>
               <div>
                 <div className="mb-1 flex items-center gap-1.5">
-                  <span className="text-xs font-medium text-gray-700">Book size flex</span>
+                  <span className="text-xs font-medium text-fg-muted">Book size flex</span>
                   <InfoHint label="What is book size flex?">
                     Books aim for your door count but flex to stay tight and walkable. <b>Compact</b> lets
                     sizes vary more so nobody drives far for a stray house; <b>Tight</b> keeps sizes even
@@ -786,13 +786,13 @@ export default function TurfsPage() {
                     roughly ~55–80 (Tight), ~48–90 (Balanced), ~40–100 (Compact).
                   </InfoHint>
                 </div>
-                <div className="flex rounded-md border border-gray-300 p-0.5 text-xs">
+                <div className="flex rounded-md border border-border-strong p-0.5 text-xs">
                   {FLEX_OPTIONS.map((o) => (
                     <button
                       key={o.key}
                       type="button"
                       onClick={() => setFlex(o.key)}
-                      className={['flex-1 rounded px-2 py-1 font-medium transition-colors', flex === o.key ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'].join(' ')}
+                      className={['flex-1 rounded px-2 py-1 font-medium transition-colors', flex === o.key ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken'].join(' ')}
                     >
                       {o.label}
                     </button>
@@ -804,23 +804,23 @@ export default function TurfsPage() {
           {mode === 'attribute' && (
             <>
               <label className="mb-3 block text-sm">
-                <span className="mb-1 block text-xs font-medium text-gray-700">Group by</span>
-                <select value={attribute} onChange={(e) => setAttribute(e.target.value)} className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
+                <span className="mb-1 block text-xs font-medium text-fg-muted">Group by</span>
+                <select value={attribute} onChange={(e) => setAttribute(e.target.value)} className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30">
                   {ATTRIBUTES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
                 </select>
               </label>
               <label className="mb-4 block text-sm">
-                <span className="mb-1 block text-xs font-medium text-gray-700">Cap at N doors/group (optional)</span>
-                <input type="number" min="1" placeholder="no cap" value={capN} onChange={(e) => setCapN(e.target.value)} className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600" />
+                <span className="mb-1 block text-xs font-medium text-fg-muted">Cap at N doors/group (optional)</span>
+                <input type="number" min="1" placeholder="no cap" value={capN} onChange={(e) => setCapN(e.target.value)} className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
               </label>
             </>
           )}
           {mode === 'manual' && (
             <div className="mb-4 text-sm">
-              <button onClick={startDraw} className="w-full rounded border border-brand-300 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100">
+              <button onClick={startDraw} className="w-full rounded border border-brand-accent/40 bg-brand-tint px-3 py-2 text-sm font-medium text-brand-tint-fg hover:bg-brand-tint/80">
                 ✎ Draw a polygon on the map
               </button>
-              <p className="mt-1 text-xs text-gray-500">{drawnPolygon ? 'Polygon drawn — Generate to create the book.' : 'Click to add points; double-click to finish.'}</p>
+              <p className="mt-1 text-xs text-fg-muted">{drawnPolygon ? 'Polygon drawn — Generate to create the book.' : 'Click to add points; double-click to finish.'}</p>
             </div>
           )}
 
@@ -829,30 +829,30 @@ export default function TurfsPage() {
           </button>
 
           {jobId && (
-            <div className="mt-3 text-xs text-gray-600">
+            <div className="mt-3 text-xs text-fg-muted">
               {jobQ.data?.status === 'failed' ? (
-                <span className="text-red-700">Failed: {jobQ.data.error || 'unknown error'}</span>
+                <span className="text-danger">Failed: {jobQ.data.error || 'unknown error'}</span>
               ) : jobQ.data?.status === 'completed' ? (
-                <span className="text-green-700">Done — {jobQ.data?.result?.bookCount ?? draftCount} books.</span>
+                <span className="text-success">Done — {jobQ.data?.result?.bookCount ?? draftCount} books.</span>
               ) : (
                 <>
                   <div className="mb-1">{progress?.phase || 'queued'}… {pct != null ? `${pct}%` : ''}</div>
-                  <div className="h-1.5 w-full overflow-hidden rounded bg-gray-100"><div className="h-full bg-brand-500 transition-all" style={{ width: `${pct || 5}%` }} /></div>
+                  <div className="h-1.5 w-full overflow-hidden rounded bg-sunken"><div className="h-full bg-brand-500 transition-all" style={{ width: `${pct || 5}%` }} /></div>
                 </>
               )}
             </div>
           )}
-          {generate.error && <div className="mt-2 text-xs text-red-700">{generate.error.message}</div>}
+          {generate.error && <div className="mt-2 text-xs text-danger">{generate.error.message}</div>}
           {publishedCount > 0 && (
-            <p className="mt-2 text-xs text-amber-700">This pass has accepted books — Discard them below to re-cut.</p>
+            <p className="mt-2 text-xs text-warning-fg">This pass has accepted books — Discard them below to re-cut.</p>
           )}
 
           {!!turfs.length && unassignedCount > 0 && (
-            <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs">
-              <p className="font-medium text-sky-900">
+            <div className="mt-3 rounded-md border border-info/30 bg-info-tint px-3 py-2.5 text-xs">
+              <p className="font-medium text-info-fg">
                 {unassignedCount.toLocaleString()} door{unassignedCount === 1 ? '' : 's'} not in any book
               </p>
-              <p className="mt-0.5 text-sky-800">
+              <p className="mt-0.5 text-info-fg">
                 Voters added since this pass was cut. Add them as new book(s) without recutting — then
                 Accept and assign as usual.
               </p>
@@ -864,20 +864,20 @@ export default function TurfsPage() {
                 {addSupplemental.isPending ? 'Adding…' : 'Add as new book'}
               </button>
               {addSupplemental.error && (
-                <div className="mt-1 text-red-700">{addSupplemental.error.message}</div>
+                <div className="mt-1 text-danger">{addSupplemental.error.message}</div>
               )}
               {addSupplemental.data?.added === 0 && (
-                <div className="mt-1 text-sky-800">No eligible doors to add (walk-list passes only include their saved list).</div>
+                <div className="mt-1 text-info-fg">No eligible doors to add (walk-list passes only include their saved list).</div>
               )}
             </div>
           )}
 
           {!!turfs.length && (
-            <div className="mt-5 border-t border-gray-100 pt-4">
+            <div className="mt-5 border-t border-border pt-4">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{turfs.length} books{draftCount ? ` · ${draftCount} draft` : ''}</span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{turfs.length} books{draftCount ? ` · ${draftCount} draft` : ''}</span>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setEditMode((v) => !v)} title="Rename books" className={`rounded px-2 py-1 text-xs font-medium ${editMode ? 'bg-gray-800 text-white' : 'border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                  <button onClick={() => setEditMode((v) => !v)} title="Rename books" className={`rounded px-2 py-1 text-xs font-medium ${editMode ? 'bg-fg text-card' : 'border border-border-strong text-fg-muted hover:bg-sunken'}`}>
                     {editMode ? 'Renaming' : 'Rename'}
                   </button>
                   {draftCount > 0 && (
@@ -888,7 +888,7 @@ export default function TurfsPage() {
                   <button
                     onClick={() => setShowDiscard(true)}
                     disabled={discard.isPending}
-                    className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                    className="rounded px-2 py-1 text-xs font-medium text-danger hover:bg-danger-tint disabled:opacity-60"
                   >
                     {discard.isPending ? 'Discarding…' : 'Discard'}
                   </button>
@@ -898,13 +898,13 @@ export default function TurfsPage() {
               <div className="mb-2 flex items-center gap-3 text-xs">
                 <button onClick={() => setSelectedBooks(new Set(turfs.map((t) => String(t._id))))} className="font-medium text-brand-700 hover:underline">Select all</button>
                 {selectedBooks.size > 0 && (
-                  <button onClick={() => setSelectedBooks(new Set())} className="font-medium text-gray-500 hover:underline">Clear ({selectedBooks.size})</button>
+                  <button onClick={() => setSelectedBooks(new Set())} className="font-medium text-fg-muted hover:underline">Clear ({selectedBooks.size})</button>
                 )}
-                <span className="text-gray-400">Click a book (here or on the map) to assign canvassers.</span>
+                <span className="text-fg-subtle">Click a book (here or on the map) to assign canvassers.</span>
               </div>
 
               {editMode && (
-                <div className="mb-2 rounded bg-gray-50 px-2 py-1.5 text-xs text-gray-600">
+                <div className="mb-2 rounded bg-sunken px-2 py-1.5 text-xs text-fg-muted">
                   Rename mode: edit a book's name below. Selecting/assigning still works as usual.
                 </div>
               )}
@@ -918,7 +918,7 @@ export default function TurfsPage() {
                     onClick={() => toggleBook(t._id)}
                     title="Click to select this book (assign on the panel); click again to deselect"
                     className={`flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-0.5 ${
-                      selected ? 'bg-brand-50 ring-1 ring-brand-300' : 'hover:bg-gray-50'
+                      selected ? 'bg-brand-50 ring-1 ring-brand-300' : 'hover:bg-sunken'
                     }`}
                   >
                     <span className="flex min-w-0 items-center gap-2 truncate">
@@ -928,7 +928,7 @@ export default function TurfsPage() {
                           defaultValue={t.name}
                           onClick={(e) => e.stopPropagation()}
                           onBlur={(e) => e.target.value.trim() && e.target.value !== t.name && rename.mutate({ turfId: t._id, name: e.target.value.trim() })}
-                          className="min-w-0 flex-1 truncate rounded border border-transparent px-1 hover:border-gray-300 focus:border-brand-500 focus:outline-none"
+                          className="min-w-0 flex-1 truncate rounded border border-transparent px-1 hover:border-border-strong focus:border-brand-500 focus:outline-none"
                         />
                       ) : (
                         <span className="truncate">{t.name}</span>
@@ -941,15 +941,15 @@ export default function TurfsPage() {
                         return (
                           <span className="flex -space-x-1" title={asg.map((u) => `${u.firstName} ${u.lastName}`).join(', ')}>
                             {asg.slice(0, 3).map((u) => (
-                              <span key={u.id} className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-brand-100 text-[8px] font-semibold text-brand-700 ring-1 ring-white">
+                              <span key={u.id} className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-brand-tint text-[8px] font-semibold text-brand-tint-fg ring-1 ring-card">
                                 {(u.firstName?.[0] || '') + (u.lastName?.[0] || '')}
                               </span>
                             ))}
-                            {asg.length > 3 && <span className="pl-1 text-[9px] text-gray-400">+{asg.length - 3}</span>}
+                            {asg.length > 3 && <span className="pl-1 text-[9px] text-fg-subtle">+{asg.length - 3}</span>}
                           </span>
                         );
                       })()}
-                      <span className="text-gray-500">{t.eligibleDoorCount ?? t.doorCount}</span>
+                      <span className="text-fg-muted">{t.eligibleDoorCount ?? t.doorCount}</span>
                     </span>
                   </li>
                   );
@@ -959,13 +959,13 @@ export default function TurfsPage() {
           )}
 
           {snapshots.length > 0 && (
-            <div className="mt-5 border-t border-gray-100 pt-4">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Undo / snapshots</div>
+            <div className="mt-5 border-t border-border pt-4">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">Undo / snapshots</div>
               {lastSnapshotId && turfs.length === 0 && (
                 <button
                   onClick={() => restore.mutate(lastSnapshotId)}
                   disabled={restore.isPending}
-                  className="mb-2 w-full rounded bg-gray-800 px-2 py-1.5 text-xs font-semibold text-white hover:bg-gray-700 disabled:opacity-60"
+                  className="mb-2 w-full rounded bg-fg px-2 py-1.5 text-xs font-semibold text-card hover:bg-fg-muted disabled:opacity-60"
                 >
                   {restore.isPending ? 'Restoring…' : '↩ Undo last discard'}
                 </button>
@@ -973,7 +973,7 @@ export default function TurfsPage() {
               <ul className="space-y-1 text-xs">
                 {snapshots.map((s) => (
                   <li key={s._id} className="flex items-center justify-between gap-2 rounded px-1 py-1">
-                    <span className="min-w-0 truncate text-gray-600">
+                    <span className="min-w-0 truncate text-fg-muted">
                       {formatInTz(s.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)} · {s.bookCount} books
                       {s.clearedKnocks ? ` · ${s.knockCount} knocks` : ''}
                       {s.restoredAt ? ' · restored' : ''}
@@ -983,7 +983,7 @@ export default function TurfsPage() {
                         onClick={() => restore.mutate(s._id)}
                         disabled={restore.isPending || turfs.length > 0}
                         title={turfs.length > 0 ? 'Discard current books first' : 'Restore this snapshot'}
-                        className="rounded border border-gray-300 px-2 py-0.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        className="rounded border border-border-strong px-2 py-0.5 font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
                       >
                         Restore
                       </button>
@@ -991,7 +991,7 @@ export default function TurfsPage() {
                         onClick={() => { if (window.confirm('Delete this snapshot? It can no longer be restored.')) deleteSnapshot.mutate(s._id); }}
                         disabled={deleteSnapshot.isPending}
                         title="Delete snapshot"
-                        className="rounded px-1.5 py-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                        className="rounded px-1.5 py-0.5 text-fg-subtle hover:bg-danger-tint hover:text-danger disabled:opacity-50"
                       >
                         ✕
                       </button>
@@ -1000,16 +1000,16 @@ export default function TurfsPage() {
                 ))}
               </ul>
               {turfs.length > 0 && (
-                <p className="mt-1 text-[11px] text-gray-400">Discard the current books to restore an earlier snapshot.</p>
+                <p className="mt-1 text-[11px] text-fg-subtle">Discard the current books to restore an earlier snapshot.</p>
               )}
-              {restore.error && <div className="mt-1 text-[11px] text-red-700">{restore.error.message}</div>}
+              {restore.error && <div className="mt-1 text-[11px] text-danger">{restore.error.message}</div>}
             </div>
           )}
         </section>
 
-        <section className="relative overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <section className="relative overflow-hidden rounded-lg border border-border bg-card">
           {!tokenQ.data?.isReady ? (
-            <div className="flex h-[600px] items-center justify-center text-sm text-gray-500">
+            <div className="flex h-[600px] items-center justify-center text-sm text-fg-muted">
               {tokenQ.isLoading ? 'Loading map…' : 'Set MAPBOX_PUBLIC_TOKEN to enable the map.'}
             </div>
           ) : (

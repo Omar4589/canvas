@@ -1,7 +1,6 @@
 import Card from './ui/Card.jsx';
 
-// Token-based: accent uses the semantic color tokens (flip automatically), so no
-// dark: variants needed.
+// Token-based: accent uses the semantic color tokens, which flip automatically.
 const ACCENT = {
   green: 'text-success',
   red: 'text-danger',

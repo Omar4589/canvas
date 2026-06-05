@@ -4,27 +4,24 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
+import { Card, Badge, Button, Input, Select } from '../components/ui';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
-const STATUS_BADGE = {
-  draft: 'bg-gray-100 text-gray-700',
-  active: 'bg-green-100 text-green-700',
-  archived: 'bg-gray-100 text-gray-400',
-};
+const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
 
 const SEG_COLORS = {
   surveyed: '#22c55e',
   lit_dropped: '#a855f7',
   not_home: '#3b82f6',
   wrong_address: '#ef4444',
-  unknocked: '#e5e7eb',
+  unknocked: '#9ca3af',
 };
 
 function ProgressBar({ counts = {}, total = 0 }) {
-  if (!total) return <span className="text-xs text-gray-400">no doors</span>;
+  if (!total) return <span className="text-xs text-fg-subtle">no doors</span>;
   return (
-    <div className="flex h-2 w-40 overflow-hidden rounded bg-gray-100">
+    <div className="flex h-2 w-40 overflow-hidden rounded bg-sunken">
       {['surveyed', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'].map((k) =>
         counts[k] ? (
           <div key={k} style={{ width: `${(counts[k] / total) * 100}%`, background: SEG_COLORS[k] }} />
@@ -40,20 +37,20 @@ function PassProgress({ campaignId, passId }) {
     queryFn: () => api(`/admin/campaigns/${campaignId}/passes/${passId}/progress`),
     enabled: !!campaignId && !!passId,
   });
-  if (q.isLoading) return <span className="text-xs text-gray-400">…</span>;
+  if (q.isLoading) return <span className="text-xs text-fg-subtle">…</span>;
   const { counts, total } = q.data || {};
   const done = total ? Math.round(((total - (counts?.unknocked || 0)) / total) * 100) : 0;
   return (
     <div className="flex items-center gap-2">
       <ProgressBar counts={counts || {}} total={total || 0} />
-      <span className="text-xs text-gray-500">{done}%</span>
+      <span className="text-xs tabular-nums text-fg-muted">{done}%</span>
     </div>
   );
 }
 
 // Stacked initials avatars for a book's assigned canvassers (hover = full names).
 function Avatars({ users = [] }) {
-  if (!users.length) return <span className="text-xs text-gray-400">Unassigned</span>;
+  if (!users.length) return <span className="text-xs text-fg-subtle">Unassigned</span>;
   const shown = users.slice(0, 3);
   return (
     <span
@@ -63,12 +60,12 @@ function Avatars({ users = [] }) {
       {shown.map((u) => (
         <span
           key={u.id}
-          className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[9px] font-semibold text-brand-700 ring-1 ring-white"
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand-tint text-[9px] font-semibold text-brand-tint-fg ring-1 ring-card"
         >
           {((u.firstName?.[0] || '') + (u.lastName?.[0] || '')).toUpperCase()}
         </span>
       ))}
-      {users.length > 3 && <span className="pl-1.5 text-[10px] text-gray-500">+{users.length - 3}</span>}
+      {users.length > 3 && <span className="pl-1.5 text-[10px] text-fg-subtle">+{users.length - 3}</span>}
     </span>
   );
 }
@@ -96,31 +93,31 @@ function PassDetail({ campaignId, pass, tz }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+      <div className="flex flex-wrap items-center gap-3 text-xs text-fg-muted">
         {pass.activatedAt && (
           <span>Activated {formatInTz(pass.activatedAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false)}</span>
         )}
-        <a href={`/turfs?passId=${pass._id}`} className="font-medium text-brand-700 hover:underline">Cut / assign books →</a>
-        <a href={`/map?passId=${pass._id}`} className="font-medium text-brand-700 hover:underline">Audit →</a>
+        <a href={`/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut / assign books →</a>
+        <a href={`/map?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Audit →</a>
       </div>
       {turfsQ.isLoading ? (
-        <div className="text-xs text-gray-500">Loading books…</div>
+        <div className="text-xs text-fg-muted">Loading books…</div>
       ) : !turfs.length ? (
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-fg-muted">
           No books cut yet.{' '}
-          <a href={`/turfs?passId=${pass._id}`} className="font-medium text-brand-700 hover:underline">Cut books →</a>
+          <a href={`/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut books →</a>
         </div>
       ) : (
-        <ul className="divide-y divide-gray-100 overflow-hidden rounded-md border border-gray-200 bg-white">
+        <ul className="divide-y divide-border overflow-hidden rounded-md border border-border bg-card">
           {turfs.map((t) => (
             <li key={t._id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
               <div className="min-w-0">
-                <span className="font-medium text-gray-900">{t.name}</span>
-                <span className="ml-2 text-xs text-gray-500">{(t.doorCount || 0).toLocaleString()} doors</span>
+                <span className="font-medium text-fg">{t.name}</span>
+                <span className="ml-2 text-xs text-fg-muted">{(t.doorCount || 0).toLocaleString()} doors</span>
               </div>
               <div className="flex items-center gap-3">
                 <Avatars users={byTurf.get(String(t._id)) || []} />
-                <a href={`/turfs?passId=${pass._id}`} className="shrink-0 text-xs font-medium text-brand-700 hover:underline">Open in Turf →</a>
+                <a href={`/turfs?passId=${pass._id}`} className="shrink-0 text-xs font-medium text-brand-accent hover:underline">Open in Turf →</a>
               </div>
             </li>
           ))}
@@ -181,18 +178,14 @@ export default function PassesPage() {
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Passes</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">Passes</h1>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Effort</span>
-            <select
-              value={effortId}
-              onChange={(e) => setEffortId(e.target.value)}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
-            >
+            <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">Effort</span>
+            <Select value={effortId} onChange={(e) => setEffortId(e.target.value)} className="py-1">
               <option value="">Choose an effort…</option>
               {efforts.map((ef) => <option key={ef._id} value={ef._id}>{ef.name}</option>)}
-            </select>
+            </Select>
           </label>
           <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
         </div>
@@ -211,35 +204,26 @@ export default function PassesPage() {
         </div>
       )}
 
-      <section className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
-        <h2 className="mb-3 text-base font-medium">New pass</h2>
+      <Card as="section" className="mb-6 p-5">
+        <h2 className="mb-3 text-base font-semibold text-fg">New pass</h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-700">Name</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. GOTV pass"
-              className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
-            />
+            <span className="mb-1 block text-xs font-medium text-fg">Name</span>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. GOTV pass" className="w-56" />
           </label>
-          <button
-            onClick={() => name && effortId && create.mutate()}
-            disabled={!name || !effortId || create.isPending}
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-          >
+          <Button onClick={() => name && effortId && create.mutate()} disabled={!name || !effortId} loading={create.isPending}>
             {create.isPending ? 'Creating…' : 'Create pass'}
-          </button>
+          </Button>
         </div>
-        {create.error && <div className="mt-2 text-xs text-red-700">{create.error.message}</div>}
-        <p className="mt-2 text-xs text-gray-500">
+        {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
+        <p className="mt-2 text-xs text-fg-muted">
           Passes belong to the selected effort. Create a pass → cut its books on the Turf Cutting page → Activate it here. Passes are one-way (draft → active → archived); each effort can have one active pass.
         </p>
-      </section>
+      </Card>
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+      <Card className="overflow-hidden">
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+          <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
             <tr>
               <th className="px-4 py-2 text-left">Pass</th>
               <th className="px-4 py-2 text-left">Name</th>
@@ -257,46 +241,46 @@ export default function PassesPage() {
                 <Fragment key={p._id}>
                   <tr
                     onClick={() => setOpenId(open ? null : p._id)}
-                    className="cursor-pointer border-t border-gray-100 transition-colors hover:bg-gray-50"
+                    className="cursor-pointer border-t border-border transition-colors hover:bg-sunken/60"
                   >
-                    <td className="px-4 py-2 text-gray-600">
-                      <span className="mr-1.5 inline-block text-gray-400">{open ? '▾' : '▸'}</span>
+                    <td className="px-4 py-2 text-fg-muted">
+                      <span className="mr-1.5 inline-block text-fg-subtle">{open ? '▾' : '▸'}</span>
                       {p.roundNumber}
                     </td>
-                    <td className="px-4 py-2">
+                    <td className="px-4 py-2 text-fg">
                       {p.name}
                       {p.status === 'active' && (
-                        <span className="ml-2 rounded bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">ACTIVE</span>
+                        <Badge variant="success" className="ml-2">ACTIVE</Badge>
                       )}
                     </td>
                     <td className="px-4 py-2">
-                      <span className={`rounded px-2 py-0.5 text-xs ${STATUS_BADGE[p.status] || ''}`}>{p.status}</span>
+                      <Badge variant={STATUS_VARIANT[p.status] || 'neutral'} className="capitalize">{p.status}</Badge>
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{p.turfCount}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-fg">{p.turfCount}</td>
                     <td className="px-4 py-2"><PassProgress campaignId={campaignId} passId={p._id} /></td>
-                    <td className="px-4 py-2 text-gray-600">
+                    <td className="px-4 py-2 text-fg-muted">
                       {p.createdAt ? formatInTz(p.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : '—'}
                     </td>
                     <td className="space-x-2 px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                       {p.status === 'draft' && (
-                        <button onClick={() => action.mutate({ id: p._id, op: 'activate' })} className="text-xs font-semibold text-green-700 hover:underline">
+                        <button onClick={() => action.mutate({ id: p._id, op: 'activate' })} className="text-xs font-semibold text-success hover:underline">
                           Activate
                         </button>
                       )}
                       {p.status === 'active' && (
-                        <button onClick={() => action.mutate({ id: p._id, op: 'archive' })} className="text-xs text-gray-500 hover:underline">
+                        <button onClick={() => action.mutate({ id: p._id, op: 'archive' })} className="text-xs text-fg-muted hover:underline">
                           Archive
                         </button>
                       )}
                       {p.status === 'draft' && (
-                        <button onClick={() => del.mutate(p._id)} className="text-xs text-red-600 hover:underline">
+                        <button onClick={() => del.mutate(p._id)} className="text-xs text-danger hover:underline">
                           Delete
                         </button>
                       )}
                     </td>
                   </tr>
                   {open && (
-                    <tr className="border-t border-gray-50 bg-gray-50/50">
+                    <tr className="border-t border-border bg-sunken/50">
                       <td colSpan="7" className="px-4 py-3">
                         <PassDetail campaignId={campaignId} pass={p} tz={tz} />
                       </td>
@@ -306,12 +290,12 @@ export default function PassesPage() {
               );
             })}
             {!passes.length && (
-              <tr><td colSpan="7" className="px-4 py-6 text-center text-gray-500">No passes yet.</td></tr>
+              <tr><td colSpan="7" className="px-4 py-6 text-center text-fg-muted">No passes yet.</td></tr>
             )}
           </tbody>
         </table>
-      </div>
-      {action.error && <div className="mt-2 text-sm text-red-700">{action.error.message}</div>}
+      </Card>
+      {action.error && <div className="mt-2 text-sm text-danger">{action.error.message}</div>}
     </div>
   );
 }

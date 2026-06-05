@@ -3,61 +3,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import UserProfileModal from '../components/UserProfileModal.jsx';
-
-const FORM_INPUT_CLS =
-  'mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500';
-
-const FILTER_INPUT_CLS =
-  'rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600';
-
-// --- Premium-restyle preview tokens/helpers (presentation only) ---
-// Soft, low-spread elevation (the Stripe/Linear card look) via inline values so this
-// preview stays self-contained — no tailwind.config or shared-file changes to revert.
-const CARD = 'rounded-xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)] dark:border-gray-800 dark:bg-gray-900 dark:shadow-none';
-const SELECT_CLS =
-  'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 transition-colors hover:border-gray-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:border-gray-600';
-
-function initials(u) {
-  return ((u?.firstName?.[0] || '') + (u?.lastName?.[0] || '')).toUpperCase() || '?';
-}
-function Avatar({ user, sm }) {
-  const size = sm ? 'h-6 w-6 text-[10px]' : 'h-9 w-9 text-xs';
-  return (
-    <span className={`inline-flex ${size} shrink-0 items-center justify-center rounded-full bg-brand-50 font-semibold text-brand-700 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/25`}>
-      {initials(user)}
-    </span>
-  );
-}
-function IconSearch(props) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
-    </svg>
-  );
-}
-function IconChevron(props) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="m9 18 6-6-6-6" />
-    </svg>
-  );
-}
-function SkeletonRows() {
-  return (
-    <div className="divide-y divide-gray-100">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="flex items-center gap-3 px-4 py-3.5">
-          <div className="h-9 w-9 animate-pulse rounded-full bg-gray-100 dark:bg-gray-800" />
-          <div className="flex-1 space-y-1.5">
-            <div className="h-3 w-40 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
-            <div className="h-2.5 w-56 animate-pulse rounded bg-gray-50 dark:bg-gray-800/60" />
-          </div>
-          <div className="h-5 w-16 animate-pulse rounded-full bg-gray-100 dark:bg-gray-800" />
-        </div>
-      ))}
-    </div>
-  );
-}
+import {
+  Card,
+  Button,
+  Badge,
+  Avatar,
+  DataTable,
+  EmptyState,
+  SkeletonRows,
+  Input,
+  Select,
+  IconSearch,
+  IconChevronRight,
+  IconUsers,
+} from '../components/ui';
 
 const EMPTY_FORM = {
   firstName: '',
@@ -166,8 +125,7 @@ export default function UsersPage() {
     list = list.slice();
     if (sortMode === 'name-asc') list.sort((a, b) => compareName(a, b, 'asc'));
     else if (sortMode === 'name-desc') list.sort((a, b) => compareName(a, b, 'desc'));
-    else if (sortMode === 'recent-joined')
-      list.sort((a, b) => compareDate(a, b, 'addedAt'));
+    else if (sortMode === 'recent-joined') list.sort((a, b) => compareDate(a, b, 'addedAt'));
     else if (sortMode === 'recent-active')
       list.sort((a, b) =>
         compareDate(
@@ -196,69 +154,59 @@ export default function UsersPage() {
     addMember.mutate(body);
   }
 
+  const labelCls = 'block text-xs font-medium text-fg';
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Users</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Members of this organization.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-fg">Users</h1>
+          <p className="text-sm text-fg-muted">Members of this organization.</p>
         </div>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(16,24,40,0.08)] transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
-        >
+        <Button onClick={() => setShowForm((s) => !s)}>
           {!showForm && <span className="text-base leading-none">+</span>}
           {showForm ? 'Cancel' : 'Add member'}
-        </button>
+        </Button>
       </div>
 
       {showForm && (
-        <form
-          onSubmit={onSubmit}
-          className={`mb-6 grid grid-cols-1 gap-4 ${CARD} p-5 md:grid-cols-3`}
-        >
+        <Card as="form" onSubmit={onSubmit} className="mb-6 grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
           <div className="md:col-span-3 flex items-center gap-2 text-xs">
-            <label className="inline-flex items-center gap-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={emailLookup}
-                onChange={(e) => setEmailLookup(e.target.checked)}
-              />
-              <span className="text-gray-700 dark:text-gray-300">
-                Existing user (by email — link them to this org)
-              </span>
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input type="checkbox" checked={emailLookup} onChange={(e) => setEmailLookup(e.target.checked)} />
+              <span className="text-fg-muted">Existing user (by email — link them to this org)</span>
             </label>
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Email</label>
-            <input
+            <label className={labelCls}>Email</label>
+            <Input
               type="email"
               value={form.email}
               onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))}
               required
-              className={FORM_INPUT_CLS}
+              className="mt-1"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Role</label>
-            <select
+            <label className={labelCls}>Role</label>
+            <Select
               value={form.role}
               onChange={(e) => setForm((s) => ({ ...s, role: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              className="mt-1 w-full"
             >
               <option value="canvasser">Canvasser</option>
               <option value="admin">Admin</option>
-            </select>
+            </Select>
           </div>
           <div className="md:col-span-3">
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-              Coordinator <span className="text-gray-400">(optional)</span>
+            <label className={labelCls}>
+              Coordinator <span className="text-fg-subtle">(optional)</span>
             </label>
-            <select
+            <Select
               value={form.coordinatorId}
               onChange={(e) => setForm((s) => ({ ...s, coordinatorId: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              className="mt-1 w-full"
             >
               <option value="">— None —</option>
               {admins.map((m) => (
@@ -266,60 +214,46 @@ export default function UsersPage() {
                   {m.user.firstName} {m.user.lastName}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {!emailLookup && (
             <>
               <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  First name
-                </label>
-                <input
+                <label className={labelCls}>First name</label>
+                <Input
                   value={form.firstName}
-                  onChange={(e) =>
-                    setForm((s) => ({ ...s, firstName: e.target.value }))
-                  }
+                  onChange={(e) => setForm((s) => ({ ...s, firstName: e.target.value }))}
                   required
-                  className={FORM_INPUT_CLS}
+                  className="mt-1"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Last name
-                </label>
-                <input
+                <label className={labelCls}>Last name</label>
+                <Input
                   value={form.lastName}
-                  onChange={(e) =>
-                    setForm((s) => ({ ...s, lastName: e.target.value }))
-                  }
+                  onChange={(e) => setForm((s) => ({ ...s, lastName: e.target.value }))}
                   required
-                  className={FORM_INPUT_CLS}
+                  className="mt-1"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Phone <span className="text-gray-400">(optional)</span>
+                <label className={labelCls}>
+                  Phone <span className="text-fg-subtle">(optional)</span>
                 </label>
-                <input
+                <Input
                   type="tel"
                   value={form.phone}
-                  onChange={(e) =>
-                    setForm((s) => ({ ...s, phone: e.target.value }))
-                  }
-                  className={FORM_INPUT_CLS}
+                  onChange={(e) => setForm((s) => ({ ...s, phone: e.target.value }))}
+                  className="mt-1"
                 />
               </div>
               <div className="md:col-span-3">
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Initial password
-                </label>
+                <label className={labelCls}>Initial password</label>
                 <div className="mt-1">
                   <PasswordInput
                     value={form.password}
-                    onChange={(e) =>
-                      setForm((s) => ({ ...s, password: e.target.value }))
-                    }
+                    onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))}
                     required
                     autoComplete="new-password"
                   />
@@ -329,50 +263,35 @@ export default function UsersPage() {
           )}
 
           <div className="md:col-span-3">
-            <button
-              type="submit"
-              disabled={addMember.isPending}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
-            >
-              {addMember.isPending
-                ? 'Adding…'
-                : emailLookup
-                ? 'Link existing user'
-                : 'Create + add'}
-            </button>
-            {addMember.error && (
-              <span className="ml-3 text-sm text-red-600">
-                {addMember.error.message}
-              </span>
-            )}
+            <Button type="submit" loading={addMember.isPending}>
+              {emailLookup ? 'Link existing user' : 'Create + add'}
+            </Button>
+            {addMember.error && <span className="ml-3 text-sm text-danger">{addMember.error.message}</span>}
           </div>
-        </form>
+        </Card>
       )}
 
-      <div className={`mb-4 flex flex-wrap items-center gap-2.5 ${CARD} p-2.5`}>
-        <div className="relative min-w-[220px] flex-1">
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500">
-            <IconSearch />
-          </span>
-          <input
+      <Card className="mb-4 flex flex-wrap items-center gap-2.5 p-2.5">
+        <div className="min-w-[220px] flex-1">
+          <Input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name or email…"
-            className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 transition-colors hover:border-gray-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
+            leadingIcon={<IconSearch size={16} />}
           />
         </div>
-        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className={SELECT_CLS}>
+        <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
           <option value="all">All roles</option>
           <option value="admin">Admins</option>
           <option value="canvasser">Canvassers</option>
-        </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={SELECT_CLS}>
+        </Select>
+        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="all">All statuses</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
-        </select>
-        <select value={coordinatorFilter} onChange={(e) => setCoordinatorFilter(e.target.value)} className={SELECT_CLS}>
+        </Select>
+        <Select value={coordinatorFilter} onChange={(e) => setCoordinatorFilter(e.target.value)}>
           <option value="all">All coordinators</option>
           <option value="none">No coordinator</option>
           {admins.map((m) => (
@@ -380,127 +299,111 @@ export default function UsersPage() {
               {m.user.firstName} {m.user.lastName}
             </option>
           ))}
-        </select>
-        <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} className={SELECT_CLS}>
+        </Select>
+        <Select value={sortMode} onChange={(e) => setSortMode(e.target.value)}>
           {SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
           ))}
-        </select>
-        <span className="ml-auto rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium tabular-nums text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+        </Select>
+        <span className="ml-auto rounded-full bg-sunken px-2.5 py-1 text-xs font-medium tabular-nums text-fg-muted">
           {visibleMembers.length} of {members.length}
         </span>
-      </div>
+      </Card>
 
       {isLoading ? (
-        <div className={`overflow-hidden ${CARD}`}>
+        <Card className="overflow-hidden">
           <SkeletonRows />
-        </div>
+        </Card>
       ) : (
-        <div className={`overflow-hidden ${CARD}`}>
-          <table className="min-w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-gray-50/90 backdrop-blur dark:bg-gray-900/80">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                <th className="px-4 py-2.5">Member</th>
-                <th className="px-4 py-2.5">Role</th>
-                <th className="px-4 py-2.5">Coordinator</th>
-                <th className="px-4 py-2.5">Status</th>
-                <th className="w-8 px-4 py-2.5"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {visibleMembers.map((m) => {
-                const u = m.user;
-                const active = m.isActive && u.isActive;
-                const coord = coordinatorName(m.coordinatorId);
-                return (
-                  <tr
-                    key={m.membershipId}
-                    onClick={() => setSelectedUserId(u.id)}
-                    className="group cursor-pointer transition-colors hover:bg-gray-50/70 dark:hover:bg-gray-800/40"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar user={u} />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 font-medium text-gray-900 dark:text-gray-100">
-                            <span className="truncate">{u.firstName} {u.lastName}</span>
-                            {u.isSuperAdmin && (
-                              <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 ring-1 ring-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">
-                                super
-                              </span>
-                            )}
-                          </div>
-                          <div className="truncate text-xs text-gray-500 dark:text-gray-400">{u.email}</div>
-                        </div>
+        <DataTable
+          head={
+            <>
+              <th className="px-4 py-2.5">Member</th>
+              <th className="px-4 py-2.5">Role</th>
+              <th className="px-4 py-2.5">Coordinator</th>
+              <th className="px-4 py-2.5">Status</th>
+              <th className="w-8 px-4 py-2.5"></th>
+            </>
+          }
+        >
+          {visibleMembers.map((m) => {
+            const u = m.user;
+            const active = m.isActive && u.isActive;
+            const coord = coordinatorName(m.coordinatorId);
+            return (
+              <tr
+                key={m.membershipId}
+                onClick={() => setSelectedUserId(u.id)}
+                className="group cursor-pointer transition-colors hover:bg-sunken/60"
+              >
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar user={u} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 font-medium text-fg">
+                        <span className="truncate">{u.firstName} {u.lastName}</span>
+                        {u.isSuperAdmin && (
+                          <Badge variant="warning" className="uppercase tracking-wide">super</Badge>
+                        )}
                       </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={
-                          m.role === 'admin'
-                            ? 'inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/25'
-                            : 'inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                        }
-                      >
-                        {m.role === 'admin' ? 'Admin' : 'Canvasser'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                      {coord ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <Avatar user={{ firstName: coord.split(' ')[0], lastName: coord.split(' ').slice(1).join(' ') }} sm />
-                          <span className="truncate">{coord}</span>
-                        </span>
-                      ) : (
-                        <span className="text-gray-300 dark:text-gray-600">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={
-                          active
-                            ? 'inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-100 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-500/25'
-                            : 'inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                        }
-                      >
-                        <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-green-500' : 'bg-gray-400'}`} />
-                        {active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-300 transition-colors group-hover:text-gray-500 dark:text-gray-600 dark:group-hover:text-gray-400">
-                      <IconChevron className="ml-auto" />
-                    </td>
-                  </tr>
-                );
-              })}
-              {!members.length && (
-                <tr>
-                  <td colSpan="5" className="px-4 py-14 text-center">
-                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500">
-                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                      <div className="truncate text-xs text-fg-muted">{u.email}</div>
                     </div>
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">No members yet</div>
-                    <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">Click <strong>Add member</strong> to start.</div>
-                  </td>
-                </tr>
-              )}
-              {members.length > 0 && !visibleMembers.length && (
-                <tr>
-                  <td colSpan="5" className="px-4 py-14 text-center text-sm text-gray-500 dark:text-gray-400">
-                    No members match your filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <Badge variant={m.role === 'admin' ? 'brand' : 'neutral'}>
+                    {m.role === 'admin' ? 'Admin' : 'Canvasser'}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-fg-muted">
+                  {coord ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Avatar
+                        user={{ firstName: coord.split(' ')[0], lastName: coord.split(' ').slice(1).join(' ') }}
+                        size="sm"
+                      />
+                      <span className="truncate">{coord}</span>
+                    </span>
+                  ) : (
+                    <span className="text-fg-subtle">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <Badge variant={active ? 'success' : 'neutral'} dot>
+                    {active ? 'Active' : 'Inactive'}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-right text-fg-subtle transition-colors group-hover:text-fg-muted">
+                  <IconChevronRight className="ml-auto" />
+                </td>
+              </tr>
+            );
+          })}
+          {!members.length && (
+            <tr>
+              <td colSpan="5">
+                <EmptyState
+                  icon={<IconUsers size={22} />}
+                  title="No members yet"
+                  hint={<>Click <strong>Add member</strong> to start.</>}
+                />
+              </td>
+            </tr>
+          )}
+          {members.length > 0 && !visibleMembers.length && (
+            <tr>
+              <td colSpan="5" className="px-4 py-14 text-center text-sm text-fg-muted">
+                No members match your filters.
+              </td>
+            </tr>
+          )}
+        </DataTable>
       )}
 
       {selectedMember && (
-        <UserProfileModal
-          membership={selectedMember}
-          onClose={() => setSelectedUserId(null)}
-        />
+        <UserProfileModal membership={selectedMember} onClose={() => setSelectedUserId(null)} />
       )}
     </div>
   );

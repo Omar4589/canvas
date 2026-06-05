@@ -560,11 +560,11 @@ export default function MapPage() {
   }
   if (!tokenQ.data?.isReady) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
+      <div className="rounded-lg border border-warning/30 bg-warning-tint p-6 text-sm text-warning-fg">
         <div className="text-base font-semibold">Mapbox token not configured</div>
         <p className="mt-2">
-          Set <code className="rounded bg-amber-100 px-1 py-0.5">MAPBOX_PUBLIC_TOKEN</code> in
-          your server <code className="rounded bg-amber-100 px-1 py-0.5">.env</code> file (a
+          Set <code className="rounded bg-warning/20 px-1 py-0.5">MAPBOX_PUBLIC_TOKEN</code> in
+          your server <code className="rounded bg-warning/20 px-1 py-0.5">.env</code> file (a
           public token starting with <code>pk.</code>) and restart the server.
         </p>
       </div>
@@ -575,11 +575,11 @@ export default function MapPage() {
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div
         style={{ flexShrink: 0 }}
-        className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-6 py-3"
+        className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-6 py-3"
       >
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-gray-900">Map</h1>
+            <h1 className="text-xl font-semibold text-fg">Map</h1>
             {scopeLabel && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700">
                 Showing: {scopeLabel}
@@ -594,13 +594,13 @@ export default function MapPage() {
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-fg-muted">
             <span>
               {householdsQ.isLoading
                 ? 'Loading households…'
                 : `${households.length.toLocaleString()} households shown`}
             </span>
-            <span className="text-gray-300" aria-hidden="true">·</span>
+            <span className="text-fg-subtle" aria-hidden="true">·</span>
             <LiveStatus
               live={live}
               onToggle={() => setLive((v) => !v)}
@@ -624,7 +624,7 @@ export default function MapPage() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <aside
           style={{ flexShrink: 0, overflowY: 'auto' }}
-          className="w-72 border-r border-gray-200 bg-white p-4"
+          className="w-72 border-r border-border bg-card p-4"
         >
           <MapFilters
             statusFilter={statusFilter}
@@ -655,7 +655,7 @@ export default function MapPage() {
                 maxHeight: 'calc(100% - 32px)',
                 overflowY: 'auto',
               }}
-              className="rounded-lg border border-gray-200 bg-white shadow-lg"
+              className="rounded-lg border border-border bg-card shadow-lg"
             >
               <HouseholdDetailPanel
                 household={selectedHousehold}
@@ -678,7 +678,7 @@ export default function MapPage() {
                 maxHeight: 'calc(100% - 32px)',
                 overflowY: 'auto',
               }}
-              className="rounded-lg border border-gray-200 bg-white shadow-lg"
+              className="rounded-lg border border-border bg-card shadow-lg"
             >
               <CanvasserPingPanel
                 activity={selectedActivity}

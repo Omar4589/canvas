@@ -3,18 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
+import { Card, Badge, Button, Input, Select } from '../components/ui';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
-// Premium-restyle preview: status as a dot pill, soft card elevation (inline so the
-// preview stays self-contained — presentation only).
-const STATUS_BADGE = {
-  draft: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
-  active: 'bg-green-50 text-green-700 ring-1 ring-green-100 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-500/25',
-  archived: 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500',
-};
-const STATUS_DOT = { draft: 'bg-gray-400', active: 'bg-green-500', archived: 'bg-gray-300' };
-const CARD = 'rounded-xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)] dark:border-gray-800 dark:bg-gray-900 dark:shadow-none';
+const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
+// Compact token field for the tiny in-row / in-panel controls.
+const COMPACT = 'rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg focus:border-brand-accent focus:outline-none';
 
 function RosterPanel({ campaignId, effort }) {
   const qc = useQueryClient();
@@ -44,25 +39,25 @@ function RosterPanel({ campaignId, effort }) {
   const addable = members.filter((m) => !crewIds.has(String(m.user.id)));
 
   return (
-    <div className="rounded border border-gray-200 bg-gray-50 p-3">
-      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Crew</div>
-      <p className="mb-2 text-[11px] text-gray-500">
+    <div className="rounded-lg border border-border bg-sunken p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Crew</div>
+      <p className="mb-2 text-[11px] text-fg-muted">
         Fills in automatically from book assignments. Add people here to pre-stage them before assigning.
       </p>
       {crew.length === 0 ? (
-        <p className="text-xs text-gray-500">No one yet — assign books on the Turf page, or pre-add someone below.</p>
+        <p className="text-xs text-fg-muted">No one yet — assign books on the Turf page, or pre-add someone below.</p>
       ) : (
         <ul className="mb-2 flex flex-wrap gap-1.5">
           {crew.map((c) => {
             const manualOnly = c.viaRoster && !c.viaAssignment;
             return (
-              <li key={c.user.id} className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">
+              <li key={c.user.id} className="flex items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs text-fg ring-1 ring-border">
                 {c.user.firstName} {c.user.lastName}
-                <span className={c.viaAssignment ? 'text-[10px] font-medium text-green-600' : 'text-[10px] text-gray-400'}>
+                <span className={c.viaAssignment ? 'text-[10px] font-medium text-success' : 'text-[10px] text-fg-subtle'}>
                   {c.viaAssignment ? 'assigned' : 'added'}
                 </span>
                 {manualOnly && (
-                  <button onClick={() => remove.mutate(c.user.id)} className="text-gray-400 hover:text-red-600" title="Remove (pre-staged only — assigned people leave when unassigned on the Turf page)">×</button>
+                  <button onClick={() => remove.mutate(c.user.id)} className="text-fg-subtle hover:text-danger" title="Remove (pre-staged only — assigned people leave when unassigned on the Turf page)">×</button>
                 )}
               </li>
             );
@@ -70,7 +65,7 @@ function RosterPanel({ campaignId, effort }) {
         </ul>
       )}
       <div className="flex items-center gap-2">
-        <select value={userId} onChange={(e) => setUserId(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs">
+        <select value={userId} onChange={(e) => setUserId(e.target.value)} className={COMPACT}>
           <option value="">Pre-add person…</option>
           {addable.map((m) => (
             <option key={m.user.id} value={m.user.id}>
@@ -78,7 +73,7 @@ function RosterPanel({ campaignId, effort }) {
             </option>
           ))}
         </select>
-        <button onClick={() => userId && add.mutate(userId)} disabled={!userId || add.isPending} className="rounded bg-brand-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">Add</button>
+        <Button size="sm" onClick={() => userId && add.mutate(userId)} disabled={!userId || add.isPending}>Add</Button>
       </div>
     </div>
   );
@@ -94,29 +89,29 @@ function ClaimPanel({ campaignId, effort, walkLists }) {
   const owned = claim.error?.data?.code === 'doors-owned' ? claim.error.data : null;
 
   return (
-    <div className="rounded border border-gray-200 bg-gray-50 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Claim doors</div>
+    <div className="rounded-lg border border-border bg-sunken p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">Claim doors</div>
       <div className="flex flex-wrap items-center gap-2">
-        <select value={walkListId} onChange={(e) => setWalkListId(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs">
+        <select value={walkListId} onChange={(e) => setWalkListId(e.target.value)} className={COMPACT}>
           <option value="">From a walk list…</option>
           {walkLists.map((w) => (
             <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>
           ))}
         </select>
-        <button onClick={() => walkListId && claim.mutate({ body: { walkListId } })} disabled={!walkListId || claim.isPending} className="rounded bg-brand-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">Claim list</button>
-        <span className="text-xs text-gray-400">or</span>
-        <button onClick={() => claim.mutate({ body: { all: true } })} disabled={claim.isPending} className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-white">Claim all Intake</button>
+        <Button size="sm" onClick={() => walkListId && claim.mutate({ body: { walkListId } })} disabled={!walkListId || claim.isPending}>Claim list</Button>
+        <span className="text-xs text-fg-subtle">or</span>
+        <Button size="sm" variant="secondary" onClick={() => claim.mutate({ body: { all: true } })} disabled={claim.isPending}>Claim all Intake</Button>
       </div>
       {claim.data && (
-        <p className="mt-2 text-xs text-green-700">Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other efforts)` : ''}.</p>
+        <p className="mt-2 text-xs text-success-fg">Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other efforts)` : ''}.</p>
       )}
       {owned && (
-        <div className="mt-2 text-xs text-amber-700">
+        <div className="mt-2 text-xs text-warning-fg">
           {owned.conflicts} door(s) belong to another effort.{' '}
           <button onClick={() => claim.mutate({ body: { walkListId: walkListId || undefined, all: walkListId ? undefined : true, force: true } })} className="font-semibold underline">Move them here (re-carve)</button>
         </div>
       )}
-      {claim.error && !owned && <p className="mt-2 text-xs text-red-700">{claim.error.message}</p>}
+      {claim.error && !owned && <p className="mt-2 text-xs text-danger">{claim.error.message}</p>}
     </div>
   );
 }
@@ -127,28 +122,30 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
   const crewTitle = (crewNames || []).join(', ');
   return (
     <>
-      <tr className="border-t border-gray-100 transition-colors hover:bg-gray-50/70 dark:border-gray-800 dark:hover:bg-gray-800/40">
+      <tr className="border-t border-border transition-colors hover:bg-sunken/60">
         <td className="px-4 py-2.5">
-          <span className="font-medium text-gray-900 dark:text-gray-100">{effort.name}</span>
+          <span className="font-medium text-fg">{effort.name}</span>
         </td>
-        <td className="px-4 py-2"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_BADGE[effort.status] || ''}`}><span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[effort.status] || 'bg-gray-300'}`} />{effort.status}</span></td>
-        <td className="px-4 py-2 text-right tabular-nums">{(effort.doorCount || 0).toLocaleString()}</td>
-        <td className="px-4 py-2 text-right tabular-nums">
-          <span title={crewTitle || undefined} className={crewTitle ? 'cursor-default border-b border-dotted border-gray-300' : undefined}>
+        <td className="px-4 py-2">
+          <Badge variant={STATUS_VARIANT[effort.status] || 'neutral'} dot className="capitalize">{effort.status}</Badge>
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-fg">{(effort.doorCount || 0).toLocaleString()}</td>
+        <td className="px-4 py-2 text-right tabular-nums text-fg">
+          <span title={crewTitle || undefined} className={crewTitle ? 'cursor-default border-b border-dotted border-border-strong' : undefined}>
             {effort.crewCount || 0}
           </span>
         </td>
-        <td className="px-4 py-2">{effort.activeRound ? `Pass ${effort.activeRound.roundNumber} · ${effort.activeRound.name}` : <span className="text-gray-400">—</span>}</td>
-        <td className="px-4 py-2 text-gray-600 dark:text-gray-300">{isSurveyType ? (survey ? survey.name : <span className="text-gray-400">campaign default</span>) : <span className="text-gray-400">n/a</span>}</td>
-        <td className="px-4 py-2 text-gray-600 dark:text-gray-300">{effort.createdAt ? formatInTz(effort.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : <span className="text-gray-400">—</span>}</td>
+        <td className="px-4 py-2 text-fg">{effort.activeRound ? `Pass ${effort.activeRound.roundNumber} · ${effort.activeRound.name}` : <span className="text-fg-subtle">—</span>}</td>
+        <td className="px-4 py-2 text-fg-muted">{isSurveyType ? (survey ? survey.name : <span className="text-fg-subtle">campaign default</span>) : <span className="text-fg-subtle">n/a</span>}</td>
+        <td className="px-4 py-2 text-fg-muted">{effort.createdAt ? formatInTz(effort.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : <span className="text-fg-subtle">—</span>}</td>
         <td className="space-x-2 px-4 py-2 text-right">
-          <button onClick={() => setOpen((v) => !v)} className="text-xs font-medium text-brand-700 hover:underline dark:text-brand-400">{open ? 'Close' : 'Manage'}</button>
-          {effort.status !== 'archived' && <button onClick={() => onArchive(effort)} className="text-xs text-gray-500 hover:underline">Archive</button>}
-          <button onClick={() => onDelete(effort)} className="text-xs text-red-600 hover:underline">Delete</button>
+          <button onClick={() => setOpen((v) => !v)} className="text-xs font-medium text-brand-accent hover:underline">{open ? 'Close' : 'Manage'}</button>
+          {effort.status !== 'archived' && <button onClick={() => onArchive(effort)} className="text-xs text-fg-muted hover:underline">Archive</button>}
+          <button onClick={() => onDelete(effort)} className="text-xs text-danger hover:underline">Delete</button>
         </td>
       </tr>
       {open && (
-        <tr className="border-t border-gray-50 bg-gray-50/50">
+        <tr className="border-t border-border bg-sunken/50">
           <td colSpan="8" className="px-4 py-3">
             <div className="grid gap-3 md:grid-cols-2">
               <RosterPanel campaignId={campaignId} effort={effort} />
@@ -158,23 +155,23 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
               <input
                 defaultValue={effort.name}
                 onBlur={(e) => e.target.value.trim() && e.target.value !== effort.name && onUpdate(effort, { name: e.target.value.trim() })}
-                className="rounded border border-gray-300 px-2 py-1 text-xs"
+                className={COMPACT}
               />
               {isSurveyType && (
                 <select
                   defaultValue={effort.surveyTemplateId || ''}
                   onChange={(e) => onUpdate(effort, { surveyTemplateId: e.target.value || null })}
-                  className="rounded border border-gray-300 px-2 py-1 text-xs"
+                  className={COMPACT}
                 >
                   <option value="">Survey: campaign default</option>
                   {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
                 </select>
               )}
-              <a href={`/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline dark:text-brand-400">Manage passes →</a>
+              <a href={`/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Manage passes →</a>
               {effort.activeRound && (
-                <a href={`/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-700 hover:underline dark:text-brand-400">Cut / assign books →</a>
+                <a href={`/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-accent hover:underline">Cut / assign books →</a>
               )}
-              <a href={`/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline dark:text-brand-400">Audit on map →</a>
+              <a href={`/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Audit on map →</a>
             </div>
           </td>
         </tr>
@@ -228,14 +225,16 @@ export default function EffortsPage() {
   const archive = useMutation({ mutationFn: (id) => api(`/admin/campaigns/${campaignId}/efforts/${id}/archive`, { method: 'POST' }), onSuccess: invalidate });
   const del = useMutation({ mutationFn: (id) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'DELETE' }), onSuccess: invalidate });
 
+  const fieldLabel = 'mb-1 block text-xs font-medium text-fg';
+
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Efforts</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">Efforts</h1>
         <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
       </div>
 
-      <p className="mb-4 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
+      <p className="mb-4 max-w-3xl text-sm text-fg-muted">
         An effort is a parallel canvassing operation within a campaign — e.g. an area or a team. Each
         effort owns a disjoint set of doors, an optional survey, and a roster, and has its own Passes
         (cut on the Turf Cutting page). Doors no one has claimed sit in <strong>Intake</strong>.
@@ -255,45 +254,45 @@ export default function EffortsPage() {
       )}
 
       {intakeCount > 0 && (
-        <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
+        <div className="mb-4 rounded-md border border-info/30 bg-info-tint px-4 py-2.5 text-sm text-info-fg">
           <strong>{intakeCount.toLocaleString()}</strong> door{intakeCount === 1 ? '' : 's'} in Intake (new addresses awaiting assignment). Open an effort below → <em>Claim all Intake</em> to assign them.
         </div>
       )}
 
-      <section className={`mb-6 ${CARD} p-5`}>
-        <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-gray-100">New effort</h2>
+      <Card as="section" className="mb-6 p-5">
+        <h2 className="mb-3 text-base font-semibold text-fg">New effort</h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">Name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="rounded border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
+            <span className={fieldLabel}>Name</span>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="w-56" />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">Seed door-set (walk list)</span>
-            <select value={seedWalkListId} onChange={(e) => setSeedWalkListId(e.target.value)} className="rounded border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
+            <span className={fieldLabel}>Seed door-set (walk list)</span>
+            <Select value={seedWalkListId} onChange={(e) => setSeedWalkListId(e.target.value)}>
               <option value="">None (claim doors later)</option>
               {walkLists.map((w) => <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>)}
-            </select>
+            </Select>
           </label>
           {isSurveyType && (
             <label className="text-sm">
-              <span className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">Survey override</span>
-              <select value={surveyTemplateId} onChange={(e) => setSurveyTemplateId(e.target.value)} className="rounded border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
+              <span className={fieldLabel}>Survey override</span>
+              <Select value={surveyTemplateId} onChange={(e) => setSurveyTemplateId(e.target.value)}>
                 <option value="">Campaign default</option>
                 {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
-              </select>
+              </Select>
             </label>
           )}
-          <button onClick={() => name && create.mutate()} disabled={!name || create.isPending} className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
+          <Button onClick={() => name && create.mutate()} disabled={!name} loading={create.isPending}>
             {create.isPending ? 'Creating…' : 'Create effort'}
-          </button>
+          </Button>
         </div>
-        {create.error && <div className="mt-2 text-xs text-red-700">{create.error.message}</div>}
-        <p className="mt-2 text-xs text-gray-500">Walk lists can be built from filters or an uploaded Voter-ID CSV (Walk Lists page). Seeding from either claims only that list's <em>unowned</em> doors; to move doors already in another effort, open the effort → Claim → Re-carve.</p>
-      </section>
+        {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
+        <p className="mt-2 text-xs text-fg-muted">Walk lists can be built from filters or an uploaded Voter-ID CSV (Walk Lists page). Seeding from either claims only that list's <em>unowned</em> doors; to move doors already in another effort, open the effort → Claim → Re-carve.</p>
+      </Card>
 
-      <div className={`overflow-hidden ${CARD}`}>
+      <Card className="overflow-hidden">
         <table className="min-w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-gray-50/90 text-[11px] font-semibold uppercase tracking-wider text-gray-500 backdrop-blur dark:bg-gray-900/80 dark:text-gray-400">
+          <thead className="sticky top-0 z-10 bg-sunken/90 text-[11px] font-semibold uppercase tracking-wider text-fg-muted backdrop-blur">
             <tr>
               <th className="px-4 py-2 text-left">Effort</th>
               <th className="px-4 py-2 text-left">Status</th>
@@ -321,11 +320,11 @@ export default function EffortsPage() {
                 onDelete={(eff) => { if (window.confirm(`Delete effort "${eff.name}"? Its doors return to Intake.`)) del.mutate(eff._id); }}
               />
             ))}
-            {!efforts.length && <tr><td colSpan="8" className="px-4 py-6 text-center text-gray-500">No efforts yet.</td></tr>}
+            {!efforts.length && <tr><td colSpan="8" className="px-4 py-6 text-center text-fg-muted">No efforts yet.</td></tr>}
           </tbody>
         </table>
-      </div>
-      {del.error && <div className="mt-2 text-sm text-red-700">{del.error.message}</div>}
+      </Card>
+      {del.error && <div className="mt-2 text-sm text-danger">{del.error.message}</div>}
     </div>
   );
 }
