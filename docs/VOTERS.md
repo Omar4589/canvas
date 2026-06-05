@@ -37,6 +37,41 @@ One page with everything about a voter:
 - **Notes** — admin notes you add here, plus read-only notes captured in the field.
 - **Canvass activity** — what's happened at the household.
 
+## Surveyed vs. voted: two independent statuses
+
+The directory's **Survey status** and **Voted status** filters look related, but they're two
+completely separate facts — neither one sets or implies the other:
+
+- **Surveyed** means **a canvasser recorded a survey** at the door, out in the field. It's the
+  voter's survey status, and it's set *only* by submitting a survey in the app. (A survey *answer*
+  like "Already Voted" is just a recorded answer — it does **not** mark the person voted.)
+- **Voted** means **the person was in an Early-Voters CSV you uploaded** on the Early Voting page.
+  It's set *only* by that upload (and the "sticky" re-apply of it), and it's tracked **per
+  campaign**. See [EARLY_VOTING.md](EARLY_VOTING.md).
+
+So all four combinations are normal: surveyed-not-voted, voted-not-surveyed, both, or neither.
+**Order doesn't matter** — someone surveyed in the field weeks ago who later shows up on a
+voted-list upload is exactly what you'd expect; the two stay true side by side and never conflict.
+
+### How to read a voter's profile
+
+- The **badges at the top** ("Surveyed", "✓ Voted") describe **the voter you opened**.
+- The **Household members** list shows **other people at the same address** — each with *their own*
+  status: `· not surveyed` (or `· surveyed`), plus `· voted` **only when that housemate voted**.
+  A common mix-up: seeing `Debra Anderson · not surveyed` under Dana's profile is **Debra's**
+  status, not Dana's — they're different people.
+- A `· fully voted` tag on the **Campaign** line means the **whole door has dropped** off the
+  canvassers' books. If it's **absent**, the door is still on the books.
+
+### Are houses with un-voted people being dropped? No.
+
+A door drops off the canvassers' map and books **only when *every* resident has voted**. A single
+un-voted housemate keeps the entire door on the books — so a home where Dana voted but Debra
+hasn't will **not** drop. That's why you can have voted residents and still see the door in the
+field. Full mechanics live in [EARLY_VOTING.md](EARLY_VOTING.md); the `audit:voted-doors` script
+([server/src/utils/auditVotedDoors.js](../server/src/utils/auditVotedDoors.js)) can prove this
+against live data.
+
 ## What you can change (web admin)
 
 - **Edit voter info** — fix/maintain contact, party, gender, registration, districts, and name.
@@ -118,3 +153,28 @@ Canvassers are restricted to households in their **assigned books on the active 
 |---|---|
 | [voters/index.jsx](../mobile/app/(app)/voters/index.jsx) | Campaign-scoped search list; row → profile. Entry point: "Voters" link in the [books](../mobile/app/(app)/books.jsx) header. |
 | [voters/[id].jsx](../mobile/app/(app)/voters/[id].jsx) | Read-only profile (details, household, voted, surveys, notes) + add-note. |
+
+## F. Status semantics (surveyed vs. voted)
+
+Surveyed and voted are **independent** and backed by **different sources** — useful to know
+because the two directory filters and the two profile badges look parallel but aren't.
+
+| UI element | Field / source | Where |
+|---|---|---|
+| "Surveyed" badge | `voter.surveyStatus === 'surveyed'` (org-level `Voter` field) | [VoterDetailPage.jsx:277](../client/src/pages/VoterDetailPage.jsx#L277) |
+| "✓ Voted" badge | `p.voted.isVoted` — a per-campaign `VotedVoter` lookup in [voterProfile.js](../server/src/services/voters/voterProfile.js) | [VoterDetailPage.jsx:280](../client/src/pages/VoterDetailPage.jsx#L280) |
+| "· fully voted" (Campaign line) | `household.fullyVoted` (derived; see [EARLY_VOTING.md](EARLY_VOTING.md)) | [VoterDetailPage.jsx:299](../client/src/pages/VoterDetailPage.jsx#L299) |
+| Household member line `· surveyed / · voted` | `m.surveyStatus` and `m.voted` (per-member, voted from a `VotedVoter` lookup) | [VoterDetailPage.jsx:308](../client/src/pages/VoterDetailPage.jsx#L308), [voterProfile.js](../server/src/services/voters/voterProfile.js) |
+| **Survey-status filter** | direct field query `filter.surveyStatus = req.query.surveyStatus` | [routes/admin/voters.js](../server/src/routes/admin/voters.js) (`GET /admin/voters`) |
+| **Voted-status filter** | campaign-scoped `VotedVoter.distinct('voterId')`, then `_id $in/$nin` | [routes/admin/voters.js](../server/src/routes/admin/voters.js) (`GET /admin/voters`) |
+
+Key invariants:
+- **Survey answers never create a voted mark.** The survey-submit path
+  ([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)) writes a `SurveyResponse`
+  and sets `surveyStatus`, and touches **no** `VotedVoter` row — even for an "Already Voted" answer.
+- **`surveyStatus` is org-wide; voted is per-campaign.** Survey status lives on the shared `Voter`
+  doc; the voted mark is a campaign-scoped `VotedVoter` row, so a voter can be voted in one
+  campaign and not another (and a `Voter` has **no** `voted` field).
+- **A door drops only when all of its voters are voted** (`recomputeFullyVoted`: `voterCount > 0 &&
+  every voter has a VotedVoter row`) — one un-voted resident keeps it on the books. Auditable via
+  `npm run audit:voted-doors` ([server/src/utils/auditVotedDoors.js](../server/src/utils/auditVotedDoors.js)).

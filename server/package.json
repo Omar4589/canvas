@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "seed:admin": "node src/utils/seedAdmin.js",
     "reconcile:counts": "node src/utils/reconcileCounts.js",
+    "audit:voted-doors": "node src/utils/auditVotedDoors.js",
     "migrate:multitenant": "node src/utils/migrateToMultiTenant.js",
     "worker": "node src/worker.js",
     "migrate:voter-scope": "node src/migrations/migrateVoterScope.js",
