@@ -18,6 +18,7 @@ import {
   saveActiveOrgId,
   clearActiveOrgId,
   clearActiveCampaign,
+  saveServerMeta,
 } from '../lib/cache';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
@@ -43,6 +44,9 @@ export default function Login() {
       if (res.user) {
         await saveCurrentUser(res.user);
       }
+      // Cache the server's min supported client version so the routing layer can
+      // gate a too-old bundle on every launch, not just right after login.
+      await saveServerMeta({ minClientApiVersion: res.minClientApiVersion ?? 1 });
       const memberships = res.memberships || [];
       await saveMemberships(memberships);
       await clearActiveOrgId();

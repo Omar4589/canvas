@@ -8,6 +8,7 @@ const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
 const SELECTED_BOOKS_KEY = 'canvass.selectedBooks';
 const CURRENT_EFFORT_KEY = 'canvass.currentEffort';
 const MAP_STYLE_KEY = 'canvass.mapStyle';
+const SERVER_META_KEY = 'canvass.serverMeta';
 
 export async function saveBootstrap(data) {
   await AsyncStorage.setItem(KEY, JSON.stringify({ ...data, cachedAt: new Date().toISOString() }));
@@ -187,4 +188,27 @@ export async function saveMapStyle(styleId) {
 
 export async function loadMapStyle() {
   return AsyncStorage.getItem(MAP_STYLE_KEY);
+}
+
+// Small bag of server-reported facts the app needs before/independent of any
+// org-scoped call — currently just `minClientApiVersion`, the lowest client
+// contract version the server still accepts. Saved at login (and refreshable
+// from any response that includes it) so the routing layer can gate a too-old
+// bundle on cold start, not only right after login.
+export async function saveServerMeta(meta) {
+  if (!meta) {
+    await AsyncStorage.removeItem(SERVER_META_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(SERVER_META_KEY, JSON.stringify(meta));
+}
+
+export async function loadServerMeta() {
+  const raw = await AsyncStorage.getItem(SERVER_META_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }

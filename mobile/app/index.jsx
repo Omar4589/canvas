@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Redirect } from 'expo-router';
 import { useAuthToken, useAuthReady } from '../lib/authState';
+import { CLIENT_API_VERSION } from '../lib/config';
 import {
   loadActiveCampaign,
   loadCurrentUser,
   loadMemberships,
   loadActiveOrgId,
+  loadServerMeta,
 } from '../lib/cache';
 
 export default function Index() {
@@ -25,13 +27,15 @@ export default function Index() {
       loadActiveCampaign(),
       loadMemberships(),
       loadActiveOrgId(),
-    ]).then(([user, campaign, memberships, activeOrgId]) => {
+      loadServerMeta(),
+    ]).then(([user, campaign, memberships, activeOrgId, serverMeta]) => {
       if (mounted) {
         setBoot({
           user: user || null,
           campaign: campaign || null,
           memberships: memberships || [],
           activeOrgId: activeOrgId || null,
+          serverMeta: serverMeta || null,
         });
       }
     });
@@ -48,6 +52,15 @@ export default function Index() {
     );
   }
   if (!token) return <Redirect href="/login" />;
+
+  // This bundle is older than the server will accept — send to a "please update"
+  // wall instead of letting it fail with cryptic 4xx errors. Exactly the class of
+  // problem that stranded the old Android build on the campaign picker. `minClientApiVersion`
+  // is reported by the server and cached at login (lib/cache saveServerMeta).
+  const minClientApiVersion = boot?.serverMeta?.minClientApiVersion || 0;
+  if (CLIENT_API_VERSION < minClientApiVersion) {
+    return <Redirect href="/update-required" />;
+  }
 
   // Admin issued a temporary password — force a change before anything else.
   // (The server also 403s every protected route until this clears.)

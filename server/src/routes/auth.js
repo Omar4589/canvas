@@ -5,6 +5,7 @@ import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
 import { signUserToken } from '../services/auth/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
+import { MIN_CLIENT_API_VERSION } from '../config/clientVersion.js';
 
 const router = Router();
 
@@ -67,7 +68,7 @@ router.post('/login', async (req, res, next) => {
 
     const token = signUserToken(user);
     const memberships = await loadMembershipsForUser(user._id);
-    res.json({ token, user: user.toSafeJSON(), memberships });
+    res.json({ token, user: user.toSafeJSON(), memberships, minClientApiVersion: MIN_CLIENT_API_VERSION });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -77,7 +78,7 @@ router.post('/login', async (req, res, next) => {
 router.get('/me', requireAuth, async (req, res, next) => {
   try {
     const memberships = await loadMembershipsForUser(req.user._id);
-    res.json({ user: req.user.toSafeJSON(), memberships });
+    res.json({ user: req.user.toSafeJSON(), memberships, minClientApiVersion: MIN_CLIENT_API_VERSION });
   } catch (err) {
     next(err);
   }

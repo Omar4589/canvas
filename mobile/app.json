@@ -19,7 +19,8 @@
     "android": {
       "package": "com.canvassapp.mobile",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/AppIcons/appstore.png",
+        "foregroundImage": "./assets/AppIcons/adaptive-foreground.png",
+        "monochromeImage": "./assets/AppIcons/adaptive-monochrome.png",
         "backgroundColor": "#ffffff"
       },
       "permissions": [

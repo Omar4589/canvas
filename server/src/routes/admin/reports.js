@@ -281,7 +281,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
     } else if (scope === 'active') filter.isActive = true;
     else if (scope === 'archived') filter.isActive = false;
 
-    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1 }).lean();
+    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1 }).lean();
     const ids = campaigns.map((c) => c._id);
 
     if (ids.length === 0) {
@@ -309,7 +309,26 @@ router.get('/campaign-rollup', async (req, res, next) => {
     // Activity counts (knocks/surveys/canvassers) honor an optional from/to range;
     // households + coverage stay current-state (all-time). Knocks range on `timestamp`,
     // surveys on `submittedAt` (matching /canvassers).
-    const tsRange = parseDateRange(req, 'timestamp');
+    //
+    // Org-wide rollups span timezones (a Texas campaign on Central, a Florida one on
+    // Eastern), so window EACH zone in its own clock for the requested day(s) — the
+    // per-campaign rows then match each campaign's own dashboard, and the cumulative is
+    // their sum. Grouping by tz keeps the $or to one branch per distinct zone (<= ~6).
+    // A single-campaign request (filter._id) already uses that campaign's tz via
+    // req.anchorTz, and All time has no window — both keep the simple parseDateRange path.
+    const fromDay = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    const toDay = req.query.to ? String(req.query.to).slice(0, 10) : null;
+    const perZoneWindows = !filter._id && (fromDay || toDay);
+    const byTz = new Map();
+    for (const c of campaigns) {
+      const tz = c.timeZone || 'America/New_York';
+      if (!byTz.has(tz)) byTz.set(tz, []);
+      byTz.get(tz).push(c._id);
+    }
+    const dateMatch = (field) =>
+      perZoneWindows
+        ? { $or: [...byTz].map(([tz, cids]) => ({ campaignId: { $in: cids }, [field]: zonedDayRange(fromDay, toDay, tz) })) }
+        : parseDateRange(req, field);
     // Honor an optional effortId (like /overview's baseFilter) so Activity scopes to
     // the effort when the Dashboard filters by one — otherwise Coverage (effort-scoped
     // households) and Activity (knocks/surveys) disagree. effortId is denormalized on
@@ -318,8 +337,8 @@ router.get('/campaign-rollup', async (req, res, next) => {
       ? { effortId: new mongoose.Types.ObjectId(req.query.effortId) }
       : {};
     const match = { organizationId, campaignId: { $in: ids }, ...effortMatch };
-    const activityMatch = { ...match, ...tsRange };
-    const surveyMatch = { ...match, ...parseDateRange(req, 'submittedAt') };
+    const activityMatch = { ...match, ...dateMatch('timestamp') };
+    const surveyMatch = { ...match, ...dateMatch('submittedAt') };
 
     const [coverageAgg, eventAgg, knockAgg, surveyAgg, canvasserAgg, cumulativeCanvassers] =
       await Promise.all([
