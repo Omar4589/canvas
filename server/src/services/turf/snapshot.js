@@ -3,6 +3,7 @@ import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Household } from '../../models/Household.js';
+import { Pass } from '../../models/Pass.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../canvass/status.js';
 
@@ -71,21 +72,40 @@ export async function restoreSnapshot({ campaign, snapshot, userId }) {
   const snap = typeof snapshot.toObject === 'function' ? snapshot.toObject() : snapshot;
   const passId = snap.passId;
 
+  // Only doors that STILL belong to this round's effort may be re-attached — a door
+  // re-carved into another effort since the snapshot must not be yanked back into this
+  // effort's book (disjointness). Such doors are dropped from the restored books.
+  const pass = await Pass.findById(passId, { effortId: 1 }).lean();
+  const allHhIds = [...new Set(snap.books.flatMap((b) => (b.householdIds || []).map(String)))];
+  const owned = new Set(
+    pass && allHhIds.length
+      ? (
+          await Household.find(
+            { _id: { $in: allHhIds }, campaignId: snap.campaignId, effortId: pass.effortId },
+            { _id: 1 }
+          ).lean()
+        ).map((h) => String(h._id))
+      : []
+  );
+
   const inserted = await Turf.insertMany(
-    snap.books.map((b) => ({
-      organizationId: snap.organizationId,
-      campaignId: snap.campaignId,
-      passId,
-      name: b.name,
-      mode: b.mode,
-      params: b.params,
-      boundary: b.boundary,
-      centroid: b.centroid,
-      householdIds: b.householdIds,
-      doorCount: b.doorCount,
-      status: b.status,
-      generatedBy: userId || null,
-    }))
+    snap.books.map((b) => {
+      const householdIds = (b.householdIds || []).filter((id) => owned.has(String(id)));
+      return {
+        organizationId: snap.organizationId,
+        campaignId: snap.campaignId,
+        passId,
+        name: b.name,
+        mode: b.mode,
+        params: b.params,
+        boundary: b.boundary,
+        centroid: b.centroid,
+        householdIds,
+        doorCount: householdIds.length,
+        status: b.status,
+        generatedBy: userId || null,
+      };
+    })
   );
 
   const mirrorOps = [];

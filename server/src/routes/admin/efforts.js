@@ -341,6 +341,12 @@ router.delete('/:id', loadEffort, async (req, res, next) => {
       return res.status(400).json({ error: 'Effort has active/archived rounds; archive it instead of deleting.' });
     }
     await Household.updateMany({ campaignId: req.campaign._id, effortId: req.effort._id }, { $set: { effortId: null, turfId: null, walkOrder: null } });
+    // Remove the effort's (draft) rounds AND their books + assignments so nothing dangles.
+    const passIds = (await Pass.find({ effortId: req.effort._id }, { _id: 1 }).lean()).map((p) => p._id);
+    if (passIds.length) {
+      await Turf.deleteMany({ passId: { $in: passIds } });
+      await TurfAssignment.deleteMany({ passId: { $in: passIds } });
+    }
     await Pass.deleteMany({ effortId: req.effort._id }); // draft rounds only
     await EffortMember.deleteMany({ effortId: req.effort._id });
     await Effort.deleteOne({ _id: req.effort._id });
