@@ -8,8 +8,10 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import BookAssignmentPanel from '../components/BookAssignmentPanel.jsx';
+import MapStyleControl from '../components/MapStyleControl.jsx';
 import StatCard from '../components/StatCard.jsx';
 import InfoHint from '../components/InfoHint.jsx';
+import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
@@ -110,7 +112,7 @@ function groupDoors(doors) {
 // DOM element for a building marker: an SVG apartment glyph (book-colored) + a
 // "{n} units" badge. A building icon — not a numbered bubble — so it never reads
 // as pin clustering.
-function buildingMarkerEl(total, color) {
+function buildingMarkerEl(total, color, dark) {
   const el = document.createElement('div');
   el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;';
   const windows = [];
@@ -119,13 +121,51 @@ function buildingMarkerEl(total, color) {
     const c = i % 3;
     windows.push(`<rect x="${7 + c * 3.6}" y="${5 + r * 3.6}" width="2.2" height="2.2" rx="0.4" fill="#fff" opacity="0.92"/>`);
   }
+  // The "{n} units" badge inverts on dark/satellite basemaps so it stays legible.
+  const badgeBg = dark ? '#e5e7eb' : '#111827';
+  const badgeFg = dark ? '#111827' : '#fff';
   el.innerHTML =
     `<svg width="28" height="28" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 1.5px rgba(0,0,0,0.35))">` +
     `<rect x="5" y="2.5" width="14" height="19" rx="1.4" fill="${color}" stroke="#fff" stroke-width="1.4"/>` +
     windows.join('') +
     `</svg>` +
-    `<div style="margin-top:-4px;background:#111827;color:#fff;font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${total} units</div>`;
+    `<div style="margin-top:-4px;background:${badgeBg};color:${badgeFg};font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${total} units</div>`;
   return el;
+}
+
+// (Re)create the book/door sources + layers. Called on initial `load` and after
+// every basemap `setStyle` (which wipes them). `dark` flips the book-label text +
+// halo so labels stay readable on dark/satellite basemaps.
+function registerBookLayers(map, dark) {
+  const empty = { type: 'FeatureCollection', features: [] };
+  map.addSource('books', { type: 'geojson', data: empty });
+  map.addLayer({ id: 'book-fill', type: 'fill', source: 'books', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['get', 'selected'], 0.3, 0.16] } });
+  map.addLayer({
+    id: 'book-outline',
+    type: 'line',
+    source: 'books',
+    paint: { 'line-color': ['get', 'color'], 'line-width': ['case', ['get', 'selected'], 4, 2] },
+  });
+  map.addSource('book-labels', { type: 'geojson', data: empty });
+  map.addLayer({
+    id: 'book-labels',
+    type: 'symbol',
+    source: 'book-labels',
+    layout: { 'text-field': ['get', 'label'], 'text-size': 12, 'text-allow-overlap': false },
+    paint: { 'text-color': dark ? '#e5e7eb' : '#111827', 'text-halo-color': dark ? '#0b0f19' : '#ffffff', 'text-halo-width': 1.5 },
+  });
+  map.addSource('doors', { type: 'geojson', data: empty });
+  map.addLayer({
+    id: 'doors',
+    type: 'circle',
+    source: 'doors',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 15, 5],
+      'circle-color': ['get', 'color'],
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 1,
+    },
+  });
 }
 function bboxOf(turfs) {
   let a = Infinity; let b = Infinity; let c = -Infinity; let d = -Infinity;
@@ -365,6 +405,11 @@ export default function TurfsPage() {
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
   // Turf snapshots belong to the selected campaign → show times in its tz (fallback org).
   const tz = campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
+  // Basemap style picker (Street/Hybrid/Satellite/Outdoors/Dark), independent of the
+  // app theme. styleEpoch bumps after a swap so paint() + building markers re-hydrate.
+  const { styleId, styleURL, setStyle, dark: darkBase } = useMapStyle();
+  const [styleEpoch, setStyleEpoch] = useState(0);
+  const appliedStyleRef = useRef(styleURL);
   // A deep-link from Efforts/Passes (?passId=) pre-selects the pass; the PassPicker's
   // auto-select only kicks in when this is empty, so a seeded value wins.
   const [searchParams] = useSearchParams();
@@ -585,7 +630,7 @@ export default function TurfsPage() {
     mapboxgl.accessToken = tokenQ.data.token;
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: 'mapbox://styles/mapbox/streets-v12',
+      style: appliedStyleRef.current,
       center: [-95.7129, 37.0902],
       zoom: 3.5,
     });
@@ -596,68 +641,51 @@ export default function TurfsPage() {
 
     map.on('draw.create', (e) => setDrawnPolygon(e.features?.[0]?.geometry || null));
 
+    // Layer event handlers — bound ONCE; they target layer IDs that registerBookLayers
+    // recreates on each style swap, so they keep working across basemap changes.
+    map.on('click', 'book-fill', (e) => {
+      if (map.queryRenderedFeatures(e.point, { layers: ['doors'] }).length) return;
+      const id = e.features?.[0]?.properties?.id;
+      if (id) toggleSelectRef.current(id);
+    });
+    map.on('mouseenter', 'book-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'book-fill', () => { map.getCanvas().style.cursor = ''; });
+    // Click empty map (not a book, not a door) → clear the selection.
+    map.on('click', (e) => {
+      if (map.queryRenderedFeatures(e.point, { layers: ['book-fill', 'doors'] }).length) return;
+      clearSelectionRef.current();
+    });
+    // Click a house → popup with address + members + book + move-to-book.
+    map.on('click', 'doors', (e) => {
+      const id = e.features?.[0]?.properties?.id;
+      if (id) openPopupRef.current(id);
+    });
+    map.on('mouseenter', 'doors', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'doors', () => { map.getCanvas().style.cursor = ''; });
+
     map.on('load', () => {
-      const empty = { type: 'FeatureCollection', features: [] };
-      map.addSource('books', { type: 'geojson', data: empty });
-      map.addLayer({ id: 'book-fill', type: 'fill', source: 'books', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['get', 'selected'], 0.3, 0.16] } });
-      map.addLayer({
-        id: 'book-outline',
-        type: 'line',
-        source: 'books',
-        paint: { 'line-color': ['get', 'color'], 'line-width': ['case', ['get', 'selected'], 4, 2] },
-      });
-      map.addSource('book-labels', { type: 'geojson', data: empty });
-      map.addLayer({
-        id: 'book-labels',
-        type: 'symbol',
-        source: 'book-labels',
-        layout: { 'text-field': ['get', 'label'], 'text-size': 12, 'text-allow-overlap': false },
-        paint: { 'text-color': '#111827', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
-      });
-      map.addSource('doors', { type: 'geojson', data: empty });
-      map.addLayer({
-        id: 'doors',
-        type: 'circle',
-        source: 'doors',
-        paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 15, 5],
-          'circle-color': ['get', 'color'],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 1,
-        },
-      });
-
-      // Click a book polygon to toggle it into the selection (drives the assignment
-      // panel + highlight). Skip if a house is under the click — that's a door tap,
-      // handled by the doors layer below.
-      map.on('click', 'book-fill', (e) => {
-        if (map.queryRenderedFeatures(e.point, { layers: ['doors'] }).length) return;
-        const id = e.features?.[0]?.properties?.id;
-        if (id) toggleSelectRef.current(id);
-      });
-      map.on('mouseenter', 'book-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'book-fill', () => { map.getCanvas().style.cursor = ''; });
-
-      // Click empty map (not a book, not a door) → clear the selection.
-      map.on('click', (e) => {
-        if (map.queryRenderedFeatures(e.point, { layers: ['book-fill', 'doors'] }).length) return;
-        clearSelectionRef.current();
-      });
-
-      // Click a house (any mode) → popup with address + members + book + move-to-book.
-      map.on('click', 'doors', (e) => {
-        const id = e.features?.[0]?.properties?.id;
-        if (id) openPopupRef.current(id);
-      });
-      map.on('mouseenter', 'doors', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'doors', () => { map.getCanvas().style.cursor = ''; });
-
+      registerBookLayers(map, darkBase);
       mapRef.current = map;
       setMapReady(true); // re-fires the paint effect now that sources exist
     });
 
     return () => { map.remove(); mapRef.current = null; drawRef.current = null; setMapReady(false); };
   }, [tokenQ.data?.isReady]);
+
+  // Swap the basemap when the picker changes; re-register layers on style.load and
+  // bump styleEpoch so paint() + building markers re-hydrate. fittedSigRef is kept
+  // so the view isn't reset on a swap.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (appliedStyleRef.current === styleURL) return;
+    appliedStyleRef.current = styleURL;
+    map.setStyle(styleURL);
+    map.once('style.load', () => {
+      registerBookLayers(map, darkBase);
+      setStyleEpoch((e) => e + 1);
+    });
+  }, [styleURL, darkBase, mapReady]);
 
   function paint() {
     const map = mapRef.current;
@@ -684,7 +712,7 @@ export default function TurfsPage() {
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }
-  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady]);
+  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch]);
 
   // Building markers (HTML overlays) for stacked apartment units — synced apart
   // from paint() so book-select toggles don't churn the DOM.
@@ -695,12 +723,12 @@ export default function TurfsPage() {
     buildingMarkersRef.current = [];
     for (const b of grouped.buildings) {
       const color = colorByTurf.get(String(b.turfId)) || '#9ca3af';
-      const el = buildingMarkerEl(b.total, color);
+      const el = buildingMarkerEl(b.total, color, darkBase);
       el.addEventListener('click', (ev) => { ev.stopPropagation(); openBuildingPopupRef.current(b.key); });
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([b.lng, b.lat]).addTo(map);
       buildingMarkersRef.current.push(marker);
     }
-  }, [grouped, colorByTurf, mapReady]);
+  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch]);
 
   // Clear selection + popups when switching pass/campaign (those books are gone).
   useEffect(() => { setSelectedBooks(new Set()); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
@@ -1014,6 +1042,9 @@ export default function TurfsPage() {
             </div>
           ) : (
             <div ref={containerRef} className="h-[600px] w-full" />
+          )}
+          {tokenQ.data?.isReady && (
+            <MapStyleControl value={styleId} onChange={setStyle} menuDirection="up" className="absolute bottom-3 left-3 z-10 items-start" />
           )}
           {popupHouseholdId && (
             <HousePopup

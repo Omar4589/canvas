@@ -10,6 +10,8 @@ import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
 import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import MapStyleControl from '../components/MapStyleControl.jsx';
+import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
 
@@ -194,6 +196,104 @@ function activitiesToLinesGeoJSON(activities, householdsById) {
   return { type: 'FeatureCollection', features };
 }
 
+const EMPTY_FC = { type: 'FeatureCollection', features: [] };
+
+// (Re)create all sources/layers/images. Called on initial `load` AND after every
+// `setStyle` (a style swap wipes custom sources/layers/images), so the basemap can
+// be switched at runtime. `dark` lightens the unknocked pin + ping lines for
+// contrast on dark/satellite basemaps. Layer event handlers are bound once at init
+// (they survive style swaps), so this only handles sources/layers/images.
+function registerLayers(map, dark) {
+  for (const status of Object.keys(STATUS_COLORS)) {
+    const id = `house-${status}`;
+    const color = status === 'unknocked' && dark ? '#d1d5db' : STATUS_COLORS[status];
+    if (map.hasImage(id)) map.removeImage(id);
+    map.addImage(id, drawHouseIcon(color), { pixelRatio: 2 });
+  }
+
+  map.addSource('households', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'households-symbols',
+    type: 'symbol',
+    source: 'households',
+    layout: {
+      'icon-image': [
+        'match', ['get', 'status'],
+        'unknocked', 'house-unknocked',
+        'not_home', 'house-not_home',
+        'surveyed', 'house-surveyed',
+        'wrong_address', 'house-wrong_address',
+        'lit_dropped', 'house-lit_dropped',
+        'house-unknocked',
+      ],
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.22, 14, 0.34, 17, 0.48],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+    },
+  });
+
+  // Canvasser GPS pings + dashed lines, inserted BELOW the household symbols.
+  map.addSource('canvasser-lines', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer(
+    {
+      id: 'canvasser-lines',
+      type: 'line',
+      source: 'canvasser-lines',
+      paint: {
+        'line-color': dark ? '#9ca3af' : '#6b7280',
+        'line-width': 1,
+        'line-opacity': 0.45,
+        'line-dasharray': [2, 2],
+      },
+    },
+    'households-symbols'
+  );
+
+  map.addSource('canvasser-pings', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer(
+    {
+      id: 'canvasser-pings',
+      type: 'circle',
+      source: 'canvasser-pings',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 7, 13, 10, 16, 13, 18, 15],
+        'circle-color': [
+          'match', ['get', 'actionType'],
+          'survey_submitted', STATUS_COLORS.surveyed,
+          'not_home', STATUS_COLORS.not_home,
+          'wrong_address', STATUS_COLORS.wrong_address,
+          'lit_dropped', STATUS_COLORS.lit_dropped,
+          '#6b7280',
+        ],
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 1.5,
+      },
+    },
+    'households-symbols'
+  );
+
+  map.addLayer(
+    {
+      id: 'canvasser-labels',
+      type: 'symbol',
+      source: 'canvasser-pings',
+      layout: {
+        'text-field': ['get', 'initials'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 8, 13, 11, 16, 13],
+        'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': '#ffffff',
+        'text-halo-color': 'rgba(0, 0, 0, 0.35)',
+        'text-halo-width': 0.8,
+      },
+    },
+    'households-symbols'
+  );
+}
+
 export default function MapPage() {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -210,6 +310,12 @@ export default function MapPage() {
   // the poll interval below; pauses automatically when the tab is backgrounded.
   const [live, setLive] = useState(true);
   const orgTz = useOrgTimeZone();
+  // Basemap style picker (Street/Hybrid/Satellite/Outdoors/Dark) — independent of
+  // the app theme. styleEpoch bumps after a style swap so the data-push effects
+  // re-hydrate the freshly-recreated sources.
+  const { styleId, styleURL, setStyle, dark: darkBase } = useMapStyle();
+  const [styleEpoch, setStyleEpoch] = useState(0);
+  const appliedStyleRef = useRef(styleURL);
 
   // Scoped audit: a deep-link from an Effort/Pass (?effortId / ?passId) narrows the
   // map to that scope. Seeded once from the URL; the chip's ✕ clears it.
@@ -320,157 +426,33 @@ export default function MapPage() {
     mapboxgl.accessToken = tokenQ.data.token;
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: 'mapbox://styles/mapbox/streets-v12',
+      style: appliedStyleRef.current,
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
     });
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'top-right');
+
+    // Layer event handlers — bound ONCE; they reference layer IDs that get
+    // recreated by registerLayers on each style swap, so they keep working.
+    map.on('click', 'households-symbols', (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      setSelected(f.properties.id);
+      setSelectedActivityId(null);
+    });
+    map.on('mouseenter', 'households-symbols', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'households-symbols', () => { map.getCanvas().style.cursor = ''; });
+    map.on('click', 'canvasser-pings', (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      setSelectedActivityId(f.properties.activityId);
+      setSelected(null);
+    });
+    map.on('mouseenter', 'canvasser-pings', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'canvasser-pings', () => { map.getCanvas().style.cursor = ''; });
+
     map.on('load', () => {
-      // Register one house icon per status (pre-colored, non-SDF).
-      // pixelRatio: 2 because drawHouseIcon renders at 2x for retina sharpness.
-      for (const status of Object.keys(STATUS_COLORS)) {
-        const id = `house-${status}`;
-        if (!map.hasImage(id)) {
-          map.addImage(id, drawHouseIcon(STATUS_COLORS[status]), { pixelRatio: 2 });
-        }
-      }
-
-      map.addSource('households', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer({
-        id: 'households-symbols',
-        type: 'symbol',
-        source: 'households',
-        layout: {
-          'icon-image': [
-            'match', ['get', 'status'],
-            'unknocked', 'house-unknocked',
-            'not_home', 'house-not_home',
-            'surveyed', 'house-surveyed',
-            'wrong_address', 'house-wrong_address',
-            'lit_dropped', 'house-lit_dropped',
-            'house-unknocked',
-          ],
-          'icon-size': [
-            'interpolate', ['linear'], ['zoom'],
-            10, 0.22,
-            14, 0.34,
-            17, 0.48,
-          ],
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
-        },
-      });
-
-      map.on('click', 'households-symbols', (e) => {
-        const f = e.features?.[0];
-        if (!f) return;
-        setSelected(f.properties.id);
-        setSelectedActivityId(null);
-      });
-      map.on('mouseenter', 'households-symbols', () => {
-        map.getCanvas().style.cursor = 'pointer';
-      });
-      map.on('mouseleave', 'households-symbols', () => {
-        map.getCanvas().style.cursor = '';
-      });
-
-      // Canvasser GPS pings + dashed lines connecting them to their households.
-      // Added BEFORE the household symbols so houses render on top.
-      map.addSource('canvasser-lines', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer(
-        {
-          id: 'canvasser-lines',
-          type: 'line',
-          source: 'canvasser-lines',
-          paint: {
-            'line-color': '#6b7280',
-            'line-width': 1,
-            'line-opacity': 0.45,
-            'line-dasharray': [2, 2],
-          },
-        },
-        'households-symbols'
-      );
-
-      map.addSource('canvasser-pings', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addLayer(
-        {
-          id: 'canvasser-pings',
-          type: 'circle',
-          source: 'canvasser-pings',
-          paint: {
-            'circle-radius': [
-              'interpolate', ['linear'], ['zoom'],
-              10, 7,
-              13, 10,
-              16, 13,
-              18, 15,
-            ],
-            'circle-color': [
-              'match', ['get', 'actionType'],
-              'survey_submitted', STATUS_COLORS.surveyed,
-              'not_home', STATUS_COLORS.not_home,
-              'wrong_address', STATUS_COLORS.wrong_address,
-              'lit_dropped', STATUS_COLORS.lit_dropped,
-              '#6b7280',
-            ],
-            'circle-stroke-color': '#ffffff',
-            'circle-stroke-width': 1.5,
-          },
-        },
-        'households-symbols'
-      );
-
-      // Canvasser initials over each ping, so admins can see who logged it at a
-      // glance. Shares the canvasser-pings source; empty initials render nothing.
-      map.addLayer(
-        {
-          id: 'canvasser-labels',
-          type: 'symbol',
-          source: 'canvasser-pings',
-          layout: {
-            'text-field': ['get', 'initials'],
-            'text-size': [
-              'interpolate', ['linear'], ['zoom'],
-              10, 8,
-              13, 11,
-              16, 13,
-            ],
-            'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
-            'text-allow-overlap': true,
-            'text-ignore-placement': true,
-          },
-          paint: {
-            'text-color': '#ffffff',
-            'text-halo-color': 'rgba(0, 0, 0, 0.35)',
-            'text-halo-width': 0.8,
-          },
-        },
-        'households-symbols'
-      );
-
-      map.on('click', 'canvasser-pings', (e) => {
-        const f = e.features?.[0];
-        if (!f) return;
-        setSelectedActivityId(f.properties.activityId);
-        setSelected(null);
-      });
-      map.on('mouseenter', 'canvasser-pings', () => {
-        map.getCanvas().style.cursor = 'pointer';
-      });
-      map.on('mouseleave', 'canvasser-pings', () => {
-        map.getCanvas().style.cursor = '';
-      });
-
+      registerLayers(map, darkBase);
       mapRef.current = map;
       setMapReady(true);
     });
@@ -480,6 +462,21 @@ export default function MapPage() {
       setMapReady(false);
     };
   }, [tokenQ.data]);
+
+  // Swap the basemap style when the picker changes. setStyle wipes our sources/
+  // layers/images, so re-register them on `style.load`, then bump styleEpoch to
+  // re-hydrate the data. _didFitBounds is preserved so the view isn't reset.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (appliedStyleRef.current === styleURL) return;
+    appliedStyleRef.current = styleURL;
+    map.setStyle(styleURL);
+    map.once('style.load', () => {
+      registerLayers(map, darkBase);
+      setStyleEpoch((e) => e + 1);
+    });
+  }, [styleURL, darkBase, mapReady]);
 
   // Push household features to the map source whenever data changes.
   useEffect(() => {
@@ -498,7 +495,7 @@ export default function MapPage() {
         mapRef.current._didFitBounds = true;
       }
     }
-  }, [households, mapReady]);
+  }, [households, mapReady, styleEpoch]);
 
   const householdsById = useMemo(() => {
     const m = new Map();
@@ -515,7 +512,7 @@ export default function MapPage() {
     const list = showCanvasserPins ? activities : [];
     pingsSrc.setData(activitiesToPingsGeoJSON(list));
     linesSrc.setData(activitiesToLinesGeoJSON(list, householdsById));
-  }, [activities, householdsById, showCanvasserPins, mapReady]);
+  }, [activities, householdsById, showCanvasserPins, mapReady, styleEpoch]);
 
   // Toggle layer visibility — instant, no refetch.
   useEffect(() => {
@@ -526,7 +523,7 @@ export default function MapPage() {
         mapRef.current.setLayoutProperty(id, 'visibility', vis);
       }
     }
-  }, [showCanvasserPins, mapReady]);
+  }, [showCanvasserPins, mapReady, styleEpoch]);
 
   const selectedHousehold = useMemo(
     () => households.find((h) => h.id === selected) || null,
@@ -643,6 +640,7 @@ export default function MapPage() {
         </aside>
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+          <MapStyleControl value={styleId} onChange={setStyle} menuDirection="down" className="absolute left-4 top-4 z-10 items-start" />
           {selectedHousehold && (
             <div
               style={{
