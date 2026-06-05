@@ -57,7 +57,7 @@ export default function CanvasserOverview() {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
 
-  const tz = campaign?.timeZone;
+  const tz = campaign?.timeZone || deviceTimezone();
 
   const [range, setRange] = useState(() => {
     if (params.from || params.to) {
@@ -67,16 +67,17 @@ export default function CanvasserOverview() {
         to: params.to || null,
       };
     }
-    return null;
+    const r = rangeFor(params.preset || '7d', null, deviceTimezone());
+    return { preset: params.preset || '7d', from: r.from, to: r.to };
   });
 
   const rangeTouchedRef = useRef(!!(params?.from || params?.to));
   useEffect(() => {
-    if (rangeTouchedRef.current || range || !tz) return;
+    if (rangeTouchedRef.current) return;
     const preset = params?.preset || '7d';
     const r = rangeFor(preset, null, tz);
     setRange({ preset, from: r.from, to: r.to });
-  }, [tz, range]);
+  }, [tz]);
 
   function onRangeChange(next) {
     rangeTouchedRef.current = true;

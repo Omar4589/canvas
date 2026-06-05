@@ -93,9 +93,14 @@ export default function AdminOverview() {
 
   // Anchor date presets to the org's active campaign timezone (not the device clock).
   const [tzCampaign, setTzCampaign] = useState(undefined);
-  const tz = tzCampaign?.timeZone;
+  // Device tz as the always-available fallback so the dashboard loads immediately; refined
+  // to the campaign tz once it resolves (below). Never leaves the range unresolved.
+  const tz = tzCampaign?.timeZone || deviceTimezone();
 
-  const [range, setRange] = useState(null);
+  const [range, setRange] = useState(() => {
+    const r = rangeFor('today', null, deviceTimezone());
+    return { preset: 'today', from: r.from, to: r.to };
+  });
   const rangeTouchedRef = useRef(false);
   function onRangeChange(v) {
     rangeTouchedRef.current = true;
@@ -107,13 +112,13 @@ export default function AdminOverview() {
     loadActiveCampaign().then((c) => setTzCampaign(c || null));
   }, []);
 
-  // Once the anchor tz is known, resolve the default preset in that clock.
+  // Refine the default preset into the campaign tz as it resolves, until the admin picks a
+  // range. The range is already seeded (device tz) above, so the screen never blocks.
   useEffect(() => {
-    if (rangeTouchedRef.current || range || !tz) return;
-    const preset = 'today';
-    const r = rangeFor(preset, null, tz);
-    setRange({ preset, from: r.from, to: r.to });
-  }, [tz, range]);
+    if (rangeTouchedRef.current) return;
+    const r = rangeFor('today', null, tz);
+    setRange({ preset: 'today', from: r.from, to: r.to });
+  }, [tz]);
 
   const activeQ = useQuery({
     queryKey: ['admin', 'reports', 'campaign-rollup', 'active', range?.from, range?.to],

@@ -7,10 +7,31 @@ import {
   StyleSheet,
   Platform,
   ScrollView,
+  TurboModuleRegistry,
+  NativeModules,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { colors, radius, spacing, type, shadow } from '../lib/theme';
 import { quickRangeFor } from '../lib/dateRanges';
+
+// The native module behind @react-native-community/datetimepicker ('RNCDatePicker')
+// ships INSIDE the native binary, not over OTA — so an OTA that runs on an older
+// build (which lacks it) would crash the whole admin area with an Invariant
+// Violation. Detect it WITHOUT throwing: getEnforcing() throws when absent, but
+// get()/NativeModules return null. Only load the component when it's actually there;
+// otherwise the calendar is hidden and the preset + quick-range chips still work.
+// The full custom picker returns automatically with the next native build.
+const HAS_NATIVE_DATEPICKER =
+  !!(TurboModuleRegistry?.get && TurboModuleRegistry.get('RNCDatePicker')) ||
+  !!NativeModules?.RNCDatePicker;
+
+let DateTimePicker = null;
+if (HAS_NATIVE_DATEPICKER) {
+  try {
+    DateTimePicker = require('@react-native-community/datetimepicker').default;
+  } catch {
+    DateTimePicker = null;
+  }
+}
 
 const QUICK_CHIPS = [
   { key: 'thisWeek', label: 'This week' },
@@ -102,6 +123,13 @@ export default function DateRangePickerModal({
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>Custom date range</Text>
 
+          {!DateTimePicker && (
+            <Text style={styles.unavailableNote}>
+              Tap-to-pick dates need the latest app version — use the quick ranges
+              below for now.
+            </Text>
+          )}
+
           <View style={styles.quickRow}>
             {QUICK_CHIPS.map((c) => (
               <Pressable
@@ -128,7 +156,7 @@ export default function DateRangePickerModal({
               </Pressable>
             ) : null}
           </View>
-          {showFromPicker && (
+          {showFromPicker && DateTimePicker && (
             <View style={styles.pickerHost}>
               <DateTimePicker
                 value={from || new Date()}
@@ -161,7 +189,7 @@ export default function DateRangePickerModal({
               </Pressable>
             ) : null}
           </View>
-          {showToPicker && (
+          {showToPicker && DateTimePicker && (
             <View style={styles.pickerHost}>
               <DateTimePicker
                 value={to || new Date()}
@@ -216,6 +244,11 @@ const styles = StyleSheet.create({
   },
   title: {
     ...type.h2,
+    marginBottom: spacing.md,
+  },
+  unavailableNote: {
+    ...type.caption,
+    color: colors.textSecondary,
     marginBottom: spacing.md,
   },
   quickRow: {

@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
-import { rangeFor } from '../../../../../lib/dateRanges';
+import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { formatExact, timeAgo } from '../../../../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../../../../lib/theme';
 import DateRangeBar from '../../../../../components/DateRangeBar';
@@ -43,22 +43,23 @@ export default function NotesScreen() {
     loadActiveCampaign().then((c) => setCampaign(c || null));
   }, []);
 
-  const tz = campaign?.timeZone;
+  const tz = campaign?.timeZone || deviceTimezone();
 
   const [range, setRange] = useState(() => {
     if (params.from || params.to) {
       return { preset: params.preset || '30d', from: params.from || null, to: params.to || null };
     }
-    return null;
+    const r = rangeFor(params.preset || '30d', null, deviceTimezone());
+    return { preset: params.preset || '30d', from: r.from, to: r.to };
   });
 
   const rangeTouchedRef = useRef(!!(params?.from || params?.to));
   useEffect(() => {
-    if (rangeTouchedRef.current || range || !tz) return;
+    if (rangeTouchedRef.current) return;
     const preset = params?.preset || '30d';
     const r = rangeFor(preset, null, tz);
     setRange({ preset, from: r.from, to: r.to });
-  }, [tz, range]);
+  }, [tz]);
 
   function onRangeChange(next) {
     rangeTouchedRef.current = true;

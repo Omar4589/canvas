@@ -63,23 +63,27 @@ export default function AdminCanvassers() {
   const router = useRouter();
   const [campaign, setCampaign] = useState(undefined);
 
-  // Anchor date presets to the selected campaign's timezone (not the device clock).
-  const tz = campaign?.timeZone;
+  // Device tz as the always-available fallback so the list loads immediately; refined to the
+  // campaign tz once it resolves (below).
+  const tz = campaign?.timeZone || deviceTimezone();
 
-  const [range, setRange] = useState(null);
+  const [range, setRange] = useState(() => {
+    const r = rangeFor('today', null, deviceTimezone());
+    return { preset: 'today', from: r.from, to: r.to };
+  });
   const rangeTouchedRef = useRef(false);
   function onRangeChange(v) {
     rangeTouchedRef.current = true;
     setRange(v);
   }
 
-  // Once the campaign tz is known, resolve the default preset in that clock.
+  // Refine the default preset into the campaign tz as it resolves, until the admin picks a
+  // range. (range is seeded with the device tz above so the list never blocks.)
   useEffect(() => {
-    if (rangeTouchedRef.current || range || !tz) return;
-    const preset = 'today';
-    const r = rangeFor(preset, null, tz);
-    setRange({ preset, from: r.from, to: r.to });
-  }, [tz, range]);
+    if (rangeTouchedRef.current) return;
+    const r = rangeFor('today', null, tz);
+    setRange({ preset: 'today', from: r.from, to: r.to });
+  }, [tz]);
 
   const [sortKey, setSortKey] = useState('surveys');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);

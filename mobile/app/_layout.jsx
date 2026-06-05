@@ -11,6 +11,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { clearActiveOrgId, clearActiveCampaign } from '../lib/cache';
+import RootErrorBoundary from '../components/RootErrorBoundary';
 
 // Any org-scoped query that fails because the active-organization context is
 // invalid (stale activeOrgId, or a client/server version skew that left us
@@ -69,13 +70,15 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <StatusBar style="dark" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="login" />
-            <Stack.Screen name="change-password" />
-            <Stack.Screen name="update-required" />
-            <Stack.Screen name="(app)" />
-          </Stack>
+          <RootErrorBoundary>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="index" />
+              <Stack.Screen name="login" />
+              <Stack.Screen name="change-password" />
+              <Stack.Screen name="update-required" />
+              <Stack.Screen name="(app)" />
+            </Stack>
+          </RootErrorBoundary>
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

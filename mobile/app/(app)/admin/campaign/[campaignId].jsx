@@ -61,24 +61,29 @@ export default function CampaignDetail() {
   const isLitDrop = campaign?.type === 'lit_drop';
   const isArchived = campaign && campaign.isActive === false;
 
-  // Anchor date presets to THIS campaign's timezone (not the device clock).
-  const tz = campaign?.timeZone;
+  // Device tz fallback so the screen loads immediately; refined to the campaign tz (and to
+  // all-time for an archived campaign) once campaignsQ resolves (below).
+  const tz = campaign?.timeZone || deviceTimezone();
 
-  const [range, setRange] = useState(null);
+  const [range, setRange] = useState(() => {
+    const r = rangeFor('today', null, deviceTimezone());
+    return { preset: 'today', from: r.from, to: r.to };
+  });
   const rangeTouchedRef = useRef(false);
   function onRangeChange(v) {
     rangeTouchedRef.current = true;
     setRange(v);
   }
 
-  // Once the campaign tz is known, resolve the default preset in that clock.
-  // Archived campaigns have no recent activity → default to all-time; active → today.
+  // Refine into the campaign tz once campaignsQ resolves, until the admin picks a range.
+  // Archived campaigns have no recent activity → all-time; active → today. (range is seeded
+  // with the device tz above so the screen never blocks.)
   useEffect(() => {
-    if (rangeTouchedRef.current || range || !tz || !campaign) return;
+    if (rangeTouchedRef.current || !campaign) return;
     const preset = campaign.isActive === false ? 'all' : 'today';
     const r = rangeFor(preset, null, tz);
     setRange({ preset, from: r.from, to: r.to });
-  }, [tz, range, campaign]);
+  }, [tz, campaign]);
 
   function rangeParams(extra = {}) {
     const p = new URLSearchParams({ campaignId: cId, tz: deviceTimezone(), ...extra });
