@@ -287,14 +287,21 @@ router.get('/campaign-rollup', async (req, res, next) => {
     // households + coverage stay current-state (all-time). Knocks range on `timestamp`,
     // surveys on `submittedAt` (matching /canvassers).
     const tsRange = parseDateRange(req, 'timestamp');
-    const match = { organizationId, campaignId: { $in: ids } };
+    // Honor an optional effortId (like /overview's baseFilter) so Activity scopes to
+    // the effort when the Dashboard filters by one — otherwise Coverage (effort-scoped
+    // households) and Activity (knocks/surveys) disagree. effortId is denormalized on
+    // Household / CanvassActivity / SurveyResponse, so this one filter scopes them all.
+    const effortMatch = req.query.effortId && mongoose.isValidObjectId(req.query.effortId)
+      ? { effortId: new mongoose.Types.ObjectId(req.query.effortId) }
+      : {};
+    const match = { organizationId, campaignId: { $in: ids }, ...effortMatch };
     const activityMatch = { ...match, ...tsRange };
     const surveyMatch = { ...match, ...parseDateRange(req, 'submittedAt') };
 
     const [coverageAgg, eventAgg, knockAgg, surveyAgg, canvasserAgg, cumulativeCanvassers] =
       await Promise.all([
         Household.aggregate([
-          { $match: { organizationId, campaignId: { $in: ids }, isActive: true } },
+          { $match: { organizationId, campaignId: { $in: ids }, isActive: true, ...effortMatch } },
           {
             $group: {
               _id: { campaignId: '$campaignId', bucket: coverageBucketExpr },

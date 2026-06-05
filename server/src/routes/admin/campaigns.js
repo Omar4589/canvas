@@ -38,7 +38,9 @@ async function withCounts(campaigns) {
   const ids = campaigns.map((c) => c._id);
   const [householdAgg, surveyAgg, activityAgg] = await Promise.all([
     Household.aggregate([
-      { $match: { campaignId: { $in: ids } } },
+      // isActive: true matches the canonical count in reports.js — soft-deleted
+      // (voterless) doors are excluded so this list agrees with the dashboard.
+      { $match: { campaignId: { $in: ids }, isActive: true } },
       { $group: { _id: { campaignId: '$campaignId', status: '$status' }, count: { $sum: 1 } } },
     ]),
     SurveyResponse.aggregate([

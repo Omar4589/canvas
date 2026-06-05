@@ -201,6 +201,16 @@ effort-scoped), [services/passes/activePasses.js](../server/src/services/passes/
   screen can offer the **effort switcher** ([EffortPicker.jsx](../mobile/components/EffortPicker.jsx))
   and scope the picker to one effort — see Part 1 §"Several efforts at once". The chosen effort persists
   via `saveCurrentEffort` ([cache.js](../mobile/lib/cache.js)).
+- **Canvass scope (everyone, admins included).** The mobile canvass surfaces — `/bootstrap` (door
+  list/map), `/changes` (30s delta), and `/me/today` (the "Remaining" stat) — all scope to the user's
+  **own assigned books** via `canvasserHouseholdScope`
+  ([canvasserScope.js](../server/src/services/canvass/canvasserScope.js)). This applies to **admins too**:
+  an admin who canvasses is scoped to their own books (from the efforts they're on), so two people never
+  knock the same block — there is no "admin sees all houses" mobile map. **"Switch to canvass mode"**
+  ([more.jsx](../mobile/app/(app)/admin/more.jsx) `onCanvassMode`, campaign screen `goCanvass`) just enters
+  the normal canvasser flow at the Books picker: assigned → their books → map; **unassigned → the "No turf
+  assigned yet" screen**. Admin *oversight* (campaign-wide counts/coverage) lives in the `/admin` screens +
+  web, on the separate `/admin/*` endpoints — never the canvass bootstrap.
 
 ## E. Reporting
 

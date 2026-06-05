@@ -33,8 +33,8 @@ function RosterPanel({ campaignId, effort }) {
 
   const crew = crewQ.data?.crew || [];
   const crewIds = new Set(crew.map((c) => String(c.user.id)));
-  const canvassers = (orgQ.data?.members || []).filter((m) => m.role === 'canvasser' && m.user.isActive && m.isActive);
-  const addable = canvassers.filter((m) => !crewIds.has(String(m.user.id)));
+  const members = (orgQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
+  const addable = members.filter((m) => !crewIds.has(String(m.user.id)));
 
   return (
     <div className="rounded border border-gray-200 bg-gray-50 p-3">
@@ -64,9 +64,11 @@ function RosterPanel({ campaignId, effort }) {
       )}
       <div className="flex items-center gap-2">
         <select value={userId} onChange={(e) => setUserId(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs">
-          <option value="">Pre-add canvasser…</option>
+          <option value="">Pre-add person…</option>
           {addable.map((m) => (
-            <option key={m.user.id} value={m.user.id}>{m.user.firstName} {m.user.lastName}</option>
+            <option key={m.user.id} value={m.user.id}>
+              {m.user.firstName} {m.user.lastName}{m.role === 'admin' ? ' (admin)' : ''}
+            </option>
           ))}
         </select>
         <button onClick={() => userId && add.mutate(userId)} disabled={!userId || add.isPending} className="rounded bg-brand-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">Add</button>

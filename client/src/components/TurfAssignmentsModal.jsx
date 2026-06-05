@@ -24,16 +24,22 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
   const assignMut = useMutation({ mutationFn: (userIds) => api(base, { method: 'POST', body: { userIds } }), onSuccess: invalidate });
   const unassignMut = useMutation({ mutationFn: (userId) => api(`${base}/${userId}`, { method: 'DELETE' }), onSuccess: invalidate });
 
-  const canvassers = (membersQ.data?.members || []).filter((m) => m.role === 'canvasser' && m.user.isActive && m.isActive);
-  const filtered = canvassers.filter((m) => {
+  // Anyone active in the org can be assigned a book — admins canvass too.
+  const members = (membersQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
+  const filtered = members.filter((m) => {
     if (!search.trim()) return true;
     const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
     return hay.includes(search.trim().toLowerCase());
   });
+  const unassignedVisible = filtered.filter((m) => !assignedSet.has(m.user.id));
 
   function toggle(userId) {
     if (assignedSet.has(userId)) unassignMut.mutate(userId);
     else assignMut.mutate([userId]);
+  }
+  function assignAllVisible() {
+    const ids = unassignedVisible.map((m) => m.user.id);
+    if (ids.length) assignMut.mutate(ids);
   }
 
   return (
@@ -41,11 +47,11 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
       <div className="w-full max-w-xl rounded-xl bg-white shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Assign canvassers</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Assign people</h2>
             <p className="text-sm text-gray-500">
               Book: <span className="font-medium">{turf.name}</span> · {turf.eligibleDoorCount ?? turf.doorCount} doors
             </p>
-            <p className="mt-1 text-xs text-gray-500">Multiple canvassers can share a book.</p>
+            <p className="mt-1 text-xs text-gray-500">Multiple people can share a book. Admins can be assigned too.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Close">
             <svg width="22" height="22" viewBox="0 0 20 20" fill="currentColor">
@@ -55,18 +61,29 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
         </div>
 
         <div className="px-6 py-4">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search canvassers…"
-            className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
-          />
+          <div className="mb-3 flex items-center gap-2">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search people…"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            />
+            {unassignedVisible.length > 0 && (
+              <button
+                onClick={assignAllVisible}
+                disabled={assignMut.isPending}
+                className="shrink-0 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50"
+              >
+                Assign all{search.trim() ? ' shown' : ''} ({unassignedVisible.length})
+              </button>
+            )}
+          </div>
           {membersQ.isLoading || assignmentsQ.isLoading ? (
             <div className="py-8 text-center text-sm text-gray-500">Loading…</div>
-          ) : canvassers.length === 0 ? (
+          ) : members.length === 0 ? (
             <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-              No canvassers in this org yet. Add one from the Users page.
+              No members in this org yet. Add one from the Users page.
             </div>
           ) : (
             <ul className="max-h-80 divide-y divide-gray-100 overflow-auto rounded-md border border-gray-200">
@@ -76,7 +93,12 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
                 return (
                   <li key={u.id} className="flex items-center justify-between px-3 py-2 text-sm">
                     <div>
-                      <div className="font-medium text-gray-900">{u.firstName} {u.lastName}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{u.firstName} {u.lastName}</span>
+                        {m.role === 'admin' && (
+                          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">admin</span>
+                        )}
+                      </div>
                       <div className="text-xs text-gray-500">{u.email}</div>
                     </div>
                     <button

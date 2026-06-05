@@ -48,11 +48,12 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
       qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaign._id] }),
   });
 
-  const canvassers = (membersQ.data?.members || []).filter(
-    (m) => m.role === 'canvasser' && m.user.isActive && m.isActive
+  // Anyone active in the org can be assigned — admins canvass too.
+  const members = (membersQ.data?.members || []).filter(
+    (m) => m.user.isActive && m.isActive
   );
 
-  const filtered = canvassers.filter((m) => {
+  const filtered = members.filter((m) => {
     if (!search.trim()) return true;
     const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
     return hay.includes(search.trim().toLowerCase());
@@ -84,7 +85,7 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
       >
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Assign canvassers</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Assign people</h2>
             <p className="text-sm text-gray-500">
               Campaign: <span className="font-medium">{campaign.name}</span>
             </p>
@@ -110,7 +111,7 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search canvassers…"
+              placeholder="Search people…"
               className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
             />
             <button
@@ -123,9 +124,9 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
 
           {membersQ.isLoading || assignmentsQ.isLoading ? (
             <div className="py-8 text-center text-sm text-gray-500">Loading…</div>
-          ) : canvassers.length === 0 ? (
+          ) : members.length === 0 ? (
             <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-              No canvassers in this org yet. Add one from the Users page.
+              No members in this org yet. Add one from the Users page.
             </div>
           ) : (
             <ul className="max-h-80 overflow-auto divide-y divide-gray-100 rounded-md border border-gray-200">
@@ -135,8 +136,11 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
                 return (
                   <li key={u.id} className="flex items-center justify-between px-3 py-2 text-sm">
                     <div>
-                      <div className="font-medium text-gray-900">
-                        {u.firstName} {u.lastName}
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{u.firstName} {u.lastName}</span>
+                        {m.role === 'admin' && (
+                          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">admin</span>
+                        )}
                       </div>
                       <div className="text-xs text-gray-500">{u.email}</div>
                     </div>

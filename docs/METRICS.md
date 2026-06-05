@@ -309,5 +309,18 @@ mobile [mobile/lib/rates.js](../mobile/lib/rates.js) (`rateFromPct` for the serv
 
 ### Personal (separate lens — NOT billing)
 [mobile/app/(app)/stats.jsx](../mobile/app/(app)/stats.jsx), [stats/[date].jsx](../mobile/app/(app)/stats/[date].jsx),
-and the map HUD read `/mobile/me/history` (`doorsKnocked` = raw personal events). These are a
-canvasser-motivation view and intentionally do **not** use the billable per-house-pass knock.
+and the map HUD ("Today's Progress") read `/mobile/me/today` + `/mobile/me/history`. `doorsKnocked` =
+raw personal door events (today / for the date); these are a canvasser-motivation view and intentionally
+do **not** use the billable per-house-pass knock.
+
+**`remaining`** (the map HUD's "Remaining", [me.js `/today`](../server/src/routes/mobile/me.js)) = the
+doors still left for **this person** to knock: `status = 'unknocked'`, `isActive`,
+**`fullyVoted: { $ne: true }`**, scoped to the user's **own assigned books** (`canvasserHouseholdScope`,
+see [EFFORTS.md §D](EFFORTS.md)) — i.e. the unknocked pins on their *own* map. Because it's **personal**,
+it does **not** equal the admin dashboard's campaign-wide **Unknocked** coverage segment:
+- Admin **Unknocked** = the *whole campaign*, with fully-voted doors pulled out into the `voted` bucket.
+- Mobile **Remaining** = *one person's assigned books*, with fully-voted doors simply excluded.
+
+So a canvasser assigned a slice of the campaign sees a smaller number, and an admin in canvass mode sees
+only their own assigned books. (Both correctly exclude fully-voted doors — a mismatch there was a real
+bug, fixed by adding the `fullyVoted` filter + the per-user scope.)

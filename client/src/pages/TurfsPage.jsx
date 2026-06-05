@@ -7,6 +7,7 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import TurfAssignmentsModal from '../components/TurfAssignmentsModal.jsx';
+import BulkAssignModal from '../components/BulkAssignModal.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 
 // Geometric book-size flex → tolerance (how much book sizes may vary from the target
@@ -367,6 +368,7 @@ export default function TurfsPage() {
   const [flex, setFlex] = useState('compact');
   const [jobId, setJobId] = useState(null);
   const [assignTurf, setAssignTurf] = useState(null);
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
 
   const [editMode, setEditMode] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState(new Set());
@@ -858,9 +860,14 @@ export default function TurfsPage() {
 
               {editMode && (
                 <div className="mb-2 rounded bg-gray-50 px-2 py-1.5 text-xs text-gray-600">
-                  Click books to select, then merge. Click a house to view it or move it to another book.
+                  Click books to select. Click a house to view it or move it to another book.
+                  {selectedBooks.size >= 1 && (
+                    <button onClick={() => setBulkAssignOpen(true)} className="ml-2 rounded bg-brand-600 px-2 py-0.5 font-semibold text-white">
+                      Assign {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'}
+                    </button>
+                  )}
                   {selectedBooks.size >= 2 && (
-                    <button onClick={() => merge.mutate([...selectedBooks])} className="ml-2 rounded bg-brand-600 px-2 py-0.5 font-semibold text-white">
+                    <button onClick={() => merge.mutate([...selectedBooks])} className="ml-2 rounded border border-gray-300 bg-white px-2 py-0.5 font-semibold text-gray-700 hover:bg-gray-50">
                       Merge {selectedBooks.size}
                     </button>
                   )}
@@ -1021,6 +1028,13 @@ export default function TurfsPage() {
           campaignId={campaignId}
           turf={assignTurf}
           onClose={() => { setAssignTurf(null); qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] }); }}
+        />
+      )}
+      {bulkAssignOpen && (
+        <BulkAssignModal
+          campaignId={campaignId}
+          turfIds={[...selectedBooks]}
+          onClose={() => { setBulkAssignOpen(false); qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] }); }}
         />
       )}
     </div>

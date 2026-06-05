@@ -8,6 +8,7 @@ import { Turf } from '../../models/Turf.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { Household } from '../../models/Household.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
+import { Membership } from '../../models/Membership.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
@@ -40,6 +41,63 @@ async function loadCampaign(req, res, next) {
   }
 }
 router.use(loadCampaign);
+
+// Bulk-assign many books to many people in one call.
+//   mode 'distribute' = round-robin: spread the books evenly across the crew (one
+//     person per book, books in spatial/name order) — the fast "split this turf".
+//   mode 'everyone'   = put every selected person on every selected book.
+//   replace:true      = clear existing assignments on those books first.
+// Validates active org membership (admins allowed — they canvass too). Reuses the
+// same TurfAssignment upsert as the per-book endpoint.
+router.post('/assign-bulk', async (req, res, next) => {
+  try {
+    const { turfIds, userIds, mode = 'distribute', replace = false } = req.body || {};
+    const orgId = activeOrgId(req);
+    const tids = (Array.isArray(turfIds) ? turfIds : []).filter((x) => mongoose.isValidObjectId(x));
+    const uids = (Array.isArray(userIds) ? userIds : []).filter((x) => mongoose.isValidObjectId(x));
+    if (!tids.length || !uids.length) return res.status(400).json({ error: 'turfIds and userIds required' });
+
+    const turfs = await Turf.find(
+      { _id: { $in: tids }, campaignId: req.campaign._id },
+      { _id: 1, passId: 1, name: 1 }
+    ).lean();
+    if (!turfs.length) return res.status(404).json({ error: 'No matching books in this campaign' });
+
+    // Keep only active org members (admins included).
+    const validUsers = [];
+    for (const uid of uids) {
+      if (await Membership.exists({ userId: uid, organizationId: orgId, isActive: true })) validUsers.push(uid);
+    }
+    if (!validUsers.length) return res.status(400).json({ error: 'No valid org members in userIds' });
+
+    // Deterministic, spatially-sensible order (book names are spatially numbered).
+    turfs.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+
+    if (replace) {
+      await TurfAssignment.deleteMany({ turfId: { $in: turfs.map((t) => t._id) } });
+    }
+
+    const pairs = [];
+    if (mode === 'everyone') {
+      for (const t of turfs) for (const uid of validUsers) pairs.push([t, uid]);
+    } else {
+      turfs.forEach((t, i) => pairs.push([t, validUsers[i % validUsers.length]]));
+    }
+
+    let assignments = 0;
+    for (const [t, uid] of pairs) {
+      await TurfAssignment.findOneAndUpdate(
+        { turfId: t._id, userId: uid },
+        { $setOnInsert: { organizationId: orgId, campaignId: req.campaign._id, passId: t.passId, assignedBy: req.user._id, assignedAt: new Date() } },
+        { upsert: true, setDefaultsOnInsert: true }
+      );
+      assignments += 1;
+    }
+    res.json({ books: turfs.length, users: validUsers.length, assignments, mode: mode === 'everyone' ? 'everyone' : 'distribute', replaced: !!replace });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Enqueue a turf generation run.
 router.post('/generate', async (req, res, next) => {
