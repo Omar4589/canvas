@@ -345,6 +345,22 @@ export default function MapScreen() {
     return all.filter((h) => h.turfId && selectedBookSet.has(String(h.turfId)));
   }, [data, selectedBookSet]);
 
+  // Header-strip summary for the book the canvasser is in: effort + book name,
+  // houses done / total, and progress. Null when no specific book is selected
+  // (e.g. an admin viewing all houses) so the strip is hidden there.
+  const bookStrip = useMemo(() => {
+    if (!selectedBookSet) return null;
+    const selBooks = (data?.books || []).filter((b) => selectedBookSet.has(String(b.id)));
+    if (!selBooks.length) return null;
+    const bookName = selBooks.length === 1 ? selBooks[0].name : `${selBooks.length} books`;
+    const effortName =
+      (data?.efforts || []).find((e) => String(e.id) === String(selBooks[0].effortId))?.name || null;
+    const total = scopedHouseholds.length;
+    const done = scopedHouseholds.filter((h) => (h.status || 'unknocked') !== 'unknocked').length;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    return { effortName, bookName, done, total, pct };
+  }, [data, selectedBookSet, scopedHouseholds]);
+
   // If this canvasser has books but no valid one is selected (first launch, or
   // the saved book was reassigned/removed), send them to the books overview to
   // pick — never leave them on an unfiltered all-houses map. The no-books case
@@ -898,6 +914,23 @@ export default function MapScreen() {
           </Pressable>
         </View>
 
+        {bookStrip && (
+          <View style={styles.bookStrip}>
+            <Text style={styles.bookStripTitle} numberOfLines={1}>
+              {bookStrip.effortName ? `${bookStrip.effortName} · ` : ''}
+              {bookStrip.bookName}
+            </Text>
+            <View style={styles.bookStripProgress}>
+              <View style={styles.bookStripBarTrack}>
+                <View style={[styles.bookStripBarFill, { width: `${bookStrip.pct}%` }]} />
+              </View>
+              <Text style={styles.bookStripCount}>
+                {bookStrip.done} / {bookStrip.total} houses
+              </Text>
+            </View>
+          </View>
+        )}
+
         {filterMenuOpen && (
           <View style={styles.filterMenu}>
             <Text style={styles.filterMenuLabel}>Show on map</Text>
@@ -1389,6 +1422,27 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   statsChipText: { color: colors.textPrimary, fontWeight: '700', fontSize: 12 },
+
+  // Book context strip: effort · book name + a progress bar + "done / total houses".
+  bookStrip: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  bookStripTitle: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 5 },
+  bookStripProgress: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  bookStripBarTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+  },
+  bookStripBarFill: { height: 6, borderRadius: 3, backgroundColor: colors.success },
+  bookStripCount: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
 
   subBar: {
     flexDirection: 'row',

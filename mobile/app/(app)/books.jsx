@@ -20,7 +20,7 @@ import {
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import Logo from '../../components/Logo';
 import EffortPicker from '../../components/EffortPicker';
-import { colors, radius } from '../../lib/theme';
+import { colors, radius, spacing } from '../../lib/theme';
 
 if (MAPBOX_PUBLIC_TOKEN) {
   Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
@@ -308,11 +308,11 @@ export default function BooksScreen() {
         <View style={styles.header}>
           <Logo size={24} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <Pressable onPress={() => refetch()} hitSlop={8} disabled={isFetching}>
+            <Pressable onPress={() => refetch()} hitSlop={8} disabled={isFetching} style={styles.iconButton}>
               {isFetching ? (
                 <ActivityIndicator size="small" color={colors.brand} />
               ) : (
-                <Text style={styles.refreshIcon}>↻</Text>
+                <Text style={styles.iconButtonText}>↻</Text>
               )}
             </Pressable>
             <Pressable onPress={() => router.push('/(app)/voters')} hitSlop={8}>
@@ -362,15 +362,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     backgroundColor: 'rgba(255,255,255,0.95)',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   switch: { color: colors.brand, fontWeight: '600', fontSize: 14 },
-  refreshIcon: { color: colors.brand, fontSize: 20, fontWeight: '700' },
+  // 36px bordered refresh button — mirrors the houses map's top bar so both bars
+  // share the same height + control.
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  iconButtonText: { color: colors.textPrimary, fontSize: 18, fontWeight: '600' },
   effortRow: { marginHorizontal: 12, marginBottom: 8, zIndex: 10 },
   hint: {
     marginHorizontal: 12,
