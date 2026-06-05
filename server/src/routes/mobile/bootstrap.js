@@ -42,19 +42,18 @@ async function assertCampaignAccess(req, campaignId) {
   return { campaign };
 }
 
-// The canvasser's assigned books across ALL active rounds, each tagged with its
-// effortId + resolved surveyTemplateId (effort override || campaign default) so
-// the app can render the right survey per door. Empty for admins/super or when
-// nothing is assigned.
+// The user's assigned books across ALL active rounds, each tagged with its effortId
+// + resolved surveyTemplateId (effort override || campaign default). Applies to
+// EVERYONE (admins included — an admin canvasses scoped to their own books); empty
+// `{ books: [], efforts: [] }` when nothing is assigned.
 async function canvasserBooks(req, campaign) {
-  if (isOrgAdminOrSuper(req)) return [];
   const passIds = await activePassIds(campaign._id);
-  if (!passIds.length) return [];
+  if (!passIds.length) return { books: [], efforts: [] };
   const myTurfs = await TurfAssignment.find(
     { userId: req.user._id, campaignId: campaign._id, passId: { $in: passIds } },
     { turfId: 1 }
   ).lean();
-  if (!myTurfs.length) return [];
+  if (!myTurfs.length) return { books: [], efforts: [] };
   const books = await Turf.find(
     { _id: { $in: myTurfs.map((a) => a.turfId) } },
     { name: 1, centroid: 1, doorCount: 1, householdIds: 1, passId: 1 }

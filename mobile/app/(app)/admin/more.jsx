@@ -62,7 +62,9 @@ export default function AdminMore() {
 
   async function onCanvassMode() {
     const c = await loadActiveCampaign();
-    router.push(c?.id ? '/(app)/map' : '/(app)/campaigns');
+    // Enter the canvasser flow (book picker) — admins canvass scoped to their own
+    // assigned books, exactly like a canvasser; unassigned → "No turf assigned".
+    router.push(c?.id ? '/(app)/books' : '/(app)/campaigns');
   }
 
   return (

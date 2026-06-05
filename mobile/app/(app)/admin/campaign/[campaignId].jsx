@@ -142,7 +142,8 @@ export default function CampaignDetail() {
     await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state });
     await clearBootstrap();
     qc.removeQueries({ queryKey: ['bootstrap'] });
-    router.push('/(app)/map');
+    // Enter the canvasser flow (book picker), scoped to this admin's own books.
+    router.push('/(app)/books');
   }
 
   if (campaignsQ.data && !campaign) {
