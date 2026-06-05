@@ -55,6 +55,17 @@
         }
       }
     </script>
+
+    <!-- Apply the saved/system theme before first paint to avoid a flash of light. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          var dark = t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body class="h-full">
     <div id="root" class="h-full"></div>

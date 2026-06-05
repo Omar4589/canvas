@@ -9,12 +9,12 @@ import { formatInTz } from '../lib/datetime.js';
 // Premium-restyle preview: status as a dot pill, soft card elevation (inline so the
 // preview stays self-contained — presentation only).
 const STATUS_BADGE = {
-  draft: 'bg-gray-100 text-gray-600',
-  active: 'bg-green-50 text-green-700 ring-1 ring-green-100',
-  archived: 'bg-gray-100 text-gray-400',
+  draft: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+  active: 'bg-green-50 text-green-700 ring-1 ring-green-100 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-500/25',
+  archived: 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500',
 };
 const STATUS_DOT = { draft: 'bg-gray-400', active: 'bg-green-500', archived: 'bg-gray-300' };
-const CARD = 'rounded-xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]';
+const CARD = 'rounded-xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)] dark:border-gray-800 dark:bg-gray-900 dark:shadow-none';
 
 function RosterPanel({ campaignId, effort }) {
   const qc = useQueryClient();
@@ -127,9 +127,9 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
   const crewTitle = (crewNames || []).join(', ');
   return (
     <>
-      <tr className="border-t border-gray-100 transition-colors hover:bg-gray-50/70">
+      <tr className="border-t border-gray-100 transition-colors hover:bg-gray-50/70 dark:border-gray-800 dark:hover:bg-gray-800/40">
         <td className="px-4 py-2.5">
-          <span className="font-medium text-gray-900">{effort.name}</span>
+          <span className="font-medium text-gray-900 dark:text-gray-100">{effort.name}</span>
         </td>
         <td className="px-4 py-2"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_BADGE[effort.status] || ''}`}><span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[effort.status] || 'bg-gray-300'}`} />{effort.status}</span></td>
         <td className="px-4 py-2 text-right tabular-nums">{(effort.doorCount || 0).toLocaleString()}</td>
@@ -139,10 +139,10 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
           </span>
         </td>
         <td className="px-4 py-2">{effort.activeRound ? `Pass ${effort.activeRound.roundNumber} · ${effort.activeRound.name}` : <span className="text-gray-400">—</span>}</td>
-        <td className="px-4 py-2 text-gray-600">{isSurveyType ? (survey ? survey.name : <span className="text-gray-400">campaign default</span>) : <span className="text-gray-400">n/a</span>}</td>
-        <td className="px-4 py-2 text-gray-600">{effort.createdAt ? formatInTz(effort.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : <span className="text-gray-400">—</span>}</td>
+        <td className="px-4 py-2 text-gray-600 dark:text-gray-300">{isSurveyType ? (survey ? survey.name : <span className="text-gray-400">campaign default</span>) : <span className="text-gray-400">n/a</span>}</td>
+        <td className="px-4 py-2 text-gray-600 dark:text-gray-300">{effort.createdAt ? formatInTz(effort.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : <span className="text-gray-400">—</span>}</td>
         <td className="space-x-2 px-4 py-2 text-right">
-          <button onClick={() => setOpen((v) => !v)} className="text-xs font-medium text-brand-700 hover:underline">{open ? 'Close' : 'Manage'}</button>
+          <button onClick={() => setOpen((v) => !v)} className="text-xs font-medium text-brand-700 hover:underline dark:text-brand-400">{open ? 'Close' : 'Manage'}</button>
           {effort.status !== 'archived' && <button onClick={() => onArchive(effort)} className="text-xs text-gray-500 hover:underline">Archive</button>}
           <button onClick={() => onDelete(effort)} className="text-xs text-red-600 hover:underline">Delete</button>
         </td>
@@ -170,11 +170,11 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
                   {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
                 </select>
               )}
-              <a href={`/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline">Manage passes →</a>
+              <a href={`/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline dark:text-brand-400">Manage passes →</a>
               {effort.activeRound && (
-                <a href={`/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-700 hover:underline">Cut / assign books →</a>
+                <a href={`/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-700 hover:underline dark:text-brand-400">Cut / assign books →</a>
               )}
-              <a href={`/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline">Audit on map →</a>
+              <a href={`/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline dark:text-brand-400">Audit on map →</a>
             </div>
           </td>
         </tr>
@@ -231,11 +231,11 @@ export default function EffortsPage() {
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Efforts</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Efforts</h1>
         <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
       </div>
 
-      <p className="mb-4 max-w-3xl text-sm text-gray-500">
+      <p className="mb-4 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
         An effort is a parallel canvassing operation within a campaign — e.g. an area or a team. Each
         effort owns a disjoint set of doors, an optional survey, and a roster, and has its own Passes
         (cut on the Turf Cutting page). Doors no one has claimed sit in <strong>Intake</strong>.
@@ -261,23 +261,23 @@ export default function EffortsPage() {
       )}
 
       <section className={`mb-6 ${CARD} p-5`}>
-        <h2 className="mb-3 text-base font-semibold text-gray-900">New effort</h2>
+        <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-gray-100">New effort</h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-700">Name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="rounded border border-gray-300 px-3 py-2 text-sm" />
+            <span className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">Name</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="rounded border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-700">Seed door-set (walk list)</span>
-            <select value={seedWalkListId} onChange={(e) => setSeedWalkListId(e.target.value)} className="rounded border border-gray-300 px-3 py-2 text-sm">
+            <span className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">Seed door-set (walk list)</span>
+            <select value={seedWalkListId} onChange={(e) => setSeedWalkListId(e.target.value)} className="rounded border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
               <option value="">None (claim doors later)</option>
               {walkLists.map((w) => <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>)}
             </select>
           </label>
           {isSurveyType && (
             <label className="text-sm">
-              <span className="mb-1 block text-xs font-medium text-gray-700">Survey override</span>
-              <select value={surveyTemplateId} onChange={(e) => setSurveyTemplateId(e.target.value)} className="rounded border border-gray-300 px-3 py-2 text-sm">
+              <span className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">Survey override</span>
+              <select value={surveyTemplateId} onChange={(e) => setSurveyTemplateId(e.target.value)} className="rounded border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
                 <option value="">Campaign default</option>
                 {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
               </select>
@@ -293,7 +293,7 @@ export default function EffortsPage() {
 
       <div className={`overflow-hidden ${CARD}`}>
         <table className="min-w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-gray-50/90 text-[11px] font-semibold uppercase tracking-wider text-gray-500 backdrop-blur">
+          <thead className="sticky top-0 z-10 bg-gray-50/90 text-[11px] font-semibold uppercase tracking-wider text-gray-500 backdrop-blur dark:bg-gray-900/80 dark:text-gray-400">
             <tr>
               <th className="px-4 py-2 text-left">Effort</th>
               <th className="px-4 py-2 text-left">Status</th>

@@ -5,6 +5,7 @@
 // values, so the two surfaces stay visually aligned.
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
