@@ -9,10 +9,11 @@ we've ever done."
 - **Part 2 — Technical reference** is for developers (and Claude): the shared component, the exact
   boundary math, how the range reaches the backend, and timezone handling.
 
-Related: [METRICS.md](METRICS.md) (what each filtered number *means*, and which metrics honor the
-range vs. stay all-time), [MAPS.md](MAPS.md) (the admin map, where the filter narrows the pins),
-[EFFORTS.md](EFFORTS.md) (reports can also be scoped to one effort via `effortId`, independent of
-the date range).
+Related: [TIMEZONES.md](TIMEZONES.md) (what "a day" *is* — every window here resolves in the
+campaign's timezone), [METRICS.md](METRICS.md) (what each filtered number *means*, and which metrics
+honor the range vs. stay all-time), [MAPS.md](MAPS.md) (the admin map, where the filter narrows the
+pins), [EFFORTS.md](EFFORTS.md) (reports can also be scoped to one effort via `effortId`, independent
+of the date range).
 
 ---
 
@@ -39,7 +40,9 @@ the same thing on a phone in the field and on the admin laptop.
 | **All time** | No limits — everything on record. |
 | **Custom** | Pick your own start and/or end date. |
 
-All windows are measured in **your local day** — "Today" means your today, wherever you are.
+All windows are measured in **the campaign's day** — "Today" means the campaign's today (Central for a
+Texas campaign, Eastern for a Florida one), identical for every admin wherever they are. The org-wide
+**Overview** uses the org's timezone. See [TIMEZONES.md](TIMEZONES.md).
 
 ## What each page opens on
 
@@ -77,22 +80,24 @@ to see the whole universe of doors again. (Details in [MAPS.md](MAPS.md).)
 
 ## A. The shared control
 
-One component drives all three web dashboards:
-[client/src/components/DateRangeSelector.jsx](../client/src/components/DateRangeSelector.jsx). It is
-the web mirror of mobile's [mobile/lib/dateRanges.js](../mobile/lib/dateRanges.js) +
-[DateRangeBar.jsx](../mobile/components/DateRangeBar.jsx) — same presets, same boundary math, so the
-two surfaces never disagree.
+The pure preset logic lives in [client/src/lib/datePresets.js](../client/src/lib/datePresets.js)
+(re-exported by [DateRangeSelector.jsx](../client/src/components/DateRangeSelector.jsx), which is the
+controlled button bar). It is the web mirror of mobile's
+[mobile/lib/dateRanges.js](../mobile/lib/dateRanges.js) + [DateRangeBar.jsx](../mobile/components/DateRangeBar.jsx)
+— byte-for-byte the same builders, verified by a cross-timezone parity test, so the two surfaces never
+disagree.
 
-Exports:
+Exports (all take the anchor `tz`):
 
 | Export | What it does |
 |---|---|
 | `RANGE_PRESETS` | The ordered preset list `{ id, label }` (`today`, `yesterday`, `7d`, `30d`, `all`, `custom`). |
-| `rangeFor(preset, custom)` | Resolves a preset id to `{ from, to }` ISO strings (or `null` bounds). For `custom`, passes the supplied `{ from, to }` through. |
-| `defaultRange(preset)` | `{ preset, ...rangeFor(preset) }` — used to initialize page state in one line. |
-| `labelForRange({preset,from,to})` | Human label; for `custom` formats the dates (same-day / range / "Since" / "Until"). |
-| `quickRangeFor(key)` | The custom-picker quick chips: `thisWeek`/`lastWeek` (Monday-start), `thisMonth`/`lastMonth`. |
-| *(default)* `DateRangeSelector` | The controlled button bar. |
+| `rangeFor(preset, custom, tz)` | Resolves a preset id to **date-only** `{ from, to }` days (or `null` bounds) computed in `tz`. For `custom`, passes the supplied `{ from, to }` through. |
+| `defaultRange(preset, tz)` | `{ preset, ...rangeFor(preset, undefined, tz) }` — initialize page state in one line. |
+| `labelForRange({preset,from,to})` | Human label; for `custom` formats the dates (parses date-only as local). |
+| `quickRangeFor(key, tz)` | The custom-picker quick chips: `thisWeek`/`lastWeek` (Monday-start), `thisMonth`/`lastMonth`, in `tz`. |
+| `todayInTz(tz)` / `shiftDays(ymd, n)` | The tz-aware "today" + UTC calendar math the builders use. |
+| *(default)* `DateRangeSelector` | The controlled button bar (takes a `tz` prop). |
 
 The custom picker is [client/src/components/DateRangePickerModal.jsx](../client/src/components/DateRangePickerModal.jsx)
 — native `<input type="date">` for From/To, the quick chips, swap-if-reversed, and open-ended
@@ -101,52 +106,63 @@ support. It reuses the modal idiom (backdrop + Escape-to-close) from
 
 ## B. Boundary math
 
-`from` is **inclusive**, `to` is **exclusive** (next-day start), and every boundary is **local
-start-of-day**:
+The control emits **date-only** `YYYY-MM-DD` days, computed in the **anchor timezone** (the
+campaign's, or the org's org-wide) — never the device clock. Both ends are **inclusive days**:
 
 ```js
-today      → { from: startOfToday,            to: null }          // open to "now"
-yesterday  → { from: startOfYesterday,        to: startOfToday }
-7d         → { from: startOfToday − 6 days,   to: null }          // today + 6 prior calendar days
-30d        → { from: startOfToday − 29 days,  to: null }
-all        → { from: null,                    to: null }
-custom     → { from: custom.from || null,     to: custom.to || null }
+today      → { from: todayInTz(tz),            to: null }          // open to "now"
+yesterday  → { from: yesterday,                to: yesterday }     // a single whole day
+7d         → { from: todayInTz(tz) − 6 days,   to: null }          // today + 6 prior days
+30d        → { from: todayInTz(tz) − 29 days,  to: null }
+all        → { from: null,                     to: null }
+custom     → { from: pickedFrom || null,       to: pickedTo || null }
 ```
 
-`startOfDay` is `new Date(d); x.setHours(0,0,0,0)` — local midnight. The web and mobile helpers are
-behaviorally equivalent here (the web factors local midnight into a `startOfDay()` helper, mobile
-inlines `setHours`, but the boundaries are identical; the web `7d`/`30d` were aligned to mobile's
-calendar-day math during this change).
+`todayInTz(tz)` is `Intl … en-CA` (the current date *in `tz`*); day arithmetic uses UTC math on the
+`YYYY-MM-DD` string so it never drifts with the device timezone or DST. The server turns these days
+into a UTC window in the anchor tz where `to` covers the **whole** day — `zonedDayRange` (see
+[TIMEZONES.md](TIMEZONES.md) §B). A single day is a full 24-hour window — this is what fixed
+"Yesterday" returning two days. The web ([datePresets.js](../client/src/lib/datePresets.js)) and mobile
+([dateRanges.js](../mobile/lib/dateRanges.js)) builders are identical, verified by a cross-timezone test.
 
-> **Boundary edge case:** the helpers treat `to` as exclusive, but the backend compares with `$lte`
-> (inclusive — see §D). A record stamped at *exactly* the millisecond of midnight would match both
-> the day before and the day after. Negligible in practice; noted for completeness.
+## C. State shape, the tz, & the gate
 
-## C. State shape & wiring
-
-Each page holds the resolved range object directly — no `useMemo`/derive step:
+Each page resolves an **anchor tz** and initializes its range only once that tz is known, so a preset
+never resolves in the device clock:
 
 ```js
-const [dateRange, setDateRange] = useState(() => defaultRange('today')); // 'all' on the map
-// ...
-<DateRangeSelector value={dateRange} onChange={setDateRange} />
+const tz = current?.timeZone || orgTz;              // campaign tz, else org (useOrgTimeZone)
+const [dateRange, setDateRange] = useState(null);   // null until the tz is known
+useEffect(() => {
+  if (rangeTouchedRef.current || !tzReady) return;  // tzReady = campaigns list loaded
+  setDateRange(defaultRange(current?.isActive === false ? 'all' : 'today', tz));
+}, [tzReady, tz, current]);
+<DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} />
 ```
 
-`dateRange` is `{ preset, from, to }`. The `.from` / `.to` keys flow straight into each query's
-`buildQuery({ from, to })` **and** its react-query `queryKey`, so changing the window (preset or
-custom) re-fetches automatically — no manual invalidation. Child components
-([QuestionResults.jsx](../client/src/components/QuestionResults.jsx), the `VoterList` inside it,
-[CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx)) receive the same
-`{from,to}`-shaped object as a prop.
+`dateRange` is `{ preset, from, to }` with **date-only** `from`/`to`. Range-scoped queries are
+**gated** on `!!dateRange` (and read it null-safely), so they never fetch a device-tz window before
+the campaign tz loads. The keys flow into each query's `buildQuery` **and** its react-query
+`queryKey`, so changing the window re-fetches automatically. `DateRangeSelector` / `DateRangeBar` and
+the custom pickers take a `tz` prop; child display components
+([QuestionResults.jsx](../client/src/components/QuestionResults.jsx),
+[CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx)) also receive `tz`
+for rendering ([TIMEZONES.md](TIMEZONES.md) §F). Mobile mirrors this per screen —
+`campaign/[campaignId]` uses its route campaign's tz, other admin screens the active campaign's.
 
 ## D. How the range reaches the backend
 
-The frontend sends absolute ISO instants as `from` / `to` query params. Two parsers consume them:
+The frontend sends **date-only** `from` / `to` query params. Both parsers turn them into a UTC window
+**in the anchor timezone** (campaign, or org for org-wide):
 
 | Endpoint family | Parser | Applied to |
 |---|---|---|
-| `/admin/reports/*` | `parseDateRange(req, field)` ([reports.js](../server/src/routes/admin/reports.js)) | `$gte`/`$lte` on the field — `timestamp` for knocks/activity, `submittedAt` for surveys. Different metrics range on different fields; see [METRICS.md](METRICS.md) §F. |
-| `/admin/households/map` | local `parseDate` ([households.js](../server/src/routes/admin/households.js)) | `$gte`/`$lte` on `CanvassActivity.timestamp` **and** `SurveyResponse.submittedAt`. |
+| `/admin/reports/*` | `parseDateRange(req, field)` → `zonedDayRange` in `req.anchorTz` ([reports.js](../server/src/routes/admin/reports.js)) | half-open `$gte`/`$lt` on the field — `timestamp` for knocks/activity, `submittedAt` for surveys. Different metrics range on different fields; see [METRICS.md](METRICS.md) §F. |
+| `/admin/households/map` | `resolveMapTz` + `zonedDayRange` ([households.js](../server/src/routes/admin/households.js)) | `$gte`/`$lt` on `CanvassActivity.timestamp` **and** `SurveyResponse.submittedAt`. |
+
+Both resolve the anchor tz the same way (campaign tz when `campaignId` is present, else the org's), so
+the map narrows to the **same campaign-day window** as the dashboards. The mechanism — `req.anchorTz`
+and `zonedDayRange` — is in [TIMEZONES.md](TIMEZONES.md) §A–B.
 
 **Map interacted-only behavior.** In [households.js](../server/src/routes/admin/households.js), when
 any of `from` / `to` / `userId` / (`questionKey`+`option`) is set, `filteringInteractions` is true:
@@ -157,36 +173,38 @@ why the map defaults to `all`.
 
 ## E. Timezone
 
-Boundaries are computed from the **admin's local browser time** (local start-of-day) and serialized
-to absolute UTC instants, which the backend compares directly with `$gte`/`$lte`. So the range
-reflects the admin's local day with no server-side timezone needed for the *filter itself*.
+The filter is anchored to the **campaign's timezone** (the org's for org-wide views), **not** the
+admin's device — so "Today" is the same campaign day for everyone, and a Tokyo-based admin asking for
+"Yesterday" on a Texas campaign gets *Texas's* yesterday. The full model — anchor resolution, the
+date-only contract, the day-window math, DST, and display labels — lives in [TIMEZONES.md](TIMEZONES.md).
 
-The separate `tz` query param (IANA name) is **not** used for range filtering — it only drives
-per-day *bucketing* in the per-canvasser endpoints (`dayBucketExpr` / daily / summary in
-[reports.js](../server/src/routes/admin/reports.js)).
-
-In the custom picker, native `<input type="date">` yields a `yyyy-mm-dd` string. Conversion to/from
-ISO uses **local** dates (`new Date(y, m-1, d)`, and local getters when formatting back) — never
-`toISOString().slice(0,10)`, which is UTC and can shift a day in negative-offset timezones.
+The legacy `tz=deviceTimezone()` query param some mobile screens still send is **dead**: the server
+ignores it and uses `req.anchorTz`. The custom pickers emit the picked **calendar dates** as date-only
+`yyyy-mm-dd` (never `toISOString`, which is UTC and shifts a day in negative-offset zones). Per-day
+*bucketing* (per-canvasser daily/summary, the user stats chart) also uses the anchor tz — see
+[TIMEZONES.md](TIMEZONES.md) §C.
 
 ## F. Frontend mapping
 
 ### Web ([client/src](../client/src))
 | File | Role |
 |---|---|
-| [components/DateRangeSelector.jsx](../client/src/components/DateRangeSelector.jsx) | Presets + helpers + the controlled button bar. |
-| [components/DateRangePickerModal.jsx](../client/src/components/DateRangePickerModal.jsx) | Custom From/To picker + quick chips. |
-| [pages/OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) | Default **Today**; range → `/campaign-rollup?scope=active`. |
-| [pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Default **Today**; range → `/campaign-rollup`, `/canvassers`, `/survey-results`. Coverage stays all-time from `/overview`. An untouched **archived** campaign auto-switches to All time (a `rangeTouchedRef` guard + effect, mirroring the mobile campaign view). |
-| [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Default **All time**; range → `/admin/households/map` (narrows pins, see §D). |
+| [lib/datePresets.js](../client/src/lib/datePresets.js) | The pure, tz-aware preset builders (`rangeFor`, `quickRangeFor`, `defaultRange`, `todayInTz`, …). |
+| [components/DateRangeSelector.jsx](../client/src/components/DateRangeSelector.jsx) | The controlled button bar (takes a `tz` prop); re-exports the builders. |
+| [components/DateRangePickerModal.jsx](../client/src/components/DateRangePickerModal.jsx) | Custom From/To picker + quick chips (date-only; takes `tz`). |
+| [pages/OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) | Default **Today** in the **org** tz; range → `/campaign-rollup?scope=active`. |
+| [pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Default **Today** in the **campaign** tz; range → `/campaign-rollup`, `/canvassers`, `/survey-results` (gated on the tz — §C). Coverage stays all-time from `/overview`. An untouched **archived** campaign defaults to All time. |
+| [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Default **All time**; campaign tz from `useCampaignSelection().selected`; range → `/admin/households/map` (narrows pins, see §D). |
 
 ### Mobile ([mobile](../mobile))
 | File | Role |
 |---|---|
-| [lib/dateRanges.js](../mobile/lib/dateRanges.js) | The canonical presets + helpers the web mirrors (`PRESETS`, `rangeFor`, `labelForRange`, `quickRangeFor`, `deviceTimezone`). |
-| [components/DateRangeBar.jsx](../mobile/components/DateRangeBar.jsx) | The scrollable preset bar (admin overview, campaign detail, leaderboard, canvasser drilldowns). |
-| [components/DateRangePickerModal.jsx](../mobile/components/DateRangePickerModal.jsx) | Native custom picker + quick chips. |
+| [lib/dateRanges.js](../mobile/lib/dateRanges.js) | The tz-aware preset builders the web mirrors (`PRESETS`, `rangeFor`, `quickRangeFor`, `labelForRange`, `todayInTz`, `shiftDays`; `deviceTimezone` is now legacy). |
+| [components/DateRangeBar.jsx](../mobile/components/DateRangeBar.jsx) | The scrollable preset bar (admin overview, campaign detail, leaderboard, canvasser drilldowns); takes a `tz` prop. |
+| [components/DateRangePickerModal.jsx](../mobile/components/DateRangePickerModal.jsx) | Native custom picker + quick chips (date-only; takes `tz`). |
 
-Admin mobile screens mostly default to **Today** (canvasser drilldowns open wider — `7d`/`30d`).
-The personal canvasser stats screen and the super-admin control room intentionally have **no** date
-filter (all-time / fixed live windows).
+Each admin screen feeds its campaign's `timeZone` to the bar/builders and keeps its range null until
+that tz loads, gating its query (the active campaign carries `timeZone`; `campaign/[campaignId]` uses
+its route campaign). Defaults are mostly **Today** (canvasser drilldowns open wider — `7d`/`30d`). The
+personal canvasser stats screen and the super-admin control room intentionally have **no** date filter
+(personal/all-time / fixed live windows).

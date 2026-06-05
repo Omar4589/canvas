@@ -8,12 +8,26 @@ import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { Campaign } from '../../models/Campaign.js';
+import { Organization } from '../../models/Organization.js';
+import { zonedDayRange } from '../../utils/timezone.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
+}
+
+// Anchor timezone for the map's date window: the campaign's, else the org's. Mirrors
+// reports.js so the map narrows to the same campaign-day window as the dashboards.
+async function resolveMapTz(orgId, campaignId) {
+  if (campaignId) {
+    const c = await Campaign.findOne({ _id: campaignId, organizationId: orgId }, { timeZone: 1 }).lean();
+    if (c?.timeZone) return c.timeZone;
+  }
+  const org = await Organization.findById(orgId, { timeZone: 1 }).lean();
+  return org?.timeZone || 'America/New_York';
 }
 
 function ensureOrgScoped(req, res) {
@@ -24,18 +38,10 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
-function parseDate(s) {
-  if (!s) return null;
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
 router.get('/map', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
-    const from = parseDate(req.query.from);
-    const to = parseDate(req.query.to);
     const userId =
       req.query.userId && mongoose.isValidObjectId(req.query.userId)
         ? new mongoose.Types.ObjectId(req.query.userId)
@@ -53,6 +59,13 @@ router.get('/map', async (req, res, next) => {
         ? new mongoose.Types.ObjectId(req.query.campaignId)
         : null;
 
+    // Date window in the campaign's (or org's) timezone — date-only days in, half-open
+    // [start(fromDay), start(toDay+1)) out — so the map narrows to the same day window as
+    // the dashboards. See docs/TIMEZONES.md.
+    const fromDay = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    const toDay = req.query.to ? String(req.query.to).slice(0, 10) : null;
+    const dateWindow = zonedDayRange(fromDay, toDay, await resolveMapTz(orgId, campaignId));
+
     const householdFilter = {
       organizationId: orgId,
       isActive: true,
@@ -63,13 +76,9 @@ router.get('/map', async (req, res, next) => {
 
     const surveyMatch = { organizationId: orgId };
     const activityMatch = { organizationId: orgId };
-    if (from) {
-      surveyMatch.submittedAt = { ...(surveyMatch.submittedAt || {}), $gte: from };
-      activityMatch.timestamp = { ...(activityMatch.timestamp || {}), $gte: from };
-    }
-    if (to) {
-      surveyMatch.submittedAt = { ...(surveyMatch.submittedAt || {}), $lte: to };
-      activityMatch.timestamp = { ...(activityMatch.timestamp || {}), $lte: to };
+    if (dateWindow.$gte || dateWindow.$lt) {
+      surveyMatch.submittedAt = dateWindow;
+      activityMatch.timestamp = dateWindow;
     }
     if (userId) {
       surveyMatch.userId = userId;
@@ -86,7 +95,7 @@ router.get('/map', async (req, res, next) => {
     }
 
     const filteringInteractions =
-      Boolean(from || to || userId || (questionKey && answerOption));
+      Boolean(fromDay || toDay || userId || (questionKey && answerOption));
 
     let interactedHouseholdIds = null;
     if (filteringInteractions) {
