@@ -7,6 +7,15 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import TurfAssignmentsModal from '../components/TurfAssignmentsModal.jsx';
+import InfoHint from '../components/InfoHint.jsx';
+
+// Geometric book-size flex → tolerance (how much book sizes may vary from the target
+// to stay compact). Default Compact (0.4); consumed by balancedKMeans via params.
+const FLEX_OPTIONS = [
+  { key: 'tight', label: 'Tight', tolerance: 0.15 },
+  { key: 'balanced', label: 'Balanced', tolerance: 0.25 },
+  { key: 'compact', label: 'Compact', tolerance: 0.4 },
+];
 
 const BOOK_COLORS = [
   '#2563eb', '#16a34a', '#db2777', '#ea580c', '#7c3aed', '#0891b2',
@@ -355,6 +364,7 @@ export default function TurfsPage() {
   const [attribute, setAttribute] = useState('precinct');
   const [capN, setCapN] = useState('');
   const [maxDoors, setMaxDoors] = useState(65);
+  const [flex, setFlex] = useState('compact');
   const [jobId, setJobId] = useState(null);
   const [assignTurf, setAssignTurf] = useState(null);
 
@@ -473,7 +483,7 @@ export default function TurfsPage() {
       let params;
       if (mode === 'manual') params = { polygon: drawnPolygon };
       else if (mode === 'attribute') params = { attribute, capN: capN ? Number(capN) : null };
-      else params = { maxDoors: Number(maxDoors) || 65 };
+      else params = { maxDoors: Number(maxDoors) || 65, tolerance: (FLEX_OPTIONS.find((o) => o.key === flex) || {}).tolerance };
       return api(`/admin/campaigns/${campaignId}/turfs/generate`, { method: 'POST', body: { passId, mode, params } });
     },
     onSuccess: (res) => {
@@ -721,11 +731,36 @@ export default function TurfsPage() {
           </div>
 
           {mode === 'geometric' && (
-            <label className="mb-4 block text-sm">
-              <span className="mb-1 block text-xs font-medium text-gray-700">Max doors per book</span>
-              <input type="number" min="1" value={maxDoors} onChange={(e) => setMaxDoors(e.target.value)} className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600" />
-              <span className="mt-1 block text-xs text-gray-500">Default 65 — adjust freely.</span>
-            </label>
+            <div className="mb-4 space-y-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-medium text-gray-700">Max doors per book</span>
+                <input type="number" min="1" value={maxDoors} onChange={(e) => setMaxDoors(e.target.value)} className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600" />
+                <span className="mt-1 block text-xs text-gray-500">Default 65 — adjust freely.</span>
+              </label>
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-gray-700">Book size flex</span>
+                  <InfoHint label="What is book size flex?">
+                    Books aim for your door count but flex to stay tight and walkable. <b>Compact</b> lets
+                    sizes vary more so nobody drives far for a stray house; <b>Tight</b> keeps sizes even
+                    but may leave a few houses in a slightly farther book. For a 65-door target, books land
+                    roughly ~55–80 (Tight), ~48–90 (Balanced), ~40–100 (Compact).
+                  </InfoHint>
+                </div>
+                <div className="flex rounded-md border border-gray-300 p-0.5 text-xs">
+                  {FLEX_OPTIONS.map((o) => (
+                    <button
+                      key={o.key}
+                      type="button"
+                      onClick={() => setFlex(o.key)}
+                      className={['flex-1 rounded px-2 py-1 font-medium transition-colors', flex === o.key ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'].join(' ')}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
           {mode === 'attribute' && (
             <>

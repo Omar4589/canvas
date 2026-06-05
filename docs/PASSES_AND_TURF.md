@@ -60,8 +60,12 @@ geography in Round 2 is a *new* book in the Round-2 pass, not the same object re
 
 **Turf-cutting** is generating the books for a pass. Three ways:
 
-- **Geometric** — the default; groups households into compact, similarly-sized books (a max door
-  count each) by location.
+- **Geometric** — the default; groups households into **compact, walkable** books by location. The
+  door count you set is an **approximate target**, not a hard cap — books flex in size so a house is
+  never stranded far from the rest of its book just to hit an exact number (i.e. no driving across the
+  area for one or two stray doors). Compactness is prioritized over even book sizes. A **Tight /
+  Balanced / Compact** control sets how much book sizes may flex (Compact by default — the least
+  driving). See Part 2 §B.1.
 - **Attribute** — one book per precinct / county / city / ZIP / district, etc.
 - **Manual** — you draw a polygon on the map and the households inside become a book.
 
@@ -156,13 +160,14 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 ([generateTurf.js](../server/src/services/turf/generateTurf.js)):
 
 1. **Load households** ([:36-44](../server/src/services/turf/generateTurf.js#L36-L44)) — base filter
-   = `{ campaignId, isActive: true, 'location.coordinates': {$exists,$ne:null} }`. If
-   `pass.walkListId` is set, intersect with the walk list's frozen `householdIds`. **This is why an
-   all-voters pass picks up newly imported households on a recut, but a walk-list pass does not.**
+   = `{ campaignId, isActive: true, effortId: pass.effortId, 'location.coordinates': {$exists,$ne:null} }`
+   — a round cuts only its **effort's** owned doors (see [EFFORTS.md](EFFORTS.md)).
 2. **Cut** by mode: `attributeCut` ([attributeCut.js](../server/src/services/turf/attributeCut.js)) —
    group by a denormalized cut column (precinct/county/city/zip/districts), optional `capN`
-   geometric subdivision; `geometricCut` ([geometricCut.js](../server/src/services/turf/geometricCut.js)) —
-   capacity-balanced k-means, `maxDoors` default 65; `manual` — households within `params.polygon`.
+   geometric subdivision; `geometricCut` ([geometricCut.js](../server/src/services/turf/geometricCut.js))
+   → `balancedKMeans` ([balancedKMeans.js](../server/src/services/turf/balancedKMeans.js)) —
+   **compactness-first** clustering with `maxDoors` as a soft target (§B.1); `manual` — households
+   within `params.polygon`.
 3. **Wipe prior drafts** ([:72-78](../server/src/services/turf/generateTurf.js#L72-L78)) — delete the
    pass's existing `draft` Turfs + their `TurfAssignment`s and clear the household mirror, so a
    re-run is idempotent. (Published books are *not* touched here — the `/generate` route blocks when
@@ -172,6 +177,35 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 
 The route enqueues this as an async job and returns a `jobId` to poll
 ([turfs.js `/generate`:45](../server/src/routes/admin/turfs.js#L45), poll at `/jobs/:jobId`).
+
+## B.1 The geometric cut (compactness-first)
+
+`balancedKMeans(items, maxDoors, { tolerance = 0.4 })`
+([balancedKMeans.js](../server/src/services/turf/balancedKMeans.js)) makes books as **tight and walkable**
+as possible, treating `maxDoors` as an **approximate target**, not a hard equal cap. (The old
+capacity-balanced cut forced near-equal sizes, which exiled boundary houses into far books — a canvasser
+driving across the area for one door.) Everything runs on Hilbert-projected meters and is fully
+**deterministic** (no `Math.random`, so a worker re-run reproduces identical books):
+
+- **k & soft band:** `k = ceil(n / maxDoors)` books; `softMax = ceil(maxDoors·(1+tolerance))` (initial
+  balance), `hardMax = ceil(maxDoors·(1+1.5·tolerance))` (true ceiling), `softMin = floor(maxDoors·(1−tolerance))`.
+- **Seed + assign (Lloyd loop):** centroids seeded evenly along the Hilbert curve; each house goes to its
+  **nearest** book still under `softMax`, and overflow picks the **nearest book with room** — never a
+  distance-blind "book with the most space" (the old stray source).
+- **Relocation polish:** move any house to a strictly-nearer book that has room — single-point, so it
+  relocates a *lone* stray (which a count-preserving swap cannot).
+- **Swap polish:** trade boundary pairs between two full books (count-preserving, lowers total distance).
+- **Tiny-book merge:** fold a sub-`softMin` book into an adjacent one if the result fits under `softMax`;
+  a genuinely **isolated** small cluster is left alone (don't drag a remote hamlet across town).
+- **`hardMax` rescue (the finisher):** a house still stuck far from its cluster joins its **nearest** book
+  even slightly over target (up to `hardMax`) instead of driving away — compactness beats the count.
+
+`tolerance` is surfaced on the Turf Cutting page as a **Tight / Balanced / Compact** toggle
+(`0.15 / 0.25 / 0.4`; default **Compact = 0.4**), sent through `params.tolerance` (the `/generate` route
+passes `params` straight through). Lower → tighter, more even books; higher → more size flex for
+compactness. On a synthetic benchmark vs. the old cut, the farthest house from its book center dropped
+from ~5 km to ~1 km, and "misplaced" doors (a closer book exists) from ~100 to 0–7. The same engine
+powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalBooks`.
 
 ## C. Lifecycle & routes
 
