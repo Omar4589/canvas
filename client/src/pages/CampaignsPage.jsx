@@ -8,6 +8,16 @@ function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
 }
 
+const US_TIMEZONES = [
+  { value: 'America/New_York', label: 'Eastern (New York)' },
+  { value: 'America/Chicago', label: 'Central (Chicago)' },
+  { value: 'America/Denver', label: 'Mountain (Denver)' },
+  { value: 'America/Phoenix', label: 'Mountain — no DST (Phoenix)' },
+  { value: 'America/Los_Angeles', label: 'Pacific (Los Angeles)' },
+  { value: 'America/Anchorage', label: 'Alaska (Anchorage)' },
+  { value: 'Pacific/Honolulu', label: 'Hawaii (Honolulu)' },
+];
+
 function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
   const isEdit = !!initial?._id;
   const [name, setName] = useState(initial?.name || '');
@@ -17,6 +27,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
     initial?.surveyTemplateId?._id || initial?.surveyTemplateId || ''
   );
   const [isActive, setIsActive] = useState(initial?.isActive ?? true);
+  const [timeZone, setTimeZone] = useState(initial?.timeZone || '');
 
   function submit(e) {
     e.preventDefault();
@@ -26,6 +37,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
       state: state.trim().toUpperCase(),
       surveyTemplateId: type === 'survey' ? surveyTemplateId : null,
       isActive,
+      timeZone: timeZone || undefined, // empty → server defaults from state
     });
   }
 
@@ -86,6 +98,24 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
             className="w-full rounded border border-gray-300 px-3 py-2 text-sm uppercase focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
           />
         </div>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs font-medium text-gray-700">Timezone</label>
+        <select
+          value={timeZone}
+          onChange={(e) => setTimeZone(e.target.value)}
+          className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+        >
+          <option value="">Auto (from state)</option>
+          {US_TIMEZONES.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-gray-500">
+          Anchors every date &amp; time for this campaign — all admins see the same numbers and clock times,
+          regardless of their own timezone.
+        </p>
       </div>
 
       {type === 'survey' && (

@@ -6,6 +6,9 @@ const organizationSchema = new mongoose.Schema(
     slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
     isActive: { type: Boolean, default: true, index: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Anchor timezone for ORG-WIDE rollups (multi-campaign), where a single campaign's
+    // zone doesn't apply. Per-campaign views use Campaign.timeZone. Overridable in the UI.
+    timeZone: { type: String, default: 'America/New_York' },
   },
   { timestamps: true }
 );

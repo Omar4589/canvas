@@ -8,6 +8,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Household } from '../../models/Household.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -18,6 +19,7 @@ const createSchema = z.object({
   state: z.string().min(2).max(2),
   surveyTemplateId: z.string().nullable().optional(),
   isActive: z.boolean().optional().default(true),
+  timeZone: z.string().optional(),
 });
 
 const updateSchema = createSchema.partial();
@@ -121,6 +123,8 @@ router.post('/', async (req, res, next) => {
       state: data.state,
       surveyTemplateId: data.type === 'survey' ? data.surveyTemplateId : null,
       isActive: data.isActive,
+      // Default the timezone from the state's dominant zone (overridable in the UI).
+      timeZone: data.timeZone || defaultZoneForState(data.state),
       createdBy: req.user._id,
     });
     res.status(201).json({ campaign });
@@ -140,6 +144,7 @@ router.patch('/:campaignId', async (req, res, next) => {
 
     if (data.name !== undefined) campaign.name = data.name;
     if (data.state !== undefined) campaign.state = data.state;
+    if (data.timeZone !== undefined) campaign.timeZone = data.timeZone;
     if (data.isActive !== undefined) campaign.isActive = data.isActive;
     if (data.type !== undefined) campaign.type = data.type;
     if (data.surveyTemplateId !== undefined) {

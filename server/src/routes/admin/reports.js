@@ -11,9 +11,33 @@ import { Membership } from '../../models/Membership.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { Organization } from '../../models/Organization.js';
+import { zonedDayRange, tzAbbrev } from '../../utils/timezone.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
+
+// Resolve the ANCHOR timezone for every report request: the campaign's zone when a
+// single campaign is scoped, else the org's zone. Every date window + day-bucket uses
+// this (NOT the viewer's tz), so admins in Tyler / Vegas / NY see identical numbers.
+async function resolveAnchorTz(req) {
+  const orgId = req.activeOrg?._id;
+  if (!orgId) return 'UTC';
+  if (req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)) {
+    const c = await Campaign.findOne({ _id: req.query.campaignId, organizationId: orgId }, { timeZone: 1 }).lean();
+    if (c?.timeZone) return c.timeZone;
+  }
+  const org = await Organization.findById(orgId, { timeZone: 1 }).lean();
+  return org?.timeZone || 'America/New_York';
+}
+router.use(async (req, res, next) => {
+  try {
+    req.anchorTz = await resolveAnchorTz(req);
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -27,19 +51,16 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
+// from/to are date-only 'YYYY-MM-DD' (the picked calendar days); we slice to stay robust
+// to any legacy ISO value. The window is computed in the request's ANCHOR timezone
+// (req.anchorTz) as a half-open [start-of-fromDay, start-of-(toDay+1)) — so a single day
+// is a full 24h window and the same range means the same days for EVERY viewer.
 function parseDateRange(req, field) {
-  const { from, to } = req.query;
-  if (!from && !to) return {};
-  const range = {};
-  if (from) {
-    const d = new Date(from);
-    if (!Number.isNaN(d.getTime())) range.$gte = d;
-  }
-  if (to) {
-    const d = new Date(to);
-    if (!Number.isNaN(d.getTime())) range.$lte = d;
-  }
-  if (!range.$gte && !range.$lte) return {};
+  const tz = req.anchorTz || 'UTC';
+  const fromDay = req.query.from ? String(req.query.from).slice(0, 10) : null;
+  const toDay = req.query.to ? String(req.query.to).slice(0, 10) : null;
+  const range = zonedDayRange(fromDay, toDay, tz);
+  if (!range.$gte && !range.$lt) return {};
   return { [field]: range };
 }
 
@@ -121,10 +142,10 @@ function parseUserIdParam(req, res) {
   return new mongoose.Types.ObjectId(userId);
 }
 
+// Day-bucket timezone = the resolved ANCHOR tz (campaign/org), NOT the viewer's
+// req.query.tz, so per-day groupings are identical for everyone.
 function tzOf(req) {
-  const tz = (req.query.tz || '').trim();
-  // mongo accepts IANA TZ names; bail to UTC if not provided
-  return tz || 'UTC';
+  return req.anchorTz || 'UTC';
 }
 
 function dayBucketExpr(field, tz) {
@@ -235,6 +256,8 @@ router.get('/overview', async (req, res, next) => {
       },
       canvass,
       events,
+      timeZone: req.anchorTz,
+      tzAbbrev: tzAbbrev(req.anchorTz),
     });
   } catch (err) {
     next(err);
@@ -463,7 +486,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
       { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, lit_dropped: 0, voted: 0 }
     );
 
-    res.json({ scope, cumulative, campaigns: rows });
+    res.json({ scope, cumulative, campaigns: rows, timeZone: req.anchorTz, tzAbbrev: tzAbbrev(req.anchorTz) });
   } catch (err) {
     next(err);
   }

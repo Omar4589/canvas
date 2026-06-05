@@ -16,7 +16,8 @@
     "migrate:activity-turf-tags": "node src/migrations/migrateActivityTurfTags.js",
     "migrate:turf-indexes": "node src/migrations/migrateTurfIndexes.js",
     "migrate:efforts": "node src/migrations/migrateEfforts.js",
-    "migrate:ack-memberships": "node src/migrations/migrateAckMemberships.js"
+    "migrate:ack-memberships": "node src/migrations/migrateAckMemberships.js",
+    "migrate:timezones": "node src/migrations/migrateTimeZones.js"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",
