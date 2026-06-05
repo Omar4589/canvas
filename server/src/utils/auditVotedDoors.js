@@ -18,12 +18,14 @@
 //
 // Exit code is 1 if any phantom drops (Check A) are found, else 0.
 //
-// Usage (from server/):
+// Usage (local, from server/):
 //   node src/utils/auditVotedDoors.js                  # all campaigns
 //   node src/utils/auditVotedDoors.js --campaign=<id>  # one campaign
 //
-// Heroku (production):
-//   heroku run "node src/utils/auditVotedDoors.js" -a <app>
+// Heroku (run console / `heroku run`, cwd is the repo root /app):
+//   npm run audit:voted-doors                          # via the root wrapper script
+//   npm run audit:voted-doors -- --campaign=<id>       # scoped
+//   node server/src/utils/auditVotedDoors.js           # direct, no redeploy needed
 
 import { config as loadEnv } from 'dotenv';
 import path from 'path';

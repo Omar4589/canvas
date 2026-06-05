@@ -15,6 +15,7 @@
     "heroku-postbuild": "npm run install:all && npm run build",
     "seed:admin": "npm --prefix server run seed:admin",
     "reconcile:counts": "npm --prefix server run reconcile:counts --",
+    "audit:voted-doors": "npm --prefix server run audit:voted-doors --",
     "migrate:multitenant": "npm --prefix server run migrate:multitenant",
     "migrate:timezones": "npm --prefix server run migrate:timezones --"
   },
