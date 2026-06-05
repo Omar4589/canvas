@@ -15,7 +15,8 @@
     "heroku-postbuild": "npm run install:all && npm run build",
     "seed:admin": "npm --prefix server run seed:admin",
     "reconcile:counts": "npm --prefix server run reconcile:counts --",
-    "migrate:multitenant": "npm --prefix server run migrate:multitenant"
+    "migrate:multitenant": "npm --prefix server run migrate:multitenant",
+    "migrate:timezones": "npm --prefix server run migrate:timezones --"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
