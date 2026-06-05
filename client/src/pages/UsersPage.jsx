@@ -10,6 +10,55 @@ const FORM_INPUT_CLS =
 const FILTER_INPUT_CLS =
   'rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600';
 
+// --- Premium-restyle preview tokens/helpers (presentation only) ---
+// Soft, low-spread elevation (the Stripe/Linear card look) via inline values so this
+// preview stays self-contained — no tailwind.config or shared-file changes to revert.
+const CARD = 'rounded-xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]';
+const SELECT_CLS =
+  'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 transition-colors hover:border-gray-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/20';
+
+function initials(u) {
+  return ((u?.firstName?.[0] || '') + (u?.lastName?.[0] || '')).toUpperCase() || '?';
+}
+function Avatar({ user, sm }) {
+  const size = sm ? 'h-6 w-6 text-[10px]' : 'h-9 w-9 text-xs';
+  return (
+    <span className={`inline-flex ${size} shrink-0 items-center justify-center rounded-full bg-brand-50 font-semibold text-brand-700 ring-1 ring-brand-100`}>
+      {initials(user)}
+    </span>
+  );
+}
+function IconSearch(props) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+function IconChevron(props) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+function SkeletonRows() {
+  return (
+    <div className="divide-y divide-gray-100">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-3.5">
+          <div className="h-9 w-9 animate-pulse rounded-full bg-gray-100" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 w-40 animate-pulse rounded bg-gray-100" />
+            <div className="h-2.5 w-56 animate-pulse rounded bg-gray-50" />
+          </div>
+          <div className="h-5 w-16 animate-pulse rounded-full bg-gray-100" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const EMPTY_FORM = {
   firstName: '',
   lastName: '',
@@ -151,13 +200,14 @@ export default function UsersPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Users</h1>
-          <p className="text-xs text-gray-500">Members of this organization.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Users</h1>
+          <p className="text-sm text-gray-500">Members of this organization.</p>
         </div>
         <button
           onClick={() => setShowForm((s) => !s)}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(16,24,40,0.08)] transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
         >
+          {!showForm && <span className="text-base leading-none">+</span>}
           {showForm ? 'Cancel' : 'Add member'}
         </button>
       </div>
@@ -165,7 +215,7 @@ export default function UsersPage() {
       {showForm && (
         <form
           onSubmit={onSubmit}
-          className="mb-6 grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-white p-5 md:grid-cols-3"
+          className={`mb-6 grid grid-cols-1 gap-4 ${CARD} p-5 md:grid-cols-3`}
         >
           <div className="md:col-span-3 flex items-center gap-2 text-xs">
             <label className="inline-flex items-center gap-1 cursor-pointer">
@@ -299,37 +349,30 @@ export default function UsersPage() {
         </form>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name or email…"
-          className={`${FILTER_INPUT_CLS} flex-1 min-w-[220px]`}
-        />
-        <select
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-          className={FILTER_INPUT_CLS}
-        >
+      <div className={`mb-4 flex flex-wrap items-center gap-2.5 ${CARD} p-2.5`}>
+        <div className="relative min-w-[220px] flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+            <IconSearch />
+          </span>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name or email…"
+            className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 transition-colors hover:border-gray-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/20"
+          />
+        </div>
+        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className={SELECT_CLS}>
           <option value="all">All roles</option>
           <option value="admin">Admins</option>
           <option value="canvasser">Canvassers</option>
         </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className={FILTER_INPUT_CLS}
-        >
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={SELECT_CLS}>
           <option value="all">All statuses</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
-        <select
-          value={coordinatorFilter}
-          onChange={(e) => setCoordinatorFilter(e.target.value)}
-          className={FILTER_INPUT_CLS}
-        >
+        <select value={coordinatorFilter} onChange={(e) => setCoordinatorFilter(e.target.value)} className={SELECT_CLS}>
           <option value="all">All coordinators</option>
           <option value="none">No coordinator</option>
           {admins.map((m) => (
@@ -338,99 +381,112 @@ export default function UsersPage() {
             </option>
           ))}
         </select>
-        <select
-          value={sortMode}
-          onChange={(e) => setSortMode(e.target.value)}
-          className={FILTER_INPUT_CLS}
-        >
+        <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} className={SELECT_CLS}>
           {SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
-        <span className="text-xs text-gray-500">
+        <span className="ml-auto rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium tabular-nums text-gray-600">
           {visibleMembers.length} of {members.length}
         </span>
       </div>
 
       {isLoading ? (
-        <div className="text-sm text-gray-500">Loading…</div>
+        <div className={`overflow-hidden ${CARD}`}>
+          <SkeletonRows />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <div className={`overflow-hidden ${CARD}`}>
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-              <tr>
-                <th className="px-4 py-2 text-left">Name</th>
-                <th className="px-4 py-2 text-left">Email</th>
-                <th className="px-4 py-2 text-left">Role</th>
-                <th className="px-4 py-2 text-left">Coordinator</th>
-                <th className="px-4 py-2 text-left">Status</th>
-                <th className="w-8 px-4 py-2"></th>
+            <thead className="sticky top-0 z-10 bg-gray-50/90 backdrop-blur">
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-2.5">Member</th>
+                <th className="px-4 py-2.5">Role</th>
+                <th className="px-4 py-2.5">Coordinator</th>
+                <th className="px-4 py-2.5">Status</th>
+                <th className="w-8 px-4 py-2.5"></th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {visibleMembers.map((m) => {
                 const u = m.user;
                 const active = m.isActive && u.isActive;
+                const coord = coordinatorName(m.coordinatorId);
                 return (
                   <tr
                     key={m.membershipId}
                     onClick={() => setSelectedUserId(u.id)}
-                    className="cursor-pointer border-t border-gray-100 transition-colors hover:bg-gray-50"
+                    className="group cursor-pointer transition-colors hover:bg-gray-50/70"
                   >
-                    <td className="px-4 py-3 font-medium text-gray-900">
-                      {u.firstName} {u.lastName}
-                      {u.isSuperAdmin && (
-                        <span className="ml-2 rounded-full bg-yellow-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-700">
-                          super
-                        </span>
-                      )}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <Avatar user={u} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 font-medium text-gray-900">
+                            <span className="truncate">{u.firstName} {u.lastName}</span>
+                            {u.isSuperAdmin && (
+                              <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 ring-1 ring-amber-100">
+                                super
+                              </span>
+                            )}
+                          </div>
+                          <div className="truncate text-xs text-gray-500">{u.email}</div>
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-700">{u.email}</td>
                     <td className="px-4 py-3">
                       <span
                         className={
                           m.role === 'admin'
-                            ? 'rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700'
-                            : 'rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700'
+                            ? 'inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 ring-1 ring-brand-100'
+                            : 'inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'
                         }
                       >
                         {m.role === 'admin' ? 'Admin' : 'Canvasser'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-700">
-                      {coordinatorName(m.coordinatorId) || (
-                        <span className="text-gray-400">—</span>
+                      {coord ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Avatar user={{ firstName: coord.split(' ')[0], lastName: coord.split(' ').slice(1).join(' ') }} sm />
+                          <span className="truncate">{coord}</span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={
                           active
-                            ? 'rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700'
-                            : 'rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500'
+                            ? 'inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-100'
+                            : 'inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500'
                         }
                       >
+                        <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-green-500' : 'bg-gray-400'}`} />
                         {active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-lg leading-none text-gray-400">
-                      ›
+                    <td className="px-4 py-3 text-right text-gray-300 transition-colors group-hover:text-gray-500">
+                      <IconChevron className="ml-auto" />
                     </td>
                   </tr>
                 );
               })}
               {!members.length && (
                 <tr>
-                  <td colSpan="6" className="px-4 py-10 text-center text-gray-500">
-                    No members yet. Click <strong>Add member</strong> to start.
+                  <td colSpan="5" className="px-4 py-14 text-center">
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                    </div>
+                    <div className="text-sm font-medium text-gray-900">No members yet</div>
+                    <div className="mt-1 text-sm text-gray-500">Click <strong>Add member</strong> to start.</div>
                   </td>
                 </tr>
               )}
               {members.length > 0 && !visibleMembers.length && (
                 <tr>
-                  <td colSpan="6" className="px-4 py-10 text-center text-gray-500">
+                  <td colSpan="5" className="px-4 py-14 text-center text-sm text-gray-500">
                     No members match your filters.
                   </td>
                 </tr>

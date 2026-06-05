@@ -6,11 +6,15 @@ import StatCard from '../components/StatCard.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
+// Premium-restyle preview: status as a dot pill, soft card elevation (inline so the
+// preview stays self-contained — presentation only).
 const STATUS_BADGE = {
-  draft: 'bg-gray-100 text-gray-700',
-  active: 'bg-green-100 text-green-700',
+  draft: 'bg-gray-100 text-gray-600',
+  active: 'bg-green-50 text-green-700 ring-1 ring-green-100',
   archived: 'bg-gray-100 text-gray-400',
 };
+const STATUS_DOT = { draft: 'bg-gray-400', active: 'bg-green-500', archived: 'bg-gray-300' };
+const CARD = 'rounded-xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]';
 
 function RosterPanel({ campaignId, effort }) {
   const qc = useQueryClient();
@@ -123,13 +127,13 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
   const crewTitle = (crewNames || []).join(', ');
   return (
     <>
-      <tr className="border-t border-gray-100">
-        <td className="px-4 py-2">
+      <tr className="border-t border-gray-100 transition-colors hover:bg-gray-50/70">
+        <td className="px-4 py-2.5">
           <span className="font-medium text-gray-900">{effort.name}</span>
         </td>
-        <td className="px-4 py-2"><span className={`rounded px-2 py-0.5 text-xs ${STATUS_BADGE[effort.status] || ''}`}>{effort.status}</span></td>
-        <td className="px-4 py-2 text-right">{(effort.doorCount || 0).toLocaleString()}</td>
-        <td className="px-4 py-2 text-right">
+        <td className="px-4 py-2"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_BADGE[effort.status] || ''}`}><span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[effort.status] || 'bg-gray-300'}`} />{effort.status}</span></td>
+        <td className="px-4 py-2 text-right tabular-nums">{(effort.doorCount || 0).toLocaleString()}</td>
+        <td className="px-4 py-2 text-right tabular-nums">
           <span title={crewTitle || undefined} className={crewTitle ? 'cursor-default border-b border-dotted border-gray-300' : undefined}>
             {effort.crewCount || 0}
           </span>
@@ -227,7 +231,7 @@ export default function EffortsPage() {
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Efforts</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Efforts</h1>
         <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
       </div>
 
@@ -256,8 +260,8 @@ export default function EffortsPage() {
         </div>
       )}
 
-      <section className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
-        <h2 className="mb-3 text-base font-medium">New effort</h2>
+      <section className={`mb-6 ${CARD} p-5`}>
+        <h2 className="mb-3 text-base font-semibold text-gray-900">New effort</h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
             <span className="mb-1 block text-xs font-medium text-gray-700">Name</span>
@@ -287,9 +291,9 @@ export default function EffortsPage() {
         <p className="mt-2 text-xs text-gray-500">Walk lists can be built from filters or an uploaded Voter-ID CSV (Walk Lists page). Seeding from either claims only that list's <em>unowned</em> doors; to move doors already in another effort, open the effort → Claim → Re-carve.</p>
       </section>
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+      <div className={`overflow-hidden ${CARD}`}>
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+          <thead className="sticky top-0 z-10 bg-gray-50/90 text-[11px] font-semibold uppercase tracking-wider text-gray-500 backdrop-blur">
             <tr>
               <th className="px-4 py-2 text-left">Effort</th>
               <th className="px-4 py-2 text-left">Status</th>
