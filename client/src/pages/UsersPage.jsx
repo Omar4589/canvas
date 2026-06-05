@@ -17,6 +17,7 @@ const EMPTY_FORM = {
   phone: '',
   password: '',
   role: 'canvasser',
+  coordinatorId: '',
 };
 
 const SORT_OPTIONS = [
@@ -27,8 +28,9 @@ const SORT_OPTIONS = [
 ];
 
 function compareName(a, b, dir) {
-  const an = `${a.user.lastName} ${a.user.firstName}`.toLowerCase();
-  const bn = `${b.user.lastName} ${b.user.firstName}`.toLowerCase();
+  // Sort by the displayed "First Last" order so the list reads alphabetically.
+  const an = `${a.user.firstName} ${a.user.lastName}`.toLowerCase();
+  const bn = `${b.user.firstName} ${b.user.lastName}`.toLowerCase();
   if (an < bn) return dir === 'asc' ? -1 : 1;
   if (an > bn) return dir === 'asc' ? 1 : -1;
   return 0;
@@ -58,6 +60,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [coordinatorFilter, setCoordinatorFilter] = useState('all');
   const [sortMode, setSortMode] = useState('name-asc');
 
   const addMember = useMutation({
@@ -79,6 +82,18 @@ export default function UsersPage() {
     ? members.find((m) => m.user.id === selectedUserId) || null
     : null;
 
+  // Active admins in this org — the eligible coordinators.
+  const admins = useMemo(
+    () => members.filter((m) => m.role === 'admin' && m.user.isActive && m.isActive),
+    [members]
+  );
+  // userId → "First Last", for rendering a coordinatorId as a name.
+  const nameByUserId = useMemo(
+    () => new Map(members.map((m) => [m.user.id, `${m.user.firstName} ${m.user.lastName}`])),
+    [members]
+  );
+  const coordinatorName = (id) => (id && nameByUserId.get(id)) || null;
+
   const visibleMembers = useMemo(() => {
     const term = search.trim().toLowerCase();
     let list = members.filter((m) => {
@@ -86,6 +101,13 @@ export default function UsersPage() {
       const active = m.isActive && m.user.isActive;
       if (statusFilter === 'active' && !active) return false;
       if (statusFilter === 'inactive' && active) return false;
+      if (coordinatorFilter === 'none' && m.coordinatorId) return false;
+      if (
+        coordinatorFilter !== 'all' &&
+        coordinatorFilter !== 'none' &&
+        m.coordinatorId !== coordinatorFilter
+      )
+        return false;
       if (term) {
         const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
         if (!hay.includes(term)) return false;
@@ -106,7 +128,7 @@ export default function UsersPage() {
         )
       );
     return list;
-  }, [members, search, roleFilter, statusFilter, sortMode]);
+  }, [members, search, roleFilter, statusFilter, coordinatorFilter, sortMode]);
 
   function onSubmit(e) {
     e.preventDefault();
@@ -114,6 +136,7 @@ export default function UsersPage() {
       email: form.email.trim(),
       role: form.role,
       linkExisting: emailLookup,
+      coordinatorId: form.coordinatorId || null,
     };
     if (!emailLookup) {
       body.firstName = form.firstName;
@@ -176,6 +199,23 @@ export default function UsersPage() {
             >
               <option value="canvasser">Canvasser</option>
               <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div className="md:col-span-3">
+            <label className="block text-xs font-medium text-gray-700">
+              Coordinator <span className="text-gray-400">(optional)</span>
+            </label>
+            <select
+              value={form.coordinatorId}
+              onChange={(e) => setForm((s) => ({ ...s, coordinatorId: e.target.value }))}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            >
+              <option value="">— None —</option>
+              {admins.map((m) => (
+                <option key={m.user.id} value={m.user.id}>
+                  {m.user.firstName} {m.user.lastName}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -286,6 +326,19 @@ export default function UsersPage() {
           <option value="inactive">Inactive</option>
         </select>
         <select
+          value={coordinatorFilter}
+          onChange={(e) => setCoordinatorFilter(e.target.value)}
+          className={FILTER_INPUT_CLS}
+        >
+          <option value="all">All coordinators</option>
+          <option value="none">No coordinator</option>
+          {admins.map((m) => (
+            <option key={m.user.id} value={m.user.id}>
+              {m.user.firstName} {m.user.lastName}
+            </option>
+          ))}
+        </select>
+        <select
           value={sortMode}
           onChange={(e) => setSortMode(e.target.value)}
           className={FILTER_INPUT_CLS}
@@ -311,6 +364,7 @@ export default function UsersPage() {
                 <th className="px-4 py-2 text-left">Name</th>
                 <th className="px-4 py-2 text-left">Email</th>
                 <th className="px-4 py-2 text-left">Role</th>
+                <th className="px-4 py-2 text-left">Coordinator</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="w-8 px-4 py-2"></th>
               </tr>
@@ -345,6 +399,11 @@ export default function UsersPage() {
                         {m.role === 'admin' ? 'Admin' : 'Canvasser'}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {coordinatorName(m.coordinatorId) || (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={
@@ -364,14 +423,14 @@ export default function UsersPage() {
               })}
               {!members.length && (
                 <tr>
-                  <td colSpan="5" className="px-4 py-10 text-center text-gray-500">
+                  <td colSpan="6" className="px-4 py-10 text-center text-gray-500">
                     No members yet. Click <strong>Add member</strong> to start.
                   </td>
                 </tr>
               )}
               {members.length > 0 && !visibleMembers.length && (
                 <tr>
-                  <td colSpan="5" className="px-4 py-10 text-center text-gray-500">
+                  <td colSpan="6" className="px-4 py-10 text-center text-gray-500">
                     No members match your filters.
                   </td>
                 </tr>

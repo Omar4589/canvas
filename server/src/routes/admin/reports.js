@@ -1101,7 +1101,7 @@ router.get('/overlaps', async (req, res, next) => {
       entry.passes.push({
         passId: c._id.passId ? String(c._id.passId) : null,
         roundNumber,
-        roundLabel: pass ? `Round ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
+        roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
         canvassers: c.events
           .map((e) => {
             const u = uMap.get(String(e.userId));

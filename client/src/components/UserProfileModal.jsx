@@ -116,6 +116,11 @@ export default function UserProfileModal({ membership, onClose }) {
   const [showResetPw, setShowResetPw] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [feedback, setFeedback] = useState(null);
+  const [coordinatorId, setCoordinatorId] = useState(membership.coordinatorId || '');
+
+  useEffect(() => {
+    setCoordinatorId(membership.coordinatorId || '');
+  }, [membership.coordinatorId]);
 
   function flash(type, text) {
     setFeedback({ type, text });
@@ -144,6 +149,13 @@ export default function UserProfileModal({ membership, onClose }) {
     enabled: !!user.id,
   });
 
+  // Org roster (cached, shared with the Users page) → the eligible coordinators
+  // are the active admins in this org, excluding this member themselves.
+  const orgQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
+  const admins = (orgQ.data?.members || []).filter(
+    (m) => m.role === 'admin' && m.user.isActive && m.isActive && m.user.id !== user.id
+  );
+
   const saveProfile = useMutation({
     mutationFn: (body) =>
       api(`/admin/memberships/${user.id}/user`, { method: 'PATCH', body }),
@@ -163,6 +175,28 @@ export default function UserProfileModal({ membership, onClose }) {
     },
     onError: (err) => flash('error', err.message),
   });
+
+  const saveCoordinator = useMutation({
+    mutationFn: (cid) =>
+      api(`/admin/memberships/${user.id}`, {
+        method: 'PATCH',
+        body: { coordinatorId: cid || null },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['memberships'] });
+      flash('success', 'Coordinator updated.');
+    },
+    onError: (err) => {
+      setCoordinatorId(membership.coordinatorId || ''); // revert on failure
+      flash('error', err.message);
+    },
+  });
+
+  function onChangeCoordinator(e) {
+    const val = e.target.value;
+    setCoordinatorId(val);
+    saveCoordinator.mutate(val);
+  }
 
   const resetPw = useMutation({
     mutationFn: (password) =>
@@ -435,6 +469,28 @@ export default function UserProfileModal({ membership, onClose }) {
               </button>
             </div>
           )}
+        </div>
+
+        <div className="border-b border-gray-200 px-6 py-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Coordinator
+          </h3>
+          <select
+            value={coordinatorId}
+            onChange={onChangeCoordinator}
+            disabled={saveCoordinator.isPending}
+            className={`${inputCls} disabled:opacity-60`}
+          >
+            <option value="">— No coordinator —</option>
+            {admins.map((m) => (
+              <option key={m.user.id} value={m.user.id}>
+                {m.user.firstName} {m.user.lastName}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-gray-500">
+            The admin who oversees this member. Saved immediately.
+          </p>
         </div>
 
         <div className="border-b border-gray-200 px-6 py-5">

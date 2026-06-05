@@ -10,6 +10,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
+import { Turf } from '../../models/Turf.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 
 const router = Router();
@@ -28,6 +29,26 @@ async function resolveMapTz(orgId, campaignId) {
   }
   const org = await Organization.findById(orgId, { timeZone: 1 }).lean();
   return org?.timeZone || 'America/New_York';
+}
+
+// The full active canvasser roster for this org. The map's canvasser dropdown is
+// populated from this — it must NOT depend on the current filters, or selecting a
+// canvasser (or any filter that yields zero households) would empty the options
+// and wedge the control. So we return it even on the empty-result paths.
+async function loadCanvasserRoster(orgId) {
+  const memberIds = await Membership.find({ organizationId: orgId, isActive: true }).distinct('userId');
+  const users = await User.find(
+    { _id: { $in: memberIds }, isActive: true },
+    'firstName lastName email'
+  )
+    .sort({ firstName: 1 })
+    .lean();
+  return users.map((u) => ({
+    id: String(u._id),
+    firstName: u.firstName,
+    lastName: u.lastName,
+    email: u.email,
+  }));
 }
 
 function ensureOrgScoped(req, res) {
@@ -59,6 +80,16 @@ router.get('/map', async (req, res, next) => {
         ? new mongoose.Types.ObjectId(req.query.campaignId)
         : null;
 
+    // Scoped audit: narrow the map to one effort's doors, or one pass's books.
+    const effortId =
+      req.query.effortId && mongoose.isValidObjectId(req.query.effortId)
+        ? new mongoose.Types.ObjectId(req.query.effortId)
+        : null;
+    const passId =
+      req.query.passId && mongoose.isValidObjectId(req.query.passId)
+        ? new mongoose.Types.ObjectId(req.query.passId)
+        : null;
+
     // Date window in the campaign's (or org's) timezone — date-only days in, half-open
     // [start(fromDay), start(toDay+1)) out — so the map narrows to the same day window as
     // the dashboards. See docs/TIMEZONES.md.
@@ -73,6 +104,7 @@ router.get('/map', async (req, res, next) => {
     };
     if (status && status.length) householdFilter.status = { $in: status };
     if (campaignId) householdFilter.campaignId = campaignId;
+    if (effortId) householdFilter.effortId = effortId;
 
     const surveyMatch = { organizationId: orgId };
     const activityMatch = { organizationId: orgId };
@@ -94,25 +126,39 @@ router.get('/map', async (req, res, next) => {
       };
     }
 
+    // Pass scoping: limit to households that sit in this pass's books (Turf.householdIds).
+    let passHhSet = null;
+    if (passId) {
+      const turfDocs = await Turf.find({ passId }, 'householdIds').lean();
+      passHhSet = new Set();
+      for (const t of turfDocs) for (const id of t.householdIds || []) passHhSet.add(String(id));
+      if (passHhSet.size === 0) {
+        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
+      }
+    }
+
     const filteringInteractions =
       Boolean(fromDay || toDay || userId || (questionKey && answerOption));
 
-    let interactedHouseholdIds = null;
-    if (filteringInteractions) {
-      const [surveyHIds, activityHIds] = await Promise.all([
-        SurveyResponse.distinct('householdId', surveyMatch),
-        questionKey && answerOption
-          ? Promise.resolve([])
-          : CanvassActivity.distinct('householdId', activityMatch),
-      ]);
-      const set = new Set([...surveyHIds, ...activityHIds].map(String));
-      interactedHouseholdIds = Array.from(set).map(
-        (id) => new mongoose.Types.ObjectId(id)
-      );
-      if (!interactedHouseholdIds.length) {
-        return res.json({ households: [], canvassers: [], total: 0 });
+    if (filteringInteractions || passHhSet) {
+      let idStrings;
+      if (filteringInteractions) {
+        const [surveyHIds, activityHIds] = await Promise.all([
+          SurveyResponse.distinct('householdId', surveyMatch),
+          questionKey && answerOption
+            ? Promise.resolve([])
+            : CanvassActivity.distinct('householdId', activityMatch),
+        ]);
+        idStrings = [...new Set([...surveyHIds, ...activityHIds].map(String))];
+        // Intersect the interaction set with the pass's households when both apply.
+        if (passHhSet) idStrings = idStrings.filter((id) => passHhSet.has(id));
+      } else {
+        idStrings = [...passHhSet];
       }
-      householdFilter._id = { $in: interactedHouseholdIds };
+      if (!idStrings.length) {
+        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
+      }
+      householdFilter._id = { $in: idStrings.map((id) => new mongoose.Types.ObjectId(id)) };
     }
 
     const households = await Household.find(
@@ -121,18 +167,15 @@ router.get('/map', async (req, res, next) => {
     ).lean();
 
     if (!households.length) {
-      return res.json({ households: [], canvassers: [], total: 0 });
+      return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
     }
 
     const householdIds = households.map((h) => h._id);
     const includeActivities = req.query.includeActivities === '1';
 
-    const orgMemberIds = await Membership.find({
-      organizationId: orgId,
-      isActive: true,
-    }).distinct('userId');
+    const canvassers = await loadCanvasserRoster(orgId);
 
-    const [voters, surveys, lastActivities, allCanvassers, activities] = await Promise.all([
+    const [voters, surveys, lastActivities, activities] = await Promise.all([
       Voter.find(
         { householdId: { $in: householdIds }, organizationId: orgId },
         'householdId fullName surveyStatus party'
@@ -153,12 +196,6 @@ router.get('/map', async (req, res, next) => {
           },
         },
       ]),
-      User.find(
-        { _id: { $in: orgMemberIds }, isActive: true },
-        'firstName lastName email'
-      )
-        .sort({ firstName: 1 })
-        .lean(),
       includeActivities
         ? CanvassActivity.find(
             { ...activityMatch, householdId: { $in: householdIds } },
@@ -248,12 +285,7 @@ router.get('/map', async (req, res, next) => {
 
     res.json({
       households: result,
-      canvassers: allCanvassers.map((u) => ({
-        id: String(u._id),
-        firstName: u.firstName,
-        lastName: u.lastName,
-        email: u.email,
-      })),
+      canvassers,
       activities: activities.map((a) => ({
         id: String(a._id),
         householdId: String(a.householdId),

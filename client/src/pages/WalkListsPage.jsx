@@ -273,7 +273,7 @@ export default function WalkListsPage() {
           </div>
 
           <div className="mb-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Prior round</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Prior pass</div>
             <div className="flex flex-wrap items-end gap-4">
               <label className="text-sm">
                 <span className="mb-1 block text-xs font-medium text-gray-700">From pass</span>
@@ -284,7 +284,7 @@ export default function WalkListsPage() {
                 >
                   <option value="">—</option>
                   {passes.map((p) => (
-                    <option key={p._id} value={p._id}>Round {p.roundNumber} · {p.name}</option>
+                    <option key={p._id} value={p._id}>Pass {p.roundNumber} · {p.name}</option>
                   ))}
                 </select>
               </label>

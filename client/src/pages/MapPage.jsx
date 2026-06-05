@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -210,6 +211,12 @@ export default function MapPage() {
   const [live, setLive] = useState(true);
   const orgTz = useOrgTimeZone();
 
+  // Scoped audit: a deep-link from an Effort/Pass (?effortId / ?passId) narrows the
+  // map to that scope. Seeded once from the URL; the chip's ✕ clears it.
+  const [searchParams] = useSearchParams();
+  const [scopeEffortId, setScopeEffortId] = useState(searchParams.get('effortId') || '');
+  const [scopePassId, setScopePassId] = useState(searchParams.get('passId') || '');
+
   const {
     campaignId,
     setCampaignId,
@@ -219,6 +226,30 @@ export default function MapPage() {
   } = useCampaignSelection();
   // Anchor presets to the selected campaign's tz (default range is all-time, which needs none).
   const tz = selectedCampaign?.timeZone || orgTz;
+
+  // Resolve a friendly name for the scope chip (reuses the cached efforts/passes lists).
+  const scopeEffortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId && !!scopeEffortId,
+  });
+  const scopePassesQ = useQuery({
+    queryKey: ['admin', 'passes', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
+    enabled: !!campaignId && !!scopePassId,
+  });
+  let scopeLabel = null;
+  if (scopeEffortId) {
+    const e = (scopeEffortsQ.data?.efforts || []).find((x) => String(x._id) === scopeEffortId);
+    scopeLabel = e ? e.name : 'Effort';
+  } else if (scopePassId) {
+    const p = (scopePassesQ.data?.passes || []).find((x) => String(x._id) === scopePassId);
+    scopeLabel = p ? `Pass ${p.roundNumber} · ${p.name}` : 'Pass';
+  }
+  function clearScope() {
+    setScopeEffortId('');
+    setScopePassId('');
+  }
 
   const tokenQ = useQuery({
     queryKey: ['config', 'mapbox-token'],
@@ -242,6 +273,8 @@ export default function MapPage() {
     questionKey: answerFilter.questionKey,
     option: answerFilter.option,
     includeActivities: showCanvasserPins ? '1' : '',
+    effortId: scopeEffortId,
+    passId: scopePassId,
   });
 
   const householdsQ = useQuery({
@@ -256,6 +289,8 @@ export default function MapPage() {
       answerFilter.questionKey,
       answerFilter.option,
       showCanvasserPins,
+      scopeEffortId,
+      scopePassId,
     ],
     queryFn: () => api(`/admin/households/map${queryString}`),
     enabled: !!campaignId,
@@ -270,6 +305,14 @@ export default function MapPage() {
   const households = householdsQ.data?.households || [];
   const canvassers = householdsQ.data?.canvassers || [];
   const activities = householdsQ.data?.activities || [];
+
+  // Safety net: if the selected canvasser somehow isn't in the roster (e.g. they
+  // were deactivated), reset the filter so the controlled <select> can't wedge.
+  useEffect(() => {
+    if (canvasserId && canvassers.length && !canvassers.some((c) => c.id === canvasserId)) {
+      setCanvasserId('');
+    }
+  }, [canvassers, canvasserId]);
 
   // Initialize the map once we have a token.
   useEffect(() => {
@@ -535,7 +578,22 @@ export default function MapPage() {
         className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-6 py-3"
       >
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Map</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-gray-900">Map</h1>
+            {scopeLabel && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700">
+                Showing: {scopeLabel}
+                <button
+                  type="button"
+                  onClick={clearScope}
+                  className="text-brand-700/70 hover:text-brand-700"
+                  aria-label="Clear scope"
+                >
+                  ✕
+                </button>
+              </span>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
             <span>
               {householdsQ.isLoading

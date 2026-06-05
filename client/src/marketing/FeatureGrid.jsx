@@ -25,9 +25,9 @@ const FEATURES = [
   },
   {
     Icon: IconRouteCheck,
-    title: 'Walk lists, rounds & passes',
+    title: 'Walk lists, books & passes',
     blurb:
-      'Organize the work into rounds and passes, assign canvassers to each book, and re-cut between passes without losing knock history.',
+      'Organize the work into passes, assign canvassers to each book, and re-cut between passes without losing knock history.',
   },
   {
     Icon: IconUser,

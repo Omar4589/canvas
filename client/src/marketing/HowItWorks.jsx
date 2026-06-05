@@ -10,7 +10,7 @@ const STEPS = [
     n: 2,
     title: 'Assign & knock',
     body:
-      'Assign books to canvassers across rounds and passes. In the field, your team works walk lists in the mobile app — GPS-stamping every knock and logging survey answers, even with no signal.',
+      'Assign books to canvassers across passes. In the field, your team works walk lists in the mobile app — GPS-stamping every knock and logging survey answers, even with no signal.',
   },
   {
     n: 3,

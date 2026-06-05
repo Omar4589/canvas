@@ -51,6 +51,22 @@ When you add someone, **they're told.** The next time they sign in they see an i
 been added to *{org}* as *{role}*." They dismiss it and it's gone. (There's no email system yet, so
 the notice is in-app.)
 
+## Coordinators (who oversees whom)
+
+Each member can optionally have a **coordinator** — an admin in the same org who oversees them. Use it
+when one campaign has several admins splitting the team (e.g. two vendors, or a paid vs. volunteer
+crew): tag each canvasser with the admin who runs their group, so you can see and report on "who
+reports to whom." A coordinator must be an **admin in this org**; you can leave it as *None*.
+
+You set it two ways, both on the Users page:
+
+- **When adding a member** — pick a "Coordinator (optional)" from the dropdown of this org's admins.
+- **Later** — open a member's profile and choose/clear their coordinator (it saves immediately).
+
+The Users list shows a **Coordinator** column, and a **Coordinator filter** lets you narrow the list to
+everyone a given admin oversees (or "No coordinator"). This is about *people management*; dividing the
+*work* itself is what Efforts do ([EFFORTS.md](EFFORTS.md)) — the two are independent and complementary.
+
 ## Passwords & lockouts
 
 A locked-out user can't reach *any* org, so password recovery has to work even when the only
@@ -74,6 +90,7 @@ Because the account is shared, some things are global and some are per-org:
 | **Login email** | Shared (it's how they sign in everywhere) | The user or a super-admin only, **if** they're in 2+ orgs |
 | Password | Shared | Any of their org's admins (as a *temporary* password) or the user |
 | Role | Per-org | Each org's admin sets the role in their own org |
+| Coordinator | Per-org (membership) | Each org's admin — points to an admin in the same org |
 | Active / inactive | Per-org (membership) | Each org's admin, for their own org |
 | Removed from org | Per-org (membership) | Each org's admin — only removes *their* membership |
 
@@ -95,9 +112,11 @@ their login email** (that would change how they sign into the *other* orgs). The
   - `isSuperAdmin: Boolean` — platform-wide; bypasses org-role checks.
 - **`Membership`** ([server/src/models/Membership.js](../server/src/models/Membership.js)) — join table
   `{ userId, organizationId, role: 'admin'|'canvasser', isActive, addedBy }`, unique on
-  `(userId, organizationId)`. New field:
+  `(userId, organizationId)`. New fields:
   - `acknowledgedAt: Date|null` — `null` = the "added to org" banner is still pending; a timestamp =
     dismissed.
+  - `coordinatorId: ObjectId|null` (ref `User`) — the supervising admin in this org, or `null`. Indexed
+    `{ organizationId, coordinatorId }`.
 
 ## Auth & the forced-password-change flow
 
@@ -136,6 +155,18 @@ mitigation envelope.
   `409 EMAIL_EXISTS_USE_LINK`; `true` + no account → `404 EMAIL_NOT_FOUND`. Both web
   ([UsersPage.jsx](../client/src/pages/UsersPage.jsx)) and mobile
   ([admin/users.jsx](../mobile/app/(app)/admin/users.jsx)) send it and offer the link toggle.
+
+## Coordinators
+
+A per-org supervisory link: `Membership.coordinatorId` → a `User` who is an **active `admin` in the same
+org**. Set on **create** (`POST /admin/memberships`, optional `coordinatorId`) and **update**
+(`PATCH /admin/memberships/:userId`, nullable `coordinatorId`); a shared validator (`resolveCoordinatorId`)
+rejects a non-admin / cross-org / self reference with `400`, and `''`/`null` clears it. `GET /admin/memberships`
+returns each member's `coordinatorId` (a plain id — the client resolves the name from the same roster, so
+no extra query/populate). The web UI lives in [UsersPage.jsx](../client/src/pages/UsersPage.jsx) (Add-member
+dropdown + table column + filter) and [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx)
+(save-on-change dropdown). No migration needed — absent → `null`. Distinct from **Efforts**, which
+partition the *doors/work*; the coordinator partitions *people*.
 
 ## In-app "added to org" notice
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -165,16 +166,16 @@ function PassPicker({ campaignId, passId, onChange }) {
   }, [passId, passes, activeIds]);
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Round</span>
+      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Pass</span>
       <select
         value={passId || ''}
         onChange={(e) => onChange(e.target.value)}
         className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
       >
-        {!passes.length && <option value="">No rounds</option>}
+        {!passes.length && <option value="">No passes</option>}
         {passes.map((p) => (
           <option key={p._id} value={p._id}>
-            {effortName.get(String(p.effortId)) || 'Effort'} · Round {p.roundNumber} · {p.name} ({p.status})
+            {effortName.get(String(p.effortId)) || 'Effort'} · Pass {p.roundNumber} · {p.name} ({p.status})
           </option>
         ))}
       </select>
@@ -364,7 +365,10 @@ export default function TurfsPage() {
   const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
   // Turf snapshots belong to the selected campaign → show times in its tz (fallback org).
   const tz = campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
-  const [passId, setPassId] = useState('');
+  // A deep-link from Efforts/Passes (?passId=) pre-selects the pass; the PassPicker's
+  // auto-select only kicks in when this is empty, so a seeded value wins.
+  const [searchParams] = useSearchParams();
+  const [passId, setPassId] = useState(() => searchParams.get('passId') || '');
 
   const [mode, setMode] = useState('geometric');
   const [attribute, setAttribute] = useState('precinct');

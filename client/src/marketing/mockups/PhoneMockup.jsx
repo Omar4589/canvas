@@ -31,7 +31,7 @@ export default function PhoneMockup() {
             <LogoMark size={18} />
             <span className="text-sm font-semibold text-gray-900">Book 7</span>
           </div>
-          <span className="text-[11px] text-gray-500">Round 2</span>
+          <span className="text-[11px] text-gray-500">Pass 2</span>
         </div>
 
         {/* Walk-list rows */}

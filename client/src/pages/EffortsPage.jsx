@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import StatCard from '../components/StatCard.jsx';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 
 const STATUS_BADGE = {
   draft: 'bg-gray-100 text-gray-700',
@@ -114,9 +117,10 @@ function ClaimPanel({ campaignId, effort, walkLists }) {
   );
 }
 
-function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, onUpdate, onArchive, onDelete }) {
+function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewNames, tz, onUpdate, onArchive, onDelete }) {
   const [open, setOpen] = useState(false);
   const survey = surveys.find((s) => String(s._id) === String(effort.surveyTemplateId));
+  const crewTitle = (crewNames || []).join(', ');
   return (
     <>
       <tr className="border-t border-gray-100">
@@ -125,9 +129,14 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, onUpd
         </td>
         <td className="px-4 py-2"><span className={`rounded px-2 py-0.5 text-xs ${STATUS_BADGE[effort.status] || ''}`}>{effort.status}</span></td>
         <td className="px-4 py-2 text-right">{(effort.doorCount || 0).toLocaleString()}</td>
-        <td className="px-4 py-2 text-right">{effort.crewCount || 0}</td>
-        <td className="px-4 py-2">{effort.activeRound ? `Round ${effort.activeRound.roundNumber} · ${effort.activeRound.name}` : <span className="text-gray-400">—</span>}</td>
+        <td className="px-4 py-2 text-right">
+          <span title={crewTitle || undefined} className={crewTitle ? 'cursor-default border-b border-dotted border-gray-300' : undefined}>
+            {effort.crewCount || 0}
+          </span>
+        </td>
+        <td className="px-4 py-2">{effort.activeRound ? `Pass ${effort.activeRound.roundNumber} · ${effort.activeRound.name}` : <span className="text-gray-400">—</span>}</td>
         <td className="px-4 py-2 text-gray-600">{isSurveyType ? (survey ? survey.name : <span className="text-gray-400">campaign default</span>) : <span className="text-gray-400">n/a</span>}</td>
+        <td className="px-4 py-2 text-gray-600">{effort.createdAt ? formatInTz(effort.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : <span className="text-gray-400">—</span>}</td>
         <td className="space-x-2 px-4 py-2 text-right">
           <button onClick={() => setOpen((v) => !v)} className="text-xs font-medium text-brand-700 hover:underline">{open ? 'Close' : 'Manage'}</button>
           {effort.status !== 'archived' && <button onClick={() => onArchive(effort)} className="text-xs text-gray-500 hover:underline">Archive</button>}
@@ -136,7 +145,7 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, onUpd
       </tr>
       {open && (
         <tr className="border-t border-gray-50 bg-gray-50/50">
-          <td colSpan="7" className="px-4 py-3">
+          <td colSpan="8" className="px-4 py-3">
             <div className="grid gap-3 md:grid-cols-2">
               <RosterPanel campaignId={campaignId} effort={effort} />
               <ClaimPanel campaignId={campaignId} effort={effort} walkLists={walkLists} />
@@ -157,7 +166,11 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, onUpd
                   {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
                 </select>
               )}
-              <a href={`/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline">Manage rounds →</a>
+              <a href={`/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline">Manage passes →</a>
+              {effort.activeRound && (
+                <a href={`/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-700 hover:underline">Cut / assign books →</a>
+              )}
+              <a href={`/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-700 hover:underline">Audit on map →</a>
             </div>
           </td>
         </tr>
@@ -186,10 +199,21 @@ export default function EffortsPage() {
   });
   const surveysQ = useQuery({ queryKey: ['admin', 'surveys'], queryFn: () => api('/admin/surveys'), enabled: isSurveyType });
 
+  const orgQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
+  const orgTz = useOrgTimeZone();
+  const tz = selected?.timeZone || orgTz;
+
   const efforts = effortsQ.data?.efforts || [];
   const intakeCount = effortsQ.data?.intakeCount || 0;
   const walkLists = walkListsQ.data?.walkLists || [];
   const surveys = surveysQ.data?.surveys || [];
+
+  // userId → "First Last", to render an effort's crewUserIds as a hover list.
+  const nameByUserId = useMemo(
+    () => new Map((orgQ.data?.members || []).map((m) => [m.user.id, `${m.user.firstName} ${m.user.lastName}`])),
+    [orgQ.data]
+  );
+  const totalDoors = useMemo(() => efforts.reduce((sum, e) => sum + (e.doorCount || 0), 0), [efforts]);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
   const create = useMutation({
@@ -209,9 +233,22 @@ export default function EffortsPage() {
 
       <p className="mb-4 max-w-3xl text-sm text-gray-500">
         An effort is a parallel canvassing operation within a campaign — e.g. an area or a team. Each
-        effort owns a disjoint set of doors, an optional survey, and a roster, and has its own Rounds
+        effort owns a disjoint set of doors, an optional survey, and a roster, and has its own Passes
         (cut on the Turf Cutting page). Doors no one has claimed sit in <strong>Intake</strong>.
       </p>
+
+      {campaignId && (
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <StatCard label="Efforts" value={efforts.length.toLocaleString()} />
+          <StatCard label="Doors assigned" value={totalDoors.toLocaleString()} />
+          <StatCard
+            label="In Intake"
+            value={intakeCount.toLocaleString()}
+            accent={intakeCount > 0 ? 'blue' : undefined}
+            hint={intakeCount > 0 ? 'Awaiting assignment' : undefined}
+          />
+        </div>
+      )}
 
       {intakeCount > 0 && (
         <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
@@ -258,8 +295,9 @@ export default function EffortsPage() {
               <th className="px-4 py-2 text-left">Status</th>
               <th className="px-4 py-2 text-right">Doors</th>
               <th className="px-4 py-2 text-right">Crew</th>
-              <th className="px-4 py-2 text-left">Active round</th>
+              <th className="px-4 py-2 text-left">Active pass</th>
               <th className="px-4 py-2 text-left">Survey</th>
+              <th className="px-4 py-2 text-left">Created</th>
               <th className="px-4 py-2 text-right">Actions</th>
             </tr>
           </thead>
@@ -272,12 +310,14 @@ export default function EffortsPage() {
                 walkLists={walkLists}
                 surveys={surveys}
                 isSurveyType={isSurveyType}
+                crewNames={(e.crewUserIds || []).map((id) => nameByUserId.get(id)).filter(Boolean)}
+                tz={tz}
                 onUpdate={(eff, body) => update.mutate({ id: eff._id, body })}
                 onArchive={(eff) => archive.mutate(eff._id)}
                 onDelete={(eff) => { if (window.confirm(`Delete effort "${eff.name}"? Its doors return to Intake.`)) del.mutate(eff._id); }}
               />
             ))}
-            {!efforts.length && <tr><td colSpan="7" className="px-4 py-6 text-center text-gray-500">No efforts yet.</td></tr>}
+            {!efforts.length && <tr><td colSpan="8" className="px-4 py-6 text-center text-gray-500">No efforts yet.</td></tr>}
           </tbody>
         </table>
       </div>

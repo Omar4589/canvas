@@ -26,11 +26,14 @@ const addSchema = z.object({
   // true = the admin intends to link an EXISTING global account by email.
   // false = create a brand-new account. Lets us give a clear error either way.
   linkExisting: z.boolean().optional().default(false),
+  // Optional supervising admin (in this org). Empty string / null = none.
+  coordinatorId: z.string().nullable().optional(),
 });
 
 const updateMembershipSchema = z.object({
   role: z.enum(['admin', 'canvasser']).optional(),
   isActive: z.boolean().optional(),
+  coordinatorId: z.string().nullable().optional(),
 });
 
 const updateUserSchema = z.object({
@@ -52,6 +55,31 @@ function ensureOrgScoped(req, res) {
     return false;
   }
   return true;
+}
+
+// Validate a coordinatorId for a membership in THIS org. A coordinator must be an
+// active admin in the same org, and can't be the member themselves. Returns
+// { ok, value } where value is the normalized ObjectId|null (null = clear). When
+// `raw` is undefined the field wasn't sent → { ok, skip:true } (leave unchanged).
+async function resolveCoordinatorId(req, raw, memberUserId) {
+  if (raw === undefined) return { ok: true, skip: true };
+  if (raw === null || raw === '') return { ok: true, value: null };
+  if (!mongoose.isValidObjectId(raw)) {
+    return { ok: false, error: 'Invalid coordinatorId.' };
+  }
+  if (memberUserId && String(raw) === String(memberUserId)) {
+    return { ok: false, error: "A member can't be their own coordinator." };
+  }
+  const coord = await Membership.findOne({
+    userId: raw,
+    organizationId: activeOrgId(req),
+    role: 'admin',
+    isActive: true,
+  });
+  if (!coord) {
+    return { ok: false, error: 'Coordinator must be an active admin in this organization.' };
+  }
+  return { ok: true, value: new mongoose.Types.ObjectId(String(raw)) };
 }
 
 function haversineMeters(lat1, lon1, lat2, lon2) {
@@ -90,6 +118,7 @@ router.get('/', async (req, res, next) => {
         role: m.role,
         isActive: m.isActive,
         addedAt: m.createdAt,
+        coordinatorId: m.coordinatorId ? String(m.coordinatorId) : null,
         user: {
           id: String(m.userId._id),
           firstName: m.userId.firstName,
@@ -157,12 +186,16 @@ router.post('/', async (req, res, next) => {
       return res.status(409).json({ error: 'User already a member of this org' });
     }
 
+    const coordRes = await resolveCoordinatorId(req, data.coordinatorId, user._id);
+    if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
+
     const membership = await Membership.create({
       userId: user._id,
       organizationId: activeOrgId(req),
       role: data.role,
       isActive: true,
       addedBy: req.user._id,
+      coordinatorId: coordRes.value || null,
     });
 
     res.status(201).json({
@@ -171,6 +204,7 @@ router.post('/', async (req, res, next) => {
         role: membership.role,
         isActive: membership.isActive,
         addedAt: membership.createdAt,
+        coordinatorId: membership.coordinatorId ? String(membership.coordinatorId) : null,
         user: user.toSafeJSON(),
       },
     });
@@ -196,6 +230,11 @@ router.patch('/:userId', async (req, res, next) => {
       return res.status(400).json({
         error: "You can't change your own role. Ask another admin.",
       });
+    }
+    if ('coordinatorId' in data) {
+      const coordRes = await resolveCoordinatorId(req, data.coordinatorId, req.params.userId);
+      if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
+      data.coordinatorId = coordRes.value ?? null;
     }
     const membership = await Membership.findOneAndUpdate(
       { userId: req.params.userId, organizationId: activeOrgId(req) },

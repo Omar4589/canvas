@@ -8,7 +8,7 @@ export const NAV = [
   { to: '/map', label: 'Map', primary: true },
   { to: '/efforts', label: 'Efforts' },
   { to: '/turfs', label: 'Turf Cutting' },
-  { to: '/passes', label: 'Rounds' },
+  { to: '/passes', label: 'Passes' },
   { to: '/walklists', label: 'Walk Lists' },
   { to: '/campaigns', label: 'Campaigns', primary: true },
   { to: '/import', label: 'CSV Import' },

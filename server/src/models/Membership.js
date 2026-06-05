@@ -21,6 +21,9 @@ const membershipSchema = new mongoose.Schema(
     },
     isActive: { type: Boolean, default: true },
     addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // The admin (in this same org) who oversees this member. Used to group
+    // canvassers under a team lead / coordinator. null = no coordinator.
+    coordinatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     // null = the user hasn't yet seen the "you were added to this org" banner;
     // a timestamp = they dismissed it. Existing rows are backfilled to createdAt
     // (see migrateAckMemberships.js) so we don't banner-spam current members.
@@ -31,5 +34,6 @@ const membershipSchema = new mongoose.Schema(
 
 membershipSchema.index({ userId: 1, organizationId: 1 }, { unique: true });
 membershipSchema.index({ organizationId: 1, role: 1 });
+membershipSchema.index({ organizationId: 1, coordinatorId: 1 });
 
 export const Membership = mongoose.model('Membership', membershipSchema);

@@ -4,7 +4,7 @@ import PhoneMockup from './mockups/PhoneMockup.jsx';
 // MobileAppSection — the field-app pitch. Copy + bullets left, phone mockup right.
 const BULLETS = [
   'GPS-stamped knocks logged at every door you visit',
-  'Walk your assigned books and rounds on the map',
+  'Walk your assigned books and passes on the map',
   'Run door surveys and scripts, capturing responses per voter',
   "Offline action queue that syncs to the dashboard the second you're back online",
 ];

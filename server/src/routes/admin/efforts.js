@@ -100,6 +100,7 @@ router.get('/', async (req, res, next) => {
         ...e,
         doorCount: doorMap.get(String(e._id)) || 0,
         crewCount: crewByEffort.get(String(e._id))?.size || 0,
+        crewUserIds: [...(crewByEffort.get(String(e._id)) || [])],
         activeRound: activeMap.get(String(e._id)) || null,
       })),
       intakeCount,
