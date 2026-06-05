@@ -8,6 +8,7 @@ import { Household } from '../../models/Household.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
+import { canvasserHouseholdScope } from '../../services/canvass/canvasserScope.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -188,6 +189,20 @@ router.get('/today', async (req, res, next) => {
       start.setHours(0, 0, 0, 0);
     }
 
+    // "Remaining" must match the doors the canvasser actually sees on their map:
+    // their assigned books (admins → whole campaign), active, still unknocked, and
+    // NOT fully early-voted. The map drops fully-voted doors and the admin dashboard
+    // buckets them as "Voted"; without these filters "remaining" overcounts them.
+    const remainingFilter = {
+      campaignId: cId,
+      organizationId: orgId,
+      isActive: true,
+      fullyVoted: { $ne: true },
+      status: 'unknocked',
+    };
+    const scope = await canvasserHouseholdScope(req, access.campaign);
+    if (scope) remainingFilter._id = { $in: scope };
+
     const [stats, remaining] = await Promise.all([
       computeDailyStats({
         orgId,
@@ -196,12 +211,7 @@ router.get('/today', async (req, res, next) => {
         start,
         end: new Date(now),
       }),
-      Household.countDocuments({
-        campaignId: cId,
-        organizationId: orgId,
-        isActive: true,
-        status: 'unknocked',
-      }),
+      Household.countDocuments(remainingFilter),
     ]);
 
     res.json({ ...stats, remaining });

@@ -13,6 +13,7 @@ import { VotedVoter } from '../../models/VotedVoter.js';
 import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
+import { canvasserHouseholdScope, isOrgAdminOrSuper } from '../../services/canvass/canvasserScope.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -29,11 +30,6 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
-function isOrgAdminOrSuper(req) {
-  if (req.user.isSuperAdmin) return true;
-  return req.activeMembership?.role === 'admin';
-}
-
 async function assertCampaignAccess(req, campaignId) {
   if (!mongoose.isValidObjectId(campaignId)) return { error: 400, message: 'Invalid campaignId' };
   const orgId = activeOrgId(req);
@@ -44,24 +40,6 @@ async function assertCampaignAccess(req, campaignId) {
   const assigned = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.user._id });
   if (!assigned) return { error: 403, message: 'Not assigned to this campaign' };
   return { campaign };
-}
-
-// A canvasser only sees households in the books ASSIGNED to them on the
-// campaign's ACTIVE rounds — UNIONED across all active efforts (a canvasser can
-// be on more than one effort). Returns:
-//   null  -> no restriction (admin/super see everything)
-//   [...] -> the allowed household ids; an EMPTY array ⇒ they see nothing.
-async function canvasserHouseholdScope(req, campaign) {
-  if (isOrgAdminOrSuper(req)) return null;
-  const passIds = await activePassIds(campaign._id);
-  if (!passIds.length) return []; // no active round anywhere → see nothing
-  const myTurfs = await TurfAssignment.find(
-    { userId: req.user._id, campaignId: campaign._id, passId: { $in: passIds } },
-    { turfId: 1 }
-  ).lean();
-  if (!myTurfs.length) return []; // not assigned a book on any active round
-  const books = await Turf.find({ _id: { $in: myTurfs.map((a) => a.turfId) } }, { householdIds: 1 }).lean();
-  return books.flatMap((b) => b.householdIds || []);
 }
 
 // The canvasser's assigned books across ALL active rounds, each tagged with its
