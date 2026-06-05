@@ -7,8 +7,8 @@ import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
-import TurfAssignmentsModal from '../components/TurfAssignmentsModal.jsx';
-import BulkAssignModal from '../components/BulkAssignModal.jsx';
+import BookAssignmentPanel from '../components/BookAssignmentPanel.jsx';
+import StatCard from '../components/StatCard.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -376,8 +376,6 @@ export default function TurfsPage() {
   const [maxDoors, setMaxDoors] = useState(65);
   const [flex, setFlex] = useState('compact');
   const [jobId, setJobId] = useState(null);
-  const [assignTurf, setAssignTurf] = useState(null);
-  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
 
   const [editMode, setEditMode] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState(new Set());
@@ -386,7 +384,6 @@ export default function TurfsPage() {
   const [showDiscard, setShowDiscard] = useState(false);
   const [clearKnocks, setClearKnocks] = useState(false);
   const [lastSnapshotId, setLastSnapshotId] = useState(null);
-  const [focusedBookId, setFocusedBookId] = useState(null);
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
   const [popupBuildingKey, setPopupBuildingKey] = useState(null);
 
@@ -396,7 +393,8 @@ export default function TurfsPage() {
   const editModeRef = useRef(false);
   const moveDoorRef = useRef(() => {});
   const toggleSelectRef = useRef(() => {});
-  const lastFocusRef = useRef(null);
+  const clearSelectionRef = useRef(() => {});
+  const fittedSigRef = useRef(null);
   const openPopupRef = useRef(() => {});
   const openBuildingPopupRef = useRef(() => {});
   const buildingMarkersRef = useRef([]);
@@ -419,7 +417,7 @@ export default function TurfsPage() {
   const draftCount = turfs.filter((t) => t.status === 'draft').length;
   const publishedCount = turfs.filter((t) => t.status === 'published').length;
   const colorByTurf = useMemo(() => new Map(turfs.map((t, i) => [String(t._id), colorFor(i)])), [turfsQ.data]);
-  const focusedBook = turfs.find((t) => String(t._id) === focusedBookId) || null;
+  const selectedTurfs = turfs.filter((t) => selectedBooks.has(String(t._id)));
   // Group stacked apartment units (same geocode) into buildings; lone doors stay
   // singles. Used for the dot layer, the building markers, and the popup.
   const grouped = useMemo(() => groupDoors(doorsQ.data?.doors || []), [doorsQ.data]);
@@ -456,10 +454,18 @@ export default function TurfsPage() {
   });
   const assignedByTurf = new Map();
   for (const a of assignmentsQ.data?.assignments || []) {
-    const arr = assignedByTurf.get(a.turfId) || [];
+    const key = String(a.turfId);
+    const arr = assignedByTurf.get(key) || [];
     arr.push(a.user);
-    assignedByTurf.set(a.turfId, arr);
+    assignedByTurf.set(key, arr);
   }
+
+  // At-a-glance summary (all client-derived from data already loaded).
+  const totalHouses = turfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
+  const assignedUserSet = new Set();
+  for (const arr of assignedByTurf.values()) for (const u of arr) assignedUserSet.add(u.id);
+  const booksUnassigned = turfs.filter((t) => !(assignedByTurf.get(String(t._id)) || []).length).length;
+  const selectedDoors = selectedTurfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
 
   // Single household detail for the click-a-dot popup.
   const householdQ = useQuery({
@@ -499,7 +505,6 @@ export default function TurfsPage() {
     },
     onSuccess: (res) => {
       setJobId(res.jobId);
-      setFocusedBookId(null);
       if (drawRef.current) drawRef.current.deleteAll();
       setDrawnPolygon(null);
     },
@@ -519,7 +524,6 @@ export default function TurfsPage() {
       setClearKnocks(false);
       setSelectedBooks(new Set());
       setEditMode(false);
-      setFocusedBookId(null);
       setLastSnapshotId(res?.snapshotId || null);
       invalidateTurfs();
       qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] });
@@ -563,11 +567,16 @@ export default function TurfsPage() {
     onSuccess: invalidateTurfs,
   });
 
+  // A book is selected by clicking it in the list OR on the map; clicking again
+  // toggles it off. The same Set drives the highlight in both places and the panel.
+  const toggleBook = (id) =>
+    setSelectedBooks((s) => { const k = String(id); const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+
   // keep refs current for the once-registered map handlers
   editModeRef.current = editMode;
   moveDoorRef.current = (householdId, toTurfId) => moveDoor.mutate({ householdId, toTurfId });
-  toggleSelectRef.current = (id) =>
-    setSelectedBooks((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  toggleSelectRef.current = toggleBook;
+  clearSelectionRef.current = () => setSelectedBooks(new Set());
   openPopupRef.current = (id) => { setPopupBuildingKey(null); setPopupHouseholdId(id); };
   openBuildingPopupRef.current = (key) => { setPopupHouseholdId(null); setPopupBuildingKey(key); };
 
@@ -590,7 +599,7 @@ export default function TurfsPage() {
     map.on('load', () => {
       const empty = { type: 'FeatureCollection', features: [] };
       map.addSource('books', { type: 'geojson', data: empty });
-      map.addLayer({ id: 'book-fill', type: 'fill', source: 'books', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.16 } });
+      map.addLayer({ id: 'book-fill', type: 'fill', source: 'books', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['get', 'selected'], 0.3, 0.16] } });
       map.addLayer({
         id: 'book-outline',
         type: 'line',
@@ -618,13 +627,21 @@ export default function TurfsPage() {
         },
       });
 
-      // Merge: click a book to toggle selection (edit mode). Skip if a house is
-      // under the click — that's a door tap, handled by the doors layer below.
+      // Click a book polygon to toggle it into the selection (drives the assignment
+      // panel + highlight). Skip if a house is under the click — that's a door tap,
+      // handled by the doors layer below.
       map.on('click', 'book-fill', (e) => {
-        if (!editModeRef.current) return;
         if (map.queryRenderedFeatures(e.point, { layers: ['doors'] }).length) return;
         const id = e.features?.[0]?.properties?.id;
         if (id) toggleSelectRef.current(id);
+      });
+      map.on('mouseenter', 'book-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'book-fill', () => { map.getCanvas().style.cursor = ''; });
+
+      // Click empty map (not a book, not a door) → clear the selection.
+      map.on('click', (e) => {
+        if (map.queryRenderedFeatures(e.point, { layers: ['book-fill', 'doors'] }).length) return;
+        clearSelectionRef.current();
       });
 
       // Click a house (any mode) → popup with address + members + book + move-to-book.
@@ -649,56 +666,44 @@ export default function TurfsPage() {
     map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs));
     map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf));
 
-    // Per-book focus: filter every layer to the focused book (its doors too) and
-    // zoom to it; otherwise clear the filters and fit all books. Re-zoom only when
-    // the focus target actually changes so unrelated repaints don't yank the view.
-    const focused = focusedBookId && turfs.find((t) => String(t._id) === focusedBookId);
-    const focusChanged = lastFocusRef.current !== focusedBookId;
-    lastFocusRef.current = focusedBookId;
-    if (focused) {
-      const onId = ['==', ['get', 'id'], focusedBookId];
-      map.setFilter('book-fill', onId);
-      map.setFilter('book-outline', onId);
-      map.setFilter('book-labels', onId);
-      map.setFilter('doors', ['==', ['get', 'turfId'], focusedBookId]);
-      if (focusChanged) {
-        const bb = bboxOf([focused]);
-        if (bb) map.fitBounds(bb, { padding: 60, maxZoom: 16, duration: 400 });
-      }
-    } else {
-      map.setFilter('book-fill', null);
-      map.setFilter('book-outline', null);
-      map.setFilter('book-labels', null);
-      map.setFilter('doors', null);
-      // Fit to the books, or — before any cut — to the raw house dots.
+    // All books/doors stay visible — selection just thickens the outline + brightens
+    // the fill (the `selected` paint props). Selecting books never hides the rest, so
+    // multi-select on the map stays usable and you keep the full picture.
+    map.setFilter('book-fill', null);
+    map.setFilter('book-outline', null);
+    map.setFilter('book-labels', null);
+    map.setFilter('doors', null);
+
+    // Fit to the books (or raw house dots before any cut) ONCE per data set — keyed
+    // by the book-id signature so selection toggles and assignment refetches never
+    // yank the admin's pan/zoom. Switching pass changes the signature → refits.
+    const sig = turfs.map((t) => String(t._id)).join(',') || `doors:${(doorsQ.data?.doors || []).length}`;
+    if (fittedSigRef.current !== sig) {
+      fittedSigRef.current = sig;
       const bb = bboxOf(turfs) || bboxOfDoors(doorsQ.data?.doors);
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }
-  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, focusedBookId]);
+  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady]);
 
   // Building markers (HTML overlays) for stacked apartment units — synced apart
-  // from paint() so book-select toggles don't churn the DOM. Honors per-book
-  // focus by only showing buildings in the focused book.
+  // from paint() so book-select toggles don't churn the DOM.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     buildingMarkersRef.current.forEach((m) => m.remove());
     buildingMarkersRef.current = [];
-    const visible = focusedBookId
-      ? grouped.buildings.filter((b) => String(b.turfId) === String(focusedBookId))
-      : grouped.buildings;
-    for (const b of visible) {
+    for (const b of grouped.buildings) {
       const color = colorByTurf.get(String(b.turfId)) || '#9ca3af';
       const el = buildingMarkerEl(b.total, color);
       el.addEventListener('click', (ev) => { ev.stopPropagation(); openBuildingPopupRef.current(b.key); });
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([b.lng, b.lat]).addTo(map);
       buildingMarkersRef.current.push(marker);
     }
-  }, [grouped, colorByTurf, focusedBookId, mapReady]);
+  }, [grouped, colorByTurf, mapReady]);
 
-  // Reset focus when switching pass/campaign (the focused id won't exist there).
-  useEffect(() => { setFocusedBookId(null); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
+  // Clear selection + popups when switching pass/campaign (those books are gone).
+  useEffect(() => { setSelectedBooks(new Set()); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
 
   function startDraw() {
     if (drawRef.current) { drawRef.current.deleteAll(); drawRef.current.changeMode('draw_polygon'); }
@@ -724,6 +729,29 @@ export default function TurfsPage() {
           )}
         </div>
       </div>
+
+      {!!turfs.length && (
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard label="Books" value={turfs.length.toLocaleString()} hint={draftCount ? `${draftCount} draft` : undefined} />
+          <StatCard
+            label="Houses"
+            value={totalHouses.toLocaleString()}
+            hint={unassignedCount > 0 ? `${unassignedCount.toLocaleString()} not in a book` : undefined}
+          />
+          <StatCard
+            label="Canvassers assigned"
+            value={assignedUserSet.size.toLocaleString()}
+            accent={assignedUserSet.size ? 'brand' : undefined}
+            hint={booksUnassigned > 0 ? `${booksUnassigned} book${booksUnassigned === 1 ? '' : 's'} unassigned` : 'every book covered'}
+          />
+          <StatCard
+            label="Selected"
+            value={selectedBooks.size.toLocaleString()}
+            accent={selectedBooks.size ? 'brand' : undefined}
+            hint={selectedBooks.size ? `${selectedDoors.toLocaleString()} doors` : undefined}
+          />
+        </div>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
         <section className="rounded-lg border border-gray-200 bg-white p-5">
@@ -849,8 +877,8 @@ export default function TurfsPage() {
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{turfs.length} books{draftCount ? ` · ${draftCount} draft` : ''}</span>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setEditMode((v) => !v)} className={`rounded px-2 py-1 text-xs font-medium ${editMode ? 'bg-gray-800 text-white' : 'border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
-                    {editMode ? 'Editing' : 'Edit'}
+                  <button onClick={() => setEditMode((v) => !v)} title="Rename books" className={`rounded px-2 py-1 text-xs font-medium ${editMode ? 'bg-gray-800 text-white' : 'border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                    {editMode ? 'Renaming' : 'Rename'}
                   </button>
                   {draftCount > 0 && (
                     <button onClick={() => accept.mutate()} disabled={accept.isPending} className="rounded bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
@@ -867,37 +895,30 @@ export default function TurfsPage() {
                 </div>
               </div>
 
+              <div className="mb-2 flex items-center gap-3 text-xs">
+                <button onClick={() => setSelectedBooks(new Set(turfs.map((t) => String(t._id))))} className="font-medium text-brand-700 hover:underline">Select all</button>
+                {selectedBooks.size > 0 && (
+                  <button onClick={() => setSelectedBooks(new Set())} className="font-medium text-gray-500 hover:underline">Clear ({selectedBooks.size})</button>
+                )}
+                <span className="text-gray-400">Click a book (here or on the map) to assign canvassers.</span>
+              </div>
+
               {editMode && (
                 <div className="mb-2 rounded bg-gray-50 px-2 py-1.5 text-xs text-gray-600">
-                  Click books to select. Click a house to view it or move it to another book.
-                  {selectedBooks.size >= 1 && (
-                    <button onClick={() => setBulkAssignOpen(true)} className="ml-2 rounded bg-brand-600 px-2 py-0.5 font-semibold text-white">
-                      Assign {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'}
-                    </button>
-                  )}
-                  {selectedBooks.size >= 2 && (
-                    <button onClick={() => merge.mutate([...selectedBooks])} className="ml-2 rounded border border-gray-300 bg-white px-2 py-0.5 font-semibold text-gray-700 hover:bg-gray-50">
-                      Merge {selectedBooks.size}
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {focusedBook && (
-                <div className="mb-2 flex items-center justify-between rounded bg-brand-50 px-2 py-1 text-xs text-brand-700">
-                  <span className="truncate">Showing <strong>{focusedBook.name}</strong> only</span>
-                  <button onClick={() => setFocusedBookId(null)} className="ml-2 shrink-0 font-semibold hover:underline">Show all</button>
+                  Rename mode: edit a book's name below. Selecting/assigning still works as usual.
                 </div>
               )}
 
               <ul className="max-h-72 space-y-1 overflow-auto text-sm">
-                {turfs.map((t, i) => (
+                {turfs.map((t, i) => {
+                  const selected = selectedBooks.has(String(t._id));
+                  return (
                   <li
                     key={t._id}
-                    onClick={() => setFocusedBookId((cur) => (cur === String(t._id) ? null : String(t._id)))}
-                    title="Click to show only this book on the map"
+                    onClick={() => toggleBook(t._id)}
+                    title="Click to select this book (assign on the panel); click again to deselect"
                     className={`flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-0.5 ${
-                      focusedBookId === String(t._id) ? 'bg-brand-50 ring-1 ring-brand-300' : 'hover:bg-gray-50'
+                      selected ? 'bg-brand-50 ring-1 ring-brand-300' : 'hover:bg-gray-50'
                     }`}
                   >
                     <span className="flex min-w-0 items-center gap-2 truncate">
@@ -929,10 +950,10 @@ export default function TurfsPage() {
                         );
                       })()}
                       <span className="text-gray-500">{t.eligibleDoorCount ?? t.doorCount}</span>
-                      <button onClick={(e) => { e.stopPropagation(); setAssignTurf(t); }} className="text-xs font-medium text-brand-600 hover:underline">Assign</button>
                     </span>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -1017,6 +1038,17 @@ export default function TurfsPage() {
               onClose={() => setPopupBuildingKey(null)}
             />
           )}
+          {selectedTurfs.length > 0 && (
+            <BookAssignmentPanel
+              campaignId={campaignId}
+              passId={passId}
+              books={selectedTurfs}
+              assignedByTurf={assignedByTurf}
+              onClear={() => setSelectedBooks(new Set())}
+              onMerge={() => merge.mutate([...selectedBooks])}
+              mergePending={merge.isPending}
+            />
+          )}
         </section>
       </div>
 
@@ -1030,20 +1062,6 @@ export default function TurfsPage() {
           error={discard.error}
           onCancel={() => { setShowDiscard(false); setClearKnocks(false); }}
           onConfirm={() => discard.mutate({ confirmActive: isActivePass, clearKnocks })}
-        />
-      )}
-      {assignTurf && (
-        <TurfAssignmentsModal
-          campaignId={campaignId}
-          turf={assignTurf}
-          onClose={() => { setAssignTurf(null); qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] }); }}
-        />
-      )}
-      {bulkAssignOpen && (
-        <BulkAssignModal
-          campaignId={campaignId}
-          turfIds={[...selectedBooks]}
-          onClose={() => { setBulkAssignOpen(false); qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] }); }}
         />
       )}
     </div>
