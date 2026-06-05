@@ -54,7 +54,7 @@ export default function BooksScreen() {
     };
   }, [router]);
 
-  const { data, isLoading, error, refetch } = useQuery({
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['bootstrap'],
     queryFn: async () => {
       try {
@@ -308,6 +308,13 @@ export default function BooksScreen() {
         <View style={styles.header}>
           <Logo size={24} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <Pressable onPress={() => refetch()} hitSlop={8} disabled={isFetching}>
+              {isFetching ? (
+                <ActivityIndicator size="small" color={colors.brand} />
+              ) : (
+                <Text style={styles.refreshIcon}>↻</Text>
+              )}
+            </Pressable>
             <Pressable onPress={() => router.push('/(app)/voters')} hitSlop={8}>
               <Text style={styles.switch}>Voters</Text>
             </Pressable>
@@ -363,6 +370,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   switch: { color: colors.brand, fontWeight: '600', fontSize: 14 },
+  refreshIcon: { color: colors.brand, fontSize: 20, fontWeight: '700' },
   effortRow: { marginHorizontal: 12, marginBottom: 8, zIndex: 10 },
   hint: {
     marginHorizontal: 12,
