@@ -3,7 +3,8 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { loadActiveCampaign, saveActiveCampaign, clearBootstrap } from '../lib/cache';
-import { colors, radius, spacing, type, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // Active-campaign selector chip + dropdown. Used by the campaign-scoped admin
 // tabs (Canvassers, Map) now that the admin home is an org overview. Self-loads
@@ -11,6 +12,7 @@ import { colors, radius, spacing, type, shadow } from '../lib/theme';
 // saveActiveCampaign, and notifies the parent through onChange(campaign).
 export default function CampaignChip({ value, onChange }) {
   const qc = useQueryClient();
+  const styles = useThemedStyles(makeStyles);
   const [open, setOpen] = useState(false);
   const [restored, setRestored] = useState(false);
 
@@ -90,34 +92,36 @@ export default function CampaignChip({ value, onChange }) {
   );
 }
 
-const styles = StyleSheet.create({
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-  },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brand, marginRight: spacing.sm },
-  chipText: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  chevron: { fontSize: 12, color: colors.textSecondary, marginLeft: spacing.sm },
-  menu: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.xs,
-    marginTop: spacing.sm,
-    ...shadow.raised,
-  },
-  item: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2 },
-  itemActive: { backgroundColor: colors.brandTint },
-  itemText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  itemTextActive: { color: colors.brand },
-  itemMeta: { ...type.caption, marginTop: 2 },
-  empty: { ...type.caption, padding: spacing.md, textAlign: 'center' },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    chip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: t.colors.card,
+      borderRadius: radius.pill,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      ...t.shadow.card,
+    },
+    dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: t.colors.brand, marginRight: spacing.sm },
+    chipText: { flex: 1, fontSize: 14, fontWeight: '600', color: t.colors.textPrimary },
+    chevron: { fontSize: 12, color: t.colors.textSecondary, marginLeft: spacing.sm },
+    menu: {
+      backgroundColor: t.colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      paddingVertical: spacing.xs,
+      marginTop: spacing.sm,
+      ...t.shadow.raised,
+    },
+    item: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2 },
+    itemActive: { backgroundColor: t.colors.brandTint },
+    itemText: { fontSize: 14, fontWeight: '600', color: t.colors.textPrimary },
+    itemTextActive: { color: t.colors.brand },
+    itemMeta: { ...t.type.caption, marginTop: 2 },
+    empty: { ...t.type.caption, padding: spacing.md, textAlign: 'center' },
+  });
+}

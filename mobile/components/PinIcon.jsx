@@ -1,9 +1,12 @@
 import Svg, { Path, Rect } from 'react-native-svg';
-import { colors } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
 
 // A small house-shaped map pin, color-coded by status. Used inline in the UI
 // (legends, list items, stats cards) so it visually echoes the actual map pins.
+// The status palette is fixed across light/dark (pins stay distinguishable), and
+// the house silhouette stays white on top of the status color in both themes.
 export default function PinIcon({ status = 'unknocked', size = 28 }) {
+  const { colors } = useTheme();
   const fill = colors.status[status] || colors.status.unknocked;
   const w = size;
   const h = size * (44 / 36);

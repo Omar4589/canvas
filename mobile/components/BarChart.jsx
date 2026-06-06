@@ -1,5 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, radius, spacing, type } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // Lightweight horizontal bar chart. No charting library.
 // data: [{ label, value, secondaryValue?, color? }]
@@ -15,6 +17,8 @@ export default function BarChart({
   secondaryLabel,
   height = 10,
 }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const fmt = valueFormat || ((v) => v?.toLocaleString?.() ?? String(v ?? 0));
   const computedMax =
     max ??
@@ -78,60 +82,62 @@ export default function BarChart({
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginVertical: 3,
-  },
-  label: {
-    ...type.caption,
-    width: 84,
-    color: colors.textSecondary,
-  },
-  track: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    borderRadius: radius.sm,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  bar: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    borderRadius: radius.sm,
-  },
-  secondary: {
-    backgroundColor: colors.border,
-  },
-  value: {
-    ...type.caption,
-    width: 50,
-    textAlign: 'right',
-    color: colors.textPrimary,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  empty: {
-    ...type.caption,
-    fontStyle: 'italic',
-    color: colors.textMuted,
-    paddingVertical: spacing.sm,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.sm,
-    gap: spacing.xs,
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  secondaryDot: { backgroundColor: colors.border },
-  legendText: { ...type.caption, color: colors.textMuted },
-  legendSpacer: { flex: 1 },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginVertical: 3,
+    },
+    label: {
+      ...t.type.caption,
+      width: 84,
+      color: t.colors.textSecondary,
+    },
+    track: {
+      flex: 1,
+      backgroundColor: t.colors.bg,
+      borderRadius: radius.sm,
+      overflow: 'hidden',
+      position: 'relative',
+    },
+    bar: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      borderRadius: radius.sm,
+    },
+    secondary: {
+      backgroundColor: t.colors.border,
+    },
+    value: {
+      ...t.type.caption,
+      width: 50,
+      textAlign: 'right',
+      color: t.colors.textPrimary,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+    empty: {
+      ...t.type.caption,
+      fontStyle: 'italic',
+      color: t.colors.textMuted,
+      paddingVertical: spacing.sm,
+    },
+    legendRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: spacing.sm,
+      gap: spacing.xs,
+    },
+    legendDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    secondaryDot: { backgroundColor: t.colors.border },
+    legendText: { ...t.type.caption, color: t.colors.textMuted },
+    legendSpacer: { flex: 1 },
+  });
+}

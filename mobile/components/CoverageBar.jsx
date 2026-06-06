@@ -1,5 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, radius, spacing, type } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // Segmented coverage bar mirroring the web CoverageBar: one proportional segment
 // per household status, colored from colors.status. `compact` renders just the
@@ -14,6 +16,8 @@ const SEGMENTS = [
 ];
 
 export default function CoverageBar({ canvass = {}, compact = false }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const total = SEGMENTS.reduce((s, seg) => s + (canvass[seg.key] || 0), 0);
   if (!total) {
     return compact ? <View style={styles.barEmpty} /> : <Text style={styles.empty}>No households yet.</Text>;
@@ -42,20 +46,22 @@ export default function CoverageBar({ canvass = {}, compact = false }) {
   );
 }
 
-const styles = StyleSheet.create({
-  bar: {
-    flexDirection: 'row',
-    height: 10,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-    backgroundColor: colors.border,
-  },
-  barCompact: { height: 8 },
-  barEmpty: { height: 8, borderRadius: radius.pill, backgroundColor: colors.border },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm },
-  legendItem: { flexDirection: 'row', alignItems: 'center', marginRight: spacing.md, marginTop: 2 },
-  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 4 },
-  legendLabel: { ...type.caption, color: colors.textSecondary, marginRight: 4 },
-  legendCount: { fontSize: 12, fontWeight: '700', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
-  empty: { ...type.caption, color: colors.textMuted },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    bar: {
+      flexDirection: 'row',
+      height: 10,
+      borderRadius: radius.pill,
+      overflow: 'hidden',
+      backgroundColor: t.colors.border,
+    },
+    barCompact: { height: 8 },
+    barEmpty: { height: 8, borderRadius: radius.pill, backgroundColor: t.colors.border },
+    legend: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm },
+    legendItem: { flexDirection: 'row', alignItems: 'center', marginRight: spacing.md, marginTop: 2 },
+    dot: { width: 8, height: 8, borderRadius: 4, marginRight: 4 },
+    legendLabel: { ...t.type.caption, color: t.colors.textSecondary, marginRight: 4 },
+    legendCount: { fontSize: 12, fontWeight: '700', color: t.colors.textPrimary, fontVariant: ['tabular-nums'] },
+    empty: { ...t.type.caption, color: t.colors.textMuted },
+  });
+}

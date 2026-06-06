@@ -10,7 +10,9 @@ import {
   TurboModuleRegistry,
   NativeModules,
 } from 'react-native';
-import { colors, radius, spacing, type, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
+import { useThemedStyles } from '../lib/useThemedStyles';
 import { quickRangeFor } from '../lib/dateRanges';
 
 // The native module behind @react-native-community/datetimepicker ('RNCDatePicker')
@@ -75,6 +77,8 @@ export default function DateRangePickerModal({
   onClose,
   onApply,
 }) {
+  const { isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [from, setFrom] = useState(parseYmd(initialFrom));
   const [to, setTo] = useState(parseYmd(initialTo));
   const [showFromPicker, setShowFromPicker] = useState(false);
@@ -116,6 +120,8 @@ export default function DateRangePickerModal({
     if (Platform.OS === 'android') setShowToPicker(false);
     if (date) setTo(date);
   }
+
+  const pickerTheme = isDark ? 'dark' : 'light';
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -162,6 +168,7 @@ export default function DateRangePickerModal({
                 value={from || new Date()}
                 mode="date"
                 display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                themeVariant={pickerTheme}
                 onChange={onFromChange}
               />
               {Platform.OS === 'ios' && (
@@ -195,6 +202,7 @@ export default function DateRangePickerModal({
                 value={to || new Date()}
                 mode="date"
                 display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                themeVariant={pickerTheme}
                 onChange={onToChange}
               />
               {Platform.OS === 'ios' && (
@@ -226,100 +234,102 @@ export default function DateRangePickerModal({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  sheet: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    width: '100%',
-    maxWidth: 480,
-    ...shadow.raised,
-  },
-  title: {
-    ...type.h2,
-    marginBottom: spacing.md,
-  },
-  unavailableNote: {
-    ...type.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
-  },
-  quickRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  quickChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.brandTint,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.brandTint,
-  },
-  quickChipText: { color: colors.brand, fontWeight: '600', fontSize: 12 },
-  fieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginVertical: spacing.xs,
-  },
-  fieldLabel: { ...type.caption, width: 48, color: colors.textSecondary },
-  fieldButton: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.bg,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  fieldValue: { ...type.body, color: colors.textPrimary },
-  clear: {
-    color: colors.textMuted,
-    fontSize: 16,
-    paddingHorizontal: spacing.xs,
-  },
-  pickerHost: {
-    marginBottom: spacing.sm,
-    backgroundColor: colors.bg,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  doneBtn: {
-    alignSelf: 'flex-end',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  doneText: { color: colors.brand, fontWeight: '700' },
-  hint: {
-    ...type.caption,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  btnRow: { flexDirection: 'row', gap: spacing.sm },
-  btn: {
-    flex: 1,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  btnGhost: {
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  btnGhostText: { color: colors.textPrimary, fontWeight: '600' },
-  btnPrimary: { backgroundColor: colors.brand },
-  btnPrimaryText: { color: colors.textInverse, fontWeight: '700' },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: t.colors.backdrop,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: spacing.lg,
+    },
+    sheet: {
+      backgroundColor: t.colors.card,
+      borderRadius: radius.lg,
+      padding: spacing.lg,
+      width: '100%',
+      maxWidth: 480,
+      ...t.shadow.raised,
+    },
+    title: {
+      ...t.type.h2,
+      marginBottom: spacing.md,
+    },
+    unavailableNote: {
+      ...t.type.caption,
+      color: t.colors.textSecondary,
+      marginBottom: spacing.md,
+    },
+    quickRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+      marginBottom: spacing.md,
+    },
+    quickChip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      backgroundColor: t.colors.brandTint,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: t.colors.brandTint,
+    },
+    quickChipText: { color: t.colors.brand, fontWeight: '600', fontSize: 12 },
+    fieldRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginVertical: spacing.xs,
+    },
+    fieldLabel: { ...t.type.caption, width: 48, color: t.colors.textSecondary },
+    fieldButton: {
+      flex: 1,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      backgroundColor: t.colors.bg,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+    },
+    fieldValue: { ...t.type.body, color: t.colors.textPrimary },
+    clear: {
+      color: t.colors.textMuted,
+      fontSize: 16,
+      paddingHorizontal: spacing.xs,
+    },
+    pickerHost: {
+      marginBottom: spacing.sm,
+      backgroundColor: t.colors.bg,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+    },
+    doneBtn: {
+      alignSelf: 'flex-end',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    doneText: { color: t.colors.brand, fontWeight: '700' },
+    hint: {
+      ...t.type.caption,
+      color: t.colors.textMuted,
+      marginTop: spacing.xs,
+      marginBottom: spacing.md,
+    },
+    btnRow: { flexDirection: 'row', gap: spacing.sm },
+    btn: {
+      flex: 1,
+      paddingVertical: spacing.md,
+      borderRadius: radius.md,
+      alignItems: 'center',
+    },
+    btnGhost: {
+      backgroundColor: t.colors.bg,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+    },
+    btnGhostText: { color: t.colors.textPrimary, fontWeight: '600' },
+    btnPrimary: { backgroundColor: t.colors.brand },
+    btnPrimaryText: { color: t.colors.textInverse, fontWeight: '700' },
+  });
+}

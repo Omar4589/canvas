@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { View, TextInput, Pressable, StyleSheet } from 'react-native';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
-import { colors, radius, spacing } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 function EyeIcon({ off }) {
+  const { colors } = useTheme();
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
       <Path
@@ -36,6 +39,8 @@ export default function PasswordInput({
   autoComplete = 'password',
   style,
 }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [visible, setVisible] = useState(false);
   return (
     <View style={[styles.wrap, style]}>
@@ -62,29 +67,31 @@ export default function PasswordInput({
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    position: 'relative',
-    justifyContent: 'center',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    paddingRight: 44,
-    fontSize: 16,
-    backgroundColor: colors.card,
-    color: colors.textPrimary,
-  },
-  eyeButton: {
-    position: 'absolute',
-    right: spacing.sm,
-    top: 0,
-    bottom: 0,
-    width: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    wrap: {
+      position: 'relative',
+      justifyContent: 'center',
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
+      paddingRight: 44,
+      fontSize: 16,
+      backgroundColor: t.colors.card,
+      color: t.colors.textPrimary,
+    },
+    eyeButton: {
+      position: 'absolute',
+      right: spacing.sm,
+      top: 0,
+      bottom: 0,
+      width: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+  });
+}

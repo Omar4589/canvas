@@ -1,9 +1,11 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors, spacing, type } from '../lib/theme';
+import { spacing } from '../lib/theme';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // Section title + optional "See all ›" link. Used across the canvasser
 // drilldown to introduce each Overview section.
 export default function SectionHeader({ title, subtitle, onSeeAll, action }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.row}>
       <View style={{ flex: 1 }}>
@@ -20,14 +22,16 @@ export default function SectionHeader({ title, subtitle, onSeeAll, action }) {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    marginTop: spacing.md,
-  },
-  title: { ...type.h3 },
-  subtitle: { ...type.caption, marginTop: 1 },
-  link: { color: colors.brand, fontWeight: '700', fontSize: 14 },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: spacing.sm,
+      marginTop: spacing.md,
+    },
+    title: { ...t.type.h3 },
+    subtitle: { ...t.type.caption, marginTop: 1 },
+    link: { color: t.colors.brand, fontWeight: '700', fontSize: 14 },
+  });
+}

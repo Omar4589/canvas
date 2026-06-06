@@ -1,15 +1,19 @@
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, radius, spacing, type, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // One KPI tile. value can be a string or number; sub is a small caption under
 // the value; delta is an optional comparison ("+1.4 vs team avg") rendered
 // below the sub. level controls the color of value: 'good' | 'caution' | 'low' | undefined.
 export default function KpiTile({ label, value, sub, delta, level, compact = false }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const valColor =
     level === 'good'
       ? colors.success
       : level === 'caution'
-      ? '#92400E'
+      ? colors.warnFg
       : level === 'low'
       ? colors.danger
       : colors.textPrimary;
@@ -40,44 +44,46 @@ export default function KpiTile({ label, value, sub, delta, level, compact = fal
   );
 }
 
-const styles = StyleSheet.create({
-  tile: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    minHeight: 80,
-  },
-  tileCompact: {
-    minHeight: 64,
-    padding: spacing.sm,
-  },
-  label: {
-    ...type.micro,
-    color: colors.textSecondary,
-    marginBottom: 4,
-  },
-  value: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  valueCompact: {
-    fontSize: 18,
-  },
-  sub: {
-    ...type.caption,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  delta: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textMuted,
-    marginTop: 4,
-  },
-  deltaPositive: { color: colors.success },
-  deltaNeutral: { color: colors.textMuted },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    tile: {
+      backgroundColor: t.colors.card,
+      borderRadius: radius.lg,
+      padding: spacing.md,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      ...t.shadow.card,
+      minHeight: 80,
+    },
+    tileCompact: {
+      minHeight: 64,
+      padding: spacing.sm,
+    },
+    label: {
+      ...t.type.micro,
+      color: t.colors.textSecondary,
+      marginBottom: 4,
+    },
+    value: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: t.colors.textPrimary,
+    },
+    valueCompact: {
+      fontSize: 18,
+    },
+    sub: {
+      ...t.type.caption,
+      color: t.colors.textMuted,
+      marginTop: 2,
+    },
+    delta: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: t.colors.textMuted,
+      marginTop: 4,
+    },
+    deltaPositive: { color: t.colors.success },
+    deltaNeutral: { color: t.colors.textMuted },
+  });
+}

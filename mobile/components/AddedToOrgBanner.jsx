@@ -3,7 +3,8 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../lib/api';
 import { loadMemberships, saveMemberships } from '../lib/cache';
-import { colors, radius, spacing, type, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 const ROLE_LABEL = { admin: 'an admin', canvasser: 'a canvasser' };
 
@@ -16,6 +17,7 @@ const ROLE_LABEL = { admin: 'an admin', canvasser: 'a canvasser' };
 // screen the user lands on after login.
 export default function AddedToOrgBanner() {
   const insets = useSafeAreaInsets();
+  const styles = useThemedStyles(makeStyles);
   const [items, setItems] = useState([]);
   const [dismissing, setDismissing] = useState({});
 
@@ -71,34 +73,36 @@ export default function AddedToOrgBanner() {
   );
 }
 
-const styles = StyleSheet.create({
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: spacing.md,
-    gap: spacing.sm,
-  },
-  banner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    backgroundColor: colors.brandTint,
-    borderWidth: 1,
-    borderColor: colors.brand,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    ...shadow.card,
-  },
-  text: { ...type.caption, color: colors.brandDark, flex: 1 },
-  bold: { fontWeight: '700', color: colors.brandDark },
-  dismiss: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
-  },
-  dismissText: { ...type.caption, color: colors.brand, fontWeight: '700' },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    overlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      paddingHorizontal: spacing.md,
+      gap: spacing.sm,
+    },
+    banner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+      backgroundColor: t.colors.brandTint,
+      borderWidth: 1,
+      borderColor: t.colors.brand,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      ...t.shadow.card,
+    },
+    text: { ...t.type.caption, color: t.colors.brandDark, flex: 1 },
+    bold: { fontWeight: '700', color: t.colors.brandDark },
+    dismiss: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: radius.sm,
+    },
+    dismissText: { ...t.type.caption, color: t.colors.brand, fontWeight: '700' },
+  });
+}

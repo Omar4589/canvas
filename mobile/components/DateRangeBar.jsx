@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { ScrollView, Pressable, Text, StyleSheet, View } from 'react-native';
 import { PRESETS, rangeFor, labelForRange } from '../lib/dateRanges';
-import { colors, radius, spacing } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useThemedStyles } from '../lib/useThemedStyles';
 import DateRangePickerModal from './DateRangePickerModal';
 
 // Shared preset bar. Controlled.
@@ -10,6 +11,7 @@ import DateRangePickerModal from './DateRangePickerModal';
 // onChange({ preset, from, to }) fires whenever a preset or custom range is
 // chosen. Caller is responsible for re-fetching with the new range.
 export default function DateRangeBar({ value, onChange, tz }) {
+  const styles = useThemedStyles(makeStyles);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   function selectPreset(key) {
@@ -67,31 +69,33 @@ export default function DateRangeBar({ value, onChange, tz }) {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  pill: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pillActive: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  pillText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
-  pillTextActive: { color: colors.textInverse },
-  customLabel: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontStyle: 'italic',
-  },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    row: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm,
+      gap: spacing.sm,
+    },
+    pill: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.pill,
+      backgroundColor: t.colors.card,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+    },
+    pillActive: {
+      backgroundColor: t.colors.brand,
+      borderColor: t.colors.brand,
+    },
+    pillText: { color: t.colors.textPrimary, fontWeight: '600', fontSize: 13 },
+    pillTextActive: { color: t.colors.textInverse },
+    customLabel: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm,
+      color: t.colors.textSecondary,
+      fontSize: 12,
+      fontStyle: 'italic',
+    },
+  });
+}

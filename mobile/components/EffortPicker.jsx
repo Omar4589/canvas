@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors, radius, spacing, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // Canvasser effort switcher: a chip + dropdown of the efforts the canvasser has
 // books in. Book numbers restart per effort, so a canvasser on two efforts could
 // see two "Book 6"s — this scopes the Books picker to one effort at a time.
 // Presentational only; the parent owns the selection + persistence.
 export default function EffortPicker({ efforts = [], value, onChange }) {
+  const styles = useThemedStyles(makeStyles);
   const [open, setOpen] = useState(false);
   const current = efforts.find((e) => String(e.id) === String(value)) || null;
 
@@ -46,33 +48,35 @@ export default function EffortPicker({ efforts = [], value, onChange }) {
   );
 }
 
-const styles = StyleSheet.create({
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-  },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brand, marginRight: spacing.sm },
-  label: { fontSize: 12, color: colors.textSecondary, marginRight: spacing.sm },
-  chipText: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  chevron: { fontSize: 12, color: colors.textSecondary, marginLeft: spacing.sm },
-  menu: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.xs,
-    marginTop: spacing.sm,
-    ...shadow.raised,
-  },
-  item: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2 },
-  itemActive: { backgroundColor: colors.brandTint },
-  itemText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  itemTextActive: { color: colors.brand },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    chip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: t.colors.card,
+      borderRadius: radius.pill,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      ...t.shadow.card,
+    },
+    dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: t.colors.brand, marginRight: spacing.sm },
+    label: { fontSize: 12, color: t.colors.textSecondary, marginRight: spacing.sm },
+    chipText: { flex: 1, fontSize: 14, fontWeight: '600', color: t.colors.textPrimary },
+    chevron: { fontSize: 12, color: t.colors.textSecondary, marginLeft: spacing.sm },
+    menu: {
+      backgroundColor: t.colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      paddingVertical: spacing.xs,
+      marginTop: spacing.sm,
+      ...t.shadow.raised,
+    },
+    item: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2 },
+    itemActive: { backgroundColor: t.colors.brandTint },
+    itemText: { fontSize: 14, fontWeight: '600', color: t.colors.textPrimary },
+    itemTextActive: { color: t.colors.brand },
+  });
+}

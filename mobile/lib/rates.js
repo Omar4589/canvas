@@ -1,4 +1,4 @@
-import { colors } from './theme';
+import { colors as lightShim } from './theme';
 
 // Tiered connection rate. Returns null when there's no data to ratio (avoids
 // showing 0% when the truth is "haven't started yet"). Tiers match canvasser
@@ -25,8 +25,15 @@ export function rateFromPct(pct) {
   return { value: `${pct}%`, level, pct };
 }
 
-export const RATE_COLORS = {
-  good: { bg: colors.successBg, fg: colors.success },
-  caution: { bg: colors.warnBg, fg: '#92400E' },
-  low: { bg: colors.dangerBg, fg: colors.danger },
-};
+// Theme-aware rate color map: pass the active palette from useTheme().
+export function makeRateColors(colors) {
+  return {
+    good: { bg: colors.successBg, fg: colors.success },
+    caution: { bg: colors.warnBg, fg: colors.warnFg },
+    low: { bg: colors.dangerBg, fg: colors.danger },
+  };
+}
+
+// Back-compat light map for screens not yet converted to makeRateColors via the
+// hook. Remove once stats.jsx and admin/campaign/[campaignId].jsx are converted.
+export const RATE_COLORS = makeRateColors(lightShim);

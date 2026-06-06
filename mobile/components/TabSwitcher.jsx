@@ -1,10 +1,12 @@
 import { ScrollView, Pressable, Text, StyleSheet } from 'react-native';
-import { colors, radius, spacing } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // Horizontal pill tabs.
 // tabs: [{ key, label, count? }]
 // activeKey, onChange(key)
 export default function TabSwitcher({ tabs, activeKey, onChange }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <ScrollView
       horizontal
@@ -30,24 +32,26 @@ export default function TabSwitcher({ tabs, activeKey, onChange }) {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  pill: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pillActive: {
-    backgroundColor: colors.textPrimary,
-    borderColor: colors.textPrimary,
-  },
-  text: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
-  textActive: { color: colors.textInverse },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    row: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm,
+      gap: spacing.sm,
+    },
+    pill: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.pill,
+      backgroundColor: t.colors.card,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+    },
+    pillActive: {
+      backgroundColor: t.colors.textPrimary,
+      borderColor: t.colors.textPrimary,
+    },
+    text: { color: t.colors.textPrimary, fontWeight: '600', fontSize: 13 },
+    textActive: { color: t.colors.textInverse },
+  });
+}

@@ -1,11 +1,13 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { timeAgo } from '../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // One survey-response row: voter name + party + address + when, optionally the
 // canvasser. `v` is a response entry from /survey-results or /voters-by-answer
 // ({ responseId, submittedAt, voter, household, canvasser }).
 export default function VoterRow({ v, showCanvasser = false }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.row}>
       <View style={{ flex: 1 }}>
@@ -30,17 +32,19 @@ export default function VoterRow({ v, showCanvasser = false }) {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    padding: spacing.sm + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.xs,
-  },
-  name: { ...type.bodyStrong, fontSize: 14 },
-  party: { color: colors.textSecondary, fontWeight: '400' },
-  address: { ...type.caption, marginTop: 1 },
-  meta: { ...type.caption, color: colors.textMuted, marginTop: 3 },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    row: {
+      backgroundColor: t.colors.card,
+      borderRadius: radius.md,
+      padding: spacing.sm + 2,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      marginBottom: spacing.xs,
+    },
+    name: { ...t.type.bodyStrong, fontSize: 14 },
+    party: { color: t.colors.textSecondary, fontWeight: '400' },
+    address: { ...t.type.caption, marginTop: 1 },
+    meta: { ...t.type.caption, color: t.colors.textMuted, marginTop: 3 },
+  });
+}

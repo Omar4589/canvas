@@ -1,11 +1,13 @@
 import { View, Text } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
-import { colors, type } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
 
 // The Doorline mark: a red map-pin shape with a small white doorway cut out
 // of the middle. Door has a tiny knob on the right side. Flat, modern, single
-// color.
+// color. The pin uses the brand color (shifts slightly between themes); the
+// doorway cut-out stays white in both.
 export function LogoMark({ size = 36 }) {
+  const { colors } = useTheme();
   return (
     <Svg width={size} height={size * (44 / 36)} viewBox="0 0 36 44">
       {/* Pin silhouette: rounded top + tapered point */}
@@ -24,7 +26,8 @@ export function LogoMark({ size = 36 }) {
   );
 }
 
-export default function Logo({ size = 32, color = colors.textPrimary, hideText = false }) {
+export default function Logo({ size = 32, color, hideText = false }) {
+  const { colors, type } = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
       <LogoMark size={size} />
@@ -35,7 +38,7 @@ export default function Logo({ size = 32, color = colors.textPrimary, hideText =
             fontSize: size * 0.78,
             marginLeft: 8,
             letterSpacing: -0.5,
-            color,
+            color: color || colors.textPrimary,
           }}
         >
           Doorline

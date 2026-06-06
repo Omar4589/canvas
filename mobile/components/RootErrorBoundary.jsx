@@ -2,7 +2,8 @@ import { Component } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import { clearActiveOrgId, clearActiveCampaign } from '../lib/cache';
-import { colors, radius, spacing, type } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
 
 // Catches any JS render/lifecycle error in the tree below it and shows the actual
 // error + which component threw, ON SCREEN — instead of the blank-black-screen +
@@ -13,7 +14,10 @@ import { colors, radius, spacing, type } from '../lib/theme';
 //
 // NOTE: this only catches JS errors. A native crash (the whole app closes with no
 // error screen) won't reach here — if that happens, capture `adb logcat` instead.
-export default class RootErrorBoundary extends Component {
+//
+// Error boundaries must be class components (no hooks), so the active theme is
+// injected as a prop by the functional wrapper below.
+class RootErrorBoundaryInner extends Component {
   state = { error: null, info: null };
 
   static getDerivedStateFromError(error) {
@@ -41,6 +45,7 @@ export default class RootErrorBoundary extends Component {
     const { error, info } = this.state;
     if (!error) return this.props.children;
 
+    const styles = makeStyles(this.props.theme);
     return (
       <View style={styles.screen}>
         <ScrollView contentContainerStyle={styles.content}>
@@ -81,36 +86,43 @@ export default class RootErrorBoundary extends Component {
   }
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, paddingTop: spacing.xxl },
-  title: { ...type.title, color: colors.danger },
-  subtitle: { ...type.caption, marginTop: spacing.xs, marginBottom: spacing.lg },
-  label: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginTop: spacing.md,
-    marginBottom: spacing.xs,
-  },
-  mono: {
-    fontFamily: 'monospace',
-    fontSize: 12,
-    color: colors.textPrimary,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-  },
-  button: {
-    backgroundColor: colors.brand,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md + 2,
-    alignItems: 'center',
-    marginTop: spacing.xl,
-  },
-  buttonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
-});
+export default function RootErrorBoundary({ children }) {
+  const theme = useTheme();
+  return <RootErrorBoundaryInner theme={theme}>{children}</RootErrorBoundaryInner>;
+}
+
+function makeStyles(t) {
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: t.colors.bg },
+    content: { padding: spacing.lg, paddingTop: spacing.xxl },
+    title: { ...t.type.title, color: t.colors.danger },
+    subtitle: { ...t.type.caption, marginTop: spacing.xs, marginBottom: spacing.lg },
+    label: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: t.colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+      marginTop: spacing.md,
+      marginBottom: spacing.xs,
+    },
+    mono: {
+      fontFamily: 'monospace',
+      fontSize: 12,
+      color: t.colors.textPrimary,
+      backgroundColor: t.colors.card,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      borderRadius: radius.md,
+      padding: spacing.md,
+    },
+    button: {
+      backgroundColor: t.colors.brand,
+      borderRadius: radius.md,
+      paddingVertical: spacing.md + 2,
+      alignItems: 'center',
+      marginTop: spacing.xl,
+    },
+    buttonText: { color: t.colors.textInverse, fontWeight: '700', fontSize: 16 },
+  });
+}

@@ -1,5 +1,7 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors, radius, spacing, type, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
+import { useThemedStyles } from '../lib/useThemedStyles';
 import PinIcon from './PinIcon';
 
 // Map CanvassActivity actionType → PinIcon status key (the status palette is
@@ -32,6 +34,7 @@ function timeOnly(ts) {
 // }
 // onPress optional → navigate to activity detail
 export default function ActivityRow({ activity, onPress, showDate = false }) {
+  const styles = useThemedStyles(makeStyles);
   const a = activity;
   const flagged =
     a.wasOfflineSubmission ||
@@ -99,71 +102,73 @@ export default function ActivityRow({ activity, onPress, showDate = false }) {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    gap: spacing.sm,
-  },
-  pinCol: {
-    alignItems: 'center',
-    width: 40,
-  },
-  time: {
-    ...type.caption,
-    color: colors.textMuted,
-    marginTop: 2,
-    fontVariant: ['tabular-nums'],
-  },
-  action: { ...type.bodyStrong },
-  party: { color: colors.textSecondary, fontWeight: '400' },
-  address: { ...type.caption, marginTop: 1 },
-  note: {
-    ...type.caption,
-    color: colors.textSecondary,
-    fontStyle: 'italic',
-    marginTop: spacing.xs,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  meta: { ...type.caption, color: colors.textMuted },
-  metaWarn: { color: colors.danger, fontWeight: '600' },
-  offlineBadge: {
-    backgroundColor: colors.warnBg,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 1,
-    borderRadius: radius.sm,
-  },
-  offlineText: {
-    color: '#92400E',
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  flagBadge: {
-    backgroundColor: colors.dangerBg,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 1,
-    borderRadius: radius.sm,
-  },
-  flagText: {
-    color: colors.danger,
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: t.colors.card,
+      borderRadius: radius.lg,
+      padding: spacing.md,
+      marginBottom: spacing.sm,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      ...t.shadow.card,
+      gap: spacing.sm,
+    },
+    pinCol: {
+      alignItems: 'center',
+      width: 40,
+    },
+    time: {
+      ...t.type.caption,
+      color: t.colors.textMuted,
+      marginTop: 2,
+      fontVariant: ['tabular-nums'],
+    },
+    action: { ...t.type.bodyStrong },
+    party: { color: t.colors.textSecondary, fontWeight: '400' },
+    address: { ...t.type.caption, marginTop: 1 },
+    note: {
+      ...t.type.caption,
+      color: t.colors.textSecondary,
+      fontStyle: 'italic',
+      marginTop: spacing.xs,
+    },
+    metaRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginTop: spacing.xs,
+    },
+    meta: { ...t.type.caption, color: t.colors.textMuted },
+    metaWarn: { color: t.colors.danger, fontWeight: '600' },
+    offlineBadge: {
+      backgroundColor: t.colors.warnBg,
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 1,
+      borderRadius: radius.sm,
+    },
+    offlineText: {
+      color: t.colors.warnFg,
+      fontSize: 10,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    flagBadge: {
+      backgroundColor: t.colors.dangerBg,
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 1,
+      borderRadius: radius.sm,
+    },
+    flagText: {
+      color: t.colors.danger,
+      fontSize: 10,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+  });
+}
