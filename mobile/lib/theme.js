@@ -9,10 +9,6 @@
 // `useTheme()` (lib/ThemeContext) and build their StyleSheet through
 // `useThemedStyles(makeStyles)` (lib/useThemedStyles) so styles regenerate when
 // the theme flips. `radius`/`spacing` are theme-independent and exported plain.
-//
-// NOTE — back-compat shim at the bottom: `colors`, `type`, `shadow` are still
-// exported as the LIGHT values so screens not yet converted to the hook keep
-// compiling and render in light. Remove the shim once every screen is converted.
 
 export const radius = {
   sm: 6,
@@ -211,11 +207,3 @@ const THEMES = {
 export function buildTheme(scheme) {
   return THEMES[scheme] || THEMES.light;
 }
-
-// ---------------------------------------------------------------------------
-// Back-compat shim — LIGHT values for screens not yet converted to useTheme().
-// Remove once the dark-mode sweep is complete (no file should import `colors`,
-// `type`, or `shadow` directly anymore).
-// ---------------------------------------------------------------------------
-export const colors = lightColors;
-export const type = THEMES.light.type;

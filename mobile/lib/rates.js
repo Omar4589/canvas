@@ -1,5 +1,3 @@
-import { colors as lightShim } from './theme';
-
 // Tiered connection rate. Returns null when there's no data to ratio (avoids
 // showing 0% when the truth is "haven't started yet"). Tiers match canvasser
 // expectations from prior screens — green ≥20%, amber 10-19%, red <10%.
@@ -33,7 +31,3 @@ export function makeRateColors(colors) {
     low: { bg: colors.dangerBg, fg: colors.danger },
   };
 }
-
-// Back-compat light map for screens not yet converted to makeRateColors via the
-// hook. Remove once stats.jsx and admin/campaign/[campaignId].jsx are converted.
-export const RATE_COLORS = makeRateColors(lightShim);

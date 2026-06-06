@@ -117,3 +117,84 @@ For tokenizing/search inputs that shouldn't be autofilled at all (e.g. the walk-
 - [client/index.html](../client/index.html) — the no-flash pre-paint script.
 - [client/src/lib/useTheme.js](../client/src/lib/useTheme.js) — the runtime toggle + persistence.
 - [client/src/components/ui/Input.jsx](../client/src/components/ui/Input.jsx) — `FIELD` / `FIELD_CLS` and the shared `<Input>` / `<Select>` / `<Textarea>`.
+
+---
+
+# Mobile (`mobile/`)
+
+The React Native app has the same light/dark behavior as the web, built a different way (there's no Tailwind or CSS variables in RN). Same idea — a small set of **semantic tokens** that flip in one place — implemented with a React context + a per-screen StyleSheet factory.
+
+## Part 1 — For everyone
+
+The app has a **light**, a **dark**, and a **System** appearance.
+
+- **Switching:** admins use the **Appearance** control on the **More** tab (Light / Dark / System); super admins and canvassers tap the **sun/moon icon** (super-admin home header, canvasser map top bar). Your choice is saved on that device.
+- **System / first run:** if you pick **System** (the default until you choose otherwise), the app follows your phone's OS setting and updates live when the phone flips. Once you pick Light or Dark, that explicit choice sticks.
+- **No flash:** the saved choice is applied before the first screen paints, so you never see a flash of the wrong theme on launch.
+- **Heads-up on "System":** on the currently shipped builds, **System resolves to Light** because the native build is pinned to light (see the OTA note in Part 2). Light and Dark work everywhere now; System starts following the OS only after the next native build.
+
+## Part 2 — Technical reference
+
+### How the flip works
+- **No Tailwind/CSS-vars in RN.** Colors live in two plain objects — `lightColors` and `darkColors` (identical keys) — in [mobile/lib/theme.js](../mobile/lib/theme.js). `buildTheme(scheme)` assembles the active theme `{ scheme, isDark, colors, type, shadow }` and is memoized per scheme so each theme object is referentially stable. `radius` and `spacing` are theme-independent and exported plain.
+- **Context, not a class.** [mobile/lib/ThemeContext.jsx](../mobile/lib/ThemeContext.jsx) holds the `preference` (`light | dark | system`) and resolves it to the active `scheme`. `useTheme()` returns the active `{ scheme, isDark, colors, type, shadow, preference, setScheme, toggle }`.
+- **The factory pattern (the important bit).** A module-level `const styles = StyleSheet.create({...})` captures colors **at import time**, so it can't react to a runtime theme change. Instead every screen defines a top-level factory and builds its styles in render:
+  ```js
+  function makeStyles(t) {
+    const { colors, type, shadow } = t;          // destructure so the body reads naturally
+    return StyleSheet.create({ screen: { backgroundColor: colors.bg }, title: { ...type.h2 } });
+  }
+  export default function Screen() {
+    const { colors } = useTheme();               // for inline color props (placeholderTextColor, etc.)
+    const styles = useThemedStyles(makeStyles);  // memoized on scheme — rebuilt only when the theme flips
+    // ...
+  }
+  ```
+  [mobile/lib/useThemedStyles.js](../mobile/lib/useThemedStyles.js) keys the memo on `theme.scheme`, so a screen has at most two StyleSheet instances over its life. Every sub-component that uses `styles` or inline `colors` calls the hook itself.
+- **Native UI follows the choice.** The provider calls `Appearance.setColorScheme(scheme)` (or `null` for System) so `Alert`, the keyboard, the date picker, and action sheets track the in-app theme. The status bar flips via a small `ThemedStatusBar` in [mobile/app/_layout.jsx](../mobile/app/_layout.jsx).
+- **No flash.** The provider seeds the initial scheme synchronously from `Appearance.getColorScheme()`, and [mobile/app/index.jsx](../mobile/app/index.jsx) holds the first paint until the stored preference loads — the RN analog of the web's pre-paint script.
+- **Persistence.** `loadThemePreference` / `saveThemePreference` in [mobile/lib/cache.js](../mobile/lib/cache.js), under `canvass.themePreference` (System is stored as the absence of the key).
+
+### Fixed (theme-independent) colors
+Like the web's fixed brand ramp, some data/asset colors stay identical in both themes so they remain distinguishable: the **pin/status palette** (`colors.status`), the **party palette** (`colors.party`), the **Logo** doorway, the **PinIcon** house, and **Mapbox ping strokes/halos** (white stroke + dark halo read on both light and dark tiles). These are the only places a raw hex is allowed in a screen.
+
+### Token reference (mobile → web equivalent)
+Defined in [mobile/lib/theme.js](../mobile/lib/theme.js) (`lightColors` / `darkColors`).
+
+| mobile token | light | dark | ~web token |
+|---|---|---|---|
+| `bg` | `#F9FAFB` | `#0B0F19` | surface |
+| `card` | `#FFFFFF` | `#111827` | card |
+| `raised` | `#FFFFFF` | `#1F2937` | raised |
+| `sunken` | `#F3F4F6` | `#0F1420` | sunken |
+| `border` / `borderStrong` | `#E5E7EB` / `#D1D5DB` | `#272E3C` / `#374151` | border / border-strong |
+| `textPrimary` / `textSecondary` / `textMuted` | `#111827` / `#6B7280` / `#9CA3AF` | `#E5E7EB` / `#9CA3AF` / `#6B7280` | fg / fg-muted / fg-subtle |
+| `textInverse` | `#FFFFFF` | `#111827` | fg-inverse |
+| `brand` / `brandDark` / `brandTint` | `#DC2626` / `#B91C1C` / `#FEF2F2` | `#EF4444` / `#F87171` / `#3F1414` | brand-accent / -hover / -tint |
+| `success` / `warn` / `danger` / `info` (+ `*Bg`) | base + soft tint | lifted base + deep tint | status colors |
+| `warnFg` / `warnBorder` / `dangerBorder` | `#92400E` / `#FCD34D` / `#FCA5A5` | `#FCD34D` / `#854D0E` / `#7F1D1D` | caution text/border, danger border |
+| `accentPurple` (+ `Bg`) / `teal` (+ `Bg`) | `#7E22CE` / `#0F766E` | `#C084FC` / `#2DD4BF` | campaign-type / voted badges |
+| `backdrop` / `chromeBar` | `rgba(0,0,0,.45)` / `rgba(255,255,255,.95)` | `rgba(0,0,0,.65)` / `rgba(17,24,39,.95)` | modal scrim / map top bar |
+| `mapLabel` / `mapLabelHalo` | `#111827` / `#FFFFFF` | `#E5E7EB` / `#0B0F19` | Mapbox symbol label + halo |
+| `status.*`, `statusLabels.*`, `party.*` | **fixed across themes** | | fixed brand ramp |
+
+### Maps
+Map **chrome** themes normally (top bars use `chromeBar`; sheets/legends/chips use `card`/`raised`). Mapbox `SymbolLayer` label colors use `mapLabel` / `mapLabelHalo`. The **base tiles** follow the theme via [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) `useMapStyle()`: when the user hasn't explicitly picked a base style, it defaults to **Dark** tiles in dark mode and **Street** otherwise — an explicit Satellite/Hybrid/etc. choice is always preserved.
+
+### Gotcha — OTA and the `fingerprint` runtime version
+`app.json` `userInterfaceStyle` is kept at **`"light"`** on purpose. It looks like it should be `"automatic"` (so System can follow the OS), but that field is **native config**: changing it changes the `fingerprint` runtimeVersion and **strands OTA updates** from the installed builds. All of dark mode ships over OTA because it flips at runtime via `Appearance.setColorScheme()`. Flip `userInterfaceStyle` to `"automatic"` **only in the next native build** (`eas build`) — that's also when "System" begins following the OS.
+
+### Adding a new screen or component — checklist
+- Define a top-level `function makeStyles(t) { const { colors, type, shadow } = t; return StyleSheet.create({ ... }); }` and call `const styles = useThemedStyles(makeStyles)` in the component (and in every sub-component that uses `styles`).
+- For inline color props (`placeholderTextColor`, `<ActivityIndicator color>`, Mapbox style objects), read `const { colors } = useTheme()`.
+- Never hard-code a hex/rgba. If a token is missing, add it to **both** `lightColors` and `darkColors` in `theme.js`. (The only exceptions are the fixed assets listed above.)
+- Keep `radius`/`spacing` as direct imports from `theme.js`.
+
+### Source files
+- [mobile/lib/theme.js](../mobile/lib/theme.js) — `lightColors` / `darkColors`, `buildTheme`, `makeType`, the fixed `status`/`party` palettes.
+- [mobile/lib/ThemeContext.jsx](../mobile/lib/ThemeContext.jsx) — provider/hook, persistence, `Appearance.setColorScheme`.
+- [mobile/lib/useThemedStyles.js](../mobile/lib/useThemedStyles.js) — the `makeStyles(t)` factory helper.
+- [mobile/lib/cache.js](../mobile/lib/cache.js) — `loadThemePreference` / `saveThemePreference`.
+- [mobile/components/ThemeToggle.jsx](../mobile/components/ThemeToggle.jsx) — the Light/Dark/System control + the sun/moon `ThemeIconButton`.
+- [mobile/app/_layout.jsx](../mobile/app/_layout.jsx) — `ThemeProvider` mount + `ThemedStatusBar`; [mobile/app/index.jsx](../mobile/app/index.jsx) — first-paint gate.
+- [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) — theme-aware base map default.
