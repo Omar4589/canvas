@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Stack, Redirect } from 'expo-router';
 import { loadCurrentUser } from '../../../lib/cache';
-import { colors } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
 
 export default function SuperAdminLayout() {
+  const { colors } = useTheme();
   const [user, setUser] = useState(undefined);
 
   useEffect(() => {

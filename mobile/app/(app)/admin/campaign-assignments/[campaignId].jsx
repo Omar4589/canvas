@@ -12,9 +12,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
-import { colors, radius, spacing, type, shadow } from '../../../../lib/theme';
+import { radius, spacing } from '../../../../lib/theme';
+import { useTheme } from '../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
 export default function CampaignAssignmentsScreen() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const qc = useQueryClient();
   const { campaignId } = useLocalSearchParams();
@@ -177,7 +181,9 @@ export default function CampaignAssignmentsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -253,10 +259,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandTint,
   },
   actionUnassign: {
-    borderColor: '#FCA5A5',
+    borderColor: colors.dangerBorder,
     backgroundColor: colors.dangerBg,
   },
   actionText: { fontSize: 12, fontWeight: '700' },
   actionTextAssign: { color: colors.brand },
   actionTextUnassign: { color: colors.danger },
-});
+  });
+}

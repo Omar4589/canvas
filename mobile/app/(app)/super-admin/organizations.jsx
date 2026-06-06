@@ -15,9 +15,13 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 export default function OrganizationsScreen() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
@@ -149,6 +153,8 @@ export default function OrganizationsScreen() {
 }
 
 function CreateOrgForm({ onSubmit, onCancel, submitting, error }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const valid = name.trim().length > 0;
@@ -211,7 +217,9 @@ function CreateOrgForm({ onSubmit, onCancel, submitting, error }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -283,11 +291,11 @@ const styles = StyleSheet.create({
   },
   toggleBtnActivate: { borderColor: colors.successBorder, backgroundColor: colors.successBg },
   toggleBtnTextActivate: { color: colors.success, fontWeight: '700', fontSize: 13 },
-  toggleBtnDeactivate: { borderColor: '#FCA5A5', backgroundColor: colors.dangerBg },
+  toggleBtnDeactivate: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerBg },
   toggleBtnTextDeactivate: { color: colors.danger, fontWeight: '700', fontSize: 13 },
   toggleBtnText: {},
 
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalBackdrop: { flex: 1, backgroundColor: colors.backdrop, justifyContent: 'flex-end' },
   formSheet: {
     backgroundColor: colors.card,
     borderTopLeftRadius: radius.lg,
@@ -331,4 +339,5 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   formBtnSecondaryText: { color: colors.textPrimary, fontWeight: '600', fontSize: 15 },
-});
+  });
+}

@@ -7,7 +7,7 @@ import {
   loadMemberships,
   loadActiveOrgId,
 } from '../../../lib/cache';
-import { colors } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
 
 function OverviewIcon({ color, size }) {
   return (
@@ -55,6 +55,7 @@ function MoreIcon({ color, size }) {
 }
 
 export default function AdminLayout() {
+  const { colors } = useTheme();
   const [state, setState] = useState(undefined);
 
   useEffect(() => {

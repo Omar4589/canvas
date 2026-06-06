@@ -6,7 +6,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import VoterRow from '../../../components/VoterRow';
 import { deviceTimezone } from '../../../lib/dateRanges';
-import { colors, spacing, type } from '../../../lib/theme';
+import { spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 const PAGE = 25;
 
@@ -15,6 +17,8 @@ function one(p) {
 }
 
 export default function AnswerVoters() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
   const campaignId = one(params.campaignId);
@@ -95,7 +99,9 @@ export default function AnswerVoters() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.sm },
   back: { color: colors.brand, fontWeight: '600', fontSize: 14 },
@@ -112,4 +118,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadMoreText: { color: colors.brand, fontWeight: '700', fontSize: 14 },
-});
+  });
+}

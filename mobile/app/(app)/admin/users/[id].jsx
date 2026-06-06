@@ -17,20 +17,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
 import { loadCurrentUser } from '../../../../lib/cache';
 import PasswordInput from '../../../../components/PasswordInput';
-import { colors, radius, spacing, type, shadow } from '../../../../lib/theme';
+import { radius, spacing } from '../../../../lib/theme';
+import { useTheme } from '../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
 const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
   not_home: 'Not home',
   wrong_address: 'Wrong address',
   lit_dropped: 'Lit dropped',
-};
-
-const ACTION_DOT_COLOR = {
-  survey_submitted: colors.status.surveyed,
-  not_home: colors.status.not_home,
-  wrong_address: colors.status.wrong_address,
-  lit_dropped: colors.status.lit_dropped,
 };
 
 function initials(first, last) {
@@ -68,6 +63,7 @@ function metersToMiles(m) {
 }
 
 function StatCell({ label, value }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.statCell}>
       <Text style={styles.statValue}>{value}</Text>
@@ -77,6 +73,14 @@ function StatCell({ label, value }) {
 }
 
 export default function AdminUserDetail() {
+  const { colors, type } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const ACTION_DOT_COLOR = {
+    survey_submitted: colors.status.surveyed,
+    not_home: colors.status.not_home,
+    wrong_address: colors.status.wrong_address,
+    lit_dropped: colors.status.lit_dropped,
+  };
   const router = useRouter();
   const qc = useQueryClient();
   const { id } = useLocalSearchParams();
@@ -627,7 +631,7 @@ export default function AdminUserDetail() {
                       ? colors.dangerBg
                       : colors.successBg,
                     borderColor: user.isActive
-                      ? '#FCA5A5'
+                      ? colors.dangerBorder
                       : colors.successBorder,
                   },
                 ]}
@@ -652,6 +656,7 @@ export default function AdminUserDetail() {
 }
 
 function Header({ onBack }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} hitSlop={8}>
@@ -661,7 +666,9 @@ function Header({ onBack }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,
@@ -881,11 +888,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.successBg,
     borderColor: colors.successBorder,
   },
-  pillDanger: { backgroundColor: colors.dangerBg, borderColor: '#FCA5A5' },
+  pillDanger: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
   pillText: {
     fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-});
+  });
+}

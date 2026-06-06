@@ -18,10 +18,15 @@ import SectionHeader from '../../../../components/SectionHeader';
 import DateRangeBar from '../../../../components/DateRangeBar';
 import { rangeFor, deviceTimezone } from '../../../../lib/dateRanges';
 import { formatRange } from '../../../../lib/datetime';
-import { rateFromPct, RATE_COLORS } from '../../../../lib/rates';
-import { colors, radius, spacing, type, shadow } from '../../../../lib/theme';
+import { rateFromPct, makeRateColors } from '../../../../lib/rates';
+import { radius, spacing } from '../../../../lib/theme';
+import { useTheme } from '../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
 function StatTile({ value, label, level }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const RATE_COLORS = makeRateColors(colors);
   const palette = level ? RATE_COLORS[level] : null;
   return (
     <View style={[styles.statTile, palette && { backgroundColor: palette.bg, borderColor: palette.bg }]}>
@@ -32,6 +37,7 @@ function StatTile({ value, label, level }) {
 }
 
 function OptionRow({ option, count, percent, onPress }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.optRow, pressed && { opacity: 0.7 }]}>
       <View style={styles.optTop}>
@@ -48,6 +54,8 @@ function OptionRow({ option, count, percent, onPress }) {
 }
 
 export default function CampaignDetail() {
+  const { colors, type } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const qc = useQueryClient();
   const { campaignId } = useLocalSearchParams();
@@ -336,7 +344,9 @@ export default function CampaignDetail() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -351,14 +361,14 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   banner: {
-    backgroundColor: '#FEF3C7',
-    borderColor: '#FCD34D',
+    backgroundColor: colors.warnBg,
+    borderColor: colors.warnBorder,
     borderWidth: 1,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
-  bannerText: { fontSize: 13, color: '#92400E', fontWeight: '600' },
+  bannerText: { fontSize: 13, color: colors.warnFg, fontWeight: '600' },
 
   card: {
     backgroundColor: colors.card,
@@ -429,4 +439,5 @@ const styles = StyleSheet.create({
 
   canvassButton: { backgroundColor: colors.brand, borderRadius: radius.md, paddingVertical: spacing.md + 2, alignItems: 'center' },
   canvassButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
-});
+  });
+}

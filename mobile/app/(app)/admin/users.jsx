@@ -16,7 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import PasswordInput from '../../../components/PasswordInput';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 const SORT_OPTIONS = [
   { key: 'name-asc', label: 'Name A–Z' },
@@ -53,6 +55,8 @@ function initials(name) {
 }
 
 function UserCard({ user, onPress }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const name = `${user.firstName} ${user.lastName}`.trim();
   return (
     <Pressable
@@ -122,6 +126,7 @@ function UserCard({ user, onPress }) {
 }
 
 function FilterPill({ active, label, onPress }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -140,6 +145,8 @@ function FilterPill({ active, label, onPress }) {
 }
 
 export default function AdminUsers() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
@@ -383,6 +390,8 @@ export default function AdminUsers() {
 }
 
 function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
+  const { colors, type } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -571,7 +580,9 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -711,7 +722,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.successBg,
     borderColor: colors.successBorder,
   },
-  pillDanger: { backgroundColor: colors.dangerBg, borderColor: '#FCA5A5' },
+  pillDanger: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
   pillText: {
     fontSize: 10,
     fontWeight: '700',
@@ -722,7 +733,7 @@ const styles = StyleSheet.create({
 
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: colors.backdrop,
     justifyContent: 'flex-end',
   },
   actionSheet: {
@@ -828,4 +839,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 15,
   },
-});
+  });
+}

@@ -17,7 +17,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { formatRange } from '../../../lib/datetime';
 import CampaignChip from '../../../components/CampaignChip';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
 import DateRangeBar from '../../../components/DateRangeBar';
 import { downloadCsv } from '../../../lib/csv';
@@ -60,6 +62,8 @@ function rowDerived(r) {
 }
 
 export default function AdminCanvassers() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const [campaign, setCampaign] = useState(undefined);
 
@@ -488,7 +492,9 @@ export default function AdminCanvassers() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -659,14 +665,14 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: '#FBBF24',
+    borderColor: colors.warn,
     marginBottom: spacing.md,
     gap: spacing.sm,
   },
   overlapBannerIcon: { fontSize: 18 },
-  overlapBannerTitle: { color: '#92400E', fontWeight: '700', fontSize: 14 },
-  overlapBannerSub: { color: '#92400E', fontSize: 12, marginTop: 1 },
-  overlapBannerChevron: { color: '#92400E', fontWeight: '700', fontSize: 22 },
+  overlapBannerTitle: { color: colors.warnFg, fontWeight: '700', fontSize: 14 },
+  overlapBannerSub: { color: colors.warnFg, fontSize: 12, marginTop: 1 },
+  overlapBannerChevron: { color: colors.warnFg, fontWeight: '700', fontSize: 22 },
 
   compareBar: {
     position: 'absolute',
@@ -696,7 +702,7 @@ const styles = StyleSheet.create({
 
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: colors.backdrop,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,
@@ -718,4 +724,5 @@ const styles = StyleSheet.create({
   sortOptActive: { backgroundColor: colors.brandTint },
   sortOptText: { ...type.body },
   sortOptTextActive: { color: colors.brand, fontWeight: '700' },
-});
+  });
+}

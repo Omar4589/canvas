@@ -20,7 +20,9 @@ import SectionHeader from '../../../components/SectionHeader';
 import DateRangeBar from '../../../components/DateRangeBar';
 import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
 import { timeAgo } from '../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 function fmt(n) {
   if (n == null) return '—';
@@ -33,6 +35,7 @@ function pct(n) {
 }
 
 function Stat({ value, label }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.stat}>
       <Text style={styles.statValue}>{fmt(value)}</Text>
@@ -42,6 +45,7 @@ function Stat({ value, label }) {
 }
 
 function CampaignCard({ campaign, onPress }) {
+  const styles = useThemedStyles(makeStyles);
   const c = campaign;
   const isLitDrop = c.type === 'lit_drop';
   return (
@@ -87,6 +91,8 @@ function CampaignCard({ campaign, onPress }) {
 }
 
 export default function AdminOverview() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -272,7 +278,9 @@ export default function AdminOverview() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -296,14 +304,14 @@ const styles = StyleSheet.create({
   },
   errorText: { ...type.caption },
   seamBanner: {
-    backgroundColor: '#FEF3C7',
-    borderColor: '#FCD34D',
+    backgroundColor: colors.warnBg,
+    borderColor: colors.warnBorder,
     borderWidth: 1,
     borderRadius: radius.md,
     padding: spacing.md,
     marginTop: spacing.sm,
   },
-  seamBannerText: { fontSize: 12, color: '#92400E', lineHeight: 17 },
+  seamBannerText: { fontSize: 12, color: colors.warnFg, lineHeight: 17 },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
   statRow: { flexDirection: 'row', justifyContent: 'space-between' },
   stat: { flex: 1 },
@@ -328,11 +336,11 @@ const styles = StyleSheet.create({
   },
   campaignName: { ...type.h3, fontSize: 15, flex: 1 },
   typePill: { borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 2 },
-  typePillSurvey: { backgroundColor: '#EFF6FF' },
-  typePillLit: { backgroundColor: '#F5F3FF' },
+  typePillSurvey: { backgroundColor: colors.infoBg },
+  typePillLit: { backgroundColor: colors.accentPurpleBg },
   typePillText: { fontSize: 10, fontWeight: '700' },
-  typePillTextSurvey: { color: '#1D4ED8' },
-  typePillTextLit: { color: '#6D28D9' },
+  typePillTextSurvey: { color: colors.info },
+  typePillTextLit: { color: colors.accentPurple },
   coverageLine: { ...type.caption, color: colors.textSecondary, marginTop: spacing.sm },
   inlineRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm, gap: spacing.md },
   inlineStat: { fontSize: 12, color: colors.textSecondary },
@@ -360,6 +368,7 @@ const styles = StyleSheet.create({
   },
   archivedName: { ...type.bodyStrong, fontSize: 14 },
   archivedMeta: { ...type.caption, marginTop: 2 },
-  archivedBadge: { backgroundColor: '#FEF3C7', borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
-  archivedBadgeText: { fontSize: 10, fontWeight: '700', color: '#92400E' },
-});
+  archivedBadge: { backgroundColor: colors.warnBg, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
+  archivedBadgeText: { fontSize: 10, fontWeight: '700', color: colors.warnFg },
+  });
+}

@@ -12,20 +12,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
   not_home: 'Not home',
   wrong_address: 'Wrong address',
   lit_dropped: 'Lit dropped',
-};
-
-const DOT_COLOR = {
-  survey_submitted: colors.success,
-  not_home: colors.brand,
-  wrong_address: colors.danger,
-  lit_dropped: '#7E22CE',
 };
 
 function formatRelative(d) {
@@ -43,6 +38,14 @@ function formatRelative(d) {
 
 export default function ActivityScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const DOT_COLOR = {
+    survey_submitted: colors.success,
+    not_home: colors.brand,
+    wrong_address: colors.danger,
+    lit_dropped: colors.accentPurple,
+  };
 
   const feedQ = useQuery({
     queryKey: ['super-admin', 'activity-feed', 50],
@@ -118,7 +121,9 @@ export default function ActivityScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -158,4 +163,5 @@ const styles = StyleSheet.create({
   org: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
   sub: { ...type.caption, fontSize: 11, marginTop: 1 },
   time: { fontSize: 11, color: colors.textMuted },
-});
+  });
+}

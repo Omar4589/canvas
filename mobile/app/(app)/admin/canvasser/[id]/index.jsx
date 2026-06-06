@@ -15,7 +15,9 @@ import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../../lib/dateRanges';
 import { formatRange, timeAgo } from '../../../../../lib/datetime';
 import { rateFromPct } from '../../../../../lib/rates';
-import { colors, radius, spacing, type, shadow } from '../../../../../lib/theme';
+import { radius, spacing } from '../../../../../lib/theme';
+import { useTheme } from '../../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import KpiGrid from '../../../../../components/KpiGrid';
 import BarChart from '../../../../../components/BarChart';
@@ -48,6 +50,8 @@ function delta(value, baseline, unit = '') {
 }
 
 export default function CanvasserOverview() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -500,6 +504,7 @@ export default function CanvasserOverview() {
 }
 
 function Header({ onBack, title }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} hitSlop={8}>
@@ -514,6 +519,7 @@ function Header({ onBack, title }) {
 }
 
 function Highlight({ title, value, sub }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.highlight}>
       <Text style={styles.highlightTitle}>{title}</Text>
@@ -524,6 +530,7 @@ function Highlight({ title, value, sub }) {
 }
 
 function QuickLink({ label, sub, onPress }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -537,6 +544,7 @@ function QuickLink({ label, sub, onPress }) {
 }
 
 function Empty({ text }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.empty}>
       <Text style={styles.emptyText}>{text}</Text>
@@ -544,7 +552,9 @@ function Empty({ text }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
@@ -701,4 +711,5 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   emptyText: { ...type.caption, fontStyle: 'italic' },
-});
+  });
+}

@@ -14,7 +14,9 @@ import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { rangeFor } from '../../../lib/dateRanges';
 import { timeAgo, formatExact } from '../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 const PRESETS = [
   { key: 'today', label: 'Today' },
@@ -32,11 +34,13 @@ function actionLabel(t) {
   return t;
 }
 
-function actionColor(t) {
+function actionColor(colors, t) {
   return colors.status[t === 'survey_submitted' ? 'surveyed' : t] || colors.textMuted;
 }
 
 export default function AdminOverlaps() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
   const [campaign, setCampaign] = useState(undefined);
@@ -151,7 +155,7 @@ export default function AdminOverlaps() {
                           <View
                             style={[
                               styles.actionDot,
-                              { backgroundColor: actionColor(c.actionType) },
+                              { backgroundColor: actionColor(colors, c.actionType) },
                             ]}
                           />
                           <View style={{ flex: 1 }}>
@@ -184,7 +188,9 @@ export default function AdminOverlaps() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -328,4 +334,5 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontVariant: ['tabular-nums'],
   },
-});
+  });
+}

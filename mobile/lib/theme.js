@@ -110,6 +110,16 @@ export const lightColors = {
   teal: '#0F766E',
   tealBg: '#CCFBF1',
 
+  // Party affiliation dots — kept recognizable (blue=Dem, red=Rep) across themes.
+  party: {
+    Democratic: '#3B82F6',
+    Republican: '#EF4444',
+    Independent: '#A855F7',
+    'No Party': '#9CA3AF',
+    Other: '#F59E0B',
+    Unknown: '#9CA3AF',
+  },
+
   backdrop: 'rgba(0,0,0,0.45)',          // modal scrims
   chromeBar: 'rgba(255,255,255,0.95)',   // translucent map top bars
   mapLabel: '#111827',                   // Mapbox symbol label text
@@ -157,6 +167,15 @@ export const darkColors = {
   accentPurpleBg: '#2E1065',
   teal: '#2DD4BF',
   tealBg: '#042F2A',
+
+  party: {
+    Democratic: '#60A5FA',
+    Republican: '#F87171',
+    Independent: '#C084FC',
+    'No Party': '#9CA3AF',
+    Other: '#FBBF24',
+    Unknown: '#9CA3AF',
+  },
 
   backdrop: 'rgba(0,0,0,0.65)',
   chromeBar: 'rgba(17,24,39,0.95)',

@@ -19,7 +19,9 @@ import MapStyleControl from '../../../components/MapStyleControl';
 import CampaignChip from '../../../components/CampaignChip';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { timeAgo, formatExact } from '../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 if (MAPBOX_PUBLIC_TOKEN) {
   Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
@@ -78,7 +80,7 @@ function actionLabel(t) {
   return t;
 }
 
-function actionColor(t) {
+function actionColor(colors, t) {
   if (t === 'survey_submitted') return colors.status.surveyed;
   return colors.status[t] || colors.textMuted;
 }
@@ -96,6 +98,8 @@ export default function AdminMap() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { styleId, styleURL, setStyle } = useMapStyle();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const cameraRef = useRef(null);
   const [campaign, setCampaign] = useState(undefined);
   const [showPings, setShowPings] = useState(false);
@@ -263,7 +267,7 @@ export default function AdminMap() {
                   'not_home', colors.status.not_home,
                   'wrong_address', colors.status.wrong_address,
                   'lit_dropped', colors.status.lit_dropped,
-                  '#6b7280',
+                  colors.textSecondary,
                 ],
                 circleStrokeColor: '#ffffff',
                 circleStrokeWidth: 2,
@@ -388,7 +392,7 @@ export default function AdminMap() {
                     <View
                       style={[
                         styles.actionDot,
-                        { backgroundColor: actionColor(a.actionType) },
+                        { backgroundColor: actionColor(colors, a.actionType) },
                       ]}
                     />
                     <Text style={styles.pingActionLabel}>
@@ -511,7 +515,9 @@ export default function AdminMap() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   center: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -536,7 +542,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: colors.chromeBar,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -759,4 +765,5 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     lineHeight: 18,
   },
-});
+  });
+}

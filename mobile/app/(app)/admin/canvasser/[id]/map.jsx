@@ -15,7 +15,10 @@ import { loadActiveCampaign } from '../../../../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../../lib/config';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { formatExact } from '../../../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../../../lib/theme';
+import { radius, spacing } from '../../../../../lib/theme';
+import { useTheme } from '../../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../../lib/useThemedStyles';
+import { useMapStyle } from '../../../../../lib/mapStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import TabSwitcher from '../../../../../components/TabSwitcher';
 import PinIcon from '../../../../../components/PinIcon';
@@ -49,6 +52,9 @@ const ACTION_LABEL = {
 
 export default function MapScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const { styleURL } = useMapStyle();
   const params = useLocalSearchParams();
   const userId = params.id;
 
@@ -143,7 +149,7 @@ export default function MapScreen() {
             <ActivityIndicator color={colors.brand} />
           </View>
         ) : (
-          <Mapbox.MapView style={{ flex: 1 }} styleURL={Mapbox.StyleURL.Street}>
+          <Mapbox.MapView style={{ flex: 1 }} styleURL={styleURL}>
             <Mapbox.Camera
               defaultSettings={{ centerCoordinate: initialCenter, zoomLevel: 12 }}
             />
@@ -228,6 +234,7 @@ export default function MapScreen() {
 }
 
 function Header({ onBack }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} hitSlop={8}>
@@ -239,7 +246,9 @@ function Header({ onBack }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -255,7 +264,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: spacing.md,
     left: spacing.lg,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: colors.chromeBar,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: radius.pill,
@@ -280,4 +289,5 @@ const styles = StyleSheet.create({
   detailAddress: { ...type.caption, marginTop: 1 },
   detailMeta: { ...type.caption, color: colors.textMuted, marginTop: 2 },
   close: { fontSize: 18, color: colors.textMuted },
-});
+  });
+}

@@ -13,7 +13,9 @@ import { useQuery, useQueries } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
 import { loadActiveCampaign } from '../../../../lib/cache';
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../lib/dateRanges';
-import { colors, radius, spacing, type, shadow } from '../../../../lib/theme';
+import { radius, spacing } from '../../../../lib/theme';
+import { useTheme } from '../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../components/DateRangeBar';
 
 // Each KPI row in the table. accessor pulls value out of the summary
@@ -103,6 +105,8 @@ function initials(name) {
 }
 
 export default function Compare() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
   const ids = useMemo(
@@ -308,7 +312,9 @@ export default function Compare() {
 const CELL_LABEL_W = 160;
 const VALUE_W = 130;
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -414,4 +420,5 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   openBtnText: { ...type.bodyStrong, fontSize: 13, color: colors.brand },
-});
+  });
+}

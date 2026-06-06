@@ -13,11 +13,15 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
-import { colors, radius, spacing, type, shadow } from '../../../../../lib/theme';
+import { radius, spacing } from '../../../../../lib/theme';
+import { useTheme } from '../../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import BarChart from '../../../../../components/BarChart';
 
 export default function AnswersScreen() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -145,7 +149,9 @@ export default function AnswersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -194,4 +200,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: { ...type.caption, fontStyle: 'italic' },
-});
+  });
+}

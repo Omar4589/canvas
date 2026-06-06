@@ -16,20 +16,15 @@ import { loadActiveCampaign } from '../../../../../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../../../lib/config';
 import { deviceTimezone } from '../../../../../../lib/dateRanges';
 import { formatRange } from '../../../../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../../../../lib/theme';
+import { radius, spacing } from '../../../../../../lib/theme';
+import { useTheme } from '../../../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../../../lib/useThemedStyles';
+import { useMapStyle } from '../../../../../../lib/mapStyles';
 import ActivityRow from '../../../../../../components/ActivityRow';
 
 if (MAPBOX_PUBLIC_TOKEN) {
   Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
 }
-
-const ACTION_COLOR = {
-  survey_submitted: colors.status.surveyed,
-  not_home: colors.status.not_home,
-  wrong_address: colors.status.wrong_address,
-  lit_dropped: colors.status.lit_dropped,
-  note_added: colors.textMuted,
-};
 
 function dayBounds(dateStr) {
   // One campaign-tz day, inclusive. dateStr is already a 'YYYY-MM-DD' campaign-tz day (from
@@ -50,6 +45,16 @@ function fmtDate(dateStr) {
 
 export default function DayDetail() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const { styleURL } = useMapStyle();
+  const ACTION_COLOR = {
+    survey_submitted: colors.status.surveyed,
+    not_home: colors.status.not_home,
+    wrong_address: colors.status.wrong_address,
+    lit_dropped: colors.status.lit_dropped,
+    note_added: colors.textMuted,
+  };
   const params = useLocalSearchParams();
   const userId = params.id;
   const date = params.date;
@@ -176,7 +181,7 @@ export default function DayDetail() {
         {/* Mini map */}
         {MAPBOX_PUBLIC_TOKEN && points.length > 0 ? (
           <View style={styles.mapCard}>
-            <Mapbox.MapView style={styles.map} styleURL={Mapbox.StyleURL.Street}>
+            <Mapbox.MapView style={styles.map} styleURL={styleURL}>
               <Mapbox.Camera
                 defaultSettings={{ centerCoordinate: initialCenter, zoomLevel: 13 }}
               />
@@ -238,6 +243,7 @@ export default function DayDetail() {
 }
 
 function Stat({ label, value }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.stat}>
       <Text style={styles.statValue}>{value}</Text>
@@ -246,7 +252,9 @@ function Stat({ label, value }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -293,4 +301,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: { ...type.caption, fontStyle: 'italic' },
-});
+  });
+}

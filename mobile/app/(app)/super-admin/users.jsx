@@ -13,7 +13,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadCurrentUser } from '../../../lib/cache';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 function formatRelative(d) {
   if (!d) return 'Never';
@@ -29,6 +31,8 @@ function formatRelative(d) {
 }
 
 export default function SuperAdminUsersScreen() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
@@ -185,7 +189,9 @@ export default function SuperAdminUsersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -254,7 +260,7 @@ const styles = StyleSheet.create({
   superTag: {
     fontSize: 10,
     fontWeight: '800',
-    color: '#92400E',
+    color: colors.warnFg,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
@@ -268,10 +274,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   promoteBtnAdd: { borderColor: colors.border, backgroundColor: colors.bg },
-  promoteBtnRemove: { borderColor: '#FCD34D', backgroundColor: '#FEF3C7' },
+  promoteBtnRemove: { borderColor: colors.warnBorder, backgroundColor: colors.warnBg },
   promoteBtnText: { fontSize: 11, fontWeight: '700' },
   promoteBtnTextAdd: { color: colors.textPrimary },
-  promoteBtnTextRemove: { color: '#92400E' },
+  promoteBtnTextRemove: { color: colors.warnFg },
 
   membershipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.sm },
   membershipPill: {
@@ -286,4 +292,5 @@ const styles = StyleSheet.create({
   membershipPillTextAdmin: { color: colors.brand },
   membershipPillTextCanvasser: { color: colors.textSecondary },
   noMemberships: { ...type.caption, fontSize: 11, marginTop: spacing.sm, fontStyle: 'italic' },
-});
+  });
+}

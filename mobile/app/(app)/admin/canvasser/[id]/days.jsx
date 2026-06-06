@@ -14,7 +14,9 @@ import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { formatRange } from '../../../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../../../lib/theme';
+import { radius, spacing } from '../../../../../lib/theme';
+import { useTheme } from '../../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 
 function fmtDate(dateStr) {
@@ -29,6 +31,8 @@ function fmtDate(dateStr) {
 }
 
 export default function DaysScreen() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -139,6 +143,7 @@ export default function DaysScreen() {
 }
 
 function Stat({ label, value }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.stat}>
       <Text style={styles.statValue}>{value}</Text>
@@ -147,7 +152,9 @@ function Stat({ label, value }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -186,4 +193,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: { ...type.caption, fontStyle: 'italic' },
-});
+  });
+}

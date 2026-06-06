@@ -14,22 +14,17 @@ import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { timeAgo } from '../../../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../../../lib/theme';
+import { radius, spacing } from '../../../../../lib/theme';
+import { useTheme } from '../../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import BarChart from '../../../../../components/BarChart';
 import SectionHeader from '../../../../../components/SectionHeader';
 
-const PARTY_COLOR = {
-  Democratic: '#3B82F6',
-  Republican: '#EF4444',
-  Independent: '#A855F7',
-  'No Party': '#9CA3AF',
-  Other: '#F59E0B',
-  Unknown: '#9CA3AF',
-};
-
 export default function VotersScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const params = useLocalSearchParams();
   const userId = params.id;
 
@@ -81,7 +76,7 @@ export default function VotersScreen() {
   const partyData = (q.data?.partyBreakdown || []).map((p) => ({
     label: p.value,
     value: p.count,
-    color: PARTY_COLOR[p.value] || colors.brand,
+    color: colors.party[p.value] || colors.brand,
   }));
   const genderData = (q.data?.genderBreakdown || []).map((g) => ({
     label: g.value,
@@ -152,7 +147,9 @@ export default function VotersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -195,4 +192,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: { ...type.caption, fontStyle: 'italic' },
-});
+  });
+}
