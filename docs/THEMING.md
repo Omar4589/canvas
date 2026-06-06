@@ -90,6 +90,18 @@ When a field swaps its background for a state (locked, invalid, disabled), make 
 locked ? 'bg-sunken text-fg-muted' : 'bg-card'
 ```
 
+### Gotcha — browser autofill
+Chrome/Safari paint their own background on autofilled fields (`:-webkit-autofill`) — white/pale — which ignores `bg-card` and stays light in dark mode, so a field you've typed into before can look white even though the control is themed. CSS can't override that background normally; the only reliable fix is a box-shadow inset, applied globally in [index.css](../client/src/index.css):
+
+```css
+input:-webkit-autofill, textarea:-webkit-autofill, select:-webkit-autofill {
+  -webkit-text-fill-color: rgb(var(--fg));
+  -webkit-box-shadow: 0 0 0 1000px rgb(var(--card)) inset;
+}
+```
+
+For tokenizing/search inputs that shouldn't be autofilled at all (e.g. the walk-list chip filters), also set `autoComplete="off"`.
+
 ### Adding a new surface or field — checklist
 - Background: `bg-surface` (page), `bg-card` (panel/field), `bg-raised` (popover), `bg-sunken` (well / locked).
 - Text: `text-fg`, with `text-fg-muted` / `text-fg-subtle` for secondary / placeholder.

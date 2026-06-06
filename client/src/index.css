@@ -91,6 +91,20 @@
   * {
     border-color: rgb(var(--border));
   }
+
+  /* Chrome/Safari autofill paints its own background (white/pale) that ignores
+   * bg-card and stays light in dark mode — so a previously-typed field looks white
+   * even though the control is themed. The box-shadow inset is the only reliable
+   * way to override it: pin autofilled fields to the card token + themed text. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: rgb(var(--fg));
+    -webkit-box-shadow: 0 0 0 1000px rgb(var(--card)) inset;
+    caret-color: rgb(var(--fg));
+  }
 }
 
 html,

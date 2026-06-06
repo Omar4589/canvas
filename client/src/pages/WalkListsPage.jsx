@@ -83,6 +83,7 @@ function MultiSelect({ label, value, onChange, options = [], placeholder }) {
           ))}
           <input
             value={query}
+            autoComplete="off"
             onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
             onFocus={() => setOpen(true)}
             onBlur={() => setTimeout(() => setOpen(false), 120)}
