@@ -42,6 +42,7 @@ import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { useMapStyle } from '../../lib/mapStyles';
 import MapStyleControl from '../../components/MapStyleControl';
+import { ThemeIconButton } from '../../components/ThemeToggle';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { colors, radius, spacing, type, shadow } from '../../lib/theme';
 
@@ -872,6 +873,9 @@ export default function MapScreen() {
                 <Text style={styles.iconButtonText}>↻</Text>
               )}
             </Pressable>
+            {/* Interim theme toggle for canvassers until a dedicated menu/drawer
+                exists; relocate there once that's designed. */}
+            <ThemeIconButton style={styles.iconButton} />
             <Pressable onPress={onLogout} style={styles.iconButtonGhost}>
               <Text style={styles.iconButtonGhostText}>Sign out</Text>
             </Pressable>

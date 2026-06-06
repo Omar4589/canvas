@@ -21,6 +21,7 @@ import {
   clearBootstrap,
 } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
+import { ThemeIconButton } from '../../../components/ThemeToggle';
 import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
 
 const ACTION_LABEL = {
@@ -104,9 +105,12 @@ export default function SuperAdminHome() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Logo size={26} />
-        <Pressable onPress={onLogout} hitSlop={8}>
-          <Text style={styles.signOut}>Sign out</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
+          <ThemeIconButton />
+          <Pressable onPress={onLogout} hitSlop={8}>
+            <Text style={styles.signOut}>Sign out</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
