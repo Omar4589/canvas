@@ -21,11 +21,15 @@ import {
   clearBootstrap,
 } from '../../lib/cache';
 import Logo from '../../components/Logo';
-import { colors, radius, spacing, type, shadow } from '../../lib/theme';
+import { radius, spacing } from '../../lib/theme';
+import { useTheme } from '../../lib/ThemeContext';
+import { useThemedStyles } from '../../lib/useThemedStyles';
 
 export default function SelectOrgScreen() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [user, setUser] = useState(null);
   const [items, setItems] = useState(null);
   const [error, setError] = useState(null);
@@ -184,7 +188,9 @@ export default function SelectOrgScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -256,4 +262,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorText: { color: colors.danger },
-});
+  });
+}

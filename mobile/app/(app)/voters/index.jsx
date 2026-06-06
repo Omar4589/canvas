@@ -13,10 +13,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 export default function VotersSearch() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [campaign, setCampaign] = useState(undefined);
   const [search, setSearch] = useState('');
   const cId = campaign?.id;
@@ -95,7 +99,9 @@ export default function VotersSearch() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -134,4 +140,5 @@ const styles = StyleSheet.create({
   address: { ...type.caption, marginTop: 2 },
   meta: { ...type.caption, color: colors.textMuted, marginTop: 3 },
   chev: { color: colors.textMuted, fontSize: 22, fontWeight: '700' },
-});
+  });
+}

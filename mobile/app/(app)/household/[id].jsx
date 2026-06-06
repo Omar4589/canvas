@@ -19,7 +19,9 @@ import { getCurrentLocation } from '../../../lib/location';
 import { submitOrQueue, flushQueue } from '../../../lib/offlineQueue';
 import { saveBootstrap } from '../../../lib/cache';
 import { timeAgo, formatExact } from '../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 function findHouseholdAndVoters(bootstrap, householdId) {
   const household = (bootstrap?.households || []).find(
@@ -48,6 +50,8 @@ function initials(fullName) {
 }
 
 function StatusPill({ status }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const dotColor = colors.status[status] || colors.textMuted;
   const isDone = status === 'surveyed' || status === 'lit_dropped';
   const bg = isDone ? colors.successBg : colors.bg;
@@ -64,6 +68,8 @@ function StatusPill({ status }) {
 }
 
 function VoterCard({ voter, onPress }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const surveyed = voter.surveyStatus === 'surveyed';
   const meta = [voter.party, voter.gender, voter.precinct].filter(Boolean).join(' · ');
   return (
@@ -131,6 +137,8 @@ export default function HouseholdDetail() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const qc = useQueryClient();
+  const { colors, type } = useTheme();
+  const styles = useThemedStyles(makeStyles);
 
   const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'] });
   const campaignType = bootstrap?.campaign?.type || 'survey';
@@ -348,7 +356,9 @@ export default function HouseholdDetail() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,
@@ -531,4 +541,5 @@ const styles = StyleSheet.create({
   actionNotHome: { backgroundColor: colors.info },
   actionWrongAddress: { backgroundColor: colors.danger },
   actionButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
-});
+  });
+}

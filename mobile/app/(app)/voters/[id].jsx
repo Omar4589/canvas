@@ -14,7 +14,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { formatExact, timeAgo } from '../../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 function answerText(a) {
   if (a == null || a === '') return '—';
@@ -22,6 +24,7 @@ function answerText(a) {
 }
 
 function Card({ title, children }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.card}>
       {title ? <Text style={styles.cardTitle}>{title}</Text> : null}
@@ -33,6 +36,8 @@ function Card({ title, children }) {
 export default function VoterProfile() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { id } = useLocalSearchParams();
   const voterId = Array.isArray(id) ? id[0] : id;
   const [campaign, setCampaign] = useState(undefined);
@@ -174,6 +179,7 @@ export default function VoterProfile() {
 }
 
 function Detail({ label, value }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
@@ -182,7 +188,9 @@ function Detail({ label, value }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -206,8 +214,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     overflow: 'hidden',
   },
-  badgeGreen: { backgroundColor: '#DCFCE7', color: '#15803D', borderColor: '#DCFCE7' },
-  badgeTeal: { backgroundColor: '#CCFBF1', color: '#0F766E', borderColor: '#CCFBF1' },
+  badgeGreen: { backgroundColor: colors.successBg, color: colors.success, borderColor: colors.successBg },
+  badgeTeal: { backgroundColor: colors.tealBg, color: colors.teal, borderColor: colors.tealBg },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
@@ -256,4 +264,5 @@ const styles = StyleSheet.create({
   },
   noteBody: { fontSize: 14, color: colors.textPrimary },
   noteMeta: { ...type.caption, color: colors.textMuted, marginTop: 3 },
-});
+  });
+}

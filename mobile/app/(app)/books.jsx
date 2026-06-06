@@ -20,7 +20,10 @@ import {
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import Logo from '../../components/Logo';
 import EffortPicker from '../../components/EffortPicker';
-import { colors, radius, spacing } from '../../lib/theme';
+import { radius, spacing } from '../../lib/theme';
+import { useTheme } from '../../lib/ThemeContext';
+import { useThemedStyles } from '../../lib/useThemedStyles';
+import { useMapStyle } from '../../lib/mapStyles';
 
 if (MAPBOX_PUBLIC_TOKEN) {
   Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
@@ -38,6 +41,9 @@ export default function BooksScreen() {
   const [mapReady, setMapReady] = useState(false);
   const [currentEffort, setCurrentEffort] = useState(null);
   const effortResolvedRef = useRef(false);
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const { styleURL } = useMapStyle();
 
   useEffect(() => {
     let mounted = true;
@@ -257,7 +263,7 @@ export default function BooksScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <Mapbox.MapView
         style={{ flex: 1 }}
-        styleURL={Mapbox.StyleURL.Street}
+        styleURL={styleURL}
         onDidFinishLoadingMap={() => setMapReady(true)}
         zoomEnabled
         scrollEnabled
@@ -291,8 +297,8 @@ export default function BooksScreen() {
               iconIgnorePlacement: true,
               textField: '{name} · {knocked}/{total}',
               textSize: 11,
-              textColor: '#111827',
-              textHaloColor: '#ffffff',
+              textColor: colors.mapLabel,
+              textHaloColor: colors.mapLabelHalo,
               textHaloWidth: 1.6,
               textAnchor: 'top',
               textOffset: [0, 1.1],
@@ -348,7 +354,9 @@ export default function BooksScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors } = t;
+  return StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: colors.bg },
   muted: { color: colors.textSecondary, textAlign: 'center', marginTop: 6 },
   emptyTitle: { fontWeight: '700', fontSize: 16, color: colors.textPrimary, marginBottom: 4 },
@@ -364,7 +372,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: colors.chromeBar,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -385,7 +393,7 @@ const styles = StyleSheet.create({
   effortRow: { marginHorizontal: 12, marginBottom: 8, zIndex: 10 },
   hint: {
     marginHorizontal: 12,
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: colors.chromeBar,
     borderRadius: radius.md,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -406,4 +414,5 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   enterButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
-});
+  });
+}

@@ -102,6 +102,14 @@ export const lightColors = {
   info: '#3B82F6',
   infoBg: '#DBEAFE',
 
+  dangerBorder: '#FCA5A5',
+
+  // Accent pairs for non-status categorizations (campaign types, voted badges).
+  accentPurple: '#7E22CE',
+  accentPurpleBg: '#F3E8FF',
+  teal: '#0F766E',
+  tealBg: '#CCFBF1',
+
   backdrop: 'rgba(0,0,0,0.45)',          // modal scrims
   chromeBar: 'rgba(255,255,255,0.95)',   // translucent map top bars
   mapLabel: '#111827',                   // Mapbox symbol label text
@@ -142,6 +150,13 @@ export const darkColors = {
 
   info: '#60A5FA',
   infoBg: '#12243F',
+
+  dangerBorder: '#7F1D1D',
+
+  accentPurple: '#C084FC',
+  accentPurpleBg: '#2E1065',
+  teal: '#2DD4BF',
+  tealBg: '#042F2A',
 
   backdrop: 'rgba(0,0,0,0.65)',
   chromeBar: 'rgba(17,24,39,0.95)',

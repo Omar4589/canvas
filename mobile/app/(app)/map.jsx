@@ -44,7 +44,10 @@ import { useMapStyle } from '../../lib/mapStyles';
 import MapStyleControl from '../../components/MapStyleControl';
 import { ThemeIconButton } from '../../components/ThemeToggle';
 import { timeAgo, formatExact } from '../../lib/datetime';
-import { colors, radius, spacing, type, shadow } from '../../lib/theme';
+import { makeRateColors } from '../../lib/rates';
+import { radius, spacing } from '../../lib/theme';
+import { useTheme } from '../../lib/ThemeContext';
+import { useThemedStyles } from '../../lib/useThemedStyles';
 
 if (MAPBOX_PUBLIC_TOKEN) {
   Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
@@ -153,6 +156,7 @@ function buildBuildingFeatureCollection(buildings) {
 }
 
 function StatusPill({ status, compact = false }) {
+  const { colors } = useTheme();
   const dotColor = colors.status[status] || colors.textMuted;
   const isDone = status === 'surveyed' || status === 'lit_dropped';
   const isMiss = status === 'not_home' || status === 'wrong_address';
@@ -160,7 +164,7 @@ function StatusPill({ status, compact = false }) {
   const border = isDone
     ? colors.successBorder
     : isMiss
-    ? '#FCA5A5'
+    ? colors.dangerBorder
     : colors.border;
   const textColor = isDone
     ? colors.success
@@ -184,6 +188,7 @@ function StatusPill({ status, compact = false }) {
 }
 
 function ProgressStat({ pinStatus, value, label }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.progressStat}>
       <PinIcon status={pinStatus} size={26} />
@@ -203,6 +208,7 @@ function ProgressStat({ pinStatus, value, label }) {
 // peek + expanded heights both differ between the no-selection and
 // house-selected modes (the legend is short, the voter list is long).
 function PullableSheet({ translateY, snapDelta, sheetHeight, children }) {
+  const styles = useThemedStyles(makeStyles);
   const startY = useSharedValue(0);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -247,6 +253,8 @@ export default function MapScreen() {
   const router = useRouter();
   const qc = useQueryClient();
   const { styleId, styleURL, setStyle } = useMapStyle();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const cameraRef = useRef(null);
   const cameraInitializedRef = useRef(false);
   const [selected, setSelected] = useState(null);
@@ -829,8 +837,8 @@ export default function MapScreen() {
               iconIgnorePlacement: true,
               textField: '{total} units · {done} done',
               textSize: 11,
-              textColor: '#111827',
-              textHaloColor: '#ffffff',
+              textColor: colors.mapLabel,
+              textHaloColor: colors.mapLabelHalo,
               textHaloWidth: 1.6,
               textAnchor: 'top',
               textOffset: [0, 1.2],
@@ -1023,6 +1031,7 @@ export default function MapScreen() {
 }
 
 function RecenterButton({ translateY, sheetHeight, following, onPress, styleId, onStyleChange }) {
+  const styles = useThemedStyles(makeStyles);
   const animatedStyle = useAnimatedStyle(() => ({
     bottom: sheetHeight.value - translateY.value + spacing.lg,
   }));
@@ -1085,13 +1094,8 @@ function getConnectionRate(surveys, doorsKnocked) {
   return { value: `${pct}%`, level };
 }
 
-const RATE_COLORS = {
-  good: { bg: colors.successBg, fg: colors.success },
-  caution: { bg: colors.warnBg, fg: '#92400E' },
-  low: { bg: colors.dangerBg, fg: colors.danger },
-};
-
 function ShiftStat({ label, value }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.shiftStat}>
       <Text style={styles.shiftStatValue}>{value}</Text>
@@ -1101,6 +1105,9 @@ function ShiftStat({ label, value }) {
 }
 
 function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const RATE_COLORS = makeRateColors(colors);
   const legend = isLitDrop ? LIT_DROP_LEGEND : SURVEY_LEGEND;
   const breakdown = today.answerBreakdown || [];
   const showAnswers = !isLitDrop && breakdown.length > 0;
@@ -1232,6 +1239,7 @@ function SelectedHouseSheetContent({
   onOpen,
   onClose,
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <>
       {/* Peek */}
@@ -1344,7 +1352,9 @@ function SelectedHouseSheetContent({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   center: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -1375,7 +1385,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: colors.chromeBar,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -1409,7 +1419,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     borderRadius: radius.pill,
   },
-  pendingBadgeText: { color: '#92400E', fontWeight: '700', fontSize: 12 },
+  pendingBadgeText: { color: colors.warnFg, fontWeight: '700', fontSize: 12 },
   adminChip: {
     backgroundColor: colors.brandTint,
     borderRadius: radius.pill,
@@ -1431,7 +1441,7 @@ const styles = StyleSheet.create({
 
   // Book context strip: effort · book name + a progress bar + "done / total houses".
   bookStrip: {
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: colors.chromeBar,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xs,
     paddingBottom: spacing.sm,
@@ -1847,7 +1857,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '600',
   },
-});
+  });
+}
 
 const pillStyles = StyleSheet.create({
   pill: {

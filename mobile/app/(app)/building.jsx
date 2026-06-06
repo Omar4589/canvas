@@ -5,12 +5,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { groupBuildings } from '../../lib/buildings';
 import { recordHouseholdAction } from '../../lib/recordAction';
-import { colors, radius, spacing, type, shadow } from '../../lib/theme';
+import { radius, spacing } from '../../lib/theme';
+import { useTheme } from '../../lib/ThemeContext';
+import { useThemedStyles } from '../../lib/useThemedStyles';
 
 export default function BuildingScreen() {
   const { bkey } = useLocalSearchParams();
   const router = useRouter();
   const qc = useQueryClient();
+  const { colors, type } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [busy, setBusy] = useState(null);
 
   const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'] });
@@ -103,7 +107,9 @@ export default function BuildingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, backgroundColor: colors.bg },
   header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
@@ -146,4 +152,5 @@ const styles = StyleSheet.create({
   chevron: { color: colors.textMuted, fontSize: 22, fontWeight: '700' },
   primaryButton: { backgroundColor: colors.brand, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderRadius: radius.md, marginTop: spacing.md },
   primaryButtonText: { color: colors.textInverse, fontWeight: '700' },
-});
+  });
+}

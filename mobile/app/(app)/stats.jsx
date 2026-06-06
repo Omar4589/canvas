@@ -14,8 +14,10 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useRefresh } from '../../lib/useRefresh';
 import { loadActiveCampaign } from '../../lib/cache';
-import { getConnectionRate, RATE_COLORS } from '../../lib/rates';
-import { colors, radius, spacing, type, shadow } from '../../lib/theme';
+import { getConnectionRate, makeRateColors } from '../../lib/rates';
+import { radius, spacing } from '../../lib/theme';
+import { useTheme } from '../../lib/ThemeContext';
+import { useThemedStyles } from '../../lib/useThemedStyles';
 
 function getLocalDateStr(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -53,6 +55,7 @@ function metersToMiles(m) {
 }
 
 function StatCell({ value, label }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.statCell}>
       <Text style={styles.statValue}>{value ?? '—'}</Text>
@@ -62,6 +65,7 @@ function StatCell({ value, label }) {
 }
 
 function Tag({ kind, children }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={[styles.tag, styles[`tag_${kind}`]]}>
       <Text style={[styles.tagText, styles[`tagText_${kind}`]]}>{children}</Text>
@@ -70,6 +74,7 @@ function Tag({ kind, children }) {
 }
 
 function DayRow({ day, todayStr, yesterdayStr, bestDate, isLitDrop, onPress }) {
+  const styles = useThemedStyles(makeStyles);
   const isToday = day.date === todayStr;
   const isYesterday = day.date === yesterdayStr;
   const isBest = bestDate && day.date === bestDate;
@@ -102,6 +107,9 @@ function DayRow({ day, todayStr, yesterdayStr, bestDate, isLitDrop, onPress }) {
 
 export default function StatsScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const RATE_COLORS = makeRateColors(colors);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
 
   useEffect(() => {
@@ -257,6 +265,7 @@ export default function StatsScreen() {
 }
 
 function Header({ onBack }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} hitSlop={8}>
@@ -266,7 +275,9 @@ function Header({ onBack }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,
@@ -470,4 +481,5 @@ const styles = StyleSheet.create({
     borderColor: colors.successBorder,
   },
   tagText_best: { color: colors.success },
-});
+  });
+}

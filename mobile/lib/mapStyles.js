@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Mapbox from '@rnmapbox/maps';
 import { loadMapStyle, saveMapStyle } from './cache';
+import { useTheme } from './ThemeContext';
 
 // Selectable base map styles. Street is the vector default; Hybrid and Satellite
 // are raster imagery (heavier on data + battery), so they stay opt-in. Hybrid
@@ -22,13 +23,21 @@ export function styleUrlFor(id) {
 
 // Loads the persisted base-style choice and exposes a setter that persists it.
 // Shared by the canvasser and admin maps so both honor the same preference.
+// When the user has NOT explicitly picked a base style, the default follows the
+// app theme — Dark tiles in dark mode, Street otherwise — so dark mode gets a
+// dark map out of the box without overriding an explicit Satellite/Hybrid choice.
 export function useMapStyle() {
-  const [styleId, setStyleId] = useState(DEFAULT_MAP_STYLE_ID);
+  const { isDark } = useTheme();
+  const [styleId, setStyleId] = useState(null);
+  const [explicit, setExplicit] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     loadMapStyle().then((id) => {
-      if (mounted && id && MAP_STYLES.some((s) => s.id === id)) setStyleId(id);
+      if (mounted && id && MAP_STYLES.some((s) => s.id === id)) {
+        setStyleId(id);
+        setExplicit(true);
+      }
     });
     return () => {
       mounted = false;
@@ -37,8 +46,12 @@ export function useMapStyle() {
 
   const setStyle = useCallback((id) => {
     setStyleId(id);
+    setExplicit(true);
     saveMapStyle(id).catch(() => {});
   }, []);
 
-  return { styleId, styleURL: styleUrlFor(styleId), setStyle };
+  const effectiveId =
+    explicit && styleId ? styleId : isDark ? 'dark' : DEFAULT_MAP_STYLE_ID;
+
+  return { styleId: effectiveId, styleURL: styleUrlFor(effectiveId), setStyle };
 }

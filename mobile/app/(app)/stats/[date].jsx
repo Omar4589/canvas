@@ -12,7 +12,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import { makeRateColors } from '../../../lib/rates';
+import { radius, spacing } from '../../../lib/theme';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 function parseLocalDate(yyyymmdd) {
   const [y, m, d] = yyyymmdd.split('-').map(Number);
@@ -71,13 +74,8 @@ function getConnectionRate(surveys, doorsKnocked) {
   return { value: `${pct}%`, level };
 }
 
-const RATE_COLORS = {
-  good: { bg: colors.successBg, fg: colors.success },
-  caution: { bg: colors.warnBg, fg: '#92400E' },
-  low: { bg: colors.dangerBg, fg: colors.danger },
-};
-
 function ShiftStat({ label, value }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.shiftStat}>
       <Text style={styles.shiftStatValue}>{value}</Text>
@@ -87,6 +85,7 @@ function ShiftStat({ label, value }) {
 }
 
 function Header({ onBack }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} hitSlop={8}>
@@ -98,6 +97,9 @@ function Header({ onBack }) {
 
 export default function DayDetailScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const RATE_COLORS = makeRateColors(colors);
   const { date } = useLocalSearchParams();
   const dateStr = Array.isArray(date) ? date[0] : date;
   const [activeCampaign, setActiveCampaign] = useState(undefined);
@@ -241,7 +243,9 @@ export default function DayDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,
@@ -398,4 +402,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
   },
-});
+  });
+}

@@ -17,7 +17,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getCurrentLocation } from '../../../../lib/location';
 import { submitOrQueue, flushQueue } from '../../../../lib/offlineQueue';
 import { saveBootstrap } from '../../../../lib/cache';
-import { colors, radius, spacing, type, shadow } from '../../../../lib/theme';
+import { radius, spacing } from '../../../../lib/theme';
+import { useTheme } from '../../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
 function isAnswered(q, value) {
   if (q.type === 'multiple_choice') return Array.isArray(value) && value.length > 0;
@@ -26,6 +28,7 @@ function isAnswered(q, value) {
 }
 
 function SingleChoice({ q, value, onChange }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.optionGrid}>
       {q.options.map((opt) => {
@@ -60,6 +63,7 @@ function SingleChoice({ q, value, onChange }) {
 }
 
 function MultipleChoice({ q, value, onChange }) {
+  const styles = useThemedStyles(makeStyles);
   const selected = Array.isArray(value) ? value : [];
   function toggle(opt) {
     if (selected.includes(opt)) onChange(selected.filter((s) => s !== opt));
@@ -99,6 +103,8 @@ function MultipleChoice({ q, value, onChange }) {
 }
 
 function FreeText({ value, onChange }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <TextInput
       value={value || ''}
@@ -115,6 +121,8 @@ export default function VoterSurvey() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const qc = useQueryClient();
+  const { colors, type } = useTheme();
+  const styles = useThemedStyles(makeStyles);
 
   const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'] });
   const voter = (bootstrap?.voters || []).find((v) => String(v._id) === String(id));
@@ -385,7 +393,9 @@ export default function VoterSurvey() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,
@@ -488,10 +498,10 @@ const styles = StyleSheet.create({
   },
   scriptLabel: {
     ...type.micro,
-    color: '#92400E',
+    color: colors.warnFg,
     marginBottom: 6,
   },
-  scriptText: { fontSize: 14, color: '#78350F', lineHeight: 20 },
+  scriptText: { fontSize: 14, color: colors.warnFg, lineHeight: 20 },
 
   questionCard: {
     backgroundColor: colors.card,
@@ -642,4 +652,5 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   primaryButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
-});
+  });
+}

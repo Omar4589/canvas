@@ -2,7 +2,8 @@ import { View, Text, Pressable, Linking, Platform, StyleSheet } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { signOut } from '../lib/authState';
 import Logo from '../components/Logo';
-import { colors, radius, spacing, type, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 // Shown when this JS bundle is older than the server will accept (see the gate in
 // index.jsx). A blocking wall is intentional: an out-of-date bundle can't talk to
@@ -14,6 +15,8 @@ const STORE_URL = Platform.select({
 });
 
 export default function UpdateRequired() {
+  const styles = useThemedStyles(makeStyles);
+
   async function openStore() {
     try {
       await Linking.openURL(STORE_URL);
@@ -49,7 +52,9 @@ export default function UpdateRequired() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   body: { flex: 1, justifyContent: 'center', paddingHorizontal: spacing.xl },
   brandBlock: { alignItems: 'center', marginBottom: spacing.xxl },
@@ -77,4 +82,5 @@ const styles = StyleSheet.create({
   buttonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
   signOutWrap: { alignItems: 'center', marginTop: spacing.lg },
   signOut: { color: colors.brand, fontWeight: '600', fontSize: 14 },
-});
+  });
+}

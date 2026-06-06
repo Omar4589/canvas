@@ -17,11 +17,15 @@ import { signOut } from '../../lib/authState';
 import { saveActiveCampaign, clearBootstrap, clearSelectedBooks, clearCurrentEffort } from '../../lib/cache';
 import { loadRoleContext } from '../../lib/role';
 import Logo from '../../components/Logo';
-import { colors, radius, spacing, type, shadow } from '../../lib/theme';
+import { radius, spacing } from '../../lib/theme';
+import { useTheme } from '../../lib/ThemeContext';
+import { useThemedStyles } from '../../lib/useThemedStyles';
 
 export default function CampaignsScreen() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [picking, setPicking] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -137,7 +141,7 @@ export default function CampaignsScreen() {
                     style={[
                       styles.typePillText,
                       {
-                        color: isLitDrop ? '#7E22CE' : colors.brand,
+                        color: isLitDrop ? colors.accentPurple : colors.brand,
                       },
                     ]}
                   >
@@ -167,7 +171,9 @@ export default function CampaignsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
@@ -210,7 +216,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   typePillSurvey: { backgroundColor: colors.brandTint },
-  typePillLitDrop: { backgroundColor: '#F3E8FF' },
+  typePillLitDrop: { backgroundColor: colors.accentPurpleBg },
   typePillText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
   cardTitle: { ...type.h3 },
   cardMeta: { ...type.caption, marginTop: 2 },
@@ -243,4 +249,5 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   retryButtonText: { color: colors.textInverse, fontWeight: '600' },
-});
+  });
+}

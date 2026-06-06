@@ -22,10 +22,14 @@ import {
 } from '../lib/cache';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
-import { colors, radius, spacing, type, shadow } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/ThemeContext';
+import { useThemedStyles } from '../lib/useThemedStyles';
 
 export default function Login() {
   const token = useAuthToken();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -121,7 +125,9 @@ export default function Login() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(t) {
+  const { colors, type, shadow } = t;
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   body: {
     flex: 1,
@@ -179,4 +185,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
   },
-});
+  });
+}
