@@ -56,7 +56,7 @@
     },
     "owner": "omar4589",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "updates": {
       "url": "https://u.expo.dev/4d913345-676f-4240-8f9a-6e8cafdda04c"
