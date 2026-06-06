@@ -11,7 +11,14 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { clearActiveOrgId, clearActiveCampaign } from '../lib/cache';
+import { ThemeProvider, useTheme } from '../lib/ThemeContext';
 import RootErrorBoundary from '../components/RootErrorBoundary';
+
+// Bar icons must contrast the bar background: light icons on dark, dark on light.
+function ThemedStatusBar() {
+  const { isDark } = useTheme();
+  return <StatusBar style={isDark ? 'light' : 'dark'} />;
+}
 
 // Any org-scoped query that fails because the active-organization context is
 // invalid (stale activeOrgId, or a client/server version skew that left us
@@ -69,16 +76,18 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          <StatusBar style="dark" />
-          <RootErrorBoundary>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="login" />
-              <Stack.Screen name="change-password" />
-              <Stack.Screen name="update-required" />
-              <Stack.Screen name="(app)" />
-            </Stack>
-          </RootErrorBoundary>
+          <ThemeProvider>
+            <ThemedStatusBar />
+            <RootErrorBoundary>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="index" />
+                <Stack.Screen name="login" />
+                <Stack.Screen name="change-password" />
+                <Stack.Screen name="update-required" />
+                <Stack.Screen name="(app)" />
+              </Stack>
+            </RootErrorBoundary>
+          </ThemeProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

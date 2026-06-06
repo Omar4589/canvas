@@ -9,6 +9,7 @@ const SELECTED_BOOKS_KEY = 'canvass.selectedBooks';
 const CURRENT_EFFORT_KEY = 'canvass.currentEffort';
 const MAP_STYLE_KEY = 'canvass.mapStyle';
 const SERVER_META_KEY = 'canvass.serverMeta';
+const THEME_KEY = 'canvass.themePreference';
 
 export async function saveBootstrap(data) {
   await AsyncStorage.setItem(KEY, JSON.stringify({ ...data, cachedAt: new Date().toISOString() }));
@@ -211,4 +212,20 @@ export async function loadServerMeta() {
   } catch {
     return null;
   }
+}
+
+// Light/dark preference: 'light' | 'dark' | 'system'. 'system' (follow the OS)
+// is the default, so it's stored as the absence of the key — saving 'system'
+// removes it, and a missing key reads back as null which the ThemeProvider
+// treats as 'system'.
+export async function saveThemePreference(pref) {
+  if (!pref || pref === 'system') {
+    await AsyncStorage.removeItem(THEME_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(THEME_KEY, String(pref));
+}
+
+export async function loadThemePreference() {
+  return AsyncStorage.getItem(THEME_KEY);
 }

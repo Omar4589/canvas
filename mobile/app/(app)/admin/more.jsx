@@ -12,9 +12,14 @@ import {
   clearActiveOrgId,
 } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
-import { colors, radius, spacing, type, shadow } from '../../../lib/theme';
+import ThemeToggle from '../../../components/ThemeToggle';
+import { useTheme } from '../../../lib/ThemeContext';
+import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { radius, spacing } from '../../../lib/theme';
 
 function Row({ icon, label, sub, onPress, danger }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -33,6 +38,7 @@ function Row({ icon, label, sub, onPress, danger }) {
 export default function AdminMore() {
   const router = useRouter();
   const qc = useQueryClient();
+  const styles = useThemedStyles(makeStyles);
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -93,6 +99,11 @@ export default function AdminMore() {
           <Row icon="🚪" label="Switch to canvass mode" onPress={onCanvassMode} />
         </View>
 
+        <Text style={styles.sectionLabel}>Appearance</Text>
+        <View style={styles.appearanceGroup}>
+          <ThemeToggle />
+        </View>
+
         <Text style={styles.sectionLabel}>Account</Text>
         <View style={styles.group}>
           {user?.isSuperAdmin && (
@@ -106,52 +117,57 @@ export default function AdminMore() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerLabel: { ...type.caption, color: colors.textSecondary },
+function makeStyles(t) {
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: t.colors.bg },
+    header: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    headerLabel: { ...t.type.caption, color: t.colors.textSecondary },
 
-  accountCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    marginTop: spacing.xs,
-    marginBottom: spacing.lg,
-  },
-  accountName: { ...type.h3 },
-  accountEmail: { ...type.caption, marginTop: 2 },
+    accountCard: {
+      backgroundColor: t.colors.card,
+      borderRadius: radius.lg,
+      padding: spacing.lg,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      ...t.shadow.card,
+      marginTop: spacing.xs,
+      marginBottom: spacing.lg,
+    },
+    accountName: { ...t.type.h3 },
+    accountEmail: { ...t.type.caption, marginTop: 2 },
 
-  sectionLabel: { ...type.micro, marginBottom: spacing.sm, marginLeft: spacing.xs },
-  group: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    marginBottom: spacing.lg,
-    overflow: 'hidden',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: spacing.md,
-  },
-  rowIcon: { fontSize: 18, width: 24, textAlign: 'center' },
-  rowLabel: { ...type.bodyStrong, fontSize: 15 },
-  rowSub: { ...type.caption, marginTop: 1 },
-  rowChevron: { fontSize: 20, color: colors.textMuted },
-});
+    sectionLabel: { ...t.type.micro, marginBottom: spacing.sm, marginLeft: spacing.xs },
+    group: {
+      backgroundColor: t.colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      ...t.shadow.card,
+      marginBottom: spacing.lg,
+      overflow: 'hidden',
+    },
+    appearanceGroup: {
+      marginBottom: spacing.lg,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: t.colors.border,
+      gap: spacing.md,
+    },
+    rowIcon: { fontSize: 18, width: 24, textAlign: 'center' },
+    rowLabel: { ...t.type.bodyStrong, fontSize: 15 },
+    rowSub: { ...t.type.caption, marginTop: 1 },
+    rowChevron: { fontSize: 20, color: t.colors.textMuted },
+  });
+}

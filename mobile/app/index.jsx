@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Redirect } from 'expo-router';
 import { useAuthToken, useAuthReady } from '../lib/authState';
+import { useTheme } from '../lib/ThemeContext';
 import { CLIENT_API_VERSION } from '../lib/config';
 import {
   loadActiveCampaign,
@@ -14,6 +15,7 @@ import {
 export default function Index() {
   const token = useAuthToken();
   const ready = useAuthReady();
+  const { colors, loaded: themeLoaded } = useTheme();
   const [boot, setBoot] = useState(undefined);
 
   useEffect(() => {
@@ -44,9 +46,14 @@ export default function Index() {
     };
   }, [ready, token]);
 
-  if (!ready || (token && boot === undefined)) {
+  // Hold the first paint until the stored theme preference has loaded, so an
+  // explicit dark choice on a light-OS device (or vice-versa) never flashes the
+  // wrong theme before redirecting. This is the RN analog of the web's pre-paint
+  // script. `colors.bg` is already correct here because the provider seeds the
+  // scheme from the OS synchronously.
+  if (!themeLoaded || !ready || (token && boot === undefined)) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg }}>
         <ActivityIndicator />
       </View>
     );
