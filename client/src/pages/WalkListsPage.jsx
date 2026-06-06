@@ -48,7 +48,7 @@ function TextFilter({ label, value, onChange, placeholder }) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded border border-border-strong px-2 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       />
     </label>
   );
@@ -74,7 +74,7 @@ function MultiSelect({ label, value, onChange, options = [], placeholder }) {
     <label className="block text-sm">
       <span className="mb-1 block text-xs font-medium text-fg-muted">{label}</span>
       <div className="relative">
-        <div className="flex min-h-[34px] flex-wrap items-center gap-1 rounded border border-border-strong px-1.5 py-1 focus-within:border-brand-accent focus-visible:ring-2 focus-visible:ring-ring/30">
+        <div className="flex min-h-[34px] flex-wrap items-center gap-1 rounded border border-border-strong bg-card px-1.5 py-1 focus-within:border-brand-accent focus-visible:ring-2 focus-visible:ring-ring/30">
           {selected.map((v) => (
             <span key={v} className="flex items-center gap-1 rounded bg-brand-tint px-1.5 py-0.5 text-xs text-brand-accent">
               {v}
@@ -91,7 +91,7 @@ function MultiSelect({ label, value, onChange, options = [], placeholder }) {
               else if (e.key === 'Backspace' && !query && selected.length) remove(selected[selected.length - 1]);
             }}
             placeholder={selected.length ? '' : (placeholder || 'Type or pick…')}
-            className="min-w-[60px] flex-1 border-0 p-0.5 text-sm focus:outline-none focus:ring-0"
+            className="min-w-[60px] flex-1 border-0 p-0.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-0"
           />
         </div>
         {open && filtered.length > 0 && (
@@ -280,7 +280,7 @@ export default function WalkListsPage() {
                 <select
                   value={f.priorPassId}
                   onChange={(e) => set('priorPassId', e.target.value)}
-                  className="rounded border border-border-strong px-2 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                  className="rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 >
                   <option value="">—</option>
                   {passes.map((p) => (
@@ -293,7 +293,7 @@ export default function WalkListsPage() {
                 <select
                   value={f.surveyResponse}
                   onChange={(e) => set('surveyResponse', e.target.value)}
-                  className="rounded border border-border-strong px-2 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                  className="rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 >
                   <option value="any">Any</option>
                   <option value="exists">Has a response</option>
@@ -315,7 +315,7 @@ export default function WalkListsPage() {
           <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <label className="flex items-center gap-2 text-sm">
               <span className="text-xs font-medium text-fg-muted">Combine</span>
-              <select value={f.combine} onChange={(e) => set('combine', e.target.value)} className="rounded border border-border-strong px-2 py-1 text-sm">
+              <select value={f.combine} onChange={(e) => set('combine', e.target.value)} className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg">
                 <option value="and">AND (match all)</option>
                 <option value="or">OR (match any)</option>
               </select>
@@ -331,7 +331,7 @@ export default function WalkListsPage() {
           </div>
 
           <div className="mt-4 flex items-center gap-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. Undecideds R1)" className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. Undecideds R1)" className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
             <button onClick={() => name && save.mutate()} disabled={!name || save.isPending} className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
               {save.isPending ? 'Saving…' : 'Save list'}
             </button>
@@ -367,7 +367,7 @@ export default function WalkListsPage() {
                 <div className="mt-3 rounded border border-warning/30 bg-warning-tint p-3 text-xs text-warning-fg">
                   Couldn't auto-detect a Voter ID column. Pick the column that holds Voter IDs:
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <select value={idColumn} onChange={(e) => setIdColumn(e.target.value)} className="rounded border border-border-strong px-2 py-1 text-sm">
+                    <select value={idColumn} onChange={(e) => setIdColumn(e.target.value)} className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg">
                       <option value="">— Choose column —</option>
                       {colError.columns.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -414,7 +414,7 @@ export default function WalkListsPage() {
               )}
 
               <div className="mt-4 flex items-center gap-2">
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. First-election voters)" className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. First-election voters)" className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
                 <button
                   onClick={() => name && csvFile && csvSave.mutate({ file: csvFile, name, idColumn: idColumn || undefined })}
                   disabled={!name || !csvFile || !csvPreview.data?.householdCount || csvSave.isPending}

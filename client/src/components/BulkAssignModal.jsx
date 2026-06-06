@@ -91,7 +91,7 @@ export default function BulkAssignModal({ campaignId, turfIds, onClose }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search people…"
-              className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
             <button onClick={selectAllVisible} className="shrink-0 rounded-md border border-border-strong px-3 py-2 text-xs font-medium text-fg-muted hover:bg-sunken">
               Select all{search.trim() ? ' shown' : ''}

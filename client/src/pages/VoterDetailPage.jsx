@@ -95,7 +95,7 @@ function VoterFields({ voter, onSave, saving, tz }) {
               <input
                 value={form[k] ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))}
-                className="mt-1 w-full rounded border border-border-strong px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none"
+                className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none"
               />
             </label>
           ))}
@@ -187,7 +187,7 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
                 <select
                   value={vals[q.key] ?? ''}
                   onChange={(e) => setVals((v) => ({ ...v, [q.key]: e.target.value }))}
-                  className="w-full rounded border border-border-strong px-2 py-1.5 text-sm"
+                  className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
                 >
                   <option value="">—</option>
                   {q.options.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -205,14 +205,14 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
                 <input
                   value={vals[q.key] ?? ''}
                   onChange={(e) => setVals((v) => ({ ...v, [q.key]: e.target.value }))}
-                  className="w-full rounded border border-border-strong px-2 py-1.5 text-sm"
+                  className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
                 />
               )}
             </div>
           ))}
           <label className="block text-xs font-medium text-fg-muted">
             Note
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="mt-1 w-full rounded border border-border-strong px-2 py-1.5 text-sm" />
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg" />
           </label>
           <div className="flex gap-2">
             <button onClick={submit} disabled={busy} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">Save</button>
@@ -341,7 +341,7 @@ export default function VoterDetailPage() {
             onChange={(e) => setNewNote(e.target.value)}
             rows={2}
             placeholder="Add a note about this voter…"
-            className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none"
+            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none"
           />
           <button
             onClick={() => newNote.trim() && addNote.mutate(newNote.trim())}

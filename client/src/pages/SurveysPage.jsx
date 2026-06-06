@@ -79,8 +79,8 @@ function OptionRow({ index, value, onChange, onRemove, canRemove, locked }) {
         readOnly={locked}
         placeholder={`Option ${index + 1}`}
         className={
-          'flex-1 rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ' +
-          (locked ? 'bg-sunken text-fg-muted' : '')
+          'flex-1 rounded border border-border-strong px-3 py-2 text-sm placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ' +
+          (locked ? 'bg-sunken text-fg-muted' : 'bg-card text-fg')
         }
       />
       <button
@@ -185,7 +185,7 @@ function QuestionCard({
             value={value.label}
             onChange={(e) => onChange({ ...value, label: e.target.value })}
             placeholder="What is your top issue?"
-            className="w-full rounded border border-border-strong px-3 py-2 text-base focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-base text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
         </div>
 
@@ -330,7 +330,7 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
             onChange={(e) => setName(e.target.value)}
             required
             placeholder="Scott Berger Door-to-Door Survey"
-            className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
           <p className="mt-2 text-xs text-fg-muted">
             Surveys are linked to campaigns on the Campaigns page.
@@ -350,7 +350,7 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
           onChange={(e) => setIntro(e.target.value)}
           rows={4}
           placeholder="Hi, I'm out talking with voters today on behalf of…"
-          className="w-full rounded border border-border-strong px-3 py-2 text-sm leading-relaxed focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm leading-relaxed text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
       </section>
 
@@ -408,7 +408,7 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
           onChange={(e) => setClosing(e.target.value)}
           rows={3}
           placeholder="Thanks so much for your time. Have a great day!"
-          className="w-full rounded border border-border-strong px-3 py-2 text-sm leading-relaxed focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm leading-relaxed text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
       </section>
 

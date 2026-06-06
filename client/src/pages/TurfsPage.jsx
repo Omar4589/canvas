@@ -297,7 +297,7 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
             value=""
             onChange={(e) => { if (e.target.value) onMove(e.target.value); }}
             disabled={moving}
-            className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
+            className="mt-1.5 w-full rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
           >
             <option value="">{moving ? 'Moving…' : 'Move to book…'}</option>
             {books
@@ -353,7 +353,7 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
           value=""
           onChange={(e) => { if (e.target.value) onMoveAll(e.target.value); }}
           disabled={moving}
-          className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
+          className="w-full rounded border border-border-strong bg-card px-2 py-1 text-xs font-medium text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
         >
           <option value="">{moving ? 'Moving…' : 'Move all units to book…'}</option>
           {books.map((t) => (
@@ -381,7 +381,7 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
                   value=""
                   onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
                   disabled={moving}
-                  className="mt-1 w-full rounded border border-border px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
+                  className="mt-1 w-full rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
                 >
                   <option value="">Move to book…</option>
                   {books
@@ -801,7 +801,7 @@ export default function TurfsPage() {
             <div className="mb-4 space-y-3">
               <label className="block text-sm">
                 <span className="mb-1 block text-xs font-medium text-fg-muted">Max doors per book</span>
-                <input type="number" min="1" value={maxDoors} onChange={(e) => setMaxDoors(e.target.value)} className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+                <input type="number" min="1" value={maxDoors} onChange={(e) => setMaxDoors(e.target.value)} className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
                 <span className="mt-1 block text-xs text-fg-muted">Default 65 — adjust freely.</span>
               </label>
               <div>
@@ -833,13 +833,13 @@ export default function TurfsPage() {
             <>
               <label className="mb-3 block text-sm">
                 <span className="mb-1 block text-xs font-medium text-fg-muted">Group by</span>
-                <select value={attribute} onChange={(e) => setAttribute(e.target.value)} className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30">
+                <select value={attribute} onChange={(e) => setAttribute(e.target.value)} className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30">
                   {ATTRIBUTES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
                 </select>
               </label>
               <label className="mb-4 block text-sm">
                 <span className="mb-1 block text-xs font-medium text-fg-muted">Cap at N doors/group (optional)</span>
-                <input type="number" min="1" placeholder="no cap" value={capN} onChange={(e) => setCapN(e.target.value)} className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+                <input type="number" min="1" placeholder="no cap" value={capN} onChange={(e) => setCapN(e.target.value)} className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
               </label>
             </>
           )}

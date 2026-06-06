@@ -109,7 +109,7 @@ export default function DateRangePickerModal({
               value={from}
               max={to || undefined}
               onChange={(e) => setFrom(e.target.value)}
-              className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="flex-1 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
             {from ? (
               <button
@@ -135,7 +135,7 @@ export default function DateRangePickerModal({
               value={to}
               min={from || undefined}
               onChange={(e) => setTo(e.target.value)}
-              className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="flex-1 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
             {to ? (
               <button

@@ -21,7 +21,7 @@ const ACTION_DOT_CLS = {
 };
 
 const inputCls =
-  'w-full rounded-md border border-border-strong px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
+  'w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
 
 function initials(first, last) {
   return ((first?.[0] || '') + (last?.[0] || '')).toUpperCase() || '?';
@@ -396,8 +396,8 @@ export default function UserProfileModal({ membership, onClose }) {
               onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
               required
               disabled={emailLocked}
-              className={`${inputCls}${
-                emailLocked ? ' cursor-not-allowed bg-sunken text-fg-muted' : ''
+              className={`${inputCls.replace(' bg-card', '')} ${
+                emailLocked ? 'cursor-not-allowed bg-sunken text-fg-muted' : 'bg-card'
               }`}
             />
             {emailLocked && (

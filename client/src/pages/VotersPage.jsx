@@ -79,12 +79,12 @@ export default function VotersPage() {
           value={search}
           onChange={(e) => onFilter(setSearch)(e.target.value)}
           placeholder="Search name, Voter ID, or address"
-          className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:col-span-2"
+          className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:col-span-2"
         />
         <select
           value={campaignId}
           onChange={(e) => onFilter(setCampaignId)(e.target.value)}
-          className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none"
+          className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none"
         >
           <option value="">All campaigns</option>
           {campaigns.map((c) => (
@@ -94,7 +94,7 @@ export default function VotersPage() {
         <select
           value={surveyStatus}
           onChange={(e) => onFilter(setSurveyStatus)(e.target.value)}
-          className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none"
+          className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none"
         >
           <option value="">Any survey status</option>
           <option value="surveyed">Surveyed</option>
@@ -103,7 +103,7 @@ export default function VotersPage() {
         <select
           value={voted}
           onChange={(e) => onFilter(setVoted)(e.target.value)}
-          className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none"
+          className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none"
         >
           <option value="">Any voted status</option>
           <option value="true">Voted</option>
@@ -113,7 +113,7 @@ export default function VotersPage() {
           value={party}
           onChange={(e) => onFilter(setParty)(e.target.value)}
           placeholder="Party"
-          className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none"
+          className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none"
         />
       </div>
 

@@ -78,7 +78,7 @@ export default function LoginPage() {
             autoComplete="email"
             placeholder="you@example.com"
             required
-            className="mt-1 w-full rounded-md border border-border-strong px-3 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
 
           <label className="mt-4 block text-xs font-semibold text-fg-muted">

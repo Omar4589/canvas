@@ -108,7 +108,7 @@ export default function EarlyVotingPage() {
             <select
               value={campaignId}
               onChange={(e) => { setCampaignId(e.target.value); setFile(null); preview.reset(); apply.reset(); }}
-              className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">— Choose a campaign —</option>
               {campaigns.map((c) => (
@@ -250,7 +250,7 @@ export default function EarlyVotingPage() {
                 value={unmarkId}
                 onChange={(e) => setUnmarkId(e.target.value)}
                 placeholder="Voter ID"
-                className="rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               />
               <button
                 onClick={() => unmarkId.trim() && unmark.mutate(unmarkId.trim())}

@@ -165,7 +165,7 @@ export default function BookAssignmentPanel({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search people…"
-              className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="w-full rounded-md border border-border-strong bg-card px-2 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
             {single
               ? filtered.some((m) => !assignedSet.has(m.user.id)) && (

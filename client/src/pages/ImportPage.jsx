@@ -278,7 +278,7 @@ export default function ImportPage() {
             <select
               value={campaignId}
               onChange={(e) => { setCampaignId(e.target.value); dropReview(); }}
-              className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="w-full rounded border border-border-strong bg-card text-fg px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">— Choose a campaign —</option>
               {campaigns.map((c) => (
@@ -325,7 +325,7 @@ export default function ImportPage() {
                     }
                     e.target.value = '';
                   }}
-                  className="rounded border border-border-strong px-2 py-1 text-xs"
+                  className="rounded border border-border-strong bg-card text-fg px-2 py-1 text-xs"
                 >
                   <option value="">Apply a saved mapping…</option>
                   <option value="default">Built-in (current format)</option>
@@ -349,7 +349,7 @@ export default function ImportPage() {
                       value={mapping[f.key] || ''}
                       onChange={(e) => { setMapping((m) => ({ ...m, [f.key]: e.target.value || undefined })); dropReview(); }}
                       className={`min-w-0 flex-1 rounded border px-2 py-1 text-xs ${
-                        isReqUnmapped ? 'border-danger/40 bg-danger-tint' : 'border-border-strong'
+                        isReqUnmapped ? 'border-danger/40 bg-danger-tint' : 'border-border-strong bg-card text-fg'
                       }`}
                     >
                       <option value="">— not mapped —</option>
@@ -373,7 +373,7 @@ export default function ImportPage() {
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
                 placeholder="Save this mapping as… (e.g. i360)"
-                className="rounded border border-border-strong px-2 py-1 text-xs"
+                className="rounded border border-border-strong bg-card text-fg placeholder:text-fg-subtle px-2 py-1 text-xs"
               />
               <button
                 onClick={() => profileName.trim() && saveProfile.mutate({ name: profileName.trim(), mapping })}

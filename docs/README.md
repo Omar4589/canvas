@@ -32,6 +32,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | [VOTERS.md](VOTERS.md) | The voter directory and profile: where voters live (org vs campaign), what's editable, and mobile lookup. |
 | [EARLY_VOTING.md](EARLY_VOTING.md) | Early/already-voted marking and how "voted" doors drop off the canvasser's list and show as their own coverage bucket. |
 | [MAPS.md](MAPS.md) | Every map (mobile field app + web admin): reading the pins, where coordinates come from, how a knock becomes a "ping," rendering, and the live-refresh intervals. |
+| [THEMING.md](THEMING.md) | Cross-cutting (not a feature): light/dark mode and the web design tokens — how the theme flips, the full token reference, and the rule that every control must use the semantic tokens (`bg-card`/`text-fg`/…) so nothing renders white in dark mode. |
 
 ### Related references (repo root)
 

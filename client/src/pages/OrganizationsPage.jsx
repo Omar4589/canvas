@@ -55,7 +55,7 @@ export default function OrganizationsPage() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Acme Campaigns LLC"
             required
-            className="mt-1 w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
         </div>
         <div>
@@ -66,7 +66,7 @@ export default function OrganizationsPage() {
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder="acme-campaigns"
-            className="mt-1 w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
         </div>
         <div className="flex items-end">

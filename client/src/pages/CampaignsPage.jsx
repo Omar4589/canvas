@@ -52,7 +52,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
           onChange={(e) => setName(e.target.value)}
           required
           placeholder="Kentucky 2026"
-          className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
       </div>
 
@@ -95,7 +95,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
             required
             maxLength={2}
             placeholder="KY"
-            className="w-full rounded border border-border-strong px-3 py-2 text-sm uppercase focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm uppercase text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
         </div>
       </div>
@@ -105,7 +105,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
         <select
           value={timeZone}
           onChange={(e) => setTimeZone(e.target.value)}
-          className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <option value="">Auto (from state)</option>
           {US_TIMEZONES.map((t) => (
@@ -127,7 +127,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
             value={surveyTemplateId}
             onChange={(e) => setSurveyTemplateId(e.target.value)}
             required
-            className="w-full rounded border border-border-strong px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
             <option value="">— Choose a survey —</option>
             {(surveys || []).map((s) => (
