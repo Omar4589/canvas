@@ -92,7 +92,7 @@ function MultiSelect({ label, value, onChange, options = [], placeholder }) {
               else if (e.key === 'Backspace' && !query && selected.length) remove(selected[selected.length - 1]);
             }}
             placeholder={selected.length ? '' : (placeholder || 'Type or pick…')}
-            className="min-w-[60px] flex-1 border-0 p-0.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-0"
+            className="min-w-[60px] flex-1 border-0 bg-transparent p-0.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-0"
           />
         </div>
         {open && filtered.length > 0 && (

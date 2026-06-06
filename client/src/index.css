@@ -14,6 +14,7 @@
 @layer base {
   :root,
   .theme-light {
+    color-scheme: light; /* native controls + CSS system colors (e.g. input `field`) render light */
     --surface: 249 250 251; /* #F9FAFB page background */
     --card: 255 255 255; /* #FFFFFF cards/panels/modals/inputs */
     --raised: 255 255 255; /* popovers/menus (= card in light) */
@@ -51,6 +52,7 @@
   }
 
   html.dark {
+    color-scheme: dark; /* native controls + CSS system colors (e.g. input `field`) render dark */
     --surface: 11 15 25; /* #0B0F19 */
     --card: 17 24 39; /* #111827 */
     --raised: 31 41 55; /* #1F2937 lift above card */

@@ -22,6 +22,7 @@ That's all most people need; the rest is for developers.
 - Colors are **CSS custom properties** in [index.css](../client/src/index.css), written as channel-triplet RGB (e.g. `--card: 255 255 255`) so Tailwind's `rgb(var(--x) / <alpha-value>)` opacity utilities work. Light values live in `:root`; `html.dark` redefines the same variables with dark values. Flipping the one `dark` class restyles the entire app.
 - Tailwind color keys map to those variables via the `ch()` helper in `tailwind.config.js`, so `bg-card`, `text-fg`, `border-border`, etc. resolve to the right value automatically.
 - A base rule sets the **default border color** to `--border` (`* { border-color: rgb(var(--border)) }`), so even a bare `border` utility themes correctly.
+- `:root` / `html.dark` also set **`color-scheme`** (`light` / `dark`). This is what makes the browser's **native controls** (scrollbars, date pickers, the input caret) and CSS **system colors** render in the right scheme — most importantly an input's default `background-color: field`. Without `color-scheme: dark`, any control that has no explicit `bg-*` falls back to the white `field` system color and stays white in dark mode (this is what made the walk-list multi-select inputs render white). So: give controls a token background **and** rely on `color-scheme` for the native bits.
 - `.theme-light` re-pins the light values; the public marketing site wraps itself in it to stay light regardless of the global theme.
 
 ### Where the `dark` class comes from
