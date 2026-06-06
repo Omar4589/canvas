@@ -22,7 +22,6 @@ import {
 } from '../lib/cache';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
-import BuildInfo from '../components/BuildInfo';
 import { colors, radius, spacing, type, shadow } from '../lib/theme';
 
 export default function Login() {
@@ -117,8 +116,6 @@ export default function Login() {
             )}
           </Pressable>
         </View>
-
-        <BuildInfo />
       </View>
     </KeyboardAvoidingView>
   );
