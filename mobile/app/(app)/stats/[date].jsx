@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
-import { makeRateColors } from '../../../lib/rates';
+import { makeRateColors, getConnectionRate, formatPace } from '../../../lib/rates';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -44,34 +44,6 @@ function formatTime(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-
-function formatPace(stats) {
-  const knocked = stats.doorsKnocked || 0;
-  if (!knocked || !stats.firstDoorAt || !stats.lastDoorAt) return '—';
-  const hours =
-    (new Date(stats.lastDoorAt).getTime() - new Date(stats.firstDoorAt).getTime()) /
-    3600000;
-  if (hours < 0.25) return '—';
-  return `${(knocked / hours).toFixed(1)}/hr`;
-}
-
-function formatDistance(meters, doorsKnocked) {
-  if (!doorsKnocked) return '—';
-  const miles = (meters || 0) * 0.000621371;
-  return `${miles.toFixed(1)} mi`;
-}
-
-// Connection rate tiers — green ≥20% (good), amber 10–19% (caution),
-// red <10% (low). Returns null if no doors knocked yet.
-function getConnectionRate(surveys, doorsKnocked) {
-  if (!doorsKnocked) return null;
-  const pct = Math.round(((surveys || 0) / doorsKnocked) * 100);
-  let level;
-  if (pct >= 20) level = 'good';
-  else if (pct >= 10) level = 'caution';
-  else level = 'low';
-  return { value: `${pct}%`, level };
 }
 
 function ShiftStat({ label, value }) {
@@ -207,10 +179,9 @@ export default function DayDetailScreen() {
           <View style={styles.shiftGrid}>
             <ShiftStat label="First door" value={formatTime(stats.firstDoorAt)} />
             <ShiftStat label="Last door" value={formatTime(stats.lastDoorAt)} />
-            <ShiftStat label="Pace" value={formatPace(stats)} />
             <ShiftStat
-              label="Distance"
-              value={formatDistance(stats.distanceMeters, stats.doorsKnocked)}
+              label="Pace"
+              value={formatPace(stats.doorsKnocked, stats.firstDoorAt, stats.lastDoorAt)}
             />
           </View>
         </View>
@@ -357,12 +328,10 @@ function makeStyles(t) {
 
   shiftGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
     columnGap: spacing.md,
   },
   shiftStat: {
-    width: '47%',
+    flex: 1,
   },
   shiftStatValue: {
     ...type.h3,

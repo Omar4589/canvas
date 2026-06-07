@@ -40,7 +40,7 @@ you were working, so a cold start reopens it instead of making you pick again.
 Every canvasser screen has a **menu button (☰) in the top-right**. Tapping it slides a panel in from
 the right with the things you reach for occasionally:
 
-- **My stats** — your shift history and totals.
+- **My stats** — your per-day shift history + all-time totals, connection rate, and a doors-per-day trend.
 - **Voters** — the voter directory / lookup.
 - **Appearance** — Light / Dark / System.
 - **Switch organization** — only if you belong to more than one (or you're a super admin).
@@ -185,6 +185,35 @@ for both, since the endpoints are role-agnostic.
   `POST /auth/change-password` (requires the current password, new ≥ 8 chars) and clears the fields on
   success. There is no email-reset flow — the user is logged in, so it's always a known-password change.
 
+## The My Stats page
+
+[app/(app)/stats.jsx](../mobile/app/(app)/stats.jsx) — the canvasser's own performance for the active
+campaign, reached from the map's "See full shift history" link. Built on `GET /mobile/me/history`
+(days[], allTime, personalBest, currentStreak) — **no server work**; pace and connection rate are
+derived client-side. Sections:
+
+- **All time** — a `KpiGrid`: Doors knocked · Surveys (or Lit drops) · **Connection rate** (or Lit
+  rate, color-tiered green/amber/red via the tile's `level`) · Days active.
+- **Highlights** — a compact `KpiGrid`: Best day · Streak · Miles walked.
+- **Doors per day** — a small vertical bar trend of the last 14 days (newest right; empty days show a
+  faint stub).
+- **Shift history** — one row per day: date (+ Today/Yesterday/Best tags), the shift range
+  (first → last door), then doors · surveys/lit · connection % · pace. Tap a row →
+  [stats/[date].jsx](../mobile/app/(app)/stats/[date].jsx) (big doors count, surveys/lit, connection-rate
+  banner, a First/Last/Pace shift card, top answers).
+
+**Counting model (important):** My Stats uses the **personal/raw** model — raw door *events* and
+`connection rate = responses ÷ doors` — so the numbers match the map's "Today's Progress" HUD the
+canvasser already sees. This is deliberately NOT the admin reports' *billable* model
+(distinct-household knocks, surveyed-knocks ÷ knocks); the two answer different questions and would
+otherwise show the same person two different "doors." Time buckets stay on the **phone's local time**
+(a personal motivation view, per [TIMEZONES.md](TIMEZONES.md)).
+
+`pace`, `connection rate`, and the rate color tiers live in [lib/rates.js](../mobile/lib/rates.js)
+(`formatPace`, `getConnectionRate`, `makeRateColors`) and are shared by the map HUD, My Stats, and the
+day detail. The map HUD's "Today's shift" shows First / Last / Pace (Distance was removed; the
+connection rate stays as the sheet's colored banner).
+
 ## The map context card
 
 [components/MapContextCard.jsx](../mobile/components/MapContextCard.jsx) merges what used to be
@@ -225,5 +254,6 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   `components/icons/HamburgerIcon.jsx`, `app/(app)/profile.jsx`.
 - Changed: `app/(app)/_layout.jsx`, `app/(app)/select-org.jsx`, `app/(app)/campaigns.jsx`,
   `app/(app)/books.jsx`, `app/(app)/map.jsx`, `app/(app)/admin/more.jsx`,
-  `components/EffortPicker.jsx`, `server/src/routes/mobile/bootstrap.js`,
-  `server/src/routes/auth.js` (self-service `PATCH /auth/me`).
+  `app/(app)/stats.jsx` (comprehensive redesign), `app/(app)/stats/[date].jsx` (drop Distance tile),
+  `components/EffortPicker.jsx`, `lib/rates.js` (shared `formatPace`),
+  `server/src/routes/mobile/bootstrap.js`, `server/src/routes/auth.js` (self-service `PATCH /auth/me`).

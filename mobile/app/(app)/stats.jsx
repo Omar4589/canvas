@@ -14,10 +14,14 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useRefresh } from '../../lib/useRefresh';
 import { loadActiveCampaign } from '../../lib/cache';
-import { getConnectionRate, makeRateColors } from '../../lib/rates';
+import { getConnectionRate, formatPace } from '../../lib/rates';
+import KpiGrid from '../../components/KpiGrid';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
+
+const TREND_HEIGHT = 64;
+const TREND_DAYS = 14;
 
 function getLocalDateStr(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -54,14 +58,19 @@ function metersToMiles(m) {
   return ((m || 0) * 0.000621371).toFixed(1);
 }
 
-function StatCell({ value, label }) {
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <View style={styles.statCell}>
-      <Text style={styles.statValue}>{value ?? '—'}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
+function formatClock(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function shiftRange(firstAt, lastAt) {
+  const a = formatClock(firstAt);
+  const b = formatClock(lastAt);
+  if (!a && !b) return null;
+  if (a && b) return `${a} – ${b}`;
+  return a || b;
 }
 
 function Tag({ kind, children }) {
@@ -73,13 +82,48 @@ function Tag({ kind, children }) {
   );
 }
 
+// A compact doors-per-day trend (vertical bars), newest on the right. Bars scale
+// to the peak day; days with no activity render as a faint stub so gaps read as
+// "didn't canvass" rather than missing.
+function DoorsTrend({ days }) {
+  const styles = useThemedStyles(makeStyles);
+  const series = days.slice(0, TREND_DAYS).reverse();
+  const max = Math.max(1, ...series.map((d) => d.doorsKnocked || 0));
+  return (
+    <View style={styles.trendCard}>
+      <View style={styles.trendHeader}>
+        <Text style={styles.sectionLabel}>Doors per day</Text>
+        <Text style={styles.trendPeak}>peak {max}</Text>
+      </View>
+      <View style={styles.trendBars}>
+        {series.map((d) => {
+          const v = d.doorsKnocked || 0;
+          const h = v > 0 ? Math.max(4, Math.round((v / max) * TREND_HEIGHT)) : 2;
+          return (
+            <View key={d.date} style={styles.trendCol}>
+              <View style={[styles.trendBar, { height: h }, v === 0 && styles.trendBarEmpty]} />
+            </View>
+          );
+        })}
+      </View>
+      <View style={styles.trendFoot}>
+        <Text style={styles.trendFootText}>{formatBestDate(series[0].date)}</Text>
+        <Text style={styles.trendFootText}>{formatBestDate(series[series.length - 1].date)}</Text>
+      </View>
+    </View>
+  );
+}
+
 function DayRow({ day, todayStr, yesterdayStr, bestDate, isLitDrop, onPress }) {
   const styles = useThemedStyles(makeStyles);
   const isToday = day.date === todayStr;
   const isYesterday = day.date === yesterdayStr;
   const isBest = bestDate && day.date === bestDate;
-  const secondaryLabel = isLitDrop ? 'lit drops' : 'surveys';
-  const secondaryValue = isLitDrop ? day.litDropped : day.responses;
+  const secondaryLabel = isLitDrop ? 'lit' : 'surveys';
+  const secondaryValue = isLitDrop ? day.litDropped || 0 : day.responses || 0;
+  const rate = getConnectionRate(secondaryValue, day.doorsKnocked);
+  const pace = formatPace(day.doorsKnocked, day.firstDoorAt, day.lastDoorAt);
+  const shift = shiftRange(day.firstDoorAt, day.lastDoorAt);
   return (
     <Pressable
       onPress={onPress}
@@ -92,12 +136,18 @@ function DayRow({ day, todayStr, yesterdayStr, bestDate, isLitDrop, onPress }) {
           {isYesterday && <Tag kind="yesterday">Yesterday</Tag>}
           {isBest && !isToday && !isYesterday && <Tag kind="best">Best</Tag>}
         </View>
+        {shift ? <Text style={styles.dayShift}>{shift}</Text> : null}
         <Text style={styles.daySummary}>
-          <Text style={styles.daySummaryStrong}>{day.doorsKnocked}</Text> doors
-          {' · '}
-          <Text style={styles.daySummaryStrong}>{secondaryValue}</Text> {secondaryLabel}
-          {' · '}
-          {metersToMiles(day.distanceMeters)} mi
+          <Text style={styles.daySummaryStrong}>{(day.doorsKnocked || 0).toLocaleString()}</Text> doors
+          {'  ·  '}
+          <Text style={styles.daySummaryStrong}>{secondaryValue.toLocaleString()}</Text> {secondaryLabel}
+          {rate ? (
+            <Text>
+              {'  ·  '}
+              <Text style={styles.daySummaryStrong}>{rate.value}</Text>
+            </Text>
+          ) : null}
+          {pace !== '—' ? `  ·  ${pace}` : ''}
         </Text>
       </View>
       <Text style={styles.chevron}>›</Text>
@@ -109,7 +159,6 @@ export default function StatsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const RATE_COLORS = makeRateColors(colors);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
 
   useEffect(() => {
@@ -127,6 +176,8 @@ export default function StatsScreen() {
     };
   }, [router]);
 
+  // Personal stats stay on the phone's local time — a motivation view, not
+  // cross-admin reporting (see docs/TIMEZONES.md).
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -176,10 +227,28 @@ export default function StatsScreen() {
 
   const primaryLabel = isLitDrop ? 'Lit drops' : 'Surveys';
   const primaryValue = isLitDrop ? allTime.litDropped : allTime.surveysSubmitted;
-  const connectionRate = isLitDrop
-    ? null
-    : getConnectionRate(allTime.surveysSubmitted, allTime.doorsKnocked);
-  const rateColors = connectionRate ? RATE_COLORS[connectionRate.level] : null;
+  const rate = getConnectionRate(primaryValue, allTime.doorsKnocked);
+
+  const kpiTiles = [
+    { label: 'Doors knocked', value: (allTime.doorsKnocked || 0).toLocaleString() },
+    { label: primaryLabel, value: (primaryValue || 0).toLocaleString() },
+    {
+      label: isLitDrop ? 'Lit rate' : 'Connection rate',
+      value: rate ? rate.value : '—',
+      level: rate ? rate.level : undefined,
+    },
+    { label: 'Days active', value: (allTime.daysActive || 0).toLocaleString() },
+  ];
+
+  const highlightTiles = [
+    {
+      label: 'Best day',
+      value: personalBest ? personalBest.doorsKnocked.toLocaleString() : '—',
+      sub: personalBest ? formatBestDate(personalBest.date) : 'no data yet',
+    },
+    { label: 'Streak', value: String(streak), sub: `day${streak === 1 ? '' : 's'} in a row` },
+    { label: 'Miles walked', value: metersToMiles(allTime.distanceMeters), sub: 'all time' },
+  ];
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -198,46 +267,15 @@ export default function StatsScreen() {
         <Text style={styles.title}>My Stats</Text>
         <Text style={styles.subtitle}>{activeCampaign.name}</Text>
 
-        <View style={styles.allTimeCard}>
-          <Text style={styles.sectionLabel}>All time</Text>
-          <View style={styles.allTimeGrid}>
-            <StatCell value={allTime.doorsKnocked?.toLocaleString()} label="Doors knocked" />
-            <StatCell value={primaryValue?.toLocaleString()} label={primaryLabel} />
-            <StatCell value={metersToMiles(allTime.distanceMeters)} label="Miles walked" />
-            <StatCell value={allTime.daysActive?.toLocaleString()} label="Days active" />
-          </View>
-
-          {connectionRate && (
-            <View style={[styles.rateBanner, { backgroundColor: rateColors.bg }]}>
-              <Text style={[styles.rateValue, { color: rateColors.fg }]}>
-                {connectionRate.value}
-              </Text>
-              <Text style={[styles.rateLabel, { color: rateColors.fg }]}>
-                connection rate
-              </Text>
-            </View>
-          )}
-
-          {streak > 0 && (
-            <View style={styles.streakBanner}>
-              <Text style={styles.streakValue}>{streak}</Text>
-              <Text style={styles.streakLabel}>
-                day{streak === 1 ? '' : 's'} in a row
-              </Text>
-            </View>
-          )}
-
-          {personalBest && (
-            <View style={styles.bestRow}>
-              <Text style={styles.bestLabel}>Personal best</Text>
-              <Text style={styles.bestValue}>
-                {personalBest.doorsKnocked} doors · {formatBestDate(personalBest.date)}
-              </Text>
-            </View>
-          )}
+        <Text style={styles.sectionLabel}>All time</Text>
+        <KpiGrid tiles={kpiTiles} columns={2} />
+        <View style={styles.highlightGap}>
+          <KpiGrid tiles={highlightTiles} columns={3} compact />
         </View>
 
-        <Text style={[styles.sectionLabel, styles.sectionGap]}>Recent days</Text>
+        {days.length >= 2 && <DoorsTrend days={days} />}
+
+        <Text style={[styles.sectionLabel, styles.sectionGap]}>Shift history</Text>
         {days.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
@@ -278,208 +316,140 @@ function Header({ onBack }) {
 function makeStyles(t) {
   const { colors, type, shadow } = t;
   return StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xl,
-  },
-  errorText: {
-    ...type.body,
-    color: colors.danger,
-    textAlign: 'center',
-    marginBottom: spacing.md,
-  },
-  retryBtn: {
-    backgroundColor: colors.brand,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
-  },
-  retryText: { color: colors.textInverse, fontWeight: '700' },
+    screen: { flex: 1, backgroundColor: colors.bg },
+    center: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: spacing.xl,
+    },
+    errorText: {
+      ...type.body,
+      color: colors.danger,
+      textAlign: 'center',
+      marginBottom: spacing.md,
+    },
+    retryBtn: {
+      backgroundColor: colors.brand,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm + 2,
+      borderRadius: radius.md,
+    },
+    retryText: { color: colors.textInverse, fontWeight: '700' },
 
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-  },
-  back: { color: colors.brand, fontWeight: '700', fontSize: 16 },
+    header: {
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+    },
+    back: { color: colors.brand, fontWeight: '700', fontSize: 16 },
 
-  content: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxl,
-  },
-  title: { ...type.title, marginTop: spacing.xs },
-  subtitle: { ...type.caption, marginBottom: spacing.lg },
+    content: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.xxl,
+    },
+    title: { ...type.title, marginTop: spacing.xs },
+    subtitle: { ...type.caption, marginBottom: spacing.lg },
 
-  sectionLabel: {
-    ...type.micro,
-    marginBottom: spacing.sm,
-  },
-  sectionGap: { marginTop: spacing.xl },
+    sectionLabel: { ...type.micro, marginBottom: spacing.sm },
+    sectionGap: { marginTop: spacing.xl },
+    highlightGap: { marginTop: spacing.sm },
 
-  allTimeCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    ...shadow.card,
-  },
-  allTimeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-    columnGap: spacing.md,
-  },
-  statCell: {
-    width: '47%',
-  },
-  statValue: {
-    ...type.title,
-    fontVariant: ['tabular-nums'],
-  },
-  statLabel: {
-    ...type.caption,
-    marginTop: 1,
-  },
+    trendCard: {
+      backgroundColor: colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.lg,
+      marginTop: spacing.xl,
+      ...shadow.card,
+    },
+    trendHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.sm,
+    },
+    trendPeak: { ...type.caption, color: colors.textMuted },
+    trendBars: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      height: TREND_HEIGHT,
+      gap: 4,
+    },
+    trendCol: { flex: 1, justifyContent: 'flex-end' },
+    trendBar: {
+      width: '100%',
+      backgroundColor: colors.brand,
+      borderTopLeftRadius: 3,
+      borderTopRightRadius: 3,
+    },
+    trendBarEmpty: { backgroundColor: colors.border },
+    trendFoot: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginTop: spacing.xs,
+    },
+    trendFootText: { ...type.caption, color: colors.textMuted, fontSize: 11 },
 
-  rateBanner: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    marginTop: spacing.md,
-    gap: spacing.sm,
-  },
-  rateValue: {
-    fontSize: 22,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  rateLabel: {
-    ...type.body,
-    fontWeight: '600',
-  },
+    empty: {
+      backgroundColor: colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.xl,
+      alignItems: 'center',
+    },
+    emptyText: {
+      ...type.body,
+      color: colors.textSecondary,
+      textAlign: 'center',
+    },
 
-  streakBanner: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    backgroundColor: colors.brandTint,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    marginTop: spacing.md,
-    gap: spacing.sm,
-  },
-  streakValue: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: colors.brand,
-    fontVariant: ['tabular-nums'],
-  },
-  streakLabel: {
-    ...type.body,
-    color: colors.brand,
-    fontWeight: '600',
-  },
+    dayList: {
+      backgroundColor: colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: 'hidden',
+    },
+    dayRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      gap: spacing.sm,
+    },
+    dayHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginBottom: 2,
+    },
+    dayDate: { ...type.bodyStrong },
+    dayShift: { ...type.caption, color: colors.textMuted, marginBottom: 2 },
+    daySummary: { ...type.caption },
+    daySummaryStrong: { color: colors.textPrimary, fontWeight: '700' },
+    chevron: { color: colors.textMuted, fontSize: 22, fontWeight: '300' },
 
-  bestRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  bestLabel: {
-    ...type.micro,
-  },
-  bestValue: {
-    ...type.bodyStrong,
-    fontSize: 13,
-  },
-
-  empty: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.xl,
-    alignItems: 'center',
-  },
-  emptyText: {
-    ...type.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-
-  dayList: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  dayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: spacing.sm,
-  },
-  dayHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: 2,
-  },
-  dayDate: {
-    ...type.bodyStrong,
-  },
-  daySummary: {
-    ...type.caption,
-  },
-  daySummaryStrong: {
-    color: colors.textPrimary,
-    fontWeight: '700',
-  },
-  chevron: {
-    color: colors.textMuted,
-    fontSize: 22,
-    fontWeight: '300',
-  },
-
-  tag: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  tagText: {
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  tag_today: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  tagText_today: { color: colors.textInverse },
-  tag_yesterday: {
-    backgroundColor: colors.brandTint,
-    borderColor: colors.brand,
-  },
-  tagText_yesterday: { color: colors.brand },
-  tag_best: {
-    backgroundColor: colors.successBg,
-    borderColor: colors.successBorder,
-  },
-  tagText_best: { color: colors.success },
+    tag: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+    },
+    tagText: {
+      fontSize: 10,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    tag_today: { backgroundColor: colors.brand, borderColor: colors.brand },
+    tagText_today: { color: colors.textInverse },
+    tag_yesterday: { backgroundColor: colors.brandTint, borderColor: colors.brand },
+    tagText_yesterday: { color: colors.brand },
+    tag_best: { backgroundColor: colors.successBg, borderColor: colors.successBorder },
+    tagText_best: { color: colors.success },
   });
 }

@@ -51,10 +51,14 @@ building marker** instead of stacking pins on top of each other. The marker show
 A canvasser opens the app and sees the doors in the books assigned to them. They can:
 
 - **Tap a pin** to see the household and the voters who live there.
+- **Mark a door and see it instantly.** Tapping Not home / Wrong address / Survey / Lit drop recolors
+  the pin **right away** — the GPS stamp and the save to the server happen in the background, so you
+  never wait on a spinner to know it registered.
 - **Recenter / follow** their own location (a "follow me" button; it turns itself off when you pan the
   map or background the app, to save battery).
-- **Work offline.** If there's no signal, knocks are saved on the phone and a "**pending**" badge
-  shows how many are waiting. They sync automatically the moment signal returns — nothing is lost.
+- **Work offline.** If there's no signal, the door still recolors instantly and the action is saved on
+  the phone; a "**pending**" badge shows how many are waiting. They sync automatically in the
+  background once signal returns — nothing is lost.
 - **Switch the base map** between Street, Satellite, Hybrid, and more.
 
 ## The web admin map
@@ -114,20 +118,38 @@ geocoding** — an older Census/Mapbox geocoder was removed. See [IMPORTS.md](IM
 
 ## C. How an action becomes a ping
 
-1. The mobile app captures location **once per action** (not continuous GPS) via
-   [lib/location.js](../mobile/lib/location.js) `getCurrentLocation()` — it reuses a recent OS fix
-   when one is fresh/accurate to avoid spinning the GPS for every door.
-2. It POSTs the action with `{ location: { lat, lng, accuracy }, timestamp, note }`:
-   `POST /mobile/households/:id/not-home` · `/wrong-address` · `/lit-drop`, and
-   `POST /mobile/voters/:voterId/survey` ([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)).
-3. The server creates a `CanvassActivity` (stamping `distanceFromHouseMeters` = haversine from the
+Recording is **optimistic-first**: the UI updates before the network, so the pin recolors the instant
+a canvasser taps an action — the GPS stamp and the server write happen in the background and never
+block the screen. (This replaced an older flow that awaited GPS **and** the full network round-trip
+before recoloring, which made doors feel unrecorded on weak signal — the bare fetch could hang ~60s.)
+
+1. **Instant (synchronous).** The tapped action patches the `['bootstrap']` React Query cache —
+   `household.status` (and the client-computed building aggregate) recolor this same frame — via the
+   shared helper [lib/recordAction.js](../mobile/lib/recordAction.js) (`recordHouseholdAction` /
+   `optimisticSubmit`). The cache is mirrored to AsyncStorage so it survives a cold start. The screen
+   returns to the map immediately; it never `await`s the network.
+2. **Background — GPS.** [lib/location.js](../mobile/lib/location.js) `getCurrentLocation()` captures
+   one fix (not continuous GPS): a warm recent OS fix when fresh/accurate, else a fresh high-accuracy
+   read **capped at ~6s** so a cold GPS can't stall the submit.
+3. **Background — submit/queue.** It POSTs `{ location: { lat, lng, accuracy }, timestamp, note }`:
+   `POST /mobile/households/:id/not-home` · `/wrong-address` · `/lit-drop`, or
+   `POST /mobile/voters/:voterId/survey` ([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js))
+   through [lib/offlineQueue.js](../mobile/lib/offlineQueue.js) `submitOrQueue`. A transport failure
+   (including the **~20s `api` timeout** — [lib/api.js](../mobile/lib/api.js)) queues it instead.
+4. **Server.** Creates a `CanvassActivity` (stamping `distanceFromHouseMeters` = haversine from the
    house), runs `recomputeHouseholdStatus`, and sets `household.status` / `lastActionAt` / `lastActionBy`
    (the save bumps `updatedAt`). Re-knocking the same door **in the same round deletes + replaces** the
    prior activity (important for delta logic — see F).
-4. On the next poll, the household pin recolors and the activity shows as a ping.
+5. **Reconcile.** On a successful online write the helper re-patches the cache with the server's
+   authoritative status. On a **hard** (4xx/5xx) failure it invalidates `['bootstrap']` to pull server
+   truth back (so an optimistic change can't linger as a lie) and alerts. Other canvassers pick the
+   door up on their next `changes` poll (F).
 
 Offline actions queue on the device ([lib/offlineQueue.js](../mobile/lib/offlineQueue.js)) and flush
-when connectivity/foreground returns.
+on **map focus, app-foreground, manual refresh, or the next recorded action**. The optimistic recolor
+already stands, so a queued door looks done immediately and the "pending" badge counts only what's
+still unsent. (A true *flush-the-moment-signal-returns* listener needs `@react-native-community/netinfo`,
+a native module — planned for the next native build; see I.)
 
 ## D. Data sources / endpoints
 
@@ -170,6 +192,13 @@ the prior `CanvassActivity`, so a delta would leave **stale pings** on the map; 
 shows the truth. A delta endpoint would only be worth it for sub-10s refresh on very large campaigns,
 and would then need to reconcile deleted pings.
 
+Recording an action does **not** wait for any of these intervals: the optimistic cache patch (C)
+recolors the door immediately and the submit runs in the background. The 30s `changes` poll only
+*reconciles* other canvassers' edits — it returns only households the server changed since `since=`, so
+it won't revert a local optimistic change the server hasn't recorded yet. The bootstrap query holds a
+5-min `staleTime` and no `refetchInterval`, and map focus only refreshes the pending badge (not a
+bootstrap refetch), so returning to the map after an action can't clobber the fresh pin.
+
 ## G. Status colors & legend
 
 Canonical palette (hex): `unknocked #9ca3af`, `not_home #3b82f6`, `surveyed #22c55e`,
@@ -195,6 +224,13 @@ Canonical palette (hex): `unknocked #9ca3af`, `not_home #3b82f6`, `surveyed #22c
 - **Native symbol layers, not MarkerView; no clustering** — one GeoJSON feature collection per layer.
 - **Fully-voted doors drop off** the canvasser's bootstrap/map (see EARLY_VOTING.md).
 - **Pings are per-action GPS stamps**, not live tracking — there is no continuous location feed.
+- **Recording is optimistic-first.** The pin recolors before the network call; GPS + submit run in the
+  background ([lib/recordAction.js](../mobile/lib/recordAction.js)). Never re-add an `await` before the
+  cache patch — that ordering was the cause of the field "did it register?" delay.
+- **`api` has a ~20s timeout** ([lib/api.js](../mobile/lib/api.js)); a bare fetch with none let weak
+  signal hang ~60s before an action would queue offline.
+- **No reconnect-flush yet.** The offline queue flushes on focus / foreground / refresh / next-action,
+  not on a connectivity event — adding that needs `@react-native-community/netinfo` (a native build).
 - **Mobile is battery-conscious** (delta + 30s/120s cadence + background pause; plain location dot, no
   compass; follow-mode auto-exits on pan/background). **Web is live** (~20s) because admins are at a
   connected desk.

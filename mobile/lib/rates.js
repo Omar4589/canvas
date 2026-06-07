@@ -23,6 +23,19 @@ export function rateFromPct(pct) {
   return { value: `${pct}%`, level, pct };
 }
 
+// Doors-per-hour over a shift, formatted. Returns '—' when there isn't enough to
+// compute: no doors, missing first/last timestamps, or a shift shorter than 15
+// minutes (too short to be a meaningful rate). Shared by the map HUD, My Stats,
+// and the day-detail screen so they all read the pace the same way.
+export function formatPace(doorsKnocked, firstDoorAt, lastDoorAt) {
+  const knocked = doorsKnocked || 0;
+  if (!knocked || !firstDoorAt || !lastDoorAt) return '—';
+  const hours =
+    (new Date(lastDoorAt).getTime() - new Date(firstDoorAt).getTime()) / 3600000;
+  if (hours < 0.25) return '—';
+  return `${(knocked / hours).toFixed(1)}/hr`;
+}
+
 // Theme-aware rate color map: pass the active palette from useTheme().
 export function makeRateColors(colors) {
   return {

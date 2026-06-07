@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator, Alert, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,7 +14,6 @@ export default function BuildingScreen() {
   const qc = useQueryClient();
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const [busy, setBusy] = useState(null);
 
   const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'] });
   const campaignType = bootstrap?.campaign?.type || 'survey';
@@ -36,17 +34,10 @@ export default function BuildingScreen() {
   const quickAction = campaignType === 'lit_drop' ? 'lit_dropped' : 'not_home';
   const quickLabel = campaignType === 'lit_drop' ? 'Lit dropped' : 'Not home';
 
-  async function onQuick(unit) {
-    setBusy(String(unit._id));
-    try {
-      const res = await recordHouseholdAction(qc, unit._id, quickAction);
-      if (res.queued) Alert.alert('Saved offline', 'Will sync when you have connection.');
-      else if (!res.ok) Alert.alert('Submit failed', res.error?.message || 'Unknown error');
-    } catch (e) {
-      Alert.alert('Error', e.message || 'Failed to submit');
-    } finally {
-      setBusy(null);
-    }
+  // Optimistic-first: the unit's status dot (and the building's done/aggregate)
+  // recolor this frame; the GPS stamp + network write run in the background.
+  function onQuick(unit) {
+    recordHouseholdAction(qc, unit._id, quickAction);
   }
 
   return (
@@ -72,7 +63,6 @@ export default function BuildingScreen() {
           const voters = (bootstrap?.voters || []).filter((v) => String(v.householdId) === String(u._id));
           const surveyed = voters.filter((v) => v.surveyStatus === 'surveyed').length;
           const status = u.status || 'unknocked';
-          const isBusy = busy === String(u._id);
           return (
             <View key={u._id} style={styles.unitCard}>
               <Pressable style={styles.unitMain} onPress={() => router.push(`/(app)/household/${u._id}`)}>
@@ -87,14 +77,13 @@ export default function BuildingScreen() {
               </Pressable>
               <Pressable
                 onPress={() => onQuick(u)}
-                disabled={isBusy}
-                style={[styles.quickBtn, campaignType === 'lit_drop' ? styles.quickLit : styles.quickNotHome]}
+                style={({ pressed }) => [
+                  styles.quickBtn,
+                  campaignType === 'lit_drop' ? styles.quickLit : styles.quickNotHome,
+                  { opacity: pressed ? 0.85 : 1 },
+                ]}
               >
-                {isBusy ? (
-                  <ActivityIndicator color={colors.textInverse} size="small" />
-                ) : (
-                  <Text style={styles.quickBtnText}>{quickLabel}</Text>
-                )}
+                <Text style={styles.quickBtnText}>{quickLabel}</Text>
               </Pressable>
               <Pressable onPress={() => router.push(`/(app)/household/${u._id}`)} hitSlop={6} style={styles.chevronWrap}>
                 <Text style={styles.chevron}>›</Text>

@@ -43,7 +43,7 @@ import { groupBuildings } from '../../lib/buildings';
 import { useMapStyle } from '../../lib/mapStyles';
 import MapControlStack from '../../components/MapControlStack';
 import { timeAgo, formatExact } from '../../lib/datetime';
-import { makeRateColors } from '../../lib/rates';
+import { makeRateColors, formatPace } from '../../lib/rates';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -1005,22 +1005,6 @@ function RecenterButton({
 const SURVEY_LEGEND = ['unknocked', 'not_home', 'surveyed', 'wrong_address'];
 const LIT_DROP_LEGEND = ['unknocked', 'lit_dropped', 'wrong_address'];
 
-function formatPace(today) {
-  const knocked = today.doorsKnocked || 0;
-  if (!knocked || !today.firstDoorAt || !today.lastDoorAt) return '—';
-  const hours =
-    (new Date(today.lastDoorAt).getTime() - new Date(today.firstDoorAt).getTime()) /
-    3600000;
-  if (hours < 0.25) return '—';
-  return `${(knocked / hours).toFixed(1)}/hr`;
-}
-
-function formatDistance(meters, doorsKnocked) {
-  if (!doorsKnocked) return '—';
-  const miles = (meters || 0) * 0.000621371;
-  return `${miles.toFixed(1)} mi`;
-}
-
 // Connection rate = surveys ÷ doors knocked. Returns null when there's no
 // data yet (avoids "0%, looks bad" on a fresh day). The `level` drives the
 // banner's color tier: ≥20% green (good), 10–19% amber (caution), <10% red.
@@ -1130,10 +1114,9 @@ function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
         <View style={styles.shiftGrid}>
           <ShiftStat label="First door" value={formatTime(today.firstDoorAt)} />
           <ShiftStat label="Last door" value={formatTime(today.lastDoorAt)} />
-          <ShiftStat label="Pace" value={formatPace(today)} />
           <ShiftStat
-            label="Distance"
-            value={formatDistance(today.distanceMeters, today.doorsKnocked)}
+            label="Pace"
+            value={formatPace(today.doorsKnocked, today.firstDoorAt, today.lastDoorAt)}
           />
         </View>
 
@@ -1527,12 +1510,10 @@ function makeStyles(t) {
   // Shift stats 2x2 grid (first/last door, pace, distance).
   shiftGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
     columnGap: spacing.md,
   },
   shiftStat: {
-    width: '47%',
+    flex: 1,
   },
   shiftStatValue: {
     ...type.h3,

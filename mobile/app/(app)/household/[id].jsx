@@ -5,8 +5,6 @@ import {
   Pressable,
   ScrollView,
   TextInput,
-  ActivityIndicator,
-  Alert,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -14,10 +12,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../../lib/api';
-import { getCurrentLocation } from '../../../lib/location';
-import { submitOrQueue, flushQueue } from '../../../lib/offlineQueue';
-import { saveBootstrap } from '../../../lib/cache';
+import { recordHouseholdAction } from '../../../lib/recordAction';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -32,12 +27,6 @@ function findHouseholdAndVoters(bootstrap, householdId) {
   );
   return { household, voters };
 }
-
-const ACTION_PATHS = {
-  not_home: 'not-home',
-  wrong_address: 'wrong-address',
-  lit_dropped: 'lit-drop',
-};
 
 function initials(fullName) {
   return (fullName || '')
@@ -145,7 +134,6 @@ export default function HouseholdDetail() {
   const { household, voters } = findHouseholdAndVoters(bootstrap, id);
 
   const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(null);
 
   if (!household) {
     return (
@@ -158,51 +146,12 @@ export default function HouseholdDetail() {
     );
   }
 
-  async function submitAction(action) {
-    setSubmitting(action);
-    try {
-      const location = await getCurrentLocation();
-      const path = ACTION_PATHS[action];
-      const result = await submitOrQueue(`/mobile/households/${id}/${path}`, {
-        note: note.trim() || null,
-        location,
-        timestamp: new Date().toISOString(),
-      });
-
-      if (result.queued) {
-        Alert.alert('Saved offline', 'Will sync when you have connection.');
-      } else if (!result.ok) {
-        Alert.alert('Submit failed', result.error?.message || 'Unknown error');
-        setSubmitting(null);
-        return;
-      }
-
-      const updatedHousehold = result.response?.household;
-      qc.setQueryData(['bootstrap'], (prev) => {
-        if (!prev) return prev;
-        const next = {
-          ...prev,
-          households: prev.households.map((h) =>
-            String(h._id) === String(id)
-              ? {
-                  ...h,
-                  status: updatedHousehold?.status ?? action,
-                  lastActionAt: new Date().toISOString(),
-                }
-              : h
-          ),
-        };
-        saveBootstrap(next);
-        return next;
-      });
-
-      flushQueue().catch(() => {});
-      router.back();
-    } catch (err) {
-      Alert.alert('Error', err.message || 'Failed to submit');
-    } finally {
-      setSubmitting(null);
-    }
+  // Optimistic-first: recolor the pin and return to the map immediately; the GPS
+  // stamp + network write happen in the background (recordHouseholdAction). We do
+  // NOT await it — awaiting is exactly what made the pin lag behind the tap.
+  function submitAction(action) {
+    recordHouseholdAction(qc, id, action, { note: note.trim() || null });
+    router.back();
   }
 
   const surveyedCount = voters.filter((v) => v.surveyStatus === 'surveyed').length;
@@ -295,57 +244,42 @@ export default function HouseholdDetail() {
           {campaignType === 'lit_drop' ? (
             <Pressable
               onPress={() => submitAction('lit_dropped')}
-              disabled={!!submitting}
               style={({ pressed }) => [
                 styles.primaryButton,
                 {
                   backgroundColor: colors.status.lit_dropped,
-                  opacity: submitting || pressed ? 0.85 : 1,
+                  opacity: pressed ? 0.85 : 1,
                 },
               ]}
             >
-              {submitting === 'lit_dropped' ? (
-                <ActivityIndicator color={colors.textInverse} />
-              ) : (
-                <Text style={styles.primaryButtonText}>
-                  {household.status === 'lit_dropped'
-                    ? 'Re-record drop'
-                    : 'Lit dropped'}
-                </Text>
-              )}
+              <Text style={styles.primaryButtonText}>
+                {household.status === 'lit_dropped'
+                  ? 'Re-record drop'
+                  : 'Lit dropped'}
+              </Text>
             </Pressable>
           ) : (
             <>
               <Pressable
                 onPress={() => submitAction('not_home')}
-                disabled={!!submitting}
                 style={({ pressed }) => [
                   styles.actionButton,
                   styles.actionNotHome,
-                  { opacity: submitting || pressed ? 0.85 : 1 },
+                  { opacity: pressed ? 0.85 : 1 },
                 ]}
               >
-                {submitting === 'not_home' ? (
-                  <ActivityIndicator color={colors.textInverse} />
-                ) : (
-                  <Text style={styles.actionButtonText}>Not home</Text>
-                )}
+                <Text style={styles.actionButtonText}>Not home</Text>
               </Pressable>
 
               <Pressable
                 onPress={() => submitAction('wrong_address')}
-                disabled={!!submitting}
                 style={({ pressed }) => [
                   styles.actionButton,
                   styles.actionWrongAddress,
-                  { opacity: submitting || pressed ? 0.85 : 1 },
+                  { opacity: pressed ? 0.85 : 1 },
                 ]}
               >
-                {submitting === 'wrong_address' ? (
-                  <ActivityIndicator color={colors.textInverse} />
-                ) : (
-                  <Text style={styles.actionButtonText}>Wrong address</Text>
-                )}
+                <Text style={styles.actionButtonText}>Wrong address</Text>
               </Pressable>
             </>
           )}

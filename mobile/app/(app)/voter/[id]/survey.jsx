@@ -5,7 +5,6 @@ import {
   Pressable,
   ScrollView,
   TextInput,
-  ActivityIndicator,
   Alert,
   StyleSheet,
   KeyboardAvoidingView,
@@ -14,9 +13,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getCurrentLocation } from '../../../../lib/location';
-import { submitOrQueue, flushQueue } from '../../../../lib/offlineQueue';
-import { saveBootstrap } from '../../../../lib/cache';
+import { optimisticSubmit } from '../../../../lib/recordAction';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
@@ -147,7 +144,6 @@ export default function VoterSurvey() {
 
   const [answers, setAnswers] = useState({});
   const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(false);
 
   if (!voter || !survey) {
     return (
@@ -183,17 +179,19 @@ export default function VoterSurvey() {
   const percent =
     totalQuestions === 0 ? 100 : Math.round((answeredCount / totalQuestions) * 100);
 
-  async function onSubmit() {
+  // Optimistic-first: mark the voter surveyed + recolor the household, then jump
+  // straight back to the map. The GPS stamp + network write run in the background
+  // (optimisticSubmit) so the canvasser never waits on them.
+  function onSubmit() {
     const err = validate();
     if (err) {
       Alert.alert('Missing answer', err);
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const location = await getCurrentLocation();
-      const payload = {
+    optimisticSubmit(qc, {
+      path: `/mobile/voters/${id}/survey`,
+      body: {
         surveyTemplateId: survey._id,
         answers: survey.questions.map((q) => ({
           questionKey: q.key,
@@ -201,45 +199,33 @@ export default function VoterSurvey() {
           answer: answers[q.key] ?? null,
         })),
         note: note.trim() || null,
-        location,
-        timestamp: new Date().toISOString(),
-      };
-
-      const result = await submitOrQueue(`/mobile/voters/${id}/survey`, payload);
-
-      if (result.queued) {
-        Alert.alert('Saved offline', 'Will sync when you have connection.');
-      } else if (!result.ok) {
-        Alert.alert('Submit failed', result.error?.message || 'Unknown error');
-        setSubmitting(false);
-        return;
-      }
-
-      qc.setQueryData(['bootstrap'], (prev) => {
-        if (!prev) return prev;
-        const next = {
+      },
+      optimisticPatch: (prev) => ({
+        ...prev,
+        voters: prev.voters.map((v) =>
+          String(v._id) === String(id) ? { ...v, surveyStatus: 'surveyed' } : v
+        ),
+        households: prev.households.map((h) =>
+          String(h._id) === String(voter.householdId)
+            ? { ...h, status: 'surveyed', lastActionAt: new Date().toISOString() }
+            : h
+        ),
+      }),
+      reconcile: (prev, response) => {
+        const status = response?.household?.status;
+        if (!status) return prev;
+        return {
           ...prev,
-          voters: prev.voters.map((v) =>
-            String(v._id) === String(id) ? { ...v, surveyStatus: 'surveyed' } : v
-          ),
           households: prev.households.map((h) =>
-            String(h._id) === String(voter.householdId)
-              ? { ...h, status: 'surveyed', lastActionAt: new Date().toISOString() }
-              : h
+            String(h._id) === String(voter.householdId) ? { ...h, status } : h
           ),
         };
-        saveBootstrap(next);
-        return next;
-      });
+      },
+      hardFailTitle: 'Survey not saved',
+      hardFailMessage: 'Could not save this survey. Please try again.',
+    });
 
-      flushQueue().catch(() => {});
-
-      router.replace('/(app)/map');
-    } catch (e) {
-      Alert.alert('Error', e.message || 'Failed to submit');
-    } finally {
-      setSubmitting(false);
-    }
+    router.replace('/(app)/map');
   }
 
   return (
@@ -375,17 +361,12 @@ export default function VoterSurvey() {
 
         <Pressable
           onPress={onSubmit}
-          disabled={submitting}
           style={({ pressed }) => [
             styles.submitButton,
-            { opacity: submitting || pressed ? 0.85 : 1 },
+            { opacity: pressed ? 0.85 : 1 },
           ]}
         >
-          {submitting ? (
-            <ActivityIndicator color={colors.textInverse} />
-          ) : (
-            <Text style={styles.submitButtonText}>Save Response</Text>
-          )}
+          <Text style={styles.submitButtonText}>Save Response</Text>
         </Pressable>
       </ScrollView>
       </KeyboardAvoidingView>
