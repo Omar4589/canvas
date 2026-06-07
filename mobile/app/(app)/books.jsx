@@ -18,7 +18,7 @@ import {
   clearCurrentEffort,
 } from '../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
-import Logo from '../../components/Logo';
+import CanvasserHeader from '../../components/CanvasserHeader';
 import EffortPicker from '../../components/EffortPicker';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
@@ -311,24 +311,12 @@ export default function BooksScreen() {
       </Mapbox.MapView>
 
       <SafeAreaView edges={['top']} style={styles.headerWrap} pointerEvents="box-none">
-        <View style={styles.header}>
-          <Logo size={24} />
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <Pressable onPress={() => refetch()} hitSlop={8} disabled={isFetching} style={styles.iconButton}>
-              {isFetching ? (
-                <ActivityIndicator size="small" color={colors.brand} />
-              ) : (
-                <Text style={styles.iconButtonText}>↻</Text>
-              )}
-            </Pressable>
-            <Pressable onPress={() => router.push('/(app)/voters')} hitSlop={8}>
-              <Text style={styles.switch}>Voters</Text>
-            </Pressable>
-            <Pressable onPress={switchCampaign} hitSlop={8}>
-              <Text style={styles.switch}>Switch campaign</Text>
-            </Pressable>
-          </View>
-        </View>
+        <CanvasserHeader
+          variant="floating"
+          onRefresh={() => refetch()}
+          refreshing={isFetching}
+          onSwitchCampaign={switchCampaign}
+        />
         {efforts.length > 1 && (
           <View style={styles.effortRow}>
             <EffortPicker efforts={efforts} value={currentEffort} onChange={onEffortChange} />
@@ -366,30 +354,6 @@ function makeStyles(t) {
   secondaryButton: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 20, paddingVertical: 10, borderRadius: radius.md },
   secondaryButtonText: { color: colors.textPrimary, fontWeight: '600' },
   headerWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.chromeBar,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  switch: { color: colors.brand, fontWeight: '600', fontSize: 14 },
-  // 36px bordered refresh button — mirrors the houses map's top bar so both bars
-  // share the same height + control.
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  iconButtonText: { color: colors.textPrimary, fontSize: 18, fontWeight: '600' },
   effortRow: { marginHorizontal: 12, marginBottom: 8, zIndex: 10 },
   hint: {
     marginHorizontal: 12,

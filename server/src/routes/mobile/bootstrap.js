@@ -106,6 +106,29 @@ async function canvasserBooks(req, campaign) {
   return { books: booksOut, efforts: effortList };
 }
 
+// The distinct efforts the user has assigned books in for one campaign — a light
+// slice of canvasserBooks() that skips the household/voter/survey work, just
+// enough for the campaign picker to offer an effort shortcut. Empty when the
+// user has no assigned books, or only default-effort (null) books. Effort ids
+// match the bootstrap's effort list, so a choice here scopes the book picker.
+async function canvasserEffortsForCampaign(req, campaign) {
+  const passIds = await activePassIds(campaign._id);
+  if (!passIds.length) return [];
+  const myTurfs = await TurfAssignment.find(
+    { userId: req.user._id, campaignId: campaign._id, passId: { $in: passIds } },
+    { turfId: 1 }
+  ).lean();
+  if (!myTurfs.length) return [];
+  const books = await Turf.find({ _id: { $in: myTurfs.map((a) => a.turfId) } }, { passId: 1 }).lean();
+  const passes = await Pass.find({ _id: { $in: books.map((b) => b.passId) } }, { effortId: 1 }).lean();
+  const effortIds = [...new Set(passes.map((p) => p.effortId).filter(Boolean).map(String))];
+  if (!effortIds.length) return [];
+  const efforts = await Effort.find({ _id: { $in: effortIds } }, { name: 1 }).lean();
+  return efforts
+    .map((e) => ({ id: String(e._id), name: e.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 router.get('/campaigns', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -122,15 +145,22 @@ router.get('/campaigns', async (req, res, next) => {
       .sort({ createdAt: -1 })
       .select('name type state surveyTemplateId timeZone')
       .lean();
-    res.json({
-      user: req.user.toSafeJSON(),
-      campaigns: campaigns.map((c) => ({
+    // `efforts` is additive — older clients ignore it; the picker uses it to let a
+    // multi-effort canvasser pick their effort up front and jump straight into the
+    // scoped book list.
+    const campaignsOut = await Promise.all(
+      campaigns.map(async (c) => ({
         id: String(c._id),
         name: c.name,
         type: c.type,
         state: c.state,
         timeZone: c.timeZone || 'America/New_York',
-      })),
+        efforts: await canvasserEffortsForCampaign(req, c),
+      }))
+    );
+    res.json({
+      user: req.user.toSafeJSON(),
+      campaigns: campaignsOut,
     });
   } catch (err) {
     next(err);

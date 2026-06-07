@@ -31,6 +31,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | [IMPORTS.md](IMPORTS.md) | Voter uploads: how rows match, what goes live, and how new addresses reach the field through Intake. |
 | [VOTERS.md](VOTERS.md) | The voter directory and profile: where voters live (org vs campaign), what's editable, and mobile lookup. |
 | [EARLY_VOTING.md](EARLY_VOTING.md) | Early/already-voted marking and how "voted" doors drop off the canvasser's list and show as their own coverage bucket. |
+| [CANVASSER_APP.md](CANVASSER_APP.md) | The mobile field app's shell: the sign-in → org → campaign → effort → book → houses flow, the slide-out menu (drawer), the lean per-screen headers, the merged map context card, and where the effort picker's data comes from. |
 | [MAPS.md](MAPS.md) | Every map (mobile field app + web admin): reading the pins, where coordinates come from, how a knock becomes a "ping," rendering, and the live-refresh intervals. |
 | [THEMING.md](THEMING.md) | Cross-cutting (not a feature): light/dark mode and the web design tokens — how the theme flips, the full token reference, and the rule that every control must use the semantic tokens (`bg-card`/`text-fg`/…) so nothing renders white in dark mode. |
 

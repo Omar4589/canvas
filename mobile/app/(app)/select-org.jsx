@@ -11,7 +11,6 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { signOut } from '../../lib/authState';
 import {
   loadMemberships,
   loadCurrentUser,
@@ -20,7 +19,7 @@ import {
   clearActiveCampaign,
   clearBootstrap,
 } from '../../lib/cache';
-import Logo from '../../components/Logo';
+import CanvasserHeader from '../../components/CanvasserHeader';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -94,19 +93,9 @@ export default function SelectOrgScreen() {
     router.replace('/(app)/super-admin');
   }
 
-  async function onLogout() {
-    qc.clear();
-    await signOut();
-  }
-
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <View style={styles.header}>
-        <Logo size={28} />
-        <Pressable onPress={onLogout} hitSlop={8}>
-          <Text style={styles.signOut}>Sign out</Text>
-        </Pressable>
-      </View>
+      <CanvasserHeader variant="solid" />
 
       <View style={styles.intro}>
         <Text style={styles.title}>Choose an organization</Text>
@@ -192,15 +181,6 @@ function makeStyles(t) {
   const { colors, type, shadow } = t;
   return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  signOut: { color: colors.brand, fontWeight: '600', fontSize: 14 },
   intro: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -13,10 +13,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useRefresh } from '../../lib/useRefresh';
-import { signOut } from '../../lib/authState';
-import { saveActiveCampaign, clearBootstrap, clearSelectedBooks, clearCurrentEffort } from '../../lib/cache';
-import { loadRoleContext } from '../../lib/role';
-import Logo from '../../components/Logo';
+import {
+  saveActiveCampaign,
+  clearBootstrap,
+  clearSelectedBooks,
+  clearCurrentEffort,
+  saveCurrentEffort,
+} from '../../lib/cache';
+import CanvasserHeader from '../../components/CanvasserHeader';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -27,17 +31,7 @@ export default function CampaignsScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const [picking, setPicking] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-    loadRoleContext().then((ctx) => {
-      if (mounted) setIsAdmin(ctx.isOrgAdmin);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const [expandedId, setExpandedId] = useState(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['mobile', 'campaigns'],
@@ -46,13 +40,17 @@ export default function CampaignsScreen() {
 
   const { refreshing, onRefresh } = useRefresh([refetch]);
 
-  async function pick(c) {
+  // Enter a campaign's book picker. An explicit effort (from an expanded card) is
+  // persisted first so the books screen opens already scoped to it — its resolver
+  // reads this saved choice instead of defaulting to the first effort.
+  async function pick(c, effortId = null) {
     setPicking(c.id);
     try {
       await saveActiveCampaign(c);
       await clearBootstrap();
       await clearSelectedBooks();
       await clearCurrentEffort();
+      if (effortId) await saveCurrentEffort(c.id, effortId);
       qc.removeQueries({ queryKey: ['bootstrap'] });
       router.replace('/(app)/books');
     } catch (e) {
@@ -60,26 +58,19 @@ export default function CampaignsScreen() {
     }
   }
 
-  async function onLogout() {
-    qc.clear();
-    await signOut();
+  // Multi-effort campaigns expand to let the canvasser choose an effort up front;
+  // single-effort (or no-effort) campaigns go straight to the books.
+  function onCardPress(c) {
+    if ((c.efforts?.length || 0) > 1) {
+      setExpandedId((id) => (id === c.id ? null : c.id));
+      return;
+    }
+    pick(c);
   }
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <View style={styles.header}>
-        <Logo size={28} />
-        <View style={{ flexDirection: 'row', gap: spacing.md }}>
-          {isAdmin && (
-            <Pressable onPress={() => router.replace('/(app)/admin')} hitSlop={8}>
-              <Text style={styles.signOut}>‹ Admin</Text>
-            </Pressable>
-          )}
-          <Pressable onPress={onLogout} hitSlop={8}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </Pressable>
-        </View>
-      </View>
+      <CanvasserHeader variant="solid" />
 
       <View style={styles.intro}>
         <Text style={styles.title}>Pick a campaign</Text>
@@ -120,43 +111,75 @@ export default function CampaignsScreen() {
       >
         {(data?.campaigns || []).map((c) => {
           const isLitDrop = c.type === 'lit_drop';
+          const efforts = c.efforts || [];
+          const expandable = efforts.length > 1;
+          const expanded = expandedId === c.id;
+          const busy = picking === c.id;
           return (
-            <Pressable
-              key={c.id}
-              onPress={() => pick(c)}
-              disabled={!!picking}
-              style={({ pressed }) => [
-                styles.card,
-                { opacity: picking || pressed ? 0.85 : 1 },
-              ]}
-            >
-              <View style={styles.cardLeft}>
-                <View
-                  style={[
-                    styles.typePill,
-                    isLitDrop ? styles.typePillLitDrop : styles.typePillSurvey,
-                  ]}
-                >
-                  <Text
+            <View key={c.id} style={styles.card}>
+              <Pressable
+                onPress={() => onCardPress(c)}
+                disabled={!!picking}
+                style={({ pressed }) => [
+                  styles.cardHeaderRow,
+                  { opacity: (picking && !busy) || pressed ? 0.85 : 1 },
+                ]}
+              >
+                <View style={styles.cardLeft}>
+                  <View
                     style={[
-                      styles.typePillText,
-                      {
-                        color: isLitDrop ? colors.accentPurple : colors.brand,
-                      },
+                      styles.typePill,
+                      isLitDrop ? styles.typePillLitDrop : styles.typePillSurvey,
                     ]}
                   >
-                    {isLitDrop ? 'Lit drop' : 'Survey'}
+                    <Text
+                      style={[
+                        styles.typePillText,
+                        { color: isLitDrop ? colors.accentPurple : colors.brand },
+                      ]}
+                    >
+                      {isLitDrop ? 'Lit drop' : 'Survey'}
+                    </Text>
+                  </View>
+                  <Text style={styles.cardTitle}>{c.name}</Text>
+                  <Text style={styles.cardMeta}>
+                    {c.state}
+                    {expandable ? ` · ${efforts.length} efforts` : ''}
                   </Text>
                 </View>
-                <Text style={styles.cardTitle}>{c.name}</Text>
-                <Text style={styles.cardMeta}>{c.state}</Text>
-              </View>
-              {picking === c.id ? (
-                <ActivityIndicator color={colors.brand} />
-              ) : (
-                <Text style={styles.chevron}>›</Text>
+                {busy && !expanded ? (
+                  <ActivityIndicator color={colors.brand} />
+                ) : (
+                  <Text style={styles.chevron}>
+                    {expandable ? (expanded ? '▾' : '▸') : '›'}
+                  </Text>
+                )}
+              </Pressable>
+
+              {expandable && expanded && (
+                <View style={styles.effortList}>
+                  <Text style={styles.effortListLabel}>Choose your effort</Text>
+                  {efforts.map((e) => (
+                    <Pressable
+                      key={e.id}
+                      onPress={() => pick(c, e.id)}
+                      disabled={!!picking}
+                      style={({ pressed }) => [styles.effortItem, pressed && { opacity: 0.85 }]}
+                    >
+                      <View style={styles.effortDot} />
+                      <Text style={styles.effortName} numberOfLines={1}>
+                        {e.name}
+                      </Text>
+                      {busy ? (
+                        <ActivityIndicator color={colors.brand} />
+                      ) : (
+                        <Text style={styles.effortChevron}>›</Text>
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
               )}
-            </Pressable>
+            </View>
           );
         })}
         {!isLoading && !error && !(data?.campaigns || []).length && (
@@ -175,15 +198,6 @@ function makeStyles(t) {
   const { colors, type, shadow } = t;
   return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  signOut: { color: colors.brand, fontWeight: '600', fontSize: 14 },
   intro: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
@@ -199,15 +213,40 @@ function makeStyles(t) {
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
-    padding: spacing.lg,
     marginBottom: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card,
+    overflow: 'hidden',
+  },
+  cardHeaderRow: {
+    padding: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   cardLeft: { flex: 1 },
+  // Inline effort chooser revealed when a multi-effort card is expanded.
+  effortList: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.sunken,
+    paddingBottom: spacing.xs,
+  },
+  effortListLabel: {
+    ...type.micro,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  effortItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  effortDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brand, marginRight: spacing.md },
+  effortName: { flex: 1, ...type.bodyStrong, fontSize: 15 },
+  effortChevron: { fontSize: 20, color: colors.textMuted },
   typePill: {
     alignSelf: 'flex-start',
     paddingHorizontal: spacing.sm,

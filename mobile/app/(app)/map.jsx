@@ -33,16 +33,15 @@ import {
   clearSelectedBooks,
   clearCurrentEffort,
 } from '../../lib/cache';
-import { loadRoleContext } from '../../lib/role';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { ensureLocationPermission } from '../../lib/location';
-import Logo from '../../components/Logo';
+import CanvasserHeader from '../../components/CanvasserHeader';
+import MapContextCard from '../../components/MapContextCard';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { useMapStyle } from '../../lib/mapStyles';
 import MapStyleControl from '../../components/MapStyleControl';
-import { ThemeIconButton } from '../../components/ThemeToggle';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { makeRateColors } from '../../lib/rates';
 import { radius, spacing } from '../../lib/theme';
@@ -263,7 +262,6 @@ export default function MapScreen() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
-  const [currentUser, setCurrentUser] = useState(null);
   // Last selected book(s) restored from storage. undefined = not resolved yet,
   // null = none saved, string = the saved book id(s). Used to re-scope the map
   // on cold start when there's no live `selectedBooks` nav param.
@@ -281,8 +279,6 @@ export default function MapScreen() {
   );
   const sheetHeight = useSharedValue(PROGRESS_EXPANDED_HEIGHT);
 
-  const [isAdmin, setIsAdmin] = useState(false);
-
   useEffect(() => {
     let mounted = true;
     loadActiveCampaign().then((c) => {
@@ -297,11 +293,6 @@ export default function MapScreen() {
       loadSelectedBooks(c.id).then((books) => {
         if (mounted) setRestoredBooks(books);
       });
-    });
-    loadRoleContext().then((ctx) => {
-      if (!mounted) return;
-      setCurrentUser(ctx.user);
-      setIsAdmin(ctx.isOrgAdmin);
     });
     return () => {
       mounted = false;
@@ -852,59 +843,28 @@ export default function MapScreen() {
 
       {/* Top chrome */}
       <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
-        <View style={styles.topBar}>
-          <Logo size={24} />
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-            {pendingCount > 0 && (
-              <View style={styles.pendingBadge}>
-                <Text style={styles.pendingBadgeText}>{pendingCount} pending</Text>
-              </View>
-            )}
-            <Pressable
-              onPress={() => router.push('/(app)/stats')}
-              style={styles.statsChip}
-            >
-              <Text style={styles.statsChipText}>My stats</Text>
-            </Pressable>
-            {isAdmin && (
-              <Pressable
-                onPress={() => router.push('/(app)/admin')}
-                style={styles.adminChip}
-              >
-                <Text style={styles.adminChipText}>Admin ↑</Text>
-              </Pressable>
-            )}
-            <Pressable onPress={onRefresh} style={styles.iconButton}>
-              {isFetching ? (
-                <ActivityIndicator size="small" color={colors.brand} />
-              ) : (
-                <Text style={styles.iconButtonText}>↻</Text>
-              )}
-            </Pressable>
-            {/* Interim theme toggle for canvassers until a dedicated menu/drawer
-                exists; relocate there once that's designed. */}
-            <ThemeIconButton style={styles.iconButton} />
-            <Pressable onPress={onLogout} style={styles.iconButtonGhost}>
-              <Text style={styles.iconButtonGhostText}>Sign out</Text>
-            </Pressable>
-          </View>
-        </View>
+        <CanvasserHeader
+          variant="floating"
+          onRefresh={onRefresh}
+          refreshing={isFetching}
+          pendingCount={pendingCount}
+        />
 
-        <View style={styles.subBar}>
-          {activeCampaign && (
-            <Pressable onPress={switchCampaign} style={styles.campaignChip}>
-              <View style={styles.campaignDot} />
-              <Text style={styles.campaignChipText} numberOfLines={1}>
-                {activeCampaign.name}
-              </Text>
-              <Text style={styles.campaignChipSwitch}>Switch</Text>
-            </Pressable>
-          )}
-          {(data?.books?.length || 0) > 0 && (
-            <Pressable onPress={() => router.replace('/(app)/books')} style={styles.filterChip}>
-              <Text style={styles.filterChipText}>◂ Books</Text>
-            </Pressable>
-          )}
+        {activeCampaign && (
+          <MapContextCard
+            campaignName={activeCampaign.name}
+            effortName={bookStrip?.effortName}
+            bookName={bookStrip?.bookName}
+            done={bookStrip?.done}
+            total={bookStrip?.total}
+            pct={bookStrip?.pct}
+            hasBooks={(data?.books?.length || 0) > 0}
+            onSwitch={switchCampaign}
+            onBooks={() => router.replace('/(app)/books')}
+          />
+        )}
+
+        <View style={styles.filterRow}>
           <Pressable
             onPress={() => setFilterMenuOpen((v) => !v)}
             style={[
@@ -925,23 +885,6 @@ export default function MapScreen() {
             <Text style={styles.filterChevron}>{filterMenuOpen ? '▴' : '▾'}</Text>
           </Pressable>
         </View>
-
-        {bookStrip && (
-          <View style={styles.bookStrip}>
-            <Text style={styles.bookStripTitle} numberOfLines={1}>
-              {bookStrip.effortName ? `${bookStrip.effortName} · ` : ''}
-              {bookStrip.bookName}
-            </Text>
-            <View style={styles.bookStripProgress}>
-              <View style={styles.bookStripBarTrack}>
-                <View style={[styles.bookStripBarFill, { width: `${bookStrip.pct}%` }]} />
-              </View>
-              <Text style={styles.bookStripCount}>
-                {bookStrip.done} / {bookStrip.total} houses
-              </Text>
-            </View>
-          </View>
-        )}
 
         {filterMenuOpen && (
           <View style={styles.filterMenu}>
@@ -1379,124 +1322,13 @@ function makeStyles(t) {
     left: 0,
     right: 0,
   },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.chromeBar,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  iconButtonText: {
-    color: colors.textPrimary,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  iconButtonGhost: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  iconButtonGhostText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  pendingBadge: {
-    backgroundColor: colors.warnBg,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
-  },
-  pendingBadgeText: { color: colors.warnFg, fontWeight: '700', fontSize: 12 },
-  adminChip: {
-    backgroundColor: colors.brandTint,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderWidth: 1,
-    borderColor: colors.brand,
-  },
-  adminChipText: { color: colors.brand, fontWeight: '700', fontSize: 12 },
-  statsChip: {
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  statsChipText: { color: colors.textPrimary, fontWeight: '700', fontSize: 12 },
-
-  // Book context strip: effort · book name + a progress bar + "done / total houses".
-  bookStrip: {
-    backgroundColor: colors.chromeBar,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  bookStripTitle: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 5 },
-  bookStripProgress: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  bookStripBarTrack: {
-    flex: 1,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.border,
-    overflow: 'hidden',
-  },
-  bookStripBarFill: { height: 6, borderRadius: 3, backgroundColor: colors.success },
-  bookStripCount: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
-
-  subBar: {
+  // Row holding just the status filter chip, below the merged context card. The
+  // chip self-sizes (alignSelf flex-start) so its dropdown menu lines up under it.
+  filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-  },
-  campaignChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-  },
-  campaignDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.brand,
-    marginRight: spacing.sm,
-  },
-  campaignChipText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  campaignChipSwitch: {
-    fontSize: 12,
-    color: colors.brand,
-    fontWeight: '700',
-    marginLeft: spacing.sm,
+    marginTop: spacing.sm,
   },
 
   filterChip: {
