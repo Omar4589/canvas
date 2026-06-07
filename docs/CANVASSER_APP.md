@@ -75,7 +75,8 @@ effort, so this keeps two different "Book 6"s from colliding.)
 
 A map of your books as colored pins — grey (not started), yellow (in progress), green (done). If
 you're in more than one effort, an **effort switcher** sits at the top to flip between them. Tap a
-book, then **Enter** to open it on the houses map.
+book, then **Enter** to open it on the houses map. The same **bottom-right controls** as the houses
+map are here too — Refresh, the terrain / base-map picker, and recenter (follow your location).
 
 ## The houses map
 
@@ -143,16 +144,28 @@ variants:
   rendered inside the screen's own `SafeAreaView` map overlay (it adds no inset itself).
 
 Left = the `<Logo>` + "Doorline" wordmark, plus an optional **Refresh** button (`onRefresh` /
-`refreshing`). Right = an optional **Switch campaign** link (`onSwitchCampaign`), then the
-**hamburger** (always, far right — it opens the right-side drawer). The refresh handler is injected so
-each screen keeps its semantics (books: `refetch()`; map passes no `onRefresh` here — its refresh
-lives in the bottom-right cluster, see below). The hamburger glyph is a custom SVG,
+`refreshing`) on the card screens. Right = an optional **Switch campaign** link (`onSwitchCampaign`),
+then the **hamburger** (always, far right — it opens the right-side drawer). On the two **map**
+screens (books + houses), Refresh is not in the header at all — it lives in the bottom-right control
+stack (see below), so their top bar is just logo + hamburger (+ Switch campaign on books). The
+hamburger glyph is a custom SVG,
 [components/icons/HamburgerIcon.jsx](../mobile/components/icons/HamburgerIcon.jsx) — no icon library;
 it matches the `Logo`/`PinIcon` `{ size, color }` convention.
 
-On the houses map specifically, Refresh and the offline-pending badge are not in the header — they're
-rendered in the bottom-right `RecenterButton` stack (a refresh circle above the terrain + recenter
-controls, with the pending count overlaid), so the top bar is just logo + hamburger.
+## The map control stack
+
+[components/MapControlStack.jsx](../mobile/components/MapControlStack.jsx) — the bottom-right cluster
+shared by both map screens: an optional **Refresh** (with the offline-pending badge), the **terrain /
+base-map** picker ([MapStyleControl](../mobile/components/MapStyleControl.jsx), menu opens upward), and
+a **recenter / follow** toggle. It's presentational (a right-aligned column fragment); the parent owns
+positioning:
+
+- **Houses map** ([map.jsx](../mobile/app/(app)/map.jsx)) wraps it in `RecenterButton`, an
+  `Animated.View` that rides above the pull-up sheet's top edge, and passes the offline `pendingCount`.
+- **Books map** ([books.jsx](../mobile/app/(app)/books.jsx)) pins it to the safe-area bottom, lifting
+  it above the "Enter book" button when a book is selected. Follow is wired via the `Camera`'s
+  `followUserLocation`, and a real pan/zoom gesture (`onCameraChanged`) drops follow — same as the
+  houses map.
 
 ## The profile screen
 
@@ -208,7 +221,8 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
 ## Files
 
 - New: `lib/DrawerContext.jsx`, `components/CanvasserDrawer.jsx`, `components/CanvasserHeader.jsx`,
-  `components/MapContextCard.jsx`, `components/icons/HamburgerIcon.jsx`, `app/(app)/profile.jsx`.
+  `components/MapContextCard.jsx`, `components/MapControlStack.jsx`,
+  `components/icons/HamburgerIcon.jsx`, `app/(app)/profile.jsx`.
 - Changed: `app/(app)/_layout.jsx`, `app/(app)/select-org.jsx`, `app/(app)/campaigns.jsx`,
   `app/(app)/books.jsx`, `app/(app)/map.jsx`, `app/(app)/admin/more.jsx`,
   `components/EffortPicker.jsx`, `server/src/routes/mobile/bootstrap.js`,

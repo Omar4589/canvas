@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../lib/api';
 import {
@@ -18,7 +18,10 @@ import {
   clearCurrentEffort,
 } from '../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
+import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
+import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
+import MapControlStack from '../../components/MapControlStack';
 import EffortPicker from '../../components/EffortPicker';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
@@ -40,10 +43,13 @@ export default function BooksScreen() {
   const [selected, setSelected] = useState(null); // a single book id, or null
   const [mapReady, setMapReady] = useState(false);
   const [currentEffort, setCurrentEffort] = useState(null);
+  const [following, setFollowing] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   const effortResolvedRef = useRef(false);
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const { styleURL } = useMapStyle();
+  const { styleId, styleURL, setStyle } = useMapStyle();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     let mounted = true;
@@ -112,9 +118,50 @@ export default function BooksScreen() {
       setCurrentEffort(effortId);
       saveCurrentEffort(activeCampaign?.id, effortId);
       setSelected(null); // the previously-picked book belonged to the old effort
+      setFollowing(false); // drop follow so the re-frame isn't suppressed by rnmapbox
       cameraInitRef.current = false; // re-frame the map to the new effort's books
     },
     [activeCampaign]
+  );
+
+  // A real pan/zoom/rotate gesture breaks follow mode (standard map behavior);
+  // programmatic camera moves aren't gestures, so they don't trip this.
+  const onCameraChanged = useCallback((state) => {
+    if (state?.gestures?.isGestureActive) setFollowing((f) => (f ? false : f));
+  }, []);
+
+  const refreshPending = useCallback(async () => {
+    setPendingCount(await getPendingCount());
+  }, []);
+
+  // Mirror the houses map's refresh: flush any offline-queued actions, reload the
+  // books, then update the pending badge — so the shared cluster's refresh button
+  // behaves identically on both maps.
+  const onRefresh = useCallback(async () => {
+    try {
+      await flushQueue();
+    } catch {}
+    await refetch();
+    await refreshPending();
+  }, [refetch, refreshPending]);
+
+  // Establish location permission before enabling follow so the recenter button
+  // can't silently no-op (rnmapbox v10 doesn't auto-request on Android).
+  const onRecenter = useCallback(async () => {
+    if (following) {
+      setFollowing(false);
+      return;
+    }
+    const granted = await ensureLocationPermission();
+    if (granted) setFollowing(true);
+  }, [following]);
+
+  // Keep the pending badge current when returning to the picker (e.g. after
+  // recording knocks offline on the map and coming back).
+  useFocusEffect(
+    useCallback(() => {
+      refreshPending();
+    }, [refreshPending])
   );
 
   // Admin / non-turf campaign (sees everything, no assigned books) → straight to the map.
@@ -265,12 +312,20 @@ export default function BooksScreen() {
         style={{ flex: 1 }}
         styleURL={styleURL}
         onDidFinishLoadingMap={() => setMapReady(true)}
+        onCameraChanged={onCameraChanged}
         zoomEnabled
         scrollEnabled
         pitchEnabled
         rotateEnabled
       >
-        <Mapbox.Camera ref={cameraRef} defaultSettings={{ centerCoordinate: DEFAULT_CENTER, zoomLevel: 9 }} />
+        <Mapbox.Camera
+          ref={cameraRef}
+          defaultSettings={{ centerCoordinate: DEFAULT_CENTER, zoomLevel: 9 }}
+          followUserLocation={following}
+          followZoomLevel={16}
+          animationMode="flyTo"
+          animationDuration={500}
+        />
         <Mapbox.UserLocation visible />
         <Mapbox.Images
           images={{
@@ -311,12 +366,7 @@ export default function BooksScreen() {
       </Mapbox.MapView>
 
       <SafeAreaView edges={['top']} style={styles.headerWrap} pointerEvents="box-none">
-        <CanvasserHeader
-          variant="floating"
-          onRefresh={() => refetch()}
-          refreshing={isFetching}
-          onSwitchCampaign={switchCampaign}
-        />
+        <CanvasserHeader variant="floating" onSwitchCampaign={switchCampaign} />
         {efforts.length > 1 && (
           <View style={styles.effortRow}>
             <EffortPicker efforts={efforts} value={currentEffort} onChange={onEffortChange} />
@@ -328,6 +378,24 @@ export default function BooksScreen() {
           </Text>
         </View>
       </SafeAreaView>
+
+      {/* Bottom-right control stack — same cluster as the houses map (refresh,
+          terrain, recenter/follow). Lifts above the "Enter book" button when a
+          book is selected so the two never overlap. */}
+      <View
+        style={[styles.controlsWrap, { bottom: insets.bottom + (selectedBook ? 84 : spacing.lg) }]}
+        pointerEvents="box-none"
+      >
+        <MapControlStack
+          following={following}
+          onRecenter={onRecenter}
+          styleId={styleId}
+          onStyleChange={setStyle}
+          onRefresh={onRefresh}
+          refreshing={isFetching}
+          pendingCount={pendingCount}
+        />
+      </View>
 
       {selectedBook && (
         <SafeAreaView edges={['bottom']} style={styles.enterWrap} pointerEvents="box-none">
@@ -354,6 +422,7 @@ function makeStyles(t) {
   secondaryButton: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 20, paddingVertical: 10, borderRadius: radius.md },
   secondaryButtonText: { color: colors.textPrimary, fontWeight: '600' },
   headerWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
+  controlsWrap: { position: 'absolute', right: spacing.lg, alignItems: 'flex-end' },
   effortRow: { marginHorizontal: 12, marginBottom: 8, zIndex: 10 },
   hint: {
     marginHorizontal: 12,

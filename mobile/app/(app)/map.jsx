@@ -41,7 +41,7 @@ import MapContextCard from '../../components/MapContextCard';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { useMapStyle } from '../../lib/mapStyles';
-import MapStyleControl from '../../components/MapStyleControl';
+import MapControlStack from '../../components/MapControlStack';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { makeRateColors } from '../../lib/rates';
 import { radius, spacing } from '../../lib/theme';
@@ -982,56 +982,22 @@ function RecenterButton({
   refreshing,
   pendingCount = 0,
 }) {
-  const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The cluster rides above the sheet's top edge so it's always reachable.
   const animatedStyle = useAnimatedStyle(() => ({
     bottom: sheetHeight.value - translateY.value + spacing.lg,
   }));
   return (
     <Animated.View style={[styles.recenterButtonWrap, animatedStyle]}>
-      {/* Refresh — flushes the offline queue + refetches. Lives in this bottom-
-          right stack (not the top bar) so it's thumb-reachable; the offline-
-          pending badge rides on it. */}
-      {onRefresh && (
-        <Pressable
-          onPress={onRefresh}
-          disabled={refreshing}
-          style={[styles.recenterButton, styles.stackButton]}
-          accessibilityLabel="Refresh"
-        >
-          {refreshing ? (
-            <ActivityIndicator size="small" color={colors.brand} />
-          ) : (
-            <Text style={styles.recenterButtonText}>↻</Text>
-          )}
-          {pendingCount > 0 && (
-            <View style={styles.pendingDot}>
-              <Text style={styles.pendingDotText}>{pendingCount}</Text>
-            </View>
-          )}
-        </Pressable>
-      )}
-      {/* Base-map picker sits on top of the recenter control as a vertical stack
-          in the bottom-right corner; its menu opens upward so it stays in view. */}
-      <MapStyleControl
-        value={styleId}
-        onChange={onStyleChange}
-        menuDirection="up"
-        style={styles.mapStyleControl}
+      <MapControlStack
+        following={following}
+        onRecenter={onPress}
+        styleId={styleId}
+        onStyleChange={onStyleChange}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        pendingCount={pendingCount}
       />
-      <Pressable
-        onPress={onPress}
-        style={[styles.recenterButton, following && styles.recenterButtonActive]}
-      >
-        <Text
-          style={[
-            styles.recenterButtonText,
-            following && styles.recenterButtonTextActive,
-          ]}
-        >
-          ◎
-        </Text>
-      </Pressable>
     </Animated.View>
   );
 }
@@ -1431,37 +1397,6 @@ function makeStyles(t) {
     right: spacing.lg,
     alignItems: 'flex-end',
   },
-  mapStyleControl: { marginBottom: spacing.sm },
-  stackButton: { marginBottom: spacing.sm },
-  recenterButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadow.raised,
-  },
-  recenterButtonActive: { backgroundColor: colors.brand },
-  recenterButtonText: { fontSize: 24, color: colors.brand, lineHeight: 26 },
-  recenterButtonTextActive: { color: colors.textInverse },
-  // Offline-pending count, overlaid on the refresh button in the bottom-right
-  // stack (warn semantics, same as the old top-bar badge).
-  pendingDot: {
-    position: 'absolute',
-    top: -5,
-    right: -5,
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    paddingHorizontal: 4,
-    backgroundColor: colors.warnBg,
-    borderWidth: 1,
-    borderColor: colors.warnBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pendingDotText: { fontSize: 10, fontWeight: '800', color: colors.warnFg },
 
   // Pullable sheet container. Height is set via the animated style (varies by
   // mode: progress is short, house view is taller). translateY pushes it down
