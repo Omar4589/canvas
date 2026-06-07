@@ -43,7 +43,20 @@
           "RNMapboxMapsImpl": "mapbox"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/AppIcons/adaptive-foreground.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#F9FAFB",
+          "dark": {
+            "image": "./assets/AppIcons/adaptive-foreground.png",
+            "backgroundColor": "#0B0F19"
+          }
+        }
+      ]
     ],
     "extra": {
       "apiBaseUrl": "http://localhost:4000",
