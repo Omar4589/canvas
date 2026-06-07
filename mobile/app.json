@@ -5,7 +5,7 @@
     "scheme": "canvass",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "icon": "./assets/AppIcons/appstore.png",
     "ios": {
       "bundleIdentifier": "com.canvassapp.mobile",
