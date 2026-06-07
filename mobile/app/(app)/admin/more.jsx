@@ -81,12 +81,18 @@ export default function AdminMore() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
-        <View style={styles.accountCard}>
-          <Text style={styles.accountName}>
-            {user?.firstName || ''} {user?.lastName || ''}
-          </Text>
-          <Text style={styles.accountEmail}>{user?.email || ''}</Text>
-        </View>
+        <Pressable
+          onPress={() => router.push('/(app)/profile')}
+          style={({ pressed }) => [styles.accountCard, pressed && { opacity: 0.85 }]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.accountName}>
+              {user?.firstName || ''} {user?.lastName || ''}
+            </Text>
+            <Text style={styles.accountEmail}>{user?.email || ''}</Text>
+          </View>
+          <Text style={styles.accountChevron}>›</Text>
+        </Pressable>
 
         <Text style={styles.sectionLabel}>Manage</Text>
         <View style={styles.group}>
@@ -131,6 +137,8 @@ function makeStyles(t) {
     headerLabel: { ...t.type.caption, color: t.colors.textSecondary },
 
     accountCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
       backgroundColor: t.colors.card,
       borderRadius: radius.lg,
       padding: spacing.lg,
@@ -142,6 +150,7 @@ function makeStyles(t) {
     },
     accountName: { ...t.type.h3 },
     accountEmail: { ...t.type.caption, marginTop: 2 },
+    accountChevron: { fontSize: 22, color: t.colors.textMuted, marginLeft: spacing.sm },
 
     sectionLabel: { ...t.type.micro, marginBottom: spacing.sm, marginLeft: spacing.xs },
     group: {

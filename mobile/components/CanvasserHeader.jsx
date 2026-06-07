@@ -12,16 +12,15 @@ import { radius, spacing } from '../lib/theme';
 //   variant="floating" — for the full-bleed map screens (books, map): a
 //                        translucent chrome bar; rendered inside the screen's own
 //                        SafeAreaView map overlay, so it adds no inset itself.
-// Left is always the hamburger (opens the drawer). Right holds only the quick
-// actions a screen passes in — Refresh, Switch campaign, an offline-pending
-// badge — everything else lives in the drawer. `children` renders extra
-// right-side controls (e.g. a screen-specific chip) before Switch campaign.
+// Left = logo + "Doorline", plus an optional Refresh button. Right = an optional
+// Switch campaign link, then the hamburger (always, far right — it opens the
+// right-side drawer). Everything else lives in the drawer. `children` renders
+// extra right-side controls before Switch campaign.
 export default function CanvasserHeader({
   variant = 'solid',
   onRefresh,
   refreshing = false,
   onSwitchCampaign,
-  pendingCount = 0,
   children,
 }) {
   const { openDrawer } = useDrawer();
@@ -32,18 +31,7 @@ export default function CanvasserHeader({
   return (
     <View style={[styles.header, floating ? styles.headerFloating : styles.headerSolid]}>
       <View style={styles.left}>
-        <Pressable onPress={openDrawer} hitSlop={10} style={styles.menuButton} accessibilityLabel="Open menu">
-          <HamburgerIcon size={22} color={colors.textPrimary} />
-        </Pressable>
-        <Logo size={floating ? 24 : 26} hideText={floating} />
-      </View>
-
-      <View style={styles.right}>
-        {pendingCount > 0 && (
-          <View style={styles.pendingBadge}>
-            <Text style={styles.pendingBadgeText}>{pendingCount} pending</Text>
-          </View>
-        )}
+        <Logo size={floating ? 24 : 26} />
         {onRefresh && (
           <Pressable onPress={onRefresh} hitSlop={8} disabled={refreshing} style={styles.iconButton}>
             {refreshing ? (
@@ -53,12 +41,18 @@ export default function CanvasserHeader({
             )}
           </Pressable>
         )}
+      </View>
+
+      <View style={styles.right}>
         {children}
         {onSwitchCampaign && (
           <Pressable onPress={onSwitchCampaign} hitSlop={8}>
             <Text style={styles.switch}>Switch campaign</Text>
           </Pressable>
         )}
+        <Pressable onPress={openDrawer} hitSlop={10} style={styles.menuButton} accessibilityLabel="Open menu">
+          <HamburgerIcon size={22} color={colors.textPrimary} />
+        </Pressable>
       </View>
     </View>
   );
@@ -94,13 +88,6 @@ function makeStyles(t) {
     },
     right: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
     switch: { color: colors.brand, fontWeight: '600', fontSize: 14 },
-    pendingBadge: {
-      backgroundColor: colors.warnBg,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.xs,
-      borderRadius: radius.pill,
-    },
-    pendingBadgeText: { color: colors.warnFg, fontWeight: '700', fontSize: 12 },
     iconButton: {
       width: 36,
       height: 36,

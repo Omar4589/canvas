@@ -37,8 +37,8 @@ you were working, so a cold start reopens it instead of making you pick again.
 
 ## The menu (the hamburger)
 
-Every canvasser screen has a **menu button (☰) in the top-left**. Tapping it slides a panel in from
-the left with the things you reach for occasionally:
+Every canvasser screen has a **menu button (☰) in the top-right**. Tapping it slides a panel in from
+the right with the things you reach for occasionally:
 
 - **My stats** — your shift history and totals.
 - **Voters** — the voter directory / lookup.
@@ -47,14 +47,21 @@ the left with the things you reach for occasionally:
 - **Admin dashboard** — only if you're an admin (jumps to the admin side).
 - **Sign out.**
 
-Close it by tapping the dimmed area, swiping the panel left, or the ✕. The map behind it keeps
+At the top of the menu, your **name + email card** is tappable — it opens your **Profile**, where you
+can update your name and phone and change your password. (Your email is managed by your admin.)
+
+Close it by tapping the dimmed area, swiping the panel right, or the ✕. The map behind it keeps
 working the moment the menu is closed.
 
-The header keeps only the **quick** actions, so the menu isn't in the way of the job:
+The logo + **Doorline** wordmark sit on the **top-left**. The header keeps only the **quick**
+actions, so the menu isn't in the way of the job:
 
-- **Refresh** (↻) — syncs your work and pulls the latest doors. On the houses map it also flushes
-  anything you recorded offline.
-- **Switch campaign** — on the book picker, a one-tap way back to the campaign list.
+- **Refresh** (↻) — syncs your work and pulls the latest doors. On the **book picker** it's in the
+  header next to the logo. On the **houses map** it lives in the bottom-right control stack (above
+  the terrain + recenter buttons) where your thumb already is, and it carries the offline-pending
+  badge; tapping it also flushes anything you recorded offline.
+- **Switch campaign** — on the book picker, a one-tap way back to the campaign list (next to the
+  menu button).
 
 ## Picking a campaign (and effort)
 
@@ -72,13 +79,16 @@ book, then **Enter** to open it on the houses map.
 
 ## The houses map
 
-The top of the map is intentionally calm — one **context card** tells you where you are:
+The top of the map is intentionally calm — just the logo on the left, the menu on the right, and one
+**context card** that tells you where you are:
 
 - The **campaign** name, with a **Switch** link.
 - The **book** you're in and its **progress bar** (done / total houses); tap it to jump back to the
   book picker.
-- A **Filter** to show only certain door statuses on the map.
-- A **pending** badge appears when you have work that hasn't synced yet (tap Refresh to flush it).
+- A **Filter** (on the right) to show only certain door statuses on the map.
+
+The **Refresh** button is in the bottom-right control stack (above terrain + recenter); a **pending**
+badge appears on it when you have work that hasn't synced yet — tapping Refresh flushes it.
 
 Everything below — the pins, the pull-up sheet with your progress and each house's voters, recenter,
 and the base-map picker — is covered in [MAPS.md](MAPS.md).
@@ -112,11 +122,12 @@ and would fight the Mapbox pan gesture). It opens by **tap**.
   expose `{ openDrawer, closeDrawer, isOpen, progress }`. `progress` is a shared value (0 closed → 1
   open) driving the slide + backdrop; `isOpen` (JS state) mounts the overlay only while it's needed.
 - Panel: [components/CanvasserDrawer.jsx](../mobile/components/CanvasserDrawer.jsx) — backdrop +
-  left panel. Closes on backdrop press or a left-swipe `Gesture.Pan` bound **only to the open panel**
-  (the map is covered by the backdrop, so the two pans never compete). It **renders `null` while
-  closed**, so it never intercepts a touch on the map underneath — the key correctness property. The
-  body reuses the `admin/more.jsx` Row/grouped-card pattern and embeds `<ThemeToggle/>`; rows are
-  gated by `loadRoleContext()` (admin/super) and active campaign (My stats / Voters).
+  **right-side** panel (matches the top-right hamburger). Closes on backdrop press or a **right**-swipe
+  `Gesture.Pan` bound **only to the open panel** (the map is covered by the backdrop, so the two pans
+  never compete). It **renders `null` while closed**, so it never intercepts a touch on the map
+  underneath — the key correctness property. The body reuses the `admin/more.jsx` Row/grouped-card
+  pattern and embeds `<ThemeToggle/>`; rows are gated by `loadRoleContext()` (admin/super) and active
+  campaign (My stats / Voters).
 - Mount: rendered in [_layout.jsx](../mobile/app/(app)/_layout.jsx) as a sibling **after** `<Stack>`
   and `<AddedToOrgBanner/>`, so it paints above the map and the bottom sheet. Inert until a screen's
   header calls `openDrawer()`, so it never shows on admin tab screens.
@@ -126,25 +137,50 @@ and would fight the Mapbox pan gesture). It opens by **tap**.
 [components/CanvasserHeader.jsx](../mobile/components/CanvasserHeader.jsx) — one component, two
 variants:
 
-- `variant="solid"` — for the card screens (select-org, campaigns): hamburger + wordmark on the
-  screen background.
+- `variant="solid"` — for the card screens (select-org, campaigns): logo + wordmark on the screen
+  background.
 - `variant="floating"` — for the full-bleed map screens (books, map): a translucent `chromeBar`
   rendered inside the screen's own `SafeAreaView` map overlay (it adds no inset itself).
 
-Left is always the hamburger (`openDrawer`). Right holds only injected quick actions: `onRefresh` /
-`refreshing`, `onSwitchCampaign`, and a `pendingCount` badge. The refresh handler is injected so each
-screen keeps its semantics (books: `refetch()`; map: `onRefresh` which also flushes the offline
-queue). The hamburger glyph is a custom SVG, [components/icons/HamburgerIcon.jsx](../mobile/components/icons/HamburgerIcon.jsx)
-— no icon library; it matches the `Logo`/`PinIcon` `{ size, color }` convention.
+Left = the `<Logo>` + "Doorline" wordmark, plus an optional **Refresh** button (`onRefresh` /
+`refreshing`). Right = an optional **Switch campaign** link (`onSwitchCampaign`), then the
+**hamburger** (always, far right — it opens the right-side drawer). The refresh handler is injected so
+each screen keeps its semantics (books: `refetch()`; map passes no `onRefresh` here — its refresh
+lives in the bottom-right cluster, see below). The hamburger glyph is a custom SVG,
+[components/icons/HamburgerIcon.jsx](../mobile/components/icons/HamburgerIcon.jsx) — no icon library;
+it matches the `Logo`/`PinIcon` `{ size, color }` convention.
+
+On the houses map specifically, Refresh and the offline-pending badge are not in the header — they're
+rendered in the bottom-right `RecenterButton` stack (a refresh circle above the terrain + recenter
+controls, with the pending count overlaid), so the top bar is just logo + hamburger.
+
+## The profile screen
+
+[app/(app)/profile.jsx](../mobile/app/(app)/profile.jsx) — a self-service account screen, pushed onto
+the `(app)` stack (back-button header, no hamburger). Reached from the **account card** at the top of
+the canvasser drawer ([CanvasserDrawer.jsx](../mobile/components/CanvasserDrawer.jsx)) and from the
+admin **More** tab's account card ([admin/more.jsx](../mobile/app/(app)/admin/more.jsx)) — same screen
+for both, since the endpoints are role-agnostic.
+
+- **Edit info:** first name, last name, phone. Saves via `PATCH /auth/me`
+  ([server/.../auth.js](../server/src/routes/auth.js)) — a `requireAuth`-only handler (no org context,
+  like change-password) validated by `updateProfileSchema`. **Email is read-only** on purpose: it's
+  globally unique and shared across a user's orgs, so email changes go through an admin (the existing
+  multi-org guard). On success the screen re-caches the user (`saveCurrentUser` / `saveMemberships`) so
+  the drawer's account card and greetings refresh.
+- **Change password:** current / new / confirm, inline. Posts to the existing
+  `POST /auth/change-password` (requires the current password, new ≥ 8 chars) and clears the fields on
+  success. There is no email-reset flow — the user is logged in, so it's always a known-password change.
 
 ## The map context card
 
 [components/MapContextCard.jsx](../mobile/components/MapContextCard.jsx) merges what used to be
 three stacked bars (a top bar + a campaign chip row + a book-progress strip) into the header plus one
 card: campaign name + Switch, then the effort · book + progress bar + a Books link. The status filter
-chip and its dropdown sit in a `filterRow` below it. All prior behavior is preserved — refresh,
-pending badge, filter, switch campaign, books navigation, recenter, base-map picker, and the pull-up
-sheet.
+chip and its dropdown sit in a `filterRow` below it, **right-aligned** (the dropdown opens
+right-aligned under the chip). All prior behavior is preserved — filter, switch campaign, books
+navigation, recenter, base-map picker, the pull-up sheet, and refresh + pending (now in the
+bottom-right stack).
 
 ## Effort selection + data
 
@@ -172,7 +208,8 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
 ## Files
 
 - New: `lib/DrawerContext.jsx`, `components/CanvasserDrawer.jsx`, `components/CanvasserHeader.jsx`,
-  `components/MapContextCard.jsx`, `components/icons/HamburgerIcon.jsx`.
+  `components/MapContextCard.jsx`, `components/icons/HamburgerIcon.jsx`, `app/(app)/profile.jsx`.
 - Changed: `app/(app)/_layout.jsx`, `app/(app)/select-org.jsx`, `app/(app)/campaigns.jsx`,
-  `app/(app)/books.jsx`, `app/(app)/map.jsx`, `components/EffortPicker.jsx`,
-  `server/src/routes/mobile/bootstrap.js`.
+  `app/(app)/books.jsx`, `app/(app)/map.jsx`, `app/(app)/admin/more.jsx`,
+  `components/EffortPicker.jsx`, `server/src/routes/mobile/bootstrap.js`,
+  `server/src/routes/auth.js` (self-service `PATCH /auth/me`).

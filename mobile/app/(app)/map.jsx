@@ -843,12 +843,7 @@ export default function MapScreen() {
 
       {/* Top chrome */}
       <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
-        <CanvasserHeader
-          variant="floating"
-          onRefresh={onRefresh}
-          refreshing={isFetching}
-          pendingCount={pendingCount}
-        />
+        <CanvasserHeader variant="floating" />
 
         {activeCampaign && (
           <MapContextCard
@@ -937,6 +932,9 @@ export default function MapScreen() {
         onPress={() => setFollowing((v) => !v)}
         styleId={styleId}
         onStyleChange={setStyle}
+        onRefresh={onRefresh}
+        refreshing={isFetching}
+        pendingCount={pendingCount}
       />
 
       {/* Bottom sheet. Always rendered; content branches on `selected`. The
@@ -973,13 +971,46 @@ export default function MapScreen() {
   );
 }
 
-function RecenterButton({ translateY, sheetHeight, following, onPress, styleId, onStyleChange }) {
+function RecenterButton({
+  translateY,
+  sheetHeight,
+  following,
+  onPress,
+  styleId,
+  onStyleChange,
+  onRefresh,
+  refreshing,
+  pendingCount = 0,
+}) {
+  const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const animatedStyle = useAnimatedStyle(() => ({
     bottom: sheetHeight.value - translateY.value + spacing.lg,
   }));
   return (
     <Animated.View style={[styles.recenterButtonWrap, animatedStyle]}>
+      {/* Refresh — flushes the offline queue + refetches. Lives in this bottom-
+          right stack (not the top bar) so it's thumb-reachable; the offline-
+          pending badge rides on it. */}
+      {onRefresh && (
+        <Pressable
+          onPress={onRefresh}
+          disabled={refreshing}
+          style={[styles.recenterButton, styles.stackButton]}
+          accessibilityLabel="Refresh"
+        >
+          {refreshing ? (
+            <ActivityIndicator size="small" color={colors.brand} />
+          ) : (
+            <Text style={styles.recenterButtonText}>↻</Text>
+          )}
+          {pendingCount > 0 && (
+            <View style={styles.pendingDot}>
+              <Text style={styles.pendingDotText}>{pendingCount}</Text>
+            </View>
+          )}
+        </Pressable>
+      )}
       {/* Base-map picker sits on top of the recenter control as a vertical stack
           in the bottom-right corner; its menu opens upward so it stays in view. */}
       <MapStyleControl
@@ -1322,11 +1353,12 @@ function makeStyles(t) {
     left: 0,
     right: 0,
   },
-  // Row holding just the status filter chip, below the merged context card. The
-  // chip self-sizes (alignSelf flex-start) so its dropdown menu lines up under it.
+  // Row holding just the status filter chip, below the merged context card,
+  // pushed to the right so it sits under the hamburger.
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     paddingHorizontal: spacing.md,
     marginTop: spacing.sm,
   },
@@ -1366,8 +1398,10 @@ function makeStyles(t) {
   },
 
   filterMenu: {
-    marginHorizontal: spacing.md,
+    alignSelf: 'flex-end',
+    marginRight: spacing.md,
     marginTop: 4,
+    minWidth: 200,
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     paddingVertical: spacing.sm,
@@ -1398,6 +1432,7 @@ function makeStyles(t) {
     alignItems: 'flex-end',
   },
   mapStyleControl: { marginBottom: spacing.sm },
+  stackButton: { marginBottom: spacing.sm },
   recenterButton: {
     width: 48,
     height: 48,
@@ -1410,6 +1445,23 @@ function makeStyles(t) {
   recenterButtonActive: { backgroundColor: colors.brand },
   recenterButtonText: { fontSize: 24, color: colors.brand, lineHeight: 26 },
   recenterButtonTextActive: { color: colors.textInverse },
+  // Offline-pending count, overlaid on the refresh button in the bottom-right
+  // stack (warn semantics, same as the old top-bar badge).
+  pendingDot: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 4,
+    backgroundColor: colors.warnBg,
+    borderWidth: 1,
+    borderColor: colors.warnBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingDotText: { fontSize: 10, fontWeight: '800', color: colors.warnFg },
 
   // Pullable sheet container. Height is set via the animated style (varies by
   // mode: progress is short, house view is taller). translateY pushes it down

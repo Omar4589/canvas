@@ -24,6 +24,12 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
+const updateProfileSchema = z.object({
+  firstName: z.string().trim().min(1),
+  lastName: z.string().trim().min(1),
+  phone: z.string().trim().max(40).optional().nullable(),
+});
+
 async function loadMembershipsForUser(userId) {
   return Membership.find({ userId, isActive: true })
     .populate({ path: 'organizationId', select: 'name slug isActive timeZone' })
@@ -101,6 +107,26 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
     const user = await User.findByIdAndUpdate(
       req.user._id,
       { passwordHash, mustChangePassword: false, tempPasswordSetAt: null },
+      { new: true }
+    );
+    const memberships = await loadMembershipsForUser(user._id);
+    res.json({ user: user.toSafeJSON(), memberships });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Self-service profile update — name + phone only. Email is intentionally NOT
+// editable here: it's globally unique and shared across all of a user's orgs, so
+// email changes go through an admin (with the multi-org guard). Like
+// change-password, this only needs requireAuth — no org context.
+router.patch('/me', requireAuth, async (req, res, next) => {
+  try {
+    const { firstName, lastName, phone } = updateProfileSchema.parse(req.body);
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { firstName, lastName, phone: phone || null },
       { new: true }
     );
     const memberships = await loadMembershipsForUser(user._id);

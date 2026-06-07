@@ -86,23 +86,23 @@ export default function CanvasserDrawer() {
   }, [isOpen]);
 
   const panelStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: -panelWidth * (1 - progress.value) }],
+    transform: [{ translateX: panelWidth * (1 - progress.value) }],
   }));
   const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
 
-  // Swipe the open panel leftward to dismiss. Bound to the panel only (the map
-  // is covered by the backdrop while open), so it never competes with Mapbox's
-  // pan. activeOffsetX(-12) means only a left drag captures; vertical scrolls of
-  // the body pass through to the ScrollView (failOffsetY).
+  // Swipe the open (right-side) panel rightward to dismiss. Bound to the panel
+  // only (the map is covered by the backdrop while open), so it never competes
+  // with Mapbox's pan. activeOffsetX(12) means only a right drag captures;
+  // vertical scrolls of the body pass through to the ScrollView (failOffsetY).
   const pan = Gesture.Pan()
-    .activeOffsetX(-12)
+    .activeOffsetX(12)
     .failOffsetY([-16, 16])
     .onUpdate((e) => {
-      const next = 1 + e.translationX / panelWidth;
+      const next = 1 - e.translationX / panelWidth;
       progress.value = Math.max(0, Math.min(1, next));
     })
     .onEnd((e) => {
-      if (progress.value < 0.5 || e.velocityX < -500) {
+      if (progress.value < 0.5 || e.velocityX > 500) {
         runOnJS(closeDrawer)();
       } else {
         progress.value = withTiming(1, DRAWER_TIMING);
@@ -167,12 +167,18 @@ export default function CanvasserDrawer() {
               contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}
               showsVerticalScrollIndicator={false}
             >
-              <View style={styles.accountCard}>
-                <Text style={styles.accountName}>
-                  {(user?.firstName || '') + (user?.lastName ? ` ${user.lastName}` : '') || 'Account'}
-                </Text>
-                <Text style={styles.accountEmail}>{user?.email || ''}</Text>
-              </View>
+              <Pressable
+                onPress={() => go('/(app)/profile')}
+                style={({ pressed }) => [styles.accountCard, pressed && { opacity: 0.85 }]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.accountName}>
+                    {(user?.firstName || '') + (user?.lastName ? ` ${user.lastName}` : '') || 'Account'}
+                  </Text>
+                  <Text style={styles.accountEmail}>{user?.email || ''}</Text>
+                </View>
+                <Text style={styles.accountChevron}>›</Text>
+              </Pressable>
 
               {activeCampaign && (
                 <>
@@ -217,10 +223,10 @@ function makeStyles(t) {
       position: 'absolute',
       top: 0,
       bottom: 0,
-      left: 0,
+      right: 0,
       backgroundColor: t.colors.bg,
-      borderRightWidth: 1,
-      borderRightColor: t.colors.border,
+      borderLeftWidth: 1,
+      borderLeftColor: t.colors.border,
       ...t.shadow.raised,
     },
     panelHeader: {
@@ -244,6 +250,8 @@ function makeStyles(t) {
     closeText: { fontSize: 15, color: t.colors.textSecondary, fontWeight: '700' },
 
     accountCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
       backgroundColor: t.colors.card,
       borderRadius: radius.lg,
       padding: spacing.lg,
@@ -255,6 +263,7 @@ function makeStyles(t) {
     },
     accountName: { ...t.type.h3 },
     accountEmail: { ...t.type.caption, marginTop: 2 },
+    accountChevron: { fontSize: 22, color: t.colors.textMuted, marginLeft: spacing.sm },
 
     sectionLabel: { ...t.type.micro, marginBottom: spacing.sm, marginLeft: spacing.xs },
     group: {
