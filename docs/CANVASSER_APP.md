@@ -189,18 +189,23 @@ for both, since the endpoints are role-agnostic.
 
 [app/(app)/stats.jsx](../mobile/app/(app)/stats.jsx) — the canvasser's own performance for the active
 campaign, reached from the map's "See full shift history" link. Built on `GET /mobile/me/history`
-(days[], allTime, personalBest, currentStreak) — **no server work**; pace and connection rate are
-derived client-side. Sections:
+(days[], personalBest, currentStreak) — **no server work**; pace and connection rate are derived
+client-side. A [DateRangeBar](../mobile/components/DateRangeBar.jsx) (Today / Yesterday / 7d / 30d /
+All time / Custom, default **30d**) scopes the **whole page** to a date range — the endpoint returns
+every day, so the range is applied **client-side** (filter `days` by `YYYY-MM-DD`, then sum). This keeps
+the list short on months-long campaigns. The range math uses the device tz, matching the history's
+phone-local buckets. Sections:
 
-- **All time** — a `KpiGrid`: Doors knocked · Surveys (or Lit drops) · **Connection rate** (or Lit
-  rate, color-tiered green/amber/red via the tile's `level`) · Days active.
-- **Highlights** — a compact `KpiGrid`: Best day · Streak · Miles walked.
-- **Doors per day** — a small vertical bar trend of the last 14 days (newest right; empty days show a
-  faint stub).
-- **Shift history** — one row per day: date (+ Today/Yesterday/Best tags), the shift range
-  (first → last door), then doors · surveys/lit · connection % · pace. Tap a row →
-  [stats/[date].jsx](../mobile/app/(app)/stats/[date].jsx) (big doors count, surveys/lit, connection-rate
-  banner, a First/Last/Pace shift card, top answers).
+- **Summary strip** — one compact card, four inline stats for the range: Doors · Surveys (or Lit drops)
+  · **Connection** (or Lit rate, color-tiered green/amber/red) · Days. A secondary line shows
+  `Best NN (date) · N-day streak · N mi` (streak is the live lifetime value).
+- **Doors per day** — a small vertical bar trend of the last ≤14 days in range, **with the count above
+  each bar** (newest right; 0-door days show a faint stub).
+- **Shift history** — one row per day: date (+ Today/Yesterday/Best tags) and a one-line
+  `shift range · surveys/lit · connection % · pace`, with the **doors count pulled right** as the
+  headline. Tap a row → [stats/[date].jsx](../mobile/app/(app)/stats/[date].jsx): the big doors number,
+  then one compact row of Surveys/Lit · Connection (color-tiered), a First/Last/Pace shift card, and top
+  answers. Empty states distinguish "no activity yet" from "no activity in this range."
 
 **Counting model (important):** My Stats uses the **personal/raw** model — raw door *events* and
 `connection rate = responses ÷ doors` — so the numbers match the map's "Today's Progress" HUD the

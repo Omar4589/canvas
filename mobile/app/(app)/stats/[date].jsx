@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
-import { makeRateColors, getConnectionRate, formatPace } from '../../../lib/rates';
+import { getConnectionRate, formatPace } from '../../../lib/rates';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -56,6 +56,26 @@ function ShiftStat({ label, value }) {
   );
 }
 
+// Compact stat card under the big doors number; `level` color-tiers the value.
+function MetaStat({ value, label, level }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const color =
+    level === 'good'
+      ? colors.success
+      : level === 'caution'
+      ? colors.warnFg
+      : level === 'low'
+      ? colors.danger
+      : colors.textPrimary;
+  return (
+    <View style={styles.metaStat}>
+      <Text style={[styles.metaValue, { color }]}>{value}</Text>
+      <Text style={styles.metaLabel}>{label}</Text>
+    </View>
+  );
+}
+
 function Header({ onBack }) {
   const styles = useThemedStyles(makeStyles);
   return (
@@ -71,7 +91,6 @@ export default function DayDetailScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const RATE_COLORS = makeRateColors(colors);
   const { date } = useLocalSearchParams();
   const dateStr = Array.isArray(date) ? date[0] : date;
   const [activeCampaign, setActiveCampaign] = useState(undefined);
@@ -124,10 +143,9 @@ export default function DayDetailScreen() {
   const isLitDrop = activeCampaign.type === 'lit_drop';
   const breakdown = stats.answerBreakdown || [];
   const showAnswers = !isLitDrop && breakdown.length > 0;
-  const connectionRate = isLitDrop
-    ? null
-    : getConnectionRate(stats.responses, stats.doorsKnocked);
-  const rateColors = connectionRate ? RATE_COLORS[connectionRate.level] : null;
+  const primaryValue = isLitDrop ? stats.litDropped || 0 : stats.responses || 0;
+  const rate = getConnectionRate(primaryValue, stats.doorsKnocked);
+  const showExtraLit = !isLitDrop && (stats.litDropped || 0) > 0;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -142,37 +160,20 @@ export default function DayDetailScreen() {
           <Text style={styles.bigStatLabel}>doors knocked</Text>
         </View>
 
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryStat}>
-            <Text style={styles.summaryValue}>
-              {isLitDrop
-                ? (stats.litDropped || 0).toLocaleString()
-                : (stats.responses || 0).toLocaleString()}
-            </Text>
-            <Text style={styles.summaryLabel}>
-              {isLitDrop ? 'Lit drops' : 'Surveys'}
-            </Text>
-          </View>
-          {!isLitDrop && (stats.litDropped || 0) > 0 && (
-            <View style={styles.summaryStat}>
-              <Text style={styles.summaryValue}>
-                {(stats.litDropped || 0).toLocaleString()}
-              </Text>
-              <Text style={styles.summaryLabel}>Lit drops</Text>
-            </View>
+        <View style={styles.metaRow}>
+          <MetaStat
+            value={primaryValue.toLocaleString()}
+            label={isLitDrop ? 'Lit drops' : 'Surveys'}
+          />
+          <MetaStat
+            value={rate ? rate.value : '—'}
+            label={isLitDrop ? 'Lit rate' : 'Connection'}
+            level={rate ? rate.level : undefined}
+          />
+          {showExtraLit && (
+            <MetaStat value={(stats.litDropped || 0).toLocaleString()} label="Lit drops" />
           )}
         </View>
-
-        {connectionRate && (
-          <View style={[styles.rateBanner, { backgroundColor: rateColors.bg }]}>
-            <Text style={[styles.rateValue, { color: rateColors.fg }]}>
-              {connectionRate.value}
-            </Text>
-            <Text style={[styles.rateLabel, { color: rateColors.fg }]}>
-              connection rate
-            </Text>
-          </View>
-        )}
 
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>Shift</Text>
@@ -271,12 +272,12 @@ function makeStyles(t) {
     fontWeight: '700',
   },
 
-  summaryRow: {
+  metaRow: {
     flexDirection: 'row',
     gap: spacing.md,
     marginTop: spacing.md,
   },
-  summaryStat: {
+  metaStat: {
     flex: 1,
     backgroundColor: colors.card,
     borderRadius: radius.lg,
@@ -284,11 +285,11 @@ function makeStyles(t) {
     borderColor: colors.border,
     padding: spacing.md,
   },
-  summaryValue: {
+  metaValue: {
     ...type.title,
     fontVariant: ['tabular-nums'],
   },
-  summaryLabel: {
+  metaLabel: {
     ...type.caption,
     marginTop: 1,
   },
@@ -303,24 +304,6 @@ function makeStyles(t) {
     ...shadow.card,
   },
 
-  rateBanner: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  rateValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  rateLabel: {
-    ...type.body,
-    fontWeight: '600',
-  },
   sectionLabel: {
     ...type.micro,
     marginBottom: spacing.md,

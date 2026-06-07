@@ -15,12 +15,13 @@ import { api } from '../../lib/api';
 import { useRefresh } from '../../lib/useRefresh';
 import { loadActiveCampaign } from '../../lib/cache';
 import { getConnectionRate, formatPace } from '../../lib/rates';
-import KpiGrid from '../../components/KpiGrid';
+import { rangeFor, deviceTimezone } from '../../lib/dateRanges';
+import DateRangeBar from '../../components/DateRangeBar';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
 
-const TREND_HEIGHT = 64;
+const TREND_HEIGHT = 56;
 const TREND_DAYS = 14;
 
 function getLocalDateStr(date = new Date()) {
@@ -73,6 +74,27 @@ function shiftRange(firstAt, lastAt) {
   return a || b;
 }
 
+// One compact inline stat for the summary strip. `level` color-tiers the value
+// (used for connection / lit rate).
+function Stat({ value, label, level }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const color =
+    level === 'good'
+      ? colors.success
+      : level === 'caution'
+      ? colors.warnFg
+      : level === 'low'
+      ? colors.danger
+      : colors.textPrimary;
+  return (
+    <View style={styles.stat}>
+      <Text style={[styles.statValue, { color }]}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
 function Tag({ kind, children }) {
   const styles = useThemedStyles(makeStyles);
   return (
@@ -82,9 +104,8 @@ function Tag({ kind, children }) {
   );
 }
 
-// A compact doors-per-day trend (vertical bars), newest on the right. Bars scale
-// to the peak day; days with no activity render as a faint stub so gaps read as
-// "didn't canvass" rather than missing.
+// Doors-per-day trend: the count sits in a fixed-height label row on top (so the
+// numbers stay aligned regardless of bar height), bar bottom-aligned below.
 function DoorsTrend({ days }) {
   const styles = useThemedStyles(makeStyles);
   const series = days.slice(0, TREND_DAYS).reverse();
@@ -101,7 +122,12 @@ function DoorsTrend({ days }) {
           const h = v > 0 ? Math.max(4, Math.round((v / max) * TREND_HEIGHT)) : 2;
           return (
             <View key={d.date} style={styles.trendCol}>
-              <View style={[styles.trendBar, { height: h }, v === 0 && styles.trendBarEmpty]} />
+              <Text style={styles.trendVal} numberOfLines={1}>
+                {v > 0 ? v : ''}
+              </Text>
+              <View style={styles.trendBarZone}>
+                <View style={[styles.trendBar, { height: h }, v === 0 && styles.trendBarEmpty]} />
+              </View>
             </View>
           );
         })}
@@ -123,7 +149,14 @@ function DayRow({ day, todayStr, yesterdayStr, bestDate, isLitDrop, onPress }) {
   const secondaryValue = isLitDrop ? day.litDropped || 0 : day.responses || 0;
   const rate = getConnectionRate(secondaryValue, day.doorsKnocked);
   const pace = formatPace(day.doorsKnocked, day.firstDoorAt, day.lastDoorAt);
-  const shift = shiftRange(day.firstDoorAt, day.lastDoorAt);
+  const detail = [
+    shiftRange(day.firstDoorAt, day.lastDoorAt),
+    `${secondaryValue.toLocaleString()} ${secondaryLabel}`,
+    rate ? rate.value : null,
+    pace !== '—' ? pace : null,
+  ]
+    .filter(Boolean)
+    .join('  ·  ');
   return (
     <Pressable
       onPress={onPress}
@@ -136,19 +169,13 @@ function DayRow({ day, todayStr, yesterdayStr, bestDate, isLitDrop, onPress }) {
           {isYesterday && <Tag kind="yesterday">Yesterday</Tag>}
           {isBest && !isToday && !isYesterday && <Tag kind="best">Best</Tag>}
         </View>
-        {shift ? <Text style={styles.dayShift}>{shift}</Text> : null}
-        <Text style={styles.daySummary}>
-          <Text style={styles.daySummaryStrong}>{(day.doorsKnocked || 0).toLocaleString()}</Text> doors
-          {'  ·  '}
-          <Text style={styles.daySummaryStrong}>{secondaryValue.toLocaleString()}</Text> {secondaryLabel}
-          {rate ? (
-            <Text>
-              {'  ·  '}
-              <Text style={styles.daySummaryStrong}>{rate.value}</Text>
-            </Text>
-          ) : null}
-          {pace !== '—' ? `  ·  ${pace}` : ''}
+        <Text style={styles.daySummary} numberOfLines={1}>
+          {detail}
         </Text>
+      </View>
+      <View style={styles.dayDoorsWrap}>
+        <Text style={styles.dayDoors}>{(day.doorsKnocked || 0).toLocaleString()}</Text>
+        <Text style={styles.dayDoorsLabel}>doors</Text>
       </View>
       <Text style={styles.chevron}>›</Text>
     </Pressable>
@@ -160,6 +187,15 @@ export default function StatsScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
+
+  // Personal stats stay on the phone's local time — a motivation view, not
+  // cross-admin reporting (see docs/TIMEZONES.md). The date filter is computed in
+  // the same tz the history is bucketed in.
+  const deviceTz = deviceTimezone();
+  const [range, setRange] = useState(() => {
+    const r = rangeFor('30d', null, deviceTz);
+    return { preset: '30d', from: r.from, to: r.to };
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -176,15 +212,11 @@ export default function StatsScreen() {
     };
   }, [router]);
 
-  // Personal stats stay on the phone's local time — a motivation view, not
-  // cross-admin reporting (see docs/TIMEZONES.md).
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['mobile', 'me', 'history', activeCampaign?.id, tz],
+    queryKey: ['mobile', 'me', 'history', activeCampaign?.id, deviceTz],
     queryFn: () =>
       api(
-        `/mobile/me/history?campaignId=${activeCampaign.id}&tz=${encodeURIComponent(tz)}`
+        `/mobile/me/history?campaignId=${activeCampaign.id}&tz=${encodeURIComponent(deviceTz)}`
       ),
     enabled: !!activeCampaign?.id,
     staleTime: 30 * 1000,
@@ -217,38 +249,36 @@ export default function StatsScreen() {
     );
   }
 
-  const days = data?.days || [];
-  const allTime = data?.allTime || {};
-  const personalBest = data?.personalBest;
-  const streak = data?.currentStreak || 0;
+  const allDays = data?.days || [];
   const isLitDrop = activeCampaign.type === 'lit_drop';
   const todayStr = getLocalDateStr();
   const yesterdayStr = getYesterdayStr();
 
-  const primaryLabel = isLitDrop ? 'Lit drops' : 'Surveys';
-  const primaryValue = isLitDrop ? allTime.litDropped : allTime.surveysSubmitted;
-  const rate = getConnectionRate(primaryValue, allTime.doorsKnocked);
+  // Scope the whole page to the selected range — the server returns every day, so
+  // we filter client-side (string compare on YYYY-MM-DD; `to` null = open-ended).
+  const days = allDays.filter(
+    (d) => (!range.from || d.date >= range.from) && (!range.to || d.date <= range.to)
+  );
 
-  const kpiTiles = [
-    { label: 'Doors knocked', value: (allTime.doorsKnocked || 0).toLocaleString() },
-    { label: primaryLabel, value: (primaryValue || 0).toLocaleString() },
-    {
-      label: isLitDrop ? 'Lit rate' : 'Connection rate',
-      value: rate ? rate.value : '—',
-      level: rate ? rate.level : undefined,
-    },
-    { label: 'Days active', value: (allTime.daysActive || 0).toLocaleString() },
-  ];
+  const totalDoors = days.reduce((s, d) => s + (d.doorsKnocked || 0), 0);
+  const totalResponses = days.reduce((s, d) => s + (d.responses || 0), 0);
+  const totalLit = days.reduce((s, d) => s + (d.litDropped || 0), 0);
+  const totalDistance = days.reduce((s, d) => s + (d.distanceMeters || 0), 0);
+  const daysActive = days.filter((d) => (d.doorsKnocked || 0) > 0).length;
+  const primaryValue = isLitDrop ? totalLit : totalResponses;
+  const rate = getConnectionRate(primaryValue, totalDoors);
+  const streak = data?.currentStreak || 0;
+  const best = days.reduce(
+    (b, d) => (!b || (d.doorsKnocked || 0) > (b.doorsKnocked || 0) ? d : b),
+    null
+  );
+  const bestHasData = best && (best.doorsKnocked || 0) > 0;
 
-  const highlightTiles = [
-    {
-      label: 'Best day',
-      value: personalBest ? personalBest.doorsKnocked.toLocaleString() : '—',
-      sub: personalBest ? formatBestDate(personalBest.date) : 'no data yet',
-    },
-    { label: 'Streak', value: String(streak), sub: `day${streak === 1 ? '' : 's'} in a row` },
-    { label: 'Miles walked', value: metersToMiles(allTime.distanceMeters), sub: 'all time' },
-  ];
+  const secondaryParts = [
+    bestHasData ? `Best ${best.doorsKnocked.toLocaleString()} (${formatBestDate(best.date)})` : null,
+    streak > 0 ? `${streak}-day streak` : null,
+    totalDistance > 0 ? `${metersToMiles(totalDistance)} mi` : null,
+  ].filter(Boolean);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -267,20 +297,38 @@ export default function StatsScreen() {
         <Text style={styles.title}>My Stats</Text>
         <Text style={styles.subtitle}>{activeCampaign.name}</Text>
 
-        <Text style={styles.sectionLabel}>All time</Text>
-        <KpiGrid tiles={kpiTiles} columns={2} />
-        <View style={styles.highlightGap}>
-          <KpiGrid tiles={highlightTiles} columns={3} compact />
+        <View style={styles.filterWrap}>
+          <DateRangeBar value={range} onChange={setRange} tz={deviceTz} />
+        </View>
+
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryRow}>
+            <Stat value={totalDoors.toLocaleString()} label="Doors" />
+            <Stat value={primaryValue.toLocaleString()} label={isLitDrop ? 'Lit drops' : 'Surveys'} />
+            <Stat
+              value={rate ? rate.value : '—'}
+              label={isLitDrop ? 'Lit rate' : 'Connection'}
+              level={rate ? rate.level : undefined}
+            />
+            <Stat value={daysActive.toLocaleString()} label="Days" />
+          </View>
+          {secondaryParts.length > 0 && (
+            <Text style={styles.summarySub}>{secondaryParts.join('  ·  ')}</Text>
+          )}
         </View>
 
         {days.length >= 2 && <DoorsTrend days={days} />}
 
         <Text style={[styles.sectionLabel, styles.sectionGap]}>Shift history</Text>
-        {days.length === 0 ? (
+        {allDays.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
               No activity yet. Knock your first door to start tracking.
             </Text>
+          </View>
+        ) : days.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>No activity in this range.</Text>
           </View>
         ) : (
           <View style={styles.dayList}>
@@ -290,7 +338,7 @@ export default function StatsScreen() {
                 day={d}
                 todayStr={todayStr}
                 yesterdayStr={yesterdayStr}
-                bestDate={personalBest?.date}
+                bestDate={best?.date}
                 isLitDrop={isLitDrop}
                 onPress={() => router.push(`/(app)/stats/${d.date}`)}
               />
@@ -348,11 +396,35 @@ function makeStyles(t) {
       paddingBottom: spacing.xxl,
     },
     title: { ...type.title, marginTop: spacing.xs },
-    subtitle: { ...type.caption, marginBottom: spacing.lg },
+    subtitle: { ...type.caption, marginBottom: spacing.md },
+
+    // DateRangeBar brings its own horizontal padding; cancel the ScrollView's so
+    // the pill row scrolls edge-to-edge and aligns with the title.
+    filterWrap: { marginHorizontal: -spacing.lg, marginBottom: spacing.sm },
 
     sectionLabel: { ...type.micro, marginBottom: spacing.sm },
     sectionGap: { marginTop: spacing.xl },
-    highlightGap: { marginTop: spacing.sm },
+
+    summaryCard: {
+      backgroundColor: colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.md,
+      ...shadow.card,
+    },
+    summaryRow: { flexDirection: 'row' },
+    stat: { flex: 1 },
+    statValue: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    statLabel: { ...type.micro, color: colors.textSecondary, marginTop: 2 },
+    summarySub: {
+      ...type.caption,
+      color: colors.textMuted,
+      marginTop: spacing.sm,
+      paddingTop: spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
 
     trendCard: {
       backgroundColor: colors.card,
@@ -370,13 +442,17 @@ function makeStyles(t) {
       marginBottom: spacing.sm,
     },
     trendPeak: { ...type.caption, color: colors.textMuted },
-    trendBars: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      height: TREND_HEIGHT,
-      gap: 4,
+    trendBars: { flexDirection: 'row', gap: 4 },
+    trendCol: { flex: 1 },
+    trendVal: {
+      height: 14,
+      fontSize: 10,
+      lineHeight: 12,
+      textAlign: 'center',
+      color: colors.textMuted,
+      fontVariant: ['tabular-nums'],
     },
-    trendCol: { flex: 1, justifyContent: 'flex-end' },
+    trendBarZone: { height: TREND_HEIGHT, justifyContent: 'flex-end', alignItems: 'center' },
     trendBar: {
       width: '100%',
       backgroundColor: colors.brand,
@@ -428,9 +504,21 @@ function makeStyles(t) {
       marginBottom: 2,
     },
     dayDate: { ...type.bodyStrong },
-    dayShift: { ...type.caption, color: colors.textMuted, marginBottom: 2 },
     daySummary: { ...type.caption },
-    daySummaryStrong: { color: colors.textPrimary, fontWeight: '700' },
+    dayDoorsWrap: { alignItems: 'flex-end', minWidth: 48 },
+    dayDoors: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: colors.textPrimary,
+      fontVariant: ['tabular-nums'],
+    },
+    dayDoorsLabel: {
+      fontSize: 9,
+      color: colors.textMuted,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      marginTop: -2,
+    },
     chevron: { color: colors.textMuted, fontSize: 22, fontWeight: '300' },
 
     tag: {
