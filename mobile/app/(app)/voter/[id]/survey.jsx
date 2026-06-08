@@ -213,6 +213,7 @@ export default function VoterSurvey() {
             : h
         ),
       }),
+      pending: [{ id: voter.householdId, status: 'surveyed' }],
       reconcile: (prev, response) => {
         const status = response?.household?.status;
         if (!status) return prev;

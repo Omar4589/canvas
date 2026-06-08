@@ -33,7 +33,9 @@ import {
   clearSelectedBooks,
   clearCurrentEffort,
 } from '../../lib/cache';
+import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
+import { reconcilePendingHouseholds } from '../../lib/recordAction';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
@@ -316,6 +318,9 @@ export default function MapScreen() {
     queryFn: async () => {
       try {
         const fresh = await api(`/mobile/bootstrap?campaignId=${activeCampaign.id}`);
+        // Hold any just-recorded, server-not-yet-confirmed statuses over this full
+        // refetch so it can't revert a fresh optimistic recolor (see recordAction).
+        fresh.households = reconcilePendingHouseholds(fresh.households);
         await saveBootstrap(fresh);
         return fresh;
       } catch (err) {
@@ -508,14 +513,18 @@ export default function MapScreen() {
         const vMap = new Map(voters.map((v) => [String(v._id), v]));
         const next = {
           ...prev,
-          households: prev.households
-            .map((h) => {
-              const c = hMap.get(String(h._id));
-              if (!c) return h;
-              if (c.isActive === false || c.fullyVoted === true) return null; // archived or everyone voted — drop
-              return { ...h, status: c.status, lastActionAt: c.lastActionAt };
-            })
-            .filter(Boolean),
+          // Hold just-recorded, server-not-yet-confirmed statuses over the delta so
+          // a poll that predates the action can't revert a fresh optimistic recolor.
+          households: reconcilePendingHouseholds(
+            prev.households
+              .map((h) => {
+                const c = hMap.get(String(h._id));
+                if (!c) return h;
+                if (c.isActive === false || c.fullyVoted === true) return null; // archived or everyone voted — drop
+                return { ...h, status: c.status, lastActionAt: c.lastActionAt };
+              })
+              .filter(Boolean)
+          ),
           voters: prev.voters.map((v) => {
             const c = vMap.get(String(v._id));
             return c ? { ...v, surveyStatus: c.surveyStatus, voted: c.voted ?? v.voted } : v;
@@ -574,6 +583,18 @@ export default function MapScreen() {
       }
     });
     return () => sub.remove();
+  }, [refreshPending]);
+
+  // Drain the offline queue the MOMENT connectivity returns — not only when the
+  // app foregrounds or the map refocuses. Completes the "records sync as soon as
+  // you have signal again" model for canvassers working dead-zone doors.
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener((state) => {
+      if (state.isConnected && state.isInternetReachable !== false) {
+        flushQueue().then(refreshPending).catch(() => {});
+      }
+    });
+    return unsub;
   }, [refreshPending]);
 
   // Follow mode adds continuous GPS + a camera animation on every location

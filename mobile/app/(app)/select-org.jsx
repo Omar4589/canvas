@@ -15,6 +15,7 @@ import {
   loadMemberships,
   loadCurrentUser,
   saveActiveOrgId,
+  saveActiveOrgName,
   clearActiveOrgId,
   clearActiveCampaign,
   clearBootstrap,
@@ -72,10 +73,11 @@ export default function SelectOrgScreen() {
     };
   }, []);
 
-  async function pick(orgId) {
+  async function pick(orgId, orgName) {
     setPicking(orgId);
     try {
       await saveActiveOrgId(orgId);
+      await saveActiveOrgName(orgName);
       await clearActiveCampaign();
       await clearBootstrap();
       qc.clear();
@@ -142,7 +144,7 @@ export default function SelectOrgScreen() {
         {(items || []).map((m) => (
           <Pressable
             key={m.organizationId}
-            onPress={() => pick(m.organizationId)}
+            onPress={() => pick(m.organizationId, m.organizationName)}
             disabled={!m.isActive || !!picking}
             style={({ pressed }) => [
               styles.card,

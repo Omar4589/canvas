@@ -146,10 +146,10 @@ before recoloring, which made doors feel unrecorded on weak signal — the bare 
    door up on their next `changes` poll (F).
 
 Offline actions queue on the device ([lib/offlineQueue.js](../mobile/lib/offlineQueue.js)) and flush
-on **map focus, app-foreground, manual refresh, or the next recorded action**. The optimistic recolor
-already stands, so a queued door looks done immediately and the "pending" badge counts only what's
-still unsent. (A true *flush-the-moment-signal-returns* listener needs `@react-native-community/netinfo`,
-a native module — planned for the next native build; see I.)
+on **reconnect (a `@react-native-community/netinfo` listener in [map.jsx](../mobile/app/(app)/map.jsx)),
+map focus, app-foreground, manual refresh, or the next recorded action**. The optimistic recolor already
+stands, so a queued door looks done immediately and the "pending" badge counts only what's still unsent;
+the reconnect listener drains it the moment signal returns, without the canvasser touching the app.
 
 ## D. Data sources / endpoints
 
@@ -208,6 +208,15 @@ first load, manual pull-to-refresh, campaign switch, or a hard-fail `invalidate`
 the `changes` delta. (`refetchOnWindowFocus` is already globally `false`; `focusManager` tracks
 app-foreground via AppState, not screen navigation.)
 
+**The hard guarantee — pending overlay.** Belt-and-suspenders on top of the above, so NO refetch from
+any source (now or future) can revert a fresh recolor: [lib/recordAction.js](../mobile/lib/recordAction.js)
+keeps a registry of statuses the canvasser set but the server hasn't confirmed (`markPendingHousehold` on
+the optimistic write), and **every server-sourced write to `['bootstrap']`** — the bootstrap `queryFn`
+result *and* the `changes`-delta merge in [map.jsx](../mobile/app/(app)/map.jsx) — runs its households
+through `reconcilePendingHouseholds()`, which re-applies the pending status and clears each entry once the
+server's own data matches (or a ~5-min TTL elapses). On a hard failure the entry is dropped and bootstrap
+invalidated. Net effect: a pin can't be reverted to pre-action state, no matter which refetch wins the race.
+
 ## G. Status colors & legend
 
 Canonical palette (hex): `unknocked #9ca3af`, `not_home #3b82f6`, `surveyed #22c55e`,
@@ -236,15 +245,17 @@ Canonical palette (hex): `unknocked #9ca3af`, `not_home #3b82f6`, `surveyed #22c
 - **Recording is optimistic-first.** The pin recolors before the network call; GPS + submit run in the
   background ([lib/recordAction.js](../mobile/lib/recordAction.js)). Never re-add an `await` before the
   cache patch — that ordering was the cause of the field "did it register?" delay.
-- **Every `['bootstrap']` reader sets `refetchOnMount: false`** (map, household, survey, building). A
-  full bootstrap refetch returns pre-action server state; one firing on screen (re)mount used to revert
-  a fresh optimistic recolor (blue→grey→blue). Don't drop this flag or add a bootstrap `refetchInterval`
-  — use the `changes` delta for liveness. `optimisticSubmit` also `cancelQueries(['bootstrap'])` to kill
-  any in-flight refetch at record time.
+- **An optimistic recolor can't be reverted by a refetch.** Three layers: every `['bootstrap']` reader
+  sets `refetchOnMount: false` (no stale full refetch on screen (re)mount); `optimisticSubmit`
+  `cancelQueries(['bootstrap'])` kills any in-flight refetch at record time; and the **pending overlay**
+  (`reconcilePendingHouseholds` in [recordAction.js](../mobile/lib/recordAction.js), applied to both
+  server writers in [map.jsx](../mobile/app/(app)/map.jsx)) re-holds the status until the server confirms.
+  Don't drop these or add a bootstrap `refetchInterval` — use the `changes` delta for liveness.
 - **`api` has a ~20s timeout** ([lib/api.js](../mobile/lib/api.js)); a bare fetch with none let weak
   signal hang ~60s before an action would queue offline.
-- **No reconnect-flush yet.** The offline queue flushes on focus / foreground / refresh / next-action,
-  not on a connectivity event — adding that needs `@react-native-community/netinfo` (a native build).
+- **The offline queue flushes on reconnect** (NetInfo listener in [map.jsx](../mobile/app/(app)/map.jsx))
+  as well as on focus / foreground / refresh / next-action. NetInfo is a native module — it ships only in
+  a native build, never an OTA (a bundle importing it would crash an older binary).
 - **Mobile is battery-conscious** (delta + 30s/120s cadence + background pause; plain location dot, no
   compass; follow-mode auto-exits on pan/background). **Web is live** (~20s) because admins are at a
   connected desk.

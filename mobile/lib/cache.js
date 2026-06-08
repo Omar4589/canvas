@@ -5,6 +5,7 @@ const CAMPAIGN_KEY = 'canvass.activeCampaign';
 const USER_KEY = 'canvass.currentUser';
 const MEMBERSHIPS_KEY = 'canvass.memberships';
 const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
+const ACTIVE_ORG_NAME_KEY = 'canvass.activeOrgName';
 const SELECTED_BOOKS_KEY = 'canvass.selectedBooks';
 const CURRENT_EFFORT_KEY = 'canvass.currentEffort';
 const MAP_STYLE_KEY = 'canvass.mapStyle';
@@ -107,8 +108,24 @@ export async function loadActiveOrgId() {
   return AsyncStorage.getItem(ACTIVE_ORG_KEY);
 }
 
+// The active org's display name, cached alongside its id when the user picks an
+// org — so surfaces like the drawer can show it without relying on a membership
+// record (super admins enter orgs they aren't members of).
+export async function saveActiveOrgName(name) {
+  if (!name) {
+    await AsyncStorage.removeItem(ACTIVE_ORG_NAME_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(ACTIVE_ORG_NAME_KEY, String(name));
+}
+
+export async function loadActiveOrgName() {
+  return AsyncStorage.getItem(ACTIVE_ORG_NAME_KEY);
+}
+
 export async function clearActiveOrgId() {
   await AsyncStorage.removeItem(ACTIVE_ORG_KEY);
+  await AsyncStorage.removeItem(ACTIVE_ORG_NAME_KEY);
 }
 
 // Which book(s) the canvasser is currently working. Persisted so the map can

@@ -46,7 +46,8 @@ the right with the things you reach for occasionally:
 - **Admin dashboard** — only if you're an admin (jumps to the admin side).
 - **Sign out.**
 
-At the top of the menu, your **name + email card** is tappable — it opens your **Profile**, where you
+At the top of the menu, a card shows the **organization you're working in** with your **name + email**;
+it's tappable — it opens your **Profile**, where you
 can update your name and phone and change your password. (Your email is managed by your admin.)
 
 Close it by tapping the dimmed area, swiping the panel right, or the ✕. The map behind it keeps

@@ -16,6 +16,7 @@ import { signOut } from '../lib/authState';
 import { loadRoleContext } from '../lib/role';
 import {
   loadActiveCampaign,
+  loadActiveOrgName,
   saveActiveCampaign,
   clearBootstrap,
   clearSelectedBooks,
@@ -68,17 +69,21 @@ export default function CanvasserDrawer() {
   const [user, setUser] = useState(null);
   const [ctx, setCtx] = useState({ isOrgAdmin: false, isSuperAdmin: false, memberships: [] });
   const [activeCampaign, setActiveCampaign] = useState(null);
+  const [orgName, setOrgName] = useState(null);
 
   // Refresh the drawer's data every time it opens, so role / campaign / account
   // are always current (they can change between opens).
   useEffect(() => {
     if (!isOpen) return;
     let mounted = true;
-    Promise.all([loadRoleContext(), loadActiveCampaign()]).then(([rc, c]) => {
+    Promise.all([loadRoleContext(), loadActiveCampaign(), loadActiveOrgName()]).then(([rc, c, on]) => {
       if (!mounted) return;
       setCtx(rc);
       setUser(rc.user);
       setActiveCampaign(c);
+      // Prefer the org name cached at selection (covers super admins, who enter
+      // orgs they aren't members of); fall back to the membership's name.
+      setOrgName(on || rc.activeMembership?.organizationName || null);
     });
     return () => {
       mounted = false;
@@ -172,6 +177,11 @@ export default function CanvasserDrawer() {
                 style={({ pressed }) => [styles.accountCard, pressed && { opacity: 0.85 }]}
               >
                 <View style={{ flex: 1 }}>
+                  {orgName ? (
+                    <Text style={styles.accountOrg} numberOfLines={1}>
+                      {orgName}
+                    </Text>
+                  ) : null}
                   <Text style={styles.accountName}>
                     {(user?.firstName || '') + (user?.lastName ? ` ${user.lastName}` : '') || 'Account'}
                   </Text>
@@ -263,6 +273,7 @@ function makeStyles(t) {
       marginTop: spacing.xs,
       marginBottom: spacing.lg,
     },
+    accountOrg: { ...t.type.micro, color: t.colors.brand, marginBottom: 3 },
     accountName: { ...t.type.h3 },
     accountEmail: { ...t.type.caption, marginTop: 2 },
     accountChevron: { fontSize: 22, color: t.colors.textMuted, marginLeft: spacing.sm },

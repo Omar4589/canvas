@@ -29,6 +29,46 @@ function setHouseholdStatus(prev, householdId, status) {
   };
 }
 
+// --- Pending optimistic statuses (the un-clobberable guarantee) -------------
+// An optimistic recolor lives in the ['bootstrap'] cache, but a server-sourced
+// write to that cache — a full bootstrap refetch, or the 30s `changes` delta —
+// can resolve with PRE-action data and revert the pin (the blue→grey→blue / "goes
+// black" flicker). To make that impossible, we keep a registry of statuses the
+// canvasser has set but the server hasn't confirmed yet, and EVERY server-sourced
+// bootstrap write runs its households through reconcilePendingHouseholds(), which
+// re-applies the pending status and clears each entry once the server's own data
+// agrees (or a safety TTL elapses). map.jsx wires this into both server writers.
+const PENDING_TTL_MS = 5 * 60 * 1000;
+const pendingHouseholds = new Map(); // id -> { status, at }
+
+export function markPendingHousehold(id, status) {
+  pendingHouseholds.set(String(id), { status, at: Date.now() });
+}
+
+export function clearPendingHousehold(id) {
+  pendingHouseholds.delete(String(id));
+}
+
+// Overlay unconfirmed optimistic statuses onto a server-sourced households array,
+// clearing entries the server has caught up to (or that have aged past the TTL).
+export function reconcilePendingHouseholds(households) {
+  if (!pendingHouseholds.size || !Array.isArray(households)) return households;
+  const now = Date.now();
+  return households.map((h) => {
+    const p = pendingHouseholds.get(String(h._id));
+    if (!p) return h;
+    if (now - p.at > PENDING_TTL_MS) {
+      pendingHouseholds.delete(String(h._id)); // give up; let the server win
+      return h;
+    }
+    if (h.status === p.status) {
+      pendingHouseholds.delete(String(h._id)); // server caught up — stop overlaying
+      return h;
+    }
+    return { ...h, status: p.status }; // server is stale for this door — hold the optimistic color
+  });
+}
+
 // Optimistic-first submit — the heart of the "recolor instantly" fix.
 //
 //   1. Patch the bootstrap cache SYNCHRONOUSLY (the visible feedback: the pin /
@@ -49,17 +89,20 @@ export function optimisticSubmit(qc, {
   body = {},
   optimisticPatch,
   reconcile,
+  pending = [],
   hardFailTitle = 'Not saved',
   hardFailMessage = 'Please try again.',
 }) {
+  // Register the unconfirmed status(es) BEFORE the patch so any concurrent or
+  // subsequent server-sourced write is overlaid (see reconcilePendingHouseholds).
+  for (const p of pending) markPendingHousehold(p.id, p.status);
+
   writeBootstrap(qc, optimisticPatch);
 
   // Discard any bootstrap refetch that is in flight RIGHT NOW (e.g. a manual
-  // pull-to-refresh, or a stale-data refetch a screen kicked off on mount). If it
-  // resolved after this patch but before the background write below lands, it
-  // would carry PRE-action data and clobber the recolor — the blue→grey→blue
-  // flicker canvassers saw. revert:false keeps the optimistic data we just wrote
-  // instead of rolling the query back to its pre-fetch (grey) state.
+  // pull-to-refresh). revert:false keeps the optimistic data we just wrote instead
+  // of rolling the query back to its pre-fetch state. (The pending overlay covers
+  // refetches that fire later; this just avoids a wasted in-flight one.)
   qc.cancelQueries({ queryKey: ['bootstrap'] }, { revert: false });
 
   return (async () => {
@@ -74,14 +117,26 @@ export function optimisticSubmit(qc, {
       location,
       timestamp: new Date().toISOString(),
     });
-    if (result.ok && reconcile) {
-      writeBootstrap(qc, (prev) => reconcile(prev, result.response));
-    } else if (!result.ok && !result.queued) {
+    if (result.ok) {
+      if (reconcile) writeBootstrap(qc, (prev) => reconcile(prev, result.response));
+      // Re-point each pending entry at the server-authoritative status we just
+      // wrote, so the next server fetch (which returns that same status) CLEARS the
+      // overlay instead of the overlay fighting the server forever.
+      const cur = qc.getQueryData(['bootstrap']);
+      const byId = new Map((cur?.households || []).map((h) => [String(h._id), h]));
+      for (const p of pending) {
+        const h = byId.get(String(p.id));
+        if (h) markPendingHousehold(p.id, h.status);
+      }
+    } else if (!result.queued) {
       // Server rejected it (not a network drop) and submitOrQueue won't retry —
-      // pull server truth back so the optimistic change can't linger as a lie.
+      // drop the optimistic claim and pull server truth back so it can't linger.
+      for (const p of pending) clearPendingHousehold(p.id);
       qc.invalidateQueries({ queryKey: ['bootstrap'] });
       Alert.alert(hardFailTitle, result.error?.message || hardFailMessage);
     }
+    // result.queued: keep the pending overlay; it clears once the flushed write
+    // syncs and a later server fetch returns the matching status.
     flushQueue().catch(() => {});
     return result;
   })();
@@ -101,6 +156,7 @@ export function recordHouseholdAction(qc, householdId, action, { note = null } =
       const status = response?.household?.status;
       return status ? setHouseholdStatus(prev, householdId, status) : prev;
     },
+    pending: [{ id: householdId, status: action }],
     hardFailTitle: 'Action not saved',
     hardFailMessage: 'Could not record this action. Please try again.',
   });

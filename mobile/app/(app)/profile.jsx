@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Updates from 'expo-updates';
 import { api } from '../../lib/api';
 import { loadCurrentUser, saveCurrentUser, saveMemberships } from '../../lib/cache';
 import PasswordInput from '../../components/PasswordInput';
@@ -119,6 +120,18 @@ export default function ProfileScreen() {
   }
 
   const pwIncomplete = !currentPassword || !newPassword || !confirm;
+
+  // Which JS bundle is actually running — so "is my latest fix live?" is a glance,
+  // not a guess. `embedded` = the build's baked-in bundle; otherwise it's the OTA
+  // update id + when it was published. (Constants from expo-updates; safe to read.)
+  const buildInfo = (() => {
+    const rt = Updates.runtimeVersion || '—';
+    const channel = Updates.channel ? ` · ${Updates.channel}` : '';
+    if (Updates.isEmbeddedLaunch || !Updates.updateId) return `v${rt}${channel} · embedded build`;
+    const id = Updates.updateId.slice(0, 8);
+    const when = Updates.createdAt ? ` · ${new Date(Updates.createdAt).toLocaleString()}` : '';
+    return `v${rt}${channel} · update ${id}${when}`;
+  })();
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -272,6 +285,8 @@ export default function ProfileScreen() {
               )}
             </Pressable>
           </View>
+
+          <Text style={styles.buildStamp}>{buildInfo}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -337,5 +352,7 @@ function makeStyles(t) {
     },
     buttonDisabled: { opacity: 0.5 },
     buttonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
+
+    buildStamp: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
   });
 }
