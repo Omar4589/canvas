@@ -73,6 +73,14 @@ export default function ClientReportMap({
       zoom: DEFAULT_ZOOM,
     });
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'top-right');
+
+    // This map is embedded inside a tab below tall content, so its container often finishes
+    // sizing a tick AFTER Mapbox initializes — leaving the canvas at the wrong (often zero)
+    // height: tiles load but nothing paints. Re-measure whenever the container settles. (The
+    // full-page admin map doesn't need this; it's 100vh from the first paint.)
+    const ro = new ResizeObserver(() => map.resize());
+    ro.observe(containerRef.current);
+
     map.on('click', 'households-symbols', (e) => {
       const f = e.features?.[0];
       if (f) setSelected(f.properties.id);
@@ -92,6 +100,7 @@ export default function ClientReportMap({
       setMapReady(true);
     });
     return () => {
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
       setMapReady(false);
@@ -150,7 +159,10 @@ export default function ClientReportMap({
   const noDoors = !dataQ.isLoading && households.length === 0;
 
   return (
-    <div className="flex h-[70vh] overflow-hidden rounded-lg border border-border">
+    <div
+      style={{ height: '70vh', minHeight: 420, display: 'flex' }}
+      className="overflow-hidden rounded-lg border border-border"
+    >
       <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-card p-4">
         <div className="mb-3 text-xs text-fg-muted">
           {dataQ.isLoading
@@ -168,8 +180,8 @@ export default function ClientReportMap({
           hideCanvassers
         />
       </aside>
-      <div className="relative flex-1">
-        <div ref={containerRef} className="absolute inset-0" />
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
         {noDoors && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
             <div className="rounded-lg border border-border bg-card/90 px-4 py-3 text-center text-sm text-fg-muted shadow-sm">
