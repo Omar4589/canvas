@@ -22,6 +22,7 @@ export function shapeReportForClient(report) {
   return {
     id: String(r._id),
     campaignId: String(r.campaignId),
+    campaignType: r.campaignType || null,
     title: r.title || '',
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,

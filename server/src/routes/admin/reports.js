@@ -1090,6 +1090,145 @@ router.get('/overlaps', async (req, res, next) => {
   }
 });
 
+// Voters with MORE THAN ONE survey response (a "Surveys" count above "Surveyed voters" means
+// someone was surveyed twice). Surfaces who/when/round/where for each so the operator can tell a
+// legit revisit (different canvassers / different round) from a mistake (same canvasser, same
+// day). Fix path: open the voter profile and delete the extra response. See METRICS.md §Surveys.
+router.get('/duplicate-surveys', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const cFilter = baseFilter(req);
+    const dateRange = parseDateRange(req, 'submittedAt');
+    const tz = req.anchorTz || 'UTC';
+
+    const dupes = await SurveyResponse.aggregate([
+      { $match: { ...cFilter, ...dateRange } },
+      {
+        $group: {
+          _id: '$voterId',
+          count: { $sum: 1 },
+          responses: {
+            $push: {
+              responseId: '$_id',
+              submittedAt: '$submittedAt',
+              passId: '$passId',
+              userId: '$userId',
+            },
+          },
+        },
+      },
+      { $match: { count: { $gt: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 200 },
+    ]);
+
+    if (!dupes.length) {
+      return res.json({ duplicates: [], total: 0, timeZone: tz, tzAbbrev: tzAbbrev(tz) });
+    }
+
+    const voterIds = dupes.map((d) => d._id);
+    const userIds = [
+      ...new Set(dupes.flatMap((d) => d.responses.map((r) => String(r.userId)))),
+    ];
+    const passIds = [
+      ...new Set(dupes.flatMap((d) => d.responses.map((r) => r.passId).filter(Boolean).map(String))),
+    ];
+
+    const [voters, users, passes] = await Promise.all([
+      Voter.find(
+        { _id: { $in: voterIds }, organizationId: orgId },
+        'fullName firstName lastName party householdId'
+      ).lean(),
+      User.find({ _id: { $in: userIds } }, 'firstName lastName email').lean(),
+      passIds.length ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean() : [],
+    ]);
+
+    const householdIds = [
+      ...new Set(voters.map((v) => v.householdId).filter(Boolean).map(String)),
+    ];
+    const households = householdIds.length
+      ? await Household.find(
+          { _id: { $in: householdIds }, organizationId: orgId },
+          'addressLine1 city state zipCode'
+        ).lean()
+      : [];
+
+    const vMap = new Map(voters.map((v) => [String(v._id), v]));
+    const uMap = new Map(users.map((u) => [String(u._id), u]));
+    const pMap = new Map(passes.map((p) => [String(p._id), p]));
+    const hMap = new Map(households.map((h) => [String(h._id), h]));
+
+    const result = dupes.map((d) => {
+      const voter = vMap.get(String(d._id)) || null;
+      const household = voter?.householdId ? hMap.get(String(voter.householdId)) : null;
+      const responses = d.responses
+        .map((r) => {
+          const u = uMap.get(String(r.userId));
+          const pass = r.passId ? pMap.get(String(r.passId)) : null;
+          return {
+            responseId: String(r.responseId),
+            submittedAt: r.submittedAt,
+            day: zonedDayStr(r.submittedAt, tz),
+            canvasser: {
+              userId: String(r.userId),
+              firstName: u?.firstName || '',
+              lastName: u?.lastName || '',
+              email: u?.email || '',
+            },
+            passId: r.passId ? String(r.passId) : null,
+            roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no round',
+          };
+        })
+        .sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt));
+
+      // Two responses from the SAME canvasser on the SAME campaign-day = the "mistake" signal.
+      const seen = new Set();
+      let sameCanvasserSameDay = false;
+      for (const r of responses) {
+        const key = `${r.canvasser.userId}|${r.day}`;
+        if (seen.has(key)) sameCanvasserSameDay = true;
+        seen.add(key);
+      }
+      const differentCanvassers = new Set(responses.map((r) => r.canvasser.userId)).size > 1;
+
+      return {
+        voterId: String(d._id),
+        count: d.count,
+        voter: voter
+          ? {
+              id: String(voter._id),
+              fullName:
+                voter.fullName || `${voter.firstName || ''} ${voter.lastName || ''}`.trim(),
+              party: voter.party || null,
+            }
+          : null,
+        household: household
+          ? {
+              id: String(household._id),
+              addressLine1: household.addressLine1,
+              city: household.city,
+              state: household.state,
+              zipCode: household.zipCode,
+            }
+          : null,
+        responses,
+        sameCanvasserSameDay,
+        differentCanvassers,
+      };
+    });
+
+    // Most suspicious first (same-canvasser-same-day), then by how many responses.
+    result.sort(
+      (a, b) => b.sameCanvasserSameDay - a.sameCanvasserSameDay || b.count - a.count
+    );
+
+    res.json({ duplicates: result, total: result.length, timeZone: tz, tzAbbrev: tzAbbrev(tz) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/canvassers/:userId/responses', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;

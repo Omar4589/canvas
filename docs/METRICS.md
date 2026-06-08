@@ -68,6 +68,14 @@ Field: `surveysSubmitted`.
 Distinct voters who have a survey — i.e. **how many people we actually reached** (not how many
 forms we filed). Field: `surveyedVoters`.
 
+> **Surveys > Surveyed voters?** Then a voter has more than one response (a re-survey). The intended
+> rule is one survey per voter per pass (the submit path replaces a same-voter, same-pass response),
+> so a gap is usually a same-day double-submit or a response with no round tag. The **Duplicate
+> surveys** report (`GET /admin/reports/duplicate-surveys`; web page `/admin/duplicate-surveys`) lists
+> those voters with **who / when / round / where** for each response and flags *same canvasser · same
+> day* (a likely mistake) vs *different canvassers* (usually a legitimate revisit). Fix by opening the
+> voter profile and deleting the extra response.
+
 ### Connection rate
 **Surveyed knocks ÷ Knocks × 100.** Of the knocks we made, how many landed a survey. A
 "surveyed knock" is a (household, pass) that got at least one survey, so the numerator is always
@@ -255,6 +263,7 @@ then rolls up to **one card per household** listing its colliding passes. Respon
 | `GET /admin/reports/canvassers/:id/summary` | one canvasser | `kpi{ homesKnocked(=knocks), surveysSubmitted, connectionRatePct, doorsPerHour, … }` | same |
 | `GET /admin/reports/canvassers/:id/daily` | one canvasser, per day | `days[{ homesKnocked, surveyKnocks, surveysSubmitted, connectionRatePct, … }]` | same |
 | `GET /admin/reports/overlaps` | overlap review | see §D | `timestamp` |
+| `GET /admin/reports/duplicate-surveys` | voters with >1 survey response | `duplicates[{ voter, household, responses[{ canvasser, submittedAt, roundLabel }], sameCanvasserSameDay, differentCanvassers }]` | `submittedAt` |
 
 **Cumulative summability:** `households`, `homesKnocked`, `knocks`, `surveyedKnocks`,
 `litKnocks`, `surveysSubmitted`, `surveyedVoters`, `litDropped` are summed across campaigns

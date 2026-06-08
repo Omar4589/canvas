@@ -17,6 +17,7 @@ export const NAV = [
   { to: '/voters', label: 'Voters' },
   { to: '/surveys', label: 'Surveys' },
   { to: '/admin/client-reports', label: 'Client Reports' },
+  { to: '/admin/duplicate-surveys', label: 'Duplicate Surveys' },
 ];
 
 export const SUPER_NAV = [

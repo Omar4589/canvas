@@ -73,6 +73,11 @@ const clientReportSchema = new mongoose.Schema(
     // Human label, e.g. "Week of Jun 1". Optional; the UI falls back to weekStart..weekEnd.
     title: { type: String, default: '', trim: true },
 
+    // Denormalized campaign type so the client UI can hide lit-drop rows for survey campaigns
+    // (and survey rows for lit-drop campaigns) without a live campaign lookup. Optional for
+    // back-compat with reports created before this field — those render everything.
+    campaignType: { type: String, enum: ['survey', 'lit_drop'], default: null },
+
     // The week window. weekStart/weekEnd are calendar days ('YYYY-MM-DD') in the campaign's
     // timezone; rangeStartUtc/rangeEndUtc are the frozen half-open UTC instants the
     // aggregations actually used (from zonedDayRange), so the window is reproducible.

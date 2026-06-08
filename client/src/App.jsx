@@ -14,6 +14,7 @@ const ClientLayout = lazy(() => import('./components/ClientLayout.jsx'));
 const ClientReportListPage = lazy(() => import('./pages/ClientReportListPage.jsx'));
 const ClientReportDetailPage = lazy(() => import('./pages/ClientReportDetailPage.jsx'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
+const DuplicateSurveysPage = lazy(() => import('./pages/DuplicateSurveysPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
 const EarlyVotingPage = lazy(() => import('./pages/EarlyVotingPage.jsx'));
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
@@ -97,6 +98,7 @@ export default function App() {
           <Route path="/campaigns" element={<CampaignsPage />} />
           <Route path="/admin/client-reports" element={<ClientReportsPage />} />
           <Route path="/admin/client-reports/:id" element={<ClientReportBuilderPage />} />
+          <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />
         </Route>
         <Route
           element={

@@ -9,7 +9,13 @@ import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
 // survey/contact breakdowns, and the sectioned observations. The map is rendered separately by
 // the parent (it needs its own data fetch).
 
-const CONTACT_ORDER = ['surveyed', 'not_home', 'wrong_address', 'lit_dropped'];
+// Which contact outcomes to show, by campaign type. Survey campaigns hide the lit-drop row;
+// lit-drop campaigns hide the surveyed row. A null/unknown type (older reports) shows all.
+function contactOrderFor(type) {
+  if (type === 'survey') return ['surveyed', 'not_home', 'wrong_address'];
+  if (type === 'lit_drop') return ['lit_dropped', 'not_home', 'wrong_address'];
+  return ['surveyed', 'not_home', 'wrong_address', 'lit_dropped'];
+}
 
 // Best-effort color for common support categories so the headline breakdown reads at a glance.
 function supportColor(label) {
@@ -32,13 +38,16 @@ export default function ClientReportView({ report }) {
   const t = cum.totals || {};
   const d = per.totals || {};
 
-  const breakdowns = cum.surveyBreakdowns || [];
+  const isLit = report?.campaignType === 'lit_drop';
+
+  const breakdowns = isLit ? [] : cum.surveyBreakdowns || [];
   const support =
     breakdowns.find((b) => b.questionKey === report.supportQuestionKey) ||
     breakdowns.find((b) => b.isSupportQuestion) ||
     null;
   const others = breakdowns.filter((b) => b !== support);
 
+  const CONTACT_ORDER = contactOrderFor(report?.campaignType);
   const contact = cum.contactBreakdown || {};
   const contactTotal = CONTACT_ORDER.reduce((s, k) => s + (contact[k] || 0), 0);
   const contactItems = CONTACT_ORDER.map((k) => ({
@@ -70,24 +79,49 @@ export default function ClientReportView({ report }) {
             hint={d.doorsKnocked ? `+${num(d.doorsKnocked)} this week` : 'No new doors this week'}
             accent="brand"
           />
-          <StatCard
-            label="Surveys taken"
-            value={num(t.surveysTaken)}
-            hint={d.surveysTaken ? `+${num(d.surveysTaken)} this week` : 'No new surveys this week'}
-            accent="green"
-          />
-          <StatCard
-            label="Voters surveyed"
-            value={num(t.surveyedVoters)}
-            hint={d.surveyedVoters ? `+${num(d.surveyedVoters)} this week` : 'No change this week'}
-            accent="blue"
-          />
-          <StatCard
-            label="Connection rate"
-            value={`${t.connectionRate ?? 0}%`}
-            hint="Surveys per door knocked"
-            accent="amber"
-          />
+          {isLit ? (
+            <>
+              <StatCard
+                label="Lit dropped"
+                value={num(t.litKnocks)}
+                hint={d.litKnocks ? `+${num(d.litKnocks)} this week` : 'No new lit this week'}
+                accent="green"
+              />
+              <StatCard
+                label="Homes knocked"
+                value={num(t.homesKnocked)}
+                hint={d.homesKnocked ? `+${num(d.homesKnocked)} this week` : 'No change this week'}
+                accent="blue"
+              />
+              <StatCard
+                label="Lit rate"
+                value={`${t.connectionRate ?? 0}%`}
+                hint="Lit drops per door knocked"
+                accent="amber"
+              />
+            </>
+          ) : (
+            <>
+              <StatCard
+                label="Surveys taken"
+                value={num(t.surveysTaken)}
+                hint={d.surveysTaken ? `+${num(d.surveysTaken)} this week` : 'No new surveys this week'}
+                accent="green"
+              />
+              <StatCard
+                label="Voters surveyed"
+                value={num(t.surveyedVoters)}
+                hint={d.surveyedVoters ? `+${num(d.surveyedVoters)} this week` : 'No change this week'}
+                accent="blue"
+              />
+              <StatCard
+                label="Connection rate"
+                value={`${t.connectionRate ?? 0}%`}
+                hint="Surveys per door knocked"
+                accent="amber"
+              />
+            </>
+          )}
         </div>
       </section>
 

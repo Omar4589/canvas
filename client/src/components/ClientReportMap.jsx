@@ -85,6 +85,9 @@ export default function ClientReportMap({
     });
     map.on('load', () => {
       registerLayers(map, darkBase, { withCanvassers: false });
+      // The container can finish laying out (flex height) a tick after init; resize so the
+      // canvas fills it rather than rendering at 0×0.
+      map.resize();
       mapRef.current = map;
       setMapReady(true);
     });
@@ -129,7 +132,11 @@ export default function ClientReportMap({
     [selected, households]
   );
 
-  if (tokenQ.isLoading || dataQ.isLoading) {
+  // Gate ONLY on the token — the map container must mount as soon as the token is ready so the
+  // init effect (which keys off tokenQ.data) finds it. Waiting on the data query here is the bug
+  // that left the map blank: the token resolves first, the effect runs with no container, bails,
+  // and never re-runs. Pins fill in once the data effect runs.
+  if (tokenQ.isLoading) {
     return <div className="p-6 text-sm text-fg-muted">Loading map…</div>;
   }
   if (!tokenQ.data?.isReady) {
@@ -140,11 +147,15 @@ export default function ClientReportMap({
     );
   }
 
+  const noDoors = !dataQ.isLoading && households.length === 0;
+
   return (
     <div className="flex h-[70vh] overflow-hidden rounded-lg border border-border">
       <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-card p-4">
         <div className="mb-3 text-xs text-fg-muted">
-          {filtered.length.toLocaleString()} of {households.length.toLocaleString()} doors
+          {dataQ.isLoading
+            ? 'Loading doors…'
+            : `${filtered.length.toLocaleString()} of ${households.length.toLocaleString()} doors`}
         </div>
         <MapFilters
           statusFilter={statusFilter}
@@ -159,6 +170,13 @@ export default function ClientReportMap({
       </aside>
       <div className="relative flex-1">
         <div ref={containerRef} className="absolute inset-0" />
+        {noDoors && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
+            <div className="rounded-lg border border-border bg-card/90 px-4 py-3 text-center text-sm text-fg-muted shadow-sm">
+              No mapped doors for this week.
+            </div>
+          </div>
+        )}
         <MapStyleControl
           value={styleId}
           onChange={setStyle}

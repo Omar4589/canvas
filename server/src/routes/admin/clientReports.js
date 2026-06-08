@@ -147,6 +147,7 @@ router.post('/', async (req, res, next) => {
     const report = new ClientReport({
       organizationId: orgId,
       campaignId: campaign._id,
+      campaignType: campaign.type,
       title: data.title || '',
       weekStart: data.weekStart,
       weekEnd: data.weekEnd,
@@ -302,6 +303,7 @@ router.post('/:id/publish', async (req, res, next) => {
     if (!campaign) return res.status(400).json({ error: 'Campaign no longer exists' });
     const template = await resolveTemplate(orgId, campaign);
 
+    report.campaignType = campaign.type; // backfill on (re)publish for older drafts
     await computeBothWindows(report, campaign, template);
     reflagSupport(report);
 
