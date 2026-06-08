@@ -259,12 +259,23 @@ Canonical palette (hex): `unknocked #9ca3af`, `not_home #3b82f6`, `surveyed #22c
 - **Mobile is battery-conscious** (delta + 30s/120s cadence + background pause; plain location dot, no
   compass; follow-mode auto-exits on pan/background). **Web is live** (~20s) because admins are at a
   connected desk.
+- **An embedded map must re-measure itself.** The full-page admin map ([MapPage.jsx](../client/src/pages/MapPage.jsx))
+  is `100vh` from the first paint, so its Mapbox container is stable. The client-report map
+  ([ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx)) is embedded inside a tab below
+  tall content, so its container finishes sizing a tick *after* Mapbox initializes — leaving a
+  zero-height canvas: **tiles load and the style switcher works, but the map area is blank, with no
+  console error.** Two fixes together: size the container with **inline** `height` / `minHeight:0`
+  (not Tailwind `h-[..vh]` + `flex-1` + `absolute inset-0`, which has been flaky here — same lesson as
+  the inline-`100vh` full-bleed rule), and attach a `ResizeObserver` that calls `map.resize()` whenever
+  the container settles. That blank-map-with-tiles-loading signature always means a size-zero canvas.
 
 ## J. Frontend file map
 
 | File | Renders |
 |---|---|
 | [client/src/pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Web admin map: sources/layers, filters, Live toggle, household + ping detail panels. |
+| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) | Shared pin rendering (`drawHouseIcon` / `householdsToGeoJSON` / `registerLayers`) used by both the admin map and the client-report map. |
+| [client/src/components/ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx) | Read-only client-report coverage map: frozen snapshot points, client-side status/answer filtering, no canvassers; ResizeObserver-resized (see gotcha §I). |
 | [client/src/components/LiveStatus.jsx](../client/src/components/LiveStatus.jsx) | The "Live · updated Xs ago" toggle/indicator + Refresh. |
 | [mobile/app/(app)/map.jsx](../mobile/app/(app)/map.jsx) | Canvasser map: pins, buildings, bottom sheet, follow mode, offline badge, `changes`/`me/today` polling. |
 | [mobile/app/(app)/admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Mobile admin overview map + canvasser-pings toggle. |
