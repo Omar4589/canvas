@@ -15,15 +15,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import CampaignChip from '../../../components/CampaignChip';
 import EffortPicker from '../../../components/EffortPicker';
-import TabSwitcher from '../../../components/TabSwitcher';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
-// Admin/super-admin screen: assign & unassign the active round's BOOKS (turf) to
-// canvassers. Two orientations (By book / By canvasser) over the same data, plus
-// bulk distribute/everyone. All endpoints already exist under /admin/campaigns/:id/turfs*
-// (same ones the web book-assignment panel uses) — no server changes.
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+// Admin/super-admin: assign & unassign the active round's BOOKS (turf) to canvassers.
+// By book (tap → map detail; Select mode for multi-assign) / By canvasser (quick toggles).
+// Reuses the existing /admin/campaigns/:id/turfs* endpoints + the new per-book progress.
 export default function AdminBooks() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -36,7 +36,9 @@ export default function AdminBooks() {
   const [view, setView] = useState('book'); // 'book' | 'canvasser'
   const [search, setSearch] = useState('');
   const [unassignedOnly, setUnassignedOnly] = useState(false);
-  const [expanded, setExpanded] = useState(null); // 'book:<id>' | 'user:<id>'
+  const [expandedUser, setExpandedUser] = useState(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedBooks, setSelectedBooks] = useState(() => new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
 
   // --- data ---
@@ -54,7 +56,6 @@ export default function AdminBooks() {
       })),
     [effortsQ.data]
   );
-  // Resolve the selected effort (default: first effort that has an active round).
   const currentEffortId =
     effortId && effortList.some((e) => e.id === effortId)
       ? effortId
@@ -78,9 +79,9 @@ export default function AdminBooks() {
     queryFn: () => api(`/admin/campaigns/${cId}/turfs/assignments?passId=${passId}`),
     enabled: !!cId && !!passId,
   });
-  const progressQ = useQuery({
-    queryKey: ['admin', 'pass-progress', cId, passId],
-    queryFn: () => api(`/admin/campaigns/${cId}/passes/${passId}/progress`),
+  const bookProgressQ = useQuery({
+    queryKey: ['admin', 'turf-progress', cId, passId],
+    queryFn: () => api(`/admin/campaigns/${cId}/turfs/progress?passId=${passId}`),
     enabled: !!cId && !!passId,
   });
 
@@ -95,13 +96,6 @@ export default function AdminBooks() {
         .filter((m) => m.role === 'canvasser' && m.user?.isActive && m.isActive && rosterUserIds.has(String(m.user.id)))
         .map((m) => ({ id: String(m.user.id), firstName: m.user.firstName, lastName: m.user.lastName, email: m.user.email })),
     [membersQ.data, rosterUserIds]
-  );
-  const books = useMemo(
-    () =>
-      (turfsQ.data?.turfs || [])
-        .filter((t) => t.status === 'published')
-        .map((t) => ({ id: String(t._id), name: t.name, doors: t.eligibleDoorCount ?? t.doorCount ?? 0 })),
-    [turfsQ.data]
   );
   const usersByBook = useMemo(() => {
     const m = new Map();
@@ -121,10 +115,40 @@ export default function AdminBooks() {
     }
     return m;
   }, [assignmentsQ.data]);
+  const progressByTurf = useMemo(() => {
+    const m = new Map();
+    for (const p of bookProgressQ.data?.progress || []) m.set(String(p.turfId), p);
+    return m;
+  }, [bookProgressQ.data]);
+  // Round header = sum of the per-book progress, so it always reconciles with the
+  // cards below (same eligible-door population — not the unfiltered pass endpoint).
+  const roundTotals = useMemo(() => {
+    let total = 0, knocked = 0;
+    for (const p of bookProgressQ.data?.progress || []) {
+      total += p.total || 0;
+      knocked += p.knocked || 0;
+    }
+    return { total, knocked };
+  }, [bookProgressQ.data]);
 
-  // Reset transient UI when the scope changes.
+  const books = useMemo(
+    () =>
+      (turfsQ.data?.turfs || [])
+        .filter((t) => t.status === 'published')
+        .map((t) => ({ id: String(t._id), name: t.name, doors: t.eligibleDoorCount ?? t.doorCount ?? 0 }))
+        .sort(byName),
+    [turfsQ.data]
+  );
+  const unassignedCount = useMemo(
+    () => books.filter((b) => !(usersByBook.get(b.id)?.length)).length,
+    [books, usersByBook]
+  );
+
+  // Reset transient UI when the scope/view changes.
   useEffect(() => {
-    setExpanded(null);
+    setExpandedUser(null);
+    setSelectMode(false);
+    setSelectedBooks(new Set());
   }, [cId, passId, view]);
 
   // --- mutations ---
@@ -147,6 +171,8 @@ export default function AdminBooks() {
     onSuccess: () => {
       invalidate();
       setBulkOpen(false);
+      setSelectMode(false);
+      setSelectedBooks(new Set());
     },
   });
   const mutating = assignMut.isPending || unassignMut.isPending || bulkMut.isPending;
@@ -172,6 +198,22 @@ export default function AdminBooks() {
   const loading =
     effortsQ.isLoading || (!!passId && (turfsQ.isLoading || assignmentsQ.isLoading || rosterQ.isLoading || membersQ.isLoading));
 
+  function toggleSelect(id) {
+    setSelectedBooks((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function selectAllVisible() {
+    setSelectedBooks(new Set(visibleBooks.map((b) => b.id)));
+  }
+  function exitSelect() {
+    setSelectMode(false);
+    setSelectedBooks(new Set());
+  }
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
@@ -189,22 +231,57 @@ export default function AdminBooks() {
             />
           </View>
         )}
-        {passId && progressQ.data?.total ? (
+        {passId && roundTotals.total ? (
           <Text style={styles.roundLine}>
-            {currentEffort?.activeRound?.name || 'Active round'} ·{' '}
-            {doneFromCounts(progressQ.data.counts)} / {progressQ.data.total} doors done
+            {currentEffort?.activeRound?.name || 'Active round'} · {roundTotals.knocked} / {roundTotals.total} doors done
           </Text>
         ) : null}
       </View>
 
-      <TabSwitcher
-        tabs={[
-          { key: 'book', label: 'By book', count: books.length || undefined },
-          { key: 'canvasser', label: 'By canvasser', count: roster.length || undefined },
-        ]}
-        activeKey={view}
-        onChange={setView}
-      />
+      {/* View toggle */}
+      <View style={styles.segmentWrap}>
+        <View style={styles.segment}>
+          {[
+            { k: 'book', label: 'By book' },
+            { k: 'canvasser', label: 'By canvasser' },
+          ].map((s) => {
+            const on = view === s.k;
+            return (
+              <Pressable key={s.k} onPress={() => setView(s.k)} style={[styles.segmentBtn, on && styles.segmentBtnOn]}>
+                <Text style={[styles.segmentText, on && styles.segmentTextOn]}>{s.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* Summary + Select (by book) */}
+      {!!passId && view === 'book' && books.length > 0 && (
+        <View style={styles.summaryRow}>
+          {selectMode ? (
+            <>
+              <Text style={styles.summaryText}>{selectedBooks.size} selected</Text>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Pressable onPress={selectAllVisible} hitSlop={6}>
+                  <Text style={styles.summaryAction}>Select all</Text>
+                </Pressable>
+                <Pressable onPress={exitSelect} hitSlop={6}>
+                  <Text style={styles.summaryAction}>Cancel</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.summaryText}>
+                {books.length} book{books.length === 1 ? '' : 's'} · {unassignedCount} unassigned
+              </Text>
+              <Pressable onPress={() => setSelectMode(true)} hitSlop={6}>
+                <Text style={styles.summaryAction}>Select</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      )}
 
       {!!passId && (
         <View style={styles.controls}>
@@ -222,21 +299,15 @@ export default function AdminBooks() {
               onPress={() => setUnassignedOnly((v) => !v)}
               style={[styles.filterChip, unassignedOnly && styles.filterChipOn]}
             >
-              <Text style={[styles.filterChipText, unassignedOnly && styles.filterChipTextOn]}>Unassigned</Text>
+              <Text style={[styles.filterChipText, unassignedOnly && styles.filterChipTextOn]}>
+                Unassigned only{unassignedCount ? ` (${unassignedCount})` : ''}
+              </Text>
             </Pressable>
           )}
         </View>
       )}
 
-      {view === 'book' && !!passId && roster.length > 0 && books.length > 0 && (
-        <View style={styles.bulkRow}>
-          <Pressable onPress={() => setBulkOpen(true)} style={styles.bulkBtn}>
-            <Text style={styles.bulkBtnText}>Bulk assign {visibleBooks.length} book{visibleBooks.length === 1 ? '' : 's'} ›</Text>
-          </Pressable>
-        </View>
-      )}
-
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: selectMode ? 96 : spacing.xxl }}>
         {!cId ? (
           <Empty styles={styles}>Pick a campaign to manage book assignments.</Empty>
         ) : loading ? (
@@ -247,75 +318,67 @@ export default function AdminBooks() {
           </Empty>
         ) : books.length === 0 ? (
           <Empty styles={styles}>No published books in this round yet. Cut turf on the web dashboard.</Empty>
-        ) : roster.length === 0 ? (
-          <Empty styles={styles}>
-            No canvassers are assigned to this campaign yet.{'\n'}
-            <Text
-              style={styles.link}
-              onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}
-            >
-              Assign canvassers →
-            </Text>
-          </Empty>
         ) : view === 'book' ? (
           visibleBooks.length === 0 ? (
             <Empty styles={styles}>No books match.</Empty>
           ) : (
             visibleBooks.map((b) => {
               const assignees = usersByBook.get(b.id) || [];
-              const isOpen = expanded === `book:${b.id}`;
+              const prog = progressByTurf.get(b.id);
+              const total = prog?.total ?? b.doors;
+              const knocked = prog?.knocked ?? 0;
+              const pct = total ? Math.round((knocked / total) * 100) : 0;
+              const checked = selectedBooks.has(b.id);
               return (
-                <View key={b.id} style={styles.card}>
-                  <Pressable
-                    onPress={() => setExpanded(isOpen ? null : `book:${b.id}`)}
-                    style={styles.cardHead}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardTitle}>{b.name}</Text>
-                      <Text style={styles.cardMeta} numberOfLines={1}>
-                        {b.doors} doors ·{' '}
-                        {assignees.length
-                          ? assignees.map((u) => `${u.firstName} ${u.lastName[0] || ''}`).join(', ')
-                          : 'unassigned'}
-                      </Text>
-                    </View>
-                    <Text style={styles.chevron}>{isOpen ? '▴' : '▾'}</Text>
-                  </Pressable>
-                  {isOpen && (
-                    <View style={styles.panel}>
-                      {roster.length === 0 ? (
-                        <Text style={styles.panelEmpty}>No canvassers.</Text>
-                      ) : (
-                        roster.map((c) => {
-                          const assigned = (bookIdsByUser.get(c.id) || new Set()).has(b.id);
-                          return (
-                            <AssignRow
-                              key={c.id}
-                              styles={styles}
-                              title={`${c.firstName} ${c.lastName}`}
-                              sub={c.email}
-                              assigned={assigned}
-                              disabled={mutating}
-                              onToggle={() => toggleAssign(b.id, c.id, assigned)}
-                            />
-                          );
-                        })
-                      )}
+                <Pressable
+                  key={b.id}
+                  onPress={() =>
+                    selectMode
+                      ? toggleSelect(b.id)
+                      : router.push({ pathname: `/(app)/admin/book/${b.id}`, params: { campaignId: cId } })
+                  }
+                  style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
+                >
+                  {selectMode && (
+                    <View style={[styles.checkbox, checked && styles.checkboxOn]}>
+                      {checked ? <Text style={styles.checkboxMark}>✓</Text> : null}
                     </View>
                   )}
-                </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle}>{b.name}</Text>
+                    <Text style={styles.cardMeta}>
+                      {b.doors} doors · {knocked}/{total} done
+                    </Text>
+                    <View style={styles.barTrack}>
+                      <View style={[styles.barFill, { width: `${pct}%` }]} />
+                    </View>
+                    <Text style={styles.assignees} numberOfLines={1}>
+                      {assignees.length
+                        ? assignees.map((u) => `${u.firstName} ${(u.lastName || '')[0] || ''}`).join(', ')
+                        : 'Unassigned'}
+                    </Text>
+                  </View>
+                  {!selectMode && <Text style={styles.chevron}>›</Text>}
+                </Pressable>
               );
             })
           )
+        ) : roster.length === 0 ? (
+          <Empty styles={styles}>
+            No canvassers are assigned to this campaign yet.{'\n'}
+            <Text style={styles.link} onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}>
+              Assign canvassers →
+            </Text>
+          </Empty>
         ) : visibleCanvassers.length === 0 ? (
           <Empty styles={styles}>No canvassers match.</Empty>
         ) : (
           visibleCanvassers.map((c) => {
             const myBooks = bookIdsByUser.get(c.id) || new Set();
-            const isOpen = expanded === `user:${c.id}`;
+            const isOpen = expandedUser === c.id;
             return (
-              <View key={c.id} style={styles.card}>
-                <Pressable onPress={() => setExpanded(isOpen ? null : `user:${c.id}`)} style={styles.cardHead}>
+              <View key={c.id} style={styles.cardCol}>
+                <Pressable onPress={() => setExpandedUser(isOpen ? null : c.id)} style={styles.cardHeadRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cardTitle}>
                       {c.firstName} {c.lastName}
@@ -350,27 +413,31 @@ export default function AdminBooks() {
         )}
       </ScrollView>
 
+      {selectMode && selectedBooks.size > 0 && (
+        <View style={styles.actionBar}>
+          <Text style={styles.actionBarText}>
+            {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'} selected
+          </Text>
+          <Pressable onPress={() => setBulkOpen(true)} style={styles.actionBarBtn}>
+            <Text style={styles.actionBarBtnText}>Assign to…</Text>
+          </Pressable>
+        </View>
+      )}
+
       <BulkModal
         visible={bulkOpen}
         styles={styles}
         colors={colors}
-        bookCount={visibleBooks.length}
+        bookCount={selectedBooks.size}
         roster={roster}
         pending={bulkMut.isPending}
         onClose={() => setBulkOpen(false)}
         onApply={({ userIds, mode, replace }) =>
-          bulkMut.mutate({ turfIds: visibleBooks.map((b) => b.id), userIds, mode, replace })
+          bulkMut.mutate({ turfIds: [...selectedBooks], userIds, mode, replace })
         }
       />
     </SafeAreaView>
   );
-}
-
-function doneFromCounts(counts) {
-  if (!counts || typeof counts !== 'object') return 0;
-  // counts is a status→count map; "done" = anything not unknocked.
-  const total = Object.values(counts).reduce((s, n) => s + (Number(n) || 0), 0);
-  return total - (Number(counts.unknocked) || 0);
 }
 
 function Empty({ children, styles }) {
@@ -410,7 +477,6 @@ function BulkModal({ visible, styles, colors, bookCount, roster, pending, onClos
   const [mode, setMode] = useState('distribute');
   const [replace, setReplace] = useState(false);
 
-  // Reset each time it opens.
   useEffect(() => {
     if (visible) {
       setSelected(new Set());
@@ -432,7 +498,7 @@ function BulkModal({ visible, styles, colors, bookCount, roster, pending, onClos
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard}>
           <View style={styles.modalHead}>
-            <Text style={styles.modalTitle}>Bulk assign · {bookCount} book{bookCount === 1 ? '' : 's'}</Text>
+            <Text style={styles.modalTitle}>Assign {bookCount} book{bookCount === 1 ? '' : 's'}</Text>
             <Pressable onPress={onClose} hitSlop={8}>
               <Text style={styles.modalClose}>✕</Text>
             </Pressable>
@@ -443,11 +509,7 @@ function BulkModal({ visible, styles, colors, bookCount, roster, pending, onClos
               { k: 'distribute', label: 'Distribute' },
               { k: 'everyone', label: 'Everyone' },
             ].map((m) => (
-              <Pressable
-                key={m.k}
-                onPress={() => setMode(m.k)}
-                style={[styles.modeBtn, mode === m.k && styles.modeBtnOn]}
-              >
+              <Pressable key={m.k} onPress={() => setMode(m.k)} style={[styles.modeBtn, mode === m.k && styles.modeBtnOn]}>
                 <Text style={[styles.modeText, mode === m.k && styles.modeTextOn]}>{m.label}</Text>
               </Pressable>
             ))}
@@ -494,11 +556,7 @@ function BulkModal({ visible, styles, colors, bookCount, roster, pending, onClos
             disabled={pending || n === 0 || bookCount === 0}
             style={[styles.applyBtn, (pending || n === 0 || bookCount === 0) && styles.applyBtnDisabled]}
           >
-            {pending ? (
-              <ActivityIndicator color={colors.textInverse} />
-            ) : (
-              <Text style={styles.applyText}>Apply</Text>
-            )}
+            {pending ? <ActivityIndicator color={colors.textInverse} /> : <Text style={styles.applyText}>Apply</Text>}
           </Pressable>
         </View>
       </View>
@@ -515,12 +573,32 @@ function makeStyles(t) {
     context: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     roundLine: { ...type.caption, color: colors.textSecondary, marginTop: spacing.sm },
 
-    controls: {
+    segmentWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+    segment: {
+      flexDirection: 'row',
+      backgroundColor: colors.sunken,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 3,
+      gap: 3,
+    },
+    segmentBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.sm, borderRadius: radius.sm },
+    segmentBtnOn: { backgroundColor: colors.card, ...shadow.card },
+    segmentText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+    segmentTextOn: { color: colors.textPrimary },
+
+    summaryRow: {
       paddingHorizontal: spacing.lg,
       paddingBottom: spacing.sm,
       flexDirection: 'row',
-      gap: spacing.sm,
+      alignItems: 'center',
+      justifyContent: 'space-between',
     },
+    summaryText: { ...type.caption, color: colors.textSecondary },
+    summaryAction: { ...type.caption, color: colors.brand, fontWeight: '700' },
+
+    controls: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, flexDirection: 'row', gap: spacing.sm },
     search: {
       flex: 1,
       backgroundColor: colors.card,
@@ -545,33 +623,58 @@ function makeStyles(t) {
     filterChipText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
     filterChipTextOn: { color: colors.brand },
 
-    bulkRow: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, alignItems: 'flex-start' },
-    bulkBtn: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-    },
-    bulkBtnText: { fontSize: 12, fontWeight: '700', color: colors.brand },
-
     card: {
+      flexDirection: 'row',
+      alignItems: 'center',
       backgroundColor: colors.card,
       borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: colors.border,
+      padding: spacing.md,
+      marginBottom: spacing.sm,
+      gap: spacing.sm,
+      ...shadow.card,
+    },
+    cardCol: {
+      backgroundColor: colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.md,
       marginBottom: spacing.sm,
       ...shadow.card,
-      overflow: 'hidden',
     },
-    cardHead: { flexDirection: 'row', alignItems: 'center', padding: spacing.md },
+    cardHeadRow: { flexDirection: 'row', alignItems: 'center' },
     cardTitle: { ...type.bodyStrong, fontSize: 15 },
     cardMeta: { ...type.caption, marginTop: 1 },
-    chevron: { fontSize: 14, color: colors.textSecondary, marginLeft: spacing.sm },
+    barTrack: { height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: 'hidden', marginTop: 6, marginBottom: 4 },
+    barFill: { height: 4, borderRadius: 2, backgroundColor: colors.success },
+    assignees: { ...type.caption, color: colors.textSecondary },
+    chevron: { fontSize: 20, color: colors.textMuted, marginLeft: spacing.sm },
 
-    panel: { borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.sunken },
-    panelEmpty: { ...type.caption, padding: spacing.md, textAlign: 'center' },
+    checkbox: {
+      width: 22,
+      height: 22,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkboxOn: { backgroundColor: colors.brand, borderColor: colors.brand },
+    checkboxMark: { color: colors.textInverse, fontSize: 13, fontWeight: '800' },
+
+    // by-canvasser expand
+    panel: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.sunken,
+      marginTop: spacing.sm,
+      marginHorizontal: -spacing.md,
+      marginBottom: -spacing.md,
+      borderBottomLeftRadius: radius.lg,
+      borderBottomRightRadius: radius.lg,
+    },
     assignRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -600,54 +703,44 @@ function makeStyles(t) {
     emptyText: { ...type.body, color: colors.textSecondary, textAlign: 'center' },
     link: { color: colors.brand, fontWeight: '700' },
 
-    // Bulk modal
-    modalBackdrop: { flex: 1, backgroundColor: colors.backdrop, justifyContent: 'flex-end' },
-    modalCard: {
-      backgroundColor: colors.bg,
-      borderTopLeftRadius: radius.lg,
-      borderTopRightRadius: radius.lg,
-      padding: spacing.lg,
-      paddingBottom: spacing.xxl,
+    // bottom action bar
+    actionBar: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.xl,
+      backgroundColor: colors.card,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      ...shadow.raised,
     },
+    actionBarText: { ...type.bodyStrong, fontSize: 14 },
+    actionBarBtn: { backgroundColor: colors.brand, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2 },
+    actionBarBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 14 },
+
+    // bulk modal
+    modalBackdrop: { flex: 1, backgroundColor: colors.backdrop, justifyContent: 'flex-end' },
+    modalCard: { backgroundColor: colors.bg, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
     modalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
     modalTitle: { ...type.h3 },
     modalClose: { fontSize: 16, color: colors.textSecondary, fontWeight: '700' },
     modeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
-    modeBtn: {
-      flex: 1,
-      alignItems: 'center',
-      paddingVertical: spacing.sm,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-    },
+    modeBtn: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
     modeBtnOn: { backgroundColor: colors.brandTint, borderColor: colors.brand },
     modeText: { fontSize: 13, fontWeight: '600', color: colors.textPrimary },
     modeTextOn: { color: colors.brand },
     pickRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, gap: spacing.sm },
-    checkbox: {
-      width: 22,
-      height: 22,
-      borderRadius: radius.sm,
-      borderWidth: 1,
-      borderColor: colors.borderStrong,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    checkboxOn: { backgroundColor: colors.brand, borderColor: colors.brand },
-    checkboxMark: { color: colors.textInverse, fontSize: 13, fontWeight: '800' },
     pickName: { ...type.body },
     replaceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
     replaceText: { ...type.caption, flex: 1 },
     preview: { ...type.caption, color: colors.textSecondary, marginTop: spacing.md },
-    applyBtn: {
-      backgroundColor: colors.brand,
-      borderRadius: radius.md,
-      paddingVertical: spacing.md,
-      alignItems: 'center',
-      marginTop: spacing.md,
-    },
+    applyBtn: { backgroundColor: colors.brand, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.md },
     applyBtnDisabled: { opacity: 0.5 },
     applyText: { color: colors.textInverse, fontWeight: '700', fontSize: 15 },
   });

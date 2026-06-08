@@ -14,22 +14,13 @@ import MapStyleControl from '../components/MapStyleControl.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
-
-const STATUS_COLORS = {
-  unknocked: '#9ca3af',
-  not_home: '#3b82f6',
-  surveyed: '#22c55e',
-  wrong_address: '#ef4444',
-  lit_dropped: '#a855f7',
-};
-
-const STATUS_LABELS = {
-  unknocked: 'Unknocked',
-  not_home: 'Not home',
-  surveyed: 'Surveyed',
-  wrong_address: 'Wrong address',
-  lit_dropped: 'Lit dropped',
-};
+import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
+import {
+  householdsToGeoJSON,
+  activitiesToPingsGeoJSON,
+  activitiesToLinesGeoJSON,
+  registerLayers,
+} from '../lib/mapRender.js';
 
 const DEFAULT_CENTER = [-95.7129, 37.0902]; // continental US
 const DEFAULT_ZOOM = 3.5;

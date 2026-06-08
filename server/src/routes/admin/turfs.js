@@ -18,6 +18,7 @@ import { recomputeTurf, recomputePassTerritories, addSupplementalBooks } from '.
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
+import { getPassStatusMap } from '../../services/passes/passStatus.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -478,6 +479,49 @@ router.get('/household/:householdId', async (req, res, next) => {
   }
 });
 
+// One book's homes (location + per-pass status + address) plus the book's boundary
+// / centroid — for the admin book-detail map. Eligible doors only (active & not
+// fully-voted), matching the canvasser's view and the progress counts.
+router.get('/:turfId/households', async (req, res, next) => {
+  try {
+    const { turfId } = req.params;
+    if (!mongoose.isValidObjectId(turfId)) return res.status(400).json({ error: 'invalid turfId' });
+    const turf = await Turf.findOne({ _id: turfId, campaignId: req.campaign._id }).lean();
+    if (!turf) return res.status(404).json({ error: 'Book not found' });
+    const ids = (turf.householdIds || []).map(String);
+    const households = ids.length
+      ? await Household.find(
+          { _id: { $in: ids }, isActive: true, fullyVoted: { $ne: true } },
+          { location: 1, addressLine1: 1, city: 1, state: 1 }
+        ).lean()
+      : [];
+    const statusMap = await getPassStatusMap(turf.passId, ids, req.campaign.type);
+    const out = households
+      .filter((h) => h.location?.coordinates?.length === 2)
+      .map((h) => ({
+        id: String(h._id),
+        lng: h.location.coordinates[0],
+        lat: h.location.coordinates[1],
+        status: statusMap.get(String(h._id))?.status || 'unknocked',
+        addressLine1: h.addressLine1 || '',
+        city: h.city || '',
+        state: h.state || '',
+      }));
+    res.json({
+      turf: {
+        id: String(turf._id),
+        name: turf.name,
+        boundary: turf.boundary || null,
+        centroid: turf.centroid || null,
+        passId: String(turf.passId),
+      },
+      households: out,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // All canvasser assignments for a pass (book -> canvassers), for at-a-glance chips.
 router.get('/assignments', async (req, res, next) => {
   try {
@@ -493,6 +537,43 @@ router.get('/assignments', async (req, res, next) => {
         user: { id: String(a.userId._id), firstName: a.userId.firstName, lastName: a.userId.lastName },
       }));
     res.json({ assignments });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Per-book progress for a round: eligible doors (active & not fully-voted, mirroring
+// the canvasser's book) and how many are knocked (status !== unknocked). One status
+// map for the whole pass, then sliced per turf — so the Books list can show
+// "12/40 done" per book without fetching every household.
+router.get('/progress', async (req, res, next) => {
+  try {
+    const { passId } = req.query;
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    const turfs = await Turf.find(
+      { campaignId: req.campaign._id, passId, status: { $ne: 'archived' } },
+      { householdIds: 1 }
+    ).lean();
+    const allHhIds = [...new Set(turfs.flatMap((t) => (t.householdIds || []).map(String)))];
+    const eligible = new Set(
+      allHhIds.length
+        ? (
+            await Household.find(
+              { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true } },
+              { _id: 1 }
+            ).lean()
+          ).map((h) => String(h._id))
+        : []
+    );
+    const statusMap = await getPassStatusMap(passId, allHhIds, req.campaign.type);
+    const progress = turfs.map((t) => {
+      const ids = (t.householdIds || []).map(String).filter((id) => eligible.has(id));
+      const knocked = ids.filter((id) => (statusMap.get(id)?.status || 'unknocked') !== 'unknocked').length;
+      return { turfId: String(t._id), total: ids.length, knocked };
+    });
+    res.json({ progress });
   } catch (err) {
     next(err);
   }
