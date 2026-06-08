@@ -830,21 +830,33 @@ router.get('/survey-results', async (req, res, next) => {
         }
       }
 
-      const options = agg
-        .filter((r) => r._id !== null && r._id !== undefined && r._id !== '')
+      // Percent denominator is THIS question's own answer total (Σ of its non-null option counts):
+      // single-choice → 100% of answerers, multiple-choice → 100% of selections. NOT the global
+      // totalResponses, which over-counts pick-many questions and under-counts skipped ones.
+      const validAgg = agg.filter((r) => r._id !== null && r._id !== undefined && r._id !== '');
+      const questionTotal = validAgg.reduce((s, r) => s + r.count, 0);
+      let orgQuestionTotal = 0;
+      if (compareToOrg) {
+        for (const [k, c] of orgMap.entries()) {
+          if (k === '' || k === 'null' || k === 'undefined') continue;
+          orgQuestionTotal += c;
+        }
+      }
+
+      const options = validAgg
         .map((r) => {
           const optionKey = typeof r._id === 'string' ? r._id : String(r._id);
           const out = {
             option: optionKey,
             count: r.count,
-            percent: totalResponses > 0 ? Math.round((r.count / totalResponses) * 1000) / 10 : 0,
+            percent: questionTotal > 0 ? Math.round((r.count / questionTotal) * 1000) / 10 : 0,
           };
           if (compareToOrg) {
             const orgCount = orgMap.get(optionKey) || 0;
             out.orgCount = orgCount;
             out.orgPercent =
-              orgTotalResponses > 0
-                ? Math.round((orgCount / orgTotalResponses) * 1000) / 10
+              orgQuestionTotal > 0
+                ? Math.round((orgCount / orgQuestionTotal) * 1000) / 10
                 : 0;
           }
           if (voterPreviewLimit > 0 && q.type !== 'text') {
@@ -868,8 +880,8 @@ router.get('/survey-results', async (req, res, next) => {
             percent: 0,
             orgCount,
             orgPercent:
-              orgTotalResponses > 0
-                ? Math.round((orgCount / orgTotalResponses) * 1000) / 10
+              orgQuestionTotal > 0
+                ? Math.round((orgCount / orgQuestionTotal) * 1000) / 10
                 : 0,
           });
         }

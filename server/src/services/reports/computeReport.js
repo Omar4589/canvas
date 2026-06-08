@@ -28,13 +28,13 @@ function scopeFilter({ orgId, campaignId, effortId }) {
 }
 
 // Per-question option counts/percent for the choice questions of a template, matching the
-// admin /survey-results math (percent = count / totalResponses, rounded to 0.1). Text
-// questions are skipped (no meaningful breakdown). isSupportQuestion flags the one the
-// operator designated as the headline support question.
+// admin /survey-results math: percent = count / THIS question's own answer total (Σ of its non-null
+// option counts), so single-choice → 100% of answerers and multiple-choice → 100% of selections —
+// not the global response count. Text questions are skipped (no meaningful breakdown).
+// isSupportQuestion flags the one the operator designated as the headline support question.
 export async function computeSurveyBreakdowns({ surveyScopeMatch, template, supportQuestionKey = null }) {
   if (!template) return [];
   const templateMatch = { ...surveyScopeMatch, surveyTemplateId: template._id };
-  const totalResponses = await SurveyResponse.countDocuments(templateMatch);
 
   const sortedQs = [...(template.questions || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
   const out = [];
@@ -50,16 +50,16 @@ export async function computeSurveyBreakdowns({ surveyScopeMatch, template, supp
     pipeline.push({ $sort: { count: -1 } });
     const agg = await SurveyResponse.aggregate(pipeline);
 
-    const options = agg
-      .filter((r) => r._id !== null && r._id !== undefined && r._id !== '')
-      .map((r) => {
-        const optionKey = typeof r._id === 'string' ? r._id : String(r._id);
-        return {
-          option: optionKey,
-          count: r.count,
-          percent: totalResponses > 0 ? Math.round((r.count / totalResponses) * 1000) / 10 : 0,
-        };
-      });
+    const validAgg = agg.filter((r) => r._id !== null && r._id !== undefined && r._id !== '');
+    const questionTotal = validAgg.reduce((s, r) => s + r.count, 0);
+    const options = validAgg.map((r) => {
+      const optionKey = typeof r._id === 'string' ? r._id : String(r._id);
+      return {
+        option: optionKey,
+        count: r.count,
+        percent: questionTotal > 0 ? Math.round((r.count / questionTotal) * 1000) / 10 : 0,
+      };
+    });
 
     out.push({
       questionKey: q.key,
