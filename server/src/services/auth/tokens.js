@@ -16,3 +16,15 @@ export function verifyToken(token) {
   if (!secret) throw new Error('JWT_SECRET not configured');
   return jwt.verify(token, secret);
 }
+
+// Short-lived access token issued after a correct share-link password, authorizing the public
+// report reads for that one link. `kind: 'share'` distinguishes it from a user token.
+export function signShareToken({ shareId, campaignId }) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET not configured');
+  return jwt.sign(
+    { kind: 'share', shareId: String(shareId), campaignId: String(campaignId) },
+    secret,
+    { expiresIn: '24h' }
+  );
+}

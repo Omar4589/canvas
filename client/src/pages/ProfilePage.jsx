@@ -3,9 +3,8 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
 import { Card, Button, Input } from '../components/ui/index.js';
 
-// Self-serve account page shared by the client portal (/client/profile) and the admin /
-// super-admin console (/profile). Edit name/phone (PATCH /auth/me), change your own password
-// (POST /auth/change-password) — both already role-agnostic. Email is admin-managed (read-only).
+// Self-serve account page for the admin / super-admin console (/profile). Edit name/phone
+// (PATCH /auth/me), change your own password (POST /auth/change-password). Email is admin-managed.
 const labelCls = 'block text-xs font-semibold text-fg-muted';
 
 export default function ProfilePage() {

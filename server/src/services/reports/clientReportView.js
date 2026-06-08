@@ -1,7 +1,7 @@
-// Shape a ClientReport (and its frozen map points) for the read-only client portal. Used by
-// BOTH the client read endpoints (/client/reports) and the admin preview
-// (/admin/client-reports/:id/preview) so the operator sees byte-for-byte what the client
-// will. Applies the visibility whitelist and drops admin-only internals.
+// Shape a ClientReport (and its frozen map points) for public viewing. Used by BOTH the public
+// share endpoints (/share/:token/reports) and the admin preview (/admin/client-reports/:id/preview)
+// so the operator sees byte-for-byte what recipients will. Applies the visibility whitelist and
+// drops admin-only internals.
 
 function shapeWindow(w = {}, visibleQuestionKeys = []) {
   const breakdowns = w.surveyBreakdowns || [];
@@ -13,6 +13,24 @@ function shapeWindow(w = {}, visibleQuestionKeys = []) {
     contactBreakdown: w.contactBreakdown || {},
     coverage: w.coverage || {},
     surveyBreakdowns: filtered,
+  };
+}
+
+// Compact row for the report hub list (newest-first): headline KPIs + week label, no breakdowns.
+export function shapeReportListRow(r) {
+  return {
+    id: String(r._id),
+    campaignId: String(r.campaignId),
+    title: r.title || '',
+    weekStart: r.weekStart,
+    weekEnd: r.weekEnd,
+    publishedAt: r.publishedAt || null,
+    mapPointCount: r.mapPointCount || 0,
+    showMap: r.visibility?.showMap !== false,
+    headline: {
+      cumulative: r.stats?.cumulative?.totals || {},
+      period: r.stats?.period?.totals || {},
+    },
   };
 }
 

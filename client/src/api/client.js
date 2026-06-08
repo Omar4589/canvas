@@ -19,12 +19,19 @@ export function setActiveOrgId(orgId) {
   else localStorage.removeItem(ACTIVE_ORG_KEY);
 }
 
-export async function api(path, { method = 'GET', body, headers = {}, formData } = {}) {
-  const token = getToken();
-  const orgId = getActiveOrgId();
+export async function api(
+  path,
+  { method = 'GET', body, headers = {}, formData, public: isPublic = false, shareToken } = {}
+) {
   const finalHeaders = { ...headers };
-  if (token) finalHeaders.Authorization = `Bearer ${token}`;
-  if (orgId) finalHeaders['X-Org-Id'] = orgId;
+  // Public (share-link) calls carry no user identity — only the optional share access token.
+  if (!isPublic) {
+    const token = getToken();
+    const orgId = getActiveOrgId();
+    if (token) finalHeaders.Authorization = `Bearer ${token}`;
+    if (orgId) finalHeaders['X-Org-Id'] = orgId;
+  }
+  if (shareToken) finalHeaders['X-Share-Token'] = shareToken;
 
   const init = { method, headers: finalHeaders };
 

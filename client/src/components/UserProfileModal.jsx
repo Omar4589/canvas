@@ -117,17 +117,10 @@ export default function UserProfileModal({ membership, onClose }) {
   const [newPassword, setNewPassword] = useState('');
   const [feedback, setFeedback] = useState(null);
   const [coordinatorId, setCoordinatorId] = useState(membership.coordinatorId || '');
-  const [clientCampaignIds, setClientCampaignIds] = useState(
-    (membership.clientCampaignIds || []).map(String)
-  );
 
   useEffect(() => {
     setCoordinatorId(membership.coordinatorId || '');
   }, [membership.coordinatorId]);
-
-  useEffect(() => {
-    setClientCampaignIds((membership.clientCampaignIds || []).map(String));
-  }, [membership.clientCampaignIds]);
 
   function flash(type, text) {
     setFeedback({ type, text });
@@ -162,31 +155,6 @@ export default function UserProfileModal({ membership, onClose }) {
   const admins = (orgQ.data?.members || []).filter(
     (m) => m.role === 'admin' && m.user.isActive && m.isActive && m.user.id !== user.id
   );
-
-  // Campaigns in this org — the access list a client can be granted.
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-    enabled: membership.role === 'client',
-  });
-  const campaigns = campaignsQ.data?.campaigns || [];
-
-  const saveCampaigns = useMutation({
-    mutationFn: (ids) =>
-      api(`/admin/memberships/${user.id}/campaigns`, {
-        method: 'PATCH',
-        body: { clientCampaignIds: ids },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['memberships'] });
-      flash('success', 'Campaign access updated.');
-    },
-    onError: (err) => {
-      setClientCampaignIds((membership.clientCampaignIds || []).map(String)); // revert
-      flash('error', err.message);
-    },
-  });
 
   const saveProfile = useMutation({
     mutationFn: (body) =>
@@ -339,16 +307,10 @@ export default function UserProfileModal({ membership, onClose }) {
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                     membership.role === 'admin'
                       ? 'bg-brand-tint text-brand-accent'
-                      : membership.role === 'client'
-                      ? 'bg-info-tint text-info-fg'
                       : 'bg-sunken text-fg-muted'
                   }`}
                 >
-                  {membership.role === 'admin'
-                    ? 'Admin'
-                    : membership.role === 'client'
-                    ? 'Client'
-                    : 'Canvasser'}
+                  {membership.role === 'admin' ? 'Admin' : 'Canvasser'}
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -476,7 +438,7 @@ export default function UserProfileModal({ membership, onClose }) {
           ) : (
             <div className="flex items-center gap-3">
               <div className="flex flex-1 gap-2">
-                {['canvasser', 'admin', 'client'].map((r) => (
+                {['canvasser', 'admin'].map((r) => (
                   <label
                     key={r}
                     className={`flex flex-1 cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm ${
@@ -493,7 +455,7 @@ export default function UserProfileModal({ membership, onClose }) {
                       onChange={() => setForm((f) => ({ ...f, role: r }))}
                       className="sr-only"
                     />
-                    {r === 'admin' ? 'Admin' : r === 'client' ? 'Client' : 'Canvasser'}
+                    {r === 'admin' ? 'Admin' : 'Canvasser'}
                   </label>
                 ))}
               </div>
@@ -509,66 +471,27 @@ export default function UserProfileModal({ membership, onClose }) {
           )}
         </div>
 
-        {membership.role !== 'client' && (
-          <div className="border-b border-border px-6 py-5">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
-              Coordinator
-            </h3>
-            <select
-              value={coordinatorId}
-              onChange={onChangeCoordinator}
-              disabled={saveCoordinator.isPending}
-              className={`${inputCls} disabled:opacity-60`}
-            >
-              <option value="">— No coordinator —</option>
-              {admins.map((m) => (
-                <option key={m.user.id} value={m.user.id}>
-                  {m.user.firstName} {m.user.lastName}
-                </option>
-              ))}
-            </select>
-            <p className="mt-2 text-xs text-fg-muted">
-              The admin who oversees this member. Saved immediately.
-            </p>
-          </div>
-        )}
-
-        {membership.role === 'client' && (
-          <div className="border-b border-border px-6 py-5">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
-              Campaign access
-            </h3>
-            <div className="flex flex-wrap gap-3">
-              {campaigns.length === 0 && (
-                <span className="text-sm text-fg-muted">No campaigns in this org yet.</span>
-              )}
-              {campaigns.map((c) => {
-                const id = String(c._id);
-                const checked = clientCampaignIds.includes(id);
-                return (
-                  <label key={id} className="flex items-center gap-2 text-sm text-fg">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={saveCampaigns.isPending}
-                      onChange={() => {
-                        const next = checked
-                          ? clientCampaignIds.filter((x) => x !== id)
-                          : [...clientCampaignIds, id];
-                        setClientCampaignIds(next);
-                        saveCampaigns.mutate(next);
-                      }}
-                    />
-                    {c.name}
-                  </label>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-xs text-fg-muted">
-              The client sees published reports for these campaigns. Saved immediately.
-            </p>
-          </div>
-        )}
+        <div className="border-b border-border px-6 py-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
+            Coordinator
+          </h3>
+          <select
+            value={coordinatorId}
+            onChange={onChangeCoordinator}
+            disabled={saveCoordinator.isPending}
+            className={`${inputCls} disabled:opacity-60`}
+          >
+            <option value="">— No coordinator —</option>
+            {admins.map((m) => (
+              <option key={m.user.id} value={m.user.id}>
+                {m.user.firstName} {m.user.lastName}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-fg-muted">
+            The admin who oversees this member. Saved immediately.
+          </p>
+        </div>
 
         <div className="border-b border-border px-6 py-5">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">

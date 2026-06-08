@@ -1,4 +1,5 @@
 import Card from './ui/Card.jsx';
+import { percentsTo100 } from '../lib/percent.js';
 
 // A labeled horizontal-bar breakdown (used for support / survey-answer / voter-contact
 // breakdowns on client reports). items: [{ label, count, color? }]. Percent is ALWAYS derived
@@ -7,8 +8,8 @@ import Card from './ui/Card.jsx';
 // scale to the largest count. Pass `emphasis` to make it the headline (support) card.
 export default function ReportBreakdown({ title, subtitle, items = [], emphasis = false }) {
   const max = Math.max(1, ...items.map((i) => i.count || 0));
-  const total = items.reduce((s, i) => s + (i.count || 0), 0);
-  const pct = (count) => (total ? Math.round(((count || 0) / total) * 1000) / 10 : 0);
+  // Percentages are derived from the counts shown and rounded so the group totals exactly 100.0%.
+  const percents = percentsTo100(items.map((i) => i.count || 0));
   return (
     <Card className={emphasis ? 'p-5 ring-1 ring-brand-600/30' : 'p-4'}>
       <div className="mb-3">
@@ -19,7 +20,7 @@ export default function ReportBreakdown({ title, subtitle, items = [], emphasis 
         <div className="text-sm text-fg-muted">No responses yet.</div>
       ) : (
         <div className="space-y-2.5">
-          {items.map((i) => (
+          {items.map((i, idx) => (
             <div key={i.label}>
               <div className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-2 text-fg-muted">
@@ -33,7 +34,7 @@ export default function ReportBreakdown({ title, subtitle, items = [], emphasis 
                 </span>
                 <span className="tabular-nums font-semibold text-fg">
                   {(i.count || 0).toLocaleString()}
-                  <span className="ml-1 font-normal text-fg-subtle">({pct(i.count)}%)</span>
+                  <span className="ml-1 font-normal text-fg-subtle">({percents[idx]}%)</span>
                 </span>
               </div>
               <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-sunken">

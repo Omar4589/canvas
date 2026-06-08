@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { percentsTo100 } from '../lib/percent.js';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -201,6 +202,8 @@ export default function QuestionResults({
   const zone = tz || orgTz;
   const { key, label, type, options = [] } = question;
   const totalAnswered = options.reduce((sum, o) => sum + (o.count || 0), 0);
+  // Round so the question's options total exactly 100.0% (largest-remainder, from the counts).
+  const percents = percentsTo100(options.map((o) => o.count || 0));
   const [expandedOption, setExpandedOption] = useState(null);
   const expandable = type === 'single_choice' || type === 'multiple_choice';
 
@@ -218,12 +221,13 @@ export default function QuestionResults({
         <div className="text-sm text-fg-muted">No responses yet.</div>
       ) : (
         <div>
-          {options.map((o) => {
+          {options.map((o, idx) => {
             const isOpen = expandedOption === o.option;
             return (
               <div key={o.option}>
                 <OptionRow
                   {...o}
+                  percent={percents[idx]}
                   expandable={expandable}
                   expanded={isOpen}
                   onToggle={() => setExpandedOption(isOpen ? null : o.option)}

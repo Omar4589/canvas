@@ -10,9 +10,9 @@ const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const ClientReportsPage = lazy(() => import('./pages/ClientReportsPage.jsx'));
 const ClientReportBuilderPage = lazy(() => import('./pages/ClientReportBuilderPage.jsx'));
-const ClientLayout = lazy(() => import('./components/ClientLayout.jsx'));
-const ClientReportListPage = lazy(() => import('./pages/ClientReportListPage.jsx'));
-const ClientReportDetailPage = lazy(() => import('./pages/ClientReportDetailPage.jsx'));
+const PublicReportLayout = lazy(() => import('./components/PublicReportLayout.jsx'));
+const PublicReportListPage = lazy(() => import('./pages/PublicReportListPage.jsx'));
+const PublicReportDetailPage = lazy(() => import('./pages/PublicReportDetailPage.jsx'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
 const DuplicateSurveysPage = lazy(() => import('./pages/DuplicateSurveysPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
@@ -47,6 +47,11 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
+        {/* Public shared report hub — no login. */}
+        <Route element={<PublicReportLayout />}>
+          <Route path="/r/:token" element={<PublicReportListPage />} />
+          <Route path="/r/:token/reports/:reportId" element={<PublicReportDetailPage />} />
+        </Route>
         <Route
           path="/change-password"
           element={
@@ -99,17 +104,6 @@ export default function App() {
           <Route path="/admin/client-reports" element={<ClientReportsPage />} />
           <Route path="/admin/client-reports/:id" element={<ClientReportBuilderPage />} />
           <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />
-        </Route>
-        <Route
-          element={
-            <ProtectedRoute requireClientRole>
-              <ClientLayout />
-            </ProtectedRoute>
-          }
-        >
-          <Route path="/client" element={<ClientReportListPage />} />
-          <Route path="/client/reports/:reportId" element={<ClientReportDetailPage />} />
-          <Route path="/client/profile" element={<ProfilePage />} />
         </Route>
         <Route
           element={

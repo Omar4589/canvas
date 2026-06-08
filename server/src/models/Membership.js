@@ -16,16 +16,8 @@ const membershipSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'canvasser', 'client'],
+      enum: ['admin', 'canvasser'],
       required: true,
-    },
-    // Only meaningful when role === 'client': the campaign(s) whose PUBLISHED client
-    // reports this client may read. Empty for admins/canvassers. Org-level membership is
-    // NOT enough for a client (an org holds many clients' campaigns) — every client
-    // request is additionally scoped to this allow-list. See requireClientCampaignAccess.
-    clientCampaignIds: {
-      type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Campaign' }],
-      default: [],
     },
     isActive: { type: Boolean, default: true },
     addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -43,7 +35,5 @@ const membershipSchema = new mongoose.Schema(
 membershipSchema.index({ userId: 1, organizationId: 1 }, { unique: true });
 membershipSchema.index({ organizationId: 1, role: 1 });
 membershipSchema.index({ organizationId: 1, coordinatorId: 1 });
-// "Which clients can see campaign X" (admin client-access management) + multikey scope.
-membershipSchema.index({ organizationId: 1, role: 1, clientCampaignIds: 1 });
 
 export const Membership = mongoose.model('Membership', membershipSchema);

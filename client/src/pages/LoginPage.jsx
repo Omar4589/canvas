@@ -32,20 +32,12 @@ export default function LoginPage() {
       }
       const memberships = res.memberships || [];
       const adminMemberships = memberships.filter((m) => m.role === 'admin');
-      const clientMemberships = memberships.filter((m) => m.role === 'client');
       const canAccessConsole = res.user.isSuperAdmin || adminMemberships.length > 0;
 
       // Super admin: straight to the console (or org picker).
       if (res.user.isSuperAdmin) {
         const savedOrgId = getActiveOrgId();
         navigate(savedOrgId ? '/admin' : '/super-admin', { replace: true });
-        return;
-      }
-
-      // Client (candidate) portal users land on /client. A client in exactly one org is
-      // auto-scoped by login(); multi-org clients pick an org first.
-      if (!canAccessConsole && clientMemberships.length > 0) {
-        navigate(memberships.length > 1 ? '/select-org' : '/client', { replace: true });
         return;
       }
 

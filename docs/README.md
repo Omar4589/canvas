@@ -28,7 +28,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | [WALKLISTS.md](WALKLISTS.md) | Saved, frozen door sets you carve efforts from — built from the filter builder or an uploaded Voter-ID CSV — and how a list seeds/claims an effort's doors. |
 | [PASSES_AND_TURF.md](PASSES_AND_TURF.md) | Rounds (a "pass" within an effort), books (walkable turf), turf-cutting & recutting, and the mechanics that apply per round. |
 | [SURVEYS.md](SURVEYS.md) | Building, running, and reporting surveys — per-effort overrides, and the guardrails on editing a survey that's already collecting answers. |
-| [CLIENT_PORTAL.md](CLIENT_PORTAL.md) | The read-only client (candidate) portal: building & publishing frozen weekly report snapshots (KPIs with this-week deltas, support/survey/contact breakdowns, authored observations, a coverage map), the `client` role scoped to a campaign, and the publish/freeze flow. |
+| [CLIENT_PORTAL.md](CLIENT_PORTAL.md) | Client reports & shareable links: building & publishing frozen weekly report snapshots (KPIs with this-week deltas, support/survey/contact breakdowns, authored observations, a coverage map), and the public per-campaign **share link** (`/r/<token>`, optional password, rotate/revoke) that opens a no-login report hub. |
 | [IMPORTS.md](IMPORTS.md) | Voter uploads: how rows match, what goes live, and how new addresses reach the field through Intake. |
 | [VOTERS.md](VOTERS.md) | The voter directory and profile: where voters live (org vs campaign), what's editable, and mobile lookup. |
 | [EARLY_VOTING.md](EARLY_VOTING.md) | Early/already-voted marking and how "voted" doors drop off the canvasser's list and show as their own coverage bucket. |

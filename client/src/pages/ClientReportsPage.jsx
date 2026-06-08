@@ -17,6 +17,138 @@ function defaultWeek() {
   return { weekStart: isoDay(start), weekEnd: isoDay(end) };
 }
 
+// Per-campaign public share links: create, copy, password, rotate, enable/disable, delete.
+function SharePanel({ campaignId }) {
+  const qc = useQueryClient();
+  const [copied, setCopied] = useState(null);
+
+  const q = useQuery({
+    queryKey: ['admin', 'client-report-shares', campaignId],
+    queryFn: () => api(`/admin/client-reports/shares?campaignId=${campaignId}`),
+    enabled: !!campaignId,
+  });
+  const shares = q.data?.shares || [];
+  const inval = () => qc.invalidateQueries({ queryKey: ['admin', 'client-report-shares', campaignId] });
+
+  const createM = useMutation({
+    mutationFn: (body) => api('/admin/client-reports/shares', { method: 'POST', body }),
+    onSuccess: inval,
+  });
+  const patchM = useMutation({
+    mutationFn: ({ id, body }) => api(`/admin/client-reports/shares/${id}`, { method: 'PATCH', body }),
+    onSuccess: inval,
+  });
+  const rotateM = useMutation({
+    mutationFn: (id) => api(`/admin/client-reports/shares/${id}/rotate`, { method: 'POST' }),
+    onSuccess: inval,
+  });
+  const deleteM = useMutation({
+    mutationFn: (id) => api(`/admin/client-reports/shares/${id}`, { method: 'DELETE' }),
+    onSuccess: inval,
+  });
+
+  const urlFor = (token) => `${window.location.origin}/r/${token}`;
+  function copy(token) {
+    navigator.clipboard
+      ?.writeText(urlFor(token))
+      .then(() => {
+        setCopied(token);
+        setTimeout(() => setCopied(null), 1500);
+      })
+      .catch(() => {});
+  }
+  function setPassword(s) {
+    const pw = window.prompt(s.hasPassword ? 'New password (leave blank to remove):' : 'Set a password for this link:');
+    if (pw === null) return; // cancelled
+    patchM.mutate({ id: s.id, body: { password: pw || null } });
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-fg">Share link</div>
+          <div className="text-xs text-fg-muted">
+            A public link to this campaign's published reports (latest + history). Anyone with it can
+            view — add a password and revoke/rotate any time.
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={createM.isPending}
+          disabled={!campaignId}
+          onClick={() => createM.mutate({ campaignId })}
+        >
+          + New link
+        </Button>
+      </div>
+      {q.isLoading && <div className="text-sm text-fg-muted">Loading…</div>}
+      {!q.isLoading && shares.length === 0 && (
+        <div className="text-sm text-fg-muted">No share link yet — create one to send to your client.</div>
+      )}
+      <div className="space-y-2">
+        {shares.map((s) => (
+          <div key={s.id} className="rounded-lg border border-border p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                readOnly
+                value={urlFor(s.token)}
+                onFocus={(e) => e.target.select()}
+                className="min-w-0 flex-1 rounded border border-border bg-sunken px-2 py-1.5 text-xs text-fg-muted"
+              />
+              <Button size="sm" variant="secondary" onClick={() => copy(s.token)}>
+                {copied === s.token ? 'Copied!' : 'Copy'}
+              </Button>
+              {!s.isActive && <Badge variant="neutral">disabled</Badge>}
+              {s.hasPassword && <Badge variant="info" dot>password</Badge>}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+              <button type="button" className="text-brand-accent hover:underline" onClick={() => setPassword(s)}>
+                {s.hasPassword ? 'Change password' : 'Set password'}
+              </button>
+              {s.hasPassword && (
+                <button
+                  type="button"
+                  className="text-fg-muted hover:underline"
+                  onClick={() => patchM.mutate({ id: s.id, body: { password: null } })}
+                >
+                  Remove password
+                </button>
+              )}
+              <button
+                type="button"
+                className="text-fg-muted hover:underline"
+                onClick={() => {
+                  if (window.confirm('Rotate this link? The current URL stops working.')) rotateM.mutate(s.id);
+                }}
+              >
+                Rotate
+              </button>
+              <button
+                type="button"
+                className="text-fg-muted hover:underline"
+                onClick={() => patchM.mutate({ id: s.id, body: { isActive: !s.isActive } })}
+              >
+                {s.isActive ? 'Disable' : 'Enable'}
+              </button>
+              <button
+                type="button"
+                className="text-danger hover:underline"
+                onClick={() => {
+                  if (window.confirm('Delete this share link?')) deleteM.mutate(s.id);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 export default function ClientReportsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -67,7 +199,7 @@ export default function ClientReportsPage() {
         <div>
           <h1 className="text-xl font-semibold text-fg">Client Reports</h1>
           <p className="mt-1 text-sm text-fg-muted">
-            Build and publish weekly snapshots for your candidate's portal.
+            Build and publish weekly snapshots, then share a link with your client.
           </p>
         </div>
         <CampaignSelector
@@ -77,6 +209,8 @@ export default function ClientReportsPage() {
           isLoading={campaignsLoading}
         />
       </div>
+
+      {campaignId && <SharePanel campaignId={campaignId} />}
 
       <Card className="p-4">
         <div className="mb-3 text-sm font-semibold text-fg">New weekly report</div>

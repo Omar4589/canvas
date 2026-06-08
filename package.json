@@ -18,8 +18,8 @@
     "audit:voted-doors": "npm --prefix server run audit:voted-doors --",
     "migrate:multitenant": "npm --prefix server run migrate:multitenant",
     "migrate:timezones": "npm --prefix server run migrate:timezones --",
-    "migrate:client-role": "npm --prefix server run migrate:client-role --",
-    "migrate:survey-dedup": "npm --prefix server run migrate:survey-dedup --"
+    "migrate:survey-dedup": "npm --prefix server run migrate:survey-dedup --",
+    "migrate:cleanup-client-role": "npm --prefix server run migrate:cleanup-client-role --"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

@@ -36,9 +36,12 @@ function visibleStatusesFor(campaignType) {
 
 export default function ClientReportMap({
   mapDataPath,
-  tokenPath = '/client/config/mapbox-token',
+  tokenPath = '/admin/config/mapbox-token',
   survey,
   campaignType = null,
+  // Extra api() options — the public share page passes { public: true, shareToken } so the map's
+  // fetches run unauthenticated; the admin preview passes nothing (authed).
+  requestOpts = {},
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -52,13 +55,13 @@ export default function ClientReportMap({
   const appliedStyleRef = useRef(styleURL);
 
   const tokenQ = useQuery({
-    queryKey: ['config', 'mapbox-token', tokenPath],
-    queryFn: () => api(tokenPath),
+    queryKey: ['mapbox-token', tokenPath, requestOpts.shareToken || null],
+    queryFn: () => api(tokenPath, requestOpts),
     staleTime: 5 * 60 * 1000,
   });
   const dataQ = useQuery({
-    queryKey: ['client-report-map', mapDataPath],
-    queryFn: () => api(mapDataPath),
+    queryKey: ['client-report-map', mapDataPath, requestOpts.shareToken || null],
+    queryFn: () => api(mapDataPath, requestOpts),
     enabled: !!mapDataPath,
   });
 

@@ -5,12 +5,11 @@ export default function ProtectedRoute({
   children,
   requireOrgAdmin = false,
   requireSuperAdmin = false,
-  requireClientRole = false,
   requireConsoleUser = false,
   requireActiveOrg = true,
   allowPasswordChange = false,
 }) {
-  const { user, memberships, activeOrgId, isSuperAdmin, isOrgAdmin, isClient, mustChangePassword, loading } =
+  const { user, memberships, activeOrgId, isSuperAdmin, isOrgAdmin, mustChangePassword, loading } =
     useAuth();
   const location = useLocation();
 
@@ -55,10 +54,6 @@ export default function ProtectedRoute({
 
   if (requireOrgAdmin && !isOrgAdmin) {
     return <div className="p-8 text-danger">Forbidden — admin access required for this org.</div>;
-  }
-
-  if (requireClientRole && !isClient && !isSuperAdmin) {
-    return <div className="p-8 text-danger">Forbidden — client access only.</div>;
   }
 
   // Console (admin/super-admin) surfaces reachable without an active org — e.g. the shared

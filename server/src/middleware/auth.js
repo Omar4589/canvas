@@ -44,17 +44,3 @@ export function requireOrgMember(req, res, next) {
   if (!req.activeMembership) return res.status(403).json({ error: 'No active org membership' });
   next();
 }
-
-// Gate the read-only client (candidate) portal. A client's membership role is 'client'
-// (never 'admin'), so requireOrgRole('admin') already locks clients out of every /admin
-// route; this is the complementary gate for /client/*. Super admins may view for support.
-// Campaign-level scope (a client only sees THEIR campaign's reports) is enforced
-// per-handler against req.activeMembership.clientCampaignIds — see routes/client/reports.js.
-export function requireClientRole(req, res, next) {
-  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  if (req.user.isSuperAdmin) return next();
-  if (req.activeMembership?.role !== 'client') {
-    return res.status(403).json({ error: 'Client access only' });
-  }
-  next();
-}

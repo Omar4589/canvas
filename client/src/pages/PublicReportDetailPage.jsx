@@ -1,14 +1,17 @@
+import { Link, useParams, useOutletContext } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import ClientReportView from '../components/ClientReportView.jsx';
 import ClientReportMap from '../components/ClientReportMap.jsx';
 
-export default function ClientReportDetailPage() {
-  const { reportId: id } = useParams();
+export default function PublicReportDetailPage() {
+  const { reportId } = useParams();
+  const { token, accessToken } = useOutletContext();
+  const opts = { public: true, shareToken: accessToken };
+
   const q = useQuery({
-    queryKey: ['client', 'report', id],
-    queryFn: () => api(`/client/reports/${id}`),
+    queryKey: ['share-report', token, reportId, accessToken],
+    queryFn: () => api(`/share/${token}/reports/${reportId}`, opts),
   });
   const report = q.data?.report;
 
@@ -18,7 +21,7 @@ export default function ClientReportDetailPage() {
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/client" className="text-xs text-brand-accent hover:underline">
+        <Link to={`/r/${token}`} className="text-xs text-brand-accent hover:underline">
           ← All reports
         </Link>
         <h1 className="mt-1 text-2xl font-semibold text-fg">
@@ -37,10 +40,11 @@ export default function ClientReportDetailPage() {
             Where we've been
           </h2>
           <ClientReportMap
-            mapDataPath={`/client/reports/${id}/map`}
-            tokenPath="/client/config/mapbox-token"
+            mapDataPath={`/share/${token}/reports/${reportId}/map`}
+            tokenPath={`/share/${token}/mapbox-token`}
             survey={q.data.survey}
             campaignType={report.campaignType}
+            requestOpts={opts}
           />
         </section>
       )}

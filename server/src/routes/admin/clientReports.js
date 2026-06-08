@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import { randomBytes } from 'crypto';
+import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
+import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { Campaign } from '../../models/Campaign.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { zonedDayRange } from '../../utils/timezone.js';
@@ -123,6 +126,135 @@ function adminListRow(r) {
     },
   };
 }
+
+// ── Share links ──────────────────────────────────────────────────────────────
+// Public, revocable per-campaign links to the campaign's published reports (see routes/public/share.js).
+// NOTE: these literal `/shares` routes are declared BEFORE the `/:id` report routes below, or Express
+// would match `:id = "shares"` first.
+
+function newShareToken() {
+  return randomBytes(24).toString('base64url'); // ~32 url-safe chars
+}
+function shareRow(s) {
+  return {
+    id: String(s._id),
+    campaignId: String(s.campaignId),
+    token: s.token,
+    label: s.label || '',
+    hasPassword: !!s.passwordHash,
+    isActive: s.isActive,
+    lastAccessedAt: s.lastAccessedAt || null,
+    createdAt: s.createdAt,
+  };
+}
+const shareCreateSchema = z.object({
+  campaignId: z.string(),
+  label: z.string().max(120).optional(),
+  password: z.string().min(1).max(200).optional(),
+});
+const shareUpdateSchema = z.object({
+  label: z.string().max(120).optional(),
+  // password: a string sets/replaces it; null or '' clears it; omitted = unchanged.
+  password: z.string().max(200).nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+router.get('/shares', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!req.query.campaignId || !mongoose.isValidObjectId(req.query.campaignId)) {
+      return res.status(400).json({ error: 'campaignId required' });
+    }
+    const shares = await ReportShareLink.find({
+      organizationId: activeOrgId(req),
+      campaignId: req.query.campaignId,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ shares: shares.map(shareRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/shares', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const data = shareCreateSchema.parse(req.body);
+    const campaign = await loadCampaignInOrg(orgId, data.campaignId);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found in this org' });
+    const share = await ReportShareLink.create({
+      organizationId: orgId,
+      campaignId: campaign._id,
+      token: newShareToken(),
+      label: data.label || '',
+      passwordHash: data.password ? await bcrypt.hash(data.password, 10) : null,
+      createdBy: req.user._id,
+    });
+    res.status(201).json({ share: shareRow(share) });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+async function loadShareInOrg(req, res) {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    res.status(400).json({ error: 'Invalid id' });
+    return null;
+  }
+  const share = await ReportShareLink.findOne({ _id: req.params.id, organizationId: activeOrgId(req) });
+  if (!share) {
+    res.status(404).json({ error: 'Share link not found' });
+    return null;
+  }
+  return share;
+}
+
+router.patch('/shares/:id', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const share = await loadShareInOrg(req, res);
+    if (!share) return;
+    const data = shareUpdateSchema.parse(req.body);
+    if (data.label !== undefined) share.label = data.label;
+    if (data.isActive !== undefined) share.isActive = data.isActive;
+    if (data.password !== undefined) {
+      share.passwordHash = data.password ? await bcrypt.hash(data.password, 10) : null;
+    }
+    await share.save();
+    res.json({ share: shareRow(share) });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+router.post('/shares/:id/rotate', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const share = await loadShareInOrg(req, res);
+    if (!share) return;
+    share.token = newShareToken(); // invalidates the old URL
+    await share.save();
+    res.json({ share: shareRow(share) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/shares/:id', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const share = await loadShareInOrg(req, res);
+    if (!share) return;
+    await ReportShareLink.deleteOne({ _id: share._id, organizationId: activeOrgId(req) });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Create a draft for a campaign + week.
 router.post('/', async (req, res, next) => {

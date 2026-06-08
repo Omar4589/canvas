@@ -145,6 +145,17 @@ for (const q of sortedQs) {
 }
 ```
 
+> **Percentages are per-question (share of that question's answers).** Each option's `percent` = its
+> `count` ÷ **that question's own answer total** — the Σ of its non-null option counts — *not* the
+> global response count. So a **single-choice** question's bars sum to ~100% of the people who answered
+> it (skips don't dilute it), and a **multiple-choice** question's sum to ~100% of all *selections*
+> (one respondent can contribute several). Counts are the raw `$group` totals. The "N answered" header
+> ([QuestionResults.jsx](../client/src/components/QuestionResults.jsx)) is the same per-question Σ, so
+> bars and header agree. The client report freezes the identical math
+> ([computeSurveyBreakdowns](../server/src/services/reports/computeReport.js)), and the report bars
+> ([ReportBreakdown.jsx](../client/src/components/ReportBreakdown.jsx)) re-derive the percent from the
+> counts they display — so a published snapshot is always self-consistent (and an old one self-heals).
+
 Because the join is `key`-only against the live questions, the following edits would corrupt reports
 if they were allowed — which is exactly why the PATCH guard refuses them once responses exist:
 

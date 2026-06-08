@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { Organization } from '../../models/Organization.js';
-import { Campaign } from '../../models/Campaign.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
@@ -19,7 +18,7 @@ const phoneSchema = z.string().trim().max(40).optional();
 
 const addSchema = z.object({
   email: z.string().email(),
-  role: z.enum(['admin', 'canvasser', 'client']).default('canvasser'),
+  role: z.enum(['admin', 'canvasser']).default('canvasser'),
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   phone: phoneSchema,
@@ -29,19 +28,12 @@ const addSchema = z.object({
   linkExisting: z.boolean().optional().default(false),
   // Optional supervising admin (in this org). Empty string / null = none.
   coordinatorId: z.string().nullable().optional(),
-  // Only used when role === 'client': the campaign(s) whose published reports this
-  // client may read. Ignored for admins/canvassers.
-  clientCampaignIds: z.array(z.string()).optional(),
 });
 
 const updateMembershipSchema = z.object({
-  role: z.enum(['admin', 'canvasser', 'client']).optional(),
+  role: z.enum(['admin', 'canvasser']).optional(),
   isActive: z.boolean().optional(),
   coordinatorId: z.string().nullable().optional(),
-});
-
-const clientCampaignsSchema = z.object({
-  clientCampaignIds: z.array(z.string()),
 });
 
 const updateUserSchema = z.object({
@@ -90,24 +82,6 @@ async function resolveCoordinatorId(req, raw, memberUserId) {
   return { ok: true, value: new mongoose.Types.ObjectId(String(raw)) };
 }
 
-// Validate a list of campaign ids for a client's access grant: every id must be a real
-// campaign in THIS org. Returns { ok, value } where value is a de-duped ObjectId[].
-async function resolveClientCampaignIds(req, raw) {
-  if (!Array.isArray(raw) || raw.length === 0) return { ok: true, value: [] };
-  const ids = [...new Set(raw.map(String))];
-  if (ids.some((id) => !mongoose.isValidObjectId(id))) {
-    return { ok: false, error: 'Invalid campaign id.' };
-  }
-  const found = await Campaign.countDocuments({
-    _id: { $in: ids },
-    organizationId: activeOrgId(req),
-  });
-  if (found !== ids.length) {
-    return { ok: false, error: 'One or more campaigns are not in this organization.' };
-  }
-  return { ok: true, value: ids.map((id) => new mongoose.Types.ObjectId(id)) };
-}
-
 function haversineMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -145,7 +119,6 @@ router.get('/', async (req, res, next) => {
         isActive: m.isActive,
         addedAt: m.createdAt,
         coordinatorId: m.coordinatorId ? String(m.coordinatorId) : null,
-        clientCampaignIds: (m.clientCampaignIds || []).map(String),
         user: {
           id: String(m.userId._id),
           firstName: m.userId.firstName,
@@ -216,13 +189,6 @@ router.post('/', async (req, res, next) => {
     const coordRes = await resolveCoordinatorId(req, data.coordinatorId, user._id);
     if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
 
-    let clientCampaignIds = [];
-    if (data.role === 'client') {
-      const campRes = await resolveClientCampaignIds(req, data.clientCampaignIds);
-      if (!campRes.ok) return res.status(400).json({ error: campRes.error });
-      clientCampaignIds = campRes.value;
-    }
-
     const membership = await Membership.create({
       userId: user._id,
       organizationId: activeOrgId(req),
@@ -230,7 +196,6 @@ router.post('/', async (req, res, next) => {
       isActive: true,
       addedBy: req.user._id,
       coordinatorId: coordRes.value || null,
-      clientCampaignIds,
     });
 
     res.status(201).json({
@@ -379,40 +344,6 @@ router.patch('/:userId/password', async (req, res, next) => {
     );
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user: user.toSafeJSON() });
-  } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
-    next(err);
-  }
-});
-
-// Set the campaign access list for a CLIENT membership (grant/revoke). The client may then
-// read only these campaigns' published reports. Validates every id belongs to this org.
-router.patch('/:userId/campaigns', async (req, res, next) => {
-  try {
-    if (!ensureOrgScoped(req, res)) return;
-    if (!mongoose.isValidObjectId(req.params.userId)) {
-      return res.status(400).json({ error: 'Invalid userId' });
-    }
-    const membership = await Membership.findOne({
-      userId: req.params.userId,
-      organizationId: activeOrgId(req),
-    });
-    if (!membership) return res.status(404).json({ error: 'Member not in this org' });
-    if (membership.role !== 'client') {
-      return res.status(400).json({ error: 'Only client members have campaign access.' });
-    }
-    const { clientCampaignIds } = clientCampaignsSchema.parse(req.body);
-    const campRes = await resolveClientCampaignIds(req, clientCampaignIds);
-    if (!campRes.ok) return res.status(400).json({ error: campRes.error });
-    membership.clientCampaignIds = campRes.value;
-    await membership.save();
-    res.json({
-      membership: {
-        membershipId: String(membership._id),
-        role: membership.role,
-        clientCampaignIds: membership.clientCampaignIds.map(String),
-      },
-    });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
