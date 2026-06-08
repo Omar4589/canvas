@@ -44,6 +44,16 @@ function MapPinIcon({ color, size }) {
   );
 }
 
+function BooksIcon({ color, size }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="5" y="3" width="14" height="18" rx="2" stroke={color} strokeWidth="2" />
+      <Path d="M9 3v18" stroke={color} strokeWidth="2" />
+      <Path d="M12.5 8h4M12.5 12h4" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 function MoreIcon({ color, size }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -108,11 +118,15 @@ export default function AdminLayout() {
       />
       <Tabs.Screen
         name="canvassers"
-        options={{ title: 'Canvassers', tabBarIcon: ({ color, size }) => <PeopleIcon color={color} size={size} /> }}
+        options={{ title: 'Insights', tabBarIcon: ({ color, size }) => <PeopleIcon color={color} size={size} /> }}
       />
       <Tabs.Screen
         name="map"
         options={{ title: 'Map', tabBarIcon: ({ color, size }) => <MapPinIcon color={color} size={size} /> }}
+      />
+      <Tabs.Screen
+        name="books"
+        options={{ title: 'Books', tabBarIcon: ({ color, size }) => <BooksIcon color={color} size={size} /> }}
       />
       <Tabs.Screen
         name="more"

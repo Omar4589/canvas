@@ -230,7 +230,7 @@ export default function AdminCanvassers() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Canvassers</Text>
+        <Text style={styles.headerTitle}>Insights</Text>
       </View>
 
       <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>

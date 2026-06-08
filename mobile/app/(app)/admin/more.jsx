@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -16,6 +16,23 @@ import ThemeToggle from '../../../components/ThemeToggle';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { radius, spacing } from '../../../lib/theme';
+
+// Setup-heavy features that live on the web dashboard (file uploads / turf drawing
+// aren't mobile-friendly). Tapping the row explains where to do them.
+const WEB_NOTES = {
+  import: {
+    title: 'CSV import',
+    body: "Uploading voter/address CSVs is done on the web dashboard — file uploads aren't available on mobile.",
+  },
+  earlyVoting: {
+    title: 'Early voting',
+    body: 'Uploading and marking early-voting records is done on the web dashboard.',
+  },
+  turf: {
+    title: 'Turf cutting',
+    body: 'Drawing and balancing turf is done on the web dashboard. You can assign existing books to canvassers from the Books tab.',
+  },
+};
 
 function Row({ icon, label, sub, onPress, danger }) {
   const { colors } = useTheme();
@@ -40,6 +57,7 @@ export default function AdminMore() {
   const qc = useQueryClient();
   const styles = useThemedStyles(makeStyles);
   const [user, setUser] = useState(null);
+  const [webNote, setWebNote] = useState(null);
 
   useEffect(() => {
     loadCurrentUser().then((u) => setUser(u));
@@ -97,12 +115,14 @@ export default function AdminMore() {
         <Text style={styles.sectionLabel}>Manage</Text>
         <View style={styles.group}>
           <Row icon="👥" label="Users" onPress={() => router.push('/(app)/admin/users')} />
-          <Row
-            icon="📊"
-            label="Compare canvassers"
-            onPress={() => router.push('/(app)/admin/canvasser/compare')}
-          />
           <Row icon="🚪" label="Switch to canvass mode" onPress={onCanvassMode} />
+        </View>
+
+        <Text style={styles.sectionLabel}>On the web</Text>
+        <View style={styles.group}>
+          <Row icon="📤" label="CSV import" sub="Manage on the web" onPress={() => setWebNote(WEB_NOTES.import)} />
+          <Row icon="🗳️" label="Early voting" sub="Manage on the web" onPress={() => setWebNote(WEB_NOTES.earlyVoting)} />
+          <Row icon="✂️" label="Turf cutting" sub="Drawing is web-only" onPress={() => setWebNote(WEB_NOTES.turf)} />
         </View>
 
         <Text style={styles.sectionLabel}>Appearance</Text>
@@ -119,6 +139,18 @@ export default function AdminMore() {
           <Row icon="↩︎" label="Sign out" onPress={onLogout} danger />
         </View>
       </ScrollView>
+
+      <Modal visible={!!webNote} transparent animationType="fade" onRequestClose={() => setWebNote(null)}>
+        <Pressable style={styles.noteBackdrop} onPress={() => setWebNote(null)}>
+          <View style={styles.noteCard}>
+            <Text style={styles.noteTitle}>{webNote?.title}</Text>
+            <Text style={styles.noteBody}>{webNote?.body}</Text>
+            <Pressable style={styles.noteBtn} onPress={() => setWebNote(null)}>
+              <Text style={styles.noteBtnText}>Got it</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -178,5 +210,33 @@ function makeStyles(t) {
     rowLabel: { ...t.type.bodyStrong, fontSize: 15 },
     rowSub: { ...t.type.caption, marginTop: 1 },
     rowChevron: { fontSize: 20, color: t.colors.textMuted },
+
+    noteBackdrop: {
+      flex: 1,
+      backgroundColor: t.colors.backdrop,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: spacing.xl,
+    },
+    noteCard: {
+      backgroundColor: t.colors.card,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      padding: spacing.lg,
+      ...t.shadow.raised,
+      width: '100%',
+      maxWidth: 360,
+    },
+    noteTitle: { ...t.type.h3, marginBottom: spacing.sm },
+    noteBody: { ...t.type.body, color: t.colors.textSecondary },
+    noteBtn: {
+      backgroundColor: t.colors.brand,
+      borderRadius: radius.md,
+      paddingVertical: spacing.sm + 2,
+      alignItems: 'center',
+      marginTop: spacing.lg,
+    },
+    noteBtnText: { color: t.colors.textInverse, fontWeight: '700', fontSize: 15 },
   });
 }
