@@ -252,10 +252,12 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     const distance = distanceFromHouse(household, data.location);
     const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
 
-    // One survey per voter PER PASS (prior-pass surveys are preserved).
-    await SurveyResponse.deleteMany({ voterId: voter._id, passId });
-
-    const surveyResponse = await SurveyResponse.create({
+    // One survey per voter PER PASS (prior-pass surveys are preserved). ATOMIC upsert keyed on
+    // (voterId, passId): a re-submit REPLACES the prior answer (self-heal), and — backed by the
+    // unique index — two concurrent submits (a double-tap) can never persist two rows; the loser
+    // of the insert race updates the winner instead. Resets editedBy/editedAt so a fresh canvasser
+    // submission clears any prior admin-edit audit.
+    const surveyFields = {
       organizationId: household.organizationId,
       campaignId: campaign._id,
       voterId: voter._id,
@@ -272,7 +274,28 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       turfId,
       effortId,
       wasOfflineSubmission: !!data.wasOfflineSubmission,
-    });
+      editedBy: null,
+      editedAt: null,
+    };
+    const surveyFilter = { voterId: voter._id, passId };
+    let surveyResponse;
+    try {
+      surveyResponse = await SurveyResponse.findOneAndUpdate(
+        surveyFilter,
+        { $set: surveyFields },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (err) {
+      if (err.code === 11000) {
+        // Lost the insert race to a concurrent submit for this (voter, pass) — the winner's row
+        // now exists, so update it (latest answers win).
+        surveyResponse = await SurveyResponse.findOneAndUpdate(
+          surveyFilter,
+          { $set: surveyFields },
+          { new: true }
+        );
+      } else throw err;
+    }
 
     await CanvassActivity.deleteMany({
       userId: req.user._id,

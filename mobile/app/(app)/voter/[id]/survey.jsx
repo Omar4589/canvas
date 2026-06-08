@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -146,6 +147,10 @@ export default function VoterSurvey() {
 
   const [answers, setAnswers] = useState({});
   const [note, setNote] = useState('');
+  // Guard against a double-tap on Save creating two survey responses. firedRef blocks the second
+  // call synchronously (state updates are async); isSubmitting drives the disabled/spinner UI.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const firedRef = useRef(false);
 
   if (!voter || !survey) {
     return (
@@ -190,6 +195,9 @@ export default function VoterSurvey() {
       Alert.alert('Missing answer', err);
       return;
     }
+    if (firedRef.current) return; // double-tap: the first submit is already in flight
+    firedRef.current = true;
+    setIsSubmitting(true);
 
     optimisticSubmit(qc, {
       path: `/mobile/voters/${id}/survey`,
@@ -364,12 +372,17 @@ export default function VoterSurvey() {
 
         <Pressable
           onPress={onSubmit}
+          disabled={isSubmitting}
           style={({ pressed }) => [
             styles.submitButton,
-            { opacity: pressed ? 0.85 : 1 },
+            { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
           ]}
         >
-          <Text style={styles.submitButtonText}>Save Response</Text>
+          {isSubmitting ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitButtonText}>Save Response</Text>
+          )}
         </Pressable>
       </ScrollView>
       </KeyboardAvoidingView>

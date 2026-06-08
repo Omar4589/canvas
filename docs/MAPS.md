@@ -253,6 +253,15 @@ Canonical palette (hex): `unknocked #9ca3af`, `not_home #3b82f6`, `surveyed #22c
   Don't drop these or add a bootstrap `refetchInterval` — use the `changes` delta for liveness.
 - **`api` has a ~20s timeout** ([lib/api.js](../mobile/lib/api.js)); a bare fetch with none let weak
   signal hang ~60s before an action would queue offline.
+- **Writes are double-tap-safe (defense in depth).** Survey/action submits are fire-and-forget +
+  navigate-away, which made a fast double-tap create two rows. Three layers now: the Save/action
+  buttons disable on first press (`firedRef` + `isSubmitting`); `optimisticSubmit` ignores a second
+  in-flight call to the same path ([recordAction.js](../mobile/lib/recordAction.js)); and `router.push`
+  to a detail screen goes through `guardedPush` ([lib/navGuard.js](../mobile/lib/navGuard.js)) so a
+  double-tap can't stack two identical screens. The hard guarantee is server-side — the survey route
+  **upserts** on `(voter, pass)` against a **unique index** (see [METRICS.md](METRICS.md)), so a race
+  can never persist two `SurveyResponse` rows; this also preserves the "re-survey replaces, counts
+  once" self-heal, just atomically.
 - **The offline queue flushes on reconnect** (NetInfo listener in [map.jsx](../mobile/app/(app)/map.jsx))
   as well as on focus / foreground / refresh / next-action. NetInfo is a native module — it ships only in
   a native build, never an OTA (a bundle importing it would crash an older binary).

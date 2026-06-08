@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { recordHouseholdAction } from '../../../lib/recordAction';
+import { guardedPush } from '../../../lib/navGuard';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -137,6 +138,10 @@ export default function HouseholdDetail() {
   const { household, voters } = findHouseholdAndVoters(bootstrap, id);
 
   const [note, setNote] = useState('');
+  // Once any action fires, lock the screen (firedRef blocks a second tap synchronously;
+  // isSubmitting disables the buttons) — then we navigate back.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const firedRef = useRef(false);
 
   if (!household) {
     return (
@@ -153,6 +158,9 @@ export default function HouseholdDetail() {
   // stamp + network write happen in the background (recordHouseholdAction). We do
   // NOT await it — awaiting is exactly what made the pin lag behind the tap.
   function submitAction(action) {
+    if (firedRef.current) return; // double-tap: an action is already recording
+    firedRef.current = true;
+    setIsSubmitting(true);
     recordHouseholdAction(qc, id, action, { note: note.trim() || null });
     router.back();
   }
@@ -227,7 +235,7 @@ export default function HouseholdDetail() {
               <VoterCard
                 key={v._id}
                 voter={v}
-                onPress={() => router.push(`/(app)/voter/${v._id}/survey`)}
+                onPress={() => guardedPush(router, `/(app)/voter/${v._id}/survey`)}
               />
             ))}
           </>
@@ -247,11 +255,12 @@ export default function HouseholdDetail() {
           {campaignType === 'lit_drop' ? (
             <Pressable
               onPress={() => submitAction('lit_dropped')}
+              disabled={isSubmitting}
               style={({ pressed }) => [
                 styles.primaryButton,
                 {
                   backgroundColor: colors.status.lit_dropped,
-                  opacity: pressed ? 0.85 : 1,
+                  opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1,
                 },
               ]}
             >
@@ -265,10 +274,11 @@ export default function HouseholdDetail() {
             <>
               <Pressable
                 onPress={() => submitAction('not_home')}
+                disabled={isSubmitting}
                 style={({ pressed }) => [
                   styles.actionButton,
                   styles.actionNotHome,
-                  { opacity: pressed ? 0.85 : 1 },
+                  { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
                 ]}
               >
                 <Text style={styles.actionButtonText}>Not home</Text>
@@ -276,10 +286,11 @@ export default function HouseholdDetail() {
 
               <Pressable
                 onPress={() => submitAction('wrong_address')}
+                disabled={isSubmitting}
                 style={({ pressed }) => [
                   styles.actionButton,
                   styles.actionWrongAddress,
-                  { opacity: pressed ? 0.85 : 1 },
+                  { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
                 ]}
               >
                 <Text style={styles.actionButtonText}>Wrong address</Text>

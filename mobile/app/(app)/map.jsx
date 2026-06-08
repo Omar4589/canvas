@@ -36,6 +36,7 @@ import {
 import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds } from '../../lib/recordAction';
+import { guardedPush } from '../../lib/navGuard';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
@@ -650,7 +651,7 @@ export default function MapScreen() {
   const onBuildingPress = useCallback(
     (e) => {
       const key = e.features?.[0]?.properties?.key;
-      if (key) router.push({ pathname: '/(app)/building', params: { bkey: key } });
+      if (key) guardedPush(router, { pathname: '/(app)/building', params: { bkey: key } });
     },
     [router]
   );
@@ -983,7 +984,7 @@ export default function MapScreen() {
             timeZone={activeCampaign?.timeZone}
             onOpen={() => {
               setSelected(null);
-              router.push(`/(app)/household/${selected._id}`);
+              guardedPush(router, `/(app)/household/${selected._id}`);
             }}
             onClose={() => setSelected(null)}
           />
@@ -991,7 +992,7 @@ export default function MapScreen() {
           <ProgressSheetContent
             today={today}
             isLitDrop={isLitDrop}
-            onViewHistory={() => router.push('/(app)/stats')}
+            onViewHistory={() => guardedPush(router, '/(app)/stats')}
           />
         )}
       </PullableSheet>

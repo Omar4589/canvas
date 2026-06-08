@@ -68,13 +68,15 @@ Field: `surveysSubmitted`.
 Distinct voters who have a survey — i.e. **how many people we actually reached** (not how many
 forms we filed). Field: `surveyedVoters`.
 
-> **Surveys > Surveyed voters?** Then a voter has more than one response (a re-survey). The intended
-> rule is one survey per voter per pass (the submit path replaces a same-voter, same-pass response),
-> so a gap is usually a same-day double-submit or a response with no round tag. The **Duplicate
-> surveys** report (`GET /admin/reports/duplicate-surveys`; web page `/admin/duplicate-surveys`) lists
-> those voters with **who / when / round / where** for each response and flags *same canvasser · same
-> day* (a likely mistake) vs *different canvassers* (usually a legitimate revisit). Fix by opening the
-> voter profile and deleting the extra response.
+> **Surveys > Surveyed voters?** Then a voter has more than one response (a re-survey). The rule is
+> **one survey per voter per pass**, now **DB-enforced** — the submit upserts on `(voter, pass)` with a
+> unique index ([SurveyResponse.js](../server/src/models/SurveyResponse.js), migration
+> [migrateSurveyDedup.js](../server/src/migrations/migrateSurveyDedup.js)), so a double-tap can no
+> longer create two rows. Any **historical** gap (pre-fix double-submit) shows in the **Duplicate
+> surveys** report (`GET /admin/reports/duplicate-surveys`; web page `/admin/duplicate-surveys`),
+> which lists those voters with **who / when / round / where** and flags *same canvasser · same day*
+> (a likely mistake) vs *different canvassers* (usually a legitimate revisit). Fix by opening the voter
+> profile and deleting the extra response.
 
 ### Connection rate
 **Surveyed knocks ÷ Knocks × 100.** Of the knocks we made, how many landed a survey. A

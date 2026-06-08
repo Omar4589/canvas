@@ -4,7 +4,6 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../lib/useTheme.js';
 import Logo from './Logo.jsx';
 import { IconSun, IconMoon } from './ui/icons.jsx';
-import IconButton from './ui/IconButton.jsx';
 
 const svgProps = {
   viewBox: '0 0 24 24',
@@ -88,10 +87,6 @@ export default function ClientLayout() {
           </Link>
 
           <div className="flex items-center gap-2">
-            <IconButton label="Toggle theme" onClick={toggle}>
-              {dark ? <IconSun /> : <IconMoon />}
-            </IconButton>
-
             <div ref={menuRef} className="relative">
               <button
                 type="button"
@@ -119,6 +114,14 @@ export default function ClientLayout() {
                     <div className="truncate text-xs text-fg-muted">{user?.email}</div>
                   </div>
                   <div className="border-t border-border sm:hidden" />
+                  <button
+                    type="button"
+                    className={itemCls}
+                    onClick={toggle}
+                  >
+                    {dark ? <IconSun size={16} /> : <IconMoon size={16} />}
+                    {dark ? 'Light mode' : 'Dark mode'}
+                  </button>
                   <button
                     type="button"
                     className={itemCls}

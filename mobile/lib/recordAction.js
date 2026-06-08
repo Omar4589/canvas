@@ -69,6 +69,12 @@ export function reconcilePendingHouseholds(households) {
   });
 }
 
+// In-flight de-dup: request paths currently being submitted, so a rapid double-fire to the SAME
+// target (a double-tap, or an offline-queue flush racing a live submit) collapses to one request.
+// The server's unique (voter, pass) index is the final backstop; this just avoids the wasted second
+// call + benign duplicate activity row. Cleared when the submit settles.
+const inFlightPaths = new Set();
+
 // Optimistic-first submit — the heart of the "recolor instantly" fix.
 //
 //   1. Patch the bootstrap cache SYNCHRONOUSLY (the visible feedback: the pin /
@@ -93,6 +99,11 @@ export function optimisticSubmit(qc, {
   hardFailTitle = 'Not saved',
   hardFailMessage = 'Please try again.',
 }) {
+  // If a submit to this exact path is already in flight, ignore the duplicate outright — the
+  // first call already patched the cache; a second would just race to create another row.
+  if (inFlightPaths.has(path)) return Promise.resolve(null);
+  inFlightPaths.add(path);
+
   // Register the unconfirmed status(es) BEFORE the patch so any concurrent or
   // subsequent server-sourced write is overlaid (see reconcilePendingHouseholds).
   for (const p of pending) markPendingHousehold(p.id, p.status);
@@ -105,7 +116,7 @@ export function optimisticSubmit(qc, {
   // refetches that fire later; this just avoids a wasted in-flight one.)
   qc.cancelQueries({ queryKey: ['bootstrap'] }, { revert: false });
 
-  return (async () => {
+  const submitPromise = (async () => {
     let location = null;
     try {
       location = await getCurrentLocation();
@@ -140,6 +151,9 @@ export function optimisticSubmit(qc, {
     flushQueue().catch(() => {});
     return result;
   })();
+  // Clear the in-flight lock once the submit settles (success, queued, or error).
+  submitPromise.finally(() => inFlightPaths.delete(path));
+  return submitPromise;
 }
 
 // Record a single-household action (not_home / wrong_address / lit_dropped),

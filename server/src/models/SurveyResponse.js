@@ -61,7 +61,11 @@ const surveyResponseSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-surveyResponseSchema.index({ voterId: 1, passId: 1 }); // within-pass survey dedup
+// One survey per voter PER PASS — DB-enforced so a double-submit race can't persist two rows.
+// The submit route upserts on this key. passId is always set (a real id or the legacy null
+// bucket), so a plain unique index is correct; different passes/voters are unaffected. NOTE: a
+// pre-existing DB must be deduped before this can build — see migrations/migrateSurveyDedup.js.
+surveyResponseSchema.index({ voterId: 1, passId: 1 }, { unique: true });
 surveyResponseSchema.index({ householdId: 1, passId: 1 }); // per-pass survey existence
 
 export const SurveyResponse = mongoose.model('SurveyResponse', surveyResponseSchema);
