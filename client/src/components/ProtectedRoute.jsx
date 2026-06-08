@@ -6,6 +6,7 @@ export default function ProtectedRoute({
   requireOrgAdmin = false,
   requireSuperAdmin = false,
   requireClientRole = false,
+  requireConsoleUser = false,
   requireActiveOrg = true,
   allowPasswordChange = false,
 }) {
@@ -58,6 +59,12 @@ export default function ProtectedRoute({
 
   if (requireClientRole && !isClient && !isSuperAdmin) {
     return <div className="p-8 text-danger">Forbidden — client access only.</div>;
+  }
+
+  // Console (admin/super-admin) surfaces reachable without an active org — e.g. the shared
+  // /profile page, which a super admin in platform view must still be able to open.
+  if (requireConsoleUser && !isOrgAdmin && !isSuperAdmin) {
+    return <div className="p-8 text-danger">Forbidden — admin access required.</div>;
   }
 
   return children;

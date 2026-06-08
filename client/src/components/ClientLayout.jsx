@@ -28,14 +28,15 @@ export default function ClientLayout() {
             <IconButton label="Toggle theme" onClick={toggle}>
               {dark ? <IconSun /> : <IconMoon />}
             </IconButton>
-            <div className="text-right">
-              <div className="hidden text-xs font-medium text-fg sm:block">
+            <Link to="/client/profile" className="hidden text-right sm:block">
+              <div className="text-xs font-medium text-fg hover:text-brand-accent">
                 {user?.firstName} {user?.lastName}
               </div>
-              <button onClick={logout} className="text-xs font-semibold text-brand-accent hover:underline">
-                Sign out
-              </button>
-            </div>
+              <div className="text-xs text-fg-muted">Account</div>
+            </Link>
+            <button onClick={logout} className="text-xs font-semibold text-brand-accent hover:underline">
+              Sign out
+            </button>
           </div>
         </div>
       </header>

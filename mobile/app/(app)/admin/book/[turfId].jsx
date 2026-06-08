@@ -6,6 +6,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Modal,
+  Alert,
   StyleSheet,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -29,6 +30,57 @@ const STATUS_LABEL = {
   wrong_address: 'Wrong address',
   lit_dropped: 'Lit dropped',
 };
+
+// Outline of the book's homes, computed from the ACTUAL coordinates so it encloses
+// every house — unlike the server's stored boundary, which can miss homes added
+// after it was computed. Uses a convex hull when the homes span an area; falls back
+// to a small bounding box for degenerate books (<3 distinct or all-collinear homes,
+// e.g. a stacked apartment) so a book with homes always shows an enclosing outline.
+// Returns a closed [lng,lat] ring, or null only when there are no homes.
+function outlineRing(points) {
+  return convexHull(points) || bboxRing(points);
+}
+
+// Convex hull (Andrew's monotone chain). Returns a closed ring, or null for <3
+// distinct, non-collinear points (no polygon possible).
+function convexHull(points) {
+  const pts = points.map((p) => [p[0], p[1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (pts.length < 3) return null;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  const ring = lower.concat(upper);
+  if (ring.length < 3) return null;
+  ring.push(ring[0]);
+  return ring;
+}
+
+// Bounding box around the points, padded to a small minimum (~80m) so it's never a
+// degenerate line/point. Always encloses the points. null only when there are none.
+function bboxRing(points, pad = 0.0008) {
+  if (!points.length) return null;
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+  for (const [lng, lat] of points) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  if (maxLng - minLng < pad) { const c = (minLng + maxLng) / 2; minLng = c - pad / 2; maxLng = c + pad / 2; }
+  if (maxLat - minLat < pad) { const c = (minLat + maxLat) / 2; minLat = c - pad / 2; maxLat = c + pad / 2; }
+  return [[minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]];
+}
 
 export default function AdminBookDetail() {
   const { colors } = useTheme();
@@ -114,56 +166,86 @@ export default function AdminBookDetail() {
     }),
     [households]
   );
-  const boundaryFeatures = useMemo(
-    () => ({
+  const boundaryFeatures = useMemo(() => {
+    const ring = outlineRing(households.map((h) => [h.lng, h.lat]));
+    return {
       type: 'FeatureCollection',
-      features: turf?.boundary?.coordinates ? [{ type: 'Feature', geometry: turf.boundary, properties: {} }] : [],
-    }),
-    [turf]
-  );
+      features: ring ? [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: {} }] : [],
+    };
+  }, [households]);
 
-  // Frame the camera to the book's homes once (fallback: centroid).
+  // Frame the camera to the book's homes once they're loaded. IMPORTANT: don't lock
+  // on the centroid fallback while the homes query is still in flight — otherwise a
+  // fast map-load beats the network and we'd never frame the actual houses.
   useEffect(() => {
     if (camInit.current || !mapReady || !cameraRef.current) return;
     const pts = households.map((h) => [h.lng, h.lat]);
-    if (!pts.length) {
+    if (pts.length) {
+      let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+      for (const [lng, lat] of pts) {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+      if (pts.length === 1 || (maxLng === minLng && maxLat === minLat)) {
+        cameraRef.current.setCamera({ centerCoordinate: [minLng, minLat], zoomLevel: 16, animationDuration: 0 });
+      } else {
+        cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [56, 40, 56, 40], 0);
+      }
+      camInit.current = true;
+    } else if (bookQ.isFetched) {
+      // The query actually ran and the book has no homes → settle on the centroid,
+      // then stop. Gate on isFetched (not !isLoading): a query still disabled while
+      // cId resolves reports !isLoading too, and locking there would strand the map.
       if (turf?.centroid?.coordinates?.length === 2) {
         cameraRef.current.setCamera({ centerCoordinate: turf.centroid.coordinates, zoomLevel: 14, animationDuration: 0 });
-        camInit.current = true;
       }
-      return;
+      camInit.current = true;
     }
-    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-    for (const [lng, lat] of pts) {
-      if (lng < minLng) minLng = lng;
-      if (lng > maxLng) maxLng = lng;
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-    }
-    if (pts.length === 1) {
-      cameraRef.current.setCamera({ centerCoordinate: pts[0], zoomLevel: 15, animationDuration: 0 });
-    } else {
-      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [70, 50, 70, 50], 0);
-    }
-    camInit.current = true;
-  }, [households, mapReady, turf]);
+  }, [households, mapReady, turf, bookQ.isFetched]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['admin', 'book-assign', cId, turfId] });
     qc.invalidateQueries({ queryKey: ['admin', 'turf-assignments'] });
     qc.invalidateQueries({ queryKey: ['admin', 'efforts', cId] });
   };
+  // Always reconcile to server truth on settle (success OR error) — so a partial /
+  // failed write doesn't leave the UI disagreeing with the server — and surface
+  // failures instead of failing silently.
+  const onErr = (e) => Alert.alert('Could not update assignments', e?.message || 'Please try again.');
+  const writeOpts = { onSettled: invalidate, onError: onErr };
   const assignMut = useMutation({
     mutationFn: ({ userId }) =>
       api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments`, { method: 'POST', body: { userIds: [userId] } }),
-    onSuccess: invalidate,
+    ...writeOpts,
   });
   const unassignMut = useMutation({
     mutationFn: ({ userId }) =>
       api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments/${userId}`, { method: 'DELETE' }),
-    onSuccess: invalidate,
+    ...writeOpts,
   });
-  const mutating = assignMut.isPending || unassignMut.isPending;
+  const assignAllMut = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments`, {
+        method: 'POST',
+        body: { userIds: roster.map((c) => c.id) },
+      }),
+    ...writeOpts,
+  });
+  const unassignAllMut = useMutation({
+    mutationFn: () =>
+      Promise.allSettled(
+        assignees.map((a) =>
+          api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments/${a.id}`, { method: 'DELETE' })
+        )
+      ).then((results) => {
+        const failed = results.filter((r) => r.status === 'rejected').length;
+        if (failed) throw new Error(`${failed} unassign${failed === 1 ? '' : 's'} failed — refreshed to the latest.`);
+      }),
+    ...writeOpts,
+  });
+  const mutating = assignMut.isPending || unassignMut.isPending || assignAllMut.isPending || unassignAllMut.isPending;
 
   // House popup detail (address + voters), fetched on tap.
   const houseQ = useQuery({
@@ -191,9 +273,21 @@ export default function AdminBookDetail() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <Header onBack={() => router.back()} title={turf?.name || 'Book'} styles={styles} />
-      <Text style={styles.subLine}>
-        {bookQ.isLoading ? 'Loading…' : `${knocked}/${total} done · ${assignees.length} assigned`}
-      </Text>
+      <View style={styles.topBar}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.topBarCount}>
+            {bookQ.isLoading ? 'Loading…' : `${knocked}/${total} done · ${assignees.length} assigned`}
+          </Text>
+          <Text style={styles.topBarNames} numberOfLines={1}>
+            {assignees.length
+              ? assignees.map((a) => `${a.firstName} ${(a.lastName || '')[0] || ''}`).join(', ')
+              : 'No one assigned'}
+          </Text>
+        </View>
+        <Pressable onPress={() => setAssignOpen(true)} style={styles.barBtn}>
+          <Text style={styles.barBtnText}>Assign</Text>
+        </Pressable>
+      </View>
 
       <View style={{ flex: 1 }}>
         <Mapbox.MapView
@@ -261,20 +355,6 @@ export default function AdminBookDetail() {
             <ActivityIndicator color={colors.brand} />
           </View>
         )}
-
-        {/* Assignees bar */}
-        <SafeAreaView edges={['bottom']} style={styles.barWrap} pointerEvents="box-none">
-          <View style={styles.bar}>
-            <Text style={styles.barText} numberOfLines={1}>
-              {assignees.length
-                ? assignees.map((a) => `${a.firstName} ${(a.lastName || '')[0] || ''}`).join(', ')
-                : 'No one assigned'}
-            </Text>
-            <Pressable onPress={() => setAssignOpen(true)} style={styles.barBtn}>
-              <Text style={styles.barBtnText}>Assign</Text>
-            </Pressable>
-          </View>
-        </SafeAreaView>
       </View>
 
       {/* House tap detail */}
@@ -325,7 +405,24 @@ export default function AdminBookDetail() {
                 </Text>
               </Text>
             ) : (
-              <ScrollView style={{ maxHeight: 360 }}>
+              <>
+                <View style={styles.bulkRow}>
+                  <Pressable
+                    onPress={() => assignAllMut.mutate()}
+                    disabled={mutating}
+                    style={[styles.bulkBtn, styles.bulkAssign, mutating && styles.bulkBtnDisabled]}
+                  >
+                    <Text style={styles.bulkAssignText}>Assign all</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => unassignAllMut.mutate()}
+                    disabled={mutating || assignees.length === 0}
+                    style={[styles.bulkBtn, styles.bulkUnassign, (mutating || assignees.length === 0) && styles.bulkBtnDisabled]}
+                  >
+                    <Text style={styles.bulkUnassignText}>Unassign all</Text>
+                  </Pressable>
+                </View>
+                <ScrollView style={{ maxHeight: 360 }}>
                 {roster.map((c) => {
                   const assigned = assignedSet.has(c.id);
                   return (
@@ -351,6 +448,7 @@ export default function AdminBookDetail() {
                   );
                 })}
               </ScrollView>
+              </>
             )}
           </View>
         </View>
@@ -374,7 +472,7 @@ function Header({ onBack, title, styles }) {
 }
 
 function makeStyles(t) {
-  const { colors, type, shadow } = t;
+  const { colors, type } = t;
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.bg },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
@@ -388,26 +486,18 @@ function makeStyles(t) {
     headerSide: { width: 64 },
     back: { color: colors.brand, fontWeight: '700', fontSize: 16 },
     headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
-    subLine: { ...type.caption, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.sm },
-
     mapLoading: { position: 'absolute', top: spacing.lg, alignSelf: 'center' },
 
-    barWrap: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-    bar: {
+    topBar: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.md,
-      margin: spacing.md,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm + 2,
-      backgroundColor: colors.card,
-      borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
-      ...shadow.raised,
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm,
     },
-    barText: { ...type.caption, color: colors.textPrimary, flex: 1, fontWeight: '600' },
-    barBtn: { backgroundColor: colors.brand, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+    topBarCount: { ...type.caption, color: colors.textSecondary },
+    topBarNames: { ...type.bodyStrong, fontSize: 14, marginTop: 1 },
+    barBtn: { backgroundColor: colors.brand, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2 },
     barBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 14 },
 
     sheetBackdrop: { flex: 1, backgroundColor: colors.backdrop, justifyContent: 'flex-end' },
@@ -436,6 +526,13 @@ function makeStyles(t) {
     },
     assignHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
     link: { color: colors.brand, fontWeight: '700' },
+    bulkRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+    bulkBtn: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm + 2, borderRadius: radius.md, borderWidth: 1 },
+    bulkBtnDisabled: { opacity: 0.5 },
+    bulkAssign: { borderColor: colors.brand, backgroundColor: colors.brandTint },
+    bulkAssignText: { color: colors.brand, fontWeight: '700', fontSize: 13 },
+    bulkUnassign: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerBg },
+    bulkUnassignText: { color: colors.danger, fontWeight: '700', fontSize: 13 },
     assignRow: {
       flexDirection: 'row',
       alignItems: 'center',

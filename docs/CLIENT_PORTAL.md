@@ -66,8 +66,11 @@ delete a draft or a published report.
 ## Giving a candidate a login
 
 On the **Users** page, **Add member** with the role **Client (read-only)** and check the campaign(s)
-whose reports they should see. (Give them an initial password; like any new user they'll be asked to
-set their own at first sign-in.) A client only ever sees **published reports for the campaigns you
+whose reports they should see. You set an **initial password** and hand it over; the client then signs
+in and can **change it themselves** any time from their **Account** page (the link in the portal
+header). They are *not* forced to change it on first login — if you'd rather hand them a one-time
+password they must replace, use **Set temporary password** on their profile (a 72-hour temp that
+forces a change at next login). A client only ever sees **published reports for the campaigns you
 grant** — never other campaigns in your org, never drafts, never live data. You can change a client's
 campaign access any time from their profile (Users → click the client → **Campaign access**).
 
@@ -185,6 +188,10 @@ and the admin preview, so the operator's preview is byte-for-byte what the clien
   client-side filtering. Role wiring: `isClient` in [AuthContext](../client/src/auth/AuthContext.jsx),
   `requireClientRole` in [ProtectedRoute](../client/src/components/ProtectedRoute.jsx), and the
   role-based redirect in [LoginPage](../client/src/pages/LoginPage.jsx).
+- Account: a shared self-serve [ProfilePage](../client/src/pages/ProfilePage.jsx) (edit name/phone via
+  `PATCH /auth/me`, change your own password via `POST /auth/change-password`) served at
+  `/client/profile` (portal header link) and `/profile` (admin + super-admin console, linked from the
+  sidebar user card; gated by `requireConsoleUser` so a super admin in platform view can reach it).
 
 ## Migration
 

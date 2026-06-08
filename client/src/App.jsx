@@ -13,6 +13,7 @@ const ClientReportBuilderPage = lazy(() => import('./pages/ClientReportBuilderPa
 const ClientLayout = lazy(() => import('./components/ClientLayout.jsx'));
 const ClientReportListPage = lazy(() => import('./pages/ClientReportListPage.jsx'));
 const ClientReportDetailPage = lazy(() => import('./pages/ClientReportDetailPage.jsx'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
 const EarlyVotingPage = lazy(() => import('./pages/EarlyVotingPage.jsx'));
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
@@ -106,6 +107,16 @@ export default function App() {
         >
           <Route path="/client" element={<ClientReportListPage />} />
           <Route path="/client/reports/:reportId" element={<ClientReportDetailPage />} />
+          <Route path="/client/profile" element={<ProfilePage />} />
+        </Route>
+        <Route
+          element={
+            <ProtectedRoute requireConsoleUser requireActiveOrg={false}>
+              <Layout />
+            </ProtectedRoute>
+          }
+        >
+          <Route path="/profile" element={<ProfilePage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -231,11 +231,6 @@ export default function AdminBooks() {
             />
           </View>
         )}
-        {passId && roundTotals.total ? (
-          <Text style={styles.roundLine}>
-            {currentEffort?.activeRound?.name || 'Active round'} · {roundTotals.knocked} / {roundTotals.total} doors done
-          </Text>
-        ) : null}
       </View>
 
       {/* View toggle */}
@@ -279,30 +274,34 @@ export default function AdminBooks() {
         </View>
       )}
 
-      {/* Count + Select — below the search / filter row */}
+      {/* Count + round caption (stacked) with Select beside them — below the search / filter row */}
       {!!passId && view === 'book' && books.length > 0 && (
         <View style={styles.summaryRow}>
-          {selectMode ? (
-            <>
-              <Text style={styles.summaryText}>{selectedBooks.size} selected</Text>
-              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                <Pressable onPress={selectAllVisible} style={styles.filterChip}>
-                  <Text style={styles.filterChipText}>Select all</Text>
-                </Pressable>
-                <Pressable onPress={exitSelect} style={styles.filterChip}>
-                  <Text style={styles.filterChipText}>Cancel</Text>
-                </Pressable>
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.summaryText}>
-                {books.length} book{books.length === 1 ? '' : 's'} · {unassignedCount} unassigned
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryText}>
+              {selectMode
+                ? `${selectedBooks.size} selected`
+                : `${books.length} book${books.length === 1 ? '' : 's'} · ${unassignedCount} unassigned`}
+            </Text>
+            {roundTotals.total ? (
+              <Text style={styles.roundLine}>
+                {currentEffort?.activeRound?.name || 'Active round'} · {roundTotals.knocked} / {roundTotals.total} doors done
               </Text>
-              <Pressable onPress={() => setSelectMode(true)} style={styles.filterChip}>
-                <Text style={styles.filterChipText}>Select</Text>
+            ) : null}
+          </View>
+          {selectMode ? (
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Pressable onPress={selectAllVisible} style={styles.filterChip}>
+                <Text style={styles.filterChipText}>Select all</Text>
               </Pressable>
-            </>
+              <Pressable onPress={exitSelect} style={styles.filterChip}>
+                <Text style={styles.filterChipText}>Cancel</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable onPress={() => setSelectMode(true)} style={styles.filterChip}>
+              <Text style={styles.filterChipText}>Select</Text>
+            </Pressable>
           )}
         </View>
       )}
@@ -571,7 +570,7 @@ function makeStyles(t) {
     header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
     headerTitle: { ...type.h3, textAlign: 'center' },
     context: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-    roundLine: { ...type.caption, color: colors.textSecondary, marginTop: spacing.sm },
+    roundLine: { ...type.caption, color: colors.textSecondary, marginTop: 2 },
 
     segmentWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     segment: {
@@ -595,6 +594,7 @@ function makeStyles(t) {
       alignItems: 'center',
       justifyContent: 'space-between',
     },
+    summaryInfo: { flex: 1, paddingRight: spacing.md },
     summaryText: { ...type.caption, color: colors.textSecondary },
 
     controls: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, flexDirection: 'row', gap: spacing.sm },

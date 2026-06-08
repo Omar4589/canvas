@@ -73,6 +73,17 @@ export function AuthProvider({ children }) {
     return res;
   }
 
+  // Self-serve profile update (name/phone). Email is admin-only — see PATCH /auth/me.
+  async function updateProfile({ firstName, lastName, phone }) {
+    const res = await api('/auth/me', {
+      method: 'PATCH',
+      body: { firstName, lastName, phone },
+    });
+    setUser(res.user);
+    setMemberships(res.memberships || []);
+    return res;
+  }
+
   async function acknowledgeMembership(membershipId) {
     await api(`/auth/memberships/${membershipId}/acknowledge`, { method: 'POST' });
     setMemberships((list) =>
@@ -113,6 +124,7 @@ export function AuthProvider({ children }) {
         logout,
         switchOrg,
         changePassword,
+        updateProfile,
         acknowledgeMembership,
       }}
     >

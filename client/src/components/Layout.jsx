@@ -162,10 +162,12 @@ export default function Layout() {
             </IconButton>
           ) : (
             <div className="mt-2 px-1">
-              <div className="truncate text-sm font-medium text-fg">
-                {user?.firstName} {user?.lastName}
-              </div>
-              <div className="truncate text-xs text-fg-muted">{user?.email}</div>
+              <NavLink to="/profile" className="block rounded-md py-0.5 hover:text-brand-accent">
+                <div className="truncate text-sm font-medium text-fg">
+                  {user?.firstName} {user?.lastName}
+                </div>
+                <div className="truncate text-xs text-fg-muted">{user?.email}</div>
+              </NavLink>
               <button
                 onClick={logout}
                 className="mt-2 text-xs font-semibold text-brand-accent hover:text-brand-hover"
