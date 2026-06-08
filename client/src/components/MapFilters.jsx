@@ -1,4 +1,4 @@
-const STATUSES = ['surveyed', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
+const DEFAULT_STATUSES = ['surveyed', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
 
 function StatusChip({ status, active, count, onClick, color, label }) {
   return (
@@ -48,6 +48,9 @@ export default function MapFilters({
   // The read-only client map has no canvasser identity — hide the Layers toggle + the
   // canvasser dropdown entirely.
   hideCanvassers = false,
+  // Which status chips to offer (the client map drops Unknocked, and Lit dropped for survey
+  // campaigns). Defaults to the full admin set.
+  statuses = DEFAULT_STATUSES,
 }) {
   function toggleStatus(s) {
     if (statusFilter.includes(s)) onStatusChange(statusFilter.filter((x) => x !== s));
@@ -117,7 +120,7 @@ export default function MapFilters({
       <div>
         <SectionLabel>Status</SectionLabel>
         <div className="space-y-1.5">
-          {STATUSES.map((s) => (
+          {statuses.map((s) => (
             <StatusChip
               key={s}
               status={s}

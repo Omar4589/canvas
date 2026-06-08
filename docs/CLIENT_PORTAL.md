@@ -37,9 +37,10 @@ reports**, newest first. Opening one shows:
   show.
 - **Canvasser observations** — your written, sectioned narrative (e.g. *Voter Intent*, *Opponent
   Activity*).
-- **A coverage map** — an interactive, read-only map of where the team has been, colored by door
-  status, with filters by status and survey answer. It shows **no canvasser names or locations** —
-  only the doors and their outcomes.
+- **A coverage map** — an interactive, read-only map of where the team has been: only the doors we
+  actually reached (unknocked doors are hidden), colored by outcome, with filters by status and survey
+  answer (the status chips follow the campaign type — no lit-drop chip on a survey campaign). It shows
+  **no canvasser names or locations** — only the doors and their outcomes.
 
 The numbers and the map are **frozen at publish time** — a published report never changes, even as the
 team keeps knocking. Next week's report picks up the new activity.

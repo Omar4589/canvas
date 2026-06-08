@@ -25,10 +25,20 @@ function matchesAnswer(h, answerFilter) {
   return String(a.answer) === String(answerFilter.option);
 }
 
+// The client map only shows doors we actually reached — every non-unknocked status. Survey
+// campaigns drop the lit-drop chip; lit-drop campaigns drop the surveyed chip.
+function visibleStatusesFor(campaignType) {
+  const base = ['surveyed', 'not_home', 'wrong_address', 'lit_dropped'];
+  if (campaignType === 'survey') return base.filter((s) => s !== 'lit_dropped');
+  if (campaignType === 'lit_drop') return base.filter((s) => s !== 'surveyed');
+  return base;
+}
+
 export default function ClientReportMap({
   mapDataPath,
   tokenPath = '/client/config/mapbox-token',
   survey,
+  campaignType = null,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -53,14 +63,21 @@ export default function ClientReportMap({
   });
 
   const households = dataQ.data?.households || [];
+  const visibleStatuses = useMemo(() => visibleStatusesFor(campaignType), [campaignType]);
+
+  // Only doors we actually reached — drop unknocked (and anything off the campaign-type set).
+  const reached = useMemo(
+    () => households.filter((h) => visibleStatuses.includes(h.status)),
+    [households, visibleStatuses]
+  );
   const filtered = useMemo(
     () =>
-      households.filter(
+      reached.filter(
         (h) =>
           (statusFilter.length === 0 || statusFilter.includes(h.status)) &&
           matchesAnswer(h, answerFilter)
       ),
-    [households, statusFilter, answerFilter]
+    [reached, statusFilter, answerFilter]
   );
 
   useEffect(() => {
@@ -156,7 +173,7 @@ export default function ClientReportMap({
     );
   }
 
-  const noDoors = !dataQ.isLoading && households.length === 0;
+  const noDoors = !dataQ.isLoading && reached.length === 0;
 
   return (
     <div
@@ -167,7 +184,7 @@ export default function ClientReportMap({
         <div className="mb-3 text-xs text-fg-muted">
           {dataQ.isLoading
             ? 'Loading doors…'
-            : `${filtered.length.toLocaleString()} of ${households.length.toLocaleString()} doors`}
+            : `${filtered.length.toLocaleString()} of ${reached.length.toLocaleString()} doors knocked`}
         </div>
         <MapFilters
           statusFilter={statusFilter}
@@ -177,6 +194,7 @@ export default function ClientReportMap({
           survey={survey}
           statusColors={STATUS_COLORS}
           statusLabels={STATUS_LABELS}
+          statuses={visibleStatuses}
           hideCanvassers
         />
       </aside>

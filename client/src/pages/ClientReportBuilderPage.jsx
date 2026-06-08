@@ -366,6 +366,7 @@ export default function ClientReportBuilderPage() {
                     mapDataPath={`/admin/client-reports/${id}/preview/map`}
                     tokenPath="/admin/config/mapbox-token"
                     survey={previewQ.data.survey}
+                    campaignType={previewQ.data.report.campaignType}
                   />
                 </section>
               )}

@@ -40,6 +40,7 @@ export default function ClientReportDetailPage() {
             mapDataPath={`/client/reports/${id}/map`}
             tokenPath="/client/config/mapbox-token"
             survey={q.data.survey}
+            campaignType={report.campaignType}
           />
         </section>
       )}

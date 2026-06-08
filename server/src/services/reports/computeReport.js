@@ -183,6 +183,9 @@ export async function buildFrozenMapPoints({ report, campaign, mapAnswerKeys = [
     if (coords.length < 2) continue;
     const status = resolveStatus(campaign.type, actsByHh.get(String(h._id)) || []);
     coverage[status] = (coverage[status] || 0) + 1;
+    // The client map shows only doors we actually reached — skip unknocked points (coverage
+    // above still counts them). The client UI also filters unknocked for older snapshots.
+    if (status === 'unknocked') continue;
     points.push({
       clientReportId: report._id,
       organizationId: orgId,
