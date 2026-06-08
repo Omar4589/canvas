@@ -26,6 +26,8 @@ import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
 import mobileMeRouter from './mobile/me.js';
 import mobileVotersRouter from './mobile/voters.js';
+import clientReportsRouter from './client/reports.js';
+import adminClientReportsRouter from './admin/clientReports.js';
 
 const router = Router();
 
@@ -38,7 +40,7 @@ router.use('/auth', authRouter);
 // Gate every protected surface for users who owe a password change. Runs before
 // the sub-routers (which re-run requireAuth harmlessly). /auth is excluded above
 // so change-password / me / logout stay reachable while the flag is set.
-router.use(['/super-admin', '/admin', '/mobile'], requireAuth, blockIfMustChangePassword);
+router.use(['/super-admin', '/admin', '/mobile', '/client'], requireAuth, blockIfMustChangePassword);
 
 router.use('/super-admin/organizations', superAdminOrganizationsRouter);
 router.use('/super-admin/users', superAdminUsersRouter);
@@ -60,11 +62,17 @@ router.use('/admin/campaigns/:campaignId/passes', adminPassesRouter);
 router.use('/admin/campaigns/:campaignId/turfs/:turfId/assignments', adminTurfAssignmentsRouter);
 router.use('/admin/campaigns/:campaignId/turfs', adminTurfsRouter);
 router.use('/admin/activities', adminActivitiesRouter);
+router.use('/admin/client-reports', adminClientReportsRouter);
 router.use('/admin/queues', adminQueuesRouter);
 
 router.use('/mobile', mobileBootstrapRouter);
 router.use('/mobile', mobileCanvassRouter);
 router.use('/mobile', mobileVotersRouter);
 router.use('/mobile/me', mobileMeRouter);
+
+// Read-only client (candidate) portal. Reuses the org-member-gated mapbox token endpoint;
+// /client/reports applies requireClientRole + per-campaign scope internally.
+router.use('/client/config', adminConfigRouter);
+router.use('/client/reports', clientReportsRouter);
 
 export default router;

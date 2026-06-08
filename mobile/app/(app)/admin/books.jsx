@@ -255,34 +255,6 @@ export default function AdminBooks() {
         </View>
       </View>
 
-      {/* Summary + Select (by book) */}
-      {!!passId && view === 'book' && books.length > 0 && (
-        <View style={styles.summaryRow}>
-          {selectMode ? (
-            <>
-              <Text style={styles.summaryText}>{selectedBooks.size} selected</Text>
-              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                <Pressable onPress={selectAllVisible} hitSlop={6}>
-                  <Text style={styles.summaryAction}>Select all</Text>
-                </Pressable>
-                <Pressable onPress={exitSelect} hitSlop={6}>
-                  <Text style={styles.summaryAction}>Cancel</Text>
-                </Pressable>
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.summaryText}>
-                {books.length} book{books.length === 1 ? '' : 's'} · {unassignedCount} unassigned
-              </Text>
-              <Pressable onPress={() => setSelectMode(true)} hitSlop={6}>
-                <Text style={styles.summaryAction}>Select</Text>
-              </Pressable>
-            </>
-          )}
-        </View>
-      )}
-
       {!!passId && (
         <View style={styles.controls}>
           <TextInput
@@ -303,6 +275,34 @@ export default function AdminBooks() {
                 Unassigned only{unassignedCount ? ` (${unassignedCount})` : ''}
               </Text>
             </Pressable>
+          )}
+        </View>
+      )}
+
+      {/* Count + Select — below the search / filter row */}
+      {!!passId && view === 'book' && books.length > 0 && (
+        <View style={styles.summaryRow}>
+          {selectMode ? (
+            <>
+              <Text style={styles.summaryText}>{selectedBooks.size} selected</Text>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Pressable onPress={selectAllVisible} style={styles.filterChip}>
+                  <Text style={styles.filterChipText}>Select all</Text>
+                </Pressable>
+                <Pressable onPress={exitSelect} style={styles.filterChip}>
+                  <Text style={styles.filterChipText}>Cancel</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.summaryText}>
+                {books.length} book{books.length === 1 ? '' : 's'} · {unassignedCount} unassigned
+              </Text>
+              <Pressable onPress={() => setSelectMode(true)} style={styles.filterChip}>
+                <Text style={styles.filterChipText}>Select</Text>
+              </Pressable>
+            </>
           )}
         </View>
       )}
@@ -596,7 +596,6 @@ function makeStyles(t) {
       justifyContent: 'space-between',
     },
     summaryText: { ...type.caption, color: colors.textSecondary },
-    summaryAction: { ...type.caption, color: colors.brand, fontWeight: '700' },
 
     controls: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, flexDirection: 'row', gap: spacing.sm },
     search: {
