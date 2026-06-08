@@ -121,7 +121,9 @@ export default function VoterSurvey() {
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
 
-  const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'] });
+  // Pure reader (see household/[id].jsx): no auto-refetch on mount, so a stale
+  // bootstrap fetch can't revert the optimistic recolor after a survey submit.
+  const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'], refetchOnMount: false });
   const voter = (bootstrap?.voters || []).find((v) => String(v._id) === String(id));
   const household = useMemo(
     () =>

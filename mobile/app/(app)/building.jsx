@@ -15,7 +15,9 @@ export default function BuildingScreen() {
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
 
-  const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'] });
+  // Pure reader (see household/[id].jsx): no auto-refetch on mount, so a stale
+  // bootstrap fetch can't revert an optimistic quick-action recolor.
+  const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'], refetchOnMount: false });
   const campaignType = bootstrap?.campaign?.type || 'survey';
   const { buildings } = groupBuildings(bootstrap?.households || []);
   const building = buildings.find((b) => b.key === bkey) || null;

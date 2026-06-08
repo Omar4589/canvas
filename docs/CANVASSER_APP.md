@@ -41,7 +41,6 @@ Every canvasser screen has a **menu button (☰) in the top-right**. Tapping it 
 the right with the things you reach for occasionally:
 
 - **My stats** — your per-day shift history + all-time totals, connection rate, and a doors-per-day trend.
-- **Voters** — the voter directory / lookup.
 - **Appearance** — Light / Dark / System.
 - **Switch organization** — only if you belong to more than one (or you're a super admin).
 - **Admin dashboard** — only if you're an admin (jumps to the admin side).
@@ -128,7 +127,9 @@ and would fight the Mapbox pan gesture). It opens by **tap**.
   never compete). It **renders `null` while closed**, so it never intercepts a touch on the map
   underneath — the key correctness property. The body reuses the `admin/more.jsx` Row/grouped-card
   pattern and embeds `<ThemeToggle/>`; rows are gated by `loadRoleContext()` (admin/super) and active
-  campaign (My stats / Voters).
+  campaign (My stats). Canvassers have **no voter-lookup entry** — they work their assigned doors and
+  see each household's voters at the door; the `/(app)/voters` screens + `/mobile/voters*` endpoints
+  still exist (unreached) for a possible future admin use.
 - Mount: rendered in [_layout.jsx](../mobile/app/(app)/_layout.jsx) as a sibling **after** `<Stack>`
   and `<AddedToOrgBanner/>`, so it paints above the map and the bottom sheet. Inert until a screen's
   header calls `openDrawer()`, so it never shows on admin tab screens.

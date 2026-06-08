@@ -14,7 +14,9 @@ const path = require('path');
 const sharp = require('sharp');
 
 // Must match STATUS_COLOR in the (now-removed) marker components.
-const STATUS_COLORS = { grey: '#9ca3af', yellow: '#f59e0b', green: '#22c55e' };
+// 'yellow' = in-progress. A true yellow (not the old mustard/amber #f59e0b) so it
+// reads clearly between grey (not started) and green (done).
+const STATUS_COLORS = { grey: '#9ca3af', yellow: '#facc15', green: '#22c55e' };
 
 const SIZE = 128; // px, matches house-*.png
 

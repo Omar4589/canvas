@@ -129,7 +129,10 @@ export default function HouseholdDetail() {
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
 
-  const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'] });
+  // Pure reader of the cache the map maintains — must NOT auto-refetch the whole
+  // campaign on mount, or a stale refetch resolving after an action would revert
+  // the optimistic recolor (the blue→grey→blue flicker).
+  const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'], refetchOnMount: false });
   const campaignType = bootstrap?.campaign?.type || 'survey';
   const { household, voters } = findHouseholdAndVoters(bootstrap, id);
 

@@ -328,6 +328,13 @@ export default function MapScreen() {
     },
     enabled: !!activeCampaign?.id,
     staleTime: 5 * 60 * 1000,
+    // Never auto-refetch the whole campaign on (re)mount. A full bootstrap refetch
+    // returns the server's CURRENT state, which lags a just-recorded action by the
+    // round-trip — so an automatic one resolving right after an optimistic recolor
+    // would revert the pin to its pre-action color (the blue→grey→blue flicker).
+    // Liveness comes from the 30s `changes` delta (incremental, safe) + manual
+    // pull-to-refresh, in line with the app's delta-based, battery-conscious design.
+    refetchOnMount: false,
   });
 
   // Scope the map to the selected book(s): the live nav param when entering from

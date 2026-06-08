@@ -54,6 +54,14 @@ export function optimisticSubmit(qc, {
 }) {
   writeBootstrap(qc, optimisticPatch);
 
+  // Discard any bootstrap refetch that is in flight RIGHT NOW (e.g. a manual
+  // pull-to-refresh, or a stale-data refetch a screen kicked off on mount). If it
+  // resolved after this patch but before the background write below lands, it
+  // would carry PRE-action data and clobber the recolor — the blue→grey→blue
+  // flicker canvassers saw. revert:false keeps the optimistic data we just wrote
+  // instead of rolling the query back to its pre-fetch (grey) state.
+  qc.cancelQueries({ queryKey: ['bootstrap'] }, { revert: false });
+
   return (async () => {
     let location = null;
     try {

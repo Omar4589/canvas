@@ -184,8 +184,10 @@ export default function CanvasserDrawer() {
                 <>
                   <Text style={styles.sectionLabel}>Navigate</Text>
                   <View style={styles.group}>
-                    <Row icon="📊" label="My stats" onPress={() => go('/(app)/stats')} />
-                    <Row icon="👥" label="Voters" onPress={() => go('/(app)/voters')} last />
+                    {/* Voter lookup intentionally omitted for canvassers — they work
+                        the doors assigned to them and see each household's voters at
+                        the door. Voter search remains an admin-only tool. */}
+                    <Row icon="📊" label="My stats" onPress={() => go('/(app)/stats')} last />
                   </View>
                 </>
               )}

@@ -14,7 +14,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.resolve(__dirname, '../assets/icons');
 
 const STATUS_COLORS = {
-  unknocked: '#9ca3af',
+  // Unvisited houses are near-black so they read as "to do" against any base map;
+  // visited statuses keep their meaningful colors. White stroke + white window/door
+  // keep the dark pin legible on dark map styles too.
+  unknocked: '#1f2937',
   not_home: '#3b82f6',
   surveyed: '#22c55e',
   wrong_address: '#ef4444',

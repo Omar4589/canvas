@@ -195,9 +195,18 @@ and would then need to reconcile deleted pings.
 Recording an action does **not** wait for any of these intervals: the optimistic cache patch (C)
 recolors the door immediately and the submit runs in the background. The 30s `changes` poll only
 *reconciles* other canvassers' edits — it returns only households the server changed since `since=`, so
-it won't revert a local optimistic change the server hasn't recorded yet. The bootstrap query holds a
-5-min `staleTime` and no `refetchInterval`, and map focus only refreshes the pending badge (not a
-bootstrap refetch), so returning to the map after an action can't clobber the fresh pin.
+it won't revert a local optimistic change the server hasn't recorded yet.
+
+**A full `bootstrap` refetch is the one thing that *would* clobber an optimistic recolor** — it returns
+the server's current state, which lags a just-recorded action by the round-trip, so one resolving right
+after a tap reverts the pin to its pre-action color (a blue→grey→blue flicker). To prevent that, every
+`['bootstrap']` reader sets **`refetchOnMount: false`** (map, household, survey, building) so opening a
+house — or the map remounting after a survey — never kicks off a stale full refetch; and
+`optimisticSubmit` calls **`cancelQueries(['bootstrap'], { revert: false })`** to discard any bootstrap
+fetch already in flight at record time (e.g. a manual pull-to-refresh). Bootstrap now refetches only on
+first load, manual pull-to-refresh, campaign switch, or a hard-fail `invalidate`; liveness in between is
+the `changes` delta. (`refetchOnWindowFocus` is already globally `false`; `focusManager` tracks
+app-foreground via AppState, not screen navigation.)
 
 ## G. Status colors & legend
 
@@ -227,6 +236,11 @@ Canonical palette (hex): `unknocked #9ca3af`, `not_home #3b82f6`, `surveyed #22c
 - **Recording is optimistic-first.** The pin recolors before the network call; GPS + submit run in the
   background ([lib/recordAction.js](../mobile/lib/recordAction.js)). Never re-add an `await` before the
   cache patch — that ordering was the cause of the field "did it register?" delay.
+- **Every `['bootstrap']` reader sets `refetchOnMount: false`** (map, household, survey, building). A
+  full bootstrap refetch returns pre-action server state; one firing on screen (re)mount used to revert
+  a fresh optimistic recolor (blue→grey→blue). Don't drop this flag or add a bootstrap `refetchInterval`
+  — use the `changes` delta for liveness. `optimisticSubmit` also `cancelQueries(['bootstrap'])` to kill
+  any in-flight refetch at record time.
 - **`api` has a ~20s timeout** ([lib/api.js](../mobile/lib/api.js)); a bare fetch with none let weak
   signal hang ~60s before an action would queue offline.
 - **No reconnect-flush yet.** The offline queue flushes on focus / foreground / refresh / next-action,
