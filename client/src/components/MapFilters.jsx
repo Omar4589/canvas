@@ -45,6 +45,9 @@ export default function MapFilters({
   statusLabels,
   showCanvasserPins = false,
   onShowCanvasserPinsChange,
+  // The read-only client map has no canvasser identity — hide the Layers toggle + the
+  // canvasser dropdown entirely.
+  hideCanvassers = false,
 }) {
   function toggleStatus(s) {
     if (statusFilter.includes(s)) onStatusChange(statusFilter.filter((x) => x !== s));
@@ -68,33 +71,35 @@ export default function MapFilters({
 
   function clearAll() {
     onStatusChange([]);
-    onCanvasserChange('');
+    onCanvasserChange?.('');
     onAnswerChange({ questionKey: '', option: '' });
   }
 
   const hasActiveFilters =
     statusFilter.length > 0 ||
-    canvasserId ||
+    (!hideCanvassers && canvasserId) ||
     (answerFilter?.questionKey && answerFilter?.option);
 
   return (
     <div className="space-y-5">
-      <div>
-        <SectionLabel>Layers</SectionLabel>
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={showCanvasserPins}
-            onChange={(e) => onShowCanvasserPinsChange?.(e.target.checked)}
-            className="h-4 w-4 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
-          />
-          <span className="text-fg">Show canvasser locations</span>
-        </label>
-        <div className="mt-1 text-xs text-fg-muted">
-          Where each survey, not-home, or wrong-address was submitted from, labeled
-          with the canvasser&apos;s initials.
+      {!hideCanvassers && (
+        <div>
+          <SectionLabel>Layers</SectionLabel>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showCanvasserPins}
+              onChange={(e) => onShowCanvasserPinsChange?.(e.target.checked)}
+              className="h-4 w-4 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
+            />
+            <span className="text-fg">Show canvasser locations</span>
+          </label>
+          <div className="mt-1 text-xs text-fg-muted">
+            Where each survey, not-home, or wrong-address was submitted from, labeled
+            with the canvasser&apos;s initials.
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-fg">Filters</h3>
@@ -125,21 +130,23 @@ export default function MapFilters({
         </div>
       </div>
 
-      <div>
-        <SectionLabel>Canvasser</SectionLabel>
-        <select
-          value={canvasserId}
-          onChange={(e) => onCanvasserChange(e.target.value)}
-          className="w-full rounded border border-border bg-card px-2 py-1.5 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-        >
-          <option value="">Any canvasser</option>
-          {canvassers.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.firstName} {c.lastName}
-            </option>
-          ))}
-        </select>
-      </div>
+      {!hideCanvassers && (
+        <div>
+          <SectionLabel>Canvasser</SectionLabel>
+          <select
+            value={canvasserId}
+            onChange={(e) => onCanvasserChange(e.target.value)}
+            className="w-full rounded border border-border bg-card px-2 py-1.5 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            <option value="">Any canvasser</option>
+            {canvassers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.firstName} {c.lastName}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {choiceQuestions.length > 0 && (
         <div>

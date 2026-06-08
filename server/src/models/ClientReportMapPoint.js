@@ -43,8 +43,6 @@ const clientReportMapPointSchema = new mongoose.Schema(
   { timestamps: false }
 );
 
-clientReportMapPointSchema.index({ clientReportId: 1 });
-
 export const ClientReportMapPoint = mongoose.model(
   'ClientReportMapPoint',
   clientReportMapPointSchema

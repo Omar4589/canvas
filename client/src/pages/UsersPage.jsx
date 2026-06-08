@@ -26,6 +26,7 @@ const EMPTY_FORM = {
   password: '',
   role: 'canvasser',
   coordinatorId: '',
+  clientCampaignIds: [],
 };
 
 const SORT_OPTIONS = [
@@ -59,6 +60,12 @@ export default function UsersPage() {
     queryKey: ['memberships'],
     queryFn: () => api('/admin/memberships'),
   });
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+    staleTime: 60 * 1000,
+  });
+  const campaigns = campaignsQ.data?.campaigns || [];
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -143,8 +150,11 @@ export default function UsersPage() {
       email: form.email.trim(),
       role: form.role,
       linkExisting: emailLookup,
-      coordinatorId: form.coordinatorId || null,
+      coordinatorId: form.role === 'client' ? null : form.coordinatorId || null,
     };
+    if (form.role === 'client') {
+      body.clientCampaignIds = form.clientCampaignIds;
+    }
     if (!emailLookup) {
       body.firstName = form.firstName;
       body.lastName = form.lastName;
@@ -197,25 +207,62 @@ export default function UsersPage() {
             >
               <option value="canvasser">Canvasser</option>
               <option value="admin">Admin</option>
+              <option value="client">Client (read-only)</option>
             </Select>
           </div>
-          <div className="md:col-span-3">
-            <label className={labelCls}>
-              Coordinator <span className="text-fg-subtle">(optional)</span>
-            </label>
-            <Select
-              value={form.coordinatorId}
-              onChange={(e) => setForm((s) => ({ ...s, coordinatorId: e.target.value }))}
-              className="mt-1 w-full"
-            >
-              <option value="">— None —</option>
-              {admins.map((m) => (
-                <option key={m.user.id} value={m.user.id}>
-                  {m.user.firstName} {m.user.lastName}
-                </option>
-              ))}
-            </Select>
-          </div>
+          {form.role !== 'client' && (
+            <div className="md:col-span-3">
+              <label className={labelCls}>
+                Coordinator <span className="text-fg-subtle">(optional)</span>
+              </label>
+              <Select
+                value={form.coordinatorId}
+                onChange={(e) => setForm((s) => ({ ...s, coordinatorId: e.target.value }))}
+                className="mt-1 w-full"
+              >
+                <option value="">— None —</option>
+                {admins.map((m) => (
+                  <option key={m.user.id} value={m.user.id}>
+                    {m.user.firstName} {m.user.lastName}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+          {form.role === 'client' && (
+            <div className="md:col-span-3">
+              <label className={labelCls}>Campaign access</label>
+              <p className="mt-0.5 text-xs text-fg-muted">
+                The campaign(s) whose published reports this client can see.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-3">
+                {campaigns.length === 0 && (
+                  <span className="text-xs text-fg-muted">No campaigns yet.</span>
+                )}
+                {campaigns.map((c) => {
+                  const id = String(c._id);
+                  const checked = form.clientCampaignIds.includes(id);
+                  return (
+                    <label key={id} className="flex items-center gap-2 text-sm text-fg">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setForm((s) => ({
+                            ...s,
+                            clientCampaignIds: checked
+                              ? s.clientCampaignIds.filter((x) => x !== id)
+                              : [...s.clientCampaignIds, id],
+                          }))
+                        }
+                      />
+                      {c.name}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {!emailLookup && (
             <>
@@ -285,6 +332,7 @@ export default function UsersPage() {
           <option value="all">All roles</option>
           <option value="admin">Admins</option>
           <option value="canvasser">Canvassers</option>
+          <option value="client">Clients</option>
         </Select>
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="all">All statuses</option>
@@ -353,8 +401,10 @@ export default function UsersPage() {
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <Badge variant={m.role === 'admin' ? 'brand' : 'neutral'}>
-                    {m.role === 'admin' ? 'Admin' : 'Canvasser'}
+                  <Badge
+                    variant={m.role === 'admin' ? 'brand' : m.role === 'client' ? 'info' : 'neutral'}
+                  >
+                    {m.role === 'admin' ? 'Admin' : m.role === 'client' ? 'Client' : 'Canvasser'}
                   </Badge>
                 </td>
                 <td className="px-4 py-3 text-fg-muted">

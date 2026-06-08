@@ -24,7 +24,13 @@ export default function SelectOrgPage() {
 
   function pick(orgId) {
     switchOrg(orgId);
-    navigate(from === '/select-org' ? '/admin' : from, { replace: true });
+    // Clients land in their read-only portal; admins/canvassers in the console.
+    const picked = memberships.find((m) => m.organizationId === orgId);
+    if (!isSuperAdmin && picked?.role === 'client') {
+      navigate('/client', { replace: true });
+      return;
+    }
+    navigate(from === '/select-org' || from === '/client' ? '/admin' : from, { replace: true });
   }
 
   function pickPlatform() {

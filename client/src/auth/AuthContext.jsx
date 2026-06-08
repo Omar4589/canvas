@@ -89,6 +89,8 @@ export function AuthProvider({ children }) {
 
   const isSuperAdmin = !!user?.isSuperAdmin;
   const isOrgAdmin = isSuperAdmin || activeMembership?.role === 'admin';
+  // Read-only client (candidate) portal user. Distinct from admin — clients land on /client.
+  const isClient = activeMembership?.role === 'client';
   const mustChangePassword = !!user?.mustChangePassword;
   // Org-wide audit timestamps (imports, walk lists, turf snapshots, user profiles) render
   // in the active org's timezone so they read the same for every admin.
@@ -104,6 +106,7 @@ export function AuthProvider({ children }) {
         orgTimeZone,
         isSuperAdmin,
         isOrgAdmin,
+        isClient,
         mustChangePassword,
         loading,
         login,
