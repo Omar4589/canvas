@@ -8,6 +8,8 @@ import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Membership } from '../../models/Membership.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { deriveSetupSteps } from '../../services/reports/setupSteps.js';
 
@@ -44,7 +46,7 @@ router.get('/', async (req, res, next) => {
     const campaignId = req.campaign._id;
     const organizationId = req.campaign.organizationId;
 
-    const [households, ownedDoors, intakeDoors, passes, publishedTurfs, assignments, orgCanvassers, activeIds] =
+    const [households, ownedDoors, intakeDoors, passes, publishedTurfs, assignments, orgCanvassers, activeIds, activity, responses] =
       await Promise.all([
         Household.countDocuments({ campaignId, isActive: true }),
         Household.countDocuments({ campaignId, isActive: true, effortId: { $ne: null } }),
@@ -54,6 +56,8 @@ router.get('/', async (req, res, next) => {
         TurfAssignment.countDocuments({ campaignId }),
         Membership.countDocuments({ organizationId, role: 'canvasser', isActive: true }),
         activePassIds(campaignId),
+        CanvassActivity.exists({ campaignId }),
+        SurveyResponse.exists({ campaignId }),
       ]);
 
     const result = deriveSetupSteps({
@@ -70,7 +74,7 @@ router.get('/', async (req, res, next) => {
       },
     });
 
-    res.json(result);
+    res.json({ ...result, hasCanvassed: Boolean(activity || responses) });
   } catch (err) {
     next(err);
   }

@@ -9,6 +9,8 @@ import { Household } from '../../models/Household.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
+import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
+import { deleteCampaignCascade } from '../../services/campaigns/deleteCampaign.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -36,9 +38,17 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
-async function withCounts(campaigns) {
+// True once the campaign has any canvassing history — gates the type flip (which
+// would corrupt door-status resolution + orphan responses) and hard delete.
+async function campaignHasCanvassed(campaignId) {
+  return Boolean(
+    (await CanvassActivity.exists({ campaignId })) || (await SurveyResponse.exists({ campaignId }))
+  );
+}
+
+async function withCounts(campaigns, organizationId) {
   const ids = campaigns.map((c) => c._id);
-  const [householdAgg, surveyAgg, activityAgg] = await Promise.all([
+  const [householdAgg, surveyAgg, activityAgg, summaries] = await Promise.all([
     Household.aggregate([
       // isActive: true matches the canonical count in reports.js — soft-deleted
       // (voterless) doors are excluded so this list agrees with the dashboard.
@@ -53,6 +63,9 @@ async function withCounts(campaigns) {
       { $match: { campaignId: { $in: ids }, actionType: 'lit_dropped' } },
       { $group: { _id: '$campaignId', count: { $sum: 1 } } },
     ]),
+    // Setup progress + management flags (setupComplete, hasCanvassed, deletable,
+    // canEditType) so the Campaigns list can gate edit/archive/delete by progress.
+    campaignSummaries({ organizationId, campaigns }),
   ]);
 
   const byCampaign = new Map();
@@ -87,6 +100,7 @@ async function withCounts(campaigns) {
       surveysSubmitted: 0,
       litDropped: 0,
     },
+    ...(summaries.get(String(c._id)) || {}),
   }));
 }
 
@@ -97,7 +111,7 @@ router.get('/', async (req, res, next) => {
       .sort({ isActive: -1, createdAt: -1 })
       .populate('surveyTemplateId', 'name version')
       .lean();
-    const withMetrics = await withCounts(campaigns);
+    const withMetrics = await withCounts(campaigns, activeOrgId(req));
     res.json({ campaigns: withMetrics });
   } catch (err) {
     next(err);
@@ -142,6 +156,15 @@ router.patch('/:campaignId', async (req, res, next) => {
     const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
+    // Type is locked once canvassing has started: flipping survey⇄lit_drop would
+    // corrupt door-status resolution and orphan SurveyResponse rows.
+    if (data.type !== undefined && data.type !== campaign.type && (await campaignHasCanvassed(campaign._id))) {
+      return res.status(400).json({
+        error: 'Type cannot change after canvassing has started — create a new campaign instead.',
+        code: 'type-locked',
+      });
+    }
+
     if (data.name !== undefined) campaign.name = data.name;
     if (data.state !== undefined) campaign.state = data.state;
     if (data.timeZone !== undefined) campaign.timeZone = data.timeZone;
@@ -167,6 +190,30 @@ router.patch('/:campaignId', async (req, res, next) => {
     res.json({ campaign });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Hard delete — allowed ONLY before any canvassing (no knocks/surveys). Cascades
+// every campaign-scoped collection + the voters housed here. Otherwise: archive.
+router.delete('/:campaignId', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    if (!mongoose.isValidObjectId(req.params.campaignId)) {
+      return res.status(400).json({ error: 'Invalid campaignId' });
+    }
+    const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (await campaignHasCanvassed(campaign._id)) {
+      return res.status(400).json({
+        error: 'This campaign has canvassing activity; archive it instead of deleting.',
+        code: 'has-activity',
+      });
+    }
+    const counts = await deleteCampaignCascade(campaign);
+    res.json({ deleted: 1, counts });
+  } catch (err) {
     next(err);
   }
 });

@@ -4,8 +4,6 @@ import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Pass } from '../../models/Pass.js';
-import { Turf } from '../../models/Turf.js';
-import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { User } from '../../models/User.js';
@@ -21,7 +19,7 @@ import {
   connectionRate,
   coverageBucketExpr,
 } from '../../services/reports/aggregations.js';
-import { deriveSetupSteps } from '../../services/reports/setupSteps.js';
+import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -355,37 +353,10 @@ router.get('/campaign-rollup', async (req, res, next) => {
         CanvassActivity.distinct('userId', activityMatch),
       ]);
 
-    // Setup-progress counts (campaign-wide; independent of the date/effort activity
-    // window above). Powers the "Setup x/N" chip on list cards via the same
-    // deriveSetupSteps helper the per-campaign setup-status endpoint uses.
-    const [ownedAgg, passAgg, pubTurfAgg, assignAgg, activePassAgg] = await Promise.all([
-      Household.aggregate([
-        { $match: { organizationId, campaignId: { $in: ids }, isActive: true, effortId: { $ne: null } } },
-        { $group: { _id: '$campaignId', n: { $sum: 1 } } },
-      ]),
-      Pass.aggregate([
-        { $match: { campaignId: { $in: ids } } },
-        { $group: { _id: '$campaignId', n: { $sum: 1 } } },
-      ]),
-      Turf.aggregate([
-        { $match: { campaignId: { $in: ids }, status: 'published' } },
-        { $group: { _id: '$campaignId', n: { $sum: 1 } } },
-      ]),
-      TurfAssignment.aggregate([
-        { $match: { campaignId: { $in: ids } } },
-        { $group: { _id: '$campaignId', n: { $sum: 1 } } },
-      ]),
-      Pass.aggregate([
-        { $match: { campaignId: { $in: ids }, status: 'active' } },
-        { $group: { _id: '$campaignId', n: { $sum: 1 } } },
-      ]),
-    ]);
-    const countMap = (agg) => new Map(agg.map((r) => [String(r._id), r.n]));
-    const ownedByCampaign = countMap(ownedAgg);
-    const passByCampaign = countMap(passAgg);
-    const pubTurfByCampaign = countMap(pubTurfAgg);
-    const assignByCampaign = countMap(assignAgg);
-    const activePassByCampaign = countMap(activePassAgg);
+    // Per-campaign setup progress + management flags (campaign-wide; independent of
+    // the date/effort activity window above) — one shared helper so the list cards,
+    // the Campaigns page, and the dashboard hub all agree.
+    const summaries = await campaignSummaries({ organizationId, campaigns });
 
     const byCampaign = new Map();
     for (const c of campaigns) {
@@ -449,25 +420,13 @@ router.get('/campaign-rollup', async (req, res, next) => {
     const rows = campaigns
       .map((campaign) => {
         const c = byCampaign.get(String(campaign._id));
-        const owned = ownedByCampaign.get(String(campaign._id)) || 0;
-        const setup = deriveSetupSteps({
-          campaign,
-          counts: {
-            households: c.households,
-            ownedDoors: owned,
-            intakeDoors: Math.max(0, c.households - owned),
-            passes: passByCampaign.get(String(campaign._id)) || 0,
-            publishedTurfs: pubTurfByCampaign.get(String(campaign._id)) || 0,
-            assignments: assignByCampaign.get(String(campaign._id)) || 0,
-            activePasses: activePassByCampaign.get(String(campaign._id)) || 0,
-          },
-        });
+        const setup = summaries.get(String(campaign._id)) || {};
         return {
           id: String(campaign._id),
           name: campaign.name,
           type: campaign.type,
           isActive: campaign.isActive,
-          setupComplete: setup.complete,
+          setupComplete: setup.setupComplete,
           stepsDone: setup.stepsDone,
           stepsTotal: setup.stepsTotal,
           nextStepKey: setup.nextStepKey,

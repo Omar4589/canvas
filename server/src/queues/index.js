@@ -21,10 +21,11 @@ const queues = new Map();
 /** Lazily construct (and cache) a producer-side Queue. Used by the web dyno. */
 export function getQueue(name) {
   if (!queues.has(name)) {
-    queues.set(
-      name,
-      new Queue(name, { connection: createRedis(), defaultJobOptions: DEFAULT_JOB_OPTIONS })
-    );
+    const queue = new Queue(name, { connection: createRedis(), defaultJobOptions: DEFAULT_JOB_OPTIONS });
+    // A Queue is an EventEmitter that re-emits Redis errors; an unobserved
+    // 'error' would throw and crash the web process. Log and move on.
+    queue.on('error', (err) => console.error(`[queue:${name}] error:`, err?.message || err));
+    queues.set(name, queue);
   }
   return queues.get(name);
 }

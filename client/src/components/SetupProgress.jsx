@@ -45,9 +45,13 @@ export default function SetupProgress({ campaignId }) {
     );
   }
 
-  const { steps, stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute } = data;
+  const { steps, stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute, hasCanvassed } = data;
 
-  // Done + live: collapse to a slim confirmation, with a way to re-open the steps.
+  // Once the round is live AND knocks have started, the dashboard is for monitoring
+  // — drop the hub entirely so it doesn't clutter an operational campaign.
+  if (complete && hasCanvassed) return null;
+
+  // Done + live but no knocks yet: a slim go-live confirmation (re-openable).
   if (complete && !showSteps) {
     return (
       <Card className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">

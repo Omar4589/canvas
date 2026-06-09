@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import { setStoredCampaignId } from '../components/CampaignSelector.jsx';
+import { Modal, Button } from '../components/ui/index.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -22,6 +23,9 @@ const US_TIMEZONES = [
 
 function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
   const isEdit = !!initial?._id;
+  // Once canvassing has started, the type flip is locked (server-enforced) and a
+  // timezone change re-buckets historical stats — surfaced as a warning.
+  const hasCanvassed = isEdit && initial?.hasCanvassed === true;
   const [name, setName] = useState(initial?.name || '');
   const [type, setType] = useState(initial?.type || 'survey');
   const [state, setState] = useState(initial?.state || '');
@@ -68,11 +72,11 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
             ].map((t) => (
               <label
                 key={t.value}
-                className={`flex flex-1 cursor-pointer items-center justify-center rounded border px-3 py-2 text-sm ${
+                className={`flex flex-1 items-center justify-center rounded border px-3 py-2 text-sm ${
                   type === t.value
                     ? 'border-brand-600 bg-brand-tint text-brand-accent'
                     : 'border-border-strong text-fg-muted hover:bg-sunken'
-                }`}
+                } ${hasCanvassed ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
               >
                 <input
                   type="radio"
@@ -80,12 +84,18 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
                   value={t.value}
                   checked={type === t.value}
                   onChange={() => setType(t.value)}
+                  disabled={hasCanvassed}
                   className="sr-only"
                 />
                 {t.label}
               </label>
             ))}
           </div>
+          {hasCanvassed && (
+            <p className="mt-1 text-xs text-warning-fg">
+              Type is locked once canvassing has started — create a new campaign to change it.
+            </p>
+          )}
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-muted">
@@ -118,6 +128,11 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
           Anchors every date &amp; time for this campaign — all admins see the same numbers and clock times,
           regardless of their own timezone.
         </p>
+        {hasCanvassed && (
+          <p className="mt-1 text-xs text-warning-fg">
+            Changing the timezone re-buckets all past daily stats for this campaign.
+          </p>
+        )}
       </div>
 
       {type === 'survey' && (
@@ -197,6 +212,7 @@ export default function CampaignsPage() {
   const [creating, setCreating] = useState(false);
   const [assigningCampaign, setAssigningCampaign] = useState(null);
   const [justCreated, setJustCreated] = useState(null);
+  const [deleting, setDeleting] = useState(null);
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -223,7 +239,17 @@ export default function CampaignsPage() {
       api(`/admin/campaigns/${id}`, { method: 'PATCH', body }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
       setEditing(null);
+    },
+  });
+
+  const del = useMutation({
+    mutationFn: (id) => api(`/admin/campaigns/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+      setDeleting(null);
     },
   });
 
@@ -307,7 +333,15 @@ export default function CampaignsPage() {
             <tbody>
               {campaigns.map((c) => (
                 <tr key={c._id} className="border-t border-border hover:bg-sunken">
-                  <td className="px-4 py-3 font-medium text-fg">{c.name}</td>
+                  <td className="px-4 py-3 font-medium text-fg">
+                    <div>{c.name}</div>
+                    {c.stepsTotal != null && !c.setupComplete && (
+                      <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 text-[10px] font-medium text-brand-tint-fg">
+                        <span className="h-1 w-1 rounded-full bg-brand-accent" />
+                        Setup {c.stepsDone}/{c.stepsTotal}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <span
                       className={
@@ -357,10 +391,31 @@ export default function CampaignsPage() {
                     </button>
                     <button
                       onClick={() => setEditing(c)}
-                      className="text-xs font-medium text-brand-accent hover:underline"
+                      className="mr-3 text-xs font-medium text-brand-accent hover:underline"
                     >
                       Edit
                     </button>
+                    <button
+                      onClick={() => update.mutate({ id: c._id, body: { isActive: !c.isActive } })}
+                      className="mr-3 text-xs font-medium text-fg-muted hover:underline"
+                    >
+                      {c.isActive ? 'Archive' : 'Reactivate'}
+                    </button>
+                    {c.deletable === true ? (
+                      <button
+                        onClick={() => setDeleting(c)}
+                        className="text-xs font-medium text-danger hover:underline"
+                      >
+                        Delete
+                      </button>
+                    ) : (
+                      <span
+                        title="Archive instead — this campaign has canvassing data"
+                        className="cursor-not-allowed text-xs font-medium text-fg-subtle"
+                      >
+                        Delete
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -381,6 +436,29 @@ export default function CampaignsPage() {
           campaign={assigningCampaign}
           onClose={() => setAssigningCampaign(null)}
         />
+      )}
+
+      {deleting && (
+        <Modal
+          size="md"
+          onClose={() => setDeleting(null)}
+          title={`Delete "${deleting.name}"?`}
+          footer={
+            <>
+              <Button variant="secondary" size="sm" onClick={() => setDeleting(null)}>Cancel</Button>
+              <Button variant="danger" size="sm" loading={del.isPending} onClick={() => del.mutate(deleting._id)}>
+                Delete permanently
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-fg-muted">
+            This permanently removes the campaign along with its {fmt(deleting.counts?.households)} doors and their
+            voters, plus any efforts and draft rounds. This can't be undone. Campaigns with canvassing activity
+            can't be deleted — archive them instead.
+          </p>
+          {del.error && <p className="mt-2 text-sm text-danger">{del.error.message}</p>}
+        </Modal>
       )}
     </div>
   );
