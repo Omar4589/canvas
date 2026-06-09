@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
-import { Card, Badge, Button, Input, Select } from '../components/ui';
+import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
@@ -71,6 +71,51 @@ function Avatars({ users = [] }) {
 }
 
 // Expanded detail for a pass: its books (with assignees) + quick-nav buttons.
+// Activate a round, but guard the silent dead-end: a round with published books
+// but ZERO canvasser assignments activates fine yet shows the field nothing. Warn
+// (non-blocking) when that's the case; "Activate anyway" proceeds.
+function ActivateButton({ campaignId, pass, onActivate }) {
+  const [confirm, setConfirm] = useState(false);
+  const asgQ = useQuery({
+    queryKey: ['turf-pass-assignments', campaignId, pass._id],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/assignments?passId=${pass._id}`),
+    enabled: !!campaignId && !!pass._id,
+  });
+  const assignmentCount = (asgQ.data?.assignments || []).length;
+
+  function click() {
+    if (asgQ.isSuccess && assignmentCount === 0) setConfirm(true);
+    else onActivate();
+  }
+
+  return (
+    <>
+      <button onClick={click} className="text-xs font-semibold text-success hover:underline">
+        Activate
+      </button>
+      {confirm && (
+        <Modal
+          size="md"
+          onClose={() => setConfirm(false)}
+          title="Activate with no canvassers assigned?"
+          footer={
+            <>
+              <Button variant="secondary" size="sm" onClick={() => setConfirm(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={() => { setConfirm(false); onActivate(); }}>Activate anyway</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-fg-muted">
+            No books in this round are assigned to a canvasser. Canvassers only see books assigned to them,
+            so nobody will have work until you assign them on the Turf Cutting page. You can activate now and
+            assign later.
+          </p>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 function PassDetail({ campaignId, pass, tz }) {
   const turfsQ = useQuery({
     queryKey: ['turfs', campaignId, pass._id],
@@ -160,7 +205,11 @@ export default function PassesPage() {
   const totalBooks = useMemo(() => passes.reduce((s, p) => s + (p.turfCount || 0), 0), [passes]);
   const activePass = passes.find((p) => p.status === 'active');
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
+    qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+  };
 
   const create = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/passes`, { method: 'POST', body: { name, effortId } }),
@@ -263,9 +312,11 @@ export default function PassesPage() {
                     </td>
                     <td className="space-x-2 px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                       {p.status === 'draft' && (
-                        <button onClick={() => action.mutate({ id: p._id, op: 'activate' })} className="text-xs font-semibold text-success hover:underline">
-                          Activate
-                        </button>
+                        <ActivateButton
+                          campaignId={campaignId}
+                          pass={p}
+                          onActivate={() => action.mutate({ id: p._id, op: 'activate' })}
+                        />
                       )}
                       {p.status === 'active' && (
                         <button onClick={() => action.mutate({ id: p._id, op: 'archive' })} className="text-xs text-fg-muted hover:underline">

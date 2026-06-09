@@ -12,7 +12,7 @@ export function getStoredCampaignId() {
   }
 }
 
-function setStoredCampaignId(id) {
+export function setStoredCampaignId(id) {
   try {
     if (id) localStorage.setItem(STORAGE_KEY, id);
     else localStorage.removeItem(STORAGE_KEY);

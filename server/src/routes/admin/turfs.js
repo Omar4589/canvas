@@ -108,8 +108,24 @@ router.post('/generate', async (req, res, next) => {
     if (!['attribute', 'geometric', 'manual'].includes(mode)) {
       return res.status(400).json({ error: 'mode must be attribute|geometric|manual' });
     }
-    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).select('_id').lean();
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).select('_id effortId').lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
+
+    // Dead-end guard: the round cuts from its effort's owned, mappable doors. With
+    // none, generation silently produces 0 books — so block it and point the admin
+    // back to the Efforts page to claim doors first. (Client guards this too.)
+    const doorCount = await Household.countDocuments({
+      campaignId: req.campaign._id,
+      isActive: true,
+      effortId: pass.effortId,
+      'location.coordinates': { $exists: true, $ne: null },
+    });
+    if (doorCount === 0) {
+      return res.status(400).json({
+        error: 'This effort owns no mappable doors yet. Claim doors into the effort (Efforts page) before cutting books.',
+        code: 'no-doors',
+      });
+    }
 
     // Block re-generating over accepted books — Discard is the deliberate path to
     // re-cut an accepted pass. (Regenerate only wipes drafts, so it would leave the

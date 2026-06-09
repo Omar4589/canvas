@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { NAV, SUPER_NAV } from './navItems.js';
+import { NAV, SUPER_NAV, NAV_GROUPS } from './navItems.js';
 import { navIcon } from './navIcons.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import Logo from './Logo.jsx';
 
 // Primary tabs vs. the "More" sheet are both derived from NAV (single source of
-// truth): items flagged `primary` are tabs, the rest go in the sheet.
+// truth): items flagged `primary` are tabs, the rest go in the sheet, clustered by
+// workflow phase (NAV_GROUPS) so the sheet mirrors the desktop sidebar.
 const primaryItems = NAV.filter((n) => n.primary);
-const moreItems = NAV.filter((n) => !n.primary);
+const ungroupedMore = NAV.filter((n) => !n.primary && !n.group);
 
 function IconMore() {
   return (
@@ -91,13 +92,34 @@ export default function BottomNav() {
               </button>
             </div>
 
-            <div className="space-y-1">
-              {moreItems.map((n) => (
-                <NavLink key={n.to} to={n.to} end={n.end} className={sheetLinkClass} onClick={close}>
-                  {n.label}
-                </NavLink>
-              ))}
-            </div>
+            {ungroupedMore.length > 0 && (
+              <div className="space-y-1">
+                {ungroupedMore.map((n) => (
+                  <NavLink key={n.to} to={n.to} end={n.end} className={sheetLinkClass} onClick={close}>
+                    {n.label}
+                  </NavLink>
+                ))}
+              </div>
+            )}
+
+            {NAV_GROUPS.map((group) => {
+              const items = NAV.filter((n) => !n.primary && n.group === group);
+              if (!items.length) return null;
+              return (
+                <div key={group}>
+                  <div className="mt-4 px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
+                    {group}
+                  </div>
+                  <div className="space-y-1">
+                    {items.map((n) => (
+                      <NavLink key={n.to} to={n.to} end={n.end} className={sheetLinkClass} onClick={close}>
+                        {n.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
 
             {isSuperAdmin && (
               <>

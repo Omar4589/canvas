@@ -6,11 +6,12 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
-import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import CampaignSelector, { useCampaignSelection, setStoredCampaignId } from '../components/CampaignSelector.jsx';
 import BookAssignmentPanel from '../components/BookAssignmentPanel.jsx';
 import MapStyleControl from '../components/MapStyleControl.jsx';
 import StatCard from '../components/StatCard.jsx';
 import InfoHint from '../components/InfoHint.jsx';
+import NextStepBanner from '../components/NextStepBanner.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -468,6 +469,9 @@ export default function TurfsPage() {
   const grouped = useMemo(() => groupDoors(doorsQ.data?.doors || []), [doorsQ.data]);
   // Doors not yet in any book — e.g. voters imported after this pass was cut.
   const unassignedCount = (doorsQ.data?.doors || []).filter((d) => !d.turfId).length;
+  // Dead-end guard: the effort owns no mappable doors. /doors returns the effort's
+  // doors (booked or not), so 0 here = nothing to cut. Don't trip while loading.
+  const hasNoDoors = !!passId && !!doorsQ.data && (doorsQ.data.doors || []).length === 0;
   // The popup's house + its current book, derived live from the doors data so it
   // updates after a move.
   const popupDoor = (doorsQ.data?.doors || []).find((d) => String(d.id) === String(popupHouseholdId));
@@ -556,7 +560,11 @@ export default function TurfsPage() {
   });
   const accept = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/accept`, { method: 'POST', body: { passId } }),
-    onSuccess: invalidateTurfs,
+    onSuccess: () => {
+      invalidateTurfs();
+      qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
+      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+    },
   });
   const discard = useMutation({
     mutationFn: (opts = {}) =>
@@ -741,7 +749,7 @@ export default function TurfsPage() {
   const progress = jobQ.data?.progress;
   const pct = typeof progress === 'object' ? progress?.pct : progress;
   const canGenerate =
-    passId && !generate.isPending && !jobBusy && publishedCount === 0 && (mode !== 'manual' || drawnPolygon);
+    passId && !generate.isPending && !jobBusy && publishedCount === 0 && !hasNoDoors && (mode !== 'manual' || drawnPolygon);
 
   return (
     <div>
@@ -856,6 +864,16 @@ export default function TurfsPage() {
             {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}
           </button>
 
+          {hasNoDoors && (
+            <NextStepBanner
+              tone="warning"
+              className="mt-3"
+              action={{ label: 'Go to Efforts', to: '/efforts', onClick: () => setStoredCampaignId(campaignId) }}
+            >
+              This effort owns no mappable doors yet. Claim doors into it on the Efforts page before cutting books.
+            </NextStepBanner>
+          )}
+
           {jobId && (
             <div className="mt-3 text-xs text-fg-muted">
               {jobQ.data?.status === 'failed' ? (
@@ -873,6 +891,21 @@ export default function TurfsPage() {
           {generate.error && <div className="mt-2 text-xs text-danger">{generate.error.message}</div>}
           {publishedCount > 0 && (
             <p className="mt-2 text-xs text-warning-fg">This pass has accepted books — Discard them below to re-cut.</p>
+          )}
+
+          {publishedCount > 0 && selectedPass && selectedPass.status !== 'active' && (
+            <NextStepBanner
+              tone="success"
+              className="mt-3"
+              title="Books accepted."
+              action={{
+                label: 'Activate round',
+                to: `/passes?effortId=${selectedPass.effortId || ''}`,
+                onClick: () => setStoredCampaignId(campaignId),
+              }}
+            >
+              Assign canvassers to books below, then activate the round to send it to the field.
+            </NextStepBanner>
           )}
 
           {!!turfs.length && unassignedCount > 0 && (

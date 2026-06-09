@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { getStoredCampaignId, setStoredCampaignId } from '../components/CampaignSelector.jsx';
+import NextStepBanner from '../components/NextStepBanner.jsx';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -118,11 +120,14 @@ export default function ImportPage() {
   const queryClient = useQueryClient();
   const orgTz = useOrgTimeZone();
   const [file, setFile] = useState(null);
-  const [campaignId, setCampaignId] = useState('');
+  // Default to the campaign the admin was last working (e.g. one they just created
+  // and clicked "Import voters" from), so the handoff lands pre-scoped.
+  const [campaignId, setCampaignId] = useState(() => getStoredCampaignId());
   const [columns, setColumns] = useState([]);
   const [mapping, setMapping] = useState({});
   const [profileName, setProfileName] = useState('');
   const [step, setStep] = useState('select'); // 'select' | 'map' | 'review'
+  const [justImported, setJustImported] = useState(null); // campaignId of the last queued import
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -195,9 +200,13 @@ export default function ImportPage() {
       fd.append('mapping', JSON.stringify(mapping));
       return api('/admin/imports/csv', { method: 'POST', formData: fd });
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       resetSelection();
       queryClient.invalidateQueries({ queryKey: ['imports'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'setup-status', variables.campaignId] });
+      queryClient.invalidateQueries({ queryKey: ['campaign-rollup'] });
+      setStoredCampaignId(variables.campaignId);
+      setJustImported(variables.campaignId);
     },
   });
 
@@ -277,7 +286,7 @@ export default function ImportPage() {
             <label className="mb-1 block text-xs font-medium text-fg-muted">Campaign</label>
             <select
               value={campaignId}
-              onChange={(e) => { setCampaignId(e.target.value); dropReview(); }}
+              onChange={(e) => { setCampaignId(e.target.value); setStoredCampaignId(e.target.value); dropReview(); }}
               className="w-full rounded border border-border-strong bg-card text-fg px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">— Choose a campaign —</option>
@@ -424,9 +433,18 @@ export default function ImportPage() {
           </div>
         )}
         {upload.data?.job && (
-          <div className="mt-3 rounded border border-success/30 bg-success-tint px-3 py-2 text-sm text-green-800">
-            Import queued — processing in the background. Progress shows below.
-          </div>
+          <NextStepBanner
+            tone="success"
+            className="mt-3"
+            title="Import queued — processing in the background."
+            action={
+              justImported
+                ? { label: 'Go to Efforts', to: '/efforts', onClick: () => setStoredCampaignId(justImported) }
+                : null
+            }
+          >
+            New addresses land in Intake until an effort claims them.
+          </NextStepBanner>
         )}
       </section>
 

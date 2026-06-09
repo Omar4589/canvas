@@ -9,6 +9,7 @@ import CanvasserTable from '../components/CanvasserTable.jsx';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import VoterHighlights from '../components/VoterHighlights.jsx';
+import SetupProgress from '../components/SetupProgress.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 
@@ -263,6 +264,12 @@ export default function DashboardPage() {
         <div className="mb-6 rounded-md border border-warning/30 bg-warning-tint px-4 py-2 text-sm text-warning-fg">
           This campaign is archived — data is read-only. Reactivate it from
           Campaigns to resume canvassing.
+        </div>
+      )}
+
+      {current && current.isActive !== false && (
+        <div className="mb-6">
+          <SetupProgress campaignId={campaignId} />
         </div>
       )}
 

@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
+import NextStepBanner from '../components/NextStepBanner.jsx';
+import { setStoredCampaignId } from '../components/CampaignSelector.jsx';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -194,6 +196,7 @@ export default function CampaignsPage() {
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
   const [assigningCampaign, setAssigningCampaign] = useState(null);
+  const [justCreated, setJustCreated] = useState(null);
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -207,9 +210,11 @@ export default function CampaignsPage() {
 
   const create = useMutation({
     mutationFn: (body) => api('/admin/campaigns', { method: 'POST', body }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
       setCreating(false);
+      setJustCreated(data?.campaign || null);
     },
   });
 
@@ -238,6 +243,21 @@ export default function CampaignsPage() {
           </button>
         )}
       </div>
+
+      {justCreated && (
+        <NextStepBanner
+          tone="success"
+          className="mb-6"
+          title={`“${justCreated.name}” created.`}
+          action={{
+            label: 'Import voters',
+            to: '/import',
+            onClick: () => setStoredCampaignId(justCreated.id || justCreated._id),
+          }}
+        >
+          Next: import a voter CSV to populate it.
+        </NextStepBanner>
+      )}
 
       {creating && (
         <div className="mb-6">

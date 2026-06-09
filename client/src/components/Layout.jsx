@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../lib/useTheme.js';
 import Logo, { LogoMark } from './Logo.jsx';
-import { NAV, SUPER_NAV } from './navItems.js';
+import { NAV, SUPER_NAV, NAV_GROUPS } from './navItems.js';
 import { navIcon, IconSignOut, IconChevron } from './navIcons.jsx';
 import { IconSun, IconMoon } from './ui/icons.jsx';
 import IconButton from './ui/IconButton.jsx';
@@ -21,6 +21,23 @@ function navClass(collapsed) {
         : 'text-fg-muted hover:bg-brand-tint hover:text-brand-tint-fg',
     ].join(' ');
 }
+
+function NavItem({ n, collapsed }) {
+  const Icon = navIcon(n.to);
+  return (
+    <NavLink
+      to={n.to}
+      end={n.end}
+      title={collapsed ? n.label : undefined}
+      className={navClass(collapsed)}
+    >
+      <Icon size={20} />
+      {!collapsed && <span>{n.label}</span>}
+    </NavLink>
+  );
+}
+
+const GROUP_HEADER = 'mt-3 px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle';
 
 function ThemeToggle({ collapsed, dark, toggle }) {
   return (
@@ -107,19 +124,23 @@ export default function Layout() {
         )}
 
         <nav className="flex-1 min-h-0 overflow-y-auto space-y-1">
-          {NAV.map((n) => {
-            const Icon = navIcon(n.to);
+          {NAV.filter((n) => !n.group).map((n) => (
+            <NavItem key={n.to} n={n} collapsed={collapsed} />
+          ))}
+          {NAV_GROUPS.map((group) => {
+            const items = NAV.filter((n) => n.group === group);
+            if (!items.length) return null;
             return (
-              <NavLink
-                key={n.to}
-                to={n.to}
-                end={n.end}
-                title={collapsed ? n.label : undefined}
-                className={navClass(collapsed)}
-              >
-                <Icon size={20} />
-                {!collapsed && <span>{n.label}</span>}
-              </NavLink>
+              <div key={group} className="space-y-1">
+                {collapsed ? (
+                  <div className="my-2 border-t border-border" />
+                ) : (
+                  <div className={GROUP_HEADER}>{group}</div>
+                )}
+                {items.map((n) => (
+                  <NavItem key={n.to} n={n} collapsed={collapsed} />
+                ))}
+              </div>
             );
           })}
           {isSuperAdmin && (
@@ -127,24 +148,11 @@ export default function Layout() {
               {collapsed ? (
                 <div className="my-2 border-t border-border" />
               ) : (
-                <div className="mt-3 px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
-                  Platform
-                </div>
+                <div className={GROUP_HEADER}>Platform</div>
               )}
-              {SUPER_NAV.map((n) => {
-                const Icon = navIcon(n.to);
-                return (
-                  <NavLink
-                    key={n.to}
-                    to={n.to}
-                    title={collapsed ? n.label : undefined}
-                    className={navClass(collapsed)}
-                  >
-                    <Icon size={20} />
-                    {!collapsed && <span>{n.label}</span>}
-                  </NavLink>
-                );
-              })}
+              {SUPER_NAV.map((n) => (
+                <NavItem key={n.to} n={n} collapsed={collapsed} />
+              ))}
             </>
           )}
         </nav>

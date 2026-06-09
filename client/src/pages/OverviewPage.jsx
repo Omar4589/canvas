@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
+import { EmptyState, Button } from '../components/ui/index.js';
 import { rateAccent, ratePct } from '../lib/rates.js';
 import { formatInTz } from '../lib/datetime.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
@@ -56,6 +57,13 @@ function CampaignCard({ campaign, onClick }) {
           {typeLabel(c.type)}
         </span>
       </div>
+
+      {c.stepsTotal != null && !c.setupComplete && (
+        <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-tint-fg">
+          <span className="h-1.5 w-1.5 rounded-full bg-brand-accent" />
+          Setup {c.stepsDone}/{c.stepsTotal} · not live
+        </span>
+      )}
 
       <div className="space-y-1.5">
         <StatRow label="Households" value={fmt(c.households)} />
@@ -234,12 +242,16 @@ export default function OverviewPage() {
           <section className="mb-8">
             <h2 className="mb-3 text-lg font-semibold text-fg">Campaigns</h2>
             {campaigns.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border bg-sunken p-8 text-center text-sm text-fg-muted">
-                No active campaigns yet.{' '}
-                <Link to="/campaigns" className="font-medium text-brand-accent hover:underline">
-                  Create or activate one
-                </Link>{' '}
-                to start canvassing.
+              <div className="rounded-lg border border-dashed border-border bg-sunken">
+                <EmptyState
+                  title="No campaigns yet"
+                  hint="Create a campaign, import voters, claim doors into an effort, cut books, assign canvassers, and go live — each campaign's dashboard walks you through every step."
+                  action={
+                    <Button variant="primary" onClick={() => navigate('/campaigns')}>
+                      Create a campaign
+                    </Button>
+                  }
+                />
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

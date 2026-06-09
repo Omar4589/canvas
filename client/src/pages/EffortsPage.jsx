@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import CampaignSelector, { useCampaignSelection, setStoredCampaignId } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
+import NextStepBanner from '../components/NextStepBanner.jsx';
 import { Card, Badge, Button, Input, Select } from '../components/ui';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -84,7 +86,10 @@ function ClaimPanel({ campaignId, effort, walkLists }) {
   const [walkListId, setWalkListId] = useState('');
   const claim = useMutation({
     mutationFn: ({ body }) => api(`/admin/campaigns/${campaignId}/efforts/${effort._id}/claim`, { method: 'POST', body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
+    },
   });
   const owned = claim.error?.data?.code === 'doors-owned' ? claim.error.data : null;
 
@@ -103,7 +108,12 @@ function ClaimPanel({ campaignId, effort, walkLists }) {
         <Button size="sm" variant="secondary" onClick={() => claim.mutate({ body: { all: true } })} disabled={claim.isPending}>Claim all Intake</Button>
       </div>
       {claim.data && (
-        <p className="mt-2 text-xs text-success-fg">Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other efforts)` : ''}.</p>
+        <p className="mt-2 text-xs text-success-fg">
+          Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other efforts)` : ''}.{' '}
+          <Link to={`/passes?effortId=${effort._id}`} onClick={() => setStoredCampaignId(campaignId)} className="font-semibold underline">
+            Create a round →
+          </Link>
+        </p>
       )}
       {owned && (
         <div className="mt-2 text-xs text-warning-fg">
@@ -254,9 +264,9 @@ export default function EffortsPage() {
       )}
 
       {intakeCount > 0 && (
-        <div className="mb-4 rounded-md border border-info/30 bg-info-tint px-4 py-2.5 text-sm text-info-fg">
+        <NextStepBanner tone="info" className="mb-4">
           <strong>{intakeCount.toLocaleString()}</strong> door{intakeCount === 1 ? '' : 's'} in Intake (new addresses awaiting assignment). Open an effort below → <em>Claim all Intake</em> to assign them.
-        </div>
+        </NextStepBanner>
       )}
 
       <Card as="section" className="mb-6 p-5">
