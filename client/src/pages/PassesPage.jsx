@@ -181,6 +181,8 @@ export default function PassesPage() {
   const [name, setName] = useState('');
   const [effortId, setEffortId] = useState(searchParams.get('effortId') || '');
   const [openId, setOpenId] = useState(null);
+  const [archiveTarget, setArchiveTarget] = useState(null); // pass pending archive-confirm
+  const [archiveText, setArchiveText] = useState('');
 
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
@@ -218,6 +220,10 @@ export default function PassesPage() {
   const action = useMutation({
     mutationFn: ({ id, op }) => api(`/admin/campaigns/${campaignId}/passes/${id}/${op}`, { method: 'POST' }),
     onSuccess: invalidate,
+  });
+  const archive = useMutation({
+    mutationFn: (id) => api(`/admin/campaigns/${campaignId}/passes/${id}/archive`, { method: 'POST', body: { confirmArchive: true } }),
+    onSuccess: () => { setArchiveTarget(null); setArchiveText(''); invalidate(); },
   });
   const del = useMutation({
     mutationFn: (id) => api(`/admin/campaigns/${campaignId}/passes/${id}`, { method: 'DELETE' }),
@@ -278,6 +284,7 @@ export default function PassesPage() {
               <th className="px-4 py-2 text-left">Name</th>
               <th className="px-4 py-2 text-left">Status</th>
               <th className="px-4 py-2 text-right">Books</th>
+              <th className="px-4 py-2 text-right">Knocks</th>
               <th className="px-4 py-2 text-left">Progress</th>
               <th className="px-4 py-2 text-left">Created</th>
               <th className="px-4 py-2 text-right">Actions</th>
@@ -306,6 +313,7 @@ export default function PassesPage() {
                       <Badge variant={STATUS_VARIANT[p.status] || 'neutral'} className="capitalize">{p.status}</Badge>
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-fg">{p.turfCount}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-fg">{(p.knockCount || 0).toLocaleString()}</td>
                     <td className="px-4 py-2"><PassProgress campaignId={campaignId} passId={p._id} /></td>
                     <td className="px-4 py-2 text-fg-muted">
                       {p.createdAt ? formatInTz(p.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : '—'}
@@ -319,7 +327,7 @@ export default function PassesPage() {
                         />
                       )}
                       {p.status === 'active' && (
-                        <button onClick={() => action.mutate({ id: p._id, op: 'archive' })} className="text-xs text-fg-muted hover:underline">
+                        <button onClick={() => { setArchiveText(''); setArchiveTarget(p); }} className="text-xs text-fg-muted hover:underline">
                           Archive
                         </button>
                       )}
@@ -332,7 +340,7 @@ export default function PassesPage() {
                   </tr>
                   {open && (
                     <tr className="border-t border-border bg-sunken/50">
-                      <td colSpan="7" className="px-4 py-3">
+                      <td colSpan="8" className="px-4 py-3">
                         <PassDetail campaignId={campaignId} pass={p} tz={tz} />
                       </td>
                     </tr>
@@ -341,12 +349,56 @@ export default function PassesPage() {
               );
             })}
             {!passes.length && (
-              <tr><td colSpan="7" className="px-4 py-6 text-center text-fg-muted">No passes yet.</td></tr>
+              <tr><td colSpan="8" className="px-4 py-6 text-center text-fg-muted">No passes yet.</td></tr>
             )}
           </tbody>
         </table>
       </Card>
       {action.error && <div className="mt-2 text-sm text-danger">{action.error.message}</div>}
+
+      {archiveTarget && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={() => setArchiveTarget(null)}>
+          <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-fg">
+              Archive Pass {archiveTarget.roundNumber} — {archiveTarget.name}?
+            </h3>
+            <p className="mt-2 text-sm text-fg-muted">
+              Archiving is <strong>one-way</strong> — a round can't be reopened, and canvassers lose it in the field.
+              <strong> Knock history is kept</strong> (cut a new round to keep going).
+            </p>
+            {archiveTarget.knockCount > 0 && (
+              <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+                ⚠️ {archiveTarget.knockCount.toLocaleString()} knock{archiveTarget.knockCount === 1 ? '' : 's'} already recorded in this round.
+              </div>
+            )}
+            {archiveTarget.knockCount > 0 && (
+              <label className="mt-3 block text-sm">
+                <span className="mb-1 block text-xs font-medium text-fg-muted">Type <strong>archive</strong> to confirm</span>
+                <input
+                  value={archiveText}
+                  onChange={(e) => setArchiveText(e.target.value)}
+                  autoFocus
+                  placeholder="archive"
+                  className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-danger focus:outline-none"
+                />
+              </label>
+            )}
+            {archive.error && <div className="mt-2 text-xs text-danger">{archive.error.message}</div>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setArchiveTarget(null)} disabled={archive.isPending} className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-sunken">
+                Cancel
+              </button>
+              <button
+                onClick={() => archive.mutate(archiveTarget._id)}
+                disabled={archive.isPending || (archiveTarget.knockCount > 0 && archiveText.trim().toLowerCase() !== 'archive')}
+                className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {archive.isPending ? 'Archiving…' : 'Archive round'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

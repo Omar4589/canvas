@@ -343,6 +343,7 @@ export default function WalkListsPage() {
                 <option value="and">AND (match all)</option>
                 <option value="or">OR (match any)</option>
               </select>
+              <span className="text-xs text-fg-subtle">only affects results when 2+ filters are set</span>
             </label>
             <button onClick={() => preview.mutate()} disabled={preview.isPending} className="rounded border border-border-strong px-3 py-1.5 text-sm font-medium hover:bg-sunken disabled:opacity-60">
               {preview.isPending ? 'Counting…' : 'Preview count'}

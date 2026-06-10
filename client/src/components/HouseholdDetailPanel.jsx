@@ -1,4 +1,6 @@
+import { useQuery } from '@tanstack/react-query';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { api } from '../api/client.js';
 import { formatInTz } from '../lib/datetime.js';
 
 function formatDateTime(d, tz) {
@@ -46,6 +48,13 @@ export default function HouseholdDetailPanel({
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
   const h = household;
+  // Full per-round activity history (so a door worked in multiple rounds shows all).
+  const activityQ = useQuery({
+    queryKey: ['household-activity', h?.id],
+    queryFn: () => api(`/admin/households/${h.id}/activity`),
+    enabled: !!h?.id,
+  });
+  const rounds = activityQ.data?.rounds || [];
   return (
     <div>
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
@@ -91,6 +100,30 @@ export default function HouseholdDetailPanel({
                 {h.lastAction.canvasser.firstName} {h.lastAction.canvasser.lastName}
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {rounds.length > 0 && (
+        <div className="border-b border-border px-4 py-3">
+          <div className="mb-2 text-xs uppercase tracking-wide text-fg-muted">History by round</div>
+          <div className="space-y-2">
+            {rounds.map((r) => (
+              <div key={r.passId || 'none'}>
+                <div className="text-xs font-semibold text-fg">
+                  {r.roundNumber != null ? `Round ${r.roundNumber}` : r.name}
+                  {r.roundNumber != null && r.name ? <span className="font-normal text-fg-muted"> · {r.name}</span> : null}
+                </div>
+                <ul className="mt-0.5 space-y-0.5">
+                  {r.entries.map((e, i) => (
+                    <li key={i} className="text-xs text-fg-muted">
+                      {actionLabel(e.actionType)} · {formatDateTime(e.at, zone)}
+                      {e.canvasser ? ` · ${e.canvasser}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         </div>
       )}

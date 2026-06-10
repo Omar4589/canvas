@@ -61,13 +61,19 @@ function booksToLabelGeoJSON(turfs) {
       .map((t) => ({ type: 'Feature', geometry: t.centroid, properties: { id: String(t._id), label: `${t.name} · ${t.eligibleDoorCount ?? t.doorCount}` } })),
   };
 }
-function doorsToGeoJSON(doors, colorByTurf) {
+function doorsToGeoJSON(doors, colorByTurf, targetedSet) {
   return {
     type: 'FeatureCollection',
     features: doors.map((d) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
-      properties: { id: d.id, turfId: d.turfId ? String(d.turfId) : '', color: colorByTurf.get(String(d.turfId)) || '#9ca3af' },
+      properties: {
+        id: d.id,
+        turfId: d.turfId ? String(d.turfId) : '',
+        color: colorByTurf.get(String(d.turfId)) || '#9ca3af',
+        // When a target filter is active, dim doors that aren't in the matched set.
+        dim: targetedSet ? !targetedSet.has(String(d.id)) : false,
+      },
     })),
   };
 }
@@ -166,6 +172,8 @@ function registerBookLayers(map, dark) {
       'circle-color': ['get', 'color'],
       'circle-stroke-color': '#ffffff',
       'circle-stroke-width': 1,
+      'circle-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
+      'circle-stroke-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
     },
   });
 }
@@ -599,6 +607,10 @@ export default function TurfsPage() {
       api(`/admin/campaigns/${campaignId}/turfs/target-preview`, { method: 'POST', body: { passId, filter: targetFilter } }),
     enabled: !!campaignId && !!passId && targetActive,
   });
+  const targetedSet = useMemo(
+    () => (targetActive && targetPreviewQ.data?.householdIds ? new Set(targetPreviewQ.data.householdIds.map(String)) : null),
+    [targetActive, targetPreviewQ.data]
+  );
   const toggleTargetStatus = (s) =>
     setTargetFilter((t) => ({
       ...t,
@@ -866,7 +878,7 @@ export default function TurfsPage() {
     if (!map || !map.getSource('books')) return;
     map.getSource('books').setData(booksToFillGeoJSON(turfs, colorByTurf, selectedBooks));
     map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs));
-    map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf));
+    map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf, targetedSet));
 
     // All books/doors stay visible — selection just thickens the outline + brightens
     // the fill (the `selected` paint props). Selecting books never hides the rest, so
@@ -886,7 +898,7 @@ export default function TurfsPage() {
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }
-  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch]);
+  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet]);
 
   // Building markers (HTML overlays) for stacked apartment units — synced apart
   // from paint() so book-select toggles don't churn the DOM.
@@ -898,11 +910,15 @@ export default function TurfsPage() {
     for (const b of grouped.buildings) {
       const color = colorByTurf.get(String(b.turfId)) || '#9ca3af';
       const el = buildingMarkerEl(b.total, color, darkBase);
+      // Live target preview: dim a building unless one of its units is targeted.
+      if (targetedSet && !(b.units || []).some((u) => targetedSet.has(String(u.id)))) {
+        el.style.opacity = '0.2';
+      }
       el.addEventListener('click', (ev) => { ev.stopPropagation(); openBuildingPopupRef.current(b.key); });
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([b.lng, b.lat]).addTo(map);
       buildingMarkersRef.current.push(marker);
     }
-  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch]);
+  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet]);
 
   // Clear selection + popups when switching pass/campaign (those books are gone).
   useEffect(() => { setSelectedBooks(new Set()); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
@@ -1164,17 +1180,21 @@ export default function TurfsPage() {
                   )}
                   {targetActive && (
                     <div className="flex items-center justify-between gap-2 text-xs">
-                      <label className="flex items-center gap-1.5 text-fg-muted">
-                        Combine
-                        <select
-                          value={targetFilter.combine}
-                          onChange={(e) => setTargetFilter((t) => ({ ...t, combine: e.target.value }))}
-                          className="rounded border border-border-strong bg-card px-1 py-0.5 text-fg"
-                        >
-                          <option value="or">OR (any)</option>
-                          <option value="and">AND (all)</option>
-                        </select>
-                      </label>
+                      {targetFilter.priorPassStatuses.length > 0 && targetFilter.answerFilters.length > 0 ? (
+                        <label className="flex items-center gap-1.5 text-fg-muted">
+                          Combine
+                          <select
+                            value={targetFilter.combine}
+                            onChange={(e) => setTargetFilter((t) => ({ ...t, combine: e.target.value }))}
+                            className="rounded border border-border-strong bg-card px-1 py-0.5 text-fg"
+                          >
+                            <option value="or">OR (any)</option>
+                            <option value="and">AND (all)</option>
+                          </select>
+                        </label>
+                      ) : (
+                        <span />
+                      )}
                       <span className="font-semibold text-fg">
                         {targetPreviewQ.isFetching
                           ? '…'

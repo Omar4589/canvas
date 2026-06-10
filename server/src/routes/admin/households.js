@@ -11,6 +11,8 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { Turf } from '../../models/Turf.js';
+import { Pass } from '../../models/Pass.js';
+import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 
 const router = Router();
@@ -102,7 +104,9 @@ router.get('/map', async (req, res, next) => {
       isActive: true,
       'location.coordinates': { $exists: true, $ne: null },
     };
-    if (status && status.length) householdFilter.status = { $in: status };
+    // When scoped to a round we filter by PER-ROUND status (resolved below), not
+    // the global Household.status — so the door set matches the colors shown.
+    if (status && status.length && !passId) householdFilter.status = { $in: status };
     if (campaignId) householdFilter.campaignId = campaignId;
     if (effortId) householdFilter.effortId = effortId;
 
@@ -119,6 +123,12 @@ router.get('/map', async (req, res, next) => {
     if (campaignId) {
       surveyMatch.campaignId = campaignId;
       activityMatch.campaignId = campaignId;
+    }
+    // Scope activity/surveys to the selected round so "showing Pass N" reflects
+    // that round's status + activity, not the global latest across all rounds.
+    if (passId) {
+      surveyMatch.passId = passId;
+      activityMatch.passId = passId;
     }
     if (questionKey && answerOption) {
       surveyMatch.answers = {
@@ -161,7 +171,7 @@ router.get('/map', async (req, res, next) => {
       householdFilter._id = { $in: idStrings.map((id) => new mongoose.Types.ObjectId(id)) };
     }
 
-    const households = await Household.find(
+    let households = await Household.find(
       householdFilter,
       'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy'
     ).lean();
@@ -170,8 +180,21 @@ router.get('/map', async (req, res, next) => {
       return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
     }
 
-    const householdIds = households.map((h) => h._id);
+    let householdIds = households.map((h) => h._id);
     const includeActivities = req.query.includeActivities === '1';
+
+    // Per-round door status when scoped to a pass (else the global Household.status).
+    let passStatusMap = null;
+    if (passId) {
+      const camp = campaignId ? await Campaign.findById(campaignId, { type: 1 }).lean() : null;
+      passStatusMap = await getPassStatusMap(passId, householdIds, camp?.type);
+      // Apply the status filter against per-round status (not the global one).
+      if (status && status.length) {
+        const wanted = new Set(status);
+        households = households.filter((h) => wanted.has(passStatusMap.get(String(h._id))?.status || 'unknocked'));
+        householdIds = households.map((h) => h._id);
+      }
+    }
 
     const canvassers = await loadCanvasserRoster(orgId);
 
@@ -180,12 +203,12 @@ router.get('/map', async (req, res, next) => {
         { householdId: { $in: householdIds }, organizationId: orgId },
         'householdId fullName surveyStatus party'
       ).lean(),
-      SurveyResponse.find({ householdId: { $in: householdIds }, organizationId: orgId })
+      SurveyResponse.find({ householdId: { $in: householdIds }, organizationId: orgId, ...(passId ? { passId } : {}) })
         .populate('voterId', 'fullName')
         .populate('userId', 'firstName lastName')
         .lean(),
       CanvassActivity.aggregate([
-        { $match: { householdId: { $in: householdIds }, organizationId: orgId } },
+        { $match: { householdId: { $in: householdIds }, organizationId: orgId, ...(passId ? { passId } : {}) } },
         { $sort: { timestamp: -1 } },
         {
           $group: {
@@ -263,8 +286,10 @@ router.get('/map', async (req, res, next) => {
         location: h.location?.coordinates
           ? { lng: h.location.coordinates[0], lat: h.location.coordinates[1] }
           : null,
-        status: h.status,
-        lastActionAt: h.lastActionAt || last?.timestamp || null,
+        // Per-round: a door untouched THIS round reads 'unknocked' (fresh), not its
+        // global latest. Only fall back to global status when not pass-scoped.
+        status: passId ? passStatusMap?.get(String(h._id))?.status || 'unknocked' : h.status,
+        lastActionAt: (passId ? last?.timestamp : h.lastActionAt) || last?.timestamp || null,
         lastAction: last
           ? {
               actionType: last.actionType,
@@ -305,6 +330,67 @@ router.get('/map', async (req, res, next) => {
       })),
       total: result.length,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Per-door activity history across ALL rounds, grouped by round — powers the
+// audit door-detail "History by round" so you can see a door worked in Round 1
+// AND Round 2 (the latest-only map view hides this).
+router.get('/:householdId/activity', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const { householdId } = req.params;
+    if (!mongoose.isValidObjectId(householdId)) return res.status(400).json({ error: 'Invalid id' });
+    const hid = new mongoose.Types.ObjectId(householdId);
+    const name = (u) => (u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : null);
+
+    const [acts, surveys] = await Promise.all([
+      CanvassActivity.find(
+        { householdId: hid, organizationId: orgId, actionType: { $ne: 'note_added' } },
+        'actionType timestamp userId passId'
+      )
+        .populate('userId', 'firstName lastName')
+        .lean(),
+      SurveyResponse.find(
+        { householdId: hid, organizationId: orgId },
+        'submittedAt userId passId voterId'
+      )
+        .populate('userId', 'firstName lastName')
+        .populate('voterId', 'fullName')
+        .lean(),
+    ]);
+
+    const entries = [
+      ...acts.map((a) => ({ kind: 'knock', actionType: a.actionType, at: a.timestamp, passId: a.passId ? String(a.passId) : null, canvasser: name(a.userId) })),
+      ...surveys.map((s) => ({ kind: 'survey', actionType: 'survey_submitted', at: s.submittedAt, passId: s.passId ? String(s.passId) : null, canvasser: name(s.userId), voter: s.voterId?.fullName || null })),
+    ].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+    const passIds = [...new Set(entries.map((e) => e.passId).filter(Boolean))];
+    const passes = passIds.length ? await Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean() : [];
+    const passMap = new Map(passes.map((p) => [String(p._id), p]));
+
+    const byPass = new Map();
+    for (const e of entries) {
+      const key = e.passId || 'none';
+      if (!byPass.has(key)) byPass.set(key, []);
+      byPass.get(key).push(e);
+    }
+    const rounds = [...byPass.entries()]
+      .map(([key, items]) => {
+        const p = key === 'none' ? null : passMap.get(key);
+        return {
+          passId: key === 'none' ? null : key,
+          roundNumber: p?.roundNumber ?? null,
+          name: p?.name || (key === 'none' ? 'Before rounds' : 'Round'),
+          entries: items,
+        };
+      })
+      .sort((a, b) => (b.roundNumber ?? -1) - (a.roundNumber ?? -1));
+
+    res.json({ rounds });
   } catch (err) {
     next(err);
   }

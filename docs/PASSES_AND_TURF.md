@@ -147,6 +147,17 @@ updates without double-counting. So: **per-round** for what the canvasser works;
 coverage/reporting. (First/only rounds look exactly as before — the difference only shows once a Round 2
 exists.)
 
+**Seeing it as an admin.** The **Passes page** shows a **Knocks** count per round (the billable
+`door × round` figure) next to the books + progress. The **audit map** (Passes → *Audit →*) is
+**pass-scoped**: with a round selected it shows *that round's* door status + activity, not the global
+latest — and the door detail has a **History by round** section, so a door worked in Round 1 *and*
+Round 2 shows both.
+
+**Archiving a round is one-way + guarded.** A round goes draft → active → archived and is **never
+reopened** (you make a new round). Archiving a **live or already-worked** round therefore needs a
+confirmation (knocks are kept either way); only the *auto*-archive when you activate the next round is
+silent.
+
 ## Only one pass runs at a time
 
 A campaign can have **only one active pass**. Activating a pass automatically **archives** any other
@@ -277,7 +288,9 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 |---|---|
 | `POST /campaigns/:campaignId/passes` | Create (auto-increments `roundNumber`, optional `walkListId`); starts `draft`. |
 | `POST /passes/:id/activate` ([:104](../server/src/routes/admin/passes.js#L104)) | 409 if archived ([:108](../server/src/routes/admin/passes.js#L108)); 400 if no published books ([:111](../server/src/routes/admin/passes.js#L111)); **archives all other active passes** ([:115-118](../server/src/routes/admin/passes.js#L115-L118)); sets `Campaign.activePassId` ([:122](../server/src/routes/admin/passes.js#L122)). |
-| `POST /passes/:id/archive` ([:129](../server/src/routes/admin/passes.js#L129)) | Archive; clears `activePassId` if it was this pass. |
+| `POST /passes/:id/archive` | **409 `archive-confirm-required`** `{ knockCount, isActive }` when the round is active **or** has knocks and `confirmArchive` isn't set (one-way + canvassers lose it — knocks kept). Else archive; clears `activePassId` if it was this pass. |
+| `GET /campaigns/:campaignId/passes` | Each pass row carries `turfCount` **and `knockCount`** (distinct `(household, pass)` over `KNOCK_ACTIONS`) for the Passes page. |
+| `GET /admin/households/:householdId/activity` | A door's `CanvassActivity` + `SurveyResponse` across all rounds, grouped by round (`{ rounds: [{ passId, roundNumber, name, entries }] }`) — powers the door-detail "History by round". |
 | `DELETE /passes/:id` ([:145](../server/src/routes/admin/passes.js#L145)) | Draft-only. |
 
 **Books / turf** ([turfs.js](../server/src/routes/admin/turfs.js)):

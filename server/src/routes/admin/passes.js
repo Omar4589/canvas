@@ -8,7 +8,9 @@ import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
 import { Household } from '../../models/Household.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
+import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 
 const router = Router({ mergeParams: true });
@@ -49,9 +51,20 @@ router.get('/', async (req, res, next) => {
       { $group: { _id: '$passId', turfs: { $sum: 1 } } },
     ]);
     const cMap = new Map(counts.map((c) => [String(c._id), c.turfs]));
+    // Per-round knock count — billing definition: distinct (household, pass).
+    const knockAgg = await CanvassActivity.aggregate([
+      { $match: { campaignId: req.campaign._id, actionType: { $in: KNOCK_ACTIONS } } },
+      { $group: { _id: { passId: '$passId', householdId: '$householdId' } } },
+      { $group: { _id: '$_id.passId', knocks: { $sum: 1 } } },
+    ]);
+    const kMap = new Map(knockAgg.map((c) => [String(c._id), c.knocks]));
     const activeIds = await activePassIds(req.campaign._id);
     res.json({
-      passes: passes.map((p) => ({ ...p, turfCount: cMap.get(String(p._id)) || 0 })),
+      passes: passes.map((p) => ({
+        ...p,
+        turfCount: cMap.get(String(p._id)) || 0,
+        knockCount: kMap.get(String(p._id)) || 0,
+      })),
       activePassIds: activeIds.map(String),
     });
   } catch (err) {
@@ -136,6 +149,23 @@ router.post('/:id/archive', async (req, res, next) => {
   try {
     const pass = await Pass.findOne({ _id: req.params.id, campaignId: req.campaign._id });
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    // Guard: archiving is one-way (no reopen). Require explicit confirmation when
+    // the round is LIVE or has recorded knocks — otherwise canvassers lose a round
+    // mid-work with no undo. (Knock history is kept either way.)
+    if (!req.body?.confirmArchive) {
+      const knockCount = await CanvassActivity.countDocuments({ passId: pass._id });
+      if (pass.status === 'active' || knockCount > 0) {
+        return res.status(409).json({
+          error:
+            pass.status === 'active'
+              ? 'This round is live. Confirm to archive it.'
+              : 'This round has recorded knocks. Confirm to archive it.',
+          code: 'archive-confirm-required',
+          isActive: pass.status === 'active',
+          knockCount,
+        });
+      }
+    }
     pass.status = 'archived';
     pass.archivedAt = new Date();
     await pass.save();

@@ -246,6 +246,9 @@ router.get('/bootstrap', async (req, res, next) => {
     const voters = votersRaw.map((v) => ({ ...v, voted: votedSet.has(String(v._id)) }));
 
     const { books, efforts } = await canvasserBooks(req, campaign);
+    // The campaign's active round ids — the client compares this to the /changes
+    // poll to detect a round activation and refresh (per-round colors).
+    const activePasses = (await activePassIds(campaign._id)).map(String);
     // Per-effort surveys: every survey a door in scope might need (effort
     // overrides + campaign default), keyed by id. The app resolves a voter's
     // survey via household → book → surveyTemplateId → surveys[id], falling back
@@ -274,6 +277,7 @@ router.get('/bootstrap', async (req, res, next) => {
       voters,
       books,
       efforts,
+      activePassIds: activePasses,
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {
@@ -348,6 +352,9 @@ router.get('/changes', async (req, res, next) => {
       serverTime: new Date().toISOString(),
       households: changedHouseholds,
       voters: changedVoters,
+      // For round-change detection: if this differs from the client's bootstrap
+      // set, a round activated/archived → the client refetches the bootstrap.
+      activePassIds: (await activePassIds(cId)).map(String),
     });
   } catch (err) {
     next(err);

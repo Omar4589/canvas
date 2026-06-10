@@ -80,7 +80,9 @@ export default function BooksScreen() {
       }
     },
     enabled: !!activeCampaign?.id,
-    staleTime: 5 * 60 * 1000,
+    // Short window so a freshly-activated round refetches per-round status on mount
+    // rather than showing the prior round's cached colors.
+    staleTime: 30 * 1000,
   });
 
   const books = data?.books || [];

@@ -54,6 +54,7 @@ canvassActivitySchema.index({ userId: 1, timestamp: -1 });
 canvassActivitySchema.index({ householdId: 1, timestamp: -1 });
 canvassActivitySchema.index({ campaignId: 1, timestamp: -1 });
 canvassActivitySchema.index({ passId: 1, householdId: 1, timestamp: -1 }); // per-pass status derivation
+canvassActivitySchema.index({ campaignId: 1, passId: 1, householdId: 1 }); // per-round knock counts (Passes page)
 canvassActivitySchema.index({ userId: 1, householdId: 1, passId: 1 }); // within-pass dedup
 
 export const CanvassActivity = mongoose.model('CanvassActivity', canvassActivitySchema);

@@ -589,7 +589,7 @@ router.post('/target-preview', async (req, res, next) => {
         ).map((h) => h._id)
       : [];
     const voterCount = cuttable.length ? await Voter.countDocuments({ householdId: { $in: cuttable } }) : 0;
-    res.json({ doorCount: cuttable.length, voterCount });
+    res.json({ doorCount: cuttable.length, voterCount, householdIds: cuttable.map(String) });
   } catch (err) {
     next(err);
   }

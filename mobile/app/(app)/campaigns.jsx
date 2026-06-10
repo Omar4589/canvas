@@ -51,7 +51,9 @@ export default function CampaignsScreen() {
       await clearSelectedBooks();
       await clearCurrentEffort();
       if (effortId) await saveCurrentEffort(c.id, effortId);
-      qc.removeQueries({ queryKey: ['bootstrap'] });
+      // Invalidate (not just remove) so the next screen refetches fresh per-round
+      // data instead of briefly showing a prior round's cached statuses.
+      qc.invalidateQueries({ queryKey: ['bootstrap'] });
       router.replace('/(app)/books');
     } catch (e) {
       setPicking(null);

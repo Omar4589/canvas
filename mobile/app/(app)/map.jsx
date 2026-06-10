@@ -333,7 +333,7 @@ export default function MapScreen() {
       }
     },
     enabled: !!activeCampaign?.id,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000,
     // Never auto-refetch the whole campaign on (re)mount. A full bootstrap refetch
     // returns the server's CURRENT state, which lags a just-recorded action by the
     // round-trip — so an automatic one resolving right after an optimistic recolor
@@ -534,6 +534,16 @@ export default function MapScreen() {
         saveBootstrap(next);
         return next;
       });
+    }
+    // Round-change detection: if the campaign's active rounds changed since our
+    // bootstrap, refetch it (the overlay re-applies any pending recolors, so a
+    // just-recorded knock won't revert). Keeps refetchOnMount:false intact.
+    const live = result.activePassIds;
+    if (live) {
+      const current = qc.getQueryData(['bootstrap'])?.activePassIds;
+      if (current && JSON.stringify([...live].sort()) !== JSON.stringify([...current].sort())) {
+        qc.invalidateQueries({ queryKey: ['bootstrap'] });
+      }
     }
     if (serverTime) sinceRef.current = serverTime;
   }, [changesQ.data, qc]);
