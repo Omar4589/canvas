@@ -435,7 +435,8 @@ export default function TurfsPage() {
   const [bookSearchQuery, setBookSearchQuery] = useState('');
   const [aptThreshold, setAptThreshold] = useState(4);
   const [selectedBooks, setSelectedBooks] = useState(new Set());
-  const [drawnPolygon, setDrawnPolygon] = useState(null);
+  const [drawnAreas, setDrawnAreas] = useState([]); // [{ id, geometry }] from MapboxDraw
+  const [manualSplit, setManualSplit] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [showDiscard, setShowDiscard] = useState(false);
   const [clearKnocks, setClearKnocks] = useState(false);
@@ -510,6 +511,19 @@ export default function TurfsPage() {
     mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/include-apartments`, { method: 'POST', body: { passId } }),
     onSuccess: invalidateCut,
   });
+
+  // Manual mode: live houses + voters inside each drawn area.
+  const manualAreasKey = JSON.stringify(drawnAreas.map((a) => a.geometry?.coordinates));
+  const manualPreviewQ = useQuery({
+    queryKey: ['manual-preview', campaignId, passId, manualAreasKey],
+    queryFn: () =>
+      api(`/admin/campaigns/${campaignId}/turfs/manual-preview`, {
+        method: 'POST',
+        body: { passId, polygons: drawnAreas.map((a) => a.geometry) },
+      }),
+    enabled: mode === 'manual' && !!campaignId && !!passId && drawnAreas.length > 0,
+  });
+  const manualAreaStats = manualPreviewQ.data?.areas || [];
   // The popup's house + its current book, derived live from the doors data so it
   // updates after a move.
   const popupDoor = (doorsQ.data?.doors || []).find((d) => String(d.id) === String(popupHouseholdId));
@@ -615,7 +629,7 @@ export default function TurfsPage() {
   const generate = useMutation({
     mutationFn: () => {
       let params;
-      if (mode === 'manual') params = { polygon: drawnPolygon };
+      if (mode === 'manual') params = { polygons: drawnAreas.map((a) => a.geometry), subCutN: manualSplit ? Number(maxDoors) || 65 : null };
       else if (mode === 'attribute') params = { attribute, capN: capN ? Number(capN) : null };
       else params = { maxDoors: Number(maxDoors) || 65, tolerance: (FLEX_OPTIONS.find((o) => o.key === flex) || {}).tolerance };
       return api(`/admin/campaigns/${campaignId}/turfs/generate`, { method: 'POST', body: { passId, mode, params } });
@@ -623,7 +637,7 @@ export default function TurfsPage() {
     onSuccess: (res) => {
       setJobId(res.jobId);
       if (drawRef.current) drawRef.current.deleteAll();
-      setDrawnPolygon(null);
+      setDrawnAreas([]);
     },
   });
   const accept = useMutation({
@@ -715,7 +729,13 @@ export default function TurfsPage() {
     map.addControl(draw);
     drawRef.current = draw;
 
-    map.on('draw.create', (e) => setDrawnPolygon(e.features?.[0]?.geometry || null));
+    const syncAreas = () => {
+      const fc = drawRef.current?.getAll();
+      setDrawnAreas((fc?.features || []).map((f) => ({ id: f.id, geometry: f.geometry })));
+    };
+    map.on('draw.create', syncAreas);
+    map.on('draw.update', syncAreas);
+    map.on('draw.delete', syncAreas);
 
     // Layer event handlers — bound ONCE; they target layer IDs that registerBookLayers
     // recreates on each style swap, so they keep working across basemap changes.
@@ -820,14 +840,23 @@ export default function TurfsPage() {
   useEffect(() => { setSelectedBooks(new Set()); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
 
   function startDraw() {
-    if (drawRef.current) { drawRef.current.deleteAll(); drawRef.current.changeMode('draw_polygon'); }
+    // Don't clear — areas accumulate so you can draw several.
+    if (drawRef.current) drawRef.current.changeMode('draw_polygon');
+  }
+  function clearAreas() {
+    if (drawRef.current) drawRef.current.deleteAll();
+    setDrawnAreas([]);
+  }
+  function deleteArea(id) {
+    if (drawRef.current) drawRef.current.delete(id);
+    setDrawnAreas((areas) => areas.filter((a) => a.id !== id));
   }
 
   const jobBusy = jobId && jobQ.data && jobQ.data.status !== 'completed' && jobQ.data.status !== 'failed';
   const progress = jobQ.data?.progress;
   const pct = typeof progress === 'object' ? progress?.pct : progress;
   const canGenerate =
-    passId && !generate.isPending && !jobBusy && publishedCount === 0 && !hasNoDoors && (mode !== 'manual' || drawnPolygon);
+    passId && !generate.isPending && !jobBusy && publishedCount === 0 && !hasNoDoors && (mode !== 'manual' || drawnAreas.length > 0);
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -974,10 +1003,58 @@ export default function TurfsPage() {
           )}
           {mode === 'manual' && (
             <div className="mb-4 text-sm">
-              <button onClick={startDraw} className="w-full rounded border border-brand-accent/40 bg-brand-tint px-3 py-2 text-sm font-medium text-brand-tint-fg hover:bg-brand-tint/80">
-                ✎ Draw a polygon on the map
-              </button>
-              <p className="mt-1 text-xs text-fg-muted">{drawnPolygon ? 'Polygon drawn — Generate to create the book.' : 'Click to add points; double-click to finish.'}</p>
+              <div className="flex gap-2">
+                <button onClick={startDraw} className="flex-1 rounded border border-brand-accent/40 bg-brand-tint px-3 py-2 text-sm font-medium text-brand-tint-fg hover:bg-brand-tint/80">
+                  ✎ Draw an area
+                </button>
+                {drawnAreas.length > 0 && (
+                  <button onClick={clearAreas} className="rounded border border-border-strong px-3 py-2 text-xs font-medium text-fg-muted hover:bg-sunken">
+                    Clear all
+                  </button>
+                )}
+              </div>
+              {drawnAreas.length === 0 ? (
+                <p className="mt-1 text-xs text-fg-muted">Click to add points; double-click to finish. Draw as many areas as you want — each becomes a book.</p>
+              ) : (
+                <>
+                  <ul className="mt-2 space-y-1">
+                    {drawnAreas.map((a, i) => {
+                      const s = manualAreaStats[i];
+                      return (
+                        <li key={a.id} className="flex items-center justify-between gap-2 rounded bg-sunken px-2 py-1 text-xs">
+                          <span className="font-medium text-fg">Area {i + 1}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="text-fg-muted">
+                              {manualPreviewQ.isFetching && !s
+                                ? '…'
+                                : `${(s?.doorCount ?? 0).toLocaleString()} houses · ${(s?.voterCount ?? 0).toLocaleString()} voters`}
+                            </span>
+                            <button onClick={() => deleteArea(a.id)} className="rounded px-1 text-fg-subtle hover:bg-danger-tint hover:text-danger" aria-label="Remove area">✕</button>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {drawnAreas.length > 1 && manualAreaStats.length > 0 && (
+                    <p className="mt-1 text-[11px] text-fg-subtle">
+                      Total: {manualAreaStats.reduce((t, x) => t + (x?.doorCount || 0), 0).toLocaleString()} houses ·{' '}
+                      {manualAreaStats.reduce((t, x) => t + (x?.voterCount || 0), 0).toLocaleString()} voters
+                    </p>
+                  )}
+                  <label className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
+                    <input type="checkbox" checked={manualSplit} onChange={(e) => setManualSplit(e.target.checked)} />
+                    Split areas over
+                    <input
+                      type="number"
+                      min="1"
+                      value={maxDoors}
+                      onChange={(e) => setMaxDoors(e.target.value)}
+                      className="w-12 rounded border border-border-strong bg-card px-1 py-0.5 text-center text-fg"
+                    />
+                    doors into smaller books
+                  </label>
+                </>
+              )}
             </div>
           )}
 

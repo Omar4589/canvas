@@ -521,6 +521,38 @@ router.post('/include-apartments', async (req, res, next) => {
   }
 });
 
+// Per-area preview for manual mode: cuttable houses + their voters inside each
+// drawn polygon (same cut base filter), index-aligned with the input polygons.
+router.post('/manual-preview', async (req, res, next) => {
+  try {
+    const { passId, polygons } = req.body || {};
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    if (!Array.isArray(polygons)) return res.status(400).json({ error: 'polygons required' });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    const base = {
+      campaignId: req.campaign._id,
+      effortId: pass.effortId,
+      isActive: true,
+      fullyVoted: { $ne: true },
+      excludedFromTurf: { $ne: true },
+      'location.coordinates': { $exists: true, $ne: null },
+    };
+    const areas = [];
+    for (const polygon of polygons) {
+      if (!polygon) { areas.push({ doorCount: 0, voterCount: 0 }); continue; }
+      const ids = (
+        await Household.find({ ...base, location: { $geoWithin: { $geometry: polygon } } }, { _id: 1 }).lean()
+      ).map((h) => h._id);
+      const voterCount = ids.length ? await Voter.countDocuments({ householdId: { $in: ids } }) : 0;
+      areas.push({ doorCount: ids.length, voterCount });
+    }
+    res.json({ areas });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Group-sizes preview for attribute mode: how many cuttable (knockable) doors fall
 // in each group (precinct/zip/district/…), so the admin can set a smart cap before
 // cutting. Same base filter as the cut, grouped by the attribute's column.

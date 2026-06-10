@@ -1,41 +1,73 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 // Click-triggered floating panel: outside-click + Esc dismiss. `trigger` is the
 // clickable node; `children` is the panel content. `align` = left|right edge.
+// The panel is portalled to <body> with fixed positioning (computed from the
+// trigger rect) so it floats above any scroll/overflow container instead of
+// living inside it — otherwise it forces scrollbars / gets clipped.
 export function Popover({ trigger, children, align = 'left', width = 'w-64', className = '' }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+  const [pos, setPos] = useState(null);
+
+  const reposition = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    // Anchor the panel's left or right edge to the trigger, just below it.
+    setPos(
+      align === 'right'
+        ? { top: r.bottom + 6, right: window.innerWidth - r.right }
+        : { top: r.bottom + 6, left: r.left }
+    );
+  }, [align]);
+
+  useLayoutEffect(() => {
+    if (open) reposition();
+  }, [open, reposition]);
 
   useEffect(() => {
     if (!open) return undefined;
     function onDoc(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      if (triggerRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
+      setOpen(false);
     }
     function onKey(e) {
       if (e.key === 'Escape') setOpen(false);
     }
+    function onMove() {
+      reposition();
+    }
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
     return () => {
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
     };
-  }, [open]);
+  }, [open, reposition]);
 
   return (
-    <span ref={ref} className="relative inline-flex">
+    <span ref={triggerRef} className="relative inline-flex">
       <button type="button" onClick={() => setOpen((o) => !o)} className="inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card rounded">
         {trigger}
       </button>
-      {open && (
-        <div
-          className={`absolute top-full z-40 mt-1.5 animate-pop-in rounded-lg border border-border bg-raised p-3 text-sm text-fg-muted shadow-popover ${
-            align === 'right' ? 'right-0' : 'left-0'
-          } ${width} ${className}`}
-        >
-          {children}
-        </div>
-      )}
+      {open && pos &&
+        createPortal(
+          <div
+            ref={panelRef}
+            style={{ position: 'fixed', ...pos }}
+            className={`z-50 animate-pop-in rounded-lg border border-border bg-raised p-3 text-sm text-fg-muted shadow-popover ${width} ${className}`}
+          >
+            {children}
+          </div>,
+          document.body
+        )}
     </span>
   );
 }

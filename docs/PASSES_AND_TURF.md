@@ -68,7 +68,12 @@ geography in Round 2 is a *new* book in the Round-2 pass, not the same object re
   driving). See Part 2 §B.1.
 - **Attribute** — one book per precinct / county / city / ZIP / district, etc. Before you cut, the
   page **previews each group's door count** so you can set a smart cap (oversized groups are split).
-- **Manual** — you draw a polygon on the map and the households inside become a book.
+  The grouping values are the household's denormalized district/precinct/ZIP/county fields, derived
+  from the imported **voters'** data.
+- **Manual** — draw one or more areas on the map; **each area becomes a book**. As you draw, the panel
+  shows the **houses + voters inside each area** (live), you can remove an area (✕) or **Clear all**,
+  and an optional **"split areas over N doors"** geometrically sub-cuts a big area into ~N-door
+  walkable books instead of one giant book.
 
 Cuts only include **knockable** doors — already-voted (fully-voted) doors are skipped, and you can also
 **remove apartments** (any building with **N+ units at one address**, default 4): those doors are
@@ -242,6 +247,7 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | Route | Behavior |
 |---|---|
 | `GET .../turfs/attribute-preview?passId=&attribute=` | Group-sizes preview for attribute mode: knockable doors per `ATTR_COLUMN[attribute]` group (same cut base filter), `{ groups: [{ name, doorCount }] }` desc. |
+| `POST .../turfs/manual-preview` `{ passId, polygons }` | Per-area preview for manual mode: cuttable houses (`$geoWithin`, same cut base filter) + their `Voter` count inside each drawn polygon → `{ areas: [{ doorCount, voterCount }] }` index-aligned. Manual `generate` takes `params.polygons[]` (one book each) + optional `subCutN` (geometric split of big areas). |
 | `POST .../turfs/assign-bulk` | Bulk-assign selected books to selected people. `mode`: `distribute` (round-robin, even **books**), `balance` (greedy by eligible door count, even **doors**), `everyone` (all on all); `replace` clears existing first. **409 `not-accepted`** if any selected book is still a draft (per-book `POST /:turfId/assignments` enforces the same). |
 | `POST .../turfs/exclude-apartments` `{ passId, threshold }` | Group the effort's doors by rounded geocode; set `Household.excludedFromTurf:true` on members of clusters ≥ threshold → they skip cutting/map/counts/canvasser everywhere (mirrors `fullyVoted`). `POST .../turfs/include-apartments` clears it. |
 | `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. Skips fully-voted doors. |

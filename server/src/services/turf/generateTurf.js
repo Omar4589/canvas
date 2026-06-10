@@ -46,12 +46,28 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   let books;
   if (mode === 'manual') {
-    if (!params.polygon) throw new Error('manual mode requires params.polygon');
-    const households = await Household.find(
-      { ...baseFilter, location: { $geoWithin: { $geometry: params.polygon } } },
-      CUT_COLUMNS
-    ).lean();
-    books = [{ name: params.name || 'Drawn book', households, boundary: params.polygon }];
+    // One or more hand-drawn areas. Each area is one book by default; with subCutN
+    // set, big areas are geometrically split into ~subCutN-door walkable books.
+    const polygons = params.polygons?.length ? params.polygons : params.polygon ? [params.polygon] : [];
+    if (!polygons.length) throw new Error('manual mode requires params.polygons');
+    const subCutN = Number(params.subCutN) || 0;
+    books = [];
+    let idx = 0;
+    for (const polygon of polygons) {
+      idx += 1;
+      const hh = await Household.find(
+        { ...baseFilter, location: { $geoWithin: { $geometry: polygon } } },
+        CUT_COLUMNS
+      ).lean();
+      if (!hh.length) continue;
+      if (subCutN > 0 && hh.length > subCutN) {
+        const chunks = geometricCut(hh, { maxDoors: subCutN });
+        chunks.forEach((c, j) => books.push({ name: `Area ${idx} · ${j + 1}`, households: c.households }));
+      } else {
+        books.push({ name: `Area ${idx}`, households: hh, boundary: polygon });
+      }
+    }
+    if (!books.length) throw new Error('No doors inside the drawn area(s)');
   } else {
     const households = await Household.find(baseFilter, CUT_COLUMNS).lean();
     await onProgress?.({ phase: 'clustering', pct: 25 });
