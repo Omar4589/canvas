@@ -882,7 +882,7 @@ export default function TurfsPage() {
       )}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0 }} className="flex gap-5 px-6 pb-6">
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: '1.25rem' }} className="px-6 pb-6">
         <section style={{ flexShrink: 0, overflowY: 'auto' }} className="w-80 rounded-lg border border-border bg-card p-5">
           <h2 className="mb-3 text-base font-medium">Generate books</h2>
 
@@ -1257,13 +1257,13 @@ export default function TurfsPage() {
           )}
         </section>
 
-        <section style={{ flex: 1, minHeight: 0 }} className="relative overflow-hidden rounded-lg border border-border bg-card">
+        <section style={{ flex: 1, minHeight: 0, position: 'relative' }} className="overflow-hidden rounded-lg border border-border bg-card">
           {!tokenQ.data?.isReady ? (
-            <div className="flex h-full items-center justify-center text-sm text-fg-muted">
+            <div style={{ height: '100%' }} className="flex items-center justify-center text-sm text-fg-muted">
               {tokenQ.isLoading ? 'Loading map…' : 'Set MAPBOX_PUBLIC_TOKEN to enable the map.'}
             </div>
           ) : (
-            <div ref={containerRef} className="absolute inset-0" />
+            <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
           )}
           {tokenQ.data?.isReady && (
             <MapStyleControl value={styleId} onChange={setStyle} menuDirection="up" className="absolute bottom-3 left-3 z-10 items-start" />
