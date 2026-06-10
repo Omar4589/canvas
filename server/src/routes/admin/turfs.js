@@ -15,6 +15,7 @@ import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { WalkList } from '../../models/WalkList.js';
 import { Voter } from '../../models/Voter.js';
 import { recomputeTurf, recomputePassTerritories, addSupplementalBooks } from '../../services/turf/generateTurf.js';
+import { ATTR_COLUMN } from '../../services/turf/attributeCut.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
@@ -45,7 +46,9 @@ router.use(loadCampaign);
 
 // Bulk-assign many books to many people in one call.
 //   mode 'distribute' = round-robin: spread the books evenly across the crew (one
-//     person per book, books in spatial/name order) — the fast "split this turf".
+//     person per book, books in spatial/name order) — even BOOK count.
+//   mode 'balance'    = greedy by knockable doors: biggest book to the lightest
+//     person — even DOOR count (books vary in size).
 //   mode 'everyone'   = put every selected person on every selected book.
 //   replace:true      = clear existing assignments on those books first.
 // Validates active org membership (admins allowed — they canvass too). Reuses the
@@ -60,7 +63,7 @@ router.post('/assign-bulk', async (req, res, next) => {
 
     const turfs = await Turf.find(
       { _id: { $in: tids }, campaignId: req.campaign._id },
-      { _id: 1, passId: 1, name: 1 }
+      { _id: 1, passId: 1, name: 1, householdIds: 1 }
     ).lean();
     if (!turfs.length) return res.status(404).json({ error: 'No matching books in this campaign' });
 
@@ -81,6 +84,32 @@ router.post('/assign-bulk', async (req, res, next) => {
     const pairs = [];
     if (mode === 'everyone') {
       for (const t of turfs) for (const uid of validUsers) pairs.push([t, uid]);
+    } else if (mode === 'balance') {
+      // Even out total KNOCKABLE doors per person (not book count). Eligible door
+      // count per book mirrors the GET / list (active & not fully-voted). Greedy:
+      // assign the biggest remaining book to the lightest-loaded person.
+      const allHhIds = [...new Set(turfs.flatMap((t) => (t.householdIds || []).map(String)))];
+      const eligible = new Set(
+        allHhIds.length
+          ? (
+              await Household.find(
+                { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true } },
+                { _id: 1 }
+              ).lean()
+            ).map((h) => String(h._id))
+          : []
+      );
+      const doorsOf = (t) => (t.householdIds || []).filter((id) => eligible.has(String(id))).length;
+      const byDoors = [...turfs].sort((a, b) => doorsOf(b) - doorsOf(a));
+      const load = new Map(validUsers.map((u) => [String(u), 0]));
+      for (const t of byDoors) {
+        let lightest = validUsers[0];
+        for (const u of validUsers) {
+          if (load.get(String(u)) < load.get(String(lightest))) lightest = u;
+        }
+        pairs.push([t, lightest]);
+        load.set(String(lightest), load.get(String(lightest)) + doorsOf(t));
+      }
     } else {
       turfs.forEach((t, i) => pairs.push([t, validUsers[i % validUsers.length]]));
     }
@@ -94,7 +123,7 @@ router.post('/assign-bulk', async (req, res, next) => {
       );
       assignments += 1;
     }
-    res.json({ books: turfs.length, users: validUsers.length, assignments, mode: mode === 'everyone' ? 'everyone' : 'distribute', replaced: !!replace });
+    res.json({ books: turfs.length, users: validUsers.length, assignments, mode: ['everyone', 'balance'].includes(mode) ? mode : 'distribute', replaced: !!replace });
   } catch (err) {
     next(err);
   }
@@ -424,6 +453,45 @@ router.get('/', async (req, res, next) => {
       }
     }
     res.json({ turfs: withCounts, votedDoorCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Group-sizes preview for attribute mode: how many cuttable (knockable) doors fall
+// in each group (precinct/zip/district/…), so the admin can set a smart cap before
+// cutting. Same base filter as the cut, grouped by the attribute's column.
+router.get('/attribute-preview', async (req, res, next) => {
+  try {
+    const { passId, attribute } = req.query;
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const col = ATTR_COLUMN[attribute];
+    if (!col) return res.status(400).json({ error: 'Invalid attribute' });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+
+    const rows = await Household.aggregate([
+      {
+        $match: {
+          campaignId: req.campaign._id,
+          effortId: pass.effortId,
+          isActive: true,
+          fullyVoted: { $ne: true },
+          'location.coordinates': { $exists: true, $ne: null },
+        },
+      },
+      { $group: { _id: `$${col}`, n: { $sum: 1 } } },
+      { $sort: { n: -1 } },
+    ]);
+    // Merge blank/missing groups into a single "Unassigned" bucket.
+    let unassigned = 0;
+    const groups = [];
+    for (const r of rows) {
+      if (r._id == null || r._id === '') unassigned += r.n;
+      else groups.push({ name: String(r._id), doorCount: r.n });
+    }
+    if (unassigned) groups.push({ name: 'Unassigned', doorCount: unassigned });
+    res.json({ groups });
   } catch (err) {
     next(err);
   }

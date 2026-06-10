@@ -16,6 +16,7 @@ export default function BookAssignmentPanel({
   passId,
   books,
   assignedByTurf,
+  crewLoad,
   onClear,
   onMerge,
   mergePending,
@@ -147,7 +148,7 @@ export default function BookAssignmentPanel({
 
           {!single && (
             <div className="mb-2 flex rounded-md border border-border-strong p-0.5 text-[11px]">
-              {[{ key: 'distribute', label: 'Distribute' }, { key: 'everyone', label: 'Everyone' }].map((o) => (
+              {[{ key: 'distribute', label: 'Even books' }, { key: 'balance', label: 'Even doors' }, { key: 'everyone', label: 'Everyone' }].map((o) => (
                 <button
                   key={o.key}
                   onClick={() => setMode(o.key)}
@@ -245,12 +246,28 @@ export default function BookAssignmentPanel({
                 {picked.size === 0
                   ? 'Pick people to assign.'
                   : mode === 'distribute'
-                  ? `Split ${books.length} books across ${picked.size} ${picked.size === 1 ? 'person' : 'people'} (round-robin).`
+                  ? `Even BOOK count: split ${books.length} books across ${picked.size} ${picked.size === 1 ? 'person' : 'people'} (round-robin).`
+                  : mode === 'balance'
+                  ? `Even DOOR count: spread the doors across ${picked.size} ${picked.size === 1 ? 'person' : 'people'} (biggest books first).`
                   : `Everyone (${picked.size}) on every book.`}
               </p>
             </>
           )}
         </div>
+
+        {crewLoad && crewLoad.length > 0 && (
+          <div className="mt-3 border-t border-border pt-3">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Crew load · this round</div>
+            <ul className="space-y-0.5 text-xs">
+              {crewLoad.map((c) => (
+                <li key={c.user.id} className="flex items-center justify-between gap-2">
+                  <span className="truncate text-fg">{c.user.firstName} {c.user.lastName}</span>
+                  <span className="shrink-0 text-fg-muted">{c.books} bk · {c.doors.toLocaleString()} dr</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {books.length >= 2 && (

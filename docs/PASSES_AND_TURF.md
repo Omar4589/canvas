@@ -66,11 +66,24 @@ geography in Round 2 is a *new* book in the Round-2 pass, not the same object re
   area for one or two stray doors). Compactness is prioritized over even book sizes. A **Tight /
   Balanced / Compact** control sets how much book sizes may flex (Compact by default — the least
   driving). See Part 2 §B.1.
-- **Attribute** — one book per precinct / county / city / ZIP / district, etc.
+- **Attribute** — one book per precinct / county / city / ZIP / district, etc. Before you cut, the
+  page **previews each group's door count** so you can set a smart cap (oversized groups are split).
 - **Manual** — you draw a polygon on the map and the households inside become a book.
 
-Books are first created as **drafts**; you review them, then **accept** them (drafts → published).
+Cuts only include **knockable** doors — already-voted (fully-voted) doors are skipped, so book sizes
+reflect real work (see [EARLY_VOTING.md](EARLY_VOTING.md)).
+
+Books are first created as **drafts** — nothing reaches canvassers until you **accept** them (drafts →
+published). Re-cut freely until then; a **Discard** snapshots the layout so it's always recoverable.
 A pass needs accepted (published) books before it can be activated.
+
+## Assigning books to canvassers
+
+Select one or more books (in the list or on the map) and add people. For several books at once there
+are three modes: **Even books** (round-robin — each person gets a similar *book* count), **Even doors**
+(greedy — spreads the *door* count evenly, since books vary in size), and **Everyone** (every selected
+person on every selected book). A **Crew load** summary shows each person's books + doors so you can
+see the balance, and a **search** box finds a book by name or assigned canvasser.
 
 ## Recutting (changing the books)
 
@@ -222,7 +235,9 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 
 | Route | Behavior |
 |---|---|
-| `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. |
+| `GET .../turfs/attribute-preview?passId=&attribute=` | Group-sizes preview for attribute mode: knockable doors per `ATTR_COLUMN[attribute]` group (same cut base filter), `{ groups: [{ name, doorCount }] }` desc. |
+| `POST .../turfs/assign-bulk` | Bulk-assign selected books to selected people. `mode`: `distribute` (round-robin, even **books**), `balance` (greedy by eligible door count, even **doors**), `everyone` (all on all); `replace` clears existing first. |
+| `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. Skips fully-voted doors. |
 | `POST .../turfs/accept` ([:99](../server/src/routes/admin/turfs.js#L99)) | Draft → published for the pass. |
 | `POST .../turfs/add-supplemental` | **Non-destructive add.** Cut the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirror `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`); serialized by `Pass.recutLock`. New books then use Accept + Assign. Body `{ passId, name?, maxDoors? }` → `{ added, bookCount, bookIds }`. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
 | `POST .../turfs/discard` ([:113](../server/src/routes/admin/turfs.js#L113)) | Snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` and clear `activePassId`; optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse`. Serialized by `Pass.recutLock`. |

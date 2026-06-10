@@ -239,8 +239,9 @@ function DiscardModal({ isActive, bookCount, clearKnocks, setClearKnocks, pendin
           </div>
         ) : (
           <p className="mt-2 text-sm text-fg-muted">
-            This removes the pass's books and canvasser assignments so you can re-cut. Knock history is kept. You
-            can undo this from Snapshots.
+            This removes the pass's books and canvasser assignments so you can re-cut. Knock history is kept, and a
+            <strong> snapshot is saved automatically</strong> — restore it anytime from <strong>Undo / snapshots</strong> below
+            if you change your mind.
           </p>
         )}
         <label className="mt-3 flex items-start gap-2 text-sm text-fg-muted">
@@ -424,6 +425,7 @@ export default function TurfsPage() {
   const [jobId, setJobId] = useState(null);
 
   const [editMode, setEditMode] = useState(false);
+  const [bookSearchQuery, setBookSearchQuery] = useState('');
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnPolygon, setDrawnPolygon] = useState(null);
   const [mapReady, setMapReady] = useState(false);
@@ -511,11 +513,41 @@ export default function TurfsPage() {
     assignedByTurf.set(key, arr);
   }
 
+  // Group-sizes preview for attribute mode (knockable doors per precinct/zip/…).
+  const attributePreviewQ = useQuery({
+    queryKey: ['turf-attribute-preview', campaignId, passId, attribute],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/attribute-preview?passId=${passId}&attribute=${attribute}`),
+    enabled: !!campaignId && !!passId && mode === 'attribute',
+  });
+
   // At-a-glance summary (all client-derived from data already loaded).
   const totalHouses = turfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
   const assignedUserSet = new Set();
   for (const arr of assignedByTurf.values()) for (const u of arr) assignedUserSet.add(u.id);
   const booksUnassigned = turfs.filter((t) => !(assignedByTurf.get(String(t._id)) || []).length).length;
+
+  // Per-canvasser load across the round (books + knockable doors) — for the panel.
+  const crewLoad = (() => {
+    const m = new Map();
+    for (const t of turfs) {
+      const doors = t.eligibleDoorCount ?? t.doorCount ?? 0;
+      for (const u of assignedByTurf.get(String(t._id)) || []) {
+        const e = m.get(u.id) || { user: u, books: 0, doors: 0 };
+        e.books += 1;
+        e.doors += doors;
+        m.set(u.id, e);
+      }
+    }
+    return [...m.values()].sort((a, b) => b.doors - a.doors);
+  })();
+
+  // Book search filter (by book name or assigned-canvasser name).
+  const bookQuery = bookSearchQuery.trim().toLowerCase();
+  const matchBook = (t) =>
+    !bookQuery ||
+    String(t.name).toLowerCase().includes(bookQuery) ||
+    (assignedByTurf.get(String(t._id)) || []).some((u) => `${u.firstName} ${u.lastName}`.toLowerCase().includes(bookQuery));
+  const shownBooksCount = bookQuery ? turfs.filter(matchBook).length : turfs.length;
   const selectedDoors = selectedTurfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
 
   // Single household detail for the click-a-dot popup.
@@ -756,7 +788,10 @@ export default function TurfsPage() {
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Turf Cutting</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Turf Cutting</h1>
+          <p className="mt-0.5 text-sm text-fg-muted">Cut this round's doors into walkable books, then assign them to canvassers.</p>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <CampaignSelector campaignId={campaignId} onChange={(id) => { setCampaignId(id); setPassId(''); }} campaigns={campaigns} isLoading={isLoading} />
           {campaignId && <PassPicker campaignId={campaignId} passId={passId} onChange={setPassId} />}
@@ -767,6 +802,16 @@ export default function TurfsPage() {
           )}
         </div>
       </div>
+
+      {!campaignId && (
+        <NextStepBanner tone="info" className="mb-5">Pick a campaign above to start cutting turf.</NextStepBanner>
+      )}
+      {campaignId && !passId && (
+        <NextStepBanner tone="info" className="mb-5">Pick a round (pass) above to cut its doors into books.</NextStepBanner>
+      )}
+      {campaignId && passId && !hasNoDoors && turfs.length === 0 && doorsQ.data && (
+        <NextStepBanner tone="info" className="mb-5">No books yet — pick a cutting mode on the left and click Generate.</NextStepBanner>
+      )}
 
       {!!turfs.length && (
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -795,16 +840,26 @@ export default function TurfsPage() {
         <section className="rounded-lg border border-border bg-card p-5">
           <h2 className="mb-3 text-base font-medium">Generate books</h2>
 
-          <div className="mb-4 flex rounded-md border border-border p-0.5 text-sm">
-            {['geometric', 'attribute', 'manual'].map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={['flex-1 rounded px-2 py-1.5 font-medium capitalize transition-colors', mode === m ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken'].join(' ')}
-              >
-                {m}
-              </button>
-            ))}
+          <div className="mb-4">
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <span className="text-xs font-medium text-fg-muted">Cutting mode</span>
+              <InfoHint label="When to use each mode">
+                <b>Geometric</b> — group nearby houses into even, walkable books (the usual choice).<br />
+                <b>Attribute</b> — one book per precinct / zip / district.<br />
+                <b>Manual</b> — draw an area on the map by hand.
+              </InfoHint>
+            </div>
+            <div className="flex rounded-md border border-border p-0.5 text-sm">
+              {['geometric', 'attribute', 'manual'].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={['flex-1 rounded px-2 py-1.5 font-medium capitalize transition-colors', mode === m ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken'].join(' ')}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
 
           {mode === 'geometric' && (
@@ -847,6 +902,24 @@ export default function TurfsPage() {
                   {ATTRIBUTES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
                 </select>
               </label>
+              {attributePreviewQ.data?.groups && (
+                <div className="mb-3 rounded-md border border-border-strong bg-sunken px-3 py-2 text-xs">
+                  <div className="mb-1 font-medium text-fg-muted">
+                    {attributePreviewQ.data.groups.length} group{attributePreviewQ.data.groups.length === 1 ? '' : 's'} → one book each{capN ? ' (big ones split by the cap)' : ''}
+                  </div>
+                  <ul className="max-h-32 space-y-0.5 overflow-auto">
+                    {attributePreviewQ.data.groups.map((g) => {
+                      const over = capN && Number(capN) > 0 && g.doorCount > Number(capN);
+                      return (
+                        <li key={g.name} className={`flex justify-between gap-2 ${over ? 'text-warning-fg' : 'text-fg-muted'}`}>
+                          <span className="truncate">{g.name}</span>
+                          <span className="shrink-0 font-semibold">{g.doorCount.toLocaleString()}{over ? ' ⚠' : ''}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
               <label className="mb-4 block text-sm">
                 <span className="mb-1 block text-xs font-medium text-fg-muted">Cap at N doors/group (optional)</span>
                 <input type="number" min="1" placeholder="no cap" value={capN} onChange={(e) => setCapN(e.target.value)} className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
@@ -865,6 +938,11 @@ export default function TurfsPage() {
           <button onClick={() => canGenerate && generate.mutate()} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
             {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}
           </button>
+          {!hasNoDoors && publishedCount === 0 && (
+            <p className="mt-2 text-[11px] text-fg-muted">
+              Generated books are <strong>drafts</strong> — nothing reaches canvassers until you Accept. Re-cut freely until then.
+            </p>
+          )}
 
           {hasNoDoors && votedDoorCount > 0 && (
             <NextStepBanner tone="info" className="mt-3">
@@ -969,7 +1047,7 @@ export default function TurfsPage() {
               </div>
 
               <div className="mb-2 flex items-center gap-3 text-xs">
-                <button onClick={() => setSelectedBooks(new Set(turfs.map((t) => String(t._id))))} className="font-medium text-brand-accent hover:underline">Select all</button>
+                <button onClick={() => setSelectedBooks(new Set(turfs.filter(matchBook).map((t) => String(t._id))))} className="font-medium text-brand-accent hover:underline">Select all{bookQuery ? ' shown' : ''}</button>
                 {selectedBooks.size > 0 && (
                   <button onClick={() => setSelectedBooks(new Set())} className="font-medium text-fg-muted hover:underline">Clear ({selectedBooks.size})</button>
                 )}
@@ -982,9 +1060,23 @@ export default function TurfsPage() {
                 </div>
               )}
 
+              {turfs.length > 6 && (
+                <div className="mb-2">
+                  <input
+                    type="search"
+                    value={bookSearchQuery}
+                    onChange={(e) => setBookSearchQuery(e.target.value)}
+                    placeholder="Search books by name or canvasser…"
+                    className="w-full rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none"
+                  />
+                  {bookQuery && <div className="mt-1 text-[10px] text-fg-subtle">{shownBooksCount} of {turfs.length} books</div>}
+                </div>
+              )}
+
               <ul className="max-h-72 space-y-1 overflow-auto text-sm">
                 {turfs.map((t, i) => {
                   const selected = selectedBooks.has(String(t._id));
+                  if (!matchBook(t)) return null;
                   return (
                   <li
                     key={t._id}
@@ -1120,6 +1212,7 @@ export default function TurfsPage() {
               passId={passId}
               books={selectedTurfs}
               assignedByTurf={assignedByTurf}
+              crewLoad={crewLoad}
               onClear={() => setSelectedBooks(new Set())}
               onMerge={() => merge.mutate([...selectedBooks])}
               mergePending={merge.isPending}
