@@ -1,6 +1,5 @@
 import mongoose from 'mongoose';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
-import { Turf } from '../../models/Turf.js';
 import { ACTION_TO_STATUS } from '../../utils/statusPrecedence.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
@@ -37,29 +36,18 @@ export async function getPassStatusMap(passId, householdIds, campaignType) {
   return map;
 }
 
-// Per-ROUND status for a set of household docs ({ _id, turfId }): each door's
-// status IN ITS BOOK'S ROUND (door → turfId → Turf.passId → getPassStatusMap),
-// so a door re-targeted in a NEW round reads as fresh/unknocked to the canvasser
-// even if it was surveyed/not-home in a prior round. Returns Map<id, status>;
-// doors not in a book are absent (caller keeps their global status). Used by the
-// mobile bootstrap, /changes, and the "remaining" count.
-export async function resolvePerRoundStatuses(households, campaignType) {
+// Per-round status from an EXPLICIT door→pass map (e.g. the canvasser's assigned
+// book's round) — correct even when Household.turfId points at a freshly-cut future
+// round. Returns Map<doorIdStr, status>; doors absent from the map get nothing.
+export async function statusesFromDoorPass(doorPass, campaignType) {
   const out = new Map();
-  const turfIds = [...new Set(households.map((h) => h.turfId).filter(Boolean).map(String))];
-  if (!turfIds.length) return out;
-  const turfPass = new Map(
-    (await Turf.find({ _id: { $in: turfIds } }, { passId: 1 }).lean()).map((t) => [
-      String(t._id),
-      t.passId ? String(t.passId) : null,
-    ])
-  );
+  if (!doorPass || !doorPass.size) return out;
   const byPass = new Map();
-  for (const h of households) {
-    const pid = h.turfId ? turfPass.get(String(h.turfId)) : null;
+  for (const [hid, pid] of doorPass) {
     if (!pid) continue;
     let arr = byPass.get(pid);
     if (!arr) { arr = []; byPass.set(pid, arr); }
-    arr.push(String(h._id));
+    arr.push(hid);
   }
   for (const [pid, hids] of byPass) {
     const m = await getPassStatusMap(pid, hids, campaignType);

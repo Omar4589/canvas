@@ -147,6 +147,11 @@ updates without double-counting. So: **per-round** for what the canvasser works;
 coverage/reporting. (First/only rounds look exactly as before — the difference only shows once a Round 2
 exists.)
 
+A canvasser's per-round status is resolved from **their assigned book's round** (not a door's global
+book pointer), so you can **cut/prep the next round at any time** — even while the current round is still
+being walked — without disturbing the active round's canvassers. (Activating the new round still archives
+the old one and needs its own book assignments — a new round is a fresh assignment.)
+
 **Seeing it as an admin.** The **Passes page** shows a **Knocks** count per round (the billable
 `door × round` figure) next to the books + progress. The **audit map** (Passes → *Audit →*) is
 **pass-scoped**: with a round selected it shows *that round's* door status + activity, not the global

@@ -25,3 +25,33 @@ export async function canvasserHouseholdScope(req, campaign) {
   const books = await Turf.find({ _id: { $in: myTurfs.map((a) => a.turfId) } }, { householdIds: 1 }).lean();
   return books.flatMap((b) => b.householdIds || []);
 }
+
+// Like canvasserHouseholdScope, but ALSO returns a door → round (pass) map built from
+// the canvasser's ASSIGNED books, so per-round status is resolved against the round
+// the canvasser is actually working — NOT the door's global Household.turfId, which
+// moves to the latest-cut round and would otherwise flip an active round's doors to
+// "fresh" when a future round is prepped. A door is in at most one of a canvasser's
+// books (efforts are disjoint), so the mapping is unambiguous.
+export async function canvasserScopeWithPasses(req, campaign) {
+  const passIds = await activePassIds(campaign._id);
+  if (!passIds.length) return { scope: [], doorPass: new Map() };
+  const myTurfs = await TurfAssignment.find(
+    { userId: req.user._id, campaignId: campaign._id, passId: { $in: passIds } },
+    { turfId: 1 }
+  ).lean();
+  if (!myTurfs.length) return { scope: [], doorPass: new Map() };
+  const books = await Turf.find(
+    { _id: { $in: myTurfs.map((a) => a.turfId) } },
+    { householdIds: 1, passId: 1 }
+  ).lean();
+  const scope = [];
+  const doorPass = new Map();
+  for (const b of books) {
+    const pid = b.passId ? String(b.passId) : null;
+    for (const hid of b.householdIds || []) {
+      scope.push(hid);
+      if (pid) doorPass.set(String(hid), pid);
+    }
+  }
+  return { scope, doorPass };
+}

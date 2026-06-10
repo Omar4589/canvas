@@ -8,8 +8,8 @@ import { Household } from '../../models/Household.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
-import { canvasserHouseholdScope } from '../../services/canvass/canvasserScope.js';
-import { resolvePerRoundStatuses } from '../../services/passes/passStatus.js';
+import { canvasserScopeWithPasses } from '../../services/canvass/canvasserScope.js';
+import { statusesFromDoorPass } from '../../services/passes/passStatus.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -201,7 +201,7 @@ router.get('/today', async (req, res, next) => {
       fullyVoted: { $ne: true },
       excludedFromTurf: { $ne: true },
     };
-    const scope = await canvasserHouseholdScope(req, access.campaign);
+    const { scope, doorPass } = await canvasserScopeWithPasses(req, access.campaign);
 
     const stats = await computeDailyStats({
       orgId,
@@ -211,20 +211,12 @@ router.get('/today', async (req, res, next) => {
       end: new Date(now),
     });
 
-    let remaining;
-    if (scope) {
-      const remDoors = await Household.find(
-        { ...remBase, _id: { $in: scope } },
-        { _id: 1, turfId: 1, status: 1 }
-      ).lean();
-      const perRound = await resolvePerRoundStatuses(remDoors, access.campaign.type);
-      remaining = remDoors.filter(
-        (h) => (perRound.get(String(h._id)) || h.status || 'unknocked') === 'unknocked'
-      ).length;
-    } else {
-      // Admin (whole campaign) → keep the cheap global count.
-      remaining = await Household.countDocuments({ ...remBase, status: 'unknocked' });
-    }
+    // Cuttable scope doors still unknocked IN THE CANVASSER'S BOOK ROUND.
+    const remDoors = await Household.find({ ...remBase, _id: { $in: scope } }, { _id: 1 }).lean();
+    const perRound = await statusesFromDoorPass(doorPass, access.campaign.type);
+    const remaining = remDoors.filter(
+      (h) => (perRound.get(String(h._id)) || 'unknocked') === 'unknocked'
+    ).length;
 
     res.json({ ...stats, remaining });
   } catch (err) {
