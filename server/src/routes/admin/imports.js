@@ -27,6 +27,21 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
+// Wrap multer so an oversized file returns a friendly 413 (with a code the client
+// can detect) instead of bubbling to the generic 500 error handler.
+function uploadCsv(req, res, next) {
+  upload.single('file')(req, res, (err) => {
+    if (err?.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        error: 'File too large — max 50 MB. Split it into smaller files (e.g. by region).',
+        code: 'file-too-large',
+      });
+    }
+    if (err) return next(err);
+    next();
+  });
+}
+
 function activeOrgId(req) {
   return req.activeOrg?._id;
 }
@@ -45,7 +60,7 @@ router.get('/fields', (req, res) => {
 });
 
 // Read a file's headers + a few sample rows and auto-suggest a mapping.
-router.post('/preview-headers', upload.single('file'), (req, res, next) => {
+router.post('/preview-headers', uploadCsv, (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
@@ -125,7 +140,7 @@ async function resolveImportMapping(req) {
 }
 
 // Enqueue a CSV import: validate synchronously, stash the file in GridFS, queue it.
-router.post('/csv', upload.single('file'), async (req, res, next) => {
+router.post('/csv', uploadCsv, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
@@ -167,7 +182,7 @@ router.post('/csv', upload.single('file'), async (req, res, next) => {
 
 // Dry-run: parse + diff the file against the campaign's current data. No writes —
 // powers the "review before you import" step. Apply is the unchanged POST /csv.
-router.post('/csv/preview', upload.single('file'), async (req, res, next) => {
+router.post('/csv/preview', uploadCsv, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
@@ -184,6 +199,46 @@ router.post('/csv/preview', upload.single('file'), async (req, res, next) => {
     const { totalRows, errors, validRows, householdMap, dupSvids } = parseAndValidate(csv, resolved.mapping);
     const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows });
     res.json({ diff });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Async preview for LARGE files: same diff as /csv/preview, but stash the file and
+// run the parse+diff on the worker (off the 30s request clock). The client polls
+// GET /:importId for job.diff. Mirrors POST /csv but kind:'preview'.
+router.post('/csv/preview-enqueue', uploadCsv, async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
+    const campaignId = req.body?.campaignId;
+    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+      return res.status(400).json({ error: 'campaignId is required' });
+    }
+    const resolved = await resolveImportMapping(req);
+    if (resolved.error) return res.status(400).json({ error: resolved.error });
+    const { mapping, importProfileId } = resolved;
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
+    if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
+
+    const job = await ImportJob.create({
+      organizationId: activeOrgId(req),
+      campaignId: campaign._id,
+      filename: req.file.originalname,
+      uploadedBy: req.user._id,
+      status: 'pending',
+      kind: 'preview',
+      fieldMapping: mapping,
+      importProfileId,
+    });
+    await saveRawImport(job._id, req.file.originalname, req.file.buffer);
+    await getQueue(QUEUE_NAMES.IMPORT).add(
+      'csv-preview',
+      { importJobId: String(job._id) },
+      { jobId: String(job._id) }
+    );
+
+    res.status(201).json({ job });
   } catch (err) {
     next(err);
   }
@@ -217,7 +272,9 @@ router.get('/worker-status', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const filter = { organizationId: activeOrgId(req) };
+    // Exclude preview jobs ($ne also matches legacy docs with no `kind`) so the
+    // ephemeral large-file previews don't clutter the import history.
+    const filter = { organizationId: activeOrgId(req), kind: { $ne: 'preview' } };
     if (req.query.campaignId) filter.campaignId = req.query.campaignId;
     const jobs = await ImportJob.find(filter, { errors: 0 })
       .sort({ createdAt: -1 })

@@ -30,6 +30,18 @@ that would change doors** (re-housing), **near-duplicate addresses** (formatting
 Voter IDs). Review it, then **Confirm & import** to apply (or **Back** to fix the mapping). Each finished
 import also records how many voters moved doors and how many doors were emptied, in the history table.
 
+## File size & large files
+
+Uploads are capped at **50 MB** (roughly 150k–250k voter rows). Picking a bigger file is blocked up
+front with a "split it" message — and since imports are **additive and idempotent** (re-uploading rows
+just refreshes them), splitting a very large file by region/county and uploading each piece produces the
+**same end result**. When you pick a file the page shows its size and an estimated row count.
+
+Most files preview in a second or two. A **large file** (≥ ~15 MB) is analyzed in the **background** so
+it can't hit the request timeout — you'll see "Analyzing in the background…" and the diff appears when
+it's ready. That background preview, like the actual import, needs the **import worker** running (the
+worker-offline banner will warn you if it isn't).
+
 ## Undo an import
 
 Uploaded the wrong file? Each completed import has an **Undo** button in the history. Undo removes the
@@ -125,8 +137,20 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
 - **Forecast vs. actual:** the preview is a forecast against current data; the apply re-parses the same
   file and computes the authoritative counts. The CLI `runImport` path skips the worker's post-apply
   step (no deactivation), same as it skips the other post-apply recomputes.
+- **Sync vs. async preview:** the synchronous `POST /csv/preview` parses + diffs in the request — fine
+  for city-sized files but at risk of the platform's 30s request timeout on very large files. So the
+  client routes files **≥ 15 MB** to `POST /csv/preview-enqueue`, which stashes the file
+  (`saveRawImport`) and queues an `ImportJob` with **`kind: 'preview'`** on the same import queue. The
+  worker branch in [importProcessor.js](../server/src/services/import/importProcessor.js) runs
+  `parseAndValidate` + `computeImportDiff`, stores the result on `ImportJob.diff`, and deletes the raw
+  file (no `applyImport`). The page polls `GET /admin/imports/:id` for `job.diff`. Preview jobs are
+  excluded from the Recent-imports list (`kind: { $ne: 'preview' }`).
+- **Size cap:** Multer rejects files over **50 MB**; a `uploadCsv` wrapper maps that to a friendly
+  **413** (`code: 'file-too-large'`) instead of a generic 500, and the client also blocks oversized
+  files before upload.
 
-Still open (not built): reopening an already-knocked door when a new voter is added there.
+Still open (not built): reopening an already-knocked door when a new voter is added there; streaming the
+upload to disk + a sampled preview if single files ever need to exceed 50 MB.
 
 ## E. Operations — the import worker
 

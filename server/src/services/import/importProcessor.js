@@ -3,6 +3,7 @@ import { ImportJob } from '../../models/ImportJob.js';
 import { Campaign } from '../../models/Campaign.js';
 import { loadRawImport, deleteRawImport } from './rawImportStore.js';
 import { parseAndValidate, applyImport } from './csvImporter.js';
+import { computeImportDiff } from './computeImportDiff.js';
 import { recomputeCutAttributesForCampaign } from '../turf/computeCutAttributes.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
@@ -40,6 +41,26 @@ export async function processImportJob(job) {
       csv,
       importJob.fieldMapping || {}
     );
+
+    // Preview kind: read-only forecast (same diff the sync /csv/preview shows), no
+    // writes. Persist the diff for the client to poll, then drop the raw file.
+    if (importJob.kind === 'preview') {
+      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows });
+      await ImportJob.updateOne(
+        { _id: importJobId },
+        {
+          status: 'completed',
+          diff,
+          totalRows,
+          errorCount: errors.length,
+          errors: errors.slice(0, 100),
+          progress: 100,
+          completedAt: new Date(),
+        }
+      );
+      await deleteRawImport(importJobId);
+      return { ok: true, kind: 'preview', importJobId: String(importJobId) };
+    }
 
     // Re-housing audit: capture each incoming voter's CURRENT household BEFORE the
     // upsert reassigns it, so we can detect moves + emptied doors afterward.

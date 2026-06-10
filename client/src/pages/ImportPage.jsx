@@ -1,10 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { getStoredCampaignId, setStoredCampaignId } from '../components/CampaignSelector.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
+
+const MAX_FILE_BYTES = 50 * 1024 * 1024; // server-enforced upload cap
+const LARGE_FILE_BYTES = 15 * 1024 * 1024; // at/above this, route the preview to the background worker
+const fmtMB = (b) => `${(b / (1024 * 1024)).toFixed(1)} MB`;
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -128,6 +132,8 @@ export default function ImportPage() {
   const [profileName, setProfileName] = useState('');
   const [step, setStep] = useState('select'); // 'select' | 'map' | 'review'
   const [justImported, setJustImported] = useState(null); // campaignId of the last queued import
+  const [previewJobId, setPreviewJobId] = useState(null); // async (large-file) preview job
+  const [fileNote, setFileNote] = useState(null); // { tooBig } | { sizeText, estRows, large }
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -192,6 +198,32 @@ export default function ImportPage() {
     onSuccess: () => setStep('review'),
   });
 
+  // Large files: the parse+diff can exceed the 30s request timeout, so run it on
+  // the worker and poll. Same diff shape as the sync path; the render unifies both.
+  const enqueuePreview = useMutation({
+    mutationFn: async ({ file, campaignId, mapping }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('campaignId', campaignId);
+      fd.append('mapping', JSON.stringify(mapping));
+      return api('/admin/imports/csv/preview-enqueue', { method: 'POST', formData: fd });
+    },
+    onSuccess: (res) => setPreviewJobId(res.job?._id || null),
+  });
+  const previewJobQ = useQuery({
+    queryKey: ['admin', 'imports', 'preview-job', previewJobId],
+    queryFn: () => api(`/admin/imports/${previewJobId}`),
+    enabled: !!previewJobId,
+    refetchInterval: (q) => {
+      const s = q.state.data?.job?.status;
+      return s === 'completed' || s === 'failed' ? false : 1500;
+    },
+  });
+  const previewAsyncJob = previewJobQ.data?.job || null;
+  useEffect(() => {
+    if (previewAsyncJob?.status === 'completed') setStep('review');
+  }, [previewAsyncJob?.status]);
+
   const upload = useMutation({
     mutationFn: async ({ file, campaignId, mapping }) => {
       const fd = new FormData();
@@ -230,19 +262,33 @@ export default function ImportPage() {
     setColumns([]);
     setMapping({});
     setStep('select');
+    setFileNote(null);
+    setPreviewJobId(null);
     previewDiff.reset();
+    enqueuePreview.reset();
   }
 
   // Any change to the inputs makes a computed diff stale — drop back to mapping.
   function dropReview() {
     previewDiff.reset();
+    enqueuePreview.reset();
+    setPreviewJobId(null);
     setStep((s) => (s === 'review' ? 'map' : s));
   }
 
   function onPickFile(f) {
+    setPreviewJobId(null);
+    previewDiff.reset();
+    enqueuePreview.reset();
+    if (!f) { setFile(null); setFileNote(null); setStep('select'); return; }
     setFile(f);
-    if (f) preview.mutate(f);
-    else setStep('select');
+    if (f.size > MAX_FILE_BYTES) {
+      setFileNote({ tooBig: true }); // block — server would 413; don't even read headers
+      setStep('select');
+      return;
+    }
+    setFileNote({ sizeText: fmtMB(f.size), estRows: Math.round(f.size / 250), large: f.size >= LARGE_FILE_BYTES });
+    preview.mutate(f); // header read is cheap (5-row peek) even for big files
   }
 
   function applyMapping(next) {
@@ -257,9 +303,29 @@ export default function ImportPage() {
 
   const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
   const requiredUnmapped = requiredKeys.filter((k) => !mapping[k]);
+
+  // Unify the sync (small-file) and async (large-file) preview so the render reads
+  // one diff / pending / error regardless of path.
+  const tooBig = !!fileNote?.tooBig;
+  const isLargeFile = !!file && file.size >= LARGE_FILE_BYTES;
+  const diff = isLargeFile ? previewAsyncJob?.diff : previewDiff.data?.diff;
+  const previewPending = isLargeFile
+    ? enqueuePreview.isPending ||
+      Boolean(previewJobId && previewAsyncJob?.status !== 'completed' && previewAsyncJob?.status !== 'failed')
+    : previewDiff.isPending;
+  const previewError = isLargeFile
+    ? enqueuePreview.error ||
+      (previewAsyncJob?.status === 'failed' ? { message: 'Background preview failed — check the file and try again.' } : null)
+    : previewDiff.error;
+
   // Not gated on step === 'map': if a race leaves step === 'review' with the diff
   // cleared, the fallback "Preview changes" button must still be usable to recover.
-  const canPreview = file && campaignId && requiredUnmapped.length === 0 && !previewDiff.isPending;
+  const canPreview = file && campaignId && requiredUnmapped.length === 0 && !previewPending && !tooBig;
+  function triggerPreview() {
+    if (!canPreview) return;
+    if (isLargeFile) enqueuePreview.mutate({ file, campaignId, mapping });
+    else previewDiff.mutate({ file, campaignId, mapping });
+  }
 
   return (
     <div>
@@ -311,6 +377,20 @@ export default function ImportPage() {
               onChange={(e) => onPickFile(e.target.files?.[0] || null)}
               className="block w-full text-sm"
             />
+            {fileNote?.tooBig && (
+              <div className="mt-2 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">
+                This file is over the 50 MB limit. Split it into smaller files (e.g. by region or county) and
+                upload each — imports are additive, so the end result is identical.
+              </div>
+            )}
+            {fileNote && !fileNote.tooBig && (
+              <p className="mt-1 text-xs text-fg-muted">
+                {fileNote.sizeText} · ~{fileNote.estRows.toLocaleString()} rows (est.)
+                {fileNote.large && (
+                  <span className="text-warning-fg"> · large file — analyzed in the background (needs the import worker running)</span>
+                )}
+              </p>
+            )}
             {preview.isPending && <p className="mt-1 text-xs text-fg-muted">Reading columns…</p>}
             {preview.error && (
               <p className="mt-1 text-xs text-danger">{preview.error.message}</p>
@@ -395,9 +475,9 @@ export default function ImportPage() {
           </div>
         )}
 
-        {step === 'review' && previewDiff.data?.diff && <ReviewPanel diff={previewDiff.data.diff} />}
+        {step === 'review' && diff && <ReviewPanel diff={diff} />}
 
-        {step === 'review' && previewDiff.data?.diff ? (
+        {step === 'review' && diff ? (
           <div className="flex items-center gap-2">
             <button
               onClick={() => setStep('map')}
@@ -415,16 +495,16 @@ export default function ImportPage() {
           </div>
         ) : (
           <button
-            onClick={() => canPreview && previewDiff.mutate({ file, campaignId, mapping })}
+            onClick={triggerPreview}
             disabled={!canPreview}
             className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
           >
-            {previewDiff.isPending ? 'Analyzing…' : 'Preview changes'}
+            {previewPending ? (isLargeFile ? 'Analyzing in the background…' : 'Analyzing…') : 'Preview changes'}
           </button>
         )}
-        {previewDiff.error && (
+        {previewError && (
           <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-            {previewDiff.error.message}
+            {previewError.message}
           </div>
         )}
         {upload.error && (

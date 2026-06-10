@@ -60,6 +60,10 @@ const importJobSchema = new mongoose.Schema(
     // Column mapping used for this import (resolved canonical -> vendor column).
     importProfileId: { type: mongoose.Schema.Types.ObjectId, ref: 'ImportProfile', default: null },
     fieldMapping: { type: mongoose.Schema.Types.Mixed, default: null },
+    // 'apply' = the real import (default; old docs read as apply). 'preview' = a
+    // read-only diff run on the worker for large files (stores `diff`, no writes).
+    kind: { type: String, enum: ['preview', 'apply'], default: 'apply', index: true },
+    diff: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );
