@@ -12,6 +12,7 @@ import { Household } from '../../models/Household.js';
 import { WalkList } from '../../models/WalkList.js';
 import { Membership } from '../../models/Membership.js';
 import { recomputeTurf } from '../../services/turf/generateTurf.js';
+import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -55,17 +56,27 @@ router.get('/', async (req, res, next) => {
   try {
     const cId = req.campaign._id;
     const efforts = await Effort.find({ campaignId: cId }).sort({ createdAt: 1 }).lean();
-    const activeRounds = await Pass.find(
-      { campaignId: cId, status: 'active' },
-      { effortId: 1, roundNumber: 1, name: 1 }
+    // All passes (not just active) — active drives crew; the full set drives the
+    // per-effort readiness rollup (round/books/assigned across any pass status).
+    const passes = await Pass.find(
+      { campaignId: cId },
+      { effortId: 1, roundNumber: 1, name: 1, status: 1 }
     ).lean();
+    const activeRounds = passes.filter((p) => p.status === 'active');
     const activePassIds = activeRounds.map((p) => p._id);
     const passToEffort = new Map(activeRounds.map((p) => [String(p._id), String(p.effortId)]));
+    const passToEffortAll = new Map(passes.map((p) => [String(p._id), String(p.effortId)]));
+    const passCountByEffort = new Map();
+    for (const p of passes) {
+      const k = String(p.effortId);
+      passCountByEffort.set(k, (passCountByEffort.get(k) || 0) + 1);
+    }
+    const activeEffortIds = new Set(activeRounds.map((p) => String(p.effortId)));
 
     // "Crew" is DERIVED: manual roster members ∪ canvassers assigned to the
     // effort's active round's books. So it always reflects who's actually working
     // and self-corrects on unassign / re-carve (no stored sync needed).
-    const [doorCounts, memberSets, assignSets, intakeCount] = await Promise.all([
+    const [doorCounts, memberSets, assignSets, intakeCount, pubTurfAgg, assignAgg] = await Promise.all([
       Household.aggregate([
         { $match: { campaignId: cId, isActive: true, effortId: { $ne: null } } },
         { $group: { _id: '$effortId', n: { $sum: 1 } } },
@@ -81,10 +92,30 @@ router.get('/', async (req, res, next) => {
           ])
         : Promise.resolve([]),
       Household.countDocuments({ campaignId: cId, isActive: true, effortId: null }),
+      // Readiness rollup: published books + assignments per pass (any status),
+      // folded up to the effort below via passToEffortAll.
+      Turf.aggregate([
+        { $match: { campaignId: cId, status: 'published' } },
+        { $group: { _id: '$passId', n: { $sum: 1 } } },
+      ]),
+      TurfAssignment.aggregate([
+        { $match: { campaignId: cId } },
+        { $group: { _id: '$passId', n: { $sum: 1 } } },
+      ]),
     ]);
 
     const doorMap = new Map(doorCounts.map((d) => [String(d._id), d.n]));
     const activeMap = new Map(activeRounds.map((p) => [String(p.effortId), p]));
+    const rollUp = (agg) => {
+      const m = new Map();
+      for (const r of agg) {
+        const eff = passToEffortAll.get(String(r._id));
+        if (eff) m.set(eff, (m.get(eff) || 0) + r.n);
+      }
+      return m;
+    };
+    const pubByEffort = rollUp(pubTurfAgg);
+    const assignByEffort = rollUp(assignAgg);
     const crewByEffort = new Map(); // effortId -> Set(userId)
     for (const m of memberSets) crewByEffort.set(String(m._id), new Set(m.users.map(String)));
     for (const a of assignSets) {
@@ -96,13 +127,23 @@ router.get('/', async (req, res, next) => {
     }
 
     res.json({
-      efforts: efforts.map((e) => ({
-        ...e,
-        doorCount: doorMap.get(String(e._id)) || 0,
-        crewCount: crewByEffort.get(String(e._id))?.size || 0,
-        crewUserIds: [...(crewByEffort.get(String(e._id)) || [])],
-        activeRound: activeMap.get(String(e._id)) || null,
-      })),
+      efforts: efforts.map((e) => {
+        const k = String(e._id);
+        return {
+          ...e,
+          doorCount: doorMap.get(k) || 0,
+          crewCount: crewByEffort.get(k)?.size || 0,
+          crewUserIds: [...(crewByEffort.get(k) || [])],
+          activeRound: activeMap.get(k) || null,
+          setup: deriveEffortSetup({
+            doorCount: doorMap.get(k) || 0,
+            passes: passCountByEffort.get(k) || 0,
+            publishedTurfs: pubByEffort.get(k) || 0,
+            assignments: assignByEffort.get(k) || 0,
+            hasActivePass: activeEffortIds.has(k),
+          }),
+        };
+      }),
       intakeCount,
     });
   } catch (err) {

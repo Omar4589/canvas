@@ -4,6 +4,7 @@ import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
+import { Effort } from '../../models/Effort.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
@@ -46,7 +47,7 @@ router.get('/', async (req, res, next) => {
     const campaignId = req.campaign._id;
     const organizationId = req.campaign.organizationId;
 
-    const [households, ownedDoors, intakeDoors, passes, publishedTurfs, assignments, orgCanvassers, activeIds, activity, responses] =
+    const [households, ownedDoors, intakeDoors, passes, publishedTurfs, assignments, orgCanvassers, activeIds, activity, responses, effortDocs, activeEffortIdsRaw] =
       await Promise.all([
         Household.countDocuments({ campaignId, isActive: true }),
         Household.countDocuments({ campaignId, isActive: true, effortId: { $ne: null } }),
@@ -58,7 +59,14 @@ router.get('/', async (req, res, next) => {
         activePassIds(campaignId),
         CanvassActivity.exists({ campaignId }),
         SurveyResponse.exists({ campaignId }),
+        Effort.find({ campaignId, status: { $ne: 'archived' } }, { _id: 1 }).lean(),
+        Pass.distinct('effortId', { campaignId, status: 'active' }),
       ]);
+
+    // Efforts that aren't live yet (no active round) — drives the dashboard nudge so
+    // a new effort isn't masked by the campaign-level "complete".
+    const activeEffortSet = new Set(activeEffortIdsRaw.map(String));
+    const effortsNeedingSetup = effortDocs.filter((e) => !activeEffortSet.has(String(e._id))).length;
 
     const result = deriveSetupSteps({
       campaign: req.campaign,
@@ -74,7 +82,7 @@ router.get('/', async (req, res, next) => {
       },
     });
 
-    res.json({ ...result, hasCanvassed: Boolean(activity || responses) });
+    res.json({ ...result, hasCanvassed: Boolean(activity || responses), effortsNeedingSetup });
   } catch (err) {
     next(err);
   }

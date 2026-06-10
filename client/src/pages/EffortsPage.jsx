@@ -5,7 +5,7 @@ import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection, setStoredCampaignId } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
-import { Card, Badge, Button, Input, Select } from '../components/ui';
+import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
@@ -81,9 +81,10 @@ function RosterPanel({ campaignId, effort }) {
   );
 }
 
-function ClaimPanel({ campaignId, effort, walkLists }) {
+function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
   const qc = useQueryClient();
   const [walkListId, setWalkListId] = useState('');
+  const [confirmAll, setConfirmAll] = useState(false);
   const claim = useMutation({
     mutationFn: ({ body }) => api(`/admin/campaigns/${campaignId}/efforts/${effort._id}/claim`, { method: 'POST', body }),
     onSuccess: () => {
@@ -105,8 +106,40 @@ function ClaimPanel({ campaignId, effort, walkLists }) {
         </select>
         <Button size="sm" onClick={() => walkListId && claim.mutate({ body: { walkListId } })} disabled={!walkListId || claim.isPending}>Claim list</Button>
         <span className="text-xs text-fg-subtle">or</span>
-        <Button size="sm" variant="secondary" onClick={() => claim.mutate({ body: { all: true } })} disabled={claim.isPending}>Claim all Intake</Button>
+        <Button size="sm" variant="secondary" onClick={() => setConfirmAll(true)} disabled={claim.isPending || intakeCount === 0}>
+          Claim all Intake{intakeCount ? ` (${intakeCount.toLocaleString()})` : ''}
+        </Button>
       </div>
+      <p className="mt-1.5 text-[11px] text-fg-muted">
+        “Claim all Intake” takes <strong>every</strong> unowned door in the campaign — from any import. To add only this
+        effort’s doors, claim from a walk list.
+      </p>
+      {confirmAll && (
+        <Modal
+          size="md"
+          onClose={() => setConfirmAll(false)}
+          title="Claim all Intake doors?"
+          footer={
+            <>
+              <Button variant="secondary" size="sm" onClick={() => setConfirmAll(false)}>Cancel</Button>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={claim.isPending}
+                onClick={() => { setConfirmAll(false); claim.mutate({ body: { all: true } }); }}
+              >
+                Claim all {intakeCount.toLocaleString()}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-fg-muted">
+            This claims all {intakeCount.toLocaleString()} unowned door(s) in the campaign into{' '}
+            <strong>{effort.name}</strong> — including any door not yet in an effort, from any import. If you only want
+            this effort’s specific doors (e.g. a precinct you just imported), cancel and claim from a walk list instead.
+          </p>
+        </Modal>
+      )}
       {claim.data && (
         <p className="mt-2 text-xs text-success-fg">
           Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other efforts)` : ''}.{' '}
@@ -126,7 +159,7 @@ function ClaimPanel({ campaignId, effort, walkLists }) {
   );
 }
 
-function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewNames, tz, onUpdate, onArchive, onDelete }) {
+function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewNames, tz, intakeCount, onUpdate, onArchive, onDelete }) {
   const [open, setOpen] = useState(false);
   const survey = surveys.find((s) => String(s._id) === String(effort.surveyTemplateId));
   const crewTitle = (crewNames || []).join(', ');
@@ -137,7 +170,17 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
           <span className="font-medium text-fg">{effort.name}</span>
         </td>
         <td className="px-4 py-2">
-          <Badge variant={STATUS_VARIANT[effort.status] || 'neutral'} dot className="capitalize">{effort.status}</Badge>
+          <div className="flex flex-col items-start gap-1">
+            <Badge variant={STATUS_VARIANT[effort.status] || 'neutral'} dot className="capitalize">{effort.status}</Badge>
+            {effort.setup && (effort.setup.complete ? (
+              <Badge variant="success" dot>Live</Badge>
+            ) : (
+              <span className="text-[10px] text-fg-muted">
+                Setup {effort.setup.stepsDone}/{effort.setup.stepsTotal}
+                {effort.setup.nextStepLabel ? ` · next: ${effort.setup.nextStepLabel}` : ''}
+              </span>
+            ))}
+          </div>
         </td>
         <td className="px-4 py-2 text-right tabular-nums text-fg">{(effort.doorCount || 0).toLocaleString()}</td>
         <td className="px-4 py-2 text-right tabular-nums text-fg">
@@ -159,7 +202,7 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
           <td colSpan="8" className="px-4 py-3">
             <div className="grid gap-3 md:grid-cols-2">
               <RosterPanel campaignId={campaignId} effort={effort} />
-              <ClaimPanel campaignId={campaignId} effort={effort} walkLists={walkLists} />
+              <ClaimPanel campaignId={campaignId} effort={effort} walkLists={walkLists} intakeCount={intakeCount} />
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <input
@@ -325,6 +368,7 @@ export default function EffortsPage() {
                 isSurveyType={isSurveyType}
                 crewNames={(e.crewUserIds || []).map((id) => nameByUserId.get(id)).filter(Boolean)}
                 tz={tz}
+                intakeCount={intakeCount}
                 onUpdate={(eff, body) => update.mutate({ id: eff._id, body })}
                 onArchive={(eff) => archive.mutate(eff._id)}
                 onDelete={(eff) => { if (window.confirm(`Delete effort "${eff.name}"? Its doors return to Intake.`)) del.mutate(eff._id); }}

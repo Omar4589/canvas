@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { setStoredCampaignId } from './CampaignSelector.jsx';
+import NextStepBanner from './NextStepBanner.jsx';
 import { Card, Badge, Button, SkeletonRows } from './ui/index.js';
 
 // Per-campaign cold-start checklist. NON-BLOCKING: it signposts the ordered
@@ -45,11 +46,24 @@ export default function SetupProgress({ campaignId }) {
     );
   }
 
-  const { steps, stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute, hasCanvassed } = data;
+  const { steps, stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute, hasCanvassed, effortsNeedingSetup } = data;
 
-  // Once the round is live AND knocks have started, the dashboard is for monitoring
-  // — drop the hub entirely so it doesn't clutter an operational campaign.
-  if (complete && hasCanvassed) return null;
+  // Once the round is live AND knocks have started, the dashboard is for monitoring.
+  // Drop the hub — UNLESS a newer effort still isn't live (the campaign-level
+  // "complete" would otherwise mask it), in which case show a slim nudge.
+  if (complete && hasCanvassed) {
+    if ((effortsNeedingSetup || 0) > 0) {
+      return (
+        <NextStepBanner
+          tone="info"
+          action={{ label: 'Go to Efforts', to: '/efforts', onClick: () => setStoredCampaignId(campaignId) }}
+        >
+          {effortsNeedingSetup} effort{effortsNeedingSetup === 1 ? '' : 's'} still need setup — claim doors, cut books, assign, and activate.
+        </NextStepBanner>
+      );
+    }
+    return null;
+  }
 
   // Done + live but no knocks yet: a slim go-live confirmation (re-openable).
   if (complete && !showSteps) {

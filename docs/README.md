@@ -21,6 +21,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 
 | Doc | What it covers |
 |---|---|
+| [CAMPAIGNS.md](CAMPAIGNS.md) | Start here: the full first-campaign flow (create → import → effort → round → cut → assign → activate) and the on-screen Setup-progress guide, plus managing a campaign (edit rules, type-lock, archive vs. delete) and extending a live one with a new effort. |
 | [METRICS.md](METRICS.md) | Every number on the dashboards — knocks, surveys, coverage, connection rate — and the duplicate-knock ("overlap") warning. The source of truth for counting. |
 | [DATE_FILTERS.md](DATE_FILTERS.md) | The date-range control on the dashboards (and map): presets, what each page defaults to, the custom picker, the boundary math, and why the map narrows its pins. |
 | [TIMEZONES.md](TIMEZONES.md) | What "a day" is and which clock every date/time is shown in: every campaign owns its timezone (the org's for org-wide rollups), the anchor-tz date window, day bucketing, and timestamp display labels. |
