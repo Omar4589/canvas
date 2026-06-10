@@ -68,6 +68,10 @@ const householdSchema = new mongoose.Schema(
     // Early voting: true when EVERY voter at this address has already voted, so
     // the door drops off the canvasser's map/books (recomputed on voted-import).
     fullyVoted: { type: Boolean, default: false, index: true },
+
+    // Admin-excluded from turf (e.g. "remove apartments"): like fullyVoted, these
+    // doors are skipped from cutting, the map, door counts, and the canvasser list.
+    excludedFromTurf: { type: Boolean, default: false, index: true },
   },
   { timestamps: true }
 );

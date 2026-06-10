@@ -86,7 +86,9 @@ See [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md).
 - **Turf cutting also skips fully-voted doors** — a new cut (or re-cut) builds and *balances* books on
   the remaining knockable doors only, so book sizes reflect real work and voted doors aren't filed
   into a book. Books cut *before* a voted upload aren't reshuffled; their live counts already shrink.
-  The Turf Cutting page notes how many voted doors were skipped.
+  The Turf Cutting page notes how many voted doors were skipped. (The same `excluded from cut/canvass`
+  mechanism also powers **"remove apartments"** on the Turf Cutting page — `Household.excludedFromTurf`,
+  the sibling flag to `fullyVoted`; see [PASSES_AND_TURF.md](PASSES_AND_TURF.md).)
 - At doors that are still open, **voted residents get a ✓ Voted badge** so the canvasser knows to
   skip them.
 

@@ -63,9 +63,14 @@ router.post('/assign-bulk', async (req, res, next) => {
 
     const turfs = await Turf.find(
       { _id: { $in: tids }, campaignId: req.campaign._id },
-      { _id: 1, passId: 1, name: 1, householdIds: 1 }
+      { _id: 1, passId: 1, name: 1, householdIds: 1, status: 1 }
     ).lean();
     if (!turfs.length) return res.status(404).json({ error: 'No matching books in this campaign' });
+    // Only published (accepted) books can be assigned — draft assignments would be
+    // silently wiped by a re-cut, so we require Accept first.
+    if (turfs.some((t) => t.status !== 'published')) {
+      return res.status(409).json({ error: 'Accept the books first — only published books can be assigned.', code: 'not-accepted' });
+    }
 
     // Keep only active org members (admins included).
     const validUsers = [];
@@ -93,7 +98,7 @@ router.post('/assign-bulk', async (req, res, next) => {
         allHhIds.length
           ? (
               await Household.find(
-                { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true } },
+                { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
                 { _id: 1 }
               ).lean()
             ).map((h) => String(h._id))
@@ -427,7 +432,7 @@ router.get('/', async (req, res, next) => {
       allHhIds.length
         ? (
             await Household.find(
-              { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true } },
+              { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
               { _id: 1 }
             ).lean()
           ).map((h) => String(h._id))
@@ -440,19 +445,77 @@ router.get('/', async (req, res, next) => {
     // Already-voted owned doors for this pass's effort — skipped by the cut. Surfaced
     // on the page as "N door(s) already voted — skipped" so a smaller book total makes sense.
     let votedDoorCount = 0;
+    let excludedApartmentCount = 0;
     if (filter.passId) {
       const pass = await Pass.findOne({ _id: filter.passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
       if (pass) {
-        votedDoorCount = await Household.countDocuments({
+        const base = {
           campaignId: req.campaign._id,
           effortId: pass.effortId,
           isActive: true,
-          fullyVoted: true,
           'location.coordinates': { $exists: true, $ne: null },
-        });
+        };
+        [votedDoorCount, excludedApartmentCount] = await Promise.all([
+          Household.countDocuments({ ...base, fullyVoted: true }),
+          Household.countDocuments({ ...base, excludedFromTurf: true }),
+        ]);
       }
     }
-    res.json({ turfs: withCounts, votedDoorCount });
+    res.json({ turfs: withCounts, votedDoorCount, excludedApartmentCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Remove apartments: persistently exclude households in multi-unit buildings (N+ at
+// one geocode) from cutting / the map / counts / the canvasser list (mirrors the
+// fully-voted exclusion). Scoped to the pass's effort. Re-includable.
+router.post('/exclude-apartments', async (req, res, next) => {
+  try {
+    const { passId, threshold } = req.body || {};
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const n = Math.max(2, parseInt(threshold, 10) || 4);
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+
+    const households = await Household.find(
+      { campaignId: req.campaign._id, effortId: pass.effortId, isActive: true, 'location.coordinates': { $exists: true, $ne: null } },
+      { _id: 1, location: 1 }
+    ).lean();
+    // Group by rounded geocode (5 decimals ≈ 1m) — same key the client groupDoors uses.
+    const byKey = new Map();
+    for (const h of households) {
+      const c = h.location?.coordinates;
+      if (!c || c.length !== 2) continue;
+      const key = `${Math.round(c[1] * 1e5)}|${Math.round(c[0] * 1e5)}`;
+      const arr = byKey.get(key) || [];
+      arr.push(h._id);
+      byKey.set(key, arr);
+    }
+    const ids = [];
+    let buildings = 0;
+    for (const arr of byKey.values()) {
+      if (arr.length >= n) { buildings += 1; ids.push(...arr); }
+    }
+    if (ids.length) await Household.updateMany({ _id: { $in: ids } }, { $set: { excludedFromTurf: true } });
+    res.json({ excluded: ids.length, buildings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Re-include: clear the apartment exclusion for the pass's effort.
+router.post('/include-apartments', async (req, res, next) => {
+  try {
+    const { passId } = req.body || {};
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    const r = await Household.updateMany(
+      { campaignId: req.campaign._id, effortId: pass.effortId, excludedFromTurf: true },
+      { $set: { excludedFromTurf: false } }
+    );
+    res.json({ included: r.modifiedCount || 0 });
   } catch (err) {
     next(err);
   }
@@ -477,6 +540,7 @@ router.get('/attribute-preview', async (req, res, next) => {
           effortId: pass.effortId,
           isActive: true,
           fullyVoted: { $ne: true },
+          excludedFromTurf: { $ne: true },
           'location.coordinates': { $exists: true, $ne: null },
         },
       },
@@ -513,6 +577,7 @@ router.get('/doors', async (req, res, next) => {
       effortId: pass.effortId, // only the round's effort's doors (mirror the cut base filter)
       isActive: true,
       fullyVoted: { $ne: true }, // exclude already-voted doors — they aren't cut/knocked
+      excludedFromTurf: { $ne: true }, // and admin-excluded (apartments)
       'location.coordinates': { $exists: true, $ne: null },
     };
     if (pass.walkListId) {
@@ -591,7 +656,7 @@ router.get('/:turfId/households', async (req, res, next) => {
     const ids = (turf.householdIds || []).map(String);
     const households = ids.length
       ? await Household.find(
-          { _id: { $in: ids }, isActive: true, fullyVoted: { $ne: true } },
+          { _id: { $in: ids }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
           { location: 1, addressLine1: 1, city: 1, state: 1 }
         ).lean()
       : [];
@@ -661,7 +726,7 @@ router.get('/progress', async (req, res, next) => {
       allHhIds.length
         ? (
             await Household.find(
-              { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true } },
+              { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
               { _id: 1 }
             ).lean()
           ).map((h) => String(h._id))

@@ -49,6 +49,11 @@ router.post('/', async (req, res, next) => {
   try {
     const { userIds } = req.body || {};
     if (!Array.isArray(userIds) || !userIds.length) return res.status(400).json({ error: 'userIds required' });
+    // Only published (accepted) books can be assigned — draft assignments would be
+    // silently wiped by a re-cut, so we require Accept first.
+    if (req.turf.status !== 'published') {
+      return res.status(409).json({ error: 'Accept the books first — only published books can be assigned.', code: 'not-accepted' });
+    }
     const orgId = activeOrgId(req);
     const created = [];
     for (const uid of userIds) {

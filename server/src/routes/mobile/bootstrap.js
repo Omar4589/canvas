@@ -76,7 +76,7 @@ async function canvasserBooks(req, campaign) {
   const eligible = new Set(
     (
       await Household.find(
-        { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true } },
+        { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
         { _id: 1 }
       ).lean()
     ).map((h) => String(h._id))
@@ -185,6 +185,7 @@ router.get('/bootstrap', async (req, res, next) => {
       organizationId: orgId,
       isActive: true,
       fullyVoted: { $ne: true }, // drop doors where everyone has already voted
+      excludedFromTurf: { $ne: true }, // and admin-excluded (apartments)
       'location.coordinates': { $exists: true, $ne: null },
     };
     const scope = await canvasserHouseholdScope(req, campaign);

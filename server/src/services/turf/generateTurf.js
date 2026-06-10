@@ -40,6 +40,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     isActive: true,
     effortId: pass.effortId,
     fullyVoted: { $ne: true },
+    excludedFromTurf: { $ne: true },
     'location.coordinates': { $exists: true, $ne: null },
   };
 
@@ -154,6 +155,7 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
     effortId: pass.effortId,
     turfId: null,
     fullyVoted: { $ne: true },
+    excludedFromTurf: { $ne: true },
     'location.coordinates': { $exists: true, $ne: null },
   };
 

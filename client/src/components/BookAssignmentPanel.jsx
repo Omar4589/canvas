@@ -23,6 +23,8 @@ export default function BookAssignmentPanel({
 }) {
   const qc = useQueryClient();
   const single = books.length === 1;
+  // Only published (accepted) books can be assigned — re-cutting would wipe drafts.
+  const draftSelected = books.some((b) => b.status && b.status !== 'published');
   const turfIds = books.map((b) => String(b._id));
   const totalDoors = books.reduce((s, b) => s + (b.eligibleDoorCount ?? b.doorCount ?? 0), 0);
 
@@ -146,6 +148,12 @@ export default function BookAssignmentPanel({
             {single ? 'People' : 'Add people'}
           </div>
 
+          {draftSelected ? (
+            <p className="rounded-md border border-warning/30 bg-warning-tint px-2.5 py-2 text-xs text-warning-fg">
+              Accept these books first to assign canvassers.
+            </p>
+          ) : (
+            <>
           {!single && (
             <div className="mb-2 flex rounded-md border border-border-strong p-0.5 text-[11px]">
               {[{ key: 'distribute', label: 'Even books' }, { key: 'balance', label: 'Even doors' }, { key: 'everyone', label: 'Everyone' }].map((o) => (
@@ -251,6 +259,8 @@ export default function BookAssignmentPanel({
                   ? `Even DOOR count: spread the doors across ${picked.size} ${picked.size === 1 ? 'person' : 'people'} (biggest books first).`
                   : `Everyone (${picked.size}) on every book.`}
               </p>
+            </>
+          )}
             </>
           )}
         </div>

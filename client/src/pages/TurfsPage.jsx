@@ -201,9 +201,16 @@ function PassPicker({ campaignId, passId, onChange }) {
   const passes = passesQ.data?.passes || [];
   const activeIds = passesQ.data?.activePassIds || [];
   const effortName = new Map((effortsQ.data?.efforts || []).map((e) => [String(e._id), e.name]));
+  // Default to a round that still NEEDS cutting (no books yet), else the active one,
+  // else the most recent — so you usually land where there's work to do.
   useEffect(() => {
     if (passId || !passes.length) return;
-    onChange(String(activeIds[0] || passes[0]._id));
+    const live = passes.filter((p) => p.status !== 'archived');
+    const recent = (arr) => [...arr].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    const needsCut = recent(live.filter((p) => (p.turfCount || 0) === 0));
+    const active = recent(live.filter((p) => p.status === 'active'));
+    const pick = needsCut[0] || active[0] || recent(live)[0] || passes[0];
+    onChange(String(pick._id));
   }, [passId, passes, activeIds]);
   return (
     <div className="flex items-center gap-2">
@@ -426,6 +433,7 @@ export default function TurfsPage() {
 
   const [editMode, setEditMode] = useState(false);
   const [bookSearchQuery, setBookSearchQuery] = useState('');
+  const [aptThreshold, setAptThreshold] = useState(4);
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnPolygon, setDrawnPolygon] = useState(null);
   const [mapReady, setMapReady] = useState(false);
@@ -476,6 +484,32 @@ export default function TurfsPage() {
   const hasNoDoors = !!passId && !!doorsQ.data && (doorsQ.data.doors || []).length === 0;
   // Already-voted owned doors the cut skips (so a smaller book total makes sense).
   const votedDoorCount = turfsQ.data?.votedDoorCount || 0;
+  const excludedApartmentCount = turfsQ.data?.excludedApartmentCount || 0;
+  // "Remove apartments": preview how many doors sit in buildings of N+ units (same
+  // rounded-geocode key the server uses), so we can persistently exclude them.
+  const aptPreview = useMemo(() => {
+    const byKey = new Map();
+    for (const d of doorsQ.data?.doors || []) {
+      const key = `${Math.round(d.lat * 1e5)}|${Math.round(d.lng * 1e5)}`;
+      byKey.set(key, (byKey.get(key) || 0) + 1);
+    }
+    let doors = 0;
+    let buildings = 0;
+    for (const c of byKey.values()) if (c >= aptThreshold) { doors += c; buildings += 1; }
+    return { doors, buildings };
+  }, [doorsQ.data, aptThreshold]);
+  const invalidateCut = () => {
+    qc.invalidateQueries({ queryKey: ['turf-doors', campaignId, passId] });
+    qc.invalidateQueries({ queryKey: ['turfs', campaignId, passId] });
+  };
+  const excludeApts = useMutation({
+    mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/exclude-apartments`, { method: 'POST', body: { passId, threshold: aptThreshold } }),
+    onSuccess: invalidateCut,
+  });
+  const includeApts = useMutation({
+    mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/include-apartments`, { method: 'POST', body: { passId } }),
+    onSuccess: invalidateCut,
+  });
   // The popup's house + its current book, derived live from the doors data so it
   // updates after a move.
   const popupDoor = (doorsQ.data?.doors || []).find((d) => String(d.id) === String(popupHouseholdId));
@@ -714,6 +748,16 @@ export default function TurfsPage() {
     return () => { map.remove(); mapRef.current = null; drawRef.current = null; setMapReady(false); };
   }, [tokenQ.data?.isReady]);
 
+  // Keep the Mapbox canvas filling its container when the box changes (e.g. the
+  // sidebar collapses) — Mapbox needs an explicit resize().
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!mapReady || !el) return;
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mapReady]);
+
   // Swap the basemap when the picker changes; re-register layers on style.load and
   // bump styleEpoch so paint() + building markers re-hydrate. fittedSigRef is kept
   // so the view isn't reset on a swap.
@@ -786,8 +830,9 @@ export default function TurfsPage() {
     passId && !generate.isPending && !jobBusy && publishedCount === 0 && !hasNoDoors && (mode !== 'manual' || drawnPolygon);
 
   return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flexShrink: 0 }} className="px-6 pt-6">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Turf Cutting</h1>
           <p className="mt-0.5 text-sm text-fg-muted">Cut this round's doors into walkable books, then assign them to canvassers.</p>
@@ -835,9 +880,10 @@ export default function TurfsPage() {
           />
         </div>
       )}
+      </div>
 
-      <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
-        <section className="rounded-lg border border-border bg-card p-5">
+      <div style={{ flex: 1, minHeight: 0 }} className="flex gap-5 px-6 pb-6">
+        <section style={{ flexShrink: 0, overflowY: 'auto' }} className="w-80 rounded-lg border border-border bg-card p-5">
           <h2 className="mb-3 text-base font-medium">Generate books</h2>
 
           <div className="mb-4">
@@ -933,6 +979,45 @@ export default function TurfsPage() {
               </button>
               <p className="mt-1 text-xs text-fg-muted">{drawnPolygon ? 'Polygon drawn — Generate to create the book.' : 'Click to add points; double-click to finish.'}</p>
             </div>
+          )}
+
+          {passId && !hasNoDoors && publishedCount === 0 && (
+            <div className="mb-3 rounded-md border border-border-strong bg-sunken px-3 py-2 text-xs">
+              {excludedApartmentCount > 0 ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-fg-muted">{excludedApartmentCount.toLocaleString()} apartment door{excludedApartmentCount === 1 ? '' : 's'} excluded</span>
+                  <button onClick={() => includeApts.mutate()} disabled={includeApts.isPending} className="shrink-0 font-semibold text-brand-accent hover:underline disabled:opacity-50">Re-include</button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-fg-muted">
+                    Remove apartments (
+                    <input
+                      type="number"
+                      min="2"
+                      value={aptThreshold}
+                      onChange={(e) => setAptThreshold(Math.max(2, parseInt(e.target.value, 10) || 4))}
+                      className="mx-0.5 w-10 rounded border border-border-strong bg-card px-1 py-0.5 text-center text-fg"
+                    />
+                    + units)
+                  </span>
+                  <button
+                    onClick={() => excludeApts.mutate()}
+                    disabled={excludeApts.isPending || aptPreview.doors === 0}
+                    className="shrink-0 font-semibold text-brand-accent hover:underline disabled:opacity-40"
+                  >
+                    {aptPreview.doors > 0 ? `Exclude ${aptPreview.doors.toLocaleString()} · ${aptPreview.buildings} bldg` : 'None found'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {doorsQ.data && !hasNoDoors && publishedCount === 0 && (
+            <p className="mb-2 text-xs text-fg-muted">
+              <strong>{(doorsQ.data.doors?.length || 0).toLocaleString()}</strong> knockable doors
+              {mode === 'geometric' ? ` → ~${Math.max(1, Math.ceil((doorsQ.data.doors?.length || 0) / (Number(maxDoors) || 65)))} books` : ''}
+            </p>
           )}
 
           <button onClick={() => canGenerate && generate.mutate()} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
@@ -1172,13 +1257,13 @@ export default function TurfsPage() {
           )}
         </section>
 
-        <section className="relative overflow-hidden rounded-lg border border-border bg-card">
+        <section style={{ flex: 1, minHeight: 0 }} className="relative overflow-hidden rounded-lg border border-border bg-card">
           {!tokenQ.data?.isReady ? (
-            <div className="flex h-[600px] items-center justify-center text-sm text-fg-muted">
+            <div className="flex h-full items-center justify-center text-sm text-fg-muted">
               {tokenQ.isLoading ? 'Loading map…' : 'Set MAPBOX_PUBLIC_TOKEN to enable the map.'}
             </div>
           ) : (
-            <div ref={containerRef} className="h-[600px] w-full" />
+            <div ref={containerRef} className="absolute inset-0" />
           )}
           {tokenQ.data?.isReady && (
             <MapStyleControl value={styleId} onChange={setStyle} menuDirection="up" className="absolute bottom-3 left-3 z-10 items-start" />

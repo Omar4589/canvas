@@ -61,7 +61,8 @@ export default function Layout() {
   const { user, logout, isSuperAdmin } = useAuth();
   const { dark, toggle: toggleTheme } = useTheme();
   const location = useLocation();
-  const isFullBleed = location.pathname === '/map' || location.pathname === '/queues';
+  const isFullBleed =
+    location.pathname === '/map' || location.pathname === '/queues' || location.pathname === '/turfs';
 
   const [collapsed, setCollapsed] = useState(() => {
     try {

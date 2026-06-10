@@ -198,6 +198,7 @@ router.get('/today', async (req, res, next) => {
       organizationId: orgId,
       isActive: true,
       fullyVoted: { $ne: true },
+      excludedFromTurf: { $ne: true },
       status: 'unknocked',
     };
     const scope = await canvasserHouseholdScope(req, access.campaign);
