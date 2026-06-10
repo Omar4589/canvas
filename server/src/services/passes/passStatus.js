@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { Turf } from '../../models/Turf.js';
 import { ACTION_TO_STATUS } from '../../utils/statusPrecedence.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
@@ -34,6 +35,37 @@ export async function getPassStatusMap(passId, householdIds, campaignType) {
     map.set(String(a._id), { status, lastActionAt: a.latestTimestamp });
   }
   return map;
+}
+
+// Per-ROUND status for a set of household docs ({ _id, turfId }): each door's
+// status IN ITS BOOK'S ROUND (door → turfId → Turf.passId → getPassStatusMap),
+// so a door re-targeted in a NEW round reads as fresh/unknocked to the canvasser
+// even if it was surveyed/not-home in a prior round. Returns Map<id, status>;
+// doors not in a book are absent (caller keeps their global status). Used by the
+// mobile bootstrap, /changes, and the "remaining" count.
+export async function resolvePerRoundStatuses(households, campaignType) {
+  const out = new Map();
+  const turfIds = [...new Set(households.map((h) => h.turfId).filter(Boolean).map(String))];
+  if (!turfIds.length) return out;
+  const turfPass = new Map(
+    (await Turf.find({ _id: { $in: turfIds } }, { passId: 1 }).lean()).map((t) => [
+      String(t._id),
+      t.passId ? String(t.passId) : null,
+    ])
+  );
+  const byPass = new Map();
+  for (const h of households) {
+    const pid = h.turfId ? turfPass.get(String(h.turfId)) : null;
+    if (!pid) continue;
+    let arr = byPass.get(pid);
+    if (!arr) { arr = []; byPass.set(pid, arr); }
+    arr.push(String(h._id));
+  }
+  for (const [pid, hids] of byPass) {
+    const m = await getPassStatusMap(pid, hids, campaignType);
+    for (const hid of hids) out.set(hid, m.get(hid)?.status || 'unknocked');
+  }
+  return out;
 }
 
 export function statusCountsFromMap(map, householdIds) {

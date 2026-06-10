@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import AnswerFilters from '../components/AnswerFilters.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
@@ -17,7 +18,7 @@ const STATUS_LABEL = {
 const EMPTY = {
   genders: [], parties: [], precincts: [], congressional: [], stateSenate: [], stateHouse: [],
   cities: [], zips: [], counties: [], ageMin: '', ageMax: '',
-  priorPassId: '', priorPassStatuses: [], surveyResponse: 'any', combine: 'and',
+  priorPassId: '', priorPassStatuses: [], surveyResponse: 'any', answerFilters: [], combine: 'and',
 };
 
 function buildFilter(f) {
@@ -36,6 +37,7 @@ function buildFilter(f) {
   if (f.priorPassId) out.priorPassId = f.priorPassId;
   if (f.priorPassStatuses.length) out.priorPassStatuses = f.priorPassStatuses;
   if (f.surveyResponse && f.surveyResponse !== 'any') out.surveyResponse = f.surveyResponse;
+  if (f.answerFilters?.length) out.answerFilters = f.answerFilters;
   out.combine = f.combine;
   return out;
 }
@@ -147,6 +149,17 @@ export default function WalkListsPage() {
     enabled: !!campaignId,
   });
   const opts = distinctQ.data || {};
+
+  // Survey questions+options for the per-question answer filter (survey campaigns).
+  const campaign = campaigns.find((c) => String(c._id) === String(campaignId));
+  const surveyQ = useQuery({
+    queryKey: ['reports', 'survey-results', campaignId],
+    queryFn: () => api(`/admin/reports/survey-results?campaignId=${campaignId}`),
+    enabled: !!campaignId && campaign?.type !== 'lit_drop',
+  });
+  const surveyQuestions = (surveyQ.data?.questions || []).filter(
+    (q) => q.type === 'single_choice' || q.type === 'multiple_choice'
+  );
 
   const preview = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/walklists/preview`, { method: 'POST', body: { filter: buildFilter(f) } }),
@@ -302,7 +315,7 @@ export default function WalkListsPage() {
                 </select>
               </label>
             </div>
-            <div className="mt-3 flex flex-wrap gap-3 text-xs">
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
               <span className="font-medium text-fg-muted">Door status:</span>
               {STATUSES.map((s) => (
                 <label key={s} className="flex items-center gap-1">
@@ -310,7 +323,17 @@ export default function WalkListsPage() {
                   {STATUS_LABEL[s]}
                 </label>
               ))}
+              <span className="text-fg-subtle">
+                {f.priorPassId ? 'status within the selected pass' : 'no pass picked → the door’s current status'}
+              </span>
             </div>
+
+            {surveyQuestions.length > 0 && (
+              <div className="mt-3">
+                <div className="mb-1 text-xs font-medium text-fg-muted">Survey answers</div>
+                <AnswerFilters questions={surveyQuestions} value={f.answerFilters} onChange={(v) => set('answerFilters', v)} />
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">

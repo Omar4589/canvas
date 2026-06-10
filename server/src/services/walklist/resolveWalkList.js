@@ -37,14 +37,15 @@ function householdDemographicQuery(filter) {
 // Each predicate becomes a household set; sets are intersected (and) or unioned
 // (or). Targeted voters = those matching the voter-demographic predicate within
 // the final households (or everyone there if no voter predicate).
-export async function resolveWalkList(campaign, filter = {}) {
+export async function resolveWalkList(campaign, filter = {}, options = {}) {
   const campaignId = campaign._id;
   const orgId = campaign.organizationId;
 
-  const baseHouseholds = await Household.find(
-    { campaignId, isActive: true, 'location.coordinates': { $exists: true, $ne: null } },
-    { _id: 1 }
-  ).lean();
+  // options.effortId scopes the whole resolution to one effort's doors (used by
+  // targeted follow-up cuts) — every predicate runs within this base set.
+  const baseMatch = { campaignId, isActive: true, 'location.coordinates': { $exists: true, $ne: null } };
+  if (options.effortId) baseMatch.effortId = oid(options.effortId);
+  const baseHouseholds = await Household.find(baseMatch, { _id: 1 }).lean();
   const baseIds = baseHouseholds.map((h) => String(h._id));
   const baseSet = new Set(baseIds);
   if (!baseSet.size) return { householdIds: [], voterIds: [], householdCount: 0, voterCount: 0 };
@@ -64,11 +65,22 @@ export async function resolveWalkList(campaign, filter = {}) {
     predicateSets.push(new Set(hs.map((h) => String(h._id))));
   }
 
-  if (arr(filter.priorPassStatuses) && filter.priorPassId) {
-    const statusMap = await getPassStatusMap(filter.priorPassId, baseIds, campaign.type);
+  if (arr(filter.priorPassStatuses)) {
     const wanted = new Set(filter.priorPassStatuses);
     const s = new Set();
-    for (const id of baseIds) if (wanted.has(statusMap.get(id)?.status || 'unknocked')) s.add(id);
+    if (filter.priorPassId) {
+      // Status WITHIN a specific prior round.
+      const statusMap = await getPassStatusMap(filter.priorPassId, baseIds, campaign.type);
+      for (const id of baseIds) if (wanted.has(statusMap.get(id)?.status || 'unknocked')) s.add(id);
+    } else {
+      // No round chosen → the door's current/global status (fixes "unknocked"
+      // returning everything when no prior pass was picked).
+      const hs = await Household.find(
+        { campaignId, _id: { $in: baseOids }, status: { $in: [...wanted] } },
+        { _id: 1 }
+      ).lean();
+      for (const h of hs) s.add(String(h._id));
+    }
     predicateSets.push(s);
   }
 

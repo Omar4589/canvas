@@ -32,9 +32,15 @@ A list is a set of **doors, not voters.** That matters at multi-voter homes (see
 On the **Walk Lists** page, the "Build a list" panel has two modes:
 
 1. **Filter builder** — pick doors by **demographics** (party, precinct, congressional/state districts,
-   gender, age), **geography** (city, ZIP, county), **prior-round door status** (e.g. "not home in
-   Round 1"), and **survey response**. Combine the filters with **AND** (match all) or **OR** (match
-   any). Use this when the people you want can be *described* by their data.
+   gender, age), **geography** (city, ZIP, county), **door status**, and **survey answers**. Combine the
+   filters with **AND** (match all) or **OR** (match any). Use this when the people you want can be
+   *described* by their data.
+   - **Door status:** pick a **"from pass"** to filter on the status *within that round* (e.g. "not-home
+     in Round 1"); leave it blank to filter on the door's **current status** across all rounds (e.g.
+     "still unknocked"). *(Previously, choosing a status without a pass silently matched everything —
+     fixed.)*
+   - **Survey answers:** filter by the actual answers to your choice questions (e.g. *Support / Likely*,
+     or *Undecided*) — one or more options per question.
 
 2. **Upload a Voter-ID CSV** — upload a file that has a column of Voter IDs. The app matches those IDs
    to this campaign's voters and freezes the doors they live at into a list. Use this when you already

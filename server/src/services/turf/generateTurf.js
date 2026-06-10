@@ -5,6 +5,7 @@ import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { attributeCut } from './attributeCut.js';
 import { geometricCut } from './geometricCut.js';
+import { resolveWalkList } from '../walklist/resolveWalkList.js';
 import { computeBoundary, computeCentroid, computeTerritories } from './boundary.js';
 import { computeWalkOrder } from './walkOrder.js';
 
@@ -44,6 +45,24 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     'location.coordinates': { $exists: true, $ne: null },
   };
 
+  // Targeted follow-up round: restrict the universe to the effort's doors matching
+  // a walk-list-shaped filter (knock status + survey answers). The existing
+  // fullyVoted/excludedFromTurf/coords exclusions still apply (intersection).
+  const isActiveFilter = (f) =>
+    !!f &&
+    Object.entries(f).some(([k, v]) => {
+      if (k === 'combine') return false;
+      if (Array.isArray(v)) return v.length > 0;
+      return v != null && v !== '' && v !== 'any';
+    });
+  const targeted = isActiveFilter(params.targetFilter);
+  if (targeted) {
+    const { householdIds } = await resolveWalkList(campaign, params.targetFilter, { effortId: pass.effortId });
+    baseFilter._id = { $in: householdIds };
+  }
+  // Record (or clear) what this round targeted — for reproducibility + a label.
+  await Pass.updateOne({ _id: passId }, { $set: { targetFilter: targeted ? params.targetFilter : null } });
+
   let books;
   if (mode === 'manual') {
     // One or more hand-drawn areas. Each area is one book by default; with subCutN
@@ -53,12 +72,18 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     const subCutN = Number(params.subCutN) || 0;
     books = [];
     let idx = 0;
+    // Overlapping areas: first area drawn wins — a household only ever joins one
+    // book (double-assignment would double-count doors and leave the turfId
+    // mirror pointing at a random book).
+    const claimed = new Set();
     for (const polygon of polygons) {
       idx += 1;
-      const hh = await Household.find(
+      const found = await Household.find(
         { ...baseFilter, location: { $geoWithin: { $geometry: polygon } } },
         CUT_COLUMNS
       ).lean();
+      const hh = found.filter((h) => !claimed.has(String(h._id)));
+      hh.forEach((h) => claimed.add(String(h._id)));
       if (!hh.length) continue;
       if (subCutN > 0 && hh.length > subCutN) {
         const chunks = geometricCut(hh, { maxDoors: subCutN });

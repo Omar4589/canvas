@@ -20,6 +20,7 @@ import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
+import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -268,16 +269,23 @@ router.post('/discard', async (req, res, next) => {
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     if (pass.status === 'archived') return res.status(409).json({ error: 'Pass is archived; create a new pass instead' });
 
-    // Live-pass guard: refuse without explicit confirmation, and report the stakes.
-    if (pass.status === 'active' && !confirmActive) {
+    // Guard: a LIVE pass — or any pass that's already been WORKED (knocks
+    // recorded) — needs explicit confirmation; report the stakes either way.
+    if (!confirmActive) {
       const knockCount = await CanvassActivity.countDocuments({ passId });
-      const assignmentCount = await TurfAssignment.countDocuments({ passId });
-      return res.status(409).json({
-        error: 'This pass is live. Confirm to discard its books.',
-        code: 'active-pass-confirm-required',
-        knockCount,
-        assignmentCount,
-      });
+      if (pass.status === 'active' || knockCount > 0) {
+        const assignmentCount = await TurfAssignment.countDocuments({ passId });
+        return res.status(409).json({
+          error:
+            pass.status === 'active'
+              ? 'This pass is live. Confirm to discard its books.'
+              : 'This pass has recorded knocks. Confirm to discard its books.',
+          code: 'active-pass-confirm-required',
+          isActive: pass.status === 'active',
+          knockCount,
+          assignmentCount,
+        });
+      }
     }
 
     if (!(await acquireRecutLock(passId, req.user._id))) {
@@ -446,6 +454,7 @@ router.get('/', async (req, res, next) => {
     // on the page as "N door(s) already voted — skipped" so a smaller book total makes sense.
     let votedDoorCount = 0;
     let excludedApartmentCount = 0;
+    let knockCount = 0;
     if (filter.passId) {
       const pass = await Pass.findOne({ _id: filter.passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
       if (pass) {
@@ -455,13 +464,14 @@ router.get('/', async (req, res, next) => {
           isActive: true,
           'location.coordinates': { $exists: true, $ne: null },
         };
-        [votedDoorCount, excludedApartmentCount] = await Promise.all([
+        [votedDoorCount, excludedApartmentCount, knockCount] = await Promise.all([
           Household.countDocuments({ ...base, fullyVoted: true }),
           Household.countDocuments({ ...base, excludedFromTurf: true }),
+          CanvassActivity.countDocuments({ passId: filter.passId }),
         ]);
       }
     }
-    res.json({ turfs: withCounts, votedDoorCount, excludedApartmentCount });
+    res.json({ turfs: withCounts, votedDoorCount, excludedApartmentCount, knockCount });
   } catch (err) {
     next(err);
   }
@@ -539,15 +549,47 @@ router.post('/manual-preview', async (req, res, next) => {
       'location.coordinates': { $exists: true, $ne: null },
     };
     const areas = [];
+    // Overlaps dedup first-area-wins, same as generation, so these live counts
+    // match what Generate will actually produce.
+    const claimed = new Set();
     for (const polygon of polygons) {
       if (!polygon) { areas.push({ doorCount: 0, voterCount: 0 }); continue; }
       const ids = (
         await Household.find({ ...base, location: { $geoWithin: { $geometry: polygon } } }, { _id: 1 }).lean()
-      ).map((h) => h._id);
+      )
+        .map((h) => h._id)
+        .filter((id) => !claimed.has(String(id)));
+      ids.forEach((id) => claimed.add(String(id)));
       const voterCount = ids.length ? await Voter.countDocuments({ householdId: { $in: ids } }) : 0;
       areas.push({ doorCount: ids.length, voterCount });
     }
     res.json({ areas });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Preview a targeted follow-up cut: how many of the effort's doors match the
+// filter (knock status + survey answers) AND are cuttable — so the admin sees the
+// universe before generating. Mirrors the cut: resolve effort-scoped, then
+// intersect with the voted/apartment/inactive exclusions.
+router.post('/target-preview', async (req, res, next) => {
+  try {
+    const { passId, filter } = req.body || {};
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    const { householdIds } = await resolveWalkList(req.campaign, filter || {}, { effortId: pass.effortId });
+    const cuttable = householdIds.length
+      ? (
+          await Household.find(
+            { _id: { $in: householdIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
+            { _id: 1 }
+          ).lean()
+        ).map((h) => h._id)
+      : [];
+    const voterCount = cuttable.length ? await Voter.countDocuments({ householdId: { $in: cuttable } }) : 0;
+    res.json({ doorCount: cuttable.length, voterCount });
   } catch (err) {
     next(err);
   }

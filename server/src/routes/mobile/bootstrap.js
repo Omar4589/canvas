@@ -13,6 +13,7 @@ import { VotedVoter } from '../../models/VotedVoter.js';
 import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
+import { resolvePerRoundStatuses } from '../../services/passes/passStatus.js';
 import { canvasserHouseholdScope, isOrgAdminOrSuper } from '../../services/canvass/canvasserScope.js';
 
 const router = Router();
@@ -205,6 +206,15 @@ router.get('/bootstrap', async (req, res, next) => {
 
     const householdIds = households.map((h) => h._id);
 
+    // Per-round status: show each door's status IN ITS BOOK'S ROUND, so a door
+    // re-targeted in a new round reads as fresh (Household.status stays global for
+    // admin/reports). Doors not in a book keep their global status.
+    const perRound = await resolvePerRoundStatuses(households, campaign.type);
+    for (const h of households) {
+      const s = perRound.get(String(h._id));
+      if (s) h.status = s;
+    }
+
     const [votersRaw, survey, votedRecs] = await Promise.all([
       campaign.type === 'survey'
         ? Voter.find(
@@ -303,7 +313,17 @@ router.get('/changes', async (req, res, next) => {
       lastActionAt: 1,
       isActive: 1,
       fullyVoted: 1, // client drops doors where everyone has now voted
+      turfId: 1, // needed to resolve per-round status
     }).lean();
+    // Per-round status (same as bootstrap) so deltas don't re-introduce the
+    // global "done" status for a door fresh in its current round.
+    {
+      const perRound = await resolvePerRoundStatuses(changedHouseholds, access.campaign.type);
+      for (const h of changedHouseholds) {
+        const s = perRound.get(String(h._id));
+        if (s) h.status = s;
+      }
+    }
 
     let changedVoters = [];
     if (changedHouseholds.length > 0) {

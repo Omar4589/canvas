@@ -73,7 +73,9 @@ geography in Round 2 is a *new* book in the Round-2 pass, not the same object re
 - **Manual** — draw one or more areas on the map; **each area becomes a book**. As you draw, the panel
   shows the **houses + voters inside each area** (live), you can remove an area (✕) or **Clear all**,
   and an optional **"split areas over N doors"** geometrically sub-cuts a big area into ~N-door
-  walkable books instead of one giant book.
+  walkable books instead of one giant book. **Overlapping areas: the first area drawn wins** — a house
+  only ever lands in one book, and the live counts reflect that while you draw (a second area that
+  overlaps the first shows fewer houses).
 
 Cuts only include **knockable** doors — already-voted (fully-voted) doors are skipped, and you can also
 **remove apartments** (any building with **N+ units at one address**, default 4): those doors are
@@ -106,8 +108,44 @@ If you don't like the books, or the underlying voter list changed, you **recut**
   was active — drops it back to **draft** (a live campaign can't be left with an active pass that
   has no books). Then you cut fresh and re-accept.
 
+**Discarding a worked round is guarded.** If the round already has knocks recorded, the Discard dialog
+names the **effort · round** in its title, shows how many knocks exist, and requires **typing
+`discard`** to confirm (the server refuses without the explicit confirmation too) — so you can't wipe
+the wrong effort's worked books by accident.
+
+**What discard does — and doesn't — touch.** Discard deletes the **books** and **canvasser
+assignments** and unlinks doors from their books. It does **not** delete knock history, survey
+responses, door statuses, or the doors themselves (unless you explicitly check *clear knock history* —
+and even then the cleared knocks go into the snapshot). The auto-saved **snapshot stores the books AND
+the assignments**: **Restore** (Undo / snapshots) re-creates both exactly, then you just re-activate
+the round on the Passes page — canvassers see their books again with all prior progress intact.
+(Restore is blocked while the pass has live books — discard those first.)
+
 There is **no "add just the new houses to the existing books"** option. Recutting is all-or-nothing
 for a pass: replace that pass's whole book set.
+
+## Targeted follow-up rounds (cut over only the doors that still need work)
+
+A new round normally cuts the effort's **whole** door universe. For a **follow-up round** you can cut
+over only a **subset** — open **Target doors** on the Turf Cutting page and pick any mix of:
+- **knock status** — e.g. *unknocked* (never reached), *not-home* (re-try); and
+- **survey answers** — e.g. *Undecided* (persuasion), *Support / Likely* (GOTV).
+
+Combine with **OR** (the union — "unknocked **or** supporters") or **AND** ("not-home **and** supporters").
+The panel shows a live door/voter count, and the cut produces books over just those doors — scoped to
+**this effort only** (it never pulls another effort's doors). Recut without a target = the full universe,
+unchanged.
+
+## Each round is its own pass — door status is per-round
+
+Crucially, **a round is an independent billable pass.** A door's "done/not-done" that the canvasser
+sees is **per the round they're working** — so a supporter you surveyed in Round 1 shows up **fresh**
+in a Round-2 GOTV book, the canvasser re-contacts it, and that counts as a **new billable knock**
+(billing already counts one knock per *door × round*). What carries across rounds is **coverage** —
+the campaign-wide "have we ever reached this door" picture (`Household.status`) — which a re-knock
+updates without double-counting. So: **per-round** for what the canvasser works; **global** for
+coverage/reporting. (First/only rounds look exactly as before — the difference only shows once a Round 2
+exists.)
 
 ## Only one pass runs at a time
 
@@ -247,13 +285,13 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | Route | Behavior |
 |---|---|
 | `GET .../turfs/attribute-preview?passId=&attribute=` | Group-sizes preview for attribute mode: knockable doors per `ATTR_COLUMN[attribute]` group (same cut base filter), `{ groups: [{ name, doorCount }] }` desc. |
-| `POST .../turfs/manual-preview` `{ passId, polygons }` | Per-area preview for manual mode: cuttable houses (`$geoWithin`, same cut base filter) + their `Voter` count inside each drawn polygon → `{ areas: [{ doorCount, voterCount }] }` index-aligned. Manual `generate` takes `params.polygons[]` (one book each) + optional `subCutN` (geometric split of big areas). |
+| `POST .../turfs/manual-preview` `{ passId, polygons }` | Per-area preview for manual mode: cuttable houses (`$geoWithin`, same cut base filter) + their `Voter` count inside each drawn polygon → `{ areas: [{ doorCount, voterCount }] }` index-aligned. Manual `generate` takes `params.polygons[]` (one book each) + optional `subCutN` (geometric split of big areas). **Overlap dedup is first-area-wins** in both the preview and the cut (a `claimed` Set across the polygon loop), so a house is never double-assigned/double-counted. |
 | `POST .../turfs/assign-bulk` | Bulk-assign selected books to selected people. `mode`: `distribute` (round-robin, even **books**), `balance` (greedy by eligible door count, even **doors**), `everyone` (all on all); `replace` clears existing first. **409 `not-accepted`** if any selected book is still a draft (per-book `POST /:turfId/assignments` enforces the same). |
 | `POST .../turfs/exclude-apartments` `{ passId, threshold }` | Group the effort's doors by rounded geocode; set `Household.excludedFromTurf:true` on members of clusters ≥ threshold → they skip cutting/map/counts/canvasser everywhere (mirrors `fullyVoted`). `POST .../turfs/include-apartments` clears it. |
 | `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. Skips fully-voted doors. |
 | `POST .../turfs/accept` ([:99](../server/src/routes/admin/turfs.js#L99)) | Draft → published for the pass. |
 | `POST .../turfs/add-supplemental` | **Non-destructive add.** Cut the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirror `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`); serialized by `Pass.recutLock`. New books then use Accept + Assign. Body `{ passId, name?, maxDoors? }` → `{ added, bookCount, bookIds }`. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
-| `POST .../turfs/discard` ([:113](../server/src/routes/admin/turfs.js#L113)) | Snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` and clear `activePassId`; optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse`. Serialized by `Pass.recutLock`. |
+| `POST .../turfs/discard` | **409 `active-pass-confirm-required`** (with `knockCount`/`assignmentCount`/`isActive`) when the pass is active **or has recorded knocks** and `confirmActive` isn't set — the client's typed-confirm dialog supplies it. Then: snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` and clear `activePassId`; optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse` (captured in the snapshot). Serialized by `Pass.recutLock`. The turfs `GET /` also returns `knockCount` for the selected pass (drives the dialog's warning). |
 | `POST .../turfs/restore-snapshot` | Re-create books + assignments from a snapshot (blocked if live books exist; does not auto-reactivate the pass). |
 | move/merge/split door endpoints | Manual book edits; re-tessellate via `recomputeTurf` / `recomputePassTerritories`. |
 

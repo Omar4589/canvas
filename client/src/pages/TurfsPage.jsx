@@ -8,6 +8,7 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
 import CampaignSelector, { useCampaignSelection, setStoredCampaignId } from '../components/CampaignSelector.jsx';
 import BookAssignmentPanel from '../components/BookAssignmentPanel.jsx';
+import AnswerFilters from '../components/AnswerFilters.jsx';
 import MapStyleControl from '../components/MapStyleControl.jsx';
 import StatCard from '../components/StatCard.jsx';
 import InfoHint from '../components/InfoHint.jsx';
@@ -231,14 +232,25 @@ function PassPicker({ campaignId, passId, onChange }) {
   );
 }
 
-function DiscardModal({ isActive, bookCount, clearKnocks, setClearKnocks, pending, error, onCancel, onConfirm }) {
+function DiscardModal({ isActive, bookCount, passLabel, knockCount, clearKnocks, setClearKnocks, pending, error, onCancel, onConfirm }) {
+  const worked = knockCount > 0;
+  const [confirmText, setConfirmText] = useState('');
+  const typedOk = !worked || confirmText.trim().toLowerCase() === 'discard';
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={onCancel}>
       <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-fg">
-          Discard {bookCount} book{bookCount === 1 ? '' : 's'}?
+          Discard {bookCount} book{bookCount === 1 ? '' : 's'}{passLabel ? ` — ${passLabel}` : ''}?
         </h3>
-        {isActive ? (
+        {worked ? (
+          <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+            ⚠️ <strong>{knockCount.toLocaleString()} knock{knockCount === 1 ? '' : 's'} already recorded</strong> in this
+            round{isActive ? ' — and it is LIVE' : ''}. Discarding removes its books and{' '}
+            <strong>all canvasser assignments</strong>{isActive ? ' and reverts the round to draft' : ''}. Knock history
+            is kept (unless you check the box below), and a snapshot is saved — restorable from{' '}
+            <strong>Undo / snapshots</strong>.
+          </div>
+        ) : isActive ? (
           <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
             ⚠️ This pass is <strong>LIVE</strong>. Discarding wipes its books and{' '}
             <strong>all canvasser assignments</strong>, and reverts the pass to draft. Knock history is kept
@@ -258,6 +270,21 @@ function DiscardModal({ isActive, bookCount, clearKnocks, setClearKnocks, pendin
             <span className="text-fg-subtle">(Snapshotted; undoable.)</span>
           </span>
         </label>
+        {worked && (
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-xs font-medium text-fg-muted">
+              Type <strong>discard</strong> to confirm
+            </span>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="discard"
+              autoFocus
+              className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-danger focus:outline-none"
+            />
+          </label>
+        )}
         {error && <div className="mt-2 text-xs text-danger">{error.message}</div>}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onCancel} disabled={pending} className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-sunken">
@@ -265,7 +292,7 @@ function DiscardModal({ isActive, bookCount, clearKnocks, setClearKnocks, pendin
           </button>
           <button
             onClick={onConfirm}
-            disabled={pending}
+            disabled={pending || !typedOk}
             className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
           >
             {pending ? 'Discarding…' : clearKnocks ? 'Discard + clear knocks' : 'Discard books'}
@@ -434,6 +461,10 @@ export default function TurfsPage() {
   const [editMode, setEditMode] = useState(false);
   const [bookSearchQuery, setBookSearchQuery] = useState('');
   const [aptThreshold, setAptThreshold] = useState(4);
+  // Targeted follow-up round: cut over only doors matching a knock-status / survey
+  // filter (e.g. unknocked, or GOTV supporters). Empty = the full effort universe.
+  const [targetFilter, setTargetFilter] = useState({ priorPassStatuses: [], answerFilters: [], combine: 'or' });
+  const [showTarget, setShowTarget] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnAreas, setDrawnAreas] = useState([]); // [{ id, geometry }] from MapboxDraw
   const [manualSplit, setManualSplit] = useState(false);
@@ -486,6 +517,7 @@ export default function TurfsPage() {
   // Already-voted owned doors the cut skips (so a smaller book total makes sense).
   const votedDoorCount = turfsQ.data?.votedDoorCount || 0;
   const excludedApartmentCount = turfsQ.data?.excludedApartmentCount || 0;
+  const knockCount = turfsQ.data?.knockCount || 0;
   // "Remove apartments": preview how many doors sit in buildings of N+ units (same
   // rounded-geocode key the server uses), so we can persistently exclude them.
   const aptPreview = useMemo(() => {
@@ -539,6 +571,41 @@ export default function TurfsPage() {
   });
   const selectedPass = (passesQ.data?.passes || []).find((p) => String(p._id) === String(passId)) || null;
   const isActivePass = selectedPass?.status === 'active';
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId,
+  });
+  // "{Effort} · Round N" — named in the Discard dialog so you can't wipe the wrong effort blind.
+  const selectedEffort = (effortsQ.data?.efforts || []).find((e) => String(e._id) === String(selectedPass?.effortId)) || null;
+  const passLabel = selectedPass ? `${selectedEffort?.name || 'Effort'} · Round ${selectedPass.roundNumber}` : '';
+
+  // Targeted-round filter: the effort's survey questions (for answer chips) + a live count.
+  const campaign = campaigns.find((c) => String(c._id) === String(campaignId)) || null;
+  const targetSurveyTemplateId = selectedEffort?.surveyTemplateId || campaign?.surveyTemplateId || null;
+  const targetSurveyQ = useQuery({
+    queryKey: ['reports', 'survey-results', campaignId, targetSurveyTemplateId],
+    queryFn: () =>
+      api(`/admin/reports/survey-results?campaignId=${campaignId}${targetSurveyTemplateId ? `&surveyTemplateId=${targetSurveyTemplateId}` : ''}`),
+    enabled: !!campaignId && campaign?.type !== 'lit_drop' && showTarget,
+  });
+  const targetQuestions = (targetSurveyQ.data?.questions || []).filter(
+    (q) => q.type === 'single_choice' || q.type === 'multiple_choice'
+  );
+  const targetActive = (targetFilter.priorPassStatuses?.length || 0) > 0 || (targetFilter.answerFilters?.length || 0) > 0;
+  const targetPreviewQ = useQuery({
+    queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter)],
+    queryFn: () =>
+      api(`/admin/campaigns/${campaignId}/turfs/target-preview`, { method: 'POST', body: { passId, filter: targetFilter } }),
+    enabled: !!campaignId && !!passId && targetActive,
+  });
+  const toggleTargetStatus = (s) =>
+    setTargetFilter((t) => ({
+      ...t,
+      priorPassStatuses: t.priorPassStatuses.includes(s)
+        ? t.priorPassStatuses.filter((x) => x !== s)
+        : [...t.priorPassStatuses, s],
+    }));
 
   const snapshotsQ = useQuery({
     queryKey: ['turf-snapshots', campaignId, passId],
@@ -632,6 +699,7 @@ export default function TurfsPage() {
       if (mode === 'manual') params = { polygons: drawnAreas.map((a) => a.geometry), subCutN: manualSplit ? Number(maxDoors) || 65 : null };
       else if (mode === 'attribute') params = { attribute, capN: capN ? Number(capN) : null };
       else params = { maxDoors: Number(maxDoors) || 65, tolerance: (FLEX_OPTIONS.find((o) => o.key === flex) || {}).tolerance };
+      if (targetActive) params.targetFilter = targetFilter;
       return api(`/admin/campaigns/${campaignId}/turfs/generate`, { method: 'POST', body: { passId, mode, params } });
     },
     onSuccess: (res) => {
@@ -1041,6 +1109,11 @@ export default function TurfsPage() {
                       {manualAreaStats.reduce((t, x) => t + (x?.voterCount || 0), 0).toLocaleString()} voters
                     </p>
                   )}
+                  {drawnAreas.length > 1 && (
+                    <p className="mt-1 text-[11px] text-fg-subtle">
+                      Houses in overlapping areas count toward the first area drawn.
+                    </p>
+                  )}
                   <label className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
                     <input type="checkbox" checked={manualSplit} onChange={(e) => setManualSplit(e.target.checked)} />
                     Split areas over
@@ -1054,6 +1127,62 @@ export default function TurfsPage() {
                     doors into smaller books
                   </label>
                 </>
+              )}
+            </div>
+          )}
+
+          {passId && publishedCount === 0 && (
+            <div className="mb-3">
+              <button
+                type="button"
+                onClick={() => setShowTarget((v) => !v)}
+                className="flex w-full items-center justify-between rounded-md border border-border-strong px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-sunken"
+              >
+                <span>Target doors {targetActive ? '· on' : '(optional)'}</span>
+                <span>{showTarget ? '▾' : '▸'}</span>
+              </button>
+              {showTarget && (
+                <div className="mt-2 space-y-2 rounded-md border border-border-strong bg-sunken px-3 py-2">
+                  <p className="text-[11px] text-fg-muted">
+                    Cut this round over only the doors that match — e.g. follow up on the unknocked, re-try not-homes, or GOTV your supporters.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <span className="font-medium text-fg-muted">Status:</span>
+                    {['unknocked', 'not_home', 'surveyed', 'lit_dropped', 'wrong_address'].map((s) => (
+                      <label key={s} className="flex items-center gap-1 capitalize">
+                        <input type="checkbox" checked={targetFilter.priorPassStatuses.includes(s)} onChange={() => toggleTargetStatus(s)} />
+                        {s.replace('_', ' ')}
+                      </label>
+                    ))}
+                  </div>
+                  {targetQuestions.length > 0 && (
+                    <AnswerFilters
+                      questions={targetQuestions}
+                      value={targetFilter.answerFilters}
+                      onChange={(v) => setTargetFilter((t) => ({ ...t, answerFilters: v }))}
+                    />
+                  )}
+                  {targetActive && (
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <label className="flex items-center gap-1.5 text-fg-muted">
+                        Combine
+                        <select
+                          value={targetFilter.combine}
+                          onChange={(e) => setTargetFilter((t) => ({ ...t, combine: e.target.value }))}
+                          className="rounded border border-border-strong bg-card px-1 py-0.5 text-fg"
+                        >
+                          <option value="or">OR (any)</option>
+                          <option value="and">AND (all)</option>
+                        </select>
+                      </label>
+                      <span className="font-semibold text-fg">
+                        {targetPreviewQ.isFetching
+                          ? '…'
+                          : `${(targetPreviewQ.data?.doorCount ?? 0).toLocaleString()} doors · ${(targetPreviewQ.data?.voterCount ?? 0).toLocaleString()} voters`}
+                      </span>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -1090,12 +1219,16 @@ export default function TurfsPage() {
             </div>
           )}
 
-          {doorsQ.data && !hasNoDoors && publishedCount === 0 && (
-            <p className="mb-2 text-xs text-fg-muted">
-              <strong>{(doorsQ.data.doors?.length || 0).toLocaleString()}</strong> knockable doors
-              {mode === 'geometric' ? ` → ~${Math.max(1, Math.ceil((doorsQ.data.doors?.length || 0) / (Number(maxDoors) || 65)))} books` : ''}
-            </p>
-          )}
+          {doorsQ.data && !hasNoDoors && publishedCount === 0 && (() => {
+            const total = doorsQ.data.doors?.length || 0;
+            const n = targetActive ? targetPreviewQ.data?.doorCount ?? null : total;
+            return (
+              <p className="mb-2 text-xs text-fg-muted">
+                <strong>{(n ?? 0).toLocaleString()}</strong> {targetActive ? 'targeted' : 'knockable'} doors
+                {mode === 'geometric' && n != null ? ` → ~${Math.max(1, Math.ceil(n / (Number(maxDoors) || 65)))} books` : ''}
+              </p>
+            );
+          })()}
 
           <button onClick={() => canGenerate && generate.mutate()} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
             {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}
@@ -1387,12 +1520,14 @@ export default function TurfsPage() {
         <DiscardModal
           isActive={isActivePass}
           bookCount={turfs.length}
+          passLabel={passLabel}
+          knockCount={knockCount}
           clearKnocks={clearKnocks}
           setClearKnocks={setClearKnocks}
           pending={discard.isPending}
           error={discard.error}
           onCancel={() => { setShowDiscard(false); setClearKnocks(false); }}
-          onConfirm={() => discard.mutate({ confirmActive: isActivePass, clearKnocks })}
+          onConfirm={() => discard.mutate({ confirmActive: isActivePass || knockCount > 0, clearKnocks })}
         />
       )}
     </div>

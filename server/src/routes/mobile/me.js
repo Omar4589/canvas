@@ -9,6 +9,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { canvasserHouseholdScope } from '../../services/canvass/canvasserScope.js';
+import { resolvePerRoundStatuses } from '../../services/passes/passStatus.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -190,30 +191,40 @@ router.get('/today', async (req, res, next) => {
     }
 
     // "Remaining" must match the doors the canvasser actually sees on their map:
-    // their assigned books (admins → whole campaign), active, still unknocked, and
-    // NOT fully early-voted. The map drops fully-voted doors and the admin dashboard
-    // buckets them as "Voted"; without these filters "remaining" overcounts them.
-    const remainingFilter = {
+    // their assigned books, active, still unknocked IN THEIR ROUND, and NOT fully
+    // early-voted. Per-round so a door re-targeted in a new round counts as
+    // remaining again (matches the per-round status the map now shows).
+    const remBase = {
       campaignId: cId,
       organizationId: orgId,
       isActive: true,
       fullyVoted: { $ne: true },
       excludedFromTurf: { $ne: true },
-      status: 'unknocked',
     };
     const scope = await canvasserHouseholdScope(req, access.campaign);
-    if (scope) remainingFilter._id = { $in: scope };
 
-    const [stats, remaining] = await Promise.all([
-      computeDailyStats({
-        orgId,
-        userId: req.user._id,
-        campaignId: cId,
-        start,
-        end: new Date(now),
-      }),
-      Household.countDocuments(remainingFilter),
-    ]);
+    const stats = await computeDailyStats({
+      orgId,
+      userId: req.user._id,
+      campaignId: cId,
+      start,
+      end: new Date(now),
+    });
+
+    let remaining;
+    if (scope) {
+      const remDoors = await Household.find(
+        { ...remBase, _id: { $in: scope } },
+        { _id: 1, turfId: 1, status: 1 }
+      ).lean();
+      const perRound = await resolvePerRoundStatuses(remDoors, access.campaign.type);
+      remaining = remDoors.filter(
+        (h) => (perRound.get(String(h._id)) || h.status || 'unknocked') === 'unknocked'
+      ).length;
+    } else {
+      // Admin (whole campaign) → keep the cheap global count.
+      remaining = await Household.countDocuments({ ...remBase, status: 'unknocked' });
+    }
 
     res.json({ ...stats, remaining });
   } catch (err) {

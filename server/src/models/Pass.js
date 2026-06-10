@@ -31,6 +31,11 @@ const passSchema = new mongoose.Schema(
     // Deprecated: door-set now comes from the effort's owned households. Kept on
     // existing docs for history; new rounds leave it null.
     walkListId: { type: mongoose.Schema.Types.ObjectId, ref: 'WalkList', default: null },
+    // Optional targeting for a follow-up round: a walk-list-shaped filter
+    // (knock status + survey answers) the cut was restricted to, scoped to this
+    // round's effort. null/empty = the full effort universe. Stored for
+    // reproducibility + a round label. Resolution lives in resolveWalkList.
+    targetFilter: { type: mongoose.Schema.Types.Mixed, default: null },
     status: {
       type: String,
       enum: ['draft', 'active', 'archived'],
