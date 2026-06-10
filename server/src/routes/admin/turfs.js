@@ -408,7 +408,22 @@ router.get('/', async (req, res, next) => {
       ...t,
       eligibleDoorCount: (t.householdIds || []).filter((id) => eligible.has(String(id))).length,
     }));
-    res.json({ turfs: withCounts });
+    // Already-voted owned doors for this pass's effort — skipped by the cut. Surfaced
+    // on the page as "N door(s) already voted — skipped" so a smaller book total makes sense.
+    let votedDoorCount = 0;
+    if (filter.passId) {
+      const pass = await Pass.findOne({ _id: filter.passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+      if (pass) {
+        votedDoorCount = await Household.countDocuments({
+          campaignId: req.campaign._id,
+          effortId: pass.effortId,
+          isActive: true,
+          fullyVoted: true,
+          'location.coordinates': { $exists: true, $ne: null },
+        });
+      }
+    }
+    res.json({ turfs: withCounts, votedDoorCount });
   } catch (err) {
     next(err);
   }
@@ -429,6 +444,7 @@ router.get('/doors', async (req, res, next) => {
       campaignId: req.campaign._id,
       effortId: pass.effortId, // only the round's effort's doors (mirror the cut base filter)
       isActive: true,
+      fullyVoted: { $ne: true }, // exclude already-voted doors — they aren't cut/knocked
       'location.coordinates': { $exists: true, $ne: null },
     };
     if (pass.walkListId) {

@@ -32,11 +32,14 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   await onProgress?.({ phase: 'loading', pct: 5 });
 
-  // A round cuts from its EFFORT's owned households (Household.effortId).
+  // A round cuts from its EFFORT's owned households (Household.effortId). Skip
+  // fully-voted doors (everyone there already voted early) — they're not knockable,
+  // so including them would balance books on dead doors. Mirrors the canvasser list.
   const baseFilter = {
     campaignId,
     isActive: true,
     effortId: pass.effortId,
+    fullyVoted: { $ne: true },
     'location.coordinates': { $exists: true, $ne: null },
   };
 
@@ -144,11 +147,13 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
   if (!pass) throw new Error('Pass not found');
 
   // Supplemental books come from the effort's OWNED doors not yet in a book.
+  // Skip fully-voted doors (not knockable), same as the main cut.
   const baseFilter = {
     campaignId,
     isActive: true,
     effortId: pass.effortId,
     turfId: null,
+    fullyVoted: { $ne: true },
     'location.coordinates': { $exists: true, $ne: null },
   };
 

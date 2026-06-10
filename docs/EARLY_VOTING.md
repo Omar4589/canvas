@@ -83,6 +83,10 @@ See [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md).
 
 - **Fully-voted doors disappear** from the map and from book/turf door counts (their book's count
   shrinks to the remaining doors).
+- **Turf cutting also skips fully-voted doors** — a new cut (or re-cut) builds and *balances* books on
+  the remaining knockable doors only, so book sizes reflect real work and voted doors aren't filed
+  into a book. Books cut *before* a voted upload aren't reshuffled; their live counts already shrink.
+  The Turf Cutting page notes how many voted doors were skipped.
 - At doors that are still open, **voted residents get a ✓ Voted badge** so the canvasser knows to
   skip them.
 

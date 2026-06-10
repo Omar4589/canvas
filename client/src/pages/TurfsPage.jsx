@@ -470,8 +470,10 @@ export default function TurfsPage() {
   // Doors not yet in any book — e.g. voters imported after this pass was cut.
   const unassignedCount = (doorsQ.data?.doors || []).filter((d) => !d.turfId).length;
   // Dead-end guard: the effort owns no mappable doors. /doors returns the effort's
-  // doors (booked or not), so 0 here = nothing to cut. Don't trip while loading.
+  // knockable doors (booked or not), so 0 here = nothing to cut. Don't trip while loading.
   const hasNoDoors = !!passId && !!doorsQ.data && (doorsQ.data.doors || []).length === 0;
+  // Already-voted owned doors the cut skips (so a smaller book total makes sense).
+  const votedDoorCount = turfsQ.data?.votedDoorCount || 0;
   // The popup's house + its current book, derived live from the doors data so it
   // updates after a move.
   const popupDoor = (doorsQ.data?.doors || []).find((d) => String(d.id) === String(popupHouseholdId));
@@ -864,7 +866,12 @@ export default function TurfsPage() {
             {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}
           </button>
 
-          {hasNoDoors && (
+          {hasNoDoors && votedDoorCount > 0 && (
+            <NextStepBanner tone="info" className="mt-3">
+              All {votedDoorCount.toLocaleString()} door{votedDoorCount === 1 ? '' : 's'} here have already voted — nothing to cut.
+            </NextStepBanner>
+          )}
+          {hasNoDoors && votedDoorCount === 0 && (
             <NextStepBanner
               tone="warning"
               className="mt-3"
@@ -872,6 +879,11 @@ export default function TurfsPage() {
             >
               This effort owns no mappable doors yet. Claim doors into it on the Efforts page before cutting books.
             </NextStepBanner>
+          )}
+          {!hasNoDoors && votedDoorCount > 0 && (
+            <p className="mt-2 text-xs text-fg-muted">
+              {votedDoorCount.toLocaleString()} door{votedDoorCount === 1 ? '' : 's'} here already voted — skipped (not cut into books).
+            </p>
           )}
 
           {jobId && (

@@ -158,7 +158,7 @@ function PassDetail({ campaignId, pass, tz }) {
             <li key={t._id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
               <div className="min-w-0">
                 <span className="font-medium text-fg">{t.name}</span>
-                <span className="ml-2 text-xs text-fg-muted">{(t.doorCount || 0).toLocaleString()} doors</span>
+                <span className="ml-2 text-xs text-fg-muted">{(t.eligibleDoorCount ?? t.doorCount ?? 0).toLocaleString()} doors</span>
               </div>
               <div className="flex items-center gap-3">
                 <Avatars users={byTurf.get(String(t._id)) || []} />
