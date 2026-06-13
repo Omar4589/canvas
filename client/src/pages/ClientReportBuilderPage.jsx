@@ -2,13 +2,34 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import { Button, Badge, Card } from '../components/ui/index.js';
+import { Button, Badge, Card, Modal, Segmented } from '../components/ui/index.js';
 import ClientReportView from '../components/ClientReportView.jsx';
 import ClientReportMap from '../components/ClientReportMap.jsx';
+import { formatWeekRange } from '../lib/datePresets.js';
+import { formatDateInTz } from '../lib/datetime.js';
 
 const STATUS_VARIANT = { draft: 'neutral', published: 'success', archived: 'warning' };
 const inputCls =
   'w-full rounded border border-border bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none';
+const chipCls = 'inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted';
+
+// Canonical JSON of just the editable fields, so we can tell a dirty draft from the saved report.
+// Key arrays are sorted (toggle order isn't a real change) and blank observation sections dropped,
+// mirroring exactly what save() persists.
+function editableSnapshot(src) {
+  return JSON.stringify({
+    title: src.title || '',
+    observations: (src.observations || [])
+      .filter((s) => (s.heading || '').trim())
+      .map((s) => ({ heading: s.heading, body: s.body || '' })),
+    supportQuestionKey: src.supportQuestionKey || null,
+    visibility: {
+      visibleQuestionKeys: [...(src.visibility?.visibleQuestionKeys || [])].sort(),
+      mapAnswerKeys: [...(src.visibility?.mapAnswerKeys || [])].sort(),
+      showMap: src.visibility?.showMap !== false,
+    },
+  });
+}
 
 export default function ClientReportBuilderPage() {
   const { id } = useParams();
@@ -17,6 +38,8 @@ export default function ClientReportBuilderPage() {
   const [tab, setTab] = useState('edit');
   const [draft, setDraft] = useState(null); // local editable copy
   const [msg, setMsg] = useState(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [confirmPublish, setConfirmPublish] = useState(false);
 
   const reportQ = useQuery({
     queryKey: ['admin', 'client-report', id],
@@ -40,10 +63,12 @@ export default function ClientReportBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report?._id]);
 
+  // Prefetch the preview as soon as the report loads so switching to the Preview tab is instant.
+  // (It reflects the last SAVED state — a save invalidates and refetches it.)
   const previewQ = useQuery({
     queryKey: ['admin', 'client-report-preview', id],
     queryFn: () => api(`/admin/client-reports/${id}/preview`),
-    enabled: tab === 'preview',
+    enabled: !!report,
   });
 
   const invalidate = () => {
@@ -92,6 +117,15 @@ export default function ClientReportBuilderPage() {
   const isDraft = report.status === 'draft';
   const questions = report.stats?.cumulative?.surveyBreakdowns || [];
 
+  // Unsaved-changes indicator + the "what the client sees" recap/validation.
+  const dirty = isDraft && editableSnapshot(draft) !== editableSnapshot(report);
+  const visibleKeys = draft.visibility.visibleQuestionKeys;
+  const visibleCount = visibleKeys.length || questions.length; // empty whitelist = all shown
+  const supportLabel = questions.find((q) => q.questionKey === draft.supportQuestionKey)?.questionLabel;
+  // A non-empty whitelist that omits the support question hides its breakdown from the client.
+  const supportHidden =
+    !!draft.supportQuestionKey && visibleKeys.length > 0 && !visibleKeys.includes(draft.supportQuestionKey);
+
   function saveBody() {
     return {
       title: draft.title,
@@ -132,6 +166,24 @@ export default function ClientReportBuilderPage() {
       return { ...d, observations: next };
     });
 
+  async function downloadPdf() {
+    const r = previewQ.data?.report;
+    if (!r) return;
+    setPdfBusy(true);
+    try {
+      const { generateReportPdf } = await import('../lib/reportPdf.js');
+      await generateReportPdf(r, {
+        campaignName: reportQ.data?.campaignName,
+        orgName: reportQ.data?.orgName,
+      });
+    } catch (err) {
+      console.error('PDF export failed', err);
+      flash('Could not build the PDF.');
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   // --- visibility toggles ---
   const toggleKey = (group, key) =>
     setDraft((d) => {
@@ -149,18 +201,33 @@ export default function ClientReportBuilderPage() {
           </button>
           <div className="mt-1 flex items-center gap-2">
             <h1 className="truncate text-xl font-semibold text-fg">
-              {report.title || `${report.weekStart} → ${report.weekEnd}`}
+              {report.title || formatWeekRange(report.weekStart, report.weekEnd)}
             </h1>
             <Badge variant={STATUS_VARIANT[report.status]} dot>
               {report.status}
             </Badge>
           </div>
           <div className="text-xs text-fg-muted">
-            {report.weekStart} → {report.weekEnd} · {report.timeZone}
+            {formatWeekRange(report.weekStart, report.weekEnd)} · {report.timeZone}
           </div>
+          {report.status === 'published' && (
+            <div className="mt-0.5 text-xs text-fg-subtle">
+              {(report.viewCount ?? 0) > 0
+                ? `Viewed ${report.viewCount.toLocaleString()}× by the client · last ${formatDateInTz(report.lastViewedAt, report.timeZone)}`
+                : 'Not viewed by the client yet'}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          {msg && <span className="text-xs text-fg-muted">{msg}</span>}
+          {msg ? (
+            <span className="text-xs text-fg-muted">{msg}</span>
+          ) : (
+            isDraft && (
+              <span className={`text-xs ${dirty ? 'text-warning-fg' : 'text-fg-subtle'}`}>
+                {dirty ? 'Unsaved changes' : 'All changes saved'}
+              </span>
+            )
+          )}
           {isDraft ? (
             <>
               <Button variant="secondary" onClick={() => recomputeM.mutate()} loading={recomputeM.isPending}>
@@ -169,7 +236,7 @@ export default function ClientReportBuilderPage() {
               <Button variant="secondary" onClick={save} loading={saveM.isPending}>
                 Save
               </Button>
-              <Button onClick={saveThenPublish} loading={publishM.isPending || saveM.isPending}>
+              <Button onClick={() => setConfirmPublish(true)} loading={publishM.isPending || saveM.isPending}>
                 Publish
               </Button>
             </>
@@ -181,17 +248,14 @@ export default function ClientReportBuilderPage() {
         </div>
       </div>
 
-      <div className="inline-flex rounded-md border border-border bg-card p-0.5 text-sm">
-        {['edit', 'preview'].map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={'rounded px-3 py-1 capitalize ' + (tab === t ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken')}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        options={[
+          { value: 'edit', label: 'Edit' },
+          { value: 'preview', label: 'Preview' },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
 
       {tab === 'edit' && (
         <div className="space-y-5">
@@ -209,7 +273,7 @@ export default function ClientReportBuilderPage() {
                 value={draft.title}
                 disabled={!isDraft}
                 onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-                placeholder={`${report.weekStart} → ${report.weekEnd}`}
+                placeholder={formatWeekRange(report.weekStart, report.weekEnd)}
               />
             </label>
           </Card>
@@ -261,6 +325,19 @@ export default function ClientReportBuilderPage() {
           {/* Support question + visibility */}
           <Card className="p-4">
             <div className="text-sm font-semibold text-fg">What the client sees</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <span className={chipCls}>Support: {supportLabel || 'None'}</span>
+              <span className={chipCls}>
+                {visibleCount} of {questions.length} question{questions.length === 1 ? '' : 's'} shown
+              </span>
+              <span className={chipCls}>Map: {draft.visibility.showMap ? 'On' : 'Off'}</span>
+            </div>
+            {supportHidden && (
+              <Card className="mt-3 bg-warning-tint p-2.5 text-xs text-warning-fg">
+                The headline support question isn't in the visible list, so the client won't see its
+                breakdown. Check it under “Visible survey questions” below.
+              </Card>
+            )}
             <div className="mt-3 grid gap-5 md:grid-cols-2">
               <div>
                 <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">
@@ -341,8 +418,8 @@ export default function ClientReportBuilderPage() {
                       </label>
                     ))}
                   </div>
-                  <div className="mt-1 text-xs text-fg-muted">
-                    Map answer filters apply on the next publish (they're frozen into the snapshot).
+                  <div className="mt-2 rounded bg-info-tint p-2 text-xs text-info-fg">
+                    Map answer filters apply on the next publish — they're frozen into the snapshot.
                   </div>
                 </div>
               )}
@@ -356,6 +433,11 @@ export default function ClientReportBuilderPage() {
           {previewQ.isLoading && <div className="text-sm text-fg-muted">Building preview…</div>}
           {previewQ.data?.report && (
             <>
+              <div className="flex justify-end">
+                <Button variant="secondary" size="sm" loading={pdfBusy} onClick={downloadPdf}>
+                  ⤓ Download PDF
+                </Button>
+              </div>
               <ClientReportView report={previewQ.data.report} />
               {previewQ.data.report.visibility?.showMap && (
                 <section>
@@ -373,6 +455,38 @@ export default function ClientReportBuilderPage() {
             </>
           )}
         </div>
+      )}
+
+      {confirmPublish && (
+        <Modal
+          size="lg"
+          onClose={() => setConfirmPublish(false)}
+          title="Publish this report?"
+          subtitle="Publishing freezes the report — what the client sees from here on."
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setConfirmPublish(false)}>
+                Cancel
+              </Button>
+              <Button
+                loading={publishM.isPending || saveM.isPending}
+                onClick={async () => {
+                  await saveThenPublish();
+                  setConfirmPublish(false);
+                }}
+              >
+                Publish
+              </Button>
+            </>
+          }
+        >
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-fg-muted">
+            <li>The cumulative and weekly numbers are frozen exactly as they are now.</li>
+            <li>The coverage map is snapshotted (door statuses as of the week's end).</li>
+            <li>The report becomes visible to anyone with a share link for this campaign.</li>
+            <li>You can “Unpublish to edit” later, then republish to refresh the snapshot.</li>
+          </ul>
+        </Modal>
       )}
     </div>
   );
