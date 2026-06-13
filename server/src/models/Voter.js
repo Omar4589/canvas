@@ -18,6 +18,20 @@ const voterSchema = new mongoose.Schema(
     stateVoterId: { type: String, required: true, index: true, trim: true },
     uid: { type: String, default: null, index: true, trim: true },
 
+    // ── Cross-org canonical Person link (shared voter DB — see docs/PERSONS.md) ──
+    // The deduped Person this row maps to. The identity fields below become a
+    // denormalized CACHE of that Person; canvassing fields stay org-private.
+    personId: { type: mongoose.Schema.Types.ObjectId, ref: 'Person', default: null, index: true },
+    // Vendor namespace for this row's `uid` (from the ImportProfile). Only a
+    // namespaced uid is used as a cross-org match key.
+    uidSource: { type: String, default: null, trim: true },
+    // Identity fields this org corrected locally (e.g. a door-confirmed phone);
+    // canonical propagation and non-owner imports must NOT overwrite these.
+    locallyEditedFields: { type: [String], default: [] },
+    // Snapshot of this org's identity immediately before the first canonical
+    // propagation overwrote it — enables rollback without a DB restore.
+    identityBackup: { type: mongoose.Schema.Types.Mixed, default: null },
+
     firstName: { type: String, required: true, trim: true },
     lastName: { type: String, required: true, trim: true },
     fullName: { type: String, required: true, trim: true },

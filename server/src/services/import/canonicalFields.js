@@ -72,7 +72,11 @@ const FIELD_ALIASES = {
   stateVoterId: ['statevoterid', 'voterid', 'sosvoterid', 'statefileid', 'voterfileid'],
   firstName: ['firstname', 'first', 'fname', 'givenname'],
   lastName: ['lastname', 'last', 'lname', 'surname'],
-  uid: ['uid', 'id', 'personid'],
+  // Only an explicit `uid` header auto-maps. Generic `id`/`personid` columns are
+  // deliberately NOT matched — a loose column landing in uid would let the
+  // uid-first matcher merge unrelated people across vendors. uid is a cross-org
+  // person key only when the ImportProfile also declares a uidSource.
+  uid: ['uid'],
   phone: ['phone', 'homephone', 'landline', 'phonenumber'],
   phoneType: ['phonetype'],
   cellPhone: ['cellphone', 'cell', 'mobile', 'mobilephone'],

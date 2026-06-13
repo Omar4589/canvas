@@ -20,7 +20,8 @@
     "migrate:ack-memberships": "node src/migrations/migrateAckMemberships.js",
     "migrate:timezones": "node src/migrations/migrateTimeZones.js",
     "migrate:survey-dedup": "node src/migrations/migrateSurveyDedup.js",
-    "migrate:cleanup-client-role": "node src/migrations/cleanupClientRole.js"
+    "migrate:cleanup-client-role": "node src/migrations/cleanupClientRole.js",
+    "migrate:persons": "node src/migrations/migratePersons.js"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",

@@ -13,6 +13,11 @@ const importProfileSchema = new mongoose.Schema(
     },
     name: { type: String, required: true, trim: true },
     mapping: { type: mongoose.Schema.Types.Mixed, default: {} },
+    // Vendor namespace for this profile's `uid` column (e.g. 'i360'). Only when set
+    // is a row's uid used as a cross-org Person match key — this prevents two
+    // vendors' colliding ids from merging different people. Null = uid is stored
+    // but not used for cross-org matching.
+    uidSource: { type: String, default: null, trim: true },
     isBuiltIn: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
