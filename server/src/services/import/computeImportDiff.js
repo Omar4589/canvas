@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
+import { Person } from '../../models/Person.js';
 import { normalizeAddress, looseAddressKey } from '../../utils/normalizeAddress.js';
 import { forecast as geocodeForecast } from './geocode/geocodeService.js';
 
@@ -20,6 +21,47 @@ async function findInChunks(Model, field, values, projection, extraFilter = {}) 
   return out;
 }
 
+// Read-only shared-voter-DB forecast: of the import's voters, how many link to a canonical
+// Person already in the system (cross-org dedup payoff) vs would create a new Person. No
+// writes — mirrors the geocoding forecast. uidSource (the vendor namespace) lets uid-keyed
+// files forecast on uid; otherwise it forecasts on (state, stateVoterId).
+async function forecastPersons(validRows, uidSource) {
+  if (!validRows.length) return { enabled: true, voters: 0, existingPeople: 0, newPeople: 0 };
+  const svidOf = (r) => {
+    const state = String(r.voter.registeredState || r.household?.state || '').toUpperCase();
+    return state && r.voter.stateVoterId ? `${state}|${r.voter.stateVoterId}` : null;
+  };
+  const uidOf = (r) => (uidSource && r.voter.uid ? `${uidSource}|${r.voter.uid}` : null);
+
+  const svidVals = [...new Set(validRows.map((r) => r.voter.stateVoterId).filter(Boolean))];
+  const uidVals = uidSource ? [...new Set(validRows.map((r) => r.voter.uid).filter(Boolean))] : [];
+  const proj = { uidKeys: 1, svidKeys: 1 };
+  const found = [
+    ...(svidVals.length ? await findInChunks(Person, 'svidKeys.stateVoterId', svidVals, proj, { mergedInto: null }) : []),
+    ...(uidVals.length ? await findInChunks(Person, 'uidKeys.uid', uidVals, proj, { mergedInto: null }) : []),
+  ];
+  const svidToPerson = new Map();
+  const uidToPerson = new Map();
+  const seen = new Set();
+  for (const p of found) {
+    if (seen.has(String(p._id))) continue;
+    seen.add(String(p._id));
+    for (const k of p.svidKeys || []) svidToPerson.set(`${String(k.registeredState || '').toUpperCase()}|${k.stateVoterId}`, String(p._id));
+    for (const k of p.uidKeys || []) uidToPerson.set(`${k.uidSource}|${k.uid}`, String(p._id));
+  }
+
+  const matchedPersonIds = new Set();
+  const newKeys = new Set();
+  for (const r of validRows) {
+    const uk = uidOf(r);
+    const sk = svidOf(r);
+    const pid = (uk && uidToPerson.get(uk)) || (sk && svidToPerson.get(sk)) || null;
+    if (pid) matchedPersonIds.add(pid);
+    else newKeys.add(uk || sk || `svid:${r.voter.stateVoterId}`);
+  }
+  return { enabled: true, voters: validRows.length, existingPeople: matchedPersonIds.size, newPeople: newKeys.size };
+}
+
 /**
  * Read-only forecast of what a CSV import would do to THIS campaign. No writes.
  * Takes the already-parsed { validRows, householdMap, errors, dupSvids } from
@@ -29,7 +71,7 @@ async function findInChunks(Model, field, values, projection, extraFilter = {}) 
  * household is counted as an updated voter but not as a within-campaign move/orphan
  * (cross-campaign door ownership is out of scope here).
  */
-export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, totalRows = 0 }) {
+export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, totalRows = 0, uidSource = null }) {
   const campaignId = campaign._id;
   const orgId = campaign.organizationId;
 
@@ -140,8 +182,12 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
   // is enabled — otherwise no-coords rows were dropped and householdMap has none.
   const geocoding = await geocodeForecast(householdMap);
 
+  // Shared-voter-DB forecast (always-on): existing-person links vs new persons.
+  const persons = await forecastPersons(validRows, uidSource);
+
   return {
     geocoding,
+    persons,
     totals: {
       totalRows,
       validCount: validRows.length,

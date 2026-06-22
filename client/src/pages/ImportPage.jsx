@@ -70,6 +70,14 @@ function ReviewPanel({ diff }) {
         <DiffStat label="Rows skipped" value={skipped} amber />
       </div>
 
+      {diff.persons?.enabled && (
+        <p className="mt-3 text-xs text-fg-muted">
+          <span className="font-medium text-fg">Shared voter database:</span>{' '}
+          links to {fmt(diff.persons.existingPeople)} existing {diff.persons.existingPeople === 1 ? 'person' : 'people'} ·
+          {' '}adds {fmt(diff.persons.newPeople)} new {diff.persons.newPeople === 1 ? 'person' : 'people'}
+        </p>
+      )}
+
       {hasWarnings && (
         <p className="mt-3 text-xs text-warning-fg">
           Amber items are worth a look before you confirm: voters changing addresses, doors that will be

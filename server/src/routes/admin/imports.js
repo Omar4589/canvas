@@ -197,7 +197,7 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     const explode = req.body?.explode !== 'false';
     const { totalRows, errors, validRows, householdMap, dupSvids, detection } =
       await buildImportRows(req.file.buffer, req.file.originalname, resolved.mapping, { explode });
-    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows });
+    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows, uidSource: resolved.uidSource });
     diff.detection = detection;
     res.json({ diff });
   } catch (err) {

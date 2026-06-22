@@ -84,7 +84,7 @@ export async function processImportJob(job) {
     // Preview kind: read-only forecast (same diff the sync /csv/preview shows), no
     // writes. Persist the diff for the client to poll, then drop the raw file.
     if (importJob.kind === 'preview') {
-      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows });
+      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows, uidSource: importJob.uidSource });
       diff.detection = detection;
       await ImportJob.updateOne(
         { _id: importJobId },

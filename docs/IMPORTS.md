@@ -1,13 +1,17 @@
 # Voter imports & Intake
 
-What happens when you upload voters — how rows match existing doors/voters, what goes live
-immediately, and how new doors reach the field through **Intake**.
+What happens when you upload voters (CSV **or** Excel) — how rows match existing doors/voters,
+what goes live immediately, how coordinate-less and multi-voter-per-row files are handled, how
+voters are linked to canonical People across orgs, and how new doors reach the field through
+**Intake**.
 
 - **Part 1 — For everyone** is plain language.
 - **Part 2 — Technical reference** is for developers (and Claude): the upsert keys, normalization,
-  the preview/diff, and the `isActive` lifecycle.
+  the preview/diff, smart-import parsing, geocoding, the shared-voter-DB linking, and the
+  `isActive` lifecycle.
 
-Related: [EFFORTS.md](EFFORTS.md) (Intake → assign to an effort), [WALKLISTS.md](WALKLISTS.md) (turn a
+Related: [PERSONS.md](PERSONS.md) (the canonical cross-org People the import links to),
+[EFFORTS.md](EFFORTS.md) (Intake → assign to an effort), [WALKLISTS.md](WALKLISTS.md) (turn a
 Voter-ID CSV into a walk list without re-importing the universe), [VOTERS.md](VOTERS.md).
 
 ---
@@ -20,6 +24,31 @@ Voter-ID CSV into a walk list without re-importing the universe), [VOTERS.md](VO
   5-digit zip). A different/misspelled address makes a **separate** household; it does **not** merge.
 - A row is matched to a **voter by their state Voter ID** (org-wide). Re-uploading the same voter
   updates their info in place.
+
+## Any vendor file — CSV or Excel
+
+You can upload **`.csv` or `.xlsx`** directly. Some vendors pack **multiple voters into one row**
+(e.g. `FLVoterId1..4`); the importer **detects** this and offers an **"Explode multi-member
+rows"** toggle (on by default) that splits each row into one voter per person — the preview
+counts update live. It also warns about **leading-zero risk** (IDs/zips stored as numbers) and
+**Excel date serials**, and surfaces a **vendor** field on the mapping step so files with a
+universal person ID (a "uid") are matched across orgs (see *Shared voter database* below).
+
+## Coordinate-less files (geocoding)
+
+If a file has **no latitude/longitude**, geocoding (when enabled) turns each address into a pin
+so the file can still import. The preview shows a **free forecast** (how many addresses need
+geocoding, how many are already cached, and an estimated cost), plus an opt-in **"See exact
+placement"** button that runs the real geocode (cost shown first) and reports exactly what can
+and can't be placed. On import, unplaceable addresses are dropped (and listed) so every imported
+door keeps a walkable pin.
+
+## Shared voter database
+
+Every upload also **links its voters to canonical People** — one record per real human, shared
+across organizations. The preview forecasts it: *"links to N existing people · adds K new
+people."* For a single-org customer the first import is all new; once another org imports the
+same voters they show up as existing-person matches. Full details: [PERSONS.md](PERSONS.md).
 
 ## Preview before you import
 
@@ -176,4 +205,41 @@ the now-empty deletable households, then runs `recomputeHouseholdActive` over ex
 voter. **Conservative — it only ever deletes net-new, untouched records and never reverts updates.**
 Idempotent: `undone` blocks a second run. The result
 (`doorsDeleted`/`doorsSkipped`/`votersDeleted`/`votersSkipped`) is stored on the `ImportJob` and shown in
-the Recent-imports history.
+the Recent-imports history. Undo also tears down any **Person** this import created that now has
+**zero** linked voters (plus its candidate/proposal/log rows) — see [PERSONS.md](PERSONS.md) §H.
+
+## G. Smart import — formats, explode & detection
+
+One parse seam: `parseUpload(buffer, filename)`
+([services/import/parseUpload.js](../server/src/services/import/parseUpload.js)) reads **CSV via
+Papa** and **XLSX via exceljs** (formatted strings, so IDs keep leading zeros). `csvImporter.js`
+splits **parse** (`buildImportRows`) from **validate**; the CSV path is byte-for-byte unchanged
+after the split. Multi-member files are detected by **numbered siblings of the mapped
+`stateVoterId` column** (`FLVoterId1..N`); only **voter-group** columns are suffix-substituted
+per member (household columns stay shared, so `Address1/2/3` never mis-explode). The explode
+decision persists on the `ImportJob` so the worker apply explodes identically to the preview.
+Detection (`{ format, multiMember, warnings[] }`) flows through `computeImportDiff` to the
+**"What we detected"** panel; warnings cover `leading_zero_risk` and `date_serial` (a bare
+numeric date is converted from the Excel serial **only** when the column maps to a date field).
+
+## H. Geocoding (when `GEOCODE_ENABLED`)
+
+Provider: **Geocodio** (storable-without-contract licensing), keyed batch API, cache-backed in
+`GeocodeCache` (org/campaign-agnostic, keyed on `looseAddressKey`). The validate gate is split:
+*invalid* coords → always `bad_coords`; *missing* coords + enabled → survive to grouping with
+null coords. `importProcessor` geocodes inline (per-batch cache writes), **fills matched
+households + drops unplaceable ones (with their voters)**, and stamps `coordSource`/
+`coordConfidence`. Safeguards: a per-state **bounding-box gate**, an `accuracy_type` + `accuracy`
+confidence gate (centroids rejected), and a negative cache with staleness. The preview forecast
+is **cache-only** (zero provider calls); the opt-in `POST /admin/imports/geocode-check` runs the
+live geocode (cost-confirmed, worker-backed) and caches results so a later apply is free. Off ⇒
+today's `bad_coords` behavior byte-for-byte. `GeocodeCache` indexes build at worker boot.
+
+## I. Shared-voter-DB linking
+
+`reconcileIdentityFromImport` runs **after geocoding, before `applyImport`**, stamping `personId`
+(+ `uidSource`) onto each row so the upsert carries them; `computeImportDiff` adds a read-only
+`persons` forecast (`existingPeople`/`newPeople`). The **vendor namespace** (`uidSource`) is
+resolved at upload (inline or from the `ImportProfile`), stored on the `ImportJob`, and threaded
+into matching. Full design — the canonical Person model, the ownership state machine, and
+super-admin oversight — is in [PERSONS.md](PERSONS.md).
