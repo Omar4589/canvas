@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { normalizeAddress, looseAddressKey } from '../../utils/normalizeAddress.js';
+import { forecast as geocodeForecast } from './geocode/geocodeService.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const SAMPLE_CAP = 100;
@@ -135,7 +136,12 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
   const noCoordinates = errors.filter((e) => e.code === 'bad_coords').length;
   const duplicateInFile = dupSvids ? dupSvids.size : 0;
 
+  // Cache-only geocoding forecast (no provider calls). Only meaningful when geocoding
+  // is enabled — otherwise no-coords rows were dropped and householdMap has none.
+  const geocoding = await geocodeForecast(householdMap);
+
   return {
+    geocoding,
     totals: {
       totalRows,
       validCount: validRows.length,

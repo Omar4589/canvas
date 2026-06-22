@@ -31,6 +31,14 @@ The metrics are correct but the distinction is subtle and could be misread (esp.
 After 1–2, pick **Dashboard**, **Overview**, or the public **Client Reports** and walk it the way we
 walked Turf Cutting ("what do we see / what should we see / what can/can't we do"), gap-analysis first.
 
+> **Done (2026-06) on Client Reports** — a UX/visual/export pass: human date ranges, the voter-contact
+> breakdown reordered ahead of the support question, a `prominent` KPI treatment + segmented bars, a
+> quiet-week empty state, **per-report view tracking** (`viewCount`/`lastViewedAt`), a client-side
+> **PDF download** (jsPDF, map omitted) shared with the on-screen view via `deriveReportSections`, and
+> builder polish (confirm-on-publish, inline share-link passwords/labels, "what the client sees" recap).
+> Still **round-blind** per item 1 — per-round breakdown was intentionally left out of this pass. See
+> [CLIENT_PORTAL.md](CLIENT_PORTAL.md).
+
 Surfaces inventory: Overview (org rollup), DashboardPage (single-campaign: activity + coverage funnel +
 survey results + canvasser leaderboard), PassesPage (per-round knocks — the only round-aware view),
 Client Reports (public weekly snapshots). Endpoints: [reports.js](../server/src/routes/admin/reports.js).

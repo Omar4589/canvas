@@ -121,6 +121,14 @@ async function loadReport(req, res, next) {
 }
 
 router.get('/:token/reports/:id', loadShare, requireShareAccess, loadReport, (req, res) => {
+  // Best-effort per-report view stamp — never block/break the read (mirrors loadShare's link stamp
+  // at the top of this file). This is the ONLY place views are counted: drafts can't reach here
+  // (reportScope forces status:'published'), the /map route shares loadReport but NOT this handler,
+  // and admin previews never hit /share — so the count reflects genuine client opens.
+  ClientReport.updateOne(
+    { _id: req.report._id },
+    { $inc: { viewCount: 1 }, $set: { lastViewedAt: new Date() } }
+  ).catch(() => {});
   res.json({ report: shapeReportForClient(req.report), survey: mapFilterSurvey(req.report) });
 });
 

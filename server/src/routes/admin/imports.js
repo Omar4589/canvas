@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
 import mongoose from 'mongoose';
-import Papa from 'papaparse';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { ImportJob } from '../../models/ImportJob.js';
@@ -9,7 +8,8 @@ import { ImportProfile } from '../../models/ImportProfile.js';
 import { Campaign } from '../../models/Campaign.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { saveRawImport } from '../../services/import/rawImportStore.js';
-import { parseAndValidate } from '../../services/import/csvImporter.js';
+import { buildImportRows } from '../../services/import/csvImporter.js';
+import { parseUpload } from '../../services/import/parseUpload.js';
 import { computeImportDiff } from '../../services/import/computeImportDiff.js';
 import { undoImport } from '../../services/import/undoImport.js';
 import {
@@ -60,19 +60,12 @@ router.get('/fields', (req, res) => {
 });
 
 // Read a file's headers + a few sample rows and auto-suggest a mapping.
-router.post('/preview-headers', uploadCsv, (req, res, next) => {
+router.post('/preview-headers', uploadCsv, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
-    const csv = req.file.buffer.toString('utf8');
-    const parsed = Papa.parse(csv, {
-      header: true,
-      skipEmptyLines: true,
-      preview: 5,
-      transformHeader: (h) => h.trim(),
-    });
-    const columns = parsed.meta?.fields || [];
-    res.json({ columns, sample: parsed.data, suggestedMapping: suggestMapping(columns) });
+    const { headers, rows } = await parseUpload(req.file.buffer, req.file.originalname);
+    res.json({ columns: headers, sample: rows.slice(0, 5), suggestedMapping: suggestMapping(headers) });
   } catch (err) {
     next(err);
   }
@@ -166,6 +159,7 @@ router.post('/csv', uploadCsv, async (req, res, next) => {
       status: 'pending',
       fieldMapping: mapping,
       importProfileId,
+      explode: req.body?.explode !== 'false',
     });
     await saveRawImport(job._id, req.file.originalname, req.file.buffer);
     await getQueue(QUEUE_NAMES.IMPORT).add(
@@ -195,9 +189,11 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
     if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
 
-    const csv = req.file.buffer.toString('utf8');
-    const { totalRows, errors, validRows, householdMap, dupSvids } = parseAndValidate(csv, resolved.mapping);
+    const explode = req.body?.explode !== 'false';
+    const { totalRows, errors, validRows, householdMap, dupSvids, detection } =
+      await buildImportRows(req.file.buffer, req.file.originalname, resolved.mapping, { explode });
     const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows });
+    diff.detection = detection;
     res.json({ diff });
   } catch (err) {
     next(err);
@@ -230,6 +226,7 @@ router.post('/csv/preview-enqueue', uploadCsv, async (req, res, next) => {
       kind: 'preview',
       fieldMapping: mapping,
       importProfileId,
+      explode: req.body?.explode !== 'false',
     });
     await saveRawImport(job._id, req.file.originalname, req.file.buffer);
     await getQueue(QUEUE_NAMES.IMPORT).add(
@@ -238,6 +235,45 @@ router.post('/csv/preview-enqueue', uploadCsv, async (req, res, next) => {
       { jobId: String(job._id) }
     );
 
+    res.status(201).json({ job });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Opt-in "See exact placement": geocode the file's missing-coord addresses NOW (caching
+// them, so a later import is free) and report the EXACT placeable/unplaceable counts.
+// Worker-backed like preview-enqueue; the client polls GET /:importId for job.geocodeCheck.
+router.post('/geocode-check', uploadCsv, async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (process.env.GEOCODE_ENABLED !== 'true') {
+      return res.status(400).json({ error: 'Geocoding is not enabled.', code: 'geocoding-disabled' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
+    const campaignId = req.body?.campaignId;
+    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+      return res.status(400).json({ error: 'campaignId is required' });
+    }
+    const resolved = await resolveImportMapping(req);
+    if (resolved.error) return res.status(400).json({ error: resolved.error });
+    const { mapping, importProfileId } = resolved;
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
+    if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
+
+    const job = await ImportJob.create({
+      organizationId: activeOrgId(req),
+      campaignId: campaign._id,
+      filename: req.file.originalname,
+      uploadedBy: req.user._id,
+      status: 'pending',
+      kind: 'geocode_check',
+      fieldMapping: mapping,
+      importProfileId,
+      explode: req.body?.explode !== 'false',
+    });
+    await saveRawImport(job._id, req.file.originalname, req.file.buffer);
+    await getQueue(QUEUE_NAMES.IMPORT).add('geocode-check', { importJobId: String(job._id) }, { jobId: String(job._id) });
     res.status(201).json({ job });
   } catch (err) {
     next(err);
@@ -274,7 +310,7 @@ router.get('/', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     // Exclude preview jobs ($ne also matches legacy docs with no `kind`) so the
     // ephemeral large-file previews don't clutter the import history.
-    const filter = { organizationId: activeOrgId(req), kind: { $ne: 'preview' } };
+    const filter = { organizationId: activeOrgId(req), kind: { $nin: ['preview', 'geocode_check'] } };
     if (req.query.campaignId) filter.campaignId = req.query.campaignId;
     const jobs = await ImportJob.find(filter, { errors: 0 })
       .sort({ createdAt: -1 })

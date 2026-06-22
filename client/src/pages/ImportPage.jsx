@@ -120,6 +120,92 @@ function ReviewPanel({ diff }) {
   );
 }
 
+function DetectionPanel({ detection, explode, onToggleExplode, busy }) {
+  if (!detection) return null;
+  const { multiMember, warnings = [], format } = detection;
+  if (!multiMember?.detected && !warnings.length) return null;
+  const blocking = warnings.find((w) => w.type === 'missing_coordinates');
+  const advisories = warnings.filter((w) => w.type !== 'missing_coordinates');
+  return (
+    <div className="mb-4 rounded border border-border bg-card p-4">
+      <h3 className="mb-2 text-sm font-medium">What we detected{format === 'xlsx' ? ' · Excel file' : ''}</h3>
+      {multiMember?.detected && (
+        <div className="mb-3 rounded border border-border-strong bg-sunken px-3 py-2">
+          <div className="text-sm font-medium">This file packs multiple voters per row — up to {multiMember.memberCount}.</div>
+          <label className="mt-2 flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={!!explode} disabled={busy} onChange={(e) => onToggleExplode(e.target.checked)} />
+            <span>Explode multi-member rows into one voter each</span>
+          </label>
+          <p className="mt-1 text-xs text-fg-muted">
+            {explode
+              ? `${fmt(multiMember.sourceRows)} rows → ${fmt(multiMember.explodedVoters)} voters.`
+              : `Off — importing only the first voter per row (${fmt(multiMember.sourceRows)} voters; the rest are skipped).`}
+          </p>
+        </div>
+      )}
+      {blocking && (
+        <div className="mb-2 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">{blocking.detail}</div>
+      )}
+      {advisories.map((w, i) => (
+        <div key={i} className="mb-2 rounded border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">{w.detail}</div>
+      ))}
+    </div>
+  );
+}
+
+function GeocodingPanel({ geocoding, result, onCheck, checking }) {
+  if (!geocoding || !geocoding.uniqueNeedingGeocode) return null;
+  const { uniqueNeedingGeocode, cachedMatched, newToGeocode, estCostUsd, badZip } = geocoding;
+  return (
+    <div className="mb-4 rounded border border-border bg-card p-4">
+      <h3 className="mb-2 text-sm font-medium">Geocoding</h3>
+      {!result ? (
+        <>
+          <p className="text-sm text-fg-muted">
+            <strong>{fmt(uniqueNeedingGeocode)}</strong> address{uniqueNeedingGeocode === 1 ? '' : 'es'} need coordinates.{' '}
+            {cachedMatched > 0 && <>{fmt(cachedMatched)} already cached · </>}
+            {newToGeocode > 0 ? (
+              <><strong>{fmt(newToGeocode)}</strong> new lookup{newToGeocode === 1 ? '' : 's'} ≈ <strong>${estCostUsd.toFixed(2)}</strong></>
+            ) : 'all cached — free'}.
+            {badZip > 0 && <> {fmt(badZip)} have no valid ZIP and can’t be geocoded.</>}
+          </p>
+          <p className="mt-1 text-xs text-fg-subtle">
+            Geocoding runs when you import (Geocodio typically places ~95%+ of US addresses). Results are cached, so re-imports are free.
+          </p>
+          {newToGeocode > 0 && (
+            <button
+              onClick={onCheck}
+              disabled={checking}
+              className="mt-2 rounded border border-border-strong px-3 py-1 text-xs font-medium hover:bg-sunken disabled:opacity-60"
+            >
+              {checking ? 'Geocoding…' : `See exact placement (≈$${estCostUsd.toFixed(2)})`}
+            </button>
+          )}
+        </>
+      ) : (
+        <div className="text-sm">
+          <p>
+            <strong className="text-success">{fmt(result.placeable)}</strong> will place and import.{' '}
+            {result.unplaceable > 0 && <><strong className="text-warning-fg">{fmt(result.unplaceable)}</strong> couldn’t be located.</>}
+            {result.failed > 0 && <> {fmt(result.failed)} hit a temporary error (re-import retries).</>}
+          </p>
+          <p className="mt-1 text-xs text-fg-muted">
+            Geocoded {fmt(result.geocodedNew)} new (≈${(result.estCostUsd || 0).toFixed(2)}) + {fmt(result.geocodedCached)} cached. The import is now free (cached).
+          </p>
+          {result.sample?.length > 0 && (
+            <details className="mt-2 rounded border border-border bg-sunken">
+              <summary className="cursor-pointer px-3 py-1 text-xs font-medium">Couldn’t place — sample ({result.sample.length})</summary>
+              <ul className="space-y-0.5 border-t border-border px-3 py-2 text-xs text-fg-muted">
+                {result.sample.map((s, i) => <li key={i}>{addr1(s.address)} — {s.reason}</li>)}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ImportPage() {
   const queryClient = useQueryClient();
   const orgTz = useOrgTimeZone();
@@ -134,6 +220,8 @@ export default function ImportPage() {
   const [justImported, setJustImported] = useState(null); // campaignId of the last queued import
   const [previewJobId, setPreviewJobId] = useState(null); // async (large-file) preview job
   const [fileNote, setFileNote] = useState(null); // { tooBig } | { sizeText, estRows, large }
+  const [explode, setExplode] = useState(true); // smart import: explode multi-voter-per-row files
+  const [geocodeCheckJobId, setGeocodeCheckJobId] = useState(null); // opt-in "See exact placement" job
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -188,11 +276,12 @@ export default function ImportPage() {
   });
 
   const previewDiff = useMutation({
-    mutationFn: async ({ file, campaignId, mapping }) => {
+    mutationFn: async ({ file, campaignId, mapping, explode }) => {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('campaignId', campaignId);
       fd.append('mapping', JSON.stringify(mapping));
+      fd.append('explode', String(explode !== false));
       return api('/admin/imports/csv/preview', { method: 'POST', formData: fd });
     },
     onSuccess: () => setStep('review'),
@@ -201,11 +290,12 @@ export default function ImportPage() {
   // Large files: the parse+diff can exceed the 30s request timeout, so run it on
   // the worker and poll. Same diff shape as the sync path; the render unifies both.
   const enqueuePreview = useMutation({
-    mutationFn: async ({ file, campaignId, mapping }) => {
+    mutationFn: async ({ file, campaignId, mapping, explode }) => {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('campaignId', campaignId);
       fd.append('mapping', JSON.stringify(mapping));
+      fd.append('explode', String(explode !== false));
       return api('/admin/imports/csv/preview-enqueue', { method: 'POST', formData: fd });
     },
     onSuccess: (res) => setPreviewJobId(res.job?._id || null),
@@ -224,12 +314,40 @@ export default function ImportPage() {
     if (previewAsyncJob?.status === 'completed') setStep('review');
   }, [previewAsyncJob?.status]);
 
-  const upload = useMutation({
-    mutationFn: async ({ file, campaignId, mapping }) => {
+  // "See exact placement" — opt-in live geocode (worker-backed, cached), then poll.
+  const runGeocodeCheck = useMutation({
+    mutationFn: async ({ file, campaignId, mapping, explode }) => {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('campaignId', campaignId);
       fd.append('mapping', JSON.stringify(mapping));
+      fd.append('explode', String(explode !== false));
+      return api('/admin/imports/geocode-check', { method: 'POST', formData: fd });
+    },
+    onSuccess: (res) => setGeocodeCheckJobId(res.job?._id || null),
+  });
+  const geocodeCheckJobQ = useQuery({
+    queryKey: ['admin', 'imports', 'geocode-check', geocodeCheckJobId],
+    queryFn: () => api(`/admin/imports/${geocodeCheckJobId}`),
+    enabled: !!geocodeCheckJobId,
+    refetchInterval: (q) => {
+      const s = q.state.data?.job?.status;
+      return s === 'completed' || s === 'failed' ? false : 1500;
+    },
+  });
+  const geocodeCheckJob = geocodeCheckJobQ.data?.job || null;
+  const geocodeCheckResult = geocodeCheckJob?.status === 'completed' ? geocodeCheckJob.geocodeCheck : null;
+  const geocodeChecking =
+    runGeocodeCheck.isPending ||
+    (!!geocodeCheckJobId && geocodeCheckJob?.status !== 'completed' && geocodeCheckJob?.status !== 'failed');
+
+  const upload = useMutation({
+    mutationFn: async ({ file, campaignId, mapping, explode }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('campaignId', campaignId);
+      fd.append('mapping', JSON.stringify(mapping));
+      fd.append('explode', String(explode !== false));
       return api('/admin/imports/csv', { method: 'POST', formData: fd });
     },
     onSuccess: (_data, variables) => {
@@ -264,6 +382,8 @@ export default function ImportPage() {
     setStep('select');
     setFileNote(null);
     setPreviewJobId(null);
+    setExplode(true);
+    setGeocodeCheckJobId(null);
     previewDiff.reset();
     enqueuePreview.reset();
   }
@@ -273,6 +393,7 @@ export default function ImportPage() {
     previewDiff.reset();
     enqueuePreview.reset();
     setPreviewJobId(null);
+    setGeocodeCheckJobId(null);
     setStep((s) => (s === 'review' ? 'map' : s));
   }
 
@@ -323,13 +444,22 @@ export default function ImportPage() {
   const canPreview = file && campaignId && requiredUnmapped.length === 0 && !previewPending && !tooBig;
   function triggerPreview() {
     if (!canPreview) return;
-    if (isLargeFile) enqueuePreview.mutate({ file, campaignId, mapping });
-    else previewDiff.mutate({ file, campaignId, mapping });
+    if (isLargeFile) enqueuePreview.mutate({ file, campaignId, mapping, explode });
+    else previewDiff.mutate({ file, campaignId, mapping, explode });
+  }
+
+  // Toggling explode changes the voter count, so re-run the preview with the new value.
+  function onToggleExplode(next) {
+    setExplode(next);
+    setGeocodeCheckJobId(null); // explode change invalidates a prior exact-placement check
+    if (!file || !campaignId || requiredUnmapped.length > 0 || tooBig) return;
+    if (isLargeFile) enqueuePreview.mutate({ file, campaignId, mapping, explode: next });
+    else previewDiff.mutate({ file, campaignId, mapping, explode: next });
   }
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold">CSV Import</h1>
+      <h1 className="mb-6 text-2xl font-semibold">Import voters</h1>
 
       {workerOffline && (
         <div className="mb-6 rounded-md border border-danger/40 bg-danger-tint px-4 py-3 text-sm text-red-800">
@@ -370,10 +500,10 @@ export default function ImportPage() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-fg-muted">CSV file</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">CSV or Excel (.xlsx) file</label>
             <input
               type="file"
-              accept=".csv"
+              accept=".csv,.xlsx"
               onChange={(e) => onPickFile(e.target.files?.[0] || null)}
               className="block w-full text-sm"
             />
@@ -475,6 +605,17 @@ export default function ImportPage() {
           </div>
         )}
 
+        {step === 'review' && diff && (
+          <DetectionPanel detection={diff.detection} explode={explode} onToggleExplode={onToggleExplode} busy={previewPending} />
+        )}
+        {step === 'review' && diff && (
+          <GeocodingPanel
+            geocoding={diff.geocoding}
+            result={geocodeCheckResult}
+            onCheck={() => runGeocodeCheck.mutate({ file, campaignId, mapping, explode })}
+            checking={geocodeChecking}
+          />
+        )}
         {step === 'review' && diff && <ReviewPanel diff={diff} />}
 
         {step === 'review' && diff ? (
@@ -486,7 +627,7 @@ export default function ImportPage() {
               Back
             </button>
             <button
-              onClick={() => upload.mutate({ file, campaignId, mapping })}
+              onClick={() => upload.mutate({ file, campaignId, mapping, explode })}
               disabled={upload.isPending}
               className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
             >
@@ -564,7 +705,16 @@ export default function ImportPage() {
                 <tr key={j._id} className="border-t border-border">
                   <td className="px-4 py-2 text-fg-muted">{formatInTz(j.createdAt, orgTz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
                   <td className="px-4 py-2">{j.campaignId?.name || '—'}</td>
-                  <td className="px-4 py-2">{j.filename || '—'}</td>
+                  <td className="px-4 py-2">
+                    {j.filename || '—'}
+                    {(j.geocodedNew > 0 || j.geocodedCached > 0 || j.geocodeUnmatched > 0) && (
+                      <div className="text-xs text-fg-subtle">
+                        geocoded {fmt((j.geocodedNew || 0) + (j.geocodedCached || 0))}
+                        {j.geocodeUnmatched > 0 ? ` · ${fmt(j.geocodeUnmatched)} unplaced` : ''}
+                        {j.geocodeFailed > 0 ? ` · ${fmt(j.geocodeFailed)} retry` : ''}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-2"><StatusBadge job={j} /></td>
                   <td className="px-4 py-2 text-right">{fmt(j.uniqueVoters)}</td>
                   <td className="px-4 py-2 text-right">{fmt(j.uniqueHouseholds)}</td>

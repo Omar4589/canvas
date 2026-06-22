@@ -18,7 +18,7 @@ const importJobSchema = new mongoose.Schema(
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     status: {
       type: String,
-      enum: ['pending', 'parsing', 'completed', 'failed'],
+      enum: ['pending', 'parsing', 'geocoding', 'completed', 'failed'],
       default: 'pending',
       index: true,
     },
@@ -31,6 +31,12 @@ const importJobSchema = new mongoose.Schema(
     // Re-housing audit: voters whose household changed, and doors emptied + deactivated by it.
     movedVoters: { type: Number, default: 0 },
     deactivatedDoors: { type: Number, default: 0 },
+    // Geocoding audit (when GEOCODE_ENABLED): coords newly geocoded, served from cache,
+    // addresses that couldn't be placed (unmatched), and transient provider errors (failed).
+    geocodedNew: { type: Number, default: 0 },
+    geocodedCached: { type: Number, default: 0 },
+    geocodeUnmatched: { type: Number, default: 0 },
+    geocodeFailed: { type: Number, default: 0 },
     // Households the incoming voters lived at BEFORE this import (captured pre-apply).
     // Persisted so a BullMQ retry — which would re-read post-move state — still knows
     // which doors to re-check for emptiness. Source of retry-safe orphan deactivation.
@@ -60,10 +66,15 @@ const importJobSchema = new mongoose.Schema(
     // Column mapping used for this import (resolved canonical -> vendor column).
     importProfileId: { type: mongoose.Schema.Types.ObjectId, ref: 'ImportProfile', default: null },
     fieldMapping: { type: mongoose.Schema.Types.Mixed, default: null },
+    // Smart import: explode multi-voter-per-row files? Persisted so the worker
+    // apply explodes identically to what the preview showed.
+    explode: { type: Boolean, default: true },
     // 'apply' = the real import (default; old docs read as apply). 'preview' = a
     // read-only diff run on the worker for large files (stores `diff`, no writes).
-    kind: { type: String, enum: ['preview', 'apply'], default: 'apply', index: true },
+    kind: { type: String, enum: ['preview', 'apply', 'geocode_check'], default: 'apply', index: true },
     diff: { type: mongoose.Schema.Types.Mixed, default: null },
+    // "See exact placement" result (kind 'geocode_check'): exact placeable/unplaceable + sample.
+    geocodeCheck: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );

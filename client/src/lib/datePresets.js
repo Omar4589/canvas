@@ -82,9 +82,42 @@ export function defaultRange(preset, tz) {
 
 // Parse a date-only 'YYYY-MM-DD' as a LOCAL Date for display (avoids the UTC-midnight
 // off-by-one that `new Date('2026-06-04')` causes in behind-UTC zones).
-function ymdToLocal(ymd) {
+export function ymdToLocal(ymd) {
   const [y, m, d] = String(ymd).split('-').map(Number);
   return new Date(y, m - 1, d);
+}
+
+// Format a single 'YYYY-MM-DD' day as 'Jun 1, 2026'. Falls back to the raw string if unparseable.
+export function formatDay(ymd) {
+  const d = ymdToLocal(ymd);
+  if (isNaN(d)) return ymd || '';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Format a report week (two 'YYYY-MM-DD' days) as a human range — what clients read instead of
+// '2026-05-31 → 2026-06-13'. Same day → one date; same year → the year is shown once at the end
+// ('May 31 – Jun 13, 2026'); cross-year → the year is shown on both sides
+// ('Dec 29, 2025 – Jan 4, 2026'); a missing side → the present day alone; unparseable → 'start – end'.
+export function formatWeekRange(start, end) {
+  if (start && !end) return formatDay(start);
+  if (end && !start) return formatDay(end);
+  if (!start && !end) return '';
+  const s = ymdToLocal(start);
+  const e = ymdToLocal(end);
+  if (isNaN(s) || isNaN(e)) return `${start} – ${end}`;
+  if (s.toDateString() === e.toDateString()) return formatDay(start);
+  const withYear = { month: 'short', day: 'numeric', year: 'numeric' };
+  const noYear = { month: 'short', day: 'numeric' };
+  const sameYear = s.getFullYear() === e.getFullYear();
+  return `${s.toLocaleDateString(undefined, sameYear ? noYear : withYear)} – ${e.toLocaleDateString(undefined, withYear)}`;
+}
+
+// Title fallback for a report with no custom title, e.g. 'Week of May 31'. (The full range with the
+// year is shown separately as a subtitle, so this stays terse.)
+export function weekOfTitle(start) {
+  const d = ymdToLocal(start);
+  if (isNaN(d)) return start ? `Week of ${start}` : 'Weekly report';
+  return `Week of ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 }
 
 export function labelForRange({ preset, from, to }) {

@@ -1,165 +1,83 @@
 import StatCard from './StatCard.jsx';
 import ReportBreakdown from './ReportBreakdown.jsx';
 import Card from './ui/Card.jsx';
-import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
+import { deriveReportSections, formatCount } from '../lib/reportDerive.js';
 
-// Presentational render of a shaped client report (shapeReportForClient output). Used by BOTH
-// the admin builder Preview and the client portal detail page so they're guaranteed identical.
-// Renders the dual-window KPI cards (cumulative total + "this week" delta), the support and
-// survey/contact breakdowns, and the sectioned observations. The map is rendered separately by
-// the parent (it needs its own data fetch).
+// Presentational render of a shaped client report (shapeReportForClient output). Used by BOTH the
+// admin builder Preview and the client portal detail page so they're guaranteed identical. Every
+// number, label, color, and SECTION ORDER comes from deriveReportSections (lib/reportDerive) — the
+// same source the PDF export consumes — so the on-screen report and the downloaded PDF never drift.
+// Section order: Activity at a glance → Voter contact breakdown → headline Support → other survey
+// questions → Canvasser observations. The map is rendered separately by the parent (own data fetch).
 
-// Which contact outcomes to show, by campaign type. Survey campaigns hide the lit-drop row;
-// lit-drop campaigns hide the surveyed row. A null/unknown type (older reports) shows all.
-function contactOrderFor(type) {
-  if (type === 'survey') return ['surveyed', 'not_home', 'wrong_address'];
-  if (type === 'lit_drop') return ['lit_dropped', 'not_home', 'wrong_address'];
-  return ['surveyed', 'not_home', 'wrong_address', 'lit_dropped'];
+function SectionHeading({ children }) {
+  return (
+    <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-fg-muted">{children}</h2>
+  );
 }
 
-// Best-effort color for common support categories so the headline breakdown reads at a glance.
-function supportColor(label) {
-  const l = String(label).toLowerCase();
-  if (l.includes('strong') && l.includes('support')) return '#16a34a';
-  if (l.includes('lean') || l.includes('likely')) return '#3b82f6';
-  if (l.includes('support') || l.includes('yes') || l.includes('favor')) return '#22c55e';
-  if (l.includes('undecided') || l.includes('unsure') || l.includes('neutral') || l.includes('maybe'))
-    return '#9ca3af';
-  if (l.includes('oppos') || l.includes('against') || l.includes('no')) return '#ef4444';
-  return '#6366f1';
+// Map a derived KPI to StatCard props: a positive period delta becomes an "up" pill, the rate card
+// shows its static hint, and a zero-delta week shows the terse "no change" hint.
+function kpiProps(k) {
+  if (k.delta === null) return { hint: k.hint };
+  if (k.delta > 0) return { delta: `+${formatCount(k.delta)} this week`, deltaTone: 'up' };
+  return { hint: k.deltaZeroText };
 }
-
-const num = (n) => (n || 0).toLocaleString();
-const optItems = (b) => (b?.options || []).map((o) => ({ label: o.option, count: o.count, percent: o.percent }));
 
 export default function ClientReportView({ report }) {
-  const cum = report?.stats?.cumulative || {};
-  const per = report?.stats?.period || {};
-  const t = cum.totals || {};
-  const d = per.totals || {};
-
-  const isLit = report?.campaignType === 'lit_drop';
-
-  const breakdowns = isLit ? [] : cum.surveyBreakdowns || [];
-  const support =
-    breakdowns.find((b) => b.questionKey === report.supportQuestionKey) ||
-    breakdowns.find((b) => b.isSupportQuestion) ||
-    null;
-  const others = breakdowns.filter((b) => b !== support);
-
-  const CONTACT_ORDER = contactOrderFor(report?.campaignType);
-  const contact = cum.contactBreakdown || {};
-  const contactTotal = CONTACT_ORDER.reduce((s, k) => s + (contact[k] || 0), 0);
-  const contactItems = CONTACT_ORDER.map((k) => ({
-    label: STATUS_LABELS[k] || k,
-    count: contact[k] || 0,
-    percent: contactTotal ? Math.round(((contact[k] || 0) / contactTotal) * 1000) / 10 : 0,
-    color: STATUS_COLORS[k],
-  }));
-
-  const supportItems = support
-    ? (support.options || []).map((o) => ({
-        label: o.option,
-        count: o.count,
-        percent: o.percent,
-        color: supportColor(o.option),
-      }))
-    : [];
+  const { kpis, contact, support, others, isQuietWeek } = deriveReportSections(report);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-fg-muted">
-          Activity at a glance
-        </h2>
+        <SectionHeading>Activity at a glance</SectionHeading>
+        {isQuietWeek && (
+          <Card className="mb-3 bg-info-tint p-3 text-sm text-info-fg">
+            A quieter week — no new doors were knocked in this period. The numbers below are cumulative
+            totals to date.
+          </Card>
+        )}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard
-            label="Doors knocked"
-            value={num(t.doorsKnocked)}
-            hint={d.doorsKnocked ? `+${num(d.doorsKnocked)} this week` : 'No new doors this week'}
-            accent="brand"
-          />
-          {isLit ? (
-            <>
-              <StatCard
-                label="Lit dropped"
-                value={num(t.litKnocks)}
-                hint={d.litKnocks ? `+${num(d.litKnocks)} this week` : 'No new lit this week'}
-                accent="green"
-              />
-              <StatCard
-                label="Homes knocked"
-                value={num(t.homesKnocked)}
-                hint={d.homesKnocked ? `+${num(d.homesKnocked)} this week` : 'No change this week'}
-                accent="blue"
-              />
-              <StatCard
-                label="Lit rate"
-                value={`${t.connectionRate ?? 0}%`}
-                hint="Lit drops per door knocked"
-                accent="amber"
-              />
-            </>
-          ) : (
-            <>
-              <StatCard
-                label="Surveys taken"
-                value={num(t.surveysTaken)}
-                hint={d.surveysTaken ? `+${num(d.surveysTaken)} this week` : 'No new surveys this week'}
-                accent="green"
-              />
-              <StatCard
-                label="Voters surveyed"
-                value={num(t.surveyedVoters)}
-                hint={d.surveyedVoters ? `+${num(d.surveyedVoters)} this week` : 'No change this week'}
-                accent="blue"
-              />
-              <StatCard
-                label="Connection rate"
-                value={`${t.connectionRate ?? 0}%`}
-                hint="Surveys per door knocked"
-                accent="amber"
-              />
-            </>
-          )}
+          {kpis.map((k) => (
+            <StatCard key={k.key} label={k.label} value={k.value} accent={k.accent} prominent {...kpiProps(k)} />
+          ))}
         </div>
+      </section>
+
+      {/* Voter contact breakdown always reads first — right after the headline numbers and before
+          the support question — so the client sees outcomes-across-all-doors up front. */}
+      <section>
+        <ReportBreakdown
+          title={contact.title}
+          subtitle={contact.subtitle}
+          items={contact.items}
+          variant="segmented"
+        />
       </section>
 
       {support && (
         <section>
           <ReportBreakdown
-            title={`Support — ${support.questionLabel}`}
-            subtitle={`${num(t.surveysTaken)} total responses`}
-            items={supportItems}
+            title={support.title}
+            subtitle={support.subtitle}
+            items={support.items}
+            variant="segmented"
             emphasis
           />
         </section>
       )}
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <ReportBreakdown
-          title="Voter contact breakdown"
-          subtitle="Outcomes across all doors knocked"
-          items={contactItems}
-        />
-        {others[0] && (
-          <ReportBreakdown title={others[0].questionLabel} items={optItems(others[0])} />
-        )}
-      </section>
-
-      {others.length > 1 && (
+      {others.length > 0 && (
         <section className="grid gap-4 lg:grid-cols-2">
-          {others.slice(1).map((b) => (
-            <ReportBreakdown key={b.questionKey} title={b.questionLabel} items={optItems(b)} />
+          {others.map((b) => (
+            <ReportBreakdown key={b.questionKey} title={b.title} items={b.items} />
           ))}
         </section>
       )}
 
       {report.observations?.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-fg-muted">
-            Canvasser observations
-          </h2>
+          <SectionHeading>Canvasser observations</SectionHeading>
           <Card className="divide-y divide-border p-0">
             {report.observations.map((s, i) => (
               <div key={i} className="p-5">

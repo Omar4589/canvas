@@ -29,14 +29,15 @@ the campaign manager, your boss, the state director — one person or many) open
 the **weekly reports for that campaign, newest first**, with no admin tools and no account to create.
 If you put a password on the link, they're asked for it once (it's remembered for that browser tab).
 
-Opening a report shows:
+A report reads top to bottom as a document, in this order:
 
 - **Activity at a glance** — headline cards (doors knocked, surveys taken, voters surveyed, connection
-  rate). Each card shows the **cumulative total** as the big number and a **"+N this week"** delta.
-- **Support breakdown** — the counts for the survey question you designate as "support" (e.g. *1,394
-  Support · 404 Likely Support · 889 Undecided · 50 Opposed*).
-- **Voter contact breakdown** — outcomes across the doors: surveyed, not home, wrong address, lit
-  dropped.
+  rate). Each card shows the **cumulative total** as the big number and a **"+N this week"** pill. A
+  quiet week (no new doors) says so plainly above the cards.
+- **Voter contact breakdown** — outcomes across the doors (surveyed, not home, wrong address, lit
+  dropped), shown as one stacked bar with a legend. This reads **first**, right after the numbers.
+- **Support breakdown** — the question you designate as "support" (e.g. *1,394 Support · 404 Likely
+  Support · 889 Undecided · 50 Opposed*), emphasized as the headline.
 - **Survey breakdowns** — per-question option counts and percentages for the questions you choose to
   show. Percentages total exactly 100% per question (see [SURVEYS.md](SURVEYS.md)).
 - **Canvasser observations** — your written, sectioned narrative (e.g. *Voter Intent*, *Opponent
@@ -44,6 +45,9 @@ Opening a report shows:
 - **A coverage map** — an interactive, read-only map of where the team has been: only the doors we
   actually reached (unknocked doors are hidden), colored by outcome, with filters by status and survey
   answer. It shows **no canvasser names or locations** — only the doors and their outcomes.
+
+The header shows the campaign, a human week range (e.g. *May 31 – Jun 13, 2026*), and a **Download PDF**
+button — a one-click, paginated PDF of the numbers, breakdowns, and observations (the map is left out).
 
 The numbers and the map are **frozen at publish time** — a published report never changes, even as the
 team keeps knocking. Next week's report picks up the new activity and appears at the same link.
@@ -57,24 +61,30 @@ through the week's end (cumulative) and just the week itself (the delta).
 In the builder you:
 
 - Write the **Canvasser observations** as sections (a heading + a paragraph each; add, reorder, remove).
-- Choose the **headline support question** and which **survey questions** the recipient may see.
+- Choose the **headline support question** and which **survey questions** the recipient may see. A
+  **"What the client sees"** recap (Support / N of M questions shown / Map on-off) updates live, and a
+  warning flags if your support question isn't in the visible set (the client wouldn't see its bars).
 - Choose whether to show the **map**, and which survey answers become map filters.
-- **Recompute** at any time while it's a draft, and use **Preview** to see exactly what the recipient
-  will see.
-- **Publish** — this freezes the numbers and snapshots the map. It now appears on the share link.
+- **Recompute** at any time while it's a draft. The header shows an **Unsaved changes / All changes
+  saved** indicator, and **Preview** (instant — it's prefetched) shows exactly what the recipient will
+  see, including a **Download PDF** button.
+- **Publish** — a confirm dialog spells out the freeze (numbers + map snapshot locked, link goes live);
+  confirming freezes the report.
 
-A published report is locked; click **Unpublish to edit** to make changes, then republish. You can
-delete a draft or a published report.
+A published report is locked; click **Unpublish to edit** to make changes, then republish. The header
+also shows whether the client has opened it yet (**Viewed N× · last …**). You can delete a draft or a
+published report.
 
 ## Sharing a report
 
 On **Client Reports**, with a campaign selected, use the **Share link** panel:
 
 - **+ New link** creates a public link to this campaign's published reports. **Copy** it and send it to
-  anyone — they don't need an account.
-- **Set password** adds a password recipients must enter; **Change / Remove password** updates it.
+  anyone — they don't need an account. Give each link a **label** (e.g. *Candidate*, *Internal*) inline.
+- **Set / Change password** is an **inline field** (no browser prompt); leaving it blank removes it.
 - **Rotate** issues a fresh URL and **instantly kills the old one** (use it if a link leaked).
-- **Disable / Enable** turns a link off without deleting it; **Delete** removes it for good.
+- **Disable / Enable** turns a link off without deleting it; **Delete** removes it for good. Each row
+  shows when the link was **last opened**.
 - You can keep **more than one link per campaign** (e.g. a password-protected one for the candidate and
   an open one for internal staff), each revocable on its own.
 
@@ -101,6 +111,9 @@ publish appear automatically — so you share it once. Recipients only ever see 
 - `supportQuestionKey`, `campaignType`, and `visibility: { visibleQuestionKeys[], mapAnswerKeys[],
   showMap }`.
 - `mapPointCount`, `publishedAt`, `publishedBy`, `createdBy`.
+- `viewCount`, `lastViewedAt` — a best-effort per-report counter of genuine client opens (defaults
+  `0`/`null`; missing on old reports, so no migration — `$inc` treats absent as 0). Surfaced to admins
+  only, never in the public shapers.
 
 **[ClientReportMapPoint](../server/src/models/ClientReportMapPoint.js)** — one frozen household point
 per published report (its own collection so a large campaign can't blow the 16 MB BSON limit). Stores
@@ -146,9 +159,10 @@ draft.
 ## Endpoints
 
 **Admin builder** — `/admin/client-reports`, gated `requireOrgRole('admin')`:
-`POST /` (create draft) · `GET /?campaignId=` (list) · `GET /:id` · `PATCH /:id` (drafts only) ·
-`POST /:id/recompute` · `GET /:id/preview` · `GET /:id/preview/map` · `POST /:id/publish` ·
-`POST /:id/unpublish` · `DELETE /:id`.
+`POST /` (create draft) · `GET /?campaignId=` (list; rows carry `viewCount`/`lastViewedAt`/`timeZone`) ·
+`GET /:id` (also returns `campaignName`/`orgName` so the builder's PDF header matches the client's) ·
+`PATCH /:id` (drafts only) · `POST /:id/recompute` · `GET /:id/preview` · `GET /:id/preview/map` ·
+`POST /:id/publish` · `POST /:id/unpublish` · `DELETE /:id`.
 
 **Admin share management** — same router, also `requireOrgRole('admin')`. Declared **before** the
 `/:id` report routes so Express doesn't match `:id = "shares"`:
@@ -171,6 +185,10 @@ active `ReportShareLink` (404 otherwise):
   reusing `shapeReportListRow` / `shapeReportForClient` / `mapFilterSurvey` / `shapeMapPoints`
   ([clientReportView.js](../server/src/services/reports/clientReportView.js)). The same shapers feed the
   admin preview, so the operator's preview is byte-for-byte what recipients get.
+- The **`/reports/:id` handler** also fires a best-effort `$inc viewCount` + `$set lastViewedAt` (never
+  blocking the read, mirroring `loadShare`'s link stamp). It lives in the handler body — **not** the
+  shared `loadReport`, so `/reports/:id/map` doesn't double-count — and only published reports are
+  reachable here, so admin previews and drafts are excluded.
 
 ## Scoping & security
 
@@ -196,10 +214,20 @@ active `ReportShareLink` (404 otherwise):
   [PublicReportListPage](../client/src/pages/PublicReportListPage.jsx) (the archive, newest first), and
   [PublicReportDetailPage](../client/src/pages/PublicReportDetailPage.jsx). Routes `/r/:token` and
   `/r/:token/reports/:reportId` live **outside** `ProtectedRoute` in [App.jsx](../client/src/App.jsx).
+- Shared derivation: [lib/reportDerive.js](../client/src/lib/reportDerive.js) `deriveReportSections()`
+  returns the report's KPIs, contact/support/other breakdowns and section **order** as plain data — the
+  single source consumed by **both** the on-screen view and the PDF, so they can't drift.
+- PDF export: [lib/reportPdf.js](../client/src/lib/reportPdf.js) `generateReportPdf()` lazily imports
+  `jspdf` (its own bundle chunk — never on the report's first paint) and draws the document from
+  `deriveReportSections` (header + KPI grid + labeled bars + observations; **map omitted**). Mounted on
+  the public detail page and the builder Preview tab.
 - Shared render: [ClientReportView](../client/src/components/ClientReportView.jsx) (KPIs + breakdowns +
   observations, used by both the public page and the admin preview),
+  [StatCard](../client/src/components/StatCard.jsx) (the report opts into a `prominent` look + a delta
+  pill; the admin dashboards' default look is unchanged),
   [ReportBreakdown](../client/src/components/ReportBreakdown.jsx) (derives 100%-summing percents from
-  counts), and the read-only [ClientReportMap](../client/src/components/ClientReportMap.jsx) — which
+  counts; `variant="segmented"` draws a stacked bar + legend for contact/support), and the read-only
+  [ClientReportMap](../client/src/components/ClientReportMap.jsx) — which
   takes a `requestOpts` prop so its fetches run public (`{ public: true, shareToken }`) on the share
   page while the admin preview stays authed; it reuses the admin map's pin rendering via
   [lib/mapRender.js](../client/src/lib/mapRender.js) (`withCanvassers: false`).
@@ -215,3 +243,7 @@ There are no client login accounts anymore. [cleanupClientRole.js](../server/src
 memberships and unsets any leftover `clientCampaignIds` (the `Membership.role` enum is now
 `admin | canvasser`). Run it with the deploy. No new env vars — `MAPBOX_PUBLIC_TOKEN` and `JWT_SECRET`
 already exist. Mobile is unaffected.
+
+The PDF export adds one client dependency, **`jspdf`** (lazy-loaded into its own chunk) — `npm --prefix
+client install` (the `heroku-postbuild` `install:all` already does this). The `viewCount`/`lastViewedAt`
+fields need **no migration** (`$inc` treats a missing field as 0; schema defaults apply on read).

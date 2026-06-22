@@ -116,8 +116,11 @@ function adminListRow(r) {
     title: r.title || '',
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
+    timeZone: r.timeZone,
     status: r.status,
     mapPointCount: r.mapPointCount || 0,
+    viewCount: r.viewCount || 0,
+    lastViewedAt: r.lastViewedAt || null,
     publishedAt: r.publishedAt || null,
     updatedAt: r.updatedAt,
     headline: {
@@ -326,7 +329,9 @@ router.get('/:id', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: activeOrgId(req) });
     if (!report) return res.status(404).json({ error: 'Report not found' });
-    res.json({ report });
+    // Campaign + org names let the builder's PDF export carry the same header the client sees.
+    const campaign = await Campaign.findById(report.campaignId, { name: 1 }).lean();
+    res.json({ report, campaignName: campaign?.name || '', orgName: req.activeOrg?.name || '' });
   } catch (err) {
     next(err);
   }

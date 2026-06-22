@@ -114,6 +114,13 @@ const clientReportSchema = new mongoose.Schema(
     // Denormalized count of frozen ClientReportMapPoint docs (for list views).
     mapPointCount: { type: Number, default: 0 },
 
+    // How many times a client opened this report through a public share link, and when last.
+    // Best-effort signal for the operator (admin previews don't count; see routes/public/share.js).
+    // Missing on old reports — `$inc` treats absent as 0 and the defaults apply on read, so no
+    // backfill/migration is needed.
+    viewCount: { type: Number, default: 0 },
+    lastViewedAt: { type: Date, default: null },
+
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     publishedAt: { type: Date, default: null },
     publishedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

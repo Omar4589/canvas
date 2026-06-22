@@ -2,6 +2,7 @@ import { Link, useOutletContext } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { Card } from '../components/ui/index.js';
+import { formatWeekRange, weekOfTitle } from '../lib/datePresets.js';
 
 const num = (n) => (n || 0).toLocaleString();
 
@@ -39,9 +40,9 @@ export default function PublicReportListPage() {
         {reports.map((r) => (
           <Link key={r.id} to={`/r/${token}/reports/${r.id}`} className="block">
             <Card className="p-4 transition-colors hover:bg-sunken">
-              <div className="font-medium text-fg">{r.title || `Week of ${r.weekStart}`}</div>
+              <div className="font-medium text-fg">{r.title || weekOfTitle(r.weekStart)}</div>
               <div className="mt-1 text-xs text-fg-muted">
-                {r.weekStart} → {r.weekEnd}
+                {formatWeekRange(r.weekStart, r.weekEnd)}
               </div>
               <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm">
                 <Metric
