@@ -33,6 +33,12 @@ const householdSchema = new mongoose.Schema(
     normalizedAddress: { type: String, required: true, index: true },
 
     location: { type: pointSchema, default: null },
+    // How the coordinates were obtained: 'file' (supplied in the import) or 'geocodio'
+    // (geocoded). coordConfidence is the geocoder's precision ('exact' rooftop vs
+    // 'interpolated'); null for file-supplied coords. Lets the map/turf tooling flag and
+    // re-verify interpolated pins.
+    coordSource: { type: String, default: null },
+    coordConfidence: { type: String, default: null },
 
     status: {
       type: String,

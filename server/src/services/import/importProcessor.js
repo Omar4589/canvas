@@ -2,7 +2,9 @@ import { UnrecoverableError } from 'bullmq';
 import { ImportJob } from '../../models/ImportJob.js';
 import { Campaign } from '../../models/Campaign.js';
 import { loadRawImport, deleteRawImport } from './rawImportStore.js';
-import { parseAndValidate, applyImport } from './csvImporter.js';
+import { buildImportRows, applyImport } from './csvImporter.js';
+import { resolve as geocodeResolve } from './geocode/geocodeService.js';
+import { normalizeAddress } from '../../utils/normalizeAddress.js';
 import { computeImportDiff } from './computeImportDiff.js';
 import { recomputeCutAttributesForCampaign } from '../turf/computeCutAttributes.js';
 import { Household } from '../../models/Household.js';
@@ -36,16 +38,53 @@ export async function processImportJob(job) {
 
   try {
     const buffer = await loadRawImport(importJobId);
-    const csv = buffer.toString('utf8');
-    const { totalRows, errors, validRows, householdMap, dupSvids } = parseAndValidate(
-      csv,
-      importJob.fieldMapping || {}
+    const { totalRows, errors, validRows, householdMap, dupSvids, detection } = await buildImportRows(
+      buffer,
+      importJob.filename,
+      importJob.fieldMapping || {},
+      { explode: importJob.explode !== false }
     );
+
+    // "See exact placement" (kind 'geocode_check'): geocode the missing-coord addresses
+    // NOW (caching them so a later import is free) and report exact placeable/unplaceable
+    // counts. No import.
+    if (importJob.kind === 'geocode_check') {
+      await ImportJob.updateOne({ _id: importJobId }, { $set: { status: 'geocoding', progress: 0 } });
+      const { unmatched, stats } = await geocodeResolve(householdMap, {
+        onProgress: async (processed, total) => {
+          const pct = total ? Math.round((processed / total) * 100) : 100;
+          await job.updateProgress(pct);
+          await ImportJob.updateOne({ _id: importJobId }, { progress: pct });
+        },
+      });
+      const sample = [];
+      for (const [address, info] of unmatched) {
+        if (sample.length >= 100) break;
+        sample.push({ address, code: info.code, reason: info.detail });
+      }
+      const geocodeCheck = {
+        households: householdMap.size,
+        placeable: stats.geocodedNew + stats.geocodedCached,
+        unplaceable: stats.geocodeUnmatched,
+        failed: stats.geocodeFailed,
+        geocodedNew: stats.geocodedNew,
+        geocodedCached: stats.geocodedCached,
+        estCostUsd: Math.round((stats.geocodedNew / 1000) * 100) / 100,
+        sample,
+      };
+      await ImportJob.updateOne(
+        { _id: importJobId },
+        { $set: { status: 'completed', geocodeCheck, progress: 100, completedAt: new Date(), ...stats } }
+      );
+      await deleteRawImport(importJobId);
+      return { ok: true, kind: 'geocode_check', importJobId: String(importJobId) };
+    }
 
     // Preview kind: read-only forecast (same diff the sync /csv/preview shows), no
     // writes. Persist the diff for the client to poll, then drop the raw file.
     if (importJob.kind === 'preview') {
       const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows });
+      diff.detection = detection;
       await ImportJob.updateOne(
         { _id: importJobId },
         {
@@ -60,6 +99,33 @@ export async function processImportJob(job) {
       );
       await deleteRawImport(importJobId);
       return { ok: true, kind: 'preview', importJobId: String(importJobId) };
+    }
+
+    // ── Geocode missing-coordinate households (if enabled) ─────────────────────
+    // Fills matched households' coords from the cache + Geocodio, and DROPS households
+    // (plus their voters) that can't be placed — so every imported door keeps a walkable
+    // pin (no location:null doors, no orphan voters).
+    let geoStats = null;
+    if (process.env.GEOCODE_ENABLED === 'true') {
+      await ImportJob.updateOne({ _id: importJobId }, { $set: { status: 'geocoding', progress: 0 } });
+      const { unmatched, stats } = await geocodeResolve(householdMap, {
+        onProgress: async (processed, total) => {
+          const overall = total ? Math.round((processed / total) * 20) : 20; // geocode = 0–20%
+          await job.updateProgress(overall);
+          await ImportJob.updateOne({ _id: importJobId }, { progress: overall });
+        },
+      });
+      geoStats = stats;
+      if (unmatched.size) {
+        for (const normAddr of unmatched.keys()) householdMap.delete(normAddr);
+        for (let i = validRows.length - 1; i >= 0; i -= 1) {
+          const info = unmatched.get(normalizeAddress(validRows[i].household));
+          if (info) {
+            errors.push({ code: info.code, reason: info.detail, stateVoterId: validRows[i].voter.stateVoterId || null });
+            validRows.splice(i, 1);
+          }
+        }
+      }
     }
 
     // Re-housing audit: capture each incoming voter's CURRENT household BEFORE the
@@ -89,9 +155,9 @@ export async function processImportJob(job) {
       householdMap,
       batchSize: 2000,
       onProgress: async ({ phase, processed, total }) => {
-        const pct = total ? Math.round((processed / total) * 100) : 100;
-        // Households fill 0-50%, voters 50-100%.
-        const overall = phase === 'households' ? Math.round(pct / 2) : 50 + Math.round(pct / 2);
+        const pct = total ? processed / total : 1;
+        // Geocoding 0-20% (when it ran), households 20-60%, voters 60-100%.
+        const overall = phase === 'households' ? 20 + Math.round(pct * 40) : 60 + Math.round(pct * 40);
         await job.updateProgress(overall);
         await ImportJob.updateOne({ _id: importJobId }, { progress: overall, processedRows: processed });
       },
@@ -164,6 +230,7 @@ export async function processImportJob(job) {
           processedRows: totalRows,
           progress: 100,
           completedAt: new Date(),
+          ...(geoStats || {}),
         },
         // A retry recomputes these as 0 (voters already moved) — $max keeps the real
         // first-attempt counts so the audit trail never regresses.

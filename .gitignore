@@ -57,3 +57,6 @@ Target-Universe*.csv
 .DS_Store
 *.tgz
 .npm/
+
+/*.xlsx
+/*.csv
