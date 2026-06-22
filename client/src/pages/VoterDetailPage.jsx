@@ -44,9 +44,21 @@ const EDIT_FIELDS = [
   ['stateHouseDistrict', 'State house district'], ['precinct', 'Precinct'],
 ];
 
-function VoterFields({ voter, onSave, saving, tz }) {
+function VoterFields({ voter, person, onSave, saving, tz }) {
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({});
+  // Shared-voter-DB: when another org owns this person's canonical identity, this org's
+  // name/contact edits become review proposals (district fields stay org-local). For a
+  // single-org customer managedByThisOrg is always true, so nothing shows.
+  const managedElsewhere = !!(person && !person.managedByThisOrg);
+  const lockNote = managedElsewhere ? (
+    <div className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+      🔒 This person&apos;s identity is managed by{' '}
+      {person.ownerOrgName ? <span className="font-medium">{person.ownerOrgName}</span> : 'another organization'}.
+      {' '}Your edits to name &amp; contact are submitted as a proposal for review and applied to your copy
+      now; district fields are always yours.
+    </div>
+  ) : null;
 
   function startEdit() {
     const f = {};
@@ -71,6 +83,7 @@ function VoterFields({ voter, onSave, saving, tz }) {
           </button>
         }
       >
+        {lockNote}
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3">
           <Detail label="Voter ID" value={voter.stateVoterId} mono />
           {EDIT_FIELDS.map(([k, label]) => <Detail key={k} label={label} value={voter[k]} />)}
@@ -88,6 +101,7 @@ function VoterFields({ voter, onSave, saving, tz }) {
   return (
     <Section title="Identity & contact">
       <form onSubmit={submit}>
+        {lockNote}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
           {EDIT_FIELDS.map(([k, label]) => (
             <label key={k} className="block text-xs font-medium text-fg-muted">
@@ -284,6 +298,7 @@ export default function VoterDetailPage() {
 
       <VoterFields
         voter={v}
+        person={p.person}
         saving={saveVoter.isPending}
         onSave={(body, done) => saveVoter.mutate(body, { onSuccess: done })}
         tz={orgTz}

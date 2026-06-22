@@ -11,6 +11,10 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
+import { Person } from '../../models/Person.js';
+import { PersonEditProposal } from '../../models/PersonEditProposal.js';
+import { propagateIdentity } from '../../services/person/propagateIdentity.js';
+import { followMerged } from '../../services/person/resolvePerson.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -150,6 +154,11 @@ router.get('/:voterId', async (req, res, next) => {
   }
 });
 
+// Shared identity fields route through the Person layer; org-local fields (districts +
+// registered state) are written straight to the voter and never propagated cross-org.
+const PERSON_IDENTITY_FIELDS = ['firstName', 'lastName', 'phone', 'phoneType', 'cellPhone', 'party', 'gender', 'dateOfBirth', 'registrationStatus'];
+const ORG_LOCAL_FIELDS = ['registeredState', 'congressionalDistrict', 'stateSenateDistrict', 'stateHouseDistrict', 'precinct'];
+
 const updateVoterSchema = z.object({
   firstName: z.string().trim().min(1).optional(),
   lastName: z.string().trim().min(1).optional(),
@@ -167,28 +176,64 @@ const updateVoterSchema = z.object({
   precinct: z.string().trim().max(80).nullable().optional(),
 });
 
-// PATCH /admin/voters/:voterId — edit allowed fields (identity/household/org are locked).
+// PATCH /admin/voters/:voterId — edit allowed fields. Shared identity routes through the
+// Person layer: owner/super-admin → propagate to canonical + every org's cache; non-owner
+// → a review proposal + this org's cache only (flagged so propagation won't clobber it).
+// District/state fields are always org-local. Pre-backfill voters (no personId) write straight.
 router.patch('/:voterId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.voterId)) {
       return res.status(400).json({ error: 'Invalid voterId' });
     }
+    const orgId = activeOrgId(req);
     const data = updateVoterSchema.parse(req.body);
-    const update = { ...data, lastEditedBy: req.user._id, lastEditedAt: new Date() };
-    if (data.dateOfBirth !== undefined) {
-      update.dateOfBirth = data.dateOfBirth ? new Date(data.dateOfBirth) : null;
-    }
+    if (data.dateOfBirth !== undefined) data.dateOfBirth = data.dateOfBirth ? new Date(data.dateOfBirth) : null;
 
-    const voter = await Voter.findOne({ _id: req.params.voterId, organizationId: activeOrgId(req) });
+    const voter = await Voter.findOne({ _id: req.params.voterId, organizationId: orgId });
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
-    Object.assign(voter, update);
-    if (data.firstName !== undefined || data.lastName !== undefined) {
-      voter.fullName = `${voter.firstName} ${voter.lastName}`.trim();
-    }
-    await voter.save();
 
-    const profile = await buildVoterProfile(voter._id, { orgId: activeOrgId(req) });
+    const identity = {};
+    for (const f of PERSON_IDENTITY_FIELDS) if (data[f] !== undefined) identity[f] = data[f];
+    const local = {};
+    for (const f of ORG_LOCAL_FIELDS) if (data[f] !== undefined) local[f] = data[f];
+    if (identity.firstName !== undefined || identity.lastName !== undefined) {
+      identity.fullName = `${identity.firstName ?? voter.firstName} ${identity.lastName ?? voter.lastName}`.trim();
+    }
+    const directSet = { ...local, lastEditedBy: req.user._id, lastEditedAt: new Date() };
+
+    if (Object.keys(identity).length) {
+      const person = voter.personId ? await followMerged(await Person.findById(voter.personId)) : null;
+      const owns = !!req.user.isSuperAdmin || (person && String(person.identityOwnerOrgId) === String(orgId));
+      if (person && !owns) {
+        const changed = Object.keys(identity);
+        const canonicalSnapshot = {};
+        for (const f of PERSON_IDENTITY_FIELDS) canonicalSnapshot[f] = person[f] ?? null;
+        await PersonEditProposal.updateOne(
+          { personId: person._id, orgId, source: 'admin_edit', status: 'pending' },
+          { $set: { fields: identity, canonicalSnapshot, baseIdentityVersion: person.identityVersion, userId: req.user._id } },
+          { upsert: true }
+        );
+        await Voter.updateOne(
+          { _id: voter._id },
+          { $set: { ...directSet, ...identity }, $addToSet: { locallyEditedFields: { $each: changed } } }
+        );
+      } else if (person) {
+        // Owner / super-admin: this edit IS the new canonical → clear any local-divergence
+        // flags on this voter, then propagate (updates the Person + fans to every cache).
+        await Voter.updateOne({ _id: voter._id }, { $pull: { locallyEditedFields: { $in: Object.keys(identity) } } });
+        await propagateIdentity(person._id, identity, {
+          orgId, source: req.user.isSuperAdmin ? 'super_admin' : 'admin_edit', userId: req.user._id,
+        });
+        await Voter.updateOne({ _id: voter._id }, { $set: directSet });
+      } else {
+        await Voter.updateOne({ _id: voter._id }, { $set: { ...directSet, ...identity } });
+      }
+    } else {
+      await Voter.updateOne({ _id: voter._id }, { $set: directSet });
+    }
+
+    const profile = await buildVoterProfile(voter._id, { orgId });
     res.json(profile);
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });

@@ -8,6 +8,8 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { User } from '../../models/User.js';
+import { Person } from '../../models/Person.js';
+import { Organization } from '../../models/Organization.js';
 
 const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
 const hasText = (s) => typeof s === 'string' && s.trim() !== '';
@@ -105,7 +107,24 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
       })),
   ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
+  // Shared-voter-DB ownership summary (drives the "managed by {org}" lock in the UI).
+  let person = null;
+  if (voter.personId) {
+    const p = await Person.findById(voter.personId, 'identityOwnerOrgId ownerProvisional').lean();
+    if (p) {
+      const ownerOrgId = p.identityOwnerOrgId ? String(p.identityOwnerOrgId) : null;
+      const managedByThisOrg = !!(ownerOrgId && orgId && ownerOrgId === String(orgId));
+      let ownerOrgName = null;
+      if (ownerOrgId && !managedByThisOrg) {
+        const o = await Organization.findById(ownerOrgId, 'name').lean();
+        ownerOrgName = o?.name || null;
+      }
+      person = { id: String(voter.personId), ownerOrgId, ownerProvisional: !!p.ownerProvisional, managedByThisOrg, ownerOrgName };
+    }
+  }
+
   return {
+    person,
     voter: {
       id: String(voter._id),
       stateVoterId: voter.stateVoterId,
