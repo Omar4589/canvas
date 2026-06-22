@@ -22,6 +22,7 @@ import adminSetupStatusRouter from './admin/setupStatus.js';
 import adminTurfAssignmentsRouter from './admin/turfAssignments.js';
 import superAdminOrganizationsRouter from './superAdmin/organizations.js';
 import superAdminUsersRouter from './superAdmin/users.js';
+import superAdminPersonsRouter from './superAdmin/persons.js';
 import superAdminPlatformRouter from './superAdmin/platform.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
@@ -48,6 +49,7 @@ router.use(['/super-admin', '/admin', '/mobile'], requireAuth, blockIfMustChange
 
 router.use('/super-admin/organizations', superAdminOrganizationsRouter);
 router.use('/super-admin/users', superAdminUsersRouter);
+router.use('/super-admin/persons', superAdminPersonsRouter);
 router.use('/super-admin', superAdminPlatformRouter);
 
 router.use('/admin/memberships', adminMembershipsRouter);

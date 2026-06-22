@@ -34,6 +34,7 @@ export const NAV = [
 export const SUPER_NAV = [
   { to: '/super-admin', label: 'Control Room' },
   { to: '/super-admin/users', label: 'All Users' },
+  { to: '/super-admin/people', label: 'People' },
   { to: '/organizations', label: 'Organizations' },
   { to: '/queues', label: 'Jobs' },
 ];

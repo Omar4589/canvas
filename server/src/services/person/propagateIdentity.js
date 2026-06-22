@@ -30,6 +30,17 @@ export async function propagateIdentity(personId, identity, { orgId = null, sour
   let person = await followMerged(await Person.findById(personId).session(session || null), session);
   if (!person) return null;
   const fields = pickIdentity(identity);
+
+  // Super-admin field locks: an import or a (non-super-admin) owner edit must NOT overwrite
+  // a pinned canonical field. Super-admin canonical edits and merges are authoritative and
+  // bypass the lock (a super-admin can unlock first). A locked name component also pins the
+  // derived fullName.
+  const honorsLocks = source !== 'super_admin' && source !== 'merge';
+  if (honorsLocks && (person.lockedFields || []).length) {
+    const locked = new Set(person.lockedFields);
+    if (locked.has('firstName') || locked.has('lastName')) locked.add('fullName');
+    for (const f of Object.keys(fields)) if (locked.has(f)) delete fields[f];
+  }
   if (!Object.keys(fields).length) return person;
 
   // 1. Update the canonical Person doc (optimistic concurrency + dotted provenance).

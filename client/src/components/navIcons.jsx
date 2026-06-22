@@ -195,6 +195,7 @@ export const NAV_ICONS = {
   '/surveys': IconClipboard,
   '/super-admin': IconGauge,
   '/super-admin/users': IconUsers,
+  '/super-admin/people': IconUsers,
   '/organizations': IconBuilding,
   '/queues': IconLayers,
 };

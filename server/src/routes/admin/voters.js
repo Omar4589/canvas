@@ -207,8 +207,10 @@ router.patch('/:voterId', async (req, res, next) => {
       const owns = !!req.user.isSuperAdmin || (person && String(person.identityOwnerOrgId) === String(orgId));
       if (person && !owns) {
         const changed = Object.keys(identity);
+        // Snapshot exactly the proposed fields (which may include the derived fullName), so
+        // the super-admin drift check compares like-for-like instead of always superseding.
         const canonicalSnapshot = {};
-        for (const f of PERSON_IDENTITY_FIELDS) canonicalSnapshot[f] = person[f] ?? null;
+        for (const f of changed) canonicalSnapshot[f] = person[f] ?? null;
         await PersonEditProposal.updateOne(
           { personId: person._id, orgId, source: 'admin_edit', status: 'pending' },
           { $set: { fields: identity, canonicalSnapshot, baseIdentityVersion: person.identityVersion, userId: req.user._id } },

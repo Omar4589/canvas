@@ -33,6 +33,8 @@ const SelectOrgPage = lazy(() => import('./pages/SelectOrgPage.jsx'));
 const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage.jsx'));
 const SuperAdminHomePage = lazy(() => import('./pages/SuperAdminHomePage.jsx'));
 const SuperAdminUsersPage = lazy(() => import('./pages/SuperAdminUsersPage.jsx'));
+const SuperAdminPeoplePage = lazy(() => import('./pages/SuperAdminPeoplePage.jsx'));
+const PersonDetailPage = lazy(() => import('./pages/PersonDetailPage.jsx'));
 
 function PageFallback() {
   return (
@@ -77,6 +79,8 @@ export default function App() {
         >
           <Route path="/super-admin" element={<SuperAdminHomePage />} />
           <Route path="/super-admin/users" element={<SuperAdminUsersPage />} />
+          <Route path="/super-admin/people" element={<SuperAdminPeoplePage />} />
+          <Route path="/super-admin/people/:personId" element={<PersonDetailPage />} />
           <Route path="/organizations" element={<OrganizationsPage />} />
         </Route>
         <Route
