@@ -85,13 +85,13 @@ router.get('/profiles', async (req, res, next) => {
 router.post('/profiles', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const { name, mapping } = req.body || {};
+    const { name, mapping, uidSource } = req.body || {};
     if (!name || !mapping || typeof mapping !== 'object') {
       return res.status(400).json({ error: 'name and mapping are required' });
     }
     const profile = await ImportProfile.findOneAndUpdate(
       { organizationId: activeOrgId(req), name: String(name).trim() },
-      { $set: { mapping }, $setOnInsert: { createdBy: req.user._id } },
+      { $set: { mapping, uidSource: uidSource ? String(uidSource).trim() || null : null }, $setOnInsert: { createdBy: req.user._id } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     res.status(201).json({ profile });
@@ -110,6 +110,9 @@ function missingMappingFields(mapping) {
 async function resolveImportMapping(req) {
   let mapping = DEFAULT_PROFILE_MAPPING;
   let importProfileId = null;
+  // Vendor namespace for the uid column (shared voter DB matching). An inline override
+  // wins; otherwise it's inherited from the saved profile.
+  let uidSource = req.body?.uidSource ? String(req.body.uidSource).trim() || null : null;
   if (req.body?.mapping) {
     try {
       mapping = JSON.parse(req.body.mapping);
@@ -124,12 +127,13 @@ async function resolveImportMapping(req) {
     if (!profile) return { error: 'Import profile not found' };
     mapping = profile.mapping;
     importProfileId = profile._id;
+    if (uidSource == null) uidSource = profile.uidSource || null;
   }
   const missing = missingMappingFields(mapping);
   if (missing.length) {
     return { error: `Mapping is missing required fields: ${missing.join(', ')}` };
   }
-  return { mapping, importProfileId };
+  return { mapping, importProfileId, uidSource };
 }
 
 // Enqueue a CSV import: validate synchronously, stash the file in GridFS, queue it.
@@ -160,6 +164,7 @@ router.post('/csv', uploadCsv, async (req, res, next) => {
       fieldMapping: mapping,
       importProfileId,
       explode: req.body?.explode !== 'false',
+      uidSource: resolved.uidSource ?? null,
     });
     await saveRawImport(job._id, req.file.originalname, req.file.buffer);
     await getQueue(QUEUE_NAMES.IMPORT).add(
@@ -227,6 +232,7 @@ router.post('/csv/preview-enqueue', uploadCsv, async (req, res, next) => {
       fieldMapping: mapping,
       importProfileId,
       explode: req.body?.explode !== 'false',
+      uidSource: resolved.uidSource ?? null,
     });
     await saveRawImport(job._id, req.file.originalname, req.file.buffer);
     await getQueue(QUEUE_NAMES.IMPORT).add(
@@ -271,6 +277,7 @@ router.post('/geocode-check', uploadCsv, async (req, res, next) => {
       fieldMapping: mapping,
       importProfileId,
       explode: req.body?.explode !== 'false',
+      uidSource: resolved.uidSource ?? null,
     });
     await saveRawImport(job._id, req.file.originalname, req.file.buffer);
     await getQueue(QUEUE_NAMES.IMPORT).add('geocode-check', { importJobId: String(job._id) }, { jobId: String(job._id) });

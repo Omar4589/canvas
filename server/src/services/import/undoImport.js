@@ -4,6 +4,10 @@ import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
+import { Person } from '../../models/Person.js';
+import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
+import { PersonEditProposal } from '../../models/PersonEditProposal.js';
+import { PersonMergeLog } from '../../models/PersonMergeLog.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
@@ -126,11 +130,32 @@ export async function undoImport(importJob) {
     return hh && !recheckInUse.has(vid) && !nowKept.has(hh);
   });
 
+  // Capture the canonical Persons of the voters about to be deleted, so we can clean up
+  // any Person this import created that ends up with zero linked voters.
+  const personIds = [
+    ...new Set(
+      (await findInChunks(Voter, '_id', finalV.map(oid), { personId: 1 }))
+        .map((v) => (v.personId ? String(v.personId) : null))
+        .filter(Boolean)
+    ),
+  ];
+
   // Delete the validated voters.
   let votersDeleted = 0;
   for (let i = 0; i < finalV.length; i += CHUNK) {
     const r = await Voter.deleteMany({ _id: { $in: finalV.slice(i, i + CHUNK).map(oid) } });
     votersDeleted += r.deletedCount || 0;
+  }
+
+  // Person teardown: a canonical Person now left with ZERO linked voters is an orphan
+  // this import created → remove it + its candidate/proposal/log rows. Persons that still
+  // have voters (pre-existing, or in other orgs) are left intact.
+  for (const pid of personIds) {
+    if ((await Voter.countDocuments({ personId: oid(pid) })) > 0) continue;
+    await Person.deleteOne({ _id: oid(pid) });
+    await PersonMergeCandidate.deleteMany({ $or: [{ personIdA: oid(pid) }, { personIdB: oid(pid) }] });
+    await PersonEditProposal.deleteMany({ personId: oid(pid) });
+    await PersonMergeLog.deleteMany({ $or: [{ survivorId: oid(pid) }, { victimId: oid(pid) }] });
   }
 
   // Delete only inserted households that are now EMPTY and STILL pristine. The field

@@ -338,7 +338,10 @@ router.get('/changes', async (req, res, next) => {
       // each affected household's updatedAt, so its door is already in this delta.
       const raw = await Voter.find(
         { householdId: { $in: hhIds }, organizationId: orgId },
-        { _id: 1, householdId: 1, surveyStatus: 1 }
+        // Identity-cache fields (match the bootstrap projection) so propagated Person
+        // identity reaches an already-bootstrapped client via the delta poll, not only a
+        // full re-bootstrap.
+        { _id: 1, householdId: 1, surveyStatus: 1, fullName: 1, firstName: 1, lastName: 1, party: 1, gender: 1, dateOfBirth: 1 }
       ).lean();
       const votedRecs = await VotedVoter.find(
         { campaignId: cId, voterId: { $in: raw.map((v) => v._id) } },

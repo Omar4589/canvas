@@ -69,6 +69,8 @@ const importJobSchema = new mongoose.Schema(
     // Smart import: explode multi-voter-per-row files? Persisted so the worker
     // apply explodes identically to what the preview showed.
     explode: { type: Boolean, default: true },
+    // Vendor namespace for this import's uid column (shared voter DB matching).
+    uidSource: { type: String, default: null },
     // 'apply' = the real import (default; old docs read as apply). 'preview' = a
     // read-only diff run on the worker for large files (stores `diff`, no writes).
     kind: { type: String, enum: ['preview', 'apply', 'geocode_check'], default: 'apply', index: true },

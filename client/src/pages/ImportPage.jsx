@@ -222,6 +222,7 @@ export default function ImportPage() {
   const [fileNote, setFileNote] = useState(null); // { tooBig } | { sizeText, estRows, large }
   const [explode, setExplode] = useState(true); // smart import: explode multi-voter-per-row files
   const [geocodeCheckJobId, setGeocodeCheckJobId] = useState(null); // opt-in "See exact placement" job
+  const [uidSource, setUidSource] = useState(''); // per-vendor namespace for cross-org uid matching
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -268,7 +269,7 @@ export default function ImportPage() {
   });
 
   const saveProfile = useMutation({
-    mutationFn: ({ name, mapping }) => api('/admin/imports/profiles', { method: 'POST', body: { name, mapping } }),
+    mutationFn: ({ name, mapping, uidSource }) => api('/admin/imports/profiles', { method: 'POST', body: { name, mapping, uidSource } }),
     onSuccess: () => {
       setProfileName('');
       queryClient.invalidateQueries({ queryKey: ['admin', 'imports', 'profiles'] });
@@ -281,6 +282,7 @@ export default function ImportPage() {
       fd.append('file', file);
       fd.append('campaignId', campaignId);
       fd.append('mapping', JSON.stringify(mapping));
+      fd.append('uidSource', uidSource || '');
       fd.append('explode', String(explode !== false));
       return api('/admin/imports/csv/preview', { method: 'POST', formData: fd });
     },
@@ -295,6 +297,7 @@ export default function ImportPage() {
       fd.append('file', file);
       fd.append('campaignId', campaignId);
       fd.append('mapping', JSON.stringify(mapping));
+      fd.append('uidSource', uidSource || '');
       fd.append('explode', String(explode !== false));
       return api('/admin/imports/csv/preview-enqueue', { method: 'POST', formData: fd });
     },
@@ -321,6 +324,7 @@ export default function ImportPage() {
       fd.append('file', file);
       fd.append('campaignId', campaignId);
       fd.append('mapping', JSON.stringify(mapping));
+      fd.append('uidSource', uidSource || '');
       fd.append('explode', String(explode !== false));
       return api('/admin/imports/geocode-check', { method: 'POST', formData: fd });
     },
@@ -347,6 +351,7 @@ export default function ImportPage() {
       fd.append('file', file);
       fd.append('campaignId', campaignId);
       fd.append('mapping', JSON.stringify(mapping));
+      fd.append('uidSource', uidSource || '');
       fd.append('explode', String(explode !== false));
       return api('/admin/imports/csv', { method: 'POST', formData: fd });
     },
@@ -384,6 +389,7 @@ export default function ImportPage() {
     setPreviewJobId(null);
     setExplode(true);
     setGeocodeCheckJobId(null);
+    setUidSource('');
     previewDiff.reset();
     enqueuePreview.reset();
   }
@@ -540,7 +546,7 @@ export default function ImportPage() {
                     if (v === 'default') applyMapping(fieldsQ.data?.defaultMapping);
                     else if (v) {
                       const p = (profilesQ.data?.profiles || []).find((x) => x._id === v);
-                      if (p) applyMapping(p.mapping);
+                      if (p) { applyMapping(p.mapping); setUidSource(p.uidSource || ''); }
                     }
                     e.target.value = '';
                   }}
@@ -587,7 +593,14 @@ export default function ImportPage() {
               </p>
             )}
 
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                value={uidSource}
+                onChange={(e) => setUidSource(e.target.value)}
+                placeholder="Vendor for cross-org matching (e.g. i360) — optional"
+                title="If this vendor's file has a universal person ID (uid), name the vendor so the same person is matched across orgs. Leave blank to match on voter ID only."
+                className="rounded border border-border-strong bg-card text-fg placeholder:text-fg-subtle px-2 py-1 text-xs"
+              />
               <input
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
@@ -595,7 +608,7 @@ export default function ImportPage() {
                 className="rounded border border-border-strong bg-card text-fg placeholder:text-fg-subtle px-2 py-1 text-xs"
               />
               <button
-                onClick={() => profileName.trim() && saveProfile.mutate({ name: profileName.trim(), mapping })}
+                onClick={() => profileName.trim() && saveProfile.mutate({ name: profileName.trim(), mapping, uidSource: uidSource.trim() || null })}
                 disabled={!profileName.trim() || saveProfile.isPending}
                 className="rounded border border-border-strong px-3 py-1 text-xs font-medium hover:bg-sunken disabled:opacity-60"
               >

@@ -4,6 +4,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { loadRawImport, deleteRawImport } from './rawImportStore.js';
 import { buildImportRows, applyImport } from './csvImporter.js';
 import { resolve as geocodeResolve } from './geocode/geocodeService.js';
+import { reconcileIdentityFromImport } from '../person/reconcileIdentityFromImport.js';
 import { normalizeAddress } from '../../utils/normalizeAddress.js';
 import { computeImportDiff } from './computeImportDiff.js';
 import { recomputeCutAttributesForCampaign } from '../turf/computeCutAttributes.js';
@@ -127,6 +128,12 @@ export async function processImportJob(job) {
         }
       }
     }
+
+    // ── Link voters to canonical Persons + reconcile identity (shared voter DB) ──
+    // Always-on (the sharedVoters branch is the rollout gate). Runs on the POST-geocode
+    // rows so only voters that will actually import get linked; stamps personId +
+    // uidSource onto each row.voter so applyImport's {...row.voter} upsert carries them.
+    await reconcileIdentityFromImport(validRows, { orgId, uidSource: importJob.uidSource || null });
 
     // Re-housing audit: capture each incoming voter's CURRENT household BEFORE the
     // upsert reassigns it, so we can detect moves + emptied doors afterward.

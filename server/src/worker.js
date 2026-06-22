@@ -5,6 +5,7 @@ import { createRedis, assertNoeviction } from './queues/connection.js';
 import { QUEUE_NAMES } from './queues/index.js';
 import { processImportJob } from './services/import/importProcessor.js';
 import { processTurfJob } from './services/turf/turfProcessor.js';
+import { GeocodeCache } from './models/GeocodeCache.js';
 
 const IMPORT_CONCURRENCY = Number(process.env.IMPORT_JOB_CONCURRENCY || 2);
 const TURF_CONCURRENCY = Number(process.env.TURF_JOB_CONCURRENCY || 1);
@@ -24,6 +25,11 @@ process.on('uncaughtException', (err) => {
 
 async function main() {
   await connectDb(process.env.MONGODB_URI);
+
+  // autoIndex is off in production (config/db.js), so the GeocodeCache indexes — a NEW
+  // collection — won't auto-build. The worker reads/writes that cache during imports,
+  // so ensure its indexes once at boot (no-op if already present).
+  await GeocodeCache.syncIndexes().catch((e) => console.error('[worker] GeocodeCache.syncIndexes failed', e?.message || e));
 
   const probe = createRedis();
   await assertNoeviction(probe);

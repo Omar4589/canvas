@@ -5,6 +5,8 @@ import { Voter } from '../models/Voter.js';
 import { Household } from '../models/Household.js';
 import { Person } from '../models/Person.js';
 import { PersonMergeCandidate } from '../models/PersonMergeCandidate.js';
+import { PersonEditProposal } from '../models/PersonEditProposal.js';
+import { PersonMergeLog } from '../models/PersonMergeLog.js';
 import { resolvePerson } from '../services/person/resolvePerson.js';
 import { normalizePersonKeys } from '../services/person/normalizePersonKeys.js';
 
@@ -154,10 +156,13 @@ async function apply(hhState) {
     linked += r.modifiedCount || 0;
   }
 
-  // Build the Person unique indexes now — after dedup, with keys populated.
+  // Build the Person* unique indexes now — after dedup, with keys populated. All four
+  // collections (autoIndex is off in prod), not just the two the backfill writes to.
   console.log('Syncing Person indexes (after dedup)…');
   await Person.syncIndexes();
   await PersonMergeCandidate.syncIndexes();
+  await PersonEditProposal.syncIndexes();
+  await PersonMergeLog.syncIndexes();
 
   const persons = await Person.countDocuments({ mergedInto: null });
   const candidates = await PersonMergeCandidate.countDocuments({ status: 'open' });
