@@ -9,8 +9,12 @@ import { geocodeBatch as geocodioBatch } from './geocodioProvider.js';
 // can drop them + their voters before insert — every imported door keeps a walkable pin).
 
 const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
-const BATCH_SIZE = () => num(process.env.GEOCODE_BATCH_SIZE, 10000);
-const TIMEOUT_MS = () => num(process.env.GEOCODE_BATCH_TIMEOUT_MS, 120000);
+// Default 1000 — well under Geocodio's 10000 hard cap. Smaller batches return within the
+// per-batch timeout (a full 10k batch can take ~10 min server-side), keep retries cheap, and
+// cache incrementally so a mid-run failure never wastes earlier batches. The worker has no
+// platform request timeout, so the 180s ceiling is generous on purpose.
+const BATCH_SIZE = () => num(process.env.GEOCODE_BATCH_SIZE, 1000);
+const TIMEOUT_MS = () => num(process.env.GEOCODE_BATCH_TIMEOUT_MS, 180000);
 const MIN_ACCURACY = () => num(process.env.GEOCODE_MIN_ACCURACY, 0.5);
 const NEG_TTL_DAYS = () => num(process.env.GEOCODE_NEGCACHE_TTL_DAYS, 30);
 const NEG_MAX_ATTEMPTS = () => num(process.env.GEOCODE_NEGCACHE_MAX_ATTEMPTS, 4);
