@@ -37,7 +37,9 @@ universal person ID (a "uid") are matched across orgs (see *Shared voter databas
 ## Coordinate-less files (geocoding)
 
 If a file has **no latitude/longitude**, geocoding (when enabled) turns each address into a pin
-so the file can still import. The preview shows a **free forecast** (how many addresses need
+so the file can still import — just **leave the Latitude/Longitude columns unmapped** (they're
+optional; the mapping step no longer requires a coordinate column). The preview shows a **free
+forecast** (how many addresses need
 geocoding, how many are already cached, and an estimated cost), plus an opt-in **"See exact
 placement"** button that runs the real geocode (cost shown first) and reports exactly what can
 and can't be placed. On import, unplaceable addresses are dropped (and listed) so every imported
@@ -224,8 +226,9 @@ numeric date is converted from the Excel serial **only** when the column maps to
 
 ## H. Geocoding (when `GEOCODE_ENABLED`)
 
-Provider: **Geocodio** (storable-without-contract licensing), keyed batch API, cache-backed in
-`GeocodeCache` (org/campaign-agnostic, keyed on `looseAddressKey`). The validate gate is split:
+Provider: **Geocodio** (storable-without-contract licensing), keyed batch API on the public **v2**
+endpoint (`api.geocod.io/v2/geocode`; override via `GEOCODIO_API_VERSION` — v1.9/v1.10 are
+enterprise-only), cache-backed in `GeocodeCache` (org/campaign-agnostic, keyed on `looseAddressKey`). The validate gate is split:
 *invalid* coords → always `bad_coords`; *missing* coords + enabled → survive to grouping with
 null coords. `importProcessor` geocodes inline (per-batch cache writes), **fills matched
 households + drops unplaceable ones (with their voters)**, and stamps `coordSource`/
@@ -234,6 +237,14 @@ confidence gate (centroids rejected), and a negative cache with staleness. The p
 is **cache-only** (zero provider calls); the opt-in `POST /admin/imports/geocode-check` runs the
 live geocode (cost-confirmed, worker-backed) and caches results so a later apply is free. Off ⇒
 today's `bad_coords` behavior byte-for-byte. `GeocodeCache` indexes build at worker boot.
+
+**Batching:** 1000 addresses/request with a 180s timeout by default (`GEOCODE_BATCH_SIZE` /
+`GEOCODE_BATCH_TIMEOUT_MS`) — Geocodio's hard cap is 10000, but smaller batches stay within the
+per-batch timeout, make retries cheap, and cache incrementally (the worker has no platform request
+timeout). **Mapping:** `latitude`/`longitude` are `required: false` in
+[canonicalFields.js](../server/src/services/import/canonicalFields.js), so a file with no
+coordinate columns passes the mapping step and is geocoded (or skipped as `bad_coords` when
+geocoding is off) per-row.
 
 ## I. Shared-voter-DB linking
 
