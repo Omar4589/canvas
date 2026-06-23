@@ -33,9 +33,8 @@ const campaignSchema = new mongoose.Schema(
 );
 
 campaignSchema.pre('validate', function (next) {
-  if (this.type === 'survey' && !this.surveyTemplateId) {
-    return next(new Error('Survey campaigns require a surveyTemplateId.'));
-  }
+  // A survey campaign MAY exist without a template — you attach one before going live; the
+  // requirement is enforced at round activation (routes/admin/passes.js), not here.
   if (this.type === 'lit_drop' && this.surveyTemplateId) {
     this.surveyTemplateId = null;
   }

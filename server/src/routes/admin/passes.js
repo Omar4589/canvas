@@ -126,6 +126,11 @@ router.post('/:id/activate', async (req, res, next) => {
     if (pass.status === 'archived') {
       return res.status(409).json({ error: 'Archived passes cannot be reactivated; create a new pass' });
     }
+    // Survey requirement (moved here from campaign creation): a survey campaign can be built
+    // out freely, but a round can't go LIVE without a survey for canvassers to submit.
+    if (req.campaign.type === 'survey' && !req.campaign.surveyTemplateId) {
+      return res.status(400).json({ error: 'Add a survey to this campaign before activating a round.', code: 'survey-required' });
+    }
     const published = await Turf.countDocuments({ passId: pass._id, status: 'published' });
     if (!published) return res.status(400).json({ error: 'Generate and accept books before activating this pass' });
 

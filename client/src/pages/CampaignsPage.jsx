@@ -1,9 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
-import NextStepBanner from '../components/NextStepBanner.jsx';
 import { setStoredCampaignId } from '../components/CampaignSelector.jsx';
 import { Modal, Button } from '../components/ui/index.js';
 
@@ -20,6 +19,43 @@ const US_TIMEZONES = [
   { value: 'America/Anchorage', label: 'Alaska (Anchorage)' },
   { value: 'Pacific/Honolulu', label: 'Hawaii (Honolulu)' },
 ];
+
+// Per-row actions in a kebab popover, fixed-positioned so it escapes the table's scroll
+// container (no more clipped/cut-off actions). items: [{ label, onClick, danger?, disabled?, title? }].
+function RowMenu({ items }) {
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  function toggle() {
+    if (pos) return setPos(null);
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+  }
+  return (
+    <>
+      <button ref={btnRef} onClick={toggle} aria-label="Actions" className="rounded px-2 py-1 text-base leading-none text-fg-muted hover:bg-sunken">⋮</button>
+      {pos && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPos(null)} />
+          <div style={{ position: 'fixed', top: pos.top, right: pos.right }} className="z-50 w-44 overflow-hidden rounded-md border border-border bg-card py-1 text-left shadow-lg">
+            {items.map((it) =>
+              it.disabled ? (
+                <div key={it.label} title={it.title} className="cursor-not-allowed px-3 py-1.5 text-xs text-fg-subtle">{it.label}</div>
+              ) : (
+                <button
+                  key={it.label}
+                  onClick={() => { setPos(null); it.onClick(); }}
+                  className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-sunken ${it.danger ? 'text-danger' : 'text-fg'}`}
+                >
+                  {it.label}
+                </button>
+              )
+            )}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 
 function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
   const isEdit = !!initial?._id;
@@ -41,7 +77,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
       name: name.trim(),
       type,
       state: state.trim().toUpperCase(),
-      surveyTemplateId: type === 'survey' ? surveyTemplateId : null,
+      surveyTemplateId: type === 'survey' ? (surveyTemplateId || null) : null,
       isActive,
       timeZone: timeZone || undefined, // empty → server defaults from state
     });
@@ -138,26 +174,24 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
       {type === 'survey' && (
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-muted">
-            Survey template
+            Survey template <span className="font-normal text-fg-subtle">(optional)</span>
           </label>
           <select
             value={surveyTemplateId}
             onChange={(e) => setSurveyTemplateId(e.target.value)}
-            required
             className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
-            <option value="">— Choose a survey —</option>
+            <option value="">— None yet (add later on the Surveys page) —</option>
             {(surveys || []).map((s) => (
               <option key={s._id} value={s._id}>
                 {s.name} (v{s.version || 1})
               </option>
             ))}
           </select>
-          {!surveys?.length && (
-            <p className="mt-1 text-xs text-fg-muted">
-              No surveys exist yet. Create one on the Surveys page first.
-            </p>
-          )}
+          <p className="mt-1 text-xs text-fg-muted">
+            Optional now — attach a survey here or later. You just can&apos;t activate a round on a
+            survey campaign without one.
+          </p>
           {(() => {
             const chosen = (surveys || []).find((s) => s._id === surveyTemplateId);
             return chosen?.responseCount > 0 ? (
@@ -208,10 +242,10 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
 
 export default function CampaignsPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
   const [assigningCampaign, setAssigningCampaign] = useState(null);
-  const [justCreated, setJustCreated] = useState(null);
   const [deleting, setDeleting] = useState(null);
 
   const campaignsQ = useQuery({
@@ -230,7 +264,12 @@ export default function CampaignsPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
       qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
       setCreating(false);
-      setJustCreated(data?.campaign || null);
+      const c = data?.campaign;
+      if (c) {
+        const id = c.id || c._id;
+        setStoredCampaignId(id);
+        navigate(`/dashboard/${id}`); // land on the campaign home — SetupProgress shows what's next
+      }
     },
   });
 
@@ -270,21 +309,6 @@ export default function CampaignsPage() {
         )}
       </div>
 
-      {justCreated && (
-        <NextStepBanner
-          tone="success"
-          className="mb-6"
-          title={`“${justCreated.name}” created.`}
-          action={{
-            label: 'Import voters',
-            to: '/import',
-            onClick: () => setStoredCampaignId(justCreated.id || justCreated._id),
-          }}
-        >
-          Next: import a voter CSV to populate it.
-        </NextStepBanner>
-      )}
-
       {creating && (
         <div className="mb-6">
           <CampaignForm
@@ -314,7 +338,7 @@ export default function CampaignsPage() {
       {campaignsQ.isLoading ? (
         <div className="text-sm text-fg-muted">Loading…</div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
           <table className="min-w-full text-sm">
             <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
               <tr>
@@ -334,7 +358,7 @@ export default function CampaignsPage() {
               {campaigns.map((c) => (
                 <tr key={c._id} className="border-t border-border hover:bg-sunken">
                   <td className="px-4 py-3 font-medium text-fg">
-                    <div>{c.name}</div>
+                    <Link to={`/dashboard/${c._id}`} className="text-fg hover:text-brand-accent hover:underline">{c.name}</Link>
                     {c.stepsTotal != null && !c.setupComplete && (
                       <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 text-[10px] font-medium text-brand-tint-fg">
                         <span className="h-1 w-1 rounded-full bg-brand-accent" />
@@ -376,46 +400,18 @@ export default function CampaignsPage() {
                       {c.isActive ? 'Active' : 'Archived'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <Link
-                      to={`/dashboard/${c._id}`}
-                      className="mr-3 text-xs font-medium text-brand-accent hover:underline"
-                    >
-                      View data
-                    </Link>
-                    <button
-                      onClick={() => setAssigningCampaign(c)}
-                      className="mr-3 text-xs font-medium text-brand-accent hover:underline"
-                    >
-                      Assignments
-                    </button>
-                    <button
-                      onClick={() => setEditing(c)}
-                      className="mr-3 text-xs font-medium text-brand-accent hover:underline"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => update.mutate({ id: c._id, body: { isActive: !c.isActive } })}
-                      className="mr-3 text-xs font-medium text-fg-muted hover:underline"
-                    >
-                      {c.isActive ? 'Archive' : 'Reactivate'}
-                    </button>
-                    {c.deletable === true ? (
-                      <button
-                        onClick={() => setDeleting(c)}
-                        className="text-xs font-medium text-danger hover:underline"
-                      >
-                        Delete
-                      </button>
-                    ) : (
-                      <span
-                        title="Archive instead — this campaign has canvassing data"
-                        className="cursor-not-allowed text-xs font-medium text-fg-subtle"
-                      >
-                        Delete
-                      </span>
-                    )}
+                  <td className="px-4 py-3 text-right">
+                    <RowMenu
+                      items={[
+                        { label: 'View dashboard', onClick: () => navigate(`/dashboard/${c._id}`) },
+                        { label: 'Assignments', onClick: () => setAssigningCampaign(c) },
+                        { label: 'Edit', onClick: () => setEditing(c) },
+                        { label: c.isActive ? 'Archive' : 'Reactivate', onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }) },
+                        c.deletable === true
+                          ? { label: 'Delete', danger: true, onClick: () => setDeleting(c) }
+                          : { label: 'Delete', disabled: true, title: 'Archive instead — this campaign has canvassing data' },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}

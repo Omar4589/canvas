@@ -15,7 +15,7 @@ export const NAV = [
   // Setup — the cold-start build chain, roughly in order.
   { to: '/campaigns', label: 'Campaigns', primary: true, group: 'Setup' },
   { to: '/surveys', label: 'Surveys', group: 'Setup' },
-  { to: '/import', label: 'CSV Import', group: 'Setup' },
+  { to: '/import', label: 'Voter Import', group: 'Setup' },
   { to: '/walklists', label: 'Walk Lists', group: 'Setup' },
   { to: '/efforts', label: 'Efforts', group: 'Setup' },
   { to: '/turfs', label: 'Turf Cutting', group: 'Setup' },

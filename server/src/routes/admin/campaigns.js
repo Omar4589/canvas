@@ -123,9 +123,11 @@ router.post('/', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
     const data = createSchema.parse(req.body);
-    if (data.type === 'survey') {
-      if (!data.surveyTemplateId || !mongoose.isValidObjectId(data.surveyTemplateId)) {
-        return res.status(400).json({ error: 'Survey campaigns require a surveyTemplateId.' });
+    // Survey template is OPTIONAL at creation — create the campaign now, attach a survey
+    // later (the guard moves to round activation). If one IS supplied it must be valid.
+    if (data.type === 'survey' && data.surveyTemplateId) {
+      if (!mongoose.isValidObjectId(data.surveyTemplateId)) {
+        return res.status(400).json({ error: 'Invalid surveyTemplateId.' });
       }
       const tmpl = await SurveyTemplate.findOne({ _id: data.surveyTemplateId, organizationId: orgId });
       if (!tmpl) return res.status(400).json({ error: 'Survey template not found in this org.' });
@@ -135,7 +137,7 @@ router.post('/', async (req, res, next) => {
       name: data.name,
       type: data.type,
       state: data.state,
-      surveyTemplateId: data.type === 'survey' ? data.surveyTemplateId : null,
+      surveyTemplateId: data.type === 'survey' ? (data.surveyTemplateId || null) : null,
       isActive: data.isActive,
       // Default the timezone from the state's dominant zone (overridable in the UI).
       timeZone: data.timeZone || defaultZoneForState(data.state),
@@ -183,9 +185,8 @@ router.patch('/:campaignId', async (req, res, next) => {
       }
       campaign.surveyTemplateId = data.surveyTemplateId || null;
     }
-    if (campaign.type === 'survey' && !campaign.surveyTemplateId) {
-      return res.status(400).json({ error: 'Survey campaigns require a surveyTemplateId.' });
-    }
+    // No survey-required guard here — a survey campaign may exist without a template; the
+    // requirement is enforced at round activation (passes.js) instead.
     await campaign.save();
     res.json({ campaign });
   } catch (err) {

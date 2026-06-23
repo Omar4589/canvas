@@ -484,7 +484,7 @@ export default function ImportPage() {
       )}
 
       <section className="mb-8 rounded-lg border border-border bg-card p-5">
-        <h2 className="mb-3 text-base font-medium">Upload voter CSV</h2>
+        <h2 className="mb-3 text-base font-medium">Upload voter file</h2>
         <p className="mb-4 text-sm text-fg-muted">
           Each upload is scoped to a single campaign and runs in the background. Map your vendor's
           columns to our fields (i360, L2, a state file, …) — re-uploading is safe and won't lose
