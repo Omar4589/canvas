@@ -296,7 +296,7 @@ function buildWarnings(rows, resolved, cellMeta, format) {
   const anyCoords = hasCoordCols && rows.some((r) => nonEmpty(r[resolved.latitude]) && nonEmpty(r[resolved.longitude]));
   if (!anyCoords) {
     warnings.push({ type: 'missing_coordinates', column: null, field: 'latitude',
-      detail: 'This file has no latitude/longitude. The app needs coordinates for map pins, so these rows cannot be imported until the addresses are geocoded (geocoding is coming).' });
+      detail: 'This file has no latitude/longitude. With geocoding enabled, the app looks up coordinates from each address during import; otherwise these rows are skipped (the app needs coordinates for map pins).' });
   }
   return warnings;
 }

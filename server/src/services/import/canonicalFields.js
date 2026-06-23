@@ -29,9 +29,11 @@ export const CANONICAL_FIELDS = [
   { key: 'state', label: 'State', required: true, group: 'household' },
   { key: 'zipCode', label: 'Zip Code', required: true, group: 'household' },
   { key: 'county', label: 'County', required: false, group: 'household' },
-  // Household coordinates (required — rows without coords are rejected)
-  { key: 'latitude', label: 'Latitude', required: true, group: 'household' },
-  { key: 'longitude', label: 'Longitude', required: true, group: 'household' },
+  // Household coordinates — OPTIONAL to map. A file with no coord columns is allowed through;
+  // per-row, coords are either geocoded from the address (when GEOCODE_ENABLED) or the row is
+  // skipped as bad_coords. (The per-row missingRequired check never required these anyway.)
+  { key: 'latitude', label: 'Latitude', required: false, group: 'household' },
+  { key: 'longitude', label: 'Longitude', required: false, group: 'household' },
 ];
 
 export const REQUIRED_FIELDS = CANONICAL_FIELDS.filter((f) => f.required).map((f) => f.key);
