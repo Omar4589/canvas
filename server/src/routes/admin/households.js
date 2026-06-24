@@ -8,6 +8,7 @@ import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { ImportJob } from '../../models/ImportJob.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { Turf } from '../../models/Turf.js';
@@ -91,6 +92,11 @@ router.get('/map', async (req, res, next) => {
       req.query.passId && mongoose.isValidObjectId(req.query.passId)
         ? new mongoose.Types.ObjectId(req.query.passId)
         : null;
+    // Narrow the map to a single import's net-new doors ("View these homes on the map").
+    const importId =
+      req.query.importId && mongoose.isValidObjectId(req.query.importId)
+        ? new mongoose.Types.ObjectId(req.query.importId)
+        : null;
 
     // Date window in the campaign's (or org's) timezone — date-only days in, half-open
     // [start(fromDay), start(toDay+1)) out — so the map narrows to the same day window as
@@ -109,6 +115,14 @@ router.get('/map', async (req, res, next) => {
     if (status && status.length && !passId) householdFilter.status = { $in: status };
     if (campaignId) householdFilter.campaignId = campaignId;
     if (effortId) householdFilter.effortId = effortId;
+    if (importId) {
+      const job = await ImportJob.findOne({ _id: importId, organizationId: orgId }, 'insertedHouseholdIds').lean();
+      const ids = job?.insertedHouseholdIds || [];
+      if (!ids.length) {
+        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
+      }
+      householdFilter._id = { $in: ids };
+    }
 
     const surveyMatch = { organizationId: orgId };
     const activityMatch = { organizationId: orgId };

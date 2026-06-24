@@ -67,6 +67,7 @@ export default function MapPage() {
   const [searchParams] = useSearchParams();
   const [scopeEffortId, setScopeEffortId] = useState(searchParams.get('effortId') || '');
   const [scopePassId, setScopePassId] = useState(searchParams.get('passId') || '');
+  const [scopeImportId, setScopeImportId] = useState(searchParams.get('importId') || '');
 
   const {
     campaignId,
@@ -96,10 +97,13 @@ export default function MapPage() {
   } else if (scopePassId) {
     const p = (scopePassesQ.data?.passes || []).find((x) => String(x._id) === scopePassId);
     scopeLabel = p ? `Pass ${p.roundNumber} · ${p.name}` : 'Pass';
+  } else if (scopeImportId) {
+    scopeLabel = "this import's homes";
   }
   function clearScope() {
     setScopeEffortId('');
     setScopePassId('');
+    setScopeImportId('');
   }
 
   const tokenQ = useQuery({
@@ -126,6 +130,7 @@ export default function MapPage() {
     includeActivities: showCanvasserPins ? '1' : '',
     effortId: scopeEffortId,
     passId: scopePassId,
+    importId: scopeImportId,
   });
 
   const householdsQ = useQuery({
@@ -142,6 +147,7 @@ export default function MapPage() {
       showCanvasserPins,
       scopeEffortId,
       scopePassId,
+      scopeImportId,
     ],
     queryFn: () => api(`/admin/households/map${queryString}`),
     enabled: !!campaignId,

@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { getStoredCampaignId, setStoredCampaignId } from '../components/CampaignSelector.jsx';
+import RowMenu from '../components/RowMenu.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // server-enforced upload cap
@@ -707,7 +708,7 @@ export default function ImportPage() {
       {isLoading ? (
         <div>Loading…</div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <div className="overflow-x-auto rounded-lg border border-border bg-card">
           <table className="min-w-full text-sm">
             <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
               <tr>
@@ -746,20 +747,12 @@ export default function ImportPage() {
                   <td className="px-4 py-2 text-right">{fmt(j.errorCount)}</td>
                   <td className="px-4 py-2 text-right">
                     {j.status === 'completed' && !j.undone ? (
-                      <div className="flex items-center justify-end gap-3">
-                        {j.campaignId?._id && (
-                          <button
-                            onClick={() => { setStoredCampaignId(String(j.campaignId._id)); navigate('/map'); }}
-                            className="text-xs font-semibold text-brand-accent hover:underline"
-                            title="See these homes placed on the map"
-                          >
-                            View on map
-                          </button>
-                        )}
-                        <button onClick={() => onUndo(j)} disabled={undo.isPending} className="text-xs font-semibold text-danger hover:underline disabled:opacity-60">
-                          Undo
-                        </button>
-                      </div>
+                      <RowMenu
+                        items={[
+                          ...(j.campaignId?._id ? [{ label: 'View on map', onClick: () => { setStoredCampaignId(String(j.campaignId._id)); navigate(`/map?importId=${j._id}`); } }] : []),
+                          { label: 'Undo import', danger: true, onClick: () => onUndo(j) },
+                        ]}
+                      />
                     ) : j.undone ? (
                       <span className="text-xs italic text-fg-subtle">undone</span>
                     ) : null}
