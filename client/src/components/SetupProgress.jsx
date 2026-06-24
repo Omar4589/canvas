@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { setStoredCampaignId } from './CampaignSelector.jsx';
 import NextStepBanner from './NextStepBanner.jsx';
 import { Card, Badge, Button, SkeletonRows } from './ui/index.js';
 
@@ -11,6 +10,10 @@ import { Card, Badge, Button, SkeletonRows } from './ui/index.js';
 // the next action, but never gates navigation — every step links straight to its
 // screen. Data comes from GET /admin/campaigns/:id/setup-status (refreshes as the
 // admin advances; mutations elsewhere invalidate ['admin','setup-status', id]).
+// Step routes that live under the campaign drill-in (/campaigns/:id/...); the rest
+// (/surveys, /campaigns) are org-level and link as-is.
+const CAMPAIGN_SCOPED = new Set(['/import', '/efforts', '/passes', '/turfs', '/walklists', '/map']);
+
 const STATUS_BADGE = {
   done: { variant: 'success', dot: true, label: 'Done' },
   current: { variant: 'brand', dot: true, label: 'Now' },
@@ -31,10 +34,14 @@ export default function SetupProgress({ campaignId }) {
 
   if (!campaignId) return null;
 
-  // Deep-link a step pre-scoped to THIS campaign (target pages read the stored id).
+  // The server returns flat step routes; the field-prep screens live under the campaign
+  // drill-in, so prefix those with /campaigns/:id (org-level routes pass through).
+  function scopedRoute(route) {
+    if (!route) return route;
+    return CAMPAIGN_SCOPED.has(route.split('?')[0]) ? `/campaigns/${campaignId}${route}` : route;
+  }
   function go(route) {
-    setStoredCampaignId(campaignId);
-    navigate(route);
+    navigate(scopedRoute(route));
   }
 
   if (isLoading || !data) {
@@ -56,7 +63,7 @@ export default function SetupProgress({ campaignId }) {
       return (
         <NextStepBanner
           tone="info"
-          action={{ label: 'Go to Efforts', to: '/efforts', onClick: () => setStoredCampaignId(campaignId) }}
+          action={{ label: 'Go to Efforts', to: `/campaigns/${campaignId}/efforts` }}
         >
           {effortsNeedingSetup} effort{effortsNeedingSetup === 1 ? '' : 's'} still need setup — claim doors, cut books, assign, and activate.
         </NextStepBanner>

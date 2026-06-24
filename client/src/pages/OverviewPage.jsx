@@ -259,7 +259,7 @@ export default function OverviewPage() {
                   <CampaignCard
                     key={c.id}
                     campaign={c}
-                    onClick={() => navigate('/dashboard/' + c.id)}
+                    onClick={() => navigate('/campaigns/' + c.id)}
                   />
                 ))}
               </div>
@@ -297,7 +297,7 @@ export default function OverviewPage() {
                       <button
                         key={c.id}
                         type="button"
-                        onClick={() => navigate('/dashboard/' + c.id)}
+                        onClick={() => navigate('/campaigns/' + c.id)}
                         className="flex w-full flex-wrap items-center gap-x-6 gap-y-1 border-t border-border px-4 py-3 text-left text-sm transition-colors first:border-t-0 hover:bg-sunken"
                       >
                         <span className="font-medium text-fg">{c.name}</span>

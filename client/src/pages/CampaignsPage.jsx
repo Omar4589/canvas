@@ -4,7 +4,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
 import RowMenu from '../components/RowMenu.jsx';
-import { setStoredCampaignId } from '../components/CampaignSelector.jsx';
 import { Modal, Button } from '../components/ui/index.js';
 
 function fmt(n) {
@@ -231,8 +230,7 @@ export default function CampaignsPage() {
       const c = data?.campaign;
       if (c) {
         const id = c.id || c._id;
-        setStoredCampaignId(id);
-        navigate(`/dashboard/${id}`); // land on the campaign home — SetupProgress shows what's next
+        navigate(`/campaigns/${id}`); // land on the campaign home — SetupProgress shows what's next
       }
     },
   });
@@ -322,7 +320,7 @@ export default function CampaignsPage() {
               {campaigns.map((c) => (
                 <tr key={c._id} className="border-t border-border hover:bg-sunken">
                   <td className="px-4 py-3 font-medium text-fg">
-                    <Link to={`/dashboard/${c._id}`} className="text-fg hover:text-brand-accent hover:underline">{c.name}</Link>
+                    <Link to={`/campaigns/${c._id}`} className="text-fg hover:text-brand-accent hover:underline">{c.name}</Link>
                     {c.stepsTotal != null && !c.setupComplete && (
                       <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 text-[10px] font-medium text-brand-tint-fg">
                         <span className="h-1 w-1 rounded-full bg-brand-accent" />
@@ -367,7 +365,7 @@ export default function CampaignsPage() {
                   <td className="px-4 py-3 text-right">
                     <RowMenu
                       items={[
-                        { label: 'View dashboard', onClick: () => navigate(`/dashboard/${c._id}`) },
+                        { label: 'View dashboard', onClick: () => navigate(`/campaigns/${c._id}`) },
                         { label: 'Assignments', onClick: () => setAssigningCampaign(c) },
                         { label: 'Edit', onClick: () => setEditing(c) },
                         { label: c.isActive ? 'Archive' : 'Reactivate', onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }) },

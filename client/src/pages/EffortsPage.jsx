@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import CampaignSelector, { useCampaignSelection, setStoredCampaignId } from '../components/CampaignSelector.jsx';
+import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
@@ -143,7 +143,7 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
       {claim.data && (
         <p className="mt-2 text-xs text-success-fg">
           Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other efforts)` : ''}.{' '}
-          <Link to={`/passes?effortId=${effort._id}`} onClick={() => setStoredCampaignId(campaignId)} className="font-semibold underline">
+          <Link to={`/campaigns/${campaignId}/passes?effortId=${effort._id}`} className="font-semibold underline">
             Create a round →
           </Link>
         </p>
@@ -220,11 +220,11 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
                   {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
                 </select>
               )}
-              <a href={`/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Manage passes →</a>
+              <a href={`/campaigns/${campaignId}/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Manage passes →</a>
               {effort.activeRound && (
-                <a href={`/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-accent hover:underline">Cut / assign books →</a>
+                <a href={`/campaigns/${campaignId}/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-accent hover:underline">Cut / assign books →</a>
               )}
-              <a href={`/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Audit on map →</a>
+              <a href={`/campaigns/${campaignId}/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Audit on map →</a>
             </div>
           </td>
         </tr>
@@ -235,7 +235,8 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
 
 export default function EffortsPage() {
   const qc = useQueryClient();
-  const { campaignId, setCampaignId, campaigns, selected, isLoading } = useCampaignSelection();
+  const { campaignId } = useParams();
+  const { selected } = useCampaignSelection(campaignId);
   const isSurveyType = selected?.type === 'survey';
   const [name, setName] = useState('');
   const [surveyTemplateId, setSurveyTemplateId] = useState('');
@@ -282,10 +283,7 @@ export default function EffortsPage() {
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight text-fg">Efforts</h1>
-        <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
-      </div>
+      <h1 className="mb-5 text-2xl font-semibold tracking-tight text-fg">Efforts</h1>
 
       <p className="mb-4 max-w-3xl text-sm text-fg-muted">
         An effort is a parallel canvassing operation within a campaign — e.g. an area or a team. Each

@@ -69,12 +69,6 @@ export default function DashboardPage() {
   // the org's. tzReady flips once the campaigns list has loaded (so `current.timeZone` is known).
   const tz = current?.timeZone || orgTz;
   const tzReady = !campaignsLoading;
-  const activeCampaigns = campaigns.filter((c) => c.isActive);
-  // Active campaigns plus the current one (even when archived) for the switcher.
-  const switcherCampaigns =
-    current && current.isActive === false
-      ? [...activeCampaigns, current]
-      : activeCampaigns;
 
   // Once the campaign's timezone is known, compute the default range in THAT clock so
   // "Today"/"Yesterday" mean the campaign's day for every admin. Archived campaigns have
@@ -198,13 +192,7 @@ export default function DashboardPage() {
     <div>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link
-            to="/admin"
-            className="text-sm font-medium text-brand-accent hover:underline"
-          >
-            ‹ Overview
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold text-fg">
+          <h1 className="text-2xl font-semibold text-fg">
             {current?.name || 'Dashboard'}
           </h1>
           {selectedCampaign && (
@@ -215,29 +203,6 @@ export default function DashboardPage() {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">
-              Campaign
-            </span>
-            <select
-              value={campaignId}
-              onChange={(e) => navigate('/dashboard/' + e.target.value)}
-              disabled={campaignsLoading}
-              className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-            >
-              {!switcherCampaigns.some((c) => String(c._id) === String(campaignId)) && (
-                <option value={campaignId || ''} hidden>
-                  {campaignsLoading ? 'Loading…' : current?.name || 'Select campaign'}
-                </option>
-              )}
-              {switcherCampaigns.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.name} ({c.type === 'survey' ? 'Survey' : 'Lit drop'})
-                  {c.isActive === false ? ' · Archived' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
           {efforts.length > 1 && (
             <select
               value={effortId}

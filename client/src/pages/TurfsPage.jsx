@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
-import CampaignSelector, { useCampaignSelection, setStoredCampaignId } from '../components/CampaignSelector.jsx';
+import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import BookAssignmentPanel from '../components/BookAssignmentPanel.jsx';
 import AnswerFilters from '../components/AnswerFilters.jsx';
 import MapStyleControl from '../components/MapStyleControl.jsx';
@@ -446,9 +446,10 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
 export default function TurfsPage() {
   const qc = useQueryClient();
   const orgTz = useOrgTimeZone();
-  const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
+  const { campaignId } = useParams();
+  const { selected } = useCampaignSelection(campaignId);
   // Turf snapshots belong to the selected campaign → show times in its tz (fallback org).
-  const tz = campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
+  const tz = selected?.timeZone || orgTz;
   // Basemap style picker (Street/Hybrid/Satellite/Outdoors/Dark), independent of the
   // app theme. styleEpoch bumps after a swap so paint() + building markers re-hydrate.
   const { styleId, styleURL, setStyle, dark: darkBase } = useMapStyle();
@@ -951,7 +952,6 @@ export default function TurfsPage() {
           <p className="mt-0.5 text-sm text-fg-muted">Cut this round's doors into walkable books, then assign them to canvassers.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <CampaignSelector campaignId={campaignId} onChange={(id) => { setCampaignId(id); setPassId(''); }} campaigns={campaigns} isLoading={isLoading} />
           {campaignId && <PassPicker campaignId={campaignId} passId={passId} onChange={setPassId} />}
           {isActivePass && (
             <span className="rounded bg-success-tint px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success">
@@ -1268,7 +1268,7 @@ export default function TurfsPage() {
             <NextStepBanner
               tone="warning"
               className="mt-3"
-              action={{ label: 'Go to Efforts', to: '/efforts', onClick: () => setStoredCampaignId(campaignId) }}
+              action={{ label: 'Go to Efforts', to: `/campaigns/${campaignId}/efforts` }}
             >
               This effort owns no mappable doors yet. Claim doors into it on the Efforts page before cutting books.
             </NextStepBanner>
@@ -1305,8 +1305,7 @@ export default function TurfsPage() {
               title="Books accepted."
               action={{
                 label: 'Activate round',
-                to: `/passes?effortId=${selectedPass.effortId || ''}`,
-                onClick: () => setStoredCampaignId(campaignId),
+                to: `/campaigns/${campaignId}/passes?effortId=${selectedPass.effortId || ''}`,
               }}
             >
               Assign canvassers to books below, then activate the round to send it to the field.

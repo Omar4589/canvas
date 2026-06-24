@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import AnswerFilters from '../components/AnswerFilters.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -120,9 +121,10 @@ function MultiSelect({ label, value, onChange, options = [], placeholder }) {
 export default function WalkListsPage() {
   const qc = useQueryClient();
   const orgTz = useOrgTimeZone();
-  const { campaignId, setCampaignId, campaigns, isLoading } = useCampaignSelection();
+  const { campaignId } = useParams();
+  const { selected } = useCampaignSelection(campaignId);
   // Walk lists belong to the selected campaign → show times in its tz (fallback org).
-  const tz = campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
+  const tz = selected?.timeZone || orgTz;
   const [f, setF] = useState(EMPTY);
   const [name, setName] = useState('');
   const [mode, setMode] = useState('filter');
@@ -233,10 +235,7 @@ export default function WalkListsPage() {
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Walk Lists</h1>
-        <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
-      </div>
+      <h1 className="mb-5 text-2xl font-semibold">Walk Lists</h1>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
         {/* Builder */}

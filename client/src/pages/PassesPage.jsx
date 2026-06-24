@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
 import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
@@ -142,15 +142,15 @@ function PassDetail({ campaignId, pass, tz }) {
         {pass.activatedAt && (
           <span>Activated {formatInTz(pass.activatedAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false)}</span>
         )}
-        <a href={`/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut / assign books →</a>
-        <a href={`/map?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Audit →</a>
+        <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut / assign books →</a>
+        <a href={`/campaigns/${campaignId}/map?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Audit →</a>
       </div>
       {turfsQ.isLoading ? (
         <div className="text-xs text-fg-muted">Loading books…</div>
       ) : !turfs.length ? (
         <div className="text-xs text-fg-muted">
           No books cut yet.{' '}
-          <a href={`/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut books →</a>
+          <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut books →</a>
         </div>
       ) : (
         <ul className="divide-y divide-border overflow-hidden rounded-md border border-border bg-card">
@@ -162,7 +162,7 @@ function PassDetail({ campaignId, pass, tz }) {
               </div>
               <div className="flex items-center gap-3">
                 <Avatars users={byTurf.get(String(t._id)) || []} />
-                <a href={`/turfs?passId=${pass._id}`} className="shrink-0 text-xs font-medium text-brand-accent hover:underline">Open in Turf →</a>
+                <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="shrink-0 text-xs font-medium text-brand-accent hover:underline">Open in Turf →</a>
               </div>
             </li>
           ))}
@@ -174,7 +174,8 @@ function PassDetail({ campaignId, pass, tz }) {
 
 export default function PassesPage() {
   const qc = useQueryClient();
-  const { campaignId, setCampaignId, campaigns, selected, isLoading } = useCampaignSelection();
+  const { campaignId } = useParams();
+  const { selected } = useCampaignSelection(campaignId);
   const orgTz = useOrgTimeZone();
   const tz = selected?.timeZone || orgTz;
   const [searchParams] = useSearchParams();
@@ -242,7 +243,6 @@ export default function PassesPage() {
               {efforts.map((ef) => <option key={ef._id} value={ef._id}>{ef.name}</option>)}
             </Select>
           </label>
-          <CampaignSelector campaignId={campaignId} onChange={setCampaignId} campaigns={campaigns} isLoading={isLoading} />
         </div>
       </div>
 

@@ -38,3 +38,26 @@ export const SUPER_NAV = [
   { to: '/organizations', label: 'Organizations' },
   { to: '/queues', label: 'Jobs' },
 ];
+
+// Campaign drill-in (desktop sidebar). ORG_NAV is shown at the top level (not inside a
+// campaign); CAMPAIGN_NAV is shown when drilled into one — `slug` is appended to
+// /campaigns/:campaignId/ (home = the campaign root → the Dashboard). `icon` is the
+// existing navIcons key. (NAV above is kept for the mobile BottomNav.)
+export const ORG_NAV = [
+  { to: '/admin', label: 'Overview', end: true },
+  { to: '/campaigns', label: 'Campaigns' },
+  { to: '/surveys', label: 'Surveys' },
+  { to: '/voters', label: 'Voters' },
+  { to: '/users', label: 'Users' },
+  { to: '/admin/duplicate-surveys', label: 'Duplicate Surveys' },
+];
+
+export const CAMPAIGN_NAV = [
+  { slug: '', label: 'Home', icon: '/admin' },
+  { slug: 'import', label: 'Voter Import', icon: '/import' },
+  { slug: 'walklists', label: 'Walk Lists', icon: '/walklists' },
+  { slug: 'efforts', label: 'Efforts', icon: '/efforts' },
+  { slug: 'turfs', label: 'Turf Cutting', icon: '/turfs' },
+  { slug: 'passes', label: 'Passes', icon: '/passes' },
+  { slug: 'map', label: 'Map', icon: '/map' },
+];

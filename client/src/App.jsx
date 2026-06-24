@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
@@ -40,6 +40,12 @@ function PageFallback() {
   return (
     <div className="p-6 text-sm text-gray-500">Loading…</div>
   );
+}
+
+// Back-compat: old /dashboard/:campaignId → the campaign home at /campaigns/:campaignId.
+function DashboardRedirect() {
+  const { campaignId } = useParams();
+  return <Navigate to={`/campaigns/${campaignId}`} replace />;
 }
 
 export default function App() {
@@ -91,20 +97,30 @@ export default function App() {
           }
         >
           <Route path="/admin" element={<OverviewPage />} />
-          <Route path="/dashboard/:campaignId" element={<DashboardPage />} />
-          <Route path="/map" element={<MapPage />} />
-          <Route path="/efforts" element={<EffortsPage />} />
-          <Route path="/turfs" element={<TurfsPage />} />
-          <Route path="/passes" element={<PassesPage />} />
-          <Route path="/walklists" element={<WalkListsPage />} />
+          <Route path="/campaigns" element={<CampaignsPage />} />
+          {/* Campaign drill-in — the URL is the active campaign */}
+          <Route path="/campaigns/:campaignId" element={<DashboardPage />} />
+          <Route path="/campaigns/:campaignId/efforts" element={<EffortsPage />} />
+          <Route path="/campaigns/:campaignId/turfs" element={<TurfsPage />} />
+          <Route path="/campaigns/:campaignId/passes" element={<PassesPage />} />
+          <Route path="/campaigns/:campaignId/walklists" element={<WalkListsPage />} />
+          <Route path="/campaigns/:campaignId/import" element={<ImportPage />} />
+          <Route path="/campaigns/:campaignId/map" element={<MapPage />} />
+          {/* Back-compat: old /dashboard/:id + flat routes redirect to the launchpad */}
+          <Route path="/dashboard/:campaignId" element={<DashboardRedirect />} />
+          <Route path="/efforts" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/turfs" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/passes" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/walklists" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/import" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/map" element={<Navigate to="/campaigns" replace />} />
+          {/* Org-level screens */}
           <Route path="/queues" element={<QueuesPage />} />
-          <Route path="/import" element={<ImportPage />} />
           <Route path="/early-voting" element={<EarlyVotingPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/voters" element={<VotersPage />} />
           <Route path="/voters/:voterId" element={<VoterDetailPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
-          <Route path="/campaigns" element={<CampaignsPage />} />
           <Route path="/admin/client-reports" element={<ClientReportsPage />} />
           <Route path="/admin/client-reports/:id" element={<ClientReportBuilderPage />} />
           <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />

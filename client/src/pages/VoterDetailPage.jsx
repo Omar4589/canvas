@@ -310,7 +310,7 @@ export default function VoterDetailPage() {
             <p className="font-medium text-fg">{h.addressLine1}{h.addressLine2 ? `, ${h.addressLine2}` : ''}</p>
             <p>{h.city}, {h.state} {h.zipCode}</p>
             <p className="mt-1 text-fg-muted">
-              Campaign: {h.campaign ? <Link to={`/dashboard/${h.campaign.id}`} className="text-brand-accent hover:underline">{h.campaign.name}</Link> : '—'}
+              Campaign: {h.campaign ? <Link to={`/campaigns/${h.campaign.id}`} className="text-brand-accent hover:underline">{h.campaign.name}</Link> : '—'}
               {h.fullyVoted && <span className="ml-2 text-teal-600">· fully voted</span>}
             </p>
             {h.members.length > 0 && (

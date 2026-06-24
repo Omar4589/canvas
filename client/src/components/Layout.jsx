@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../lib/useTheme.js';
 import Logo, { LogoMark } from './Logo.jsx';
-import { NAV, SUPER_NAV, NAV_GROUPS } from './navItems.js';
+import { ORG_NAV, CAMPAIGN_NAV, SUPER_NAV } from './navItems.js';
 import { navIcon, IconSignOut, IconChevron } from './navIcons.jsx';
 import { IconSun, IconMoon } from './ui/icons.jsx';
 import IconButton from './ui/IconButton.jsx';
@@ -61,8 +63,25 @@ export default function Layout() {
   const { user, logout, isSuperAdmin } = useAuth();
   const { dark, toggle: toggleTheme } = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Campaign drill-in: when the URL is /campaigns/:campaignId(/...), the sidebar shows the
+  // campaign-scoped nav instead of the org nav. The splat is the current screen slug.
+  const campaignMatch = useMatch('/campaigns/:campaignId/*');
+  const inCampaign = !!campaignMatch;
+  const campaignId = campaignMatch?.params.campaignId || '';
+  const currentSlug = campaignMatch?.params['*'] || '';
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+    staleTime: 60 * 1000,
+    enabled: inCampaign,
+  });
+  const campaigns = campaignsQ.data?.campaigns || [];
+  const currentCampaign = campaigns.find((c) => String(c._id) === String(campaignId));
+
   const isFullBleed =
-    location.pathname === '/map' || location.pathname === '/queues' || location.pathname === '/turfs';
+    location.pathname.endsWith('/map') || location.pathname.endsWith('/turfs') || location.pathname === '/queues';
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -125,35 +144,54 @@ export default function Layout() {
         )}
 
         <nav className="flex-1 min-h-0 overflow-y-auto space-y-1">
-          {NAV.filter((n) => !n.group).map((n) => (
-            <NavItem key={n.to} n={n} collapsed={collapsed} />
-          ))}
-          {NAV_GROUPS.map((group) => {
-            const items = NAV.filter((n) => n.group === group);
-            if (!items.length) return null;
-            return (
-              <div key={group} className="space-y-1">
-                {collapsed ? (
-                  <div className="my-2 border-t border-border" />
-                ) : (
-                  <div className={GROUP_HEADER}>{group}</div>
-                )}
-                {items.map((n) => (
-                  <NavItem key={n.to} n={n} collapsed={collapsed} />
-                ))}
-              </div>
-            );
-          })}
-          {isSuperAdmin && (
+          {inCampaign ? (
             <>
-              {collapsed ? (
-                <div className="my-2 border-t border-border" />
-              ) : (
-                <div className={GROUP_HEADER}>Platform</div>
+              {!collapsed && (
+                <div className="mb-3">
+                  <NavLink to="/campaigns" className="inline-flex items-center gap-1 px-1 text-xs font-medium text-fg-muted hover:text-brand-accent">
+                    ‹ Campaigns
+                  </NavLink>
+                  <select
+                    value={campaignId}
+                    onChange={(e) => navigate(`/campaigns/${e.target.value}${currentSlug ? '/' + currentSlug : ''}`)}
+                    title="Switch campaign"
+                    className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm font-semibold text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                  >
+                    {!campaigns.length && <option value={campaignId}>{currentCampaign?.name || 'Campaign'}</option>}
+                    {campaigns.map((c) => (
+                      <option key={c._id} value={c._id}>{c.name}{c.isActive === false ? ' · Archived' : ''}</option>
+                    ))}
+                  </select>
+                </div>
               )}
-              {SUPER_NAV.map((n) => (
+              {CAMPAIGN_NAV.map((n) => {
+                const Icon = navIcon(n.icon);
+                const to = `/campaigns/${campaignId}${n.slug ? '/' + n.slug : ''}`;
+                return (
+                  <NavLink key={n.slug || 'home'} to={to} end={!n.slug} title={collapsed ? n.label : undefined} className={navClass(collapsed)}>
+                    <Icon size={20} />
+                    {!collapsed && <span>{n.label}</span>}
+                  </NavLink>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              {ORG_NAV.map((n) => (
                 <NavItem key={n.to} n={n} collapsed={collapsed} />
               ))}
+              {isSuperAdmin && (
+                <>
+                  {collapsed ? (
+                    <div className="my-2 border-t border-border" />
+                  ) : (
+                    <div className={GROUP_HEADER}>Platform</div>
+                  )}
+                  {SUPER_NAV.map((n) => (
+                    <NavItem key={n.to} n={n} collapsed={collapsed} />
+                  ))}
+                </>
+              )}
             </>
           )}
         </nav>

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
-import { getStoredCampaignId, setStoredCampaignId } from '../components/CampaignSelector.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 
@@ -221,9 +220,8 @@ export default function ImportPage() {
   const orgTz = useOrgTimeZone();
   const navigate = useNavigate();
   const [file, setFile] = useState(null);
-  // Default to the campaign the admin was last working (e.g. one they just created
-  // and clicked "Import voters" from), so the handoff lands pre-scoped.
-  const [campaignId, setCampaignId] = useState(() => getStoredCampaignId());
+  // The campaign being imported into comes from the drill-in URL (/campaigns/:id/import).
+  const { campaignId } = useParams();
   const [columns, setColumns] = useState([]);
   const [mapping, setMapping] = useState({});
   const [profileName, setProfileName] = useState('');
@@ -371,7 +369,6 @@ export default function ImportPage() {
       queryClient.invalidateQueries({ queryKey: ['imports'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'setup-status', variables.campaignId] });
       queryClient.invalidateQueries({ queryKey: ['campaign-rollup'] });
-      setStoredCampaignId(variables.campaignId);
       setJustImported(variables.campaignId);
     },
   });
@@ -439,7 +436,7 @@ export default function ImportPage() {
     dropReview();
   }
 
-  const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
+  const campaign = (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId)) || null;
   const requiredUnmapped = requiredKeys.filter((k) => !mapping[k]);
 
   // Unify the sync (small-file) and async (large-file) preview so the render reads
@@ -497,23 +494,13 @@ export default function ImportPage() {
         <div className="mb-4 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-muted">Campaign</label>
-            <select
-              value={campaignId}
-              onChange={(e) => { setCampaignId(e.target.value); setStoredCampaignId(e.target.value); dropReview(); }}
-              className="w-full rounded border border-border-strong bg-card text-fg px-3 py-2 text-sm focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-            >
-              <option value="">— Choose a campaign —</option>
-              {campaigns.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.name} ({c.state} · {c.type === 'survey' ? 'Survey' : 'Lit drop'})
-                </option>
-              ))}
-            </select>
-            {!campaignsQ.isLoading && !campaigns.length && (
-              <p className="mt-1 text-xs text-warning-fg">
-                No active campaigns. Create one on the Campaigns page first.
-              </p>
-            )}
+            <div className="rounded border border-border bg-sunken px-3 py-2 text-sm text-fg">
+              {campaign
+                ? `${campaign.name} (${campaign.state} · ${campaign.type === 'survey' ? 'Survey' : 'Lit drop'})`
+                : campaignsQ.isLoading
+                  ? 'Loading…'
+                  : 'Unknown campaign'}
+            </div>
           </div>
 
           <div>
@@ -684,7 +671,7 @@ export default function ImportPage() {
             title="Import queued — processing in the background."
             action={
               justImported
-                ? { label: 'Go to Efforts', to: '/efforts', onClick: () => setStoredCampaignId(justImported) }
+                ? { label: 'Go to Efforts', to: `/campaigns/${justImported}/efforts` }
                 : null
             }
           >
@@ -749,7 +736,7 @@ export default function ImportPage() {
                     {j.status === 'completed' && !j.undone ? (
                       <RowMenu
                         items={[
-                          ...(j.campaignId?._id ? [{ label: 'View on map', onClick: () => { setStoredCampaignId(String(j.campaignId._id)); navigate(`/map?importId=${j._id}`); } }] : []),
+                          ...(j.campaignId?._id ? [{ label: 'View on map', onClick: () => navigate(`/campaigns/${j.campaignId._id}/map?importId=${j._id}`) }] : []),
                           { label: 'Undo import', danger: true, onClick: () => onUndo(j) },
                         ]}
                       />

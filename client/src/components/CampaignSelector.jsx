@@ -19,8 +19,10 @@ export function setStoredCampaignId(id) {
   } catch {}
 }
 
-export function useCampaignSelection() {
-  const [campaignId, setCampaignId] = useState(getStoredCampaignId());
+// `overrideId` (from the campaign drill-in URL, useParams) is the source of truth when
+// present; the localStorage state is only the fallback for not-yet-migrated screens.
+export function useCampaignSelection(overrideId) {
+  const [storedId, setStoredId] = useState(getStoredCampaignId());
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -28,33 +30,40 @@ export function useCampaignSelection() {
     staleTime: 60 * 1000,
   });
 
-  const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
+  const allCampaigns = campaignsQ.data?.campaigns || [];
+  const campaigns = allCampaigns.filter((c) => c.isActive);
+  const campaignId = overrideId || storedId;
 
-  // If the stored campaign no longer exists, clear it.
+  // Remember the drilled-in campaign as "last used" (for redirects + legacy screens).
   useEffect(() => {
-    if (!campaignId || !campaigns.length) return;
-    if (!campaigns.find((c) => String(c._id) === String(campaignId))) {
-      setCampaignId('');
+    if (overrideId) setStoredCampaignId(overrideId);
+  }, [overrideId]);
+
+  // Legacy (no URL override): clear a stale stored id...
+  useEffect(() => {
+    if (overrideId || !storedId || !campaigns.length) return;
+    if (!campaigns.find((c) => String(c._id) === String(storedId))) {
+      setStoredId('');
       setStoredCampaignId('');
     }
-  }, [campaignId, campaigns]);
+  }, [overrideId, storedId, campaigns]);
 
-  // Auto-select the first campaign on first load if none chosen.
+  // ...and auto-select the first campaign on first load.
   useEffect(() => {
-    if (campaignId) return;
+    if (overrideId || storedId) return;
     if (campaigns.length > 0) {
       const first = String(campaigns[0]._id);
-      setCampaignId(first);
+      setStoredId(first);
       setStoredCampaignId(first);
     }
-  }, [campaignId, campaigns]);
+  }, [overrideId, storedId, campaigns]);
 
   function update(id) {
-    setCampaignId(id);
+    setStoredId(id);
     setStoredCampaignId(id);
   }
 
-  const selected = campaigns.find((c) => String(c._id) === String(campaignId)) || null;
+  const selected = allCampaigns.find((c) => String(c._id) === String(campaignId)) || null;
 
   return { campaignId, setCampaignId: update, campaigns, selected, isLoading: campaignsQ.isLoading };
 }

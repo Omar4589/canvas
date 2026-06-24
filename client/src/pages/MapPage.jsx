@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -9,7 +9,7 @@ import HouseholdDetailPanel from '../components/HouseholdDetailPanel.jsx';
 import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
 import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
-import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import MapStyleControl from '../components/MapStyleControl.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
@@ -69,13 +69,8 @@ export default function MapPage() {
   const [scopePassId, setScopePassId] = useState(searchParams.get('passId') || '');
   const [scopeImportId, setScopeImportId] = useState(searchParams.get('importId') || '');
 
-  const {
-    campaignId,
-    setCampaignId,
-    campaigns,
-    selected: selectedCampaign,
-    isLoading: campaignsLoading,
-  } = useCampaignSelection();
+  const { campaignId } = useParams();
+  const { selected: selectedCampaign } = useCampaignSelection(campaignId);
   // Anchor presets to the selected campaign's tz (default range is all-time, which needs none).
   const tz = selectedCampaign?.timeZone || orgTz;
 
@@ -359,12 +354,6 @@ export default function MapPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <CampaignSelector
-            campaignId={campaignId}
-            onChange={setCampaignId}
-            campaigns={campaigns}
-            isLoading={campaignsLoading}
-          />
           <AddressSearch households={households} onSelect={flyToHousehold} />
           <DateRangeSelector value={dateRange} onChange={setDateRange} tz={tz} />
         </div>

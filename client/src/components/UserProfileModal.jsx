@@ -540,7 +540,11 @@ export default function UserProfileModal({ membership, onClose }) {
               Recent activity
             </h3>
             <Link
-              to="/map"
+              to={(() => {
+                const c = activityQ.data?.activities?.[0]?.campaign;
+                const cid = c?.id || c?._id;
+                return cid ? `/campaigns/${cid}/map` : '/campaigns';
+              })()}
               className="text-xs font-semibold text-brand-accent hover:underline"
               onClick={onClose}
             >
