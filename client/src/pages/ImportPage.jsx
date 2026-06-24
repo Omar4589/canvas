@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -217,6 +218,7 @@ function GeocodingPanel({ geocoding, result, onCheck, checking }) {
 export default function ImportPage() {
   const queryClient = useQueryClient();
   const orgTz = useOrgTimeZone();
+  const navigate = useNavigate();
   const [file, setFile] = useState(null);
   // Default to the campaign the admin was last working (e.g. one they just created
   // and clicked "Import voters" from), so the handoff lands pre-scoped.
@@ -744,9 +746,20 @@ export default function ImportPage() {
                   <td className="px-4 py-2 text-right">{fmt(j.errorCount)}</td>
                   <td className="px-4 py-2 text-right">
                     {j.status === 'completed' && !j.undone ? (
-                      <button onClick={() => onUndo(j)} disabled={undo.isPending} className="text-xs font-semibold text-danger hover:underline disabled:opacity-60">
-                        Undo
-                      </button>
+                      <div className="flex items-center justify-end gap-3">
+                        {j.campaignId?._id && (
+                          <button
+                            onClick={() => { setStoredCampaignId(String(j.campaignId._id)); navigate('/map'); }}
+                            className="text-xs font-semibold text-brand-accent hover:underline"
+                            title="See these homes placed on the map"
+                          >
+                            View on map
+                          </button>
+                        )}
+                        <button onClick={() => onUndo(j)} disabled={undo.isPending} className="text-xs font-semibold text-danger hover:underline disabled:opacity-60">
+                          Undo
+                        </button>
+                      </div>
                     ) : j.undone ? (
                       <span className="text-xs italic text-fg-subtle">undone</span>
                     ) : null}

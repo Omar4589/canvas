@@ -106,6 +106,7 @@ function QuestionCard({
   onMoveDown,
   locked = false,
   lockedOptionCount = 0,
+  error,
 }) {
   const isChoice = value.type === 'single_choice' || value.type === 'multiple_choice';
 
@@ -185,8 +186,9 @@ function QuestionCard({
             value={value.label}
             onChange={(e) => onChange({ ...value, label: e.target.value })}
             placeholder="What is your top issue?"
-            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-base text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className={`w-full rounded border bg-card px-3 py-2 text-base text-fg placeholder:text-fg-subtle focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${error?.label ? 'border-danger' : 'border-border-strong focus:border-brand-accent'}`}
           />
+          {error?.label && <p className="mt-1 text-xs text-danger">{error.label}</p>}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -231,6 +233,7 @@ function QuestionCard({
             >
               + Add option
             </button>
+            {error?.options && <p className="mt-2 text-xs text-danger">{error.options}</p>}
           </div>
         )}
       </div>
@@ -243,6 +246,7 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
   const [intro, setIntro] = useState(initial?.intro || '');
   const [closing, setClosing] = useState(initial?.closing || '');
   const [questions, setQuestions] = useState(initial?.questions || []);
+  const [errors, setErrors] = useState({ questions: {} });
 
   useEffect(() => {
     setName(initial?.name || '');
@@ -267,6 +271,13 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
 
   function updateQuestion(index, q) {
     setQuestions((prev) => prev.map((p, i) => (i === index ? q : p)));
+    if (errors.questions[index]) {
+      setErrors((p) => {
+        const nq = { ...p.questions };
+        delete nq[index];
+        return { ...p, questions: nq };
+      });
+    }
   }
 
   function removeQuestion(index) {
@@ -275,6 +286,7 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
 
   function addQuestion() {
     setQuestions((prev) => reorder([...prev, blankQuestion()]));
+    if (errors.noQuestions) setErrors((p) => ({ ...p, noQuestions: undefined }));
   }
 
   function move(index, delta) {
@@ -287,8 +299,28 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
     });
   }
 
+  function validate() {
+    const e = { questions: {} };
+    if (!name.trim()) e.name = 'Give your survey a name.';
+    if (!questions.length) e.noQuestions = 'Add at least one question before saving.';
+    questions.forEach((q, i) => {
+      const qe = {};
+      if (!q.label.trim()) qe.label = 'This question needs a label.';
+      const isChoice = q.type === 'single_choice' || q.type === 'multiple_choice';
+      if (isChoice && !(q.options || []).some((o) => o.trim())) qe.options = 'Add at least one answer option.';
+      if (Object.keys(qe).length) e.questions[i] = qe;
+    });
+    return e;
+  }
+
   function submit(e) {
     e.preventDefault();
+    const v = validate();
+    if (v.name || v.noQuestions || Object.keys(v.questions).length) {
+      setErrors(v);
+      return;
+    }
+    setErrors({ questions: {} });
     const cleaned = questions.map((q, i, all) => {
       const key = q.key && q.key.trim() ? q.key : deriveKey(q, i, all);
       const isChoice = q.type === 'single_choice' || q.type === 'multiple_choice';
@@ -327,14 +359,13 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
           </label>
           <input
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
+            onChange={(e) => { setName(e.target.value); if (errors.name) setErrors((p) => ({ ...p, name: undefined })); }}
             placeholder="Scott Berger Door-to-Door Survey"
-            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className={`w-full rounded border bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${errors.name ? 'border-danger' : 'border-border-strong focus:border-brand-accent'}`}
           />
-          <p className="mt-2 text-xs text-fg-muted">
-            Surveys are linked to campaigns on the Campaigns page.
-          </p>
+          {errors.name
+            ? <p className="mt-1 text-xs text-danger">{errors.name}</p>
+            : <p className="mt-2 text-xs text-fg-muted">Surveys are linked to campaigns on the Campaigns page.</p>}
         </div>
       </section>
 
@@ -378,12 +409,13 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
                 onMoveDown={() => move(i, 1)}
                 locked={locked && !!original}
                 lockedOptionCount={original?.options?.length || 0}
+                error={errors.questions[i]}
               />
             );
           })}
           {!questions.length && (
-            <div className="rounded-lg border-2 border-dashed border-border bg-card px-4 py-10 text-center text-sm text-fg-muted">
-              No questions yet. Add your first one below.
+            <div className={`rounded-lg border-2 border-dashed px-4 py-10 text-center text-sm ${errors.noQuestions ? 'border-danger text-danger' : 'border-border bg-card text-fg-muted'}`}>
+              {errors.noQuestions || 'No questions yet. Add your first one below.'}
             </div>
           )}
         </div>
