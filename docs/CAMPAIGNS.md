@@ -13,7 +13,7 @@ effort).
 
 Related: [EFFORTS.md](EFFORTS.md) (efforts own the doors and rounds), [IMPORTS.md](IMPORTS.md) (how a
 CSV matches and reaches Intake), [WALKLISTS.md](WALKLISTS.md) (route a specific CSV to one effort),
-[SURVEYS.md](SURVEYS.md) (a survey campaign needs a survey first), [PASSES_AND_TURF.md](PASSES_AND_TURF.md)
+[SURVEYS.md](SURVEYS.md) (attach a survey before activating a round), [PASSES_AND_TURF.md](PASSES_AND_TURF.md)
 (rounds + cutting books), [METRICS.md](METRICS.md) (the numbers), [TIMEZONES.md](TIMEZONES.md) (why a
 timezone change matters).
 
@@ -27,13 +27,16 @@ A campaign goes from "created" to "canvassers in the field" through one ordered 
 progress** card on the campaign's dashboard walks you through it — it's a live checklist with a
 "next step" button, so you never have to remember the order. The steps:
 
-1. **Survey** *(survey campaigns only)* — build a survey on the **Surveys** page first; a survey
-   campaign can't be created without one. (Lit-drop campaigns skip this.)
-2. **Create the campaign** — **Campaigns → New campaign**: name, type (survey / lit drop), state,
-   timezone (auto-fills from the state). After it's created you'll be nudged to import voters.
-3. **Import voters** — **CSV Import**: upload a voter file. **The file must already have latitude /
-   longitude columns** — the app doesn't geocode. New addresses land in **Intake** (owned by no
-   effort yet). See [IMPORTS.md](IMPORTS.md).
+1. **Create the campaign** — **Campaigns → New campaign**: name, type (survey / lit drop), state,
+   timezone (auto-fills from the state). A survey is **not** required at creation. After it's created
+   you'll be nudged to import voters.
+2. **Attach a survey** *(survey campaigns only)* — on the campaign's **Survey** tab, pick (or build)
+   the survey to use. You can do this any time before you activate a round; the requirement is
+   enforced at **round activation**, not at creation. (Lit-drop campaigns skip this.) See
+   [SURVEYS.md](SURVEYS.md).
+3. **Import voters** — **Voter Import**: upload a voter file. If it already has latitude / longitude
+   columns they're used as-is; otherwise the app **geocodes** the addresses for you (via Geocodio).
+   New addresses land in **Intake** (owned by no effort yet). See [IMPORTS.md](IMPORTS.md).
 4. **Create an effort and give it doors** — **Efforts → New effort**, then **Claim** its doors (from
    a walk list, or "Claim all Intake"). An effort owns a disjoint set of doors; nothing gets
    canvassed until an effort owns it. See [EFFORTS.md](EFFORTS.md).
@@ -44,8 +47,18 @@ progress** card on the campaign's dashboard walks you through it — it's a live
    none).
 8. **Activate the round** — **Passes → Activate**. Now it's live and the field app shows the work.
 
-The sidebar is grouped to mirror this: **Setup** (Campaigns, Surveys, CSV Import, Walk Lists,
-Efforts, Turf Cutting, Passes) → **Field Ops** (Map, Voters, Early Voting) → **Reporting** → **Manage**.
+Inside a campaign the left sidebar lists that campaign's tabs in roughly this order, so the nav
+mirrors the chain. How that drill-in works is below.
+
+## Navigating a campaign (the drill-in)
+
+The **Campaigns** page is the launchpad. **Click a campaign** to *drill in*: the left sidebar swaps
+from the org-level items to **that campaign's tabs** — Home, Survey, Voter Import, Walk Lists,
+Efforts, Turf Cutting, Passes, Map, Early Voting, Client Reports — with a **"‹ Campaigns"** link to
+exit and a **campaign switcher** dropdown to hop to another campaign without leaving the page you're
+on. The **URL is the active campaign**: `/campaigns/:id` is its Home (dashboard), and each tab is
+`/campaigns/:id/…`. There are no more per-screen "Campaign" dropdowns — the URL plus the sidebar
+switcher are how you pick which campaign you're working in.
 
 ### The Setup progress card
 
@@ -77,9 +90,10 @@ once canvassing has started:
 - **Type (survey ⇄ lit drop)** — **locked once canvassing has started.** Flipping it would corrupt
   how door statuses are computed and orphan existing survey responses, so the radios go read-only
   with a note. To run a different type, create a new campaign.
-- **Survey template** — repointing a survey campaign warns you if the chosen survey already has
-  responses (new answers report alongside the old ones). To change questions, duplicate the survey
-  on the Surveys page and pick the copy. See [SURVEYS.md](SURVEYS.md).
+- **Survey template** — the campaign's **Survey** tab (`/campaigns/:id/survey`) is where you attach,
+  change, or preview the survey. Repointing a survey campaign warns you if the chosen survey already
+  has responses (new answers report alongside the old ones). To change questions, duplicate the
+  survey on the Surveys page and pick the copy. See [SURVEYS.md](SURVEYS.md).
 
 ### Archive vs. delete
 
@@ -179,9 +193,16 @@ The cold-start readiness chain is a pure derivation in
 
 ## Frontend
 
-- Phased nav: [navItems.js](../client/src/components/navItems.js) (`NAV_GROUPS` + per-item `group`),
-  rendered grouped in [Layout.jsx](../client/src/components/Layout.jsx) and
-  [BottomNav.jsx](../client/src/components/BottomNav.jsx).
+- **Campaign-scoped routes** — the in-campaign screens live under `/campaigns/:campaignId/*` in
+  [App.jsx](../client/src/App.jsx) (`survey`, `import`, `walklists`, `efforts`, `turfs`, `passes`,
+  `map`, `early-voting`, `reports`, `reports/:id`; the bare `/campaigns/:campaignId` is the
+  dashboard). Each screen reads the active campaign from `useParams().campaignId` — there is **no
+  localStorage campaign selector**. Old flat routes (`/efforts`, `/passes`, …) and `/dashboard/:id`
+  redirect into this shape.
+- Two-level drill-in nav: [navItems.js](../client/src/components/navItems.js) (`ORG_NAV` for the top
+  level + `CAMPAIGN_NAV` for the in-campaign tabs), rendered by
+  [Layout.jsx](../client/src/components/Layout.jsx) (sidebar with the "‹ Campaigns" exit + campaign
+  switcher) and [BottomNav.jsx](../client/src/components/BottomNav.jsx).
 - Hub + hand-offs: [SetupProgress.jsx](../client/src/components/SetupProgress.jsx),
   [NextStepBanner.jsx](../client/src/components/NextStepBanner.jsx) (the reusable next-step signpost).
 - Management UI: [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) — the `CampaignForm`

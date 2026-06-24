@@ -247,8 +247,8 @@ export default function ImportPage() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['imports'],
-    queryFn: () => api('/admin/imports'),
+    queryKey: ['imports', campaignId],
+    queryFn: () => api(`/admin/imports?campaignId=${campaignId}`),
     refetchInterval: (q) => {
       const jobs = q.state.data?.jobs || [];
       return jobs.some((j) => j.status === 'pending' || j.status === 'parsing') ? 1500 : false;
@@ -700,7 +700,6 @@ export default function ImportPage() {
             <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
               <tr>
                 <th className="px-4 py-2 text-left">When</th>
-                <th className="px-4 py-2 text-left">Campaign</th>
                 <th className="px-4 py-2 text-left">File</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="px-4 py-2 text-right">Voters</th>
@@ -715,7 +714,6 @@ export default function ImportPage() {
               {(data?.jobs || []).map((j) => (
                 <tr key={j._id} className="border-t border-border">
                   <td className="px-4 py-2 text-fg-muted">{formatInTz(j.createdAt, orgTz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
-                  <td className="px-4 py-2">{j.campaignId?.name || '—'}</td>
                   <td className="px-4 py-2">
                     {j.filename || '—'}
                     {(j.geocodedNew > 0 || j.geocodedCached > 0 || j.geocodeUnmatched > 0) && (
@@ -748,7 +746,7 @@ export default function ImportPage() {
               ))}
               {!data?.jobs?.length && (
                 <tr>
-                  <td colSpan="10" className="px-4 py-6 text-center text-fg-muted">No imports yet.</td>
+                  <td colSpan="9" className="px-4 py-6 text-center text-fg-muted">No imports yet for this campaign.</td>
                 </tr>
               )}
             </tbody>

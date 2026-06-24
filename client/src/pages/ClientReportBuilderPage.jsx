@@ -32,7 +32,7 @@ function editableSnapshot(src) {
 }
 
 export default function ClientReportBuilderPage() {
-  const { id } = useParams();
+  const { campaignId, id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState('edit');
@@ -196,7 +196,7 @@ export default function ClientReportBuilderPage() {
     <div className="mx-auto max-w-5xl space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <button onClick={() => navigate('/admin/client-reports')} className="text-xs text-brand-accent hover:underline">
+          <button onClick={() => navigate(`/campaigns/${campaignId}/reports`)} className="text-xs text-brand-accent hover:underline">
             ← All reports
           </button>
           <div className="mt-1 flex items-center gap-2">

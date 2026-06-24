@@ -18,6 +18,13 @@ Voter-ID CSV into a walk list without re-importing the universe), [VOTERS.md](VO
 
 # Part 1 — For everyone
 
+## Where to find it
+
+Voter Import lives **inside a campaign**: open a campaign from the Campaigns launchpad, then pick
+**Voter Import** in the campaign sidebar. There's no campaign dropdown on the page anymore — the
+campaign you drilled into is the target, shown read-only at the top, and the **Recent imports**
+history below only lists that campaign's imports.
+
 ## How an upload is matched
 
 - A row is matched to a **household by its address** (after light normalization: trim + uppercase,
@@ -149,6 +156,14 @@ Cuts and `/doors` require `location.coordinates`; coordinate-less households per
 round was cut, on doors the effort owns (derive; no extra field).
 
 ## D. Preview & confirm (the import diff)
+
+The page ([client/src/pages/ImportPage.jsx](../client/src/pages/ImportPage.jsx)) is a **campaign
+drill-in screen** at `/campaigns/:campaignId/import`; it reads `campaignId` from `useParams()` (no
+in-page picker — the target campaign is shown read-only and posted on every mutation). The
+**Recent imports** history is campaign-scoped via `GET /admin/imports?campaignId=<id>` (the server
+already supported the filter), so the old redundant "Campaign" column is gone. **View on map** on a
+completed import navigates to `/campaigns/:campaignId/map?importId=<job>` to show that import's
+homes on the campaign map. The old flat `/import` route redirects.
 
 The web flow is **map → preview → confirm**. `POST /admin/imports/csv/preview`
 ([routes/admin/imports.js](../server/src/routes/admin/imports.js)) parses the file (`parseAndValidate`,

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import CampaignSelector, { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import { Button, Badge, Card } from '../components/ui/index.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import { formatWeekRange } from '../lib/datePresets.js';
@@ -233,7 +233,8 @@ function ShareRow({ s, url, copied, onCopy, patchM, rotateM, deleteM }) {
 export default function ClientReportsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { campaignId, setCampaignId, campaigns, isLoading: campaignsLoading } = useCampaignSelection();
+  const { campaignId } = useParams();
+  const { selected, isLoading: campaignsLoading } = useCampaignSelection(campaignId);
 
   const [form, setForm] = useState(() => ({ title: '', ...defaultWeek() }));
   const [error, setError] = useState(null);
@@ -248,7 +249,7 @@ export default function ClientReportsPage() {
     mutationFn: (body) => api('/admin/client-reports', { method: 'POST', body }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'client-reports', campaignId] });
-      navigate(`/admin/client-reports/${res.report._id}`);
+      navigate(`/campaigns/${campaignId}/reports/${res.report._id}`);
     },
     onError: (e) => setError(e.message),
   });
@@ -274,21 +275,15 @@ export default function ClientReportsPage() {
 
   const reports = reportsQ.data?.reports || [];
 
+  if (!campaignsLoading && !selected) return <Navigate to="/campaigns" replace />;
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-fg">Client Reports</h1>
-          <p className="mt-1 text-sm text-fg-muted">
-            Build and publish weekly snapshots, then share a link with your client.
-          </p>
-        </div>
-        <CampaignSelector
-          campaignId={campaignId}
-          onChange={setCampaignId}
-          campaigns={campaigns}
-          isLoading={campaignsLoading}
-        />
+      <div>
+        <h1 className="text-xl font-semibold text-fg">Client Reports</h1>
+        <p className="mt-1 text-sm text-fg-muted">
+          Build and publish weekly snapshots, then share a link with your client.
+        </p>
       </div>
 
       {campaignId && <SharePanel campaignId={campaignId} />}
@@ -340,7 +335,7 @@ export default function ClientReportsPage() {
           <Card key={r.id} className="flex items-center justify-between gap-3 p-4">
             <button
               type="button"
-              onClick={() => navigate(`/admin/client-reports/${r.id}`)}
+              onClick={() => navigate(`/campaigns/${campaignId}/reports/${r.id}`)}
               className="min-w-0 flex-1 text-left"
             >
               <div className="flex items-center gap-2">
@@ -363,7 +358,7 @@ export default function ClientReportsPage() {
               </div>
             </button>
             <div className="flex shrink-0 items-center gap-2">
-              <Button size="sm" variant="secondary" onClick={() => navigate(`/admin/client-reports/${r.id}`)}>
+              <Button size="sm" variant="secondary" onClick={() => navigate(`/campaigns/${campaignId}/reports/${r.id}`)}>
                 Open
               </Button>
               <Button

@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { NavLink } from 'react-router-dom';
-import { NAV, SUPER_NAV, NAV_GROUPS } from './navItems.js';
+import { NavLink, useMatch } from 'react-router-dom';
+import { ORG_NAV, CAMPAIGN_NAV, SUPER_NAV } from './navItems.js';
 import { navIcon } from './navIcons.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import Logo from './Logo.jsx';
 
-// Primary tabs vs. the "More" sheet are both derived from NAV (single source of
-// truth): items flagged `primary` are tabs, the rest go in the sheet, clustered by
-// workflow phase (NAV_GROUPS) so the sheet mirrors the desktop sidebar.
-const primaryItems = NAV.filter((n) => n.primary);
-const ungroupedMore = NAV.filter((n) => !n.primary && !n.group);
+// Two-level mobile nav, mirroring the desktop sidebar (Layout.jsx): at the top level
+// it shows org items; drilled into a campaign (/campaigns/:id/*) it swaps to the
+// campaign nav with a "‹ All campaigns" exit in the More sheet. A small set of items
+// get a bottom-bar tab (keyed by route path in org mode, by slug in campaign mode);
+// the rest live in the sheet.
+const ORG_PRIMARY = ['/admin', '/campaigns', '/users'];
+const CAMPAIGN_PRIMARY = ['', 'map'];
 
 function IconMore() {
   return (
@@ -41,20 +43,44 @@ function sheetLinkClass({ isActive }) {
 export default function BottomNav() {
   const { user, logout, isSuperAdmin } = useAuth();
   const [open, setOpen] = useState(false);
+  const campaignMatch = useMatch('/campaigns/:campaignId/*');
+  const inCampaign = !!campaignMatch;
+  const campaignId = campaignMatch?.params.campaignId || '';
 
   function close() {
     setOpen(false);
   }
 
+  // Resolve the tab + sheet item lists for the current context.
+  let tabs;
+  let moreItems;
+  if (inCampaign) {
+    const toItem = (n) => ({
+      key: n.slug || 'home',
+      to: `/campaigns/${campaignId}${n.slug ? '/' + n.slug : ''}`,
+      label: n.label,
+      icon: n.icon,
+      end: !n.slug,
+    });
+    const all = CAMPAIGN_NAV.map(toItem);
+    tabs = CAMPAIGN_NAV.filter((n) => CAMPAIGN_PRIMARY.includes(n.slug)).map(toItem);
+    moreItems = all.filter((it) => !tabs.some((t) => t.key === it.key));
+  } else {
+    const toItem = (n) => ({ key: n.to, to: n.to, label: n.label, icon: n.to, end: n.end });
+    const all = ORG_NAV.map(toItem);
+    tabs = ORG_NAV.filter((n) => ORG_PRIMARY.includes(n.to)).map(toItem);
+    moreItems = all.filter((it) => !tabs.some((t) => t.key === it.key));
+  }
+
   return (
     <>
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 flex border-t border-border bg-card py-1">
-        {primaryItems.map((n) => {
-          const Icon = navIcon(n.to);
+        {tabs.map((it) => {
+          const Icon = navIcon(it.icon);
           return (
-            <NavLink key={n.to} to={n.to} end={n.end} className={tabClass}>
+            <NavLink key={it.key} to={it.to} end={it.end} className={tabClass}>
               <Icon />
-              <span>{n.label}</span>
+              <span>{it.label}</span>
             </NavLink>
           );
         })}
@@ -92,34 +118,19 @@ export default function BottomNav() {
               </button>
             </div>
 
-            {ungroupedMore.length > 0 && (
-              <div className="space-y-1">
-                {ungroupedMore.map((n) => (
-                  <NavLink key={n.to} to={n.to} end={n.end} className={sheetLinkClass} onClick={close}>
-                    {n.label}
-                  </NavLink>
-                ))}
-              </div>
+            {inCampaign && (
+              <NavLink to="/campaigns" className={sheetLinkClass} onClick={close}>
+                ‹ All campaigns
+              </NavLink>
             )}
 
-            {NAV_GROUPS.map((group) => {
-              const items = NAV.filter((n) => !n.primary && n.group === group);
-              if (!items.length) return null;
-              return (
-                <div key={group}>
-                  <div className="mt-4 px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
-                    {group}
-                  </div>
-                  <div className="space-y-1">
-                    {items.map((n) => (
-                      <NavLink key={n.to} to={n.to} end={n.end} className={sheetLinkClass} onClick={close}>
-                        {n.label}
-                      </NavLink>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+            <div className="space-y-1">
+              {moreItems.map((it) => (
+                <NavLink key={it.key} to={it.to} end={it.end} className={sheetLinkClass} onClick={close}>
+                  {it.label}
+                </NavLink>
+              ))}
+            </div>
 
             {isSuperAdmin && (
               <>

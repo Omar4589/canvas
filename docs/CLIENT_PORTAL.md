@@ -54,9 +54,9 @@ team keeps knocking. Next week's report picks up the new activity and appears at
 
 ## Building and publishing a weekly report
 
-On the admin side, open **Client Reports** (left nav), pick a campaign, and click **Create draft** for
-a week (a start and end date). The system pre-computes all the numbers for two windows — everything
-through the week's end (cumulative) and just the week itself (the delta).
+On the admin side, drill into the campaign and open its **Client Reports** tab, then click **Create
+draft** for a week (a start and end date). The system pre-computes all the numbers for two windows —
+everything through the week's end (cumulative) and just the week itself (the delta).
 
 In the builder you:
 
@@ -77,7 +77,7 @@ published report.
 
 ## Sharing a report
 
-On **Client Reports**, with a campaign selected, use the **Share link** panel:
+On the campaign's **Client Reports** tab, use the **Share link** panel:
 
 - **+ New link** creates a public link to this campaign's published reports. **Copy** it and send it to
   anyone — they don't need an account. Give each link a **label** (e.g. *Candidate*, *Internal*) inline.
@@ -158,7 +158,14 @@ draft.
 
 ## Endpoints
 
-**Admin builder** — `/admin/client-reports`, gated `requireOrgRole('admin')`:
+**Admin builder** — server routes are mounted at `/admin/client-reports` (unchanged), gated
+`requireOrgRole('admin')` and filtered by `campaignId` in query/body. The admin **UI** for these lives
+inside the campaign drill-in — list at `/campaigns/:campaignId/reports`
+([ClientReportsPage](../client/src/pages/ClientReportsPage.jsx)), builder at
+`/campaigns/:campaignId/reports/:id` ([ClientReportBuilderPage](../client/src/pages/ClientReportBuilderPage.jsx)),
+both reading `campaignId` from `useParams` (the old "Client Reports" launchpad + campaign dropdown are
+gone; the legacy `/admin/client-reports[/:id]` client routes redirect to `/campaigns` — see
+[App.jsx](../client/src/App.jsx)). Server endpoints:
 `POST /` (create draft) · `GET /?campaignId=` (list; rows carry `viewCount`/`lastViewedAt`/`timeZone`) ·
 `GET /:id` (also returns `campaignName`/`orgName` so the builder's PDF header matches the client's) ·
 `PATCH /:id` (drafts only) · `POST /:id/recompute` · `GET /:id/preview` · `GET /:id/preview/map` ·

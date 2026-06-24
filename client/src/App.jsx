@@ -22,6 +22,7 @@ const VotersPage = lazy(() => import('./pages/VotersPage.jsx'));
 const VoterDetailPage = lazy(() => import('./pages/VoterDetailPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
+const CampaignSurveyPage = lazy(() => import('./pages/CampaignSurveyPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
 const TurfsPage = lazy(() => import('./pages/TurfsPage.jsx'));
 const PassesPage = lazy(() => import('./pages/PassesPage.jsx'));
@@ -106,6 +107,10 @@ export default function App() {
           <Route path="/campaigns/:campaignId/walklists" element={<WalkListsPage />} />
           <Route path="/campaigns/:campaignId/import" element={<ImportPage />} />
           <Route path="/campaigns/:campaignId/map" element={<MapPage />} />
+          <Route path="/campaigns/:campaignId/survey" element={<CampaignSurveyPage />} />
+          <Route path="/campaigns/:campaignId/early-voting" element={<EarlyVotingPage />} />
+          <Route path="/campaigns/:campaignId/reports" element={<ClientReportsPage />} />
+          <Route path="/campaigns/:campaignId/reports/:id" element={<ClientReportBuilderPage />} />
           {/* Back-compat: old /dashboard/:id + flat routes redirect to the launchpad */}
           <Route path="/dashboard/:campaignId" element={<DashboardRedirect />} />
           <Route path="/efforts" element={<Navigate to="/campaigns" replace />} />
@@ -114,15 +119,15 @@ export default function App() {
           <Route path="/walklists" element={<Navigate to="/campaigns" replace />} />
           <Route path="/import" element={<Navigate to="/campaigns" replace />} />
           <Route path="/map" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/early-voting" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/admin/client-reports" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/admin/client-reports/:id" element={<Navigate to="/campaigns" replace />} />
           {/* Org-level screens */}
           <Route path="/queues" element={<QueuesPage />} />
-          <Route path="/early-voting" element={<EarlyVotingPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/voters" element={<VotersPage />} />
           <Route path="/voters/:voterId" element={<VoterDetailPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
-          <Route path="/admin/client-reports" element={<ClientReportsPage />} />
-          <Route path="/admin/client-reports/:id" element={<ClientReportBuilderPage />} />
           <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />
         </Route>
         <Route

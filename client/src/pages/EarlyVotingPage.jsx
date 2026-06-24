@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useParams, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
 function fmt(n) {
@@ -20,14 +22,13 @@ function Stat({ label, value, accent }) {
 export default function EarlyVotingPage() {
   const qc = useQueryClient();
   const orgTz = useOrgTimeZone();
-  const [campaignId, setCampaignId] = useState('');
+  const { campaignId } = useParams();
+  const { selected, isLoading: campaignLoading } = useCampaignSelection(campaignId);
   const [file, setFile] = useState(null);
   const [unmarkId, setUnmarkId] = useState('');
 
-  const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
-  const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
-  // Early-voting uploads belong to the selected campaign → show times in its tz (fallback org).
-  const tz = campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
+  // Early-voting uploads belong to this campaign → show times in its tz (fallback org).
+  const tz = selected?.timeZone || orgTz;
 
   const historyQ = useQuery({
     queryKey: ['voted', campaignId],
@@ -92,6 +93,8 @@ export default function EarlyVotingPage() {
   const pv = preview.data;
   const canApply = file && campaignId && pv && pv.willMark > 0 && !apply.isPending;
 
+  if (!campaignLoading && !selected) return <Navigate to="/campaigns" replace />;
+
   return (
     <div className="max-w-4xl">
       <h1 className="mb-2 text-2xl font-semibold">Early Voting</h1>
@@ -105,18 +108,11 @@ export default function EarlyVotingPage() {
         <div className="mb-4 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-muted">Campaign</label>
-            <select
-              value={campaignId}
-              onChange={(e) => { setCampaignId(e.target.value); setFile(null); preview.reset(); apply.reset(); }}
-              className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-            >
-              <option value="">— Choose a campaign —</option>
-              {campaigns.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.name} ({c.state} · {c.type === 'survey' ? 'Survey' : 'Lit drop'})
-                </option>
-              ))}
-            </select>
+            <div className="rounded border border-border bg-sunken px-3 py-2 text-sm text-fg">
+              {selected
+                ? `${selected.name} (${selected.state} · ${selected.type === 'survey' ? 'Survey' : 'Lit drop'})`
+                : 'Loading…'}
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-muted">Voted-voters CSV</label>

@@ -45,6 +45,34 @@ start seeing it.
 The Surveys list also shows, for each survey, **which campaigns use it** — so you can see at a
 glance whether a survey is live before you touch it.
 
+## The campaign's "Survey" tab (which survey this campaign uses)
+
+Each campaign has its own **Survey** tab (open a campaign, then **Survey** in the sidebar). It shows
+**which survey the campaign uses** and a **read-only preview** of it — the intro, the questions and
+their options, and the closing — so you can confirm the right questionnaire is attached without
+opening the builder. This tab is about **association, not authoring**: surveys stay reusable
+**org-level templates**, and you still write and edit the actual questions in the **Surveys
+library**.
+
+From here you can:
+
+- **Change survey** — pick a different template from your library for this campaign.
+- **Edit in library →** — jump to the Surveys page to edit the attached survey's questions.
+- **Create new** — open the builder pre-tagged to this campaign; when you save, the new survey is
+  **automatically attached** here and you land back on this tab.
+
+A few rules this tab enforces:
+
+- A **lit-drop campaign** shows a short "surveys aren't used for this campaign" note instead —
+  lit-drops record drops, not responses.
+- A **survey campaign can't activate a round until a survey is attached** — until then canvassers
+  have nothing to fill out.
+- **Swapping mid-canvass is allowed.** If you change to a different survey after answers have come
+  in, the old responses keep reporting under the old survey and new answers report under the new one
+  — nothing is lost or mixed. If the survey you pick **already has responses**, the tab warns you
+  that new answers will report **separately** from those.
+- There's **no "unlink"** — to stop using a survey you simply **change to a different one**.
+
 ## What a canvasser sees (mobile)
 
 At a voter, the canvasser opens the survey, reads the intro, answers the questions (required ones
@@ -196,7 +224,9 @@ recoverable even if a destructive change somehow lands (e.g. via a direct DB wri
 
 | File | Renders |
 |---|---|
-| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`); derives `key` from label with collision suffixes; shows `usedByCampaigns` + **response count**; when a survey has responses, locks destructive controls on existing questions and surfaces PATCH `409` reasons; **Duplicate** action per row. |
+| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`); derives `key` from label with collision suffixes; shows `usedByCampaigns` + **response count**; when a survey has responses, locks destructive controls on existing questions and surfaces PATCH `409` reasons; **Duplicate** action per row. Also the **auto-attach return loop**: a `?attachTo=<campaignId>` query param opens the create form pre-tagged to that campaign, then on save `PATCH /admin/campaigns/:attachTo { surveyTemplateId }` and `navigate('/campaigns/:attachTo/survey')` (cancel/back also returns there). |
+| [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`, route in [App.jsx](../client/src/App.jsx)). Pure **association** UI — no authoring. Three states: **attached** (header + `SurveyPreview` + **Change survey** / **Edit in library →**), **no survey yet** (Pick a survey / Create new → `?attachTo`), **lit-drop** (surveys-not-used note). Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }` (no server change — route pre-existed); warns when the chosen template has responses; unknown/wrong-org campaign → `Navigate('/campaigns')`. No standalone unlink. |
+| [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options shown as radio/checkbox glyphs, text questions as a free-text placeholder. No edit affordances (the builder's `QuestionCard` is module-local to `SurveysPage`). |
 | [client/src/pages/CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) | Survey-template dropdown shows a heads-up when the chosen survey already has responses (repointing reports new answers separately). |
 | [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results`. |
 | [client/src/components/CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx) | A canvasser's individual responses (shows template `version`). |

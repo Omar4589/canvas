@@ -41,7 +41,10 @@ These are two different things:
 
 ## How to use it (Early Voting page)
 
-1. Pick the **campaign**.
+Open a campaign and pick **Early Voting** from its sidebar — the campaign in the URL is the one you're
+uploading to (shown as a read-only label, no dropdown to pick).
+
+1. Confirm the **campaign** label matches the election you mean (switch campaigns from the sidebar if not).
 2. Choose your **voted-voters CSV** (any column that looks like a Voter ID is auto-detected). A
    **preview** runs immediately — no changes yet.
 3. The preview shows: **Will mark voted**, **Already voted** (skipped), **Doors that will drop**,
@@ -109,7 +112,8 @@ A 2-voter home, Jane and John, on Campaign A:
 
 End to end, from upload to what everyone sees:
 
-1. **Upload (admin).** On the Early Voting page, pick the campaign and choose the voted-voters CSV.
+1. **Upload (admin).** Drill into a campaign, open its **Early Voting** tab (the campaign comes from the
+   URL — no in-page picker), and choose the voted-voters CSV.
 2. **Preview — no writes.** `POST …/voted/preview` parses the CSV, auto-detects the Voter-ID column,
    matches voters **by `stateVoterId`** (org-wide) filtered to this campaign's households, and returns
    will-mark / already-voted / doors-that-will-drop / not-found (plus the unmatched IDs to download).
@@ -206,13 +210,18 @@ admin-only, campaign loaded/validated per request.
 
 ## E. Frontend mapping
 
-- **Web** — [pages/EarlyVotingPage.jsx](../client/src/pages/EarlyVotingPage.jsx): campaign picker,
-  CSV upload (auto-previews on pick), preview stats, **Mark these voters voted**, and the history
-  table (`Voters marked voted` / `Doors fully voted` + per-upload **Undo**). The preview, the apply
-  result, and a footnote under the history all explain that **"Not found" voters are saved** and
-  auto-marked if those voters are later imported into this campaign (the sticky behavior). Routed at
-  `/early-voting`, admin-only ([App.jsx](../client/src/App.jsx)), nav item in
-  [navItems.js](../client/src/components/navItems.js).
+- **Web** — [pages/EarlyVotingPage.jsx](../client/src/pages/EarlyVotingPage.jsx): a **per-campaign
+  screen in the campaign drill-in**. It reads `campaignId` from `useParams` (the URL *is* the active
+  campaign), so there's **no in-page campaign picker** — just a **read-only campaign label**; it
+  redirects to `/campaigns` if the campaign doesn't resolve. Then: CSV upload (auto-previews on pick),
+  preview stats, **Mark these voters voted**, and the history table (`Voters marked voted` /
+  `Doors fully voted` + per-upload **Undo**). The preview, the apply result, and a footnote under the
+  history all explain that **"Not found" voters are saved** and auto-marked if those voters are later
+  imported into this campaign (the sticky behavior). Routed at
+  **`/campaigns/:campaignId/early-voting`**, admin-only ([App.jsx](../client/src/App.jsx)); the old flat
+  `/early-voting` redirects to `/campaigns`. Reached from the **"Early Voting"** item in the
+  campaign-scoped sidebar (`CAMPAIGN_NAV`, slug `early-voting`, in
+  [navItems.js](../client/src/components/navItems.js)).
 - **Mobile** — bootstrap derives the per-voter `voted` flag and drops fully-voted doors (§D). The
   ✓ Voted badge renders in [map.jsx:1112](../mobile/app/(app)/map.jsx#L1112) and
   [household/[id].jsx:96](../mobile/app/(app)/household/[id].jsx#L96).

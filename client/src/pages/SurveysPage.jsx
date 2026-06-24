@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 
@@ -475,13 +476,36 @@ export default function SurveysPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [creating, setCreating] = useState(false);
 
+  // Auto-attach loop: the in-campaign Survey screen sends "Create new" here with
+  // ?attachTo=<campaignId>; we open the create form, then on save attach the new
+  // template to that campaign and return there (cancel/back returns too).
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const attachTo = searchParams.get('attachTo');
+  useEffect(() => {
+    if (attachTo) {
+      setSelectedId(null);
+      setCreating(true);
+    }
+  }, [attachTo]);
+
   const surveys = data?.surveys || [];
   const selected = surveys.find((s) => s._id === selectedId) || null;
 
   const create = useMutation({
     mutationFn: (body) => api('/admin/surveys', { method: 'POST', body }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       qc.invalidateQueries({ queryKey: ['surveys'] });
+      if (attachTo) {
+        try {
+          await api(`/admin/campaigns/${attachTo}`, { method: 'PATCH', body: { surveyTemplateId: res.survey._id } });
+          qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+        } catch {
+          /* survey is created; if the attach fails the campaign screen still lets them pick it */
+        }
+        navigate(`/campaigns/${attachTo}/survey`);
+        return;
+      }
       setCreating(false);
       setSelectedId(res.survey._id);
     },
@@ -504,6 +528,10 @@ export default function SurveysPage() {
   const isEditing = creating || !!selected;
 
   function closeEditor() {
+    if (attachTo) {
+      navigate(`/campaigns/${attachTo}/survey`);
+      return;
+    }
     setCreating(false);
     setSelectedId(null);
   }
