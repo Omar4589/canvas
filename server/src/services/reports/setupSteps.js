@@ -21,7 +21,7 @@ const STEP_DEFS = [
   {
     key: 'survey',
     label: 'Survey ready',
-    route: '/surveys',
+    route: '/survey',
     skipped: (campaign) => campaign.type === 'lit_drop',
     satisfied: (_counts, campaign) => Boolean(campaign.surveyTemplateId),
     value: (_c, campaign, status) =>
@@ -30,7 +30,7 @@ const STEP_DEFS = [
   {
     key: 'campaign',
     label: 'Campaign created',
-    route: '/campaigns',
+    route: null, // you're already in the campaign — no "View" that would exit the drill-in
     satisfied: () => true,
     value: (_c, campaign) => campaign.name,
   },
@@ -84,6 +84,7 @@ const STEP_DEFS = [
       return n > 0 ? `${n} assignment${n === 1 ? '' : 's'}` : 'None assigned';
     },
     warn: (counts) => ((counts.orgCanvassers || 0) === 0 ? 'No canvassers in this org yet' : null),
+    warnRoute: '/users', // org-level; the warning links here (with a ?return back to setup)
   },
   {
     key: 'roundActivated',
@@ -123,6 +124,7 @@ export function deriveSetupSteps({ campaign, counts = {} }) {
       value: def.value(counts, campaign, status),
       route: def.route,
       ...(warn ? { warn } : {}),
+      ...(warn && def.warnRoute ? { warnRoute: def.warnRoute } : {}),
     };
   });
 

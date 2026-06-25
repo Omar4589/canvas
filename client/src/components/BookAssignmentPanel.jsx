@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 
@@ -22,6 +23,7 @@ export default function BookAssignmentPanel({
   mergePending,
 }) {
   const qc = useQueryClient();
+  const location = useLocation();
   const single = books.length === 1;
   // Only published (accepted) books can be assigned — re-cutting would wipe drafts.
   const draftSelected = books.some((b) => b.status && b.status !== 'published');
@@ -193,7 +195,13 @@ export default function BookAssignmentPanel({
             <div className="py-6 text-center text-xs text-fg-muted">Loading…</div>
           ) : !members.length ? (
             <div className="rounded border border-dashed border-border bg-sunken px-3 py-4 text-center text-xs text-fg-muted">
-              No members in this org yet.
+              No members in this org yet.{' '}
+              <Link
+                to={`/users?return=${encodeURIComponent(location.pathname + location.search)}`}
+                className="font-medium text-brand-accent underline hover:no-underline"
+              >
+                Manage Users →
+              </Link>
             </div>
           ) : (
             <ul className="max-h-56 divide-y divide-border overflow-auto rounded-md border border-border">

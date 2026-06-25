@@ -230,7 +230,7 @@ export default function CampaignsPage() {
       const c = data?.campaign;
       if (c) {
         const id = c.id || c._id;
-        navigate(`/campaigns/${id}`); // land on the campaign home — SetupProgress shows what's next
+        navigate(`/campaigns/${id}`, { state: { justCreated: true } }); // land on the campaign home — SetupProgress shows what's next
       }
     },
   });

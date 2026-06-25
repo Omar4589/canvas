@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
@@ -10,6 +10,7 @@ import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import VoterHighlights from '../components/VoterHighlights.jsx';
 import SetupProgress from '../components/SetupProgress.jsx';
+import NextStepBanner from '../components/NextStepBanner.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 
@@ -34,6 +35,8 @@ function SectionHeading({ title, right }) {
 export default function DashboardPage() {
   const { campaignId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const justCreated = location.state?.justCreated; // set by CampaignsPage right after create
   const orgTz = useOrgTimeZone();
   // dateRange stays null until the campaign's timezone is known, so presets resolve in
   // the campaign's clock (not the device's) and range queries never fetch a device-tz window.
@@ -160,6 +163,10 @@ export default function DashboardPage() {
 
   const overview = overviewQ.data || {};
   const totals = overview.totals || {};
+  // A brand-new campaign (no voters imported) has nothing to report yet — keep the
+  // SetupProgress checklist front and center instead of a wall of empty widgets.
+  const hasDoors = (totals.households || 0) > 0;
+  const overviewReady = !overviewQ.isLoading && !overviewQ.error;
   const canvass = overview.canvass || {};
   const rangeStats = rollupQ.data?.cumulative || {};
   const isLitDrop = selectedCampaign?.type === 'lit_drop';
@@ -232,12 +239,34 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {justCreated && (
+        <NextStepBanner
+          tone="success"
+          title={`${current?.name || 'Campaign'} created.`}
+          className="mb-6"
+          action={{ label: 'Import voters', to: `/campaigns/${campaignId}/import` }}
+        >
+          Start with the checklist below — first up, import your voter file.
+        </NextStepBanner>
+      )}
       {current && current.isActive !== false && (
         <div className="mb-6">
           <SetupProgress campaignId={campaignId} />
         </div>
       )}
 
+      {overviewReady && !hasDoors ? (
+        <section className="mb-8">
+          <div className="rounded-lg border border-dashed border-border bg-sunken p-8 text-center">
+            <p className="text-sm font-medium text-fg">No data yet</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-fg-muted">
+              Coverage and live stats appear here once you import voters and canvassing starts. Use the
+              checklist above to get set up.
+            </p>
+          </div>
+        </section>
+      ) : (
+        <>
       {/* Activity — honors the selected date range */}
       <section className="mb-6">
         <SectionHeading
@@ -429,6 +458,8 @@ export default function DashboardPage() {
           />
         )}
       </section>
+        </>
+      )}
 
       {selectedCanvasser && (
         <CanvasserResponsesModal

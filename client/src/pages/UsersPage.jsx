@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import PasswordInput from '../components/PasswordInput.jsx';
@@ -55,6 +56,8 @@ function compareDate(a, b, key) {
 
 export default function UsersPage() {
   const qc = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('return'); // set when arriving from a campaign's setup flow
   const { data, isLoading } = useQuery({
     queryKey: ['memberships'],
     queryFn: () => api('/admin/memberships'),
@@ -158,10 +161,17 @@ export default function UsersPage() {
 
   return (
     <div>
+      {returnTo && (
+        <Link to={returnTo} className="mb-3 inline-block text-sm font-medium text-brand-accent hover:underline">
+          ‹ Back to setup
+        </Link>
+      )}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">Users</h1>
-          <p className="text-sm text-fg-muted">Members of this organization.</p>
+          <p className="text-sm text-fg-muted">
+            Members of this organization — the canvassers you assign books to. (Voter records live under Voters.)
+          </p>
         </div>
         <Button onClick={() => setShowForm((s) => !s)}>
           {!showForm && <span className="text-base leading-none">+</span>}

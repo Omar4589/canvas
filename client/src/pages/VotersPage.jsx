@@ -71,6 +71,7 @@ export default function VotersPage() {
         <h1 className="text-2xl font-semibold text-fg">Voters</h1>
         <p className="mt-1 text-sm text-fg-muted">
           Everyone in your organization's voter database. Click a voter to see their full profile.
+          (For canvassers — the people you assign books to — see <strong>Users</strong>.)
         </p>
       </div>
 

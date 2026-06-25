@@ -11,8 +11,9 @@ import { Card, Badge, Button, SkeletonRows } from './ui/index.js';
 // screen. Data comes from GET /admin/campaigns/:id/setup-status (refreshes as the
 // admin advances; mutations elsewhere invalidate ['admin','setup-status', id]).
 // Step routes that live under the campaign drill-in (/campaigns/:id/...); the rest
-// (/surveys, /campaigns) are org-level and link as-is.
-const CAMPAIGN_SCOPED = new Set(['/import', '/efforts', '/passes', '/turfs', '/walklists', '/map']);
+// (/surveys library, /campaigns, /users) are org-level and link as-is; '/survey' (singular)
+// is the in-campaign Survey tab.
+const CAMPAIGN_SCOPED = new Set(['/survey', '/import', '/efforts', '/passes', '/turfs', '/walklists', '/map']);
 
 const STATUS_BADGE = {
   done: { variant: 'success', dot: true, label: 'Done' },
@@ -128,12 +129,28 @@ export default function SetupProgress({ campaignId }) {
               </Badge>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-fg">{s.label}</div>
-                <div className="truncate text-xs text-fg-muted">
+                <div className="text-xs text-fg-muted">
                   {s.value}
-                  {s.warn ? <span className="text-warning-fg"> · {s.warn}</span> : null}
+                  {s.warn ? (
+                    <span className="text-warning-fg">
+                      {' · '}
+                      {s.warn}
+                      {s.warnRoute && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate(`${scopedRoute(s.warnRoute)}?return=${encodeURIComponent(`/campaigns/${campaignId}`)}`)
+                          }
+                          className="ml-1 font-medium underline hover:no-underline"
+                        >
+                          add on Users →
+                        </button>
+                      )}
+                    </span>
+                  ) : null}
                 </div>
               </div>
-              {s.status !== 'skipped' && (
+              {s.status !== 'skipped' && s.route && (
                 <Button size="sm" variant="secondary" onClick={() => go(s.route)} className="shrink-0">
                   {s.status === 'done' ? 'View' : 'Open'}
                 </Button>
