@@ -74,6 +74,8 @@ export default function ClientReportBuilderPage() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['admin', 'client-report', id] });
     queryClient.invalidateQueries({ queryKey: ['admin', 'client-report-preview', id] });
+    // Status changes (publish/unpublish/save) also refresh the campaign's reports list.
+    queryClient.invalidateQueries({ queryKey: ['admin', 'client-reports', campaignId] });
   };
   const flash = (m) => {
     setMsg(m);

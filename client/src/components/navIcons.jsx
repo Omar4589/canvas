@@ -200,6 +200,7 @@ export const NAV_ICONS = {
   '/walklists': IconList,
   '/campaigns': IconFlag,
   '/import': IconUpload,
+  '/efforts': IconLayers,
   '/early-voting': IconBallot,
   '/admin/client-reports': IconReport,
   '/users': IconUser,

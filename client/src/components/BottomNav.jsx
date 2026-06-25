@@ -119,7 +119,7 @@ export default function BottomNav() {
             </div>
 
             {inCampaign && (
-              <NavLink to="/campaigns" className={sheetLinkClass} onClick={close}>
+              <NavLink to="/campaigns" end className={sheetLinkClass} onClick={close}>
                 ‹ All campaigns
               </NavLink>
             )}
