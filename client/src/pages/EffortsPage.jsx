@@ -99,7 +99,7 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">Claim doors</div>
       <div className="flex flex-wrap items-center gap-2">
         <select value={walkListId} onChange={(e) => setWalkListId(e.target.value)} className={COMPACT}>
-          <option value="">From a walk list…</option>
+          <option value="">From a saved search…</option>
           {walkLists.map((w) => (
             <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>
           ))}
@@ -112,7 +112,7 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
       </div>
       <p className="mt-1.5 text-[11px] text-fg-muted">
         “Claim all Intake” takes <strong>every</strong> unowned door in the campaign — from any import. To add only this
-        effort’s doors, claim from a walk list.
+        walk list’s doors, claim from a saved search.
       </p>
       {confirmAll && (
         <Modal
@@ -135,14 +135,14 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
         >
           <p className="text-sm text-fg-muted">
             This claims all {intakeCount.toLocaleString()} unowned door(s) in the campaign into{' '}
-            <strong>{effort.name}</strong> — including any door not yet in an effort, from any import. If you only want
-            this effort’s specific doors (e.g. a precinct you just imported), cancel and claim from a walk list instead.
+            <strong>{effort.name}</strong> — including any door not yet in a walk list, from any import. If you only want
+            this walk list’s specific doors (e.g. a precinct you just imported), cancel and claim from a saved search instead.
           </p>
         </Modal>
       )}
       {claim.data && (
         <p className="mt-2 text-xs text-success-fg">
-          Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other efforts)` : ''}.{' '}
+          Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other walk lists)` : ''}.{' '}
           <Link to={`/campaigns/${campaignId}/passes?effortId=${effort._id}`} className="font-semibold underline">
             Create a round →
           </Link>
@@ -150,7 +150,7 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
       )}
       {owned && (
         <div className="mt-2 text-xs text-warning-fg">
-          {owned.conflicts} door(s) belong to another effort.{' '}
+          {owned.conflicts} door(s) belong to another walk list.{' '}
           <button onClick={() => claim.mutate({ body: { walkListId: walkListId || undefined, all: walkListId ? undefined : true, force: true } })} className="font-semibold underline">Move them here (re-carve)</button>
         </div>
       )}
@@ -283,17 +283,17 @@ export default function EffortsPage() {
 
   return (
     <div>
-      <h1 className="mb-5 text-2xl font-semibold tracking-tight text-fg">Efforts</h1>
+      <h1 className="mb-5 text-2xl font-semibold tracking-tight text-fg">Walk Lists</h1>
 
       <p className="mb-4 max-w-3xl text-sm text-fg-muted">
-        An effort is a parallel canvassing operation within a campaign — e.g. an area or a team. Each
-        effort owns a disjoint set of doors, an optional survey, and a roster, and has its own Passes
+        A walk list is a parallel canvassing operation within a campaign — e.g. an area or a team. Each
+        walk list owns a disjoint set of doors, an optional survey, and a roster, and has its own Passes
         (cut on the Turf Cutting page). Doors no one has claimed sit in <strong>Intake</strong>.
       </p>
 
       {campaignId && (
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <StatCard label="Efforts" value={efforts.length.toLocaleString()} />
+          <StatCard label="Walk Lists" value={efforts.length.toLocaleString()} />
           <StatCard label="Doors assigned" value={totalDoors.toLocaleString()} />
           <StatCard
             label="In Intake"
@@ -306,19 +306,19 @@ export default function EffortsPage() {
 
       {intakeCount > 0 && (
         <NextStepBanner tone="info" className="mb-4">
-          <strong>{intakeCount.toLocaleString()}</strong> door{intakeCount === 1 ? '' : 's'} in Intake (new addresses awaiting assignment). Open an effort below → <em>Claim all Intake</em> to assign them.
+          <strong>{intakeCount.toLocaleString()}</strong> door{intakeCount === 1 ? '' : 's'} in Intake (new addresses awaiting assignment). Open a walk list below → <em>Claim all Intake</em> to assign them.
         </NextStepBanner>
       )}
 
       <Card as="section" className="mb-6 p-5">
-        <h2 className="mb-3 text-base font-semibold text-fg">New effort</h2>
+        <h2 className="mb-3 text-base font-semibold text-fg">New walk list</h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
             <span className={fieldLabel}>Name</span>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="w-56" />
           </label>
           <label className="text-sm">
-            <span className={fieldLabel}>Seed door-set (walk list)</span>
+            <span className={fieldLabel}>Seed door-set (saved search)</span>
             <Select value={seedWalkListId} onChange={(e) => setSeedWalkListId(e.target.value)}>
               <option value="">None (claim doors later)</option>
               {walkLists.map((w) => <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>)}
@@ -334,18 +334,18 @@ export default function EffortsPage() {
             </label>
           )}
           <Button onClick={() => name && create.mutate()} disabled={!name} loading={create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create effort'}
+            {create.isPending ? 'Creating…' : 'Create walk list'}
           </Button>
         </div>
         {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
-        <p className="mt-2 text-xs text-fg-muted">Walk lists can be built from filters or an uploaded Voter-ID CSV (Walk Lists page). Seeding from either claims only that list's <em>unowned</em> doors; to move doors already in another effort, open the effort → Claim → Re-carve.</p>
+        <p className="mt-2 text-xs text-fg-muted">Saved searches can be built from filters or an uploaded Voter-ID CSV (Saved Searches page). Seeding from either claims only that list's <em>unowned</em> doors; to move doors already in another walk list, open the walk list → Claim → Re-carve.</p>
       </Card>
 
       <Card className="overflow-hidden">
         <table className="min-w-full text-sm">
           <thead className="sticky top-0 z-10 bg-sunken/90 text-[11px] font-semibold uppercase tracking-wider text-fg-muted backdrop-blur">
             <tr>
-              <th className="px-4 py-2 text-left">Effort</th>
+              <th className="px-4 py-2 text-left">Walk List</th>
               <th className="px-4 py-2 text-left">Status</th>
               <th className="px-4 py-2 text-right">Doors</th>
               <th className="px-4 py-2 text-right">Crew</th>
@@ -369,10 +369,10 @@ export default function EffortsPage() {
                 intakeCount={intakeCount}
                 onUpdate={(eff, body) => update.mutate({ id: eff._id, body })}
                 onArchive={(eff) => archive.mutate(eff._id)}
-                onDelete={(eff) => { if (window.confirm(`Delete effort "${eff.name}"? Its doors return to Intake.`)) del.mutate(eff._id); }}
+                onDelete={(eff) => { if (window.confirm(`Delete walk list "${eff.name}"? Its doors return to Intake.`)) del.mutate(eff._id); }}
               />
             ))}
-            {!efforts.length && <tr><td colSpan="8" className="px-4 py-6 text-center text-fg-muted">No efforts yet.</td></tr>}
+            {!efforts.length && <tr><td colSpan="8" className="px-4 py-6 text-center text-fg-muted">No walk lists yet.</td></tr>}
           </tbody>
         </table>
       </Card>

@@ -153,7 +153,7 @@ export default function WalkListsPage() {
   const opts = distinctQ.data || {};
 
   // Survey questions+options for the per-question answer filter (survey campaigns).
-  const campaign = campaigns.find((c) => String(c._id) === String(campaignId));
+  const campaign = selected;
   const surveyQ = useQuery({
     queryKey: ['reports', 'survey-results', campaignId],
     queryFn: () => api(`/admin/reports/survey-results?campaignId=${campaignId}`),
@@ -235,13 +235,13 @@ export default function WalkListsPage() {
 
   return (
     <div>
-      <h1 className="mb-5 text-2xl font-semibold">Walk Lists</h1>
+      <h1 className="mb-5 text-2xl font-semibold">Saved Searches</h1>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
         {/* Builder */}
         <section className="rounded-lg border border-border bg-card p-5">
-          <h2 className="mb-1 text-base font-medium">Build a list</h2>
-          <p className="mb-3 text-xs text-fg-muted">Build from demographic/geographic filters, or upload a CSV of Voter IDs. Saved lists are frozen snapshots.</p>
+          <h2 className="mb-1 text-base font-medium">Build a saved search</h2>
+          <p className="mb-3 text-xs text-fg-muted">Build from demographic/geographic filters, or upload a CSV of Voter IDs. Saved searches are frozen snapshots.</p>
 
           <div className="mb-4 inline-flex rounded-md border border-border-strong p-0.5 text-sm">
             {[['filter', 'Filter builder'], ['csv', 'Upload CSV']].map(([m, label]) => (
@@ -355,9 +355,9 @@ export default function WalkListsPage() {
           </div>
 
           <div className="mt-4 flex items-center gap-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. Undecideds R1)" className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Saved search name (e.g. Undecideds R1)" className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
             <button onClick={() => name && save.mutate()} disabled={!name || save.isPending} className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
-              {save.isPending ? 'Saving…' : 'Save list'}
+              {save.isPending ? 'Saving…' : 'Save search'}
             </button>
             <button onClick={() => { setF(EMPTY); preview.reset(); }} className="text-xs text-fg-muted hover:underline">Reset</button>
           </div>
@@ -371,7 +371,7 @@ export default function WalkListsPage() {
             <div>
               <p className="mb-3 text-xs text-fg-muted">
                 Upload a CSV of Voter IDs (any column that looks like a Voter ID is auto-detected). We match them to
-                this campaign's voters and freeze the doors they live at into a list. A door joins the list if <em>any</em> of
+                this campaign's voters and freeze the doors they live at into a saved search. A door joins the saved search if <em>any</em> of
                 its voters is in your file — claiming the door later moves <em>all</em> voters there. IDs not yet imported
                 into this campaign won't match.
               </p>
@@ -421,9 +421,9 @@ export default function WalkListsPage() {
                   </div>
                   {csvPreview.data.ownedDoors > 0 && (
                     <div className="mt-3 rounded border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
-                      <strong>{csvPreview.data.ownedDoors.toLocaleString()}</strong> of these doors are already in another effort
+                      <strong>{csvPreview.data.ownedDoors.toLocaleString()}</strong> of these doors are already in another walk list
                       {csvPreview.data.ownedByEffort?.length ? ` (${csvPreview.data.ownedByEffort.map((o) => `${o.name}: ${o.count}`).join(', ')})` : ''}.
-                      You can still save this list — but claiming it into an effort will ask you to move (re-carve) those doors.
+                      You can still save this saved search — but claiming it into a walk list will ask you to move (re-carve) those doors.
                     </div>
                   )}
                   {csvPreview.data.noCoordinates > 0 && (
@@ -438,13 +438,13 @@ export default function WalkListsPage() {
               )}
 
               <div className="mt-4 flex items-center gap-2">
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="List name (e.g. First-election voters)" className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Saved search name (e.g. First-election voters)" className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
                 <button
                   onClick={() => name && csvFile && csvSave.mutate({ file: csvFile, name, idColumn: idColumn || undefined })}
                   disabled={!name || !csvFile || !csvPreview.data?.householdCount || csvSave.isPending}
                   className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
                 >
-                  {csvSave.isPending ? 'Saving…' : 'Save list'}
+                  {csvSave.isPending ? 'Saving…' : 'Save search'}
                 </button>
               </div>
               {csvSave.error && <div className="mt-2 text-xs text-danger">{csvSave.error.message}</div>}
@@ -454,7 +454,7 @@ export default function WalkListsPage() {
 
         {/* Saved lists */}
         <section className="rounded-lg border border-border bg-card p-5">
-          <h2 className="mb-3 text-base font-medium">Saved lists</h2>
+          <h2 className="mb-3 text-base font-medium">Saved searches</h2>
           {listsQ.isLoading ? (
             <div className="text-sm text-fg-muted">Loading…</div>
           ) : !lists.length ? (

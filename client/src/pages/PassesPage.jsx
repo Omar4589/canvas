@@ -237,9 +237,9 @@ export default function PassesPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-fg">Passes</h1>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">Effort</span>
+            <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">Walk list</span>
             <Select value={effortId} onChange={(e) => setEffortId(e.target.value)} className="py-1">
-              <option value="">Choose an effort…</option>
+              <option value="">Choose a walk list…</option>
               {efforts.map((ef) => <option key={ef._id} value={ef._id}>{ef.name}</option>)}
             </Select>
           </label>
@@ -272,7 +272,7 @@ export default function PassesPage() {
         </div>
         {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
         <p className="mt-2 text-xs text-fg-muted">
-          Passes belong to the selected effort. Create a pass → cut its books on the Turf Cutting page → Activate it here. Passes are one-way (draft → active → archived); each effort can have one active pass.
+          Passes belong to the selected walk list. Create a pass → cut its books on the Turf Cutting page → Activate it here. Passes are one-way (draft → active → archived); each walk list can have one active pass.
         </p>
       </Card>
 

@@ -42,7 +42,7 @@ async function loadEffort(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid effortId' });
     const effort = await Effort.findOne({ _id: req.params.id, campaignId: req.campaign._id });
-    if (!effort) return res.status(404).json({ error: 'Effort not found' });
+    if (!effort) return res.status(404).json({ error: 'Walk list not found' });
     req.effort = effort;
     next();
   } catch (err) {
@@ -215,7 +215,7 @@ router.post('/:id/claim', loadEffort, async (req, res, next) => {
     if (walkListId) {
       if (!mongoose.isValidObjectId(walkListId)) return res.status(400).json({ error: 'Invalid walkListId' });
       const wl = await WalkList.findOne({ _id: walkListId, campaignId: cId }, { householdIds: 1 }).lean();
-      if (!wl) return res.status(404).json({ error: 'Walk list not found' });
+      if (!wl) return res.status(404).json({ error: 'Saved search not found' });
       idFilter = { _id: { $in: wl.householdIds || [] } };
     } else if (all) {
       idFilter = { effortId: null }; // Intake (unowned) doors only — never another effort's doors
@@ -380,7 +380,7 @@ router.delete('/:id', loadEffort, async (req, res, next) => {
   try {
     const liveRounds = await Pass.countDocuments({ effortId: req.effort._id, status: { $ne: 'draft' } });
     if (liveRounds) {
-      return res.status(400).json({ error: 'Effort has active/archived rounds; archive it instead of deleting.' });
+      return res.status(400).json({ error: 'Walk list has active/archived rounds; archive it instead of deleting.' });
     }
     await Household.updateMany({ campaignId: req.campaign._id, effortId: req.effort._id }, { $set: { effortId: null, turfId: null, walkOrder: null } });
     // Remove the effort's (draft) rounds AND their books + assignments so nothing dangles.

@@ -88,7 +88,7 @@ export default function MapPage() {
   let scopeLabel = null;
   if (scopeEffortId) {
     const e = (scopeEffortsQ.data?.efforts || []).find((x) => String(x._id) === scopeEffortId);
-    scopeLabel = e ? e.name : 'Effort';
+    scopeLabel = e ? e.name : 'Walk list';
   } else if (scopePassId) {
     const p = (scopePassesQ.data?.passes || []).find((x) => String(x._id) === scopePassId);
     scopeLabel = p ? `Pass ${p.roundNumber} · ${p.name}` : 'Pass';

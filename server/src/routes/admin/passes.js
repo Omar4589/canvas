@@ -79,7 +79,7 @@ router.post('/', async (req, res, next) => {
     if (!name) return res.status(400).json({ error: 'name is required' });
     if (!mongoose.isValidObjectId(effortId)) return res.status(400).json({ error: 'effortId is required' });
     const effort = await Effort.findOne({ _id: effortId, campaignId: req.campaign._id }).select('_id').lean();
-    if (!effort) return res.status(404).json({ error: 'Effort not found' });
+    if (!effort) return res.status(404).json({ error: 'Walk list not found' });
     let pass;
     for (let attempt = 0; attempt < 5 && !pass; attempt += 1) {
       const last = await Pass.findOne({ effortId }).sort({ roundNumber: -1 }).select('roundNumber').lean();

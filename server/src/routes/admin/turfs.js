@@ -20,6 +20,7 @@ import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
+import { ensureCampaignAssignments } from '../../services/campaignRoster.js';
 import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
 
 const router = Router({ mergeParams: true });
@@ -129,6 +130,8 @@ router.post('/assign-bulk', async (req, res, next) => {
       );
       assignments += 1;
     }
+    // Books given → make sure those users are on the campaign roster (gates mobile visibility).
+    await ensureCampaignAssignments(req.campaign._id, validUsers, orgId, req.user._id);
     res.json({ books: turfs.length, users: validUsers.length, assignments, mode: ['everyone', 'balance'].includes(mode) ? mode : 'distribute', replaced: !!replace });
   } catch (err) {
     next(err);
@@ -157,7 +160,7 @@ router.post('/generate', async (req, res, next) => {
     });
     if (doorCount === 0) {
       return res.status(400).json({
-        error: 'This effort owns no mappable doors yet. Claim doors into the effort (Efforts page) before cutting books.',
+        error: 'This walk list owns no mappable doors yet. Claim doors into the walk list (Walk Lists page) before cutting books.',
         code: 'no-doors',
       });
     }
@@ -834,7 +837,7 @@ router.post('/move-door', async (req, res, next) => {
     const movingHh = await Household.findOne({ _id: householdId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!movingHh) return res.status(404).json({ error: 'Household not found' });
     if (String(movingHh.effortId) !== String(toPass.effortId)) {
-      return res.status(409).json({ error: 'That door belongs to a different effort and cannot be moved into this book.' });
+      return res.status(409).json({ error: 'That door belongs to a different walk list and cannot be moved into this book.' });
     }
 
     const fromQuery = mongoose.isValidObjectId(fromTurfId)

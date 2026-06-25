@@ -412,7 +412,7 @@ export default function CampaignsPage() {
         >
           <p className="text-sm text-fg-muted">
             This permanently removes the campaign along with its {fmt(deleting.counts?.households)} doors and their
-            voters, plus any efforts and draft rounds. This can't be undone. Campaigns with canvassing activity
+            voters, plus any walk lists and draft rounds. This can't be undone. Campaigns with canvassing activity
             can't be deleted — archive them instead.
           </p>
           {del.error && <p className="mt-2 text-sm text-danger">{del.error.message}</p>}

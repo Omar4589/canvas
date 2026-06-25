@@ -23,6 +23,7 @@ const VoterDetailPage = lazy(() => import('./pages/VoterDetailPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
 const CampaignSurveyPage = lazy(() => import('./pages/CampaignSurveyPage.jsx'));
+const CampaignTeamPage = lazy(() => import('./pages/CampaignTeamPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
 const TurfsPage = lazy(() => import('./pages/TurfsPage.jsx'));
 const PassesPage = lazy(() => import('./pages/PassesPage.jsx'));
@@ -108,6 +109,7 @@ export default function App() {
           <Route path="/campaigns/:campaignId/import" element={<ImportPage />} />
           <Route path="/campaigns/:campaignId/map" element={<MapPage />} />
           <Route path="/campaigns/:campaignId/survey" element={<CampaignSurveyPage />} />
+          <Route path="/campaigns/:campaignId/team" element={<CampaignTeamPage />} />
           <Route path="/campaigns/:campaignId/early-voting" element={<EarlyVotingPage />} />
           <Route path="/campaigns/:campaignId/reports" element={<ClientReportsPage />} />
           <Route path="/campaigns/:campaignId/reports/:id" element={<ClientReportBuilderPage />} />

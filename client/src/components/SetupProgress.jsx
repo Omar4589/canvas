@@ -64,9 +64,9 @@ export default function SetupProgress({ campaignId }) {
       return (
         <NextStepBanner
           tone="info"
-          action={{ label: 'Go to Efforts', to: `/campaigns/${campaignId}/efforts` }}
+          action={{ label: 'Go to Walk Lists', to: `/campaigns/${campaignId}/efforts` }}
         >
-          {effortsNeedingSetup} effort{effortsNeedingSetup === 1 ? '' : 's'} still need setup — claim doors, cut books, assign, and activate.
+          {effortsNeedingSetup} walk list{effortsNeedingSetup === 1 ? '' : 's'} still need setup — claim doors, cut books, assign, and activate.
         </NextStepBanner>
       );
     }

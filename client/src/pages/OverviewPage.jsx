@@ -245,7 +245,7 @@ export default function OverviewPage() {
               <div className="rounded-lg border border-dashed border-border bg-sunken">
                 <EmptyState
                   title="No campaigns yet"
-                  hint="Create a campaign, import voters, claim doors into an effort, cut books, assign canvassers, and go live — each campaign's dashboard walks you through every step."
+                  hint="Create a campaign, import voters, claim doors into a walk list, cut books, assign canvassers, and go live — each campaign's dashboard walks you through every step."
                   action={
                     <Button variant="primary" onClick={() => navigate('/campaigns')}>
                       Create a campaign

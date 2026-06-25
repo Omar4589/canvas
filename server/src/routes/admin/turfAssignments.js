@@ -5,6 +5,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Membership } from '../../models/Membership.js';
+import { ensureCampaignAssignments } from '../../services/campaignRoster.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -75,6 +76,8 @@ router.post('/', async (req, res, next) => {
       );
       created.push(a);
     }
+    // Book given → make sure they're on the campaign roster (gates mobile visibility).
+    await ensureCampaignAssignments(req.turf.campaignId, created.map((a) => a.userId), orgId, req.user._id);
     res.status(201).json({ assignments: created });
   } catch (err) {
     next(err);

@@ -19,6 +19,13 @@ function fmt(n) {
 // `value(...)` returns the human display string for the current data.
 const STEP_DEFS = [
   {
+    key: 'campaign',
+    label: 'Campaign created',
+    route: null, // you're already in the campaign — no "View" that would exit the drill-in
+    satisfied: () => true,
+    value: (_c, campaign) => campaign.name,
+  },
+  {
     key: 'survey',
     label: 'Survey ready',
     route: '/survey',
@@ -26,13 +33,6 @@ const STEP_DEFS = [
     satisfied: (_counts, campaign) => Boolean(campaign.surveyTemplateId),
     value: (_c, campaign, status) =>
       status === 'skipped' ? 'Not needed (lit drop)' : campaign.surveyTemplateId ? 'Survey linked' : 'Pick a survey',
-  },
-  {
-    key: 'campaign',
-    label: 'Campaign created',
-    route: null, // you're already in the campaign — no "View" that would exit the drill-in
-    satisfied: () => true,
-    value: (_c, campaign) => campaign.name,
   },
   {
     key: 'voters',
@@ -43,7 +43,7 @@ const STEP_DEFS = [
   },
   {
     key: 'doorsOwned',
-    label: 'Doors in an effort',
+    label: 'Doors in a walk list',
     route: '/efforts',
     satisfied: (counts) => (counts.ownedDoors || 0) > 0,
     value: (counts) => {

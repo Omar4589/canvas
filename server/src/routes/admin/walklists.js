@@ -241,7 +241,7 @@ router.get('/:id', async (req, res, next) => {
       { _id: req.params.id, campaignId: req.campaign._id },
       { householdIds: 0, voterIds: 0 }
     ).lean();
-    if (!walkList) return res.status(404).json({ error: 'Walk list not found' });
+    if (!walkList) return res.status(404).json({ error: 'Saved search not found' });
     res.json({ walkList });
   } catch (err) {
     next(err);

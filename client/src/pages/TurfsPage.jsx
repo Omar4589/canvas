@@ -232,7 +232,7 @@ function PassPicker({ campaignId, passId, onChange }) {
         {!passes.length && <option value="">No passes</option>}
         {passes.map((p) => (
           <option key={p._id} value={p._id}>
-            {effortName.get(String(p.effortId)) || 'Effort'} · Pass {p.roundNumber} · {p.name} ({p.status})
+            {effortName.get(String(p.effortId)) || 'Walk list'} · Pass {p.roundNumber} · {p.name} ({p.status})
           </option>
         ))}
       </select>
@@ -587,7 +587,7 @@ export default function TurfsPage() {
   });
   // "{Effort} · Round N" — named in the Discard dialog so you can't wipe the wrong effort blind.
   const selectedEffort = (effortsQ.data?.efforts || []).find((e) => String(e._id) === String(selectedPass?.effortId)) || null;
-  const passLabel = selectedPass ? `${selectedEffort?.name || 'Effort'} · Round ${selectedPass.roundNumber}` : '';
+  const passLabel = selectedPass ? `${selectedEffort?.name || 'Walk list'} · Round ${selectedPass.roundNumber}` : '';
 
   // Targeted-round filter: the effort's survey questions (for answer chips) + a live count.
   const campaign = campaigns.find((c) => String(c._id) === String(campaignId)) || null;
@@ -1268,9 +1268,9 @@ export default function TurfsPage() {
             <NextStepBanner
               tone="warning"
               className="mt-3"
-              action={{ label: 'Go to Efforts', to: `/campaigns/${campaignId}/efforts` }}
+              action={{ label: 'Go to Walk Lists', to: `/campaigns/${campaignId}/efforts` }}
             >
-              This effort owns no mappable doors yet. Claim doors into it on the Efforts page before cutting books.
+              This walk list owns no mappable doors yet. Claim doors into it on the Walk Lists page before cutting books.
             </NextStepBanner>
           )}
           {!hasNoDoors && votedDoorCount > 0 && (
@@ -1332,7 +1332,7 @@ export default function TurfsPage() {
                 <div className="mt-1 text-danger">{addSupplemental.error.message}</div>
               )}
               {addSupplemental.data?.added === 0 && (
-                <div className="mt-1 text-info-fg">No eligible doors to add (walk-list passes only include their saved list).</div>
+                <div className="mt-1 text-info-fg">No eligible doors to add (saved-search passes only include their saved list).</div>
               )}
             </div>
           )}

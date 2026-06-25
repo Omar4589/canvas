@@ -251,7 +251,7 @@ export default function ImportPage() {
     queryFn: () => api(`/admin/imports?campaignId=${campaignId}`),
     refetchInterval: (q) => {
       const jobs = q.state.data?.jobs || [];
-      return jobs.some((j) => j.status === 'pending' || j.status === 'parsing') ? 1500 : false;
+      return jobs.some((j) => j.status === 'pending' || j.status === 'parsing' || j.status === 'geocoding') ? 1500 : false;
     },
   });
   const workerStatusQ = useQuery({
@@ -494,13 +494,13 @@ export default function ImportPage() {
         <div className="mb-4 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-muted">Campaign</label>
-            <div className="rounded border border-border bg-sunken px-3 py-2 text-sm text-fg">
+            <p className="py-2 text-sm font-semibold text-fg">
               {campaign
                 ? `${campaign.name} (${campaign.state} · ${campaign.type === 'survey' ? 'Survey' : 'Lit drop'})`
                 : campaignsQ.isLoading
                   ? 'Loading…'
                   : 'Unknown campaign'}
-            </div>
+            </p>
           </div>
 
           <div>
@@ -671,11 +671,11 @@ export default function ImportPage() {
             title="Import queued — processing in the background."
             action={
               justImported
-                ? { label: 'Go to Efforts', to: `/campaigns/${justImported}/efforts` }
+                ? { label: 'Go to Walk Lists', to: `/campaigns/${justImported}/efforts` }
                 : null
             }
           >
-            New addresses land in Intake until an effort claims them.
+            New addresses land in Intake until a walk list claims them.
           </NextStepBanner>
         )}
       </section>

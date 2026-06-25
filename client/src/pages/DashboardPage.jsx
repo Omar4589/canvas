@@ -214,10 +214,10 @@ export default function DashboardPage() {
             <select
               value={effortId}
               onChange={(e) => setEffortId(e.target.value)}
-              title="Filter to one effort"
+              title="Filter to one walk list"
               className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
-              <option value="">All efforts</option>
+              <option value="">All walk lists</option>
               {efforts.map((ef) => (
                 <option key={ef._id} value={ef._id}>{ef.name}</option>
               ))}
