@@ -172,5 +172,33 @@ export async function generateReportPdf(report, { campaignName = '', orgName = '
     });
   }
 
+  // ── What these numbers mean (the PDF can't show the on-screen "(i)" tooltips, so list the
+  //    same definitions here — same `help` strings from reportDerive, single source of truth) ──
+  const defs = [];
+  for (const k of sections.kpis) if (k.help) defs.push([k.label, k.help]);
+  if (sections.contact?.help) defs.push([sections.contact.title, sections.contact.help]);
+  for (const it of sections.contact?.items || []) if (it.help) defs.push([it.label, it.help]);
+  if (defs.length) {
+    y += 4;
+    ensure(34);
+    setFont(10.5, 'bold', GRAY);
+    doc.text('WHAT THESE NUMBERS MEAN', MARGIN, y);
+    y += 16;
+    defs.forEach(([term, desc]) => {
+      const lines = doc.splitTextToSize(String(desc), contentW);
+      ensure(15 + lines.length * 12);
+      setFont(9.5, 'bold', DARK);
+      doc.text(String(term), MARGIN, y);
+      y += 13;
+      setFont(9, 'normal', GRAY);
+      lines.forEach((ln) => {
+        ensure(12);
+        doc.text(ln, MARGIN, y);
+        y += 12;
+      });
+      y += 6;
+    });
+  }
+
   doc.save(`weekly-report-${report.weekEnd || 'export'}.pdf`);
 }

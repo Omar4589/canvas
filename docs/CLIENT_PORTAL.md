@@ -136,6 +136,22 @@ a snapshot is reproducible and can't drift. It reuses the shared knock primitive
 - **cumulative** = `{ $lt: rangeEndUtc }` (everything through the week's end).
 - **period** = `{ $gte: rangeStartUtc, $lt: rangeEndUtc }` (just the week).
 
+**Voter-contact breakdown is a DOOR-OUTCOME breakdown, not a raw-event count.** `contactBreakdown`
+collapses each `(household, pass)` to its single resolved outcome via
+`resolveStatus(campaignType, acts)` ([statusPrecedence.js](../server/src/utils/statusPrecedence.js)) —
+the same per-door-per-round unit as `knocksPipeline`. So the bar **sums exactly to
+`totals.doorsKnocked`**, and `contactBreakdown.surveyed === totals.surveyedKnocks` (the connection-rate
+numerator). A door knocked by two canvassers in the same round (an "overlap") is **one** knock with
+**one** outcome here, even though it has two `CanvassActivity` rows — matching how Doors knocked counts
+it (see [METRICS.md](METRICS.md) §overlaps). This is why the breakdown's **"Surveyed" (doors)** can be
+below the **"Surveys taken"** KPI: a home with two voters surveyed in one visit is **1 surveyed door
+but 2 surveys**. (Before this fix the breakdown counted raw activity events, so overlaps made it
+over-count and the bar didn't tie to Doors knocked.) The client labels are local to
+[reportDerive.js](../client/src/lib/reportDerive.js) (`CONTACT_LABELS`: "Surveyed" / "Didn't answer" /
+"Wrong address"), separate from the admin coverage bar's `STATUS_LABELS`. Each KPI and breakdown row
+carries a plain-language `help` string surfaced as an on-screen "(i)" tooltip (`InfoHint`) and a
+"What these numbers mean" section in the PDF.
+
 Survey/support breakdowns use the **per-question** denominator (each option's percent = count ÷ that
 question's own answer total), and `ReportBreakdown` rounds them to total exactly 100% — see
 [SURVEYS.md](SURVEYS.md).

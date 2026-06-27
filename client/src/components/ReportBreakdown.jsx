@@ -1,4 +1,5 @@
 import Card from './ui/Card.jsx';
+import InfoHint from './InfoHint.jsx';
 import { percentsTo100 } from '../lib/percent.js';
 
 // A labeled breakdown (support / survey-answer / voter-contact) on a client report. items:
@@ -21,6 +22,7 @@ function Legend({ items, percents }) {
               style={i.color ? { backgroundColor: i.color } : undefined}
             />
             {i.label}
+            {i.help && <InfoHint label={`What "${i.label}" counts`}>{i.help}</InfoHint>}
           </span>
           <span className="tabular-nums font-semibold text-fg">
             {(i.count || 0).toLocaleString()}
@@ -69,6 +71,7 @@ function Bars({ items, percents }) {
                 />
               )}
               {i.label}
+              {i.help && <InfoHint label={`What "${i.label}" counts`}>{i.help}</InfoHint>}
             </span>
             <span className="tabular-nums font-semibold text-fg">
               {(i.count || 0).toLocaleString()}
@@ -90,14 +93,17 @@ function Bars({ items, percents }) {
   );
 }
 
-export default function ReportBreakdown({ title, subtitle, items = [], emphasis = false, variant = 'bars' }) {
+export default function ReportBreakdown({ title, subtitle, help, items = [], emphasis = false, variant = 'bars' }) {
   const percents = percentsTo100(items.map((i) => i.count || 0));
   const total = items.reduce((s, i) => s + (i.count || 0), 0);
   const isEmpty = items.length === 0 || total === 0;
   return (
     <Card className={emphasis ? 'p-5 ring-1 ring-brand-600/30' : 'p-4'}>
       <div className="mb-3">
-        <div className="text-sm font-semibold text-fg">{title}</div>
+        <div className="flex items-center gap-1 text-sm font-semibold text-fg">
+          <span>{title}</span>
+          {help && <InfoHint label={`About ${title}`}>{help}</InfoHint>}
+        </div>
         {subtitle && <div className="mt-0.5 text-xs text-fg-muted">{subtitle}</div>}
       </div>
       {isEmpty ? (

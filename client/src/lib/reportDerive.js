@@ -16,6 +16,36 @@ export function contactOrderFor(type) {
   return ['surveyed', 'not_home', 'wrong_address', 'lit_dropped'];
 }
 
+// Client-facing, plain-language labels for the voter-contact breakdown. Deliberately local to the
+// client report (NOT the shared STATUS_LABELS used by the admin coverage bar): this is a DOOR-OUTCOME
+// breakdown that sums to "Doors knocked", so "Didn't answer" reads clearer than "Not home" for a client.
+const CONTACT_LABELS = {
+  surveyed: 'Surveyed',
+  not_home: "Didn't answer",
+  wrong_address: 'Wrong address',
+  lit_dropped: 'Lit dropped',
+};
+
+// "(i)" tooltip copy, so anyone reading the report knows exactly what each number counts — and why
+// door-level "Surveyed" can differ from the "Surveys taken" / "Voters surveyed" KPIs.
+const CONTACT_SECTION_HELP =
+  'Every door we knocked falls into exactly one outcome, so these add up to "Doors knocked".';
+const CONTACT_HELP = {
+  surveyed: 'Doors where we completed at least one survey. A home with two voters surveyed in one visit is one surveyed door but two "Surveys taken".',
+  not_home: 'Doors where no one answered.',
+  wrong_address: 'Doors that turned out to be a wrong or bad address.',
+  lit_dropped: 'Doors where we dropped literature.',
+};
+const KPI_HELP = {
+  doorsKnocked: 'Every door we knocked, counted once per round. Going back in a later round counts again. This is the billable number.',
+  surveysTaken: 'Total survey forms collected — one per voter per round. A home with two voters surveyed in one visit counts as two surveys.',
+  surveyedVoters: 'How many distinct people we surveyed — not how many forms were filled out.',
+  litDropped: 'Doors where we dropped literature, counted once per door per round.',
+  homesKnocked: 'Distinct homes we have reached at least once (a home counts once no matter how many rounds).',
+  surveyRate: 'Of the doors we knocked, the share where we completed at least one survey.',
+  litRate: 'Of the doors we knocked, the share where we dropped literature.',
+};
+
 // Best-effort color for common support categories so the headline breakdown reads at a glance.
 // These are literal hexes on purpose — they also feed jsPDF's RGB API directly (it can't read CSS
 // tokens), and they read well on both light and dark.
@@ -41,6 +71,7 @@ function deriveKpis({ isLit, t, d }) {
     delta: d.doorsKnocked || 0,
     deltaZeroText: 'No new doors this week',
     hint: null,
+    help: KPI_HELP.doorsKnocked,
   };
   const rate = {
     key: 'rate',
@@ -50,19 +81,20 @@ function deriveKpis({ isLit, t, d }) {
     delta: null,
     deltaZeroText: null,
     hint: isLit ? 'Lit drops per door knocked' : 'Surveys per door knocked',
+    help: isLit ? KPI_HELP.litRate : KPI_HELP.surveyRate,
   };
   if (isLit) {
     return [
       doors,
-      { key: 'litKnocks', label: 'Lit dropped', value: formatCount(t.litKnocks), accent: 'green', delta: d.litKnocks || 0, deltaZeroText: 'No new lit this week', hint: null },
-      { key: 'homesKnocked', label: 'Homes knocked', value: formatCount(t.homesKnocked), accent: 'blue', delta: d.homesKnocked || 0, deltaZeroText: 'No change this week', hint: null },
+      { key: 'litKnocks', label: 'Lit dropped', value: formatCount(t.litKnocks), accent: 'green', delta: d.litKnocks || 0, deltaZeroText: 'No new lit this week', hint: null, help: KPI_HELP.litDropped },
+      { key: 'homesKnocked', label: 'Homes knocked', value: formatCount(t.homesKnocked), accent: 'blue', delta: d.homesKnocked || 0, deltaZeroText: 'No change this week', hint: null, help: KPI_HELP.homesKnocked },
       rate,
     ];
   }
   return [
     doors,
-    { key: 'surveysTaken', label: 'Surveys taken', value: formatCount(t.surveysTaken), accent: 'green', delta: d.surveysTaken || 0, deltaZeroText: 'No new surveys this week', hint: null },
-    { key: 'surveyedVoters', label: 'Voters surveyed', value: formatCount(t.surveyedVoters), accent: 'blue', delta: d.surveyedVoters || 0, deltaZeroText: 'No change this week', hint: null },
+    { key: 'surveysTaken', label: 'Surveys taken', value: formatCount(t.surveysTaken), accent: 'green', delta: d.surveysTaken || 0, deltaZeroText: 'No new surveys this week', hint: null, help: KPI_HELP.surveysTaken },
+    { key: 'surveyedVoters', label: 'Voters surveyed', value: formatCount(t.surveyedVoters), accent: 'blue', delta: d.surveyedVoters || 0, deltaZeroText: 'No change this week', hint: null, help: KPI_HELP.surveyedVoters },
     rate,
   ];
 }
@@ -84,10 +116,12 @@ export function deriveReportSections(report) {
   const contact = {
     title: 'Voter contact breakdown',
     subtitle: 'Outcomes across all doors knocked',
+    help: CONTACT_SECTION_HELP,
     items: contactOrder.map((k) => ({
-      label: STATUS_LABELS[k] || k,
+      label: CONTACT_LABELS[k] || STATUS_LABELS[k] || k,
       count: contactRaw[k] || 0,
       color: STATUS_COLORS[k],
+      help: CONTACT_HELP[k],
     })),
   };
 

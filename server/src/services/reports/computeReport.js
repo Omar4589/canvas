@@ -80,6 +80,7 @@ export async function computeWindowStats({
   campaignId,
   effortId = null,
   range,
+  campaignType = null,
   template = null,
   supportQuestionKey = null,
 }) {
@@ -87,11 +88,23 @@ export async function computeWindowStats({
   const actMatch = { ...scope, ...dateMatch('timestamp', range) };
   const surveyScopeMatch = { ...scope, ...dateMatch('submittedAt', range) };
 
-  const [knockAgg, eventAgg, surveysTaken, surveyedVoterIds, distinctHomes] = await Promise.all([
+  const [knockAgg, knockGroups, surveysTaken, surveyedVoterIds, distinctHomes] = await Promise.all([
     CanvassActivity.aggregate(knocksPipeline(actMatch)),
+    // Contact breakdown is a DOOR-OUTCOME breakdown, not a raw-event count: collapse each
+    // (household, pass) to its single resolved outcome (the same resolveStatus the live app uses
+    // for door status), so the breakdown sums to doorsKnocked (billable knocks) instead of
+    // over-counting. A door knocked by two canvassers in the SAME pass — an "overlap" — has two
+    // CanvassActivity rows but is one knock with one outcome here. Same (household, pass) grouping
+    // and window as knocksPipeline, so the two always agree (Σ events === knocks; events.surveyed
+    // === surveyedKnocks). See docs/METRICS.md (overlaps) and docs/CLIENT_PORTAL.md.
     CanvassActivity.aggregate([
-      { $match: actMatch },
-      { $group: { _id: '$actionType', count: { $sum: 1 } } },
+      { $match: { ...actMatch, actionType: { $in: KNOCK_ACTIONS } } },
+      {
+        $group: {
+          _id: { householdId: '$householdId', passId: '$passId' },
+          acts: { $push: { actionType: '$actionType', timestamp: '$timestamp' } },
+        },
+      },
     ]),
     SurveyResponse.countDocuments(surveyScopeMatch),
     SurveyResponse.distinct('voterId', surveyScopeMatch),
@@ -99,12 +112,12 @@ export async function computeWindowStats({
   ]);
 
   const k = knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0 };
+  // One outcome per (household, pass): every group has >=1 knock action so resolveStatus never
+  // returns 'unknocked'. Σ(events) === knockGroups.length === k.knocks === doorsKnocked.
   const events = { not_home: 0, wrong_address: 0, surveyed: 0, lit_dropped: 0 };
-  for (const r of eventAgg) {
-    if (r._id === 'not_home') events.not_home = r.count;
-    else if (r._id === 'wrong_address') events.wrong_address = r.count;
-    else if (r._id === 'survey_submitted') events.surveyed = r.count;
-    else if (r._id === 'lit_dropped') events.lit_dropped = r.count;
+  for (const g of knockGroups) {
+    const status = resolveStatus(campaignType, g.acts);
+    if (status in events) events[status] += 1;
   }
 
   const totals = {

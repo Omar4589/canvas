@@ -287,6 +287,13 @@ summable — it uses a separate org-wide `distinct('userId')`.
   back-compat **alias of `knocks`**. New code should read `knocks`.
 - **Org knocks ≤ Σ per-canvasser knocks** when overlaps exist (each canvasser keeps personal
   credit; the org dedups the house-pass).
+- **Client-report voter-contact breakdown is deduped per `(household, pass)`**, not a raw-event
+  count: `computeWindowStats` ([computeReport.js](../server/src/services/reports/computeReport.js))
+  resolves each house-pass to one outcome via `resolveStatus`, so the breakdown sums to
+  `doorsKnocked` and `breakdown.surveyed === surveyedKnocks`. An overlap (2+ canvassers, same
+  house-pass) is one outcome here, exactly as it's one knock. The admin Overview uses the deduped
+  **coverage funnel** (`canvass`, per-household status) for the same reason; its raw `events{}`
+  object is a separate volume lens (e.g. lit-drop volume). See [CLIENT_PORTAL.md](CLIENT_PORTAL.md).
 - **Early-voting doors get their own "Voted" coverage segment.** A household marked `fullyVoted`
   drops off the *canvasser's* map/books and, in reports, is pulled out of `unknocked` into a
   dedicated **`voted`** coverage bucket (`coverageBucketExpr` in reports.js). It still counts in

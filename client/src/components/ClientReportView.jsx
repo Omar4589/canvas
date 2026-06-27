@@ -39,7 +39,7 @@ export default function ClientReportView({ report }) {
         )}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {kpis.map((k) => (
-            <StatCard key={k.key} label={k.label} value={k.value} accent={k.accent} prominent {...kpiProps(k)} />
+            <StatCard key={k.key} label={k.label} value={k.value} accent={k.accent} help={k.help} prominent {...kpiProps(k)} />
           ))}
         </div>
       </section>
@@ -50,6 +50,7 @@ export default function ClientReportView({ report }) {
         <ReportBreakdown
           title={contact.title}
           subtitle={contact.subtitle}
+          help={contact.help}
           items={contact.items}
           variant="segmented"
         />
