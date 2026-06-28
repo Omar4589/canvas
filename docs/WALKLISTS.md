@@ -43,6 +43,12 @@ On the **Saved Searches** page, the "Build a saved search" panel has two modes:
      fixed.)*
    - **Survey answers:** filter by the actual answers to your choice questions (e.g. *Support / Likely*,
      or *Undecided*) — one or more options per question.
+   - **Survey tags:** filter by a survey **tag** instead of by question. A tag is a label you can
+     attach to options *across different questions* (e.g. a `Volunteer` tag on the "yes" option of two
+     separate questions). Picking a tag collects every door whose survey answer carried **any** option
+     with that tag — a cross-question "OR" the per-question answer picker can't express. Use this to
+     pull, say, "everyone who looks like a volunteer" no matter which question revealed it. See
+     [SURVEYS.md](SURVEYS.md) for how tags are defined.
 
 2. **Upload a Voter-ID CSV** — upload a file that has a column of Voter IDs. The app matches those IDs
    to this campaign's voters and freezes the doors they live at into a saved search. Use this when you already
@@ -72,6 +78,23 @@ Either way, claiming takes only the saved search's **unowned (Intake)** doors. I
 **already in another walk list**, the app says "*X doors are in another walk list*" and offers a **re-carve**
 (move them here) — which pulls them out of the other walk list cleanly. See [EFFORTS.md](EFFORTS.md).
 
+## Downloading a saved search as a spreadsheet
+
+Every saved search has a **Download CSV** action that exports its frozen voters as a spreadsheet — one
+row per voter, with **Voter ID, First Name, Last Name, Party, Age, Phone, Precinct, Address, City, State,
+ZIP**. This is the bridge out of the app: use it for a **re-canvass list**, to hand a **phone bank** the
+numbers, or to send a **mail house** the addresses.
+
+Two things to remember:
+
+- It exports the saved search's **frozen** set — the same doors/voters it was saved with, not a fresh
+  re-resolve. Build a new saved search if you want current data.
+- It exports **whole doors:** every voter at each door is included (the same whole-door rule as
+  everywhere else), not only the voters who matched a filter or a CSV upload.
+
+The download is **authenticated** — it goes through your logged-in session like the rest of the app — so
+the file isn't a public link you can forward; re-download it from the saved search when you need it again.
+
 ## Why the CSV upload exists
 
 Two jobs the filter builder can't do:
@@ -98,16 +121,25 @@ Two jobs the filter builder can't do:
 # Part 2 — Technical reference
 
 Server: [routes/admin/walklists.js](../server/src/routes/admin/walklists.js) (CRUD + filter
-preview/save + CSV preview/save + distinct values),
+preview/save + CSV preview/save + distinct values + CSV export),
 [services/walklist/resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js) (filter
 resolver), [services/import/parseVoterIdList.js](../server/src/services/import/parseVoterIdList.js)
-(CSV matcher + door resolver, shared with early voting).
+(CSV matcher + door resolver, shared with early voting),
+[services/surveys/answerAgg.js](../server/src/services/surveys/answerAgg.js) (`answerFilterClause` /
+`answerTagClause`, the survey-answer and survey-tag match clauses).
 
 ## A. Data model
 
 | Model | File | Notes |
 |---|---|---|
 | `WalkList` | [models/WalkList.js](../server/src/models/WalkList.js) | A **frozen** selection (the `WalkList` model backs the user-facing **saved search**). `filter` (the builder's criteria, kept for reference), frozen `householdIds`/`voterIds` + `householdCount`/`voterCount` (the source of truth — saved searches do **not** re-resolve), `source` (`'filter'` \| `'csv'`), and `sourceMeta` (`fileName`, `idColumn`, `idsInFile`, `matchedVoters`, `notFound`) for CSV provenance/audit. |
+
+Inside `filter`, survey predicates are split across two fields because they combine differently:
+
+| Field | Schema | Meaning |
+|---|---|---|
+| `answerFilters` | `[{ questionKey, values, texts }]` (`answerFilterSchema`) | Per-question option picks. Each entry is its own predicate set, so it obeys the saved search's global `combine` (`and`/`or`). |
+| `answerTagFilters` | `[{ tag }]` (`tagFilterSchema`) | Per-tag picks. Each tag becomes **one** predicate set that already OR's every option carrying that tag **across questions** — a cross-question OR the per-question `answerFilters` can't express under the single global `combine`. |
 
 A saved search is **campaign-scoped**; the frozen ids are the truth, so seeding/claiming never re-runs the
 filter or re-reads the CSV.
@@ -119,6 +151,16 @@ filter or re-reads the CSV.
   prior-pass/survey predicates into household **sets**, intersected (`and`) or unioned (`or`). The base
   is the campaign's **coordinate-bearing active** households; targeted voters = those matching the voter
   predicate within the final households (or all voters there if no voter predicate).
+  - **Survey tags (`filter.answerTagFilters`).** Each `{ tag }` resolves to **one** predicate set:
+    `resolveWalkList` loads the campaign's `SurveyTemplate`, then for the tag calls
+    `answerTagClause(template, tag)` ([answerAgg.js](../server/src/services/surveys/answerAgg.js)) — a
+    single `$or` over every `(questionKey, optionId | legacy text)` member carrying that tag (matched
+    **case-insensitively** via `normalizeTag`) — and `SurveyResponse.distinct('householdId', …)` for the
+    households. Because the cross-question OR is baked **inside** one set, the tag still behaves as a
+    single predicate under the global `combine`; this is exactly why it can't be expressed as several
+    per-question `answerFilters` (those would each be separate sets and so get AND/OR'd globally). Like
+    the other survey predicates, it honors `filter.priorPassId` (scoping to that round's responses) when
+    set. If the campaign has no template, tag filters are skipped.
 - **CSV →
   [parseVoterIdList.js](../server/src/services/import/parseVoterIdList.js)** — two functions:
   - `parseAndMatch(campaign, buffer, idColumn)` — PapaParse the CSV, auto-detect the ID column
@@ -144,10 +186,30 @@ Mounted at `/admin/campaigns/:campaignId/walklists`, admin-only.
 | `POST /from-csv/preview` | `multipart`: `file` (+ optional `idColumn`) | `{ idColumn, columns, totalRows, idsInFile, matched, householdCount, voterCount, noCoordinates, notFound, notFoundIds, ownedDoors, intakeDoors, ownedByEffort, sample }` — no save |
 | `POST /from-csv` | `multipart`: `file`, `name` (+ optional `idColumn`) | `201 { walkList }` — save a CSV saved search (`source: 'csv'`) |
 | `GET /distinct` | — | filter-value pickers (genders, parties, precincts, …) |
+| `GET /:id/export.csv` | — | downloads the saved search's frozen voters as an **authenticated** CSV (`text/csv` + `Content-Disposition` attachment). Columns: **Voter ID, First Name, Last Name, Party, Age, Phone, Precinct, Address, City, State, ZIP**. |
 | `GET /:id` · `DELETE /:id` | — | fetch / delete a saved search (delete never touches door ownership) |
 
 Preview and save each upload the file (stateless re-parse, cheap) — the same two-call pattern the Early
 Voting page uses.
+
+**Route order matters.** `GET /:id/export.csv` is registered **before** `GET /:id` so the literal
+`export.csv` segment isn't swallowed by the `:id` param route.
+
+### CSV export ([walklists.js](../server/src/routes/admin/walklists.js) `GET /:id/export.csv`)
+
+- **Frozen source of truth.** It reads the saved search's stored `voterIds`/`householdIds` — no
+  re-resolve — then loads those `Voter`s (projected to `stateVoterId, firstName, lastName, party, phone,
+  dateOfBirth, precinct, householdId`) and their `Household`s (`addressLine1/2, city, state, zipCode`),
+  joining voters to addresses by `householdId`. **One row per voter** (so multi-voter doors emit several
+  rows), `Address` = `addressLine1 + addressLine2`.
+- **Age** is computed from `dateOfBirth` at request time (`ageOf`, clamped to `0..129`), so it stays
+  current even though the rest of the set is frozen.
+- **CSV hygiene.** `csvCell` quotes/escapes any value containing `"`, `,`, or newline (doubling embedded
+  quotes); the download filename is the saved search name sanitized to `[A-Za-z0-9_-]`, capped at 60
+  chars, defaulting to `walklist.csv`.
+- **Authenticated, not a public link.** It rides the same `requireAuth` + `orgContext` +
+  `requireOrgRole('admin')` chain as every other route here, scoped by `campaignId`. The client fetches
+  it with the bearer token + `X-Org-Id` header and saves the blob — there's no shareable URL.
 
 ## D. How a saved search reaches a walk list (unchanged machinery)
 
@@ -176,5 +238,6 @@ A saved search is just `householdIds`. Both seed and claim live in
 
 | File | Renders |
 |---|---|
-| [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | "Build a saved search" with a **Filter builder / Upload CSV** toggle (CSV: file → auto-preview with matched/doors/owned-doors warning/unmatched download → name + save), and the saved-searches column (with a "from CSV" badge). |
+| [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | "Build a saved search" with a **Filter builder / Upload CSV** toggle (CSV: file → auto-preview with matched/doors/owned-doors warning/unmatched download → name + save), and the saved-searches column (with a "from CSV" badge). The filter builder embeds `AnswerFilters` for survey predicates; the survey-tag palette (`f.answerTagFilters` ↔ `tagValue`/`onTagChange`) and the per-saved-search **Download CSV** action (`exportCsv`, which fetches `…/export.csv` with the bearer token + `X-Org-Id` and saves the returned blob) live here. |
+| [client/src/components/AnswerFilters.jsx](../client/src/components/AnswerFilters.jsx) | The shared survey-answer picker. A **By tag** chip row (rendered when a tag palette is available and `onTagChange` is wired) toggles `answerTagFilters: [{ tag }]`, case-insensitively, **above** the per-question option rows. Also embedded by [TurfsPage.jsx](../client/src/pages/TurfsPage.jsx). |
 | [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | "Seed door-set" + Claim dropdowns list every saved search (CSV ones tagged `· CSV`); the claim panel surfaces the `409 doors-owned` re-carve. |

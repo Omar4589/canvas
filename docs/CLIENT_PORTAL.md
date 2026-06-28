@@ -34,8 +34,10 @@ A report reads top to bottom as a document, in this order:
 - **Activity at a glance** — headline cards (doors knocked, surveys taken, voters surveyed, connection
   rate). Each card shows the **cumulative total** as the big number and a **"+N this week"** pill. A
   quiet week (no new doors) says so plainly above the cards.
-- **Voter contact breakdown** — outcomes across the doors (surveyed, not home, wrong address, lit
-  dropped), shown as one stacked bar with a legend. This reads **first**, right after the numbers.
+- **Voter contact breakdown** — outcomes across the doors (surveyed, *declined to participate*, not
+  home, wrong address, lit dropped), shown as one stacked bar with a legend. This reads **first**, right
+  after the numbers. On survey campaigns, **Declined to participate** is the door where someone answered
+  but wouldn't take the survey — a real contact, not a survey — shown in amber.
 - **Support breakdown** — the question you designate as "support" (e.g. *1,394 Support · 404 Likely
   Support · 889 Undecided · 50 Opposed*), emphasized as the headline.
 - **Survey breakdowns** — per-question option counts and percentages for the questions you choose to
@@ -147,8 +149,15 @@ it (see [METRICS.md](METRICS.md) §overlaps). This is why the breakdown's **"Sur
 below the **"Surveys taken"** KPI: a home with two voters surveyed in one visit is **1 surveyed door
 but 2 surveys**. (Before this fix the breakdown counted raw activity events, so overlaps made it
 over-count and the bar didn't tie to Doors knocked.) The client labels are local to
-[reportDerive.js](../client/src/lib/reportDerive.js) (`CONTACT_LABELS`: "Surveyed" / "Didn't answer" /
-"Wrong address"), separate from the admin coverage bar's `STATUS_LABELS`. Each KPI and breakdown row
+[reportDerive.js](../client/src/lib/reportDerive.js) (`CONTACT_LABELS`: "Surveyed" / "Declined to
+participate" / "Didn't answer" / "Wrong address" / "Lit dropped"), separate from the admin coverage
+bar's `STATUS_LABELS`. The `refused` row is the **"Declined to participate"** bucket — a door where a
+voter answered but declined the survey: a billable knock and a contact, but **not** a survey, so it's
+separate from "Surveyed". `contactOrderFor('survey')` slots it right after `surveyed`; `computeReport`
+keeps it in `contactBreakdown.events` so the bar still sums exactly to `totals.doorsKnocked`. (It's the
+client-facing reflection of the door-level **Refused** disposition — see [METRICS.md](METRICS.md) /
+[SURVEYS.md](SURVEYS.md); `totals.refusedKnocks` and `contactRate = (surveyed + refused) / knocks` are
+admin-side and don't appear in the client report.) Each KPI and breakdown row
 carries a plain-language `help` string surfaced as an on-screen "(i)" tooltip (`InfoHint`) and a
 "What these numbers mean" section in the PDF.
 

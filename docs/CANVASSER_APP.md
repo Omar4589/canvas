@@ -94,6 +94,45 @@ badge appears on it when you have work that hasn't synced yet — tapping Refres
 Everything below — the pins, the pull-up sheet with your progress and each house's voters, recenter,
 and the base-map picker — is covered in [MAPS.md](MAPS.md).
 
+## At the door
+
+Tapping a house opens its detail. The header shows the address, when it was last visited, and a
+**status pill** (the amber **Refused** pill is new — see below). What you do here depends on the
+campaign type:
+
+- On a **Lit drop** campaign, there's a single **Lit dropped** button.
+- On a **Survey** campaign, you get the **voters at this address** (each a tappable card → their
+  survey) plus three door buttons stacked at the bottom: **Not home**, **Wrong address**, and the new
+  **Refused**. Any of them recolors the pin and drops you back on the map the instant you tap — you're
+  never waiting on the network.
+
+### Refused (someone answered, but said no)
+
+**Refused** is for when a person comes to the door but declines to participate — different from **Not
+home** (nobody answered) and **Wrong address** (the door doesn't belong to your list). It only appears
+on **survey** campaigns. It counts as a real knock and as having reached a person, just not a completed
+survey, so it gets its own **amber** color everywhere (the pin, the status pill). Like the other door
+buttons, it recolors the pin to amber immediately and syncs in the background.
+
+### Taking a survey
+
+Tapping a voter opens their survey. A few things make the script feel like a real conversation:
+
+- **Questions appear and disappear as you answer.** A later question can be set up to show only when an
+  earlier answer matches (for example, a follow-up that only shows if the person said they're undecided).
+  You don't manage any of this — the right questions just show up live as you go, and the progress bar
+  and "Question N of M" count only ever reflect the questions actually on screen.
+- **Read-aloud prompts.** Some answer choices have a short script attached. Pick that choice and an
+  amber **Read aloud** callout appears right under it with the words to say next.
+- **Other (specify).** When a question allows it, an **Other (specify)** choice shows at the end of the
+  list; choosing it opens a text box to type what the person actually said. (An Other choice doesn't
+  count as answered until you've typed something.)
+- The **greeting** and **closing** scripts, when the survey has them, sit in the same amber callouts at
+  the top and bottom.
+
+Saving the survey marks that voter surveyed and turns the house green on the map right away, the same
+optimistic, never-wait-on-the-network behavior as the door buttons.
+
 ---
 
 # Part 2 — Technical reference
@@ -231,6 +270,58 @@ right-aligned under the chip). All prior behavior is preserved — filter, switc
 navigation, recenter, base-map picker, the pull-up sheet, and refresh + pending (now in the
 bottom-right stack).
 
+## The door screen
+
+[app/(app)/household/[id].jsx](../mobile/app/(app)/household/[id].jsx) — pushed onto the `(app)` stack
+from the map's bottom sheet. A pure reader of the `['bootstrap']` cache (`refetchOnMount: false`, same
+reason as the map: a stale refetch must not revert an optimistic recolor). Reads `campaign.type` to
+branch the action area:
+
+- `lit_drop` → one **Lit dropped** button (`submitAction('lit_dropped')`).
+- `survey` → the **voters at this address** list (each `VoterCard` `guardedPush`es to
+  `/(app)/voter/:id/survey`) plus three door buttons: **Not home** (`info`), **Wrong address**
+  (`danger`), and **Refused** (`colors.status.refused`, amber). All route through `submitAction`, which
+  fires `recordHouseholdAction(qc, id, action, …)` and `router.back()`s without awaiting — `firedRef`
+  blocks a double-tap synchronously, `isSubmitting` disables the buttons.
+
+`StatusPill` recognizes a third visual state for `refused`: amber `warnBg`/`warnBorder`/`warnFg` (done
+statuses stay green `successBg`, everything else neutral). The dot color comes from
+`colors.status[status]`, the label from `colors.statusLabels[status]`.
+
+The **Refused** disposition is plumbed through `recordAction.js`: `ACTION_PATHS.refused = 'refused'`
+maps it to `POST /mobile/households/:id/refused`, and it flows through the same `optimisticSubmit`
+pipeline (optimistic patch → pending overlay → GPS-stamped background write → reconcile) as the other
+door actions, so the amber pin recolor is un-clobberable by a racing server fetch. The amber tokens are
+defined in [lib/theme.js](../mobile/lib/theme.js) (`status.refused` / `statusLabels.refused` =
+`'#F59E0B'` / `'Refused'`; the survey screen's callouts reuse `warn`/`warnBg`/`warnFg`).
+
+## The at-door survey
+
+[app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) — resolves the voter,
+household, and the **effort-scoped** survey (the door's book → `surveyTemplateId` override, falling back
+to `activeSurvey`) from the bootstrap cache. Three field behaviors beyond a flat questionnaire:
+
+- **Conditional visibility.** `visibleQuestions` is recomputed from `answers` every render via the
+  shared pure evaluator [lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js)
+  (`makeCell` + `visibleQuestionKeys`, mirrored from `services/surveys/visibility.js` on the server and
+  the admin client). It normalizes each non-retired question to a cell (choice → optionIds, text →
+  text), hides questions whose `visibleIf` fails, and **withholds hidden questions' answers** from the
+  rules of later questions. Everything downstream — the progress bar, the "Question N of M" count,
+  `validate()` (required only enforced on visible questions), and the submitted `answers` array — keys
+  off `visibleQuestions`, so hidden questions never block a save or get sent.
+- **Per-option read-aloud scripts.** When a selected option has `opt.script`, an amber `scriptBlock`
+  ("Read aloud") renders inline beneath it (in both `SingleChoice` and `MultipleChoice`). The survey's
+  `intro` and `closing` render in the same callout at the top/bottom.
+- **Other (specify).** When `q.otherOption` is set, a synthetic `{ id: '__other__' }` choice is appended;
+  selecting it renders a `FreeText` box stored in `otherTexts[q.key]`. `isAnsweredNow` treats an
+  Other-only selection as unanswered until its text is non-empty. On submit, the `__other__` sentinel is
+  sent in `optionIds` with the typed value in `otherText` (and snapshotted into the answer's label text,
+  fallback `'Other'`).
+
+Submit is optimistic-first like the door buttons: `optimisticSubmit` to `/mobile/voters/:id/survey`
+marks the voter `surveyed` + the household `surveyed`/green, registers the pending overlay, then
+`router.replace('/(app)/map')` without awaiting the GPS stamp or write.
+
 ## Effort selection + data
 
 Two entry points, both scoping the book picker to one effort:
@@ -263,4 +354,8 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   `app/(app)/books.jsx`, `app/(app)/map.jsx`, `app/(app)/admin/more.jsx`,
   `app/(app)/stats.jsx` (comprehensive redesign), `app/(app)/stats/[date].jsx` (drop Distance tile),
   `components/EffortPicker.jsx`, `lib/rates.js` (shared `formatPace`),
+  `app/(app)/household/[id].jsx` (Refused door button + amber status pill),
+  `app/(app)/voter/[id]/survey.jsx` (conditional questions, per-option scripts, Other specify),
+  `lib/recordAction.js` (`refused` action path), `lib/surveyVisibility.js` (shared visibility evaluator),
+  `lib/theme.js` (`status.refused` / `statusLabels.refused` amber tokens),
   `server/src/routes/mobile/bootstrap.js`, `server/src/routes/auth.js` (self-service `PATCH /auth/me`).

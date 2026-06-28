@@ -13,6 +13,11 @@ Related: [CANVASSER_APP.md](CANVASSER_APP.md) (the field app), [PASSES_AND_TURF.
 (rounds + turf/books that this assigns), [EFFORTS.md](EFFORTS.md) (efforts own the rounds),
 [METRICS.md](METRICS.md) (the numbers on the Insights/Overview tabs).
 
+The web-dashboard admin tools this doc references for depth: [SURVEYS.md](SURVEYS.md) (the survey
+builder — conditional questions, option scripts, "Other (specify)", tags — and the survey report),
+[WALKLISTS.md](WALKLISTS.md) (saved searches, by-tag filtering, CSV export), [METRICS.md](METRICS.md)
+(the **Refused** door outcome and the **contactRate** / "Reached a person" math).
+
 ---
 
 # Part 1 — For everyone
@@ -50,6 +55,66 @@ next sync.
 - **On the web:** CSV import, Early voting, Turf cutting — these open a short note (managed on the web
   dashboard; file uploads / turf drawing aren't mobile-friendly).
 - **Appearance**, and **Account** (Platform view for super admins, Switch organization, Sign out).
+
+---
+
+# Part 1b — On the web dashboard (admin capabilities)
+
+The mobile app above is for in-the-field admin work (assigning books, watching the numbers).
+**Setup and analysis live on the web dashboard** — and several of those tools grew capabilities worth
+knowing about. The depth lives in the linked docs; here's what an admin can now do and where it shows
+up. (Mobile is unchanged by all of this — the survey builder, the survey report, walk lists, and tags
+are web-only; the only field-app change is the new **Refused** button covered in
+[CANVASSER_APP.md](CANVASSER_APP.md).)
+
+### The survey builder does more than plain questions
+On the **Surveys** page, beyond wording/type/required/options, a question can now carry:
+- **Conditional display ("Show only if…")** — show a question only when an **earlier** answer matches
+  (Match ALL / Match ANY over rules). Branch, skip, and skip-to-end all come from this one control.
+- **Read-aloud option scripts** — a per-option line the canvasser sees the moment they pick that
+  option (guidance only; doesn't change counts).
+- **"Other (specify)"** — a toggle that adds an **Other** choice with a free-text box at the door.
+- **Tags** — a short label (e.g. "Supporter") you stick on an answer **option**, via a pick-or-create
+  combobox that suggests tags already used in this survey. Tags are **case-insensitive** and group
+  options **across questions**, so anyone who picked any tagged option counts once. Tags are
+  **admin-only** metadata for reporting and list-building — canvassers never see them.
+
+> These are the same builder features described in full in [SURVEYS.md](SURVEYS.md) (including the now
+> much more permissive "edit a survey that already has answers" rules). The only hard block is changing
+> a question's **answer type** once it has responses.
+
+### The survey report now rolls up by tag
+The campaign's **survey results** (on the campaign dashboard, below the per-question charts) gained a
+**Tags** panel: one bar per tag showing **how many distinct voters** carry it (counted once even if
+they hit the tag in several questions). Click a tag to see which options feed it and to drill into the
+**list of voters** reached. See [SURVEYS.md](SURVEYS.md) §I.
+
+### Saved searches filter by tag and export to CSV
+On the **Saved Searches** page (the walk-list builder), the answer-filter panel now has a **By tag**
+row: pick "Supporter" and the resulting saved search is **every door with someone who matched that tag
+in any question** — a cross-question reach the per-question answer filters can't express. The door
+**status** filter also lists **Refused** alongside the other dispositions. From the Saved Searches
+list, **Export CSV** downloads that saved search's voters (Voter ID, name, party, age, phone, precinct,
+address) for a re-canvass, phone bank, or mail house. See [WALKLISTS.md](WALKLISTS.md) and
+[SURVEYS.md](SURVEYS.md) §I.
+
+### The "Refused" door outcome in admin numbers
+On **survey campaigns**, a door can be recorded as **Refused** — someone answered but declined to
+participate. It's a **billable knock** and counts as a **contact**, but it is **not** a survey; it sits
+in its own amber bucket (color `#F59E0B` everywhere). Where it shows up for an admin:
+- **Coverage** — the all-time coverage bar (Overview and each campaign dashboard) has its own amber
+  **Refused** segment beside Surveyed / Not home / Wrong address.
+- **A new "Reached a person" rate** — `contactRate = (surveyed + refused) ÷ knocks` — measures how
+  often a knock reached a live person. It's **separate from** the existing Connection/Survey rate,
+  which is unchanged (refusals don't count as surveys there).
+- **Per-canvasser CSV** — the leaderboard export gains a **Refused** column.
+- **Client reports** — the door-outcome breakdown labels it **"Declined to participate."**
+
+> The Refused metric math (`refusedKnocks`, `contactRate`) and the field-app button live in
+> [METRICS.md](METRICS.md) and [CANVASSER_APP.md](CANVASSER_APP.md). The mobile admin Overview/Insights
+> tabs render the coverage bar (so the Refused segment shows there too) but currently surface the rate
+> set as Knocks / Surveys / Surveyed voters / Connection rate — the dedicated "Reached a person" card
+> is not on those tiles today.
 
 ---
 
@@ -100,6 +165,21 @@ book's homes for assignment in context. Hidden route, pushed from the Books list
 
 **Prerequisite:** a canvasser sees a book only if assigned to the **campaign** *and* the **book**, so
 book assignment alone is a no-op until they're on the campaign — hence the campaign-assigned roster.
+
+## Web-dashboard admin surfaces (file map)
+These tools are web-only (the mobile More hub links out to the web for them). Listed here so the file
+map is complete; full server/data depth is in the linked docs, not duplicated.
+
+| Capability | Client | Server / data | Doc |
+|---|---|---|---|
+| Survey builder: conditions, option scripts, "Other (specify)", **tag** combobox + palette | [SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) (`SurveyForm`, `OptionRow`, `ConditionEditor`; `tagPalette` → `tags`; shared `<datalist id="survey-tags">`) | [routes/admin/surveys.js](../server/src/routes/admin/surveys.js) (`canonicalizeTags`, `validateVisibleIfIntegrity`, soft-retire reconcile); `SurveyTemplate.tags` / `option.tag` / `option.script` / `question.visibleIf` / `question.otherOption` | [SURVEYS.md](SURVEYS.md) §B/§D/§I |
+| Survey report **Tags** rollup + voters-by-tag drill | [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) renders `<TagResults>` from `surveyResultsQ.data.tags`; `QuestionResults.jsx` `TagResults` | `GET /admin/reports/survey-results` `tags[]` (distinct voters per tag via `answerTagClause`) + `GET /admin/reports/voters-by-answer?tag=&surveyTemplateId=` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [SURVEYS.md](SURVEYS.md) §I |
+| Saved searches: **By tag** filter + status filter incl. **Refused** + **Export CSV** | [WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) (`AnswerFilters` `answerTagFilters`; `STATUSES` includes `'refused'`; `exportCsv` authenticated blob download) | `filter.answerTagFilters` ([resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js)) + `GET /admin/campaigns/:id/walklists/:id/export.csv` ([routes/admin/walklists.js](../server/src/routes/admin/walklists.js)) | [WALKLISTS.md](WALKLISTS.md), [SURVEYS.md](SURVEYS.md) §I |
+| **Refused** door outcome in admin numbers | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) amber `refused` segment; [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) / [OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) coverage; [reportDerive.js](../client/src/lib/reportDerive.js) `CONTACT_LABELS.refused = 'Declined to participate'` | `refused` (coverage + events), `refusedKnocks`, `contactRate` on `/overview` · `/campaign-rollup` · `/canvassers`; `Refused` column in `/admin/reports/canvassers.csv` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [METRICS.md](METRICS.md) |
+
+> Note — what is **not** in the survey builder: there is **no per-question "Refused to answer" option**
+> (`question.refusalOption` is reserved and unwired). "Refused" is a **door-level disposition** on
+> survey campaigns, recorded from the field app, not a survey answer. See [SURVEYS.md](SURVEYS.md) §A.
 
 ## Roadmap (Phase 2+)
 Campaigns (CRUD) · Efforts & assignments · Walk lists · Voters (search) · Surveys (builder) — each adds
