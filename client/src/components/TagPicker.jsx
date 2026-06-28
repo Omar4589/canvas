@@ -64,10 +64,10 @@ export default function TagPicker({ value, onChange, tags = [], onCreate }) {
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
-        placeholder="Pick or create a tag…"
+        placeholder="Pick a tag or create one…"
         className="w-44 rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       />
-      {open && (filtered.length > 0 || showCreate) && (
+      {open && (
         <ul className="absolute left-0 top-full z-20 mt-1 max-h-48 w-44 overflow-auto rounded border border-border bg-card py-1 text-xs shadow-lg">
           {filtered.map((t) => (
             <li key={t.name}>
@@ -91,6 +91,9 @@ export default function TagPicker({ value, onChange, tags = [], onCreate }) {
                 {creating ? 'Creating…' : `Create “${q}”`}
               </button>
             </li>
+          )}
+          {filtered.length === 0 && !showCreate && (
+            <li className="px-2 py-1 text-fg-subtle">No tags yet — type to create your first.</li>
           )}
         </ul>
       )}

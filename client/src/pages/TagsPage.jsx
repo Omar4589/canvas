@@ -159,8 +159,9 @@ export default function TagsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight text-fg">Tags</h1>
         <p className="text-sm text-fg-muted">
-          Your organization's tag library — the managed picklist used when tagging survey
-          options and saved searches. Renaming a tag updates it everywhere.
+          Your organization's reusable tag library — the picklist used when tagging survey options and
+          saved searches. Tags are <strong>optional</strong>, and are created here or automatically the
+          first time you tag a survey answer. Renaming, merging, or deleting a tag updates it everywhere.
         </p>
       </div>
 

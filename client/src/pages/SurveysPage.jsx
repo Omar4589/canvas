@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import TagPicker from '../components/TagPicker.jsx';
+import InfoHint from '../components/InfoHint.jsx';
 
 const QUESTION_TYPES = [
   { value: 'single_choice', label: 'Single choice', hint: 'Pick one' },
@@ -168,15 +169,20 @@ function OptionRow({ index, value, onChange, onRemove, tags = [], onCreateTag })
             </button>
           )}
           {showTag || value.tag ? (
-            <label className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5">
               <span className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">Tag</span>
+              <InfoHint label="What are tags?">
+                <b>Optional.</b> Tag an answer — like “Supporter” — so reports roll up everyone who picked
+                it across questions, and you can build or export voter lists by tag. Pick an existing tag
+                from your org or create a new one; manage them all on the <b>Tags</b> page.
+              </InfoHint>
               <TagPicker
                 value={value.tag || ''}
                 onChange={(name) => onChange({ ...value, tag: name })}
                 tags={tags}
                 onCreate={onCreateTag}
               />
-            </label>
+            </div>
           ) : (
             <button
               type="button"
@@ -725,6 +731,13 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
             {questions.length} {questions.length === 1 ? 'question' : 'questions'}
           </span>
         </div>
+        <p className="-mt-1 mb-3 text-xs text-fg-muted">
+          Each answer can carry an optional <strong>tag</strong> (like “Supporter”) to group answers across
+          questions in reports and build lists by tag.{' '}
+          <a href="/tags" target="_blank" rel="noopener" className="text-brand-accent hover:underline">
+            Manage tags →
+          </a>
+        </p>
         <div className="space-y-3">
           {questions.map((q, i) => {
             if (q.retired) {
