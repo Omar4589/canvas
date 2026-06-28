@@ -1,0 +1,168 @@
+[
+  {
+    "name": "no conditions -> all visible",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2" },
+      { "key": "q3" }
+    ],
+    "answersByKey": {},
+    "expectedVisibleKeys": ["q1", "q2", "q3"]
+  },
+  {
+    "name": "is matches -> child visible",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["a"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["a"], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "is no match -> child hidden",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["a"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["b"], "text": null } },
+    "expectedVisibleKeys": ["q1"]
+  },
+  {
+    "name": "is_not on unanswered upstream passes",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is_not", "optionIds": ["a"] }] } }
+    ],
+    "answersByKey": {},
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "any_of one of targets -> visible",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["a", "b"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["b"], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "any_of none of targets -> hidden",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["a", "b"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["c"], "text": null } },
+    "expectedVisibleKeys": ["q1"]
+  },
+  {
+    "name": "answered (text upstream) -> visible",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "answered", "optionIds": [] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": [], "text": "Healthcare matters" } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "not_answered when blank -> visible",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "not_answered", "optionIds": [] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": [], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "choice upstream with stale text snapshot but empty ids -> not_answered passes (cross-runtime)",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "not_answered", "optionIds": [] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": [], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "multiple_choice membership for is",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["a"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["a", "c"], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "chained collapse: hidden parent withholds its answer from child",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["a"] }] } },
+      { "key": "q3", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q2", "op": "is", "optionIds": ["x"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["b"], "text": null }, "q2": { "optionIds": ["x"], "text": null } },
+    "expectedVisibleKeys": ["q1"]
+  },
+  {
+    "name": "chained visible: parent shown exposes its answer to child",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["a"] }] } },
+      { "key": "q3", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q2", "op": "is", "optionIds": ["x"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["a"], "text": null }, "q2": { "optionIds": ["x"], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2", "q3"]
+  },
+  {
+    "name": "forward reference fails closed",
+    "questions": [
+      { "key": "q1", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q2", "op": "is", "optionIds": ["a"] }] } },
+      { "key": "q2" }
+    ],
+    "answersByKey": { "q2": { "optionIds": ["a"], "text": null } },
+    "expectedVisibleKeys": ["q2"]
+  },
+  {
+    "name": "logic any -> one rule passing is enough",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["a"] }, { "questionKey": "q1", "op": "is", "optionIds": ["b"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["b"], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "empty rules -> visible",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [] } }
+    ],
+    "answersByKey": {},
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "retired upstream treated as absent -> child hidden",
+    "questions": [
+      { "key": "q1", "retired": true },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["a"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["a"], "text": null } },
+    "expectedVisibleKeys": []
+  },
+  {
+    "name": "skip-to-end: last question hidden",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2" },
+      { "key": "q3", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["yes"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["no"], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "sentinel id (__other__) as rule target",
+    "questions": [
+      { "key": "q1" },
+      { "key": "q2", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["__other__"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["__other__"], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2"]
+  }
+]

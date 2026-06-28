@@ -8,8 +8,10 @@ import { Household } from '../../models/Household.js';
 import { Campaign } from '../../models/Campaign.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { recomputeSurveyStatus } from '../../services/canvass/status.js';
+import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
 import { Person } from '../../models/Person.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
@@ -341,7 +343,16 @@ router.patch('/:voterId/surveys/:responseId', async (req, res, next) => {
       organizationId: activeOrgId(req),
     });
     if (!sr) return res.status(404).json({ error: 'Survey response not found' });
-    if (data.answers !== undefined) sr.answers = data.answers;
+    if (data.answers !== undefined) {
+      // Normalize against the response's template, but PRESERVE history: keep
+      // answers even if new visibleIf logic would now hide them (dropHidden:false).
+      // Unknown ids/rows are still pruned. Missing template → no template-driven
+      // normalization possible, so store as-is rather than wipe the edit.
+      const template = await SurveyTemplate.findById(sr.surveyTemplateId);
+      sr.answers = template
+        ? normalizeAndFilterAnswers(template, data.answers, { dropHidden: false })
+        : data.answers;
+    }
     if (data.note !== undefined) sr.note = data.note;
     sr.editedBy = req.user._id;
     sr.editedAt = new Date();

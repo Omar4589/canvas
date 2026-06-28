@@ -144,7 +144,9 @@ export default function DayDetailScreen() {
   const breakdown = stats.answerBreakdown || [];
   const showAnswers = !isLitDrop && breakdown.length > 0;
   const primaryValue = isLitDrop ? stats.litDropped || 0 : stats.responses || 0;
-  const rate = getConnectionRate(primaryValue, stats.doorsKnocked);
+  // Rate = surveyed/lit HOMES ÷ knocked homes (bounded), matching the report; the displayed
+  // Surveys/Lit and doors counts stay raw.
+  const rate = getConnectionRate(isLitDrop ? stats.litHomes : stats.surveyedHomes, stats.knockedHomes);
   const showExtraLit = !isLitDrop && (stats.litDropped || 0) > 0;
 
   return (

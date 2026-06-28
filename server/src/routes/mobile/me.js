@@ -61,7 +61,7 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
       actionType: { $in: DOOR_ACTIONS },
     })
       .sort({ timestamp: 1 })
-      .select('timestamp location actionType')
+      .select('timestamp location actionType householdId')
       .lean(),
     SurveyResponse.countDocuments({
       userId,
@@ -78,8 +78,21 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
   let lastDoorAt = null;
   let distanceMeters = 0;
   let prev = null;
+  // Distinct HOMES (not raw events) so the connection rate is bounded: surveyed homes / knocked
+  // homes is always <= 100% (a surveyed home is also a knocked home), and a single home with 2
+  // voters surveyed reads 100%, not 200%. Matches the report's surveyedKnocks/knocks. The raw
+  // doorsKnocked/responses/litDropped counts above stay as the motivational volume numbers.
+  const knockedHomeSet = new Set();
+  const surveyedHomeSet = new Set();
+  const litHomeSet = new Set();
   for (const a of activities) {
-    if (a.actionType === 'lit_dropped') litDropped += 1;
+    const hid = String(a.householdId);
+    knockedHomeSet.add(hid);
+    if (a.actionType === 'lit_dropped') {
+      litDropped += 1;
+      litHomeSet.add(hid);
+    }
+    if (a.actionType === 'survey_submitted') surveyedHomeSet.add(hid);
     if (!firstDoorAt) firstDoorAt = a.timestamp;
     lastDoorAt = a.timestamp;
     if (a.location && prev?.location) {
@@ -160,6 +173,9 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
     doorsKnocked,
     responses,
     litDropped,
+    knockedHomes: knockedHomeSet.size,
+    surveyedHomes: surveyedHomeSet.size,
+    litHomes: litHomeSet.size,
     firstDoorAt: firstDoorAt ? firstDoorAt.toISOString() : null,
     lastDoorAt: lastDoorAt ? lastDoorAt.toISOString() : null,
     distanceMeters: Math.round(distanceMeters),
@@ -282,7 +298,7 @@ router.get('/history', async (req, res, next) => {
         actionType: { $in: DOOR_ACTIONS },
       })
         .sort({ timestamp: 1 })
-        .select('timestamp location actionType')
+        .select('timestamp location actionType householdId')
         .lean(),
       SurveyResponse.find({
         userId,
@@ -319,6 +335,10 @@ router.get('/history', async (req, res, next) => {
           lastDoorAt: null,
           distanceMeters: 0,
           _prevLocation: null,
+          // Distinct homes per day → a bounded connection rate (see computeDailyStats).
+          _knockedHomes: new Set(),
+          _surveyedHomes: new Set(),
+          _litHomes: new Set(),
         });
       }
       return dayMap.get(d);
@@ -328,7 +348,13 @@ router.get('/history', async (req, res, next) => {
       const d = dayStr(a.timestamp);
       const day = ensureDay(d);
       day.doorsKnocked++;
-      if (a.actionType === 'lit_dropped') day.litDropped++;
+      const hid = String(a.householdId);
+      day._knockedHomes.add(hid);
+      if (a.actionType === 'lit_dropped') {
+        day.litDropped++;
+        day._litHomes.add(hid);
+      }
+      if (a.actionType === 'survey_submitted') day._surveyedHomes.add(hid);
       const ts = a.timestamp.toISOString();
       if (!day.firstDoorAt) day.firstDoorAt = ts;
       day.lastDoorAt = ts;
@@ -352,6 +378,9 @@ router.get('/history', async (req, res, next) => {
         doorsKnocked: d.doorsKnocked,
         litDropped: d.litDropped,
         responses: d.responses,
+        knockedHomes: d._knockedHomes.size,
+        surveyedHomes: d._surveyedHomes.size,
+        litHomes: d._litHomes.size,
         firstDoorAt: d.firstDoorAt,
         lastDoorAt: d.lastDoorAt,
         distanceMeters: Math.round(d.distanceMeters),

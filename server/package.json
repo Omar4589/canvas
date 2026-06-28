@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "test": "node --test",
     "seed:admin": "node src/utils/seedAdmin.js",
     "reconcile:counts": "node src/utils/reconcileCounts.js",
     "audit:voted-doors": "node src/utils/auditVotedDoors.js",

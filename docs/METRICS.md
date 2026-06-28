@@ -329,8 +329,16 @@ mobile [mobile/lib/rates.js](../mobile/lib/rates.js) (`rateFromPct` for the serv
 ### Personal (separate lens — NOT billing)
 [mobile/app/(app)/stats.jsx](../mobile/app/(app)/stats.jsx), [stats/[date].jsx](../mobile/app/(app)/stats/[date].jsx),
 and the map HUD ("Today's Progress") read `/mobile/me/today` + `/mobile/me/history`. `doorsKnocked` =
-raw personal door events (today / for the date); these are a canvasser-motivation view and intentionally
-do **not** use the billable per-house-pass knock.
+raw personal door events (today / for the date), and `responses`/`litDropped` are raw volume counts;
+these are a canvasser-motivation view and intentionally do **not** use the billable per-house-pass knock.
+
+**The personal connection rate, though, is bounded like the report's.** `/mobile/me/*` also returns
+`knockedHomes` / `surveyedHomes` / `litHomes` (distinct `householdId` for that user/window/day), and the
+mobile rate is `surveyedHomes ÷ knockedHomes` (or `litHomes ÷ knockedHomes`), clamped ≤100% in
+[mobile/lib/rates.js](../mobile/lib/rates.js) `getConnectionRate`. So a canvasser who knocks one home and
+surveys two voters there sees **100%, not 200%**, and the personal rate reads the same way as the
+admin/report `connectionRate` (= `surveyedKnocks/knocks`). Only the *rate* uses distinct homes; the
+displayed door/survey/lit **counts** stay raw.
 
 **`remaining`** (the map HUD's "Remaining", [me.js `/today`](../server/src/routes/mobile/me.js)) = the
 doors still left for **this person** to knock: `status = 'unknocked'`, `isActive`,

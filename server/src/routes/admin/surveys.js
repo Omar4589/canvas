@@ -19,6 +19,24 @@ const optionSchema = z.object({
   order: z.number().optional(),
 });
 
+// One visibleIf rule. is/is_not compare against exactly one option; any_of needs
+// at least one; answered/not_answered carry no optionIds. Cross-question integrity
+// (earlier-reference, op-vs-type, optionId existence) is enforced after reconcile.
+const ruleSchema = z
+  .object({
+    questionKey: z.string().min(1),
+    op: z.enum(['is', 'is_not', 'any_of', 'answered', 'not_answered']),
+    optionIds: z.array(z.string()).default([]),
+  })
+  .refine(
+    (r) => {
+      if (r.op === 'is' || r.op === 'is_not') return r.optionIds.length === 1;
+      if (r.op === 'any_of') return r.optionIds.length >= 1;
+      return true;
+    },
+    { message: "Rule op 'is'/'is_not' needs exactly one optionId; 'any_of' needs at least one." }
+  );
+
 const questionSchema = z.object({
   key: z.string().min(1),
   label: z.string().min(1),
@@ -28,7 +46,7 @@ const questionSchema = z.object({
   order: z.number().optional().default(0),
   retired: z.boolean().optional(),
   visibleIf: z
-    .object({ logic: z.enum(['all', 'any']), rules: z.array(z.any()) })
+    .object({ logic: z.enum(['all', 'any']), rules: z.array(ruleSchema).default([]) })
     .nullable()
     .optional(),
   otherOption: z.boolean().optional(),
@@ -121,6 +139,47 @@ function reconcileQuestions(existingQuestions = [], incomingQuestions = []) {
   return reconciled;
 }
 
+// Cross-question integrity for visibleIf, run on the FINAL (reconciled) questions.
+// Every rule on a non-retired question must reference a STRICTLY EARLIER non-retired
+// question (forward/self/dangling => error, which also makes cycles impossible),
+// the op must suit the referenced question's type (text questions support only
+// answered/not_answered), and is/is_not/any_of optionIds must exist on the
+// referenced question (retired-inclusive) or be '__other__' when it allows Other.
+// Returns an error message string, or null when valid.
+function validateVisibleIfIntegrity(questions = []) {
+  const active = questions.filter((q) => q && !q.retired);
+  const posByKey = new Map(active.map((q, i) => [q.key, i]));
+  const qByKey = new Map(active.map((q) => [q.key, q]));
+
+  for (let i = 0; i < active.length; i++) {
+    const q = active[i];
+    const rules = (q.visibleIf && q.visibleIf.rules) || [];
+    for (const rule of rules) {
+      const refPos = posByKey.get(rule.questionKey);
+      if (refPos == null) {
+        return `Question "${q.label}" has a condition referencing an unknown or retired question "${rule.questionKey}".`;
+      }
+      if (refPos >= i) {
+        return `Question "${q.label}" has a condition referencing question "${rule.questionKey}", which must come earlier in the survey.`;
+      }
+      const ref = qByKey.get(rule.questionKey);
+      if (ref.type === 'text' && rule.op !== 'answered' && rule.op !== 'not_answered') {
+        return `Question "${q.label}" has a condition on text question "${ref.label}", which only supports answered / not answered.`;
+      }
+      if (rule.op === 'is' || rule.op === 'is_not' || rule.op === 'any_of') {
+        const validIds = new Set((ref.options || []).map((o) => o.id));
+        if (ref.otherOption) validIds.add('__other__');
+        for (const id of rule.optionIds || []) {
+          if (!validIds.has(id)) {
+            return `Question "${q.label}" has a condition referencing an option "${id}" that doesn't exist on question "${ref.label}".`;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function activeOrgId(req) {
   return req.activeOrg?._id;
 }
@@ -174,9 +233,12 @@ router.post('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const data = upsertSchema.parse(req.body);
+    const finalQuestions = assignOptionIds(data.questions);
+    const integrityError = validateVisibleIfIntegrity(finalQuestions);
+    if (integrityError) return res.status(400).json({ error: integrityError });
     const survey = await SurveyTemplate.create({
       ...data,
-      questions: assignOptionIds(data.questions),
+      questions: finalQuestions,
       organizationId: activeOrgId(req),
       createdBy: req.user._id,
       version: 1,
@@ -220,7 +282,10 @@ router.patch('/:surveyId', async (req, res, next) => {
     const priorQuestions = existing.questions;
     Object.assign(existing, data);
     if (data.questions) {
-      existing.questions = reconcileQuestions(priorQuestions, data.questions);
+      const reconciled = reconcileQuestions(priorQuestions, data.questions);
+      const integrityError = validateVisibleIfIntegrity(reconciled);
+      if (integrityError) return res.status(400).json({ error: integrityError });
+      existing.questions = reconciled;
       existing.version = (existing.version || 1) + 1;
     }
     await existing.save();

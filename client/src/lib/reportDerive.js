@@ -80,7 +80,7 @@ function deriveKpis({ isLit, t, d }) {
     accent: 'amber',
     delta: null,
     deltaZeroText: null,
-    hint: isLit ? 'Lit drops per door knocked' : 'Surveys per door knocked',
+    hint: isLit ? 'Share of doors where we dropped lit' : 'Share of doors where we surveyed someone',
     help: isLit ? KPI_HELP.litRate : KPI_HELP.surveyRate,
   };
   if (isLit) {

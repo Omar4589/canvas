@@ -19,6 +19,7 @@
     "migrate:multitenant": "npm --prefix server run migrate:multitenant",
     "migrate:timezones": "npm --prefix server run migrate:timezones --",
     "migrate:survey-dedup": "npm --prefix server run migrate:survey-dedup --",
+    "migrate:survey-option-ids": "npm --prefix server run migrate:survey-option-ids --",
     "migrate:cleanup-client-role": "npm --prefix server run migrate:cleanup-client-role --"
   },
   "devDependencies": {

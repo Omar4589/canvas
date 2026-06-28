@@ -1044,12 +1044,13 @@ function RecenterButton({
 const SURVEY_LEGEND = ['unknocked', 'not_home', 'surveyed', 'wrong_address'];
 const LIT_DROP_LEGEND = ['unknocked', 'lit_dropped', 'wrong_address'];
 
-// Connection rate = surveys ÷ doors knocked. Returns null when there's no
-// data yet (avoids "0%, looks bad" on a fresh day). The `level` drives the
-// banner's color tier: ≥20% green (good), 10–19% amber (caution), <10% red.
-function getConnectionRate(surveys, doorsKnocked) {
-  if (!doorsKnocked) return null;
-  const pct = Math.round(((surveys || 0) / doorsKnocked) * 100);
+// Connection rate = surveyed homes ÷ knocked homes (DISTINCT homes), so it's bounded ≤100% and
+// matches the admin/report rate — a home with 2 voters surveyed reads 100%, not 200%. Returns null
+// when there's no data yet (avoids "0%, looks bad" on a fresh day). The Math.min is a guard. The
+// `level` drives the banner's color tier: ≥20% green (good), 10–19% amber (caution), <10% red.
+function getConnectionRate(surveyedHomes, knockedHomes) {
+  if (!knockedHomes) return null;
+  const pct = Math.min(100, Math.round(((surveyedHomes || 0) / knockedHomes) * 100));
   let level;
   if (pct >= 20) level = 'good';
   else if (pct >= 10) level = 'caution';
@@ -1076,7 +1077,7 @@ function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
   const showAnswers = !isLitDrop && breakdown.length > 0;
   const connectionRate = isLitDrop
     ? null
-    : getConnectionRate(today.responses, today.doorsKnocked);
+    : getConnectionRate(today.surveyedHomes, today.knockedHomes);
   const rateColors = connectionRate ? RATE_COLORS[connectionRate.level] : null;
 
   return (

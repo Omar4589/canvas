@@ -1,9 +1,11 @@
-// Tiered connection rate. Returns null when there's no data to ratio (avoids
-// showing 0% when the truth is "haven't started yet"). Tiers match canvasser
-// expectations from prior screens — green ≥20%, amber 10-19%, red <10%.
+// Tiered connection rate = surveyed homes ÷ knocked homes (callers pass DISTINCT-HOME counts),
+// so it's bounded ≤100% and matches the admin/report rate — a home with 2 voters surveyed reads
+// 100%, not 200%. Returns null when there's no data to ratio (avoids showing 0% when the truth is
+// "haven't started yet"). The Math.min is a belt-and-suspenders guard. Tiers: green ≥20%, amber
+// 10-19%, red <10%.
 export function getConnectionRate(numerator, denominator) {
   if (!denominator) return null;
-  const pct = Math.round(((numerator || 0) / denominator) * 100);
+  const pct = Math.min(100, Math.round(((numerator || 0) / denominator) * 100));
   let level;
   if (pct >= 20) level = 'good';
   else if (pct >= 10) level = 'caution';

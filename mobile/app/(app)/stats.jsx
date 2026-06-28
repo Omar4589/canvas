@@ -147,7 +147,9 @@ function DayRow({ day, todayStr, yesterdayStr, bestDate, isLitDrop, onPress }) {
   const isBest = bestDate && day.date === bestDate;
   const secondaryLabel = isLitDrop ? 'lit' : 'surveys';
   const secondaryValue = isLitDrop ? day.litDropped || 0 : day.responses || 0;
-  const rate = getConnectionRate(secondaryValue, day.doorsKnocked);
+  // Rate = surveyed/lit HOMES ÷ knocked homes (bounded), matching the report; the volume counts
+  // (surveys/lit, doors) above stay raw.
+  const rate = getConnectionRate(isLitDrop ? day.litHomes : day.surveyedHomes, day.knockedHomes);
   const pace = formatPace(day.doorsKnocked, day.firstDoorAt, day.lastDoorAt);
   const detail = [
     shiftRange(day.firstDoorAt, day.lastDoorAt),
@@ -266,7 +268,11 @@ export default function StatsScreen() {
   const totalDistance = days.reduce((s, d) => s + (d.distanceMeters || 0), 0);
   const daysActive = days.filter((d) => (d.doorsKnocked || 0) > 0).length;
   const primaryValue = isLitDrop ? totalLit : totalResponses;
-  const rate = getConnectionRate(primaryValue, totalDoors);
+  // Rate from HOMES (bounded ≤100%), matching the report; the displayed Doors/Surveys stats stay raw.
+  const totalKnockedHomes = days.reduce((s, d) => s + (d.knockedHomes || 0), 0);
+  const totalSurveyedHomes = days.reduce((s, d) => s + (d.surveyedHomes || 0), 0);
+  const totalLitHomes = days.reduce((s, d) => s + (d.litHomes || 0), 0);
+  const rate = getConnectionRate(isLitDrop ? totalLitHomes : totalSurveyedHomes, totalKnockedHomes);
   const streak = data?.currentStreak || 0;
   const best = days.reduce(
     (b, d) => (!b || (d.doorsKnocked || 0) > (b.doorsKnocked || 0) ? d : b),

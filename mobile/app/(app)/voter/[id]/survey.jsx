@@ -15,75 +15,100 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { optimisticSubmit } from '../../../../lib/recordAction';
+import { makeCell, visibleQuestionKeys } from '../../../../lib/surveyVisibility';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
-function isAnswered(q, value) {
-  if (q.type === 'multiple_choice') return Array.isArray(value) && value.length > 0;
-  if (q.type === 'text') return typeof value === 'string' && value.trim().length > 0;
-  return value != null && value !== '';
-}
-
-function SingleChoice({ q, value, onChange }) {
+function SingleChoice({ q, value, onChange, otherText, onOtherText }) {
   const styles = useThemedStyles(makeStyles);
+  // Real options plus a synthetic "Other (specify)" when the question allows it.
+  const opts = q.options.filter((o) => !o.retired);
+  const rendered = q.otherOption
+    ? [...opts, { id: '__other__', text: 'Other (specify)' }]
+    : opts;
   return (
     <View style={styles.optionGrid}>
-      {q.options.filter((o) => !o.retired).map((opt) => {
+      {rendered.map((opt) => {
         const selected = value === opt.id;
         return (
-          <Pressable
-            key={opt.id}
-            onPress={() => onChange(opt.id)}
-            style={[styles.option, selected && styles.optionSelected]}
-          >
-            <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{opt.text}</Text>
-            <View style={[styles.radio, selected && styles.radioSelected]}>
-              {selected && <View style={styles.radioInner} />}
-            </View>
-          </Pressable>
+          <View key={opt.id} style={styles.optionWrap}>
+            <Pressable
+              onPress={() => onChange(opt.id)}
+              style={[styles.option, selected && styles.optionSelected]}
+            >
+              <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{opt.text}</Text>
+              <View style={[styles.radio, selected && styles.radioSelected]}>
+                {selected && <View style={styles.radioInner} />}
+              </View>
+            </Pressable>
+            {selected && opt.id !== '__other__' && opt.script ? (
+              <View style={styles.scriptBlock}>
+                <Text style={styles.scriptLabel}>Read aloud</Text>
+                <Text style={styles.scriptText}>{opt.script}</Text>
+              </View>
+            ) : null}
+            {selected && opt.id === '__other__' ? (
+              <FreeText value={otherText} onChange={onOtherText} placeholder="Please specify" />
+            ) : null}
+          </View>
         );
       })}
     </View>
   );
 }
 
-function MultipleChoice({ q, value, onChange }) {
+function MultipleChoice({ q, value, onChange, otherText, onOtherText }) {
   const styles = useThemedStyles(makeStyles);
   const selected = Array.isArray(value) ? value : [];
   function toggle(id) {
     if (selected.includes(id)) onChange(selected.filter((s) => s !== id));
     else onChange([...selected, id]);
   }
+  // Real options plus a synthetic "Other (specify)" when the question allows it.
+  const opts = q.options.filter((o) => !o.retired);
+  const rendered = q.otherOption
+    ? [...opts, { id: '__other__', text: 'Other (specify)' }]
+    : opts;
   return (
     <View style={styles.optionGrid}>
-      {q.options.filter((o) => !o.retired).map((opt) => {
+      {rendered.map((opt) => {
         const isOn = selected.includes(opt.id);
         return (
-          <Pressable
-            key={opt.id}
-            onPress={() => toggle(opt.id)}
-            style={[styles.option, isOn && styles.optionSelected]}
-          >
-            <Text style={[styles.optionText, isOn && styles.optionTextSelected]}>{opt.text}</Text>
-            <View style={[styles.checkbox, isOn && styles.checkboxSelected]}>
-              {isOn && <Text style={styles.checkboxMark}>✓</Text>}
-            </View>
-          </Pressable>
+          <View key={opt.id} style={styles.optionWrap}>
+            <Pressable
+              onPress={() => toggle(opt.id)}
+              style={[styles.option, isOn && styles.optionSelected]}
+            >
+              <Text style={[styles.optionText, isOn && styles.optionTextSelected]}>{opt.text}</Text>
+              <View style={[styles.checkbox, isOn && styles.checkboxSelected]}>
+                {isOn && <Text style={styles.checkboxMark}>✓</Text>}
+              </View>
+            </Pressable>
+            {isOn && opt.id !== '__other__' && opt.script ? (
+              <View style={styles.scriptBlock}>
+                <Text style={styles.scriptLabel}>Read aloud</Text>
+                <Text style={styles.scriptText}>{opt.script}</Text>
+              </View>
+            ) : null}
+            {isOn && opt.id === '__other__' ? (
+              <FreeText value={otherText} onChange={onOtherText} placeholder="Please specify" />
+            ) : null}
+          </View>
         );
       })}
     </View>
   );
 }
 
-function FreeText({ value, onChange }) {
+function FreeText({ value, onChange, placeholder }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   return (
     <TextInput
       value={value || ''}
       onChangeText={onChange}
-      placeholder="Type response"
+      placeholder={placeholder || 'Type response'}
       placeholderTextColor={colors.textMuted}
       multiline
       style={styles.textInput}
@@ -122,11 +147,39 @@ export default function VoterSurvey() {
   }, [bootstrap, household]);
 
   const [answers, setAnswers] = useState({});
+  const [otherTexts, setOtherTexts] = useState({});
   const [note, setNote] = useState('');
   // Guard against a double-tap on Save creating two survey responses. firedRef blocks the second
   // call synchronously (state updates are async); isSubmitting drives the disabled/spinner UI.
   const [isSubmitting, setIsSubmitting] = useState(false);
   const firedRef = useRef(false);
+
+  // Live visibility: recompute which questions show as answers change. Feed the
+  // pure evaluator a normalized cell per non-retired question (choice → optionIds,
+  // text → text); it hides questions whose visibleIf fails and withholds hidden
+  // questions' answers from later questions. Declared before the early return so
+  // the hook order stays stable regardless of voter/survey availability.
+  const visibleQuestions = useMemo(() => {
+    if (!survey) return [];
+    const rawAnswersByKey = {};
+    for (const q of survey.questions) {
+      if (q.retired) continue;
+      const v = answers[q.key];
+      let ids = [];
+      let textFromState = null;
+      if (q.type === 'multiple_choice') {
+        ids = Array.isArray(v) ? v : [];
+      } else if (q.type === 'text') {
+        ids = [];
+        textFromState = v;
+      } else {
+        ids = v != null ? [v] : [];
+      }
+      rawAnswersByKey[q.key] = makeCell(q.type, ids, textFromState);
+    }
+    const vis = visibleQuestionKeys(survey.questions, rawAnswersByKey);
+    return survey.questions.filter((q) => !q.retired && vis.has(q.key));
+  }, [answers, otherTexts, survey]);
 
   if (!voter || !survey) {
     return (
@@ -141,17 +194,42 @@ export default function VoterSurvey() {
     );
   }
 
-  // Phase 1: skip retired questions. (Phase 2 adds visibleIf conditional filtering.)
-  const visibleQuestions = survey.questions.filter((q) => !q.retired);
+  // Sentinel-aware answered check, closing over answers + otherTexts. A selection
+  // of '__other__' only counts as answered once its free-text is non-empty.
+  function isAnsweredNow(q) {
+    const v = answers[q.key];
+    if (q.type === 'multiple_choice') {
+      const arr = Array.isArray(v) ? v : [];
+      if (arr.length === 0) return false;
+      if (arr.includes('__other__')) {
+        const t = otherTexts[q.key];
+        const otherOk = typeof t === 'string' && t.trim().length > 0;
+        // Other-only selection requires its text; any real option also counts.
+        if (arr.length === 1) return otherOk;
+        return true;
+      }
+      return true;
+    }
+    if (q.type === 'text') return typeof v === 'string' && v.trim().length > 0;
+    if (v === '__other__') {
+      const t = otherTexts[q.key];
+      return typeof t === 'string' && t.trim().length > 0;
+    }
+    return v != null && v !== '';
+  }
 
   function setAnswer(key, value) {
     setAnswers((prev) => ({ ...prev, [key]: value }));
   }
 
+  function setOtherText(key, value) {
+    setOtherTexts((prev) => ({ ...prev, [key]: value }));
+  }
+
   function validate() {
     for (const q of visibleQuestions) {
       if (!q.required) continue;
-      if (!isAnswered(q, answers[q.key])) {
+      if (!isAnsweredNow(q)) {
         return `Please answer: ${q.label}`;
       }
     }
@@ -159,7 +237,7 @@ export default function VoterSurvey() {
   }
 
   const totalQuestions = visibleQuestions.length;
-  const answeredCount = visibleQuestions.filter((q) => isAnswered(q, answers[q.key])).length;
+  const answeredCount = visibleQuestions.filter((q) => isAnsweredNow(q)).length;
   const percent =
     totalQuestions === 0 ? 100 : Math.round((answeredCount / totalQuestions) * 100);
 
@@ -183,14 +261,22 @@ export default function VoterSurvey() {
         answers: visibleQuestions.map((q) => {
           const v = answers[q.key];
           if (q.type === 'text') {
-            return { questionKey: q.key, questionLabel: q.label, answer: v ?? null, optionIds: [] };
+            // Always emit otherText (null here) to match the answer schema.
+            return { questionKey: q.key, questionLabel: q.label, answer: v ?? null, optionIds: [], otherText: null };
           }
-          // Choice: answer state holds option id(s). Send the ids + a text snapshot.
+          // Choice: answer state holds option id(s) — incl. the '__other__'
+          // sentinel when picked. Send the ids + a text snapshot.
           const ids = q.type === 'multiple_choice' ? (Array.isArray(v) ? v : []) : v != null ? [v] : [];
+          const hasOther = ids.includes('__other__');
+          const otherText = hasOther ? (otherTexts[q.key] ?? null) : null;
           const byId = new Map((q.options || []).map((o) => [o.id, o.text]));
-          const texts = ids.map((id) => byId.get(id)).filter((t) => t != null);
+          // Map real ids to their labels; the '__other__' sentinel snapshots its
+          // free-text (fallback 'Other') since it has no real option label.
+          const texts = ids
+            .map((id) => (id === '__other__' ? (otherTexts[q.key] || 'Other') : byId.get(id)))
+            .filter((t) => t != null);
           const answer = q.type === 'multiple_choice' ? texts : texts[0] ?? null;
-          return { questionKey: q.key, questionLabel: q.label, answer, optionIds: ids };
+          return { questionKey: q.key, questionLabel: q.label, answer, optionIds: ids, otherText };
         }),
         note: note.trim() || null,
       },
@@ -318,6 +404,8 @@ export default function VoterSurvey() {
                   q={q}
                   value={answers[q.key]}
                   onChange={(v) => setAnswer(q.key, v)}
+                  otherText={otherTexts[q.key]}
+                  onOtherText={(t) => setOtherText(q.key, t)}
                 />
               )}
               {q.type === 'multiple_choice' && (
@@ -325,6 +413,8 @@ export default function VoterSurvey() {
                   q={q}
                   value={answers[q.key]}
                   onChange={(v) => setAnswer(q.key, v)}
+                  otherText={otherTexts[q.key]}
+                  onOtherText={(t) => setOtherText(q.key, t)}
                 />
               )}
               {q.type === 'text' && (
@@ -529,9 +619,15 @@ function makeStyles(t) {
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
-  option: {
+  // Wraps a single option Pressable + its inline read-aloud script / Other input.
+  // Carries the grid sizing so the option keeps its two-up layout; the script and
+  // FreeText stack full-width beneath it.
+  optionWrap: {
     minWidth: '47%',
     flexGrow: 1,
+  },
+  option: {
+    width: '100%',
     backgroundColor: colors.card,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,

@@ -18,11 +18,12 @@ function slugify(s) {
 }
 
 function blankQuestion() {
+  const used = new Set();
   return {
     key: '',
     label: '',
     type: 'single_choice',
-    options: [{ text: '' }, { text: '' }],
+    options: [{ id: optionId('', used), text: '' }, { id: optionId('', used), text: '' }],
     required: false,
     order: 0,
     retired: false,
@@ -44,6 +45,50 @@ function deriveKey(q, index, allQuestions) {
     key = `${base}_${n++}`;
   }
   return key;
+}
+
+// Mint a stable, unique-within-question option id (slug of text, else 'opt', with a
+// numeric suffix on collision). New options get one at add-time so conditions can
+// reference them before the survey is first saved; the server preserves sent ids.
+function optionId(text, used) {
+  const base = slugify(text) || 'opt';
+  let id = base;
+  let n = 2;
+  while (used.has(id)) id = `${base}_${n++}`;
+  used.add(id);
+  return id;
+}
+
+// Validate one question's visibleIf against the questions BEFORE it. Returns an
+// error string (shown live + on save) or null. Conditions may only reference an
+// earlier, keyed, non-retired question; the op must fit that question's type; and
+// is/is_not target exactly one existing option, any_of at least one (retired ids +
+// '__other__' allowed when that question enables Other).
+function ruleError(q, index, questions) {
+  const vi = q.visibleIf;
+  if (!vi || !(vi.rules || []).length) return null;
+  const earlier = new Map(
+    questions.slice(0, index).filter((x) => !x.retired && x.key).map((x) => [x.key, x])
+  );
+  for (const r of vi.rules) {
+    const refQ = earlier.get(r.questionKey);
+    if (!refQ) return 'A condition references a question that does not come before this one.';
+    const validOps = refQ.type === 'text'
+      ? ['answered', 'not_answered']
+      : ['is', 'is_not', 'any_of', 'answered', 'not_answered'];
+    if (!validOps.includes(r.op)) return `A condition uses an operator that doesn’t fit “${refQ.label || 'that question'}”.`;
+    if (r.op === 'is' || r.op === 'is_not' || r.op === 'any_of') {
+      const ids = r.optionIds || [];
+      if (!ids.length) return 'A condition is missing its answer selection.';
+      if ((r.op === 'is' || r.op === 'is_not') && ids.length !== 1) return 'A condition should target exactly one answer.';
+      const valid = new Set([
+        ...(refQ.options || []).map((o) => o.id),
+        ...(refQ.otherOption ? ['__other__'] : []),
+      ]);
+      if (!ids.every((id) => valid.has(id))) return 'A condition points at an answer that no longer exists.';
+    }
+  }
+  return null;
 }
 
 function TypePills({ value, onChange, disabled }) {
@@ -74,43 +119,232 @@ function TypePills({ value, onChange, disabled }) {
 
 function OptionRow({ index, value, onChange, onRemove }) {
   const retired = !!value.retired;
+  const [showScript, setShowScript] = useState(!!value.script);
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-6 text-right text-xs font-medium text-fg-subtle">{index + 1}.</span>
-      <input
-        value={value.text || ''}
-        onChange={(e) => onChange({ ...value, text: e.target.value })}
-        readOnly={retired}
-        placeholder={`Option ${index + 1}`}
-        className={
-          'flex-1 rounded border border-border-strong px-3 py-2 text-sm placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ' +
-          (retired ? 'bg-sunken text-fg-subtle line-through' : 'bg-card text-fg')
-        }
-      />
-      {retired ? (
-        <button
-          type="button"
-          onClick={() => onChange({ ...value, retired: false })}
-          className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-brand-accent hover:bg-brand-tint"
-          title="Restore option"
-        >
-          Restore
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={onRemove}
-          className="rounded p-2 text-fg-subtle hover:bg-danger-tint hover:text-danger"
-          title="Remove / retire option"
-        >
-          ×
-        </button>
-      )}
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <span className="w-6 text-right text-xs font-medium text-fg-subtle">{index + 1}.</span>
+        <input
+          value={value.text || ''}
+          onChange={(e) => onChange({ ...value, text: e.target.value })}
+          readOnly={retired}
+          placeholder={`Option ${index + 1}`}
+          className={
+            'flex-1 rounded border border-border-strong px-3 py-2 text-sm placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ' +
+            (retired ? 'bg-sunken text-fg-subtle line-through' : 'bg-card text-fg')
+          }
+        />
+        {retired ? (
+          <button
+            type="button"
+            onClick={() => onChange({ ...value, retired: false })}
+            className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-brand-accent hover:bg-brand-tint"
+            title="Restore option"
+          >
+            Restore
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="rounded p-2 text-fg-subtle hover:bg-danger-tint hover:text-danger"
+            title="Remove / retire option"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {!retired &&
+        (showScript || value.script ? (
+          <div className="pl-8">
+            <textarea
+              value={value.script || ''}
+              onChange={(e) => onChange({ ...value, script: e.target.value })}
+              rows={2}
+              placeholder="Read aloud when this answer is picked (optional)"
+              className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-xs leading-relaxed text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowScript(true)}
+            className="ml-8 text-[11px] text-fg-subtle hover:text-brand-accent"
+          >
+            + read-aloud script
+          </button>
+        ))}
     </div>
   );
 }
 
-function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, error }) {
+const OPS = [
+  { value: 'is', label: 'is' },
+  { value: 'is_not', label: 'is not' },
+  { value: 'any_of', label: 'is any of' },
+  { value: 'answered', label: 'is answered' },
+  { value: 'not_answered', label: 'is not answered' },
+];
+
+function opsForType(type) {
+  return type === 'text' ? OPS.filter((o) => o.value === 'answered' || o.value === 'not_answered') : OPS;
+}
+
+function starterRule(priorQuestions) {
+  const q = priorQuestions[0];
+  return { questionKey: q.key, op: q.type === 'text' ? 'answered' : 'is', optionIds: [] };
+}
+
+// Per-question "Show only if…" editor. Rules may reference only EARLIER keyed
+// questions (acyclic by construction). For is/is_not/any_of it resolves the
+// referenced question's current options (+ "Other" when enabled) as pickable
+// targets, writing stable option ids into the rule.
+function ConditionEditor({ value, onChange, priorQuestions }) {
+  const byKey = new Map(priorQuestions.map((q) => [q.key, q]));
+  const selectCls =
+    'rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg focus:border-brand-accent focus:outline-none';
+
+  if (!value) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={!priorQuestions.length}
+          onClick={() => onChange({ logic: 'all', rules: [starterRule(priorQuestions)] })}
+          className="inline-flex items-center gap-1 rounded border border-dashed border-border-strong px-3 py-1.5 text-xs font-medium text-fg-muted hover:border-brand-600 hover:text-brand-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong disabled:hover:text-fg-muted"
+        >
+          + Show only if…
+        </button>
+        {!priorQuestions.length && (
+          <span className="text-[11px] text-fg-subtle">Conditions can only reference earlier questions.</span>
+        )}
+      </div>
+    );
+  }
+
+  const rules = value.rules || [];
+  const setRule = (idx, next) => onChange({ ...value, rules: rules.map((r, i) => (i === idx ? next : r)) });
+  const addRule = () => onChange({ ...value, rules: [...rules, starterRule(priorQuestions)] });
+  const removeRule = (idx) => {
+    const next = rules.filter((_, i) => i !== idx);
+    onChange(next.length ? { ...value, rules: next } : null);
+  };
+
+  return (
+    <div className="rounded-md border border-border bg-sunken p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted">Shown only if</span>
+        <button type="button" onClick={() => onChange(null)} className="text-[11px] text-fg-subtle hover:text-danger">
+          Remove condition
+        </button>
+      </div>
+
+      {rules.length > 1 && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-fg-muted">
+          Match
+          <select value={value.logic} onChange={(e) => onChange({ ...value, logic: e.target.value })} className={selectCls}>
+            <option value="all">ALL</option>
+            <option value="any">ANY</option>
+          </select>
+          of these rules
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {rules.map((r, i) => {
+          const refQ = byKey.get(r.questionKey);
+          const needsOptions = r.op === 'is' || r.op === 'is_not' || r.op === 'any_of';
+          const single = r.op === 'is' || r.op === 'is_not';
+          const opts = refQ
+            ? [
+                ...(refQ.options || []).filter((o) => !o.retired),
+                ...(refQ.otherOption ? [{ id: '__other__', text: 'Other (specify)' }] : []),
+              ]
+            : [];
+          return (
+            <div key={i} className="rounded border border-border bg-card p-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={r.questionKey}
+                  onChange={(e) => {
+                    const nq = byKey.get(e.target.value);
+                    setRule(i, { questionKey: e.target.value, op: nq && nq.type === 'text' ? 'answered' : 'is', optionIds: [] });
+                  }}
+                  className={selectCls}
+                >
+                  {priorQuestions.map((q) => (
+                    <option key={q.key} value={q.key}>
+                      {q.label || '(untitled)'}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={r.op}
+                  onChange={(e) => {
+                    const op = e.target.value;
+                    const optionIds = op === 'is' || op === 'is_not' ? (r.optionIds || []).slice(0, 1) : r.optionIds || [];
+                    setRule(i, { ...r, op, optionIds });
+                  }}
+                  className={selectCls}
+                >
+                  {opsForType(refQ?.type).map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => removeRule(i)}
+                  className="ml-auto rounded p-1 text-fg-subtle hover:bg-danger-tint hover:text-danger"
+                  title="Remove rule"
+                >
+                  ×
+                </button>
+              </div>
+              {needsOptions && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {opts.map((o) => {
+                    const on = (r.optionIds || []).includes(o.id);
+                    return (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() =>
+                          setRule(i, {
+                            ...r,
+                            optionIds: single
+                              ? [o.id]
+                              : on
+                                ? r.optionIds.filter((x) => x !== o.id)
+                                : [...(r.optionIds || []), o.id],
+                          })
+                        }
+                        className={
+                          'rounded-full px-2.5 py-1 text-xs transition-colors ' +
+                          (on ? 'bg-brand-600 text-white' : 'border border-border bg-card text-fg-muted hover:bg-sunken')
+                        }
+                      >
+                        {o.text || '(untitled)'}
+                      </button>
+                    );
+                  })}
+                  {!opts.length && <span className="text-[11px] text-fg-subtle">That question has no options to match.</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <button type="button" onClick={addRule} className="mt-2 text-[11px] font-medium text-brand-accent hover:underline">
+        + Add rule
+      </button>
+    </div>
+  );
+}
+
+function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, priorQuestions = [], error }) {
   const isChoice = value.type === 'single_choice' || value.type === 'multiple_choice';
 
   function updateOption(optIdx, next) {
@@ -120,7 +354,8 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
   }
 
   function addOption() {
-    onChange({ ...value, options: [...value.options, { text: '' }] });
+    const used = new Set(value.options.map((o) => o.id).filter(Boolean));
+    onChange({ ...value, options: [...value.options, { id: optionId('', used), text: '' }] });
   }
 
   function removeOption(optIdx) {
@@ -137,8 +372,10 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
 
   function setType(t) {
     if (t === 'text') onChange({ ...value, type: t, options: [] });
-    else if (!isChoice) onChange({ ...value, type: t, options: [{ text: '' }, { text: '' }] });
-    else onChange({ ...value, type: t });
+    else if (!isChoice) {
+      const used = new Set();
+      onChange({ ...value, type: t, options: [{ id: optionId('', used), text: '' }, { id: optionId('', used), text: '' }] });
+    } else onChange({ ...value, type: t });
   }
 
   return (
@@ -206,14 +443,26 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
               <p className="mt-1 text-[11px] text-fg-subtle">Type is locked once there are responses — Duplicate to change it.</p>
             )}
           </div>
-          <label className="flex cursor-pointer items-center gap-2 rounded border border-border bg-sunken px-3 py-2 text-sm">
-            <input
-              type="checkbox"
-              checked={value.required}
-              onChange={(e) => onChange({ ...value, required: e.target.checked })}
-            />
-            Required
-          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2 rounded border border-border bg-sunken px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={value.required}
+                onChange={(e) => onChange({ ...value, required: e.target.checked })}
+              />
+              Required
+            </label>
+            {isChoice && (
+              <label className="flex cursor-pointer items-center gap-2 rounded border border-border bg-sunken px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={!!value.otherOption}
+                  onChange={(e) => onChange({ ...value, otherOption: e.target.checked })}
+                />
+                Other (specify)
+              </label>
+            )}
+          </div>
         </div>
 
         {isChoice && (
@@ -242,6 +491,18 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
             {error?.options && <p className="mt-2 text-xs text-danger">{error.options}</p>}
           </div>
         )}
+
+        <div>
+          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-muted">
+            Conditional display
+          </label>
+          <ConditionEditor
+            value={value.visibleIf}
+            onChange={(vi) => onChange({ ...value, visibleIf: vi })}
+            priorQuestions={priorQuestions}
+          />
+          {error?.condition && <p className="mt-1 text-xs text-danger">{error.condition}</p>}
+        </div>
       </div>
     </div>
   );
@@ -276,7 +537,15 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
   }, [initial?._id]);
 
   function updateQuestion(index, q) {
-    setQuestions((prev) => prev.map((p, i) => (i === index ? q : p)));
+    setQuestions((prev) =>
+      prev.map((p, i) => {
+        if (i !== index) return p;
+        // Mint the stable question key the first time it gets a label, then keep it
+        // immutable — conditions reference questions by key, so it can't churn.
+        if (!q.key && (q.label || '').trim()) return { ...q, key: deriveKey(q, index, prev) };
+        return q;
+      })
+    );
     if (errors.questions[index]) {
       setErrors((p) => {
         const nq = { ...p.questions };
@@ -323,6 +592,8 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
       const isChoice = q.type === 'single_choice' || q.type === 'multiple_choice';
       if (isChoice && !(q.options || []).some((o) => !o.retired && (o.text || '').trim()))
         qe.options = 'Add at least one answer option.';
+      const ce = ruleError(q, i, questions);
+      if (ce) qe.condition = ce;
       if (Object.keys(qe).length) e.questions[i] = qe;
     });
     return e;
@@ -339,12 +610,15 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
     const cleaned = questions.map((q, i, all) => {
       const key = q.key && q.key.trim() ? q.key : deriveKey(q, i, all);
       const isChoice = q.type === 'single_choice' || q.type === 'multiple_choice';
-      // Keep existing (id'd) + retired options; drop brand-new blank ones. Never
-      // regenerate an option id — the server assigns ids to id-less new options.
+      // Keep text-bearing + retired options; drop brand-new blank ones. Stable ids
+      // (minted at add-time) round-trip untouched. Per-option scripts trim to null.
       const options = isChoice
-        ? q.options.map((o) => ({ ...o, text: (o.text || '').trim() })).filter((o) => o.text || o.retired || o.id)
+        ? q.options
+            .map((o) => ({ ...o, text: (o.text || '').trim(), script: (o.script || '').trim() || null }))
+            .filter((o) => o.text || o.retired)
         : [];
-      return { ...q, key, options };
+      const visibleIf = q.visibleIf && (q.visibleIf.rules || []).length ? q.visibleIf : null;
+      return { ...q, key, options, visibleIf };
     });
     onSave({ name, intro, closing, questions: reorder(cleaned) });
   }
@@ -429,6 +703,8 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
               );
             }
             const displayNum = questions.slice(0, i).filter((x) => !x.retired).length + 1;
+            const priorQuestions = questions.slice(0, i).filter((x) => !x.retired && x.key);
+            const condition = ruleError(q, i, questions);
             return (
               <QuestionCard
                 key={i}
@@ -441,7 +717,8 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
                 onMoveUp={() => move(i, -1)}
                 onMoveDown={() => move(i, 1)}
                 hasResponses={locked}
-                error={errors.questions[i]}
+                priorQuestions={priorQuestions}
+                error={{ ...(errors.questions[i] || {}), condition: errors.questions[i]?.condition || condition }}
               />
             );
           })}
