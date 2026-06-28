@@ -117,9 +117,10 @@ function TypePills({ value, onChange, disabled }) {
   );
 }
 
-function OptionRow({ index, value, onChange, onRemove }) {
+function OptionRow({ index, value, onChange, onRemove, tags = [] }) {
   const retired = !!value.retired;
   const [showScript, setShowScript] = useState(!!value.script);
+  const [showTag, setShowTag] = useState(!!value.tag);
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-2">
@@ -154,26 +155,50 @@ function OptionRow({ index, value, onChange, onRemove }) {
           </button>
         )}
       </div>
-      {!retired &&
-        (showScript || value.script ? (
-          <div className="pl-8">
-            <textarea
-              value={value.script || ''}
-              onChange={(e) => onChange({ ...value, script: e.target.value })}
-              rows={2}
-              placeholder="Read aloud when this answer is picked (optional)"
-              className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-xs leading-relaxed text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-            />
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setShowScript(true)}
-            className="ml-8 text-[11px] text-fg-subtle hover:text-brand-accent"
-          >
-            + read-aloud script
-          </button>
-        ))}
+      {!retired && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-8">
+          {showScript || value.script ? null : (
+            <button
+              type="button"
+              onClick={() => setShowScript(true)}
+              className="text-[11px] text-fg-subtle hover:text-brand-accent"
+            >
+              + read-aloud script
+            </button>
+          )}
+          {showTag || value.tag ? (
+            <label className="flex items-center gap-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">Tag</span>
+              <input
+                value={value.tag || ''}
+                onChange={(e) => onChange({ ...value, tag: e.target.value })}
+                list="survey-tags"
+                placeholder="e.g. Supporter"
+                className="w-40 rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              />
+            </label>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowTag(true)}
+              className="text-[11px] text-fg-subtle hover:text-brand-accent"
+            >
+              + tag
+            </button>
+          )}
+        </div>
+      )}
+      {!retired && (showScript || value.script) && (
+        <div className="pl-8">
+          <textarea
+            value={value.script || ''}
+            onChange={(e) => onChange({ ...value, script: e.target.value })}
+            rows={2}
+            placeholder="Read aloud when this answer is picked (optional)"
+            className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-xs leading-relaxed text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -344,7 +369,7 @@ function ConditionEditor({ value, onChange, priorQuestions }) {
   );
 }
 
-function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, priorQuestions = [], error }) {
+function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, priorQuestions = [], tags = [], error }) {
   const isChoice = value.type === 'single_choice' || value.type === 'multiple_choice';
 
   function updateOption(optIdx, next) {
@@ -478,6 +503,7 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
                   value={opt}
                   onChange={(v) => updateOption(i, v)}
                   onRemove={() => removeOption(i)}
+                  tags={tags}
                 />
               ))}
             </div>
@@ -527,6 +553,23 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
   // closing, label/required, reorder, ADD questions, ADD options. Destructive
   // ones (remove question/option, rename option, change type) are locked per
   // existing question; brand-new questions added here are fully editable.
+  // The tag palette feeding every option's datalist: the case-insensitive union of
+  // initial.tags + every option's tag across all questions, preserving the first
+  // display casing we see. Recomputes as options change, so a tag typed on one
+  // option immediately appears in the other options' datalists.
+  const tagPalette = useMemo(() => {
+    const seen = new Map(); // lowercased -> display
+    const add = (t) => {
+      const trimmed = (t || '').trim();
+      if (!trimmed) return;
+      const key = trimmed.toLowerCase();
+      if (!seen.has(key)) seen.set(key, trimmed);
+    };
+    (initial?.tags || []).forEach(add);
+    for (const q of questions) for (const o of q.options || []) add(o.tag);
+    return Array.from(seen.values());
+  }, [questions, initial?._id]);
+
   const locked = !!initial?.hasResponses;
   const originalByKey = useMemo(() => {
     const m = new Map();
@@ -614,17 +657,28 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
       // (minted at add-time) round-trip untouched. Per-option scripts trim to null.
       const options = isChoice
         ? q.options
-            .map((o) => ({ ...o, text: (o.text || '').trim(), script: (o.script || '').trim() || null }))
+            .map((o) => ({
+              ...o,
+              text: (o.text || '').trim(),
+              script: (o.script || '').trim() || null,
+              tag: (o.tag || '').trim() || null,
+            }))
             .filter((o) => o.text || o.retired)
         : [];
       const visibleIf = q.visibleIf && (q.visibleIf.rules || []).length ? q.visibleIf : null;
       return { ...q, key, options, visibleIf };
     });
-    onSave({ name, intro, closing, questions: reorder(cleaned) });
+    onSave({ name, intro, closing, questions: reorder(cleaned), tags: tagPalette });
   }
 
   return (
     <form onSubmit={submit} className="space-y-6 pb-24">
+      {/* Shared tag palette — referenced by every per-option tag input via list="survey-tags". */}
+      <datalist id="survey-tags">
+        {tagPalette.map((t) => (
+          <option key={t} value={t} />
+        ))}
+      </datalist>
       {locked && (
         <div className="rounded-lg border-l-4 border-warning/40 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
           <p className="font-medium">
@@ -718,6 +772,7 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
                 onMoveDown={() => move(i, 1)}
                 hasResponses={locked}
                 priorQuestions={priorQuestions}
+                tags={tagPalette}
                 error={{ ...(errors.questions[i] || {}), condition: errors.questions[i]?.condition || condition }}
               />
             );

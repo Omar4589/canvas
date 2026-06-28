@@ -6,6 +6,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Campaign } from '../../models/Campaign.js';
 import { classifyQuestionEdits } from '../../services/surveys/diffQuestions.js';
+import { canonicalizeTags } from '../../services/surveys/tags.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -58,6 +59,7 @@ const upsertSchema = z.object({
   intro: z.string().optional().default(''),
   closing: z.string().optional().default(''),
   questions: z.array(questionSchema).default([]),
+  tags: z.array(z.string()).optional().default([]),
 });
 
 // Stable option-id helpers — mirror src/migrations/migrateSurveyOptionIds.js
@@ -233,12 +235,14 @@ router.post('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const data = upsertSchema.parse(req.body);
-    const finalQuestions = assignOptionIds(data.questions);
-    const integrityError = validateVisibleIfIntegrity(finalQuestions);
+    const withIds = assignOptionIds(data.questions);
+    const integrityError = validateVisibleIfIntegrity(withIds);
     if (integrityError) return res.status(400).json({ error: integrityError });
+    const { tags, questions: finalQuestions } = canonicalizeTags(withIds, data.tags);
     const survey = await SurveyTemplate.create({
       ...data,
       questions: finalQuestions,
+      tags,
       organizationId: activeOrgId(req),
       createdBy: req.user._id,
       version: 1,
@@ -285,7 +289,9 @@ router.patch('/:surveyId', async (req, res, next) => {
       const reconciled = reconcileQuestions(priorQuestions, data.questions);
       const integrityError = validateVisibleIfIntegrity(reconciled);
       if (integrityError) return res.status(400).json({ error: integrityError });
-      existing.questions = reconciled;
+      const { tags, questions } = canonicalizeTags(reconciled, data.tags ?? existing.tags);
+      existing.questions = questions;
+      existing.tags = tags;
       existing.version = (existing.version || 1) + 1;
     }
     await existing.save();

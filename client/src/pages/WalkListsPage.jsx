@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client.js';
+import { api, getToken, getActiveOrgId } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import AnswerFilters from '../components/AnswerFilters.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
@@ -20,7 +20,7 @@ const STATUS_LABEL = {
 const EMPTY = {
   genders: [], parties: [], precincts: [], congressional: [], stateSenate: [], stateHouse: [],
   cities: [], zips: [], counties: [], ageMin: '', ageMax: '',
-  priorPassId: '', priorPassStatuses: [], surveyResponse: 'any', answerFilters: [], combine: 'and',
+  priorPassId: '', priorPassStatuses: [], surveyResponse: 'any', answerFilters: [], answerTagFilters: [], combine: 'and',
 };
 
 function buildFilter(f) {
@@ -40,6 +40,7 @@ function buildFilter(f) {
   if (f.priorPassStatuses.length) out.priorPassStatuses = f.priorPassStatuses;
   if (f.surveyResponse && f.surveyResponse !== 'any') out.surveyResponse = f.surveyResponse;
   if (f.answerFilters?.length) out.answerFilters = f.answerFilters;
+  if (f.answerTagFilters?.length) out.answerTagFilters = f.answerTagFilters;
   out.combine = f.combine;
   return out;
 }
@@ -163,6 +164,9 @@ export default function WalkListsPage() {
   const surveyQuestions = (surveyQ.data?.questions || []).filter(
     (q) => q.type === 'single_choice' || q.type === 'multiple_choice'
   );
+  // Tag palette for cross-question by-tag filtering. Prefer the survey's display
+  // palette; AnswerFilters falls back to the union of option tags otherwise.
+  const surveyTags = (surveyQ.data?.tags || []).map((t) => t.tag).filter(Boolean);
 
   const preview = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/walklists/preview`, { method: 'POST', body: { filter: buildFilter(f) } }),
@@ -226,6 +230,50 @@ export default function WalkListsPage() {
     a.download = 'unmatched-voter-ids.csv';
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // Saved-search CSV export. The export endpoint streams a file attachment, not
+  // JSON, so the shared `api()` helper (which JSON-parses every body) can't be
+  // used. We replicate its auth: a raw fetch to the same `/api` base with the
+  // Bearer token + X-Org-Id header, read the response as a Blob, then trigger a
+  // browser download via an object URL + temporary <a download> (revoked after).
+  const [exportingId, setExportingId] = useState(null);
+  const [exportError, setExportError] = useState('');
+
+  async function exportCsv(w) {
+    setExportError('');
+    setExportingId(w._id);
+    try {
+      const headers = {};
+      const token = getToken();
+      const orgId = getActiveOrgId();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (orgId) headers['X-Org-Id'] = orgId;
+      const res = await fetch(
+        `/api/admin/campaigns/${campaignId}/walklists/${w._id}/export.csv`,
+        { headers }
+      );
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      const blob = await res.blob();
+      // Prefer the server's Content-Disposition filename; fall back to the name.
+      const disp = res.headers.get('Content-Disposition') || '';
+      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
+      const fileName = m
+        ? decodeURIComponent(m[1])
+        : `${(w.name || 'walklist').replace(/[^\w.-]+/g, '_')}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err.message || 'Export failed');
+    } finally {
+      setExportingId(null);
+    }
   }
 
   function toggleStatus(s) {
@@ -328,10 +376,17 @@ export default function WalkListsPage() {
               </span>
             </div>
 
-            {surveyQuestions.length > 0 && (
+            {(surveyQuestions.length > 0 || surveyTags.length > 0) && (
               <div className="mt-3">
                 <div className="mb-1 text-xs font-medium text-fg-muted">Survey answers</div>
-                <AnswerFilters questions={surveyQuestions} value={f.answerFilters} onChange={(v) => set('answerFilters', v)} />
+                <AnswerFilters
+                  questions={surveyQuestions}
+                  value={f.answerFilters}
+                  onChange={(v) => set('answerFilters', v)}
+                  tags={surveyTags}
+                  tagValue={f.answerTagFilters}
+                  onTagChange={(v) => set('answerTagFilters', v)}
+                />
               </div>
             )}
           </div>
@@ -456,6 +511,7 @@ export default function WalkListsPage() {
         {/* Saved lists */}
         <section className="rounded-lg border border-border bg-card p-5">
           <h2 className="mb-3 text-base font-medium">Saved searches</h2>
+          {exportError && <div className="mb-2 text-xs text-danger">{exportError}</div>}
           {listsQ.isLoading ? (
             <div className="text-sm text-fg-muted">Loading…</div>
           ) : !lists.length ? (
@@ -471,7 +527,16 @@ export default function WalkListsPage() {
                         <span className="shrink-0 rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-medium text-brand-accent" title={w.sourceMeta?.fileName || 'Built from an uploaded Voter-ID CSV'}>from CSV</span>
                       )}
                     </span>
-                    <button onClick={() => del.mutate(w._id)} className="shrink-0 text-xs text-danger hover:underline">Delete</button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        onClick={() => exportCsv(w)}
+                        disabled={exportingId === w._id}
+                        className="text-xs text-brand-accent hover:underline disabled:opacity-60"
+                      >
+                        {exportingId === w._id ? 'Exporting…' : 'Export CSV'}
+                      </button>
+                      <button onClick={() => del.mutate(w._id)} className="text-xs text-danger hover:underline">Delete</button>
+                    </div>
                   </div>
                   <div className="text-xs text-fg-muted">
                     {w.householdCount?.toLocaleString()} hh · {w.voterCount?.toLocaleString()} voters · {formatInTz(w.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)}

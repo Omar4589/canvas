@@ -234,6 +234,64 @@ router.get('/distinct', async (req, res, next) => {
   }
 });
 
+// Download a saved search's frozen voters as CSV (name/party/age/phone/address) — for a
+// re-canvass list, a phone bank, or a mail house. The frozen voterIds are the source of truth.
+function csvCell(v) {
+  const s = v == null ? '' : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function ageOf(dob) {
+  if (!dob) return '';
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+  return age >= 0 && age < 130 ? String(age) : '';
+}
+
+router.get('/:id/export.csv', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+    const walkList = await WalkList.findOne(
+      { _id: req.params.id, campaignId: req.campaign._id },
+      { name: 1, voterIds: 1, householdIds: 1 }
+    ).lean();
+    if (!walkList) return res.status(404).json({ error: 'Saved search not found' });
+
+    const [voters, households] = await Promise.all([
+      Voter.find(
+        { _id: { $in: walkList.voterIds || [] } },
+        'stateVoterId firstName lastName party phone dateOfBirth precinct householdId'
+      ).lean(),
+      Household.find(
+        { _id: { $in: walkList.householdIds || [] } },
+        'addressLine1 addressLine2 city state zipCode'
+      ).lean(),
+    ]);
+    const hhById = new Map(households.map((h) => [String(h._id), h]));
+
+    const headers = ['Voter ID', 'First Name', 'Last Name', 'Party', 'Age', 'Phone', 'Precinct', 'Address', 'City', 'State', 'ZIP'];
+    const lines = [headers.join(',')];
+    for (const v of voters) {
+      const h = hhById.get(String(v.householdId)) || {};
+      const addr = [h.addressLine1, h.addressLine2].filter(Boolean).join(' ');
+      lines.push(
+        [v.stateVoterId, v.firstName, v.lastName, v.party || '', ageOf(v.dateOfBirth), v.phone || '', v.precinct || '', addr, h.city || '', h.state || '', h.zipCode || '']
+          .map(csvCell)
+          .join(',')
+      );
+    }
+    const safeName = (walkList.name || 'walklist').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 60) || 'walklist';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.csv"`);
+    res.send(lines.join('\n'));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });

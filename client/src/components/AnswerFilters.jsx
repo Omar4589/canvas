@@ -7,7 +7,20 @@
 // matches id-native via `values` AND legacy text via `texts`. Orphan options
 // (id null) carry their text in BOTH the values-fallback and `texts`.
 // Multi-select per question; emits only questions with at least one selection.
-export default function AnswerFilters({ questions = [], value = [], onChange }) {
+//
+// By-tag filtering (cross-question OR): tags group options across questions.
+// Available tags come from `tags` (survey.tags display palette) when provided,
+// else from the union of every option's `tag`. Matching is case-insensitive;
+// selected tags are emitted to the parent via `onTagChange` as
+// `answerTagFilters: [{ tag }]` (parallel to the per-question `onChange`).
+export default function AnswerFilters({
+  questions = [],
+  value = [],
+  onChange,
+  tags,
+  tagValue = [],
+  onTagChange,
+}) {
   // Normalise a raw option (string | {option} | {option,id,retired,count}) to a
   // consistent shape. `selKey` is the stable selection key: the option id when
   // present, otherwise the text (orphan fallback).
@@ -63,9 +76,75 @@ export default function AnswerFilters({ questions = [], value = [], onChange }) 
     onChange(next);
   }
 
-  if (!questions.length) return null;
+  // Available tags: prefer the survey's display palette (`tags`); otherwise
+  // build a case-insensitive union of every option's `tag`, preserving the
+  // first-seen display casing. Map keyed by lowercase → display.
+  const tagDisplayByLower = new Map();
+  const addTag = (t) => {
+    if (t == null) return;
+    const text = String(t).trim();
+    if (!text) return;
+    const lower = text.toLowerCase();
+    if (!tagDisplayByLower.has(lower)) tagDisplayByLower.set(lower, text);
+  };
+  if (Array.isArray(tags) && tags.length) {
+    tags.forEach(addTag);
+  } else {
+    for (const q of questions) {
+      for (const o of q.options || []) {
+        if (o && typeof o === 'object') addTag(o.tag);
+      }
+    }
+  }
+  const availableTags = [...tagDisplayByLower.values()];
+
+  // Selected tags, compared case-insensitively against the incoming value.
+  const selectedTagLowers = new Set(
+    (tagValue || [])
+      .map((t) => (t && t.tag != null ? String(t.tag).trim().toLowerCase() : null))
+      .filter(Boolean)
+  );
+
+  function toggleTag(display) {
+    const lower = display.toLowerCase();
+    const next = new Set(selectedTagLowers);
+    if (next.has(lower)) next.delete(lower);
+    else next.add(lower);
+    // Emit display-cased tags for the lowers still selected.
+    const out = availableTags
+      .filter((d) => next.has(d.toLowerCase()))
+      .map((d) => ({ tag: d }));
+    onTagChange?.(out);
+  }
+
+  const showTags = availableTags.length > 0 && typeof onTagChange === 'function';
+
+  if (!questions.length && !showTags) return null;
   return (
     <div className="space-y-3">
+      {showTags && (
+        <div>
+          <div className="mb-1 text-xs font-medium text-fg-muted">By tag</div>
+          <div className="flex flex-wrap gap-1">
+            {availableTags.map((t) => {
+              const active = selectedTagLowers.has(t.toLowerCase());
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => toggleTag(t)}
+                  className={
+                    'rounded-full px-2.5 py-1 text-xs transition-colors ' +
+                    (active ? 'bg-brand-600 text-white' : 'border border-border bg-card text-fg-muted hover:bg-sunken')
+                  }
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {questions.map((q) => {
         const sel = byKey.get(q.key) || new Set();
         return (

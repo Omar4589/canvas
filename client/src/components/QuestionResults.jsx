@@ -21,27 +21,43 @@ function formatDate(d, tz) {
 
 const PAGE_SIZE = 25;
 
-function VoterList({ questionKey, optionId, option, surveyTemplateId, dateRange, campaignId, tz }) {
+function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateRange, campaignId, tz }) {
   const [skip, setSkip] = useState(0);
   const [accumulated, setAccumulated] = useState([]);
+
+  // A tag query is cross-question: it sends `tag` + `surveyTemplateId` instead of
+  // questionKey/optionId/option.
+  const byTag = !!tag;
 
   // Reset when filters change.
   useEffect(() => {
     setSkip(0);
     setAccumulated([]);
-  }, [questionKey, optionId, option, surveyTemplateId, dateRange?.from, dateRange?.to, campaignId]);
+  }, [questionKey, optionId, option, tag, surveyTemplateId, dateRange?.from, dateRange?.to, campaignId]);
 
-  const queryString = buildQuery({
-    questionKey,
-    optionId,
-    option,
-    surveyTemplateId,
-    campaignId,
-    from: dateRange?.from,
-    to: dateRange?.to,
-    limit: PAGE_SIZE,
-    skip,
-  });
+  const queryString = buildQuery(
+    byTag
+      ? {
+          tag,
+          surveyTemplateId,
+          campaignId,
+          from: dateRange?.from,
+          to: dateRange?.to,
+          limit: PAGE_SIZE,
+          skip,
+        }
+      : {
+          questionKey,
+          optionId,
+          option,
+          surveyTemplateId,
+          campaignId,
+          from: dateRange?.from,
+          to: dateRange?.to,
+          limit: PAGE_SIZE,
+          skip,
+        }
+  );
   const { data, isLoading, error } = useQuery({
     queryKey: [
       'reports',
@@ -49,6 +65,7 @@ function VoterList({ questionKey, optionId, option, surveyTemplateId, dateRange,
       questionKey,
       optionId,
       option,
+      tag,
       surveyTemplateId,
       campaignId,
       dateRange?.from,
@@ -181,6 +198,101 @@ function OptionRow({
         <span className="text-xs text-fg-muted">({count})</span>
       </div>
     </button>
+  );
+}
+
+function TagRow({ tag, voterCount, percent, expanded, onToggle }) {
+  const width = Math.max(0, Math.min(100, percent || 0));
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="grid w-full grid-cols-12 items-center gap-3 py-1.5 text-left text-sm cursor-pointer rounded px-1 hover:bg-sunken"
+    >
+      <div className="col-span-4 flex items-center gap-1 truncate text-fg" title={tag}>
+        <span className={'inline-block transition-transform ' + (expanded ? 'rotate-90' : '')}>
+          ▸
+        </span>
+        <span className="truncate font-medium">{tag}</span>
+      </div>
+      <div className="col-span-6">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-sunken">
+          <div className="h-full bg-brand-500" style={{ width: `${width}%` }} />
+        </div>
+      </div>
+      <div className="col-span-2 flex items-baseline justify-end gap-2">
+        <span className="font-semibold text-fg">{voterCount.toLocaleString()}</span>
+      </div>
+    </button>
+  );
+}
+
+export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId, tz }) {
+  const orgTz = useOrgTimeZone();
+  const zone = tz || orgTz;
+  const [expandedTag, setExpandedTag] = useState(null);
+
+  if (!tags.length) return null;
+
+  // Scale bars against the most-reached tag so they're visually comparable.
+  const maxCount = Math.max(...tags.map((t) => t.voterCount || 0), 1);
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="mb-1 flex items-baseline justify-between gap-3">
+        <h3 className="font-medium text-fg">Tags</h3>
+        <span className="shrink-0 text-xs uppercase tracking-wide text-fg-muted">
+          {tags.length} {tags.length === 1 ? 'tag' : 'tags'}
+        </span>
+      </div>
+      <p className="mb-3 text-xs text-fg-muted">
+        Tags group answers across questions. Counts are distinct voters reached.
+      </p>
+      <div>
+        {tags.map((t) => {
+          const isOpen = expandedTag === t.tag;
+          const percent = (100 * (t.voterCount || 0)) / maxCount;
+          return (
+            <div key={t.tag}>
+              <TagRow
+                tag={t.tag}
+                voterCount={t.voterCount || 0}
+                percent={percent}
+                expanded={isOpen}
+                onToggle={() => setExpandedTag(isOpen ? null : t.tag)}
+              />
+              {(t.options || []).length > 0 && (
+                <ul className="mb-1 ml-6 space-y-0.5 text-xs text-fg-subtle">
+                  {t.options.map((o) => (
+                    <li
+                      key={`${o.questionKey}:${o.optionId}`}
+                      className="flex items-baseline justify-between gap-3"
+                    >
+                      <span className="truncate" title={o.text}>{o.text}</span>
+                      <span className="shrink-0 text-fg-muted">({o.count})</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {isOpen && (
+                <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">
+                  <VoterList
+                    tag={t.tag}
+                    surveyTemplateId={surveyTemplateId}
+                    dateRange={dateRange}
+                    campaignId={campaignId}
+                    tz={zone}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 text-xs text-fg-subtle">
+        Click any tag to see the voters reached.
+      </div>
+    </div>
   );
 }
 

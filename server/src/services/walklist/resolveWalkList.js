@@ -3,7 +3,8 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
-import { answerFilterClause } from '../surveys/answerAgg.js';
+import { answerFilterClause, answerTagClause } from '../surveys/answerAgg.js';
+import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const arr = (a) => (Array.isArray(a) && a.length ? a : null);
@@ -106,6 +107,23 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
       };
       if (filter.priorPassId) srMatch.passId = oid(filter.priorPassId);
       predicateSets.push(new Set((await SurveyResponse.distinct('householdId', srMatch)).map(String)));
+    }
+  }
+
+  // Tag predicate: each tag becomes ONE set of households whose response carries ANY
+  // option with that tag (across questions) — a cross-question OR that the per-question
+  // answerFilters can't express under the global combine.
+  if (arr(filter.answerTagFilters)) {
+    const template = campaign.surveyTemplateId
+      ? await SurveyTemplate.findById(campaign.surveyTemplateId).lean()
+      : null;
+    if (template) {
+      for (const tf of filter.answerTagFilters) {
+        if (!tf.tag) continue;
+        const srMatch = { campaignId, ...answerTagClause(template, tf.tag) };
+        if (filter.priorPassId) srMatch.passId = oid(filter.priorPassId);
+        predicateSets.push(new Set((await SurveyResponse.distinct('householdId', srMatch)).map(String)));
+      }
     }
   }
 

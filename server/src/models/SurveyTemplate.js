@@ -69,6 +69,7 @@ const surveyTemplateSchema = new mongoose.Schema(
     intro: { type: String, default: '' },
     closing: { type: String, default: '' },
     questions: { type: [questionSchema], default: [] },
+    tags: { type: [String], default: [] }, // Phase 3 tag palette (display casing; matching is case-insensitive)
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }

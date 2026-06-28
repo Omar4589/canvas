@@ -4,6 +4,8 @@
 // renamed/removed). So: renaming an option never breaks a count (id is stable);
 // removing one surfaces its old answers as a "retired/legacy" bucket. See docs/SURVEYS.md.
 
+import { tagOptionMap, normalizeTag } from './tags.js';
+
 // Pipeline fragment for one choice question: after the caller's $match on the response
 // set, explode one row per chosen answer-key — the option id(s) for id-native rows, or
 // the literal text (wrapped to an array) for legacy rows. Works for single + multiple.
@@ -72,5 +74,19 @@ export function answerFilterClause(questionKey, values = [], texts = []) {
   // answer text, plus any explicit current texts passed for the chosen ids.
   const textVals = [...new Set([...values, ...texts])];
   if (textVals.length) ors.push({ answers: { $elemMatch: { questionKey, answer: { $in: textVals } } } });
+  return ors.length ? { $or: ors } : { _id: null };
+}
+
+// Match clause for "voters who chose ANY option carrying this tag" — a single $or across
+// the tag's (questionKey, optionId | legacy text) members, ACROSS questions. Reuses
+// voterAnswerClause per member. Returns { $or: [...] } or { _id: null } (matches nothing).
+export function answerTagClause(template, tag) {
+  const entry = tagOptionMap(template).get(normalizeTag(tag));
+  if (!entry || !entry.members.length) return { _id: null };
+  const ors = [];
+  for (const m of entry.members) {
+    const c = voterAnswerClause(m.questionKey, m.optionId, m.text);
+    if (c.$or) ors.push(...c.$or);
+  }
   return ors.length ? { $or: ors } : { _id: null };
 }

@@ -10,7 +10,8 @@ import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
-import { choiceKeyStages, mergeOptionRows, voterAnswerClause } from '../../services/surveys/answerAgg.js';
+import { choiceKeyStages, mergeOptionRows, voterAnswerClause, answerTagClause } from '../../services/surveys/answerAgg.js';
+import { tagOptionMap } from '../../services/surveys/tags.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Organization } from '../../models/Organization.js';
 import { zonedDayRange, tzAbbrev, zonedDayStr } from '../../utils/timezone.js';
@@ -892,6 +893,25 @@ router.get('/survey-results', async (req, res, next) => {
       questions.push({ key: q.key, label: q.label, type: q.type, options });
     }
 
+    // Tag rollup: DISTINCT voters who chose ANY option carrying each tag (across questions).
+    // Counts come from a per-tag distinct-voter query (answerTagClause); the contributing
+    // options + their counts are pulled from the per-question breakdown built above.
+    const tags = [];
+    for (const entry of tagOptionMap(template).values()) {
+      const memberKeys = new Set(entry.members.map((m) => `${m.questionKey}|${m.optionId}`));
+      const tagOptions = [];
+      for (const q of questions) {
+        for (const o of q.options) {
+          if (o.id && memberKeys.has(`${q.key}|${o.id}`)) {
+            tagOptions.push({ questionKey: q.key, optionId: o.id, text: o.option, count: o.count });
+          }
+        }
+      }
+      const voterIds = await SurveyResponse.distinct('voterId', { ...match, ...answerTagClause(template, entry.display) });
+      tags.push({ tag: entry.display, voterCount: voterIds.length, options: tagOptions });
+    }
+    tags.sort((a, b) => b.voterCount - a.voterCount);
+
     res.json({
       surveyTemplate: {
         id: String(template._id),
@@ -903,6 +923,7 @@ router.get('/survey-results', async (req, res, next) => {
       compareToOrg,
       userId: userIdParam ? String(userIdParam) : null,
       questions,
+      tags,
     });
   } catch (err) {
     next(err);
@@ -913,20 +934,29 @@ router.get('/voters-by-answer', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
-    const { questionKey, option, optionId, surveyTemplateId } = req.query;
-    if (!questionKey || (!option && !optionId)) {
+    const { questionKey, option, optionId, surveyTemplateId, tag } = req.query;
+    const wantsTag = !!tag;
+    if (!wantsTag && (!questionKey || (!option && !optionId))) {
       return res.status(400).json({ error: 'questionKey and option (or optionId) are required' });
+    }
+    if (wantsTag && !(surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId))) {
+      return res.status(400).json({ error: 'surveyTemplateId is required to drill by tag' });
     }
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
     const dateRange = parseDateRange(req, 'submittedAt');
     const cFilter = baseFilter(req);
-    // Dual-read: match the stable option id (id-native) OR the legacy answer text.
-    const filter = {
-      ...dateRange,
-      ...cFilter,
-      ...voterAnswerClause(questionKey, optionId || null, option ?? null),
-    };
+    // Tag drill: match ANY option carrying the tag (across questions). Otherwise dual-read a
+    // single option: the stable option id (id-native) OR the legacy answer text.
+    let answerClause;
+    if (wantsTag) {
+      const template = await SurveyTemplate.findOne({ _id: surveyTemplateId, organizationId: orgId }).lean();
+      if (!template) return res.status(404).json({ error: 'Survey not found' });
+      answerClause = answerTagClause(template, tag);
+    } else {
+      answerClause = voterAnswerClause(questionKey, optionId || null, option ?? null);
+    }
+    const filter = { ...dateRange, ...cFilter, ...answerClause };
     if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
       filter.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
     }

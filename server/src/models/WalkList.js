@@ -11,6 +11,9 @@ const answerFilterSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// A survey-tag predicate: every option carrying `tag` (across questions) OR'd together.
+const tagFilterSchema = new mongoose.Schema({ tag: { type: String, required: true } }, { _id: false });
+
 const filterSchema = new mongoose.Schema(
   {
     // Demographics
@@ -30,6 +33,7 @@ const filterSchema = new mongoose.Schema(
     priorPassStatuses: { type: [String], default: undefined },
     surveyResponse: { type: String, enum: ['any', 'exists', 'not_exists'], default: 'any' },
     answerFilters: { type: [answerFilterSchema], default: [] },
+    answerTagFilters: { type: [tagFilterSchema], default: [] },
     combine: { type: String, enum: ['and', 'or'], default: 'and' },
   },
   { _id: false }

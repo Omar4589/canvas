@@ -4,7 +4,7 @@ import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
-import QuestionResults from '../components/QuestionResults.jsx';
+import QuestionResults, { TagResults } from '../components/QuestionResults.jsx';
 import CanvasserTable from '../components/CanvasserTable.jsx';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
@@ -411,6 +411,18 @@ export default function DashboardPage() {
               No responses in this range yet.
             </div>
           ) : (
+            <>
+            {(surveyResultsQ.data.tags || []).length > 0 && (
+              <div className="mb-4">
+                <TagResults
+                  tags={surveyResultsQ.data.tags}
+                  surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
+                  dateRange={dateRange}
+                  campaignId={campaignId}
+                  tz={tz}
+                />
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {surveyResultsQ.data.questions.map((q) => (
                 <div
@@ -429,6 +441,7 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
+            </>
           )}
         </section>
       )}
