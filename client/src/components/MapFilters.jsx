@@ -1,4 +1,4 @@
-const DEFAULT_STATUSES = ['surveyed', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
+const DEFAULT_STATUSES = ['surveyed', 'refused', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
 
 function StatusChip({ status, active, count, onClick, color, label }) {
   return (

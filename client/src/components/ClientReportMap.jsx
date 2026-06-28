@@ -28,7 +28,7 @@ function matchesAnswer(h, answerFilter) {
 // The client map only shows doors we actually reached — every non-unknocked status. Survey
 // campaigns drop the lit-drop chip; lit-drop campaigns drop the surveyed chip.
 function visibleStatusesFor(campaignType) {
-  const base = ['surveyed', 'not_home', 'wrong_address', 'lit_dropped'];
+  const base = ['surveyed', 'refused', 'not_home', 'wrong_address', 'lit_dropped'];
   if (campaignType === 'survey') return base.filter((s) => s !== 'lit_dropped');
   if (campaignType === 'lit_drop') return base.filter((s) => s !== 'surveyed');
   return base;

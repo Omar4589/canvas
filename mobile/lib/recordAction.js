@@ -3,7 +3,7 @@ import { getCurrentLocation } from './location';
 import { submitOrQueue, flushQueue } from './offlineQueue';
 import { saveBootstrap } from './cache';
 
-const ACTION_PATHS = { not_home: 'not-home', wrong_address: 'wrong-address', lit_dropped: 'lit-drop' };
+const ACTION_PATHS = { not_home: 'not-home', wrong_address: 'wrong-address', lit_dropped: 'lit-drop', refused: 'refused' };
 
 // Patch the ['bootstrap'] cache and persist it. The React Query update is
 // synchronous, so every screen reading ['bootstrap'] (the map's pins, the

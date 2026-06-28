@@ -14,7 +14,7 @@ import { statusesFromDoorPass } from '../../services/passes/passStatus.js';
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
 
-const DOOR_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
+const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -85,6 +85,7 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
   const knockedHomeSet = new Set();
   const surveyedHomeSet = new Set();
   const litHomeSet = new Set();
+  const refusedHomeSet = new Set();
   for (const a of activities) {
     const hid = String(a.householdId);
     knockedHomeSet.add(hid);
@@ -93,6 +94,7 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
       litHomeSet.add(hid);
     }
     if (a.actionType === 'survey_submitted') surveyedHomeSet.add(hid);
+    if (a.actionType === 'refused') refusedHomeSet.add(hid);
     if (!firstDoorAt) firstDoorAt = a.timestamp;
     lastDoorAt = a.timestamp;
     if (a.location && prev?.location) {
@@ -176,6 +178,10 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
     knockedHomes: knockedHomeSet.size,
     surveyedHomes: surveyedHomeSet.size,
     litHomes: litHomeSet.size,
+    refusedHomes: refusedHomeSet.size,
+    // "Reached a person" = surveyed OR refused homes (distinct). Per-day display value only —
+    // never sum across days (a home refused day 1 + surveyed day 2 would double-count).
+    reachedHomes: new Set([...surveyedHomeSet, ...refusedHomeSet]).size,
     firstDoorAt: firstDoorAt ? firstDoorAt.toISOString() : null,
     lastDoorAt: lastDoorAt ? lastDoorAt.toISOString() : null,
     distanceMeters: Math.round(distanceMeters),
@@ -339,6 +345,7 @@ router.get('/history', async (req, res, next) => {
           _knockedHomes: new Set(),
           _surveyedHomes: new Set(),
           _litHomes: new Set(),
+          _refusedHomes: new Set(),
         });
       }
       return dayMap.get(d);
@@ -355,6 +362,7 @@ router.get('/history', async (req, res, next) => {
         day._litHomes.add(hid);
       }
       if (a.actionType === 'survey_submitted') day._surveyedHomes.add(hid);
+      if (a.actionType === 'refused') day._refusedHomes.add(hid);
       const ts = a.timestamp.toISOString();
       if (!day.firstDoorAt) day.firstDoorAt = ts;
       day.lastDoorAt = ts;
@@ -381,6 +389,8 @@ router.get('/history', async (req, res, next) => {
         knockedHomes: d._knockedHomes.size,
         surveyedHomes: d._surveyedHomes.size,
         litHomes: d._litHomes.size,
+        refusedHomes: d._refusedHomes.size,
+        reachedHomes: new Set([...d._surveyedHomes, ...d._refusedHomes]).size,
         firstDoorAt: d.firstDoorAt,
         lastDoorAt: d.lastDoorAt,
         distanceMeters: Math.round(d.distanceMeters),

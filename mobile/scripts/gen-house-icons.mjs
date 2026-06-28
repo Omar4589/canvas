@@ -21,6 +21,7 @@ const STATUS_COLORS = {
   not_home: '#3b82f6',
   surveyed: '#22c55e',
   wrong_address: '#ef4444',
+  refused: '#F59E0B',
 };
 
 function darken(hex, amount = 0.2) {

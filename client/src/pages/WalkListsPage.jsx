@@ -7,11 +7,12 @@ import AnswerFilters from '../components/AnswerFilters.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
-const STATUSES = ['unknocked', 'not_home', 'surveyed', 'wrong_address', 'lit_dropped'];
+const STATUSES = ['unknocked', 'not_home', 'surveyed', 'refused', 'wrong_address', 'lit_dropped'];
 const STATUS_LABEL = {
   unknocked: 'Unknocked',
   not_home: 'Not home',
   surveyed: 'Surveyed',
+  refused: 'Refused',
   wrong_address: 'Wrong address',
   lit_dropped: 'Lit dropped',
 };

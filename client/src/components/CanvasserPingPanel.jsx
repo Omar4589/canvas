@@ -19,6 +19,8 @@ function actionLabel(t) {
       return 'Not home';
     case 'wrong_address':
       return 'Wrong address';
+    case 'refused':
+      return 'Refused';
     case 'survey_submitted':
       return 'Survey submitted';
     case 'lit_dropped':
@@ -35,6 +37,7 @@ const ACTION_COLORS = {
   lit_dropped: '#a855f7',
   not_home: '#3b82f6',
   wrong_address: '#ef4444',
+  refused: '#f59e0b',
   note_added: '#9ca3af',
 };
 

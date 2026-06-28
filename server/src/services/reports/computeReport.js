@@ -2,7 +2,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Household } from '../../models/Household.js';
 import { resolveStatus } from '../../utils/statusPrecedence.js';
-import { KNOCK_ACTIONS, knocksPipeline, connectionRate } from './aggregations.js';
+import { KNOCK_ACTIONS, knocksPipeline, connectionRate, contactRate } from './aggregations.js';
 import { choiceKeyStages, mergeOptionRows } from '../surveys/answerAgg.js';
 
 // Compute service for the client report builder. Everything here is WINDOWED by an explicit
@@ -107,10 +107,11 @@ export async function computeWindowStats({
     CanvassActivity.distinct('householdId', { ...actMatch, actionType: { $in: KNOCK_ACTIONS } }),
   ]);
 
-  const k = knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0 };
+  const k = knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
   // One outcome per (household, pass): every group has >=1 knock action so resolveStatus never
-  // returns 'unknocked'. Σ(events) === knockGroups.length === k.knocks === doorsKnocked.
-  const events = { not_home: 0, wrong_address: 0, surveyed: 0, lit_dropped: 0 };
+  // returns 'unknocked'. Σ(events) === knockGroups.length === k.knocks === doorsKnocked. `refused`
+  // is a knock outcome too, so it MUST be a key here or the breakdown stops summing to doorsKnocked.
+  const events = { not_home: 0, wrong_address: 0, refused: 0, surveyed: 0, lit_dropped: 0 };
   for (const g of knockGroups) {
     const status = resolveStatus(campaignType, g.acts);
     if (status in events) events[status] += 1;
@@ -123,7 +124,9 @@ export async function computeWindowStats({
     surveyedVoters: surveyedVoterIds.length,
     surveyedKnocks: k.surveyedKnocks,
     litKnocks: k.litKnocks,
+    refusedKnocks: k.refusedKnocks || 0,
     connectionRate: connectionRate(k),
+    contactRate: contactRate(k), // "reached a person" = (surveyed + refused) / knocks
   };
 
   const surveyBreakdowns = await computeSurveyBreakdowns({
@@ -185,7 +188,7 @@ export async function buildFrozenMapPoints({ report, campaign, mapAnswerKeys = [
     }
   }
 
-  const coverage = { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, lit_dropped: 0 };
+  const coverage = { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, refused: 0, lit_dropped: 0 };
   const points = [];
   for (const h of households) {
     const coords = h.location?.coordinates || [];

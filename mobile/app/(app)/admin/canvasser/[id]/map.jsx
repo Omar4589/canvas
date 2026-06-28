@@ -32,6 +32,7 @@ const ACTION_TABS = [
   { key: 'survey_submitted', label: 'Surveys' },
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },
+  { key: 'refused', label: 'Refused' },
   { key: 'lit_dropped', label: 'Lit drop' },
 ];
 
@@ -39,6 +40,7 @@ const ACTION_PIN = {
   survey_submitted: 'surveyed',
   not_home: 'not_home',
   wrong_address: 'wrong_address',
+  refused: 'refused',
   lit_dropped: 'lit_dropped',
   note_added: 'unknocked',
 };
@@ -46,6 +48,7 @@ const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
   not_home: 'Not home',
   wrong_address: 'Wrong address',
+  refused: 'Refused',
   lit_dropped: 'Lit dropped',
   note_added: 'Note',
 };
@@ -180,6 +183,7 @@ export default function MapScreen() {
                     'survey_submitted', colors.status.surveyed,
                     'not_home', colors.status.not_home,
                     'wrong_address', colors.status.wrong_address,
+                    'refused', colors.status.refused,
                     'lit_dropped', colors.status.lit_dropped,
                     colors.textMuted,
                   ],

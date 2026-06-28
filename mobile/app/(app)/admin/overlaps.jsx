@@ -31,6 +31,7 @@ function actionLabel(t) {
   if (t === 'lit_dropped') return 'Lit dropped';
   if (t === 'not_home') return 'Not home';
   if (t === 'wrong_address') return 'Wrong addr';
+  if (t === 'refused') return 'Refused';
   return t;
 }
 

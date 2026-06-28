@@ -18,6 +18,7 @@ import {
   KNOCK_ACTIONS,
   knocksPipeline,
   connectionRate,
+  contactRate,
   coverageBucketExpr,
 } from '../../services/reports/aggregations.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
@@ -191,20 +192,22 @@ router.get('/overview', async (req, res, next) => {
       not_home: 0,
       surveyed: 0,
       wrong_address: 0,
+      refused: 0,
       lit_dropped: 0,
       voted: 0,
     };
     for (const r of statusAgg) canvass[r._id] = r.count;
 
-    const events = { notHome: 0, wrongAddress: 0, surveySubmitted: 0, litDropped: 0 };
+    const events = { notHome: 0, wrongAddress: 0, surveySubmitted: 0, litDropped: 0, refused: 0 };
     for (const r of eventAgg) {
       if (r._id === 'not_home') events.notHome = r.count;
       else if (r._id === 'wrong_address') events.wrongAddress = r.count;
       else if (r._id === 'survey_submitted') events.surveySubmitted = r.count;
       else if (r._id === 'lit_dropped') events.litDropped = r.count;
+      else if (r._id === 'refused') events.refused = r.count;
     }
 
-    const k = knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0 };
+    const k = knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
     const surveyedVoters = surveyedVoterIds.length;
 
     res.json({
@@ -218,7 +221,9 @@ router.get('/overview', async (req, res, next) => {
         knocks: k.knocks,
         surveyedKnocks: k.surveyedKnocks,
         litKnocks: k.litKnocks,
+        refusedKnocks: k.refusedKnocks,
         connectionRate: connectionRate(k),
+        contactRate: contactRate(k),
       },
       canvass,
       events,
@@ -261,10 +266,12 @@ router.get('/campaign-rollup', async (req, res, next) => {
           knocks: 0,
           surveyedKnocks: 0,
           litKnocks: 0,
+          refusedKnocks: 0,
           surveysSubmitted: 0,
           surveyedVoters: 0,
           litDropped: 0,
           connectionRate: 0,
+          contactRate: 0,
           activeCanvassers: 0,
           lastActivityAt: null,
         },
@@ -369,6 +376,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           not_home: 0,
           surveyed: 0,
           wrong_address: 0,
+          refused: 0,
           lit_dropped: 0,
           voted: 0,
         },
@@ -378,6 +386,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
         knocks: 0,
         surveyedKnocks: 0,
         litKnocks: 0,
+        refusedKnocks: 0,
         activeCanvassers: 0,
         lastActivityAt: null,
       });
@@ -404,6 +413,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
       c.knocks = r.knocks;
       c.surveyedKnocks = r.surveyedKnocks;
       c.litKnocks = r.litKnocks;
+      c.refusedKnocks = r.refusedKnocks;
     }
     for (const r of surveyAgg) {
       const c = byCampaign.get(String(r._id));
@@ -437,10 +447,12 @@ router.get('/campaign-rollup', async (req, res, next) => {
           knocks: c.knocks,
           surveyedKnocks: c.surveyedKnocks,
           litKnocks: c.litKnocks,
+          refusedKnocks: c.refusedKnocks,
           surveysSubmitted: c.surveysSubmitted,
           surveyedVoters: c.surveyedVoters,
           litDropped: c.litDropped,
           connectionRate: connectionRate(c),
+          contactRate: contactRate(c),
           activeCanvassers: c.activeCanvassers,
           lastActivityAt: c.lastActivityAt,
           coverage: c.coverage,
@@ -457,10 +469,12 @@ router.get('/campaign-rollup', async (req, res, next) => {
       knocks: sum('knocks'),
       surveyedKnocks: sum('surveyedKnocks'),
       litKnocks: sum('litKnocks'),
+      refusedKnocks: sum('refusedKnocks'),
       surveysSubmitted: sum('surveysSubmitted'),
       surveyedVoters: sum('surveyedVoters'),
       litDropped: sum('litDropped'),
       connectionRate: 0,
+      contactRate: 0,
       activeCanvassers: cumulativeCanvassers.length,
       lastActivityAt: rows.reduce(
         (acc, r) =>
@@ -473,12 +487,13 @@ router.get('/campaign-rollup', async (req, res, next) => {
         ? Math.round((cumulative.homesKnocked / cumulative.households) * 100)
         : 0;
     cumulative.connectionRate = connectionRate(cumulative);
+    cumulative.contactRate = contactRate(cumulative);
     cumulative.coverage = rows.reduce(
       (acc, r) => {
         for (const k of Object.keys(acc)) acc[k] += r.coverage?.[k] || 0;
         return acc;
       },
-      { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, lit_dropped: 0, voted: 0 }
+      { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, refused: 0, lit_dropped: 0, voted: 0 }
     );
 
     // Heads-up flag: are we in the nightly window where a relative preset could read a day
@@ -549,6 +564,7 @@ router.get('/canvassers', async (req, res, next) => {
           surveyKnocks: 0,
           notHome: 0,
           wrongAddress: 0,
+          refused: 0,
           litDropped: 0,
           firstActivityAt: null,
           lastActivityAt: null,
@@ -568,6 +584,7 @@ router.get('/canvassers', async (req, res, next) => {
       const u = ensure(row._id.userId);
       if (row._id.actionType === 'not_home') u.notHome = row.count;
       else if (row._id.actionType === 'wrong_address') u.wrongAddress = row.count;
+      else if (row._id.actionType === 'refused') u.refused = row.count;
       else if (row._id.actionType === 'lit_dropped') u.litDropped = row.count;
       // survey_submitted activities are deduped to one per (user, household, pass), so this
       // is the canvasser's count of distinct surveyed door-passes (the rate's numerator).
@@ -600,7 +617,7 @@ router.get('/canvassers', async (req, res, next) => {
         // Billable knocks = this canvasser's distinct (household, pass) door interactions.
         // surveyKnocks/litDropped are mutually exclusive by campaign type, so they're the
         // completion-action numerator for the connection rate.
-        const knocks = u.notHome + u.wrongAddress + u.litDropped + u.surveyKnocks;
+        const knocks = u.notHome + u.wrongAddress + u.refused + u.litDropped + u.surveyKnocks;
         return {
           userId: u.userId,
           firstName: info?.firstName || '',
@@ -611,6 +628,7 @@ router.get('/canvassers', async (req, res, next) => {
           surveyKnocks: u.surveyKnocks,
           notHome: u.notHome,
           wrongAddress: u.wrongAddress,
+          refused: u.refused,
           litDropped: u.litDropped,
           knocks,
           // homesKnocked kept as an alias of knocks for back-compat with un-updated callers.
@@ -619,6 +637,11 @@ router.get('/canvassers', async (req, res, next) => {
             knocks,
             surveyedKnocks: u.surveyKnocks,
             litKnocks: u.litDropped,
+          }),
+          contactRate: contactRate({
+            knocks,
+            surveyedKnocks: u.surveyKnocks,
+            refusedKnocks: u.refused,
           }),
           firstActivityAt: u.firstActivityAt,
           lastActivityAt: u.lastActivityAt,
@@ -1348,6 +1371,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
           surveyKnocks: 0,
           notHome: 0,
           wrongAddress: 0,
+          refused: 0,
           litDropped: 0,
           firstActivityAt: null,
           lastActivityAt: null,
@@ -1362,6 +1386,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       const u = ensure(r._id.userId);
       if (r._id.actionType === 'not_home') u.notHome = r.count;
       else if (r._id.actionType === 'wrong_address') u.wrongAddress = r.count;
+      else if (r._id.actionType === 'refused') u.refused = r.count;
       else if (r._id.actionType === 'lit_dropped') u.litDropped = r.count;
       else if (r._id.actionType === 'survey_submitted') u.surveyKnocks = r.count;
       if (!u.firstActivityAt || r.firstAt < u.firstActivityAt) u.firstActivityAt = r.firstAt;
@@ -1384,13 +1409,13 @@ router.get('/canvassers.csv', async (req, res, next) => {
       'Rank', 'First name', 'Last name', 'Email', 'Phone', 'Active',
       'Knocks', 'Surveys', 'Lit drops', 'Not home', 'Wrong address',
       'Connection rate %', 'Hours on doors', 'Days active', 'Knocks/hr', 'Surveys/hr',
-      'First activity', 'Last activity',
+      'First activity', 'Last activity', 'Refused',
     ];
     const enriched = Array.from(byUser.values())
       .map((u) => {
         const info = userMap.get(u.userId) || {};
         // Billable knocks = distinct (household, pass). Connection = completion knocks / knocks.
-        const knocks = u.notHome + u.wrongAddress + u.litDropped + u.surveyKnocks;
+        const knocks = u.notHome + u.wrongAddress + u.refused + u.litDropped + u.surveyKnocks;
         const connection = connectionRate({
           knocks,
           surveyedKnocks: u.surveyKnocks,
@@ -1435,6 +1460,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       Math.round(u.surveysPerHour * 100) / 100,
       u.firstActivityAt ? new Date(u.firstActivityAt).toISOString() : '',
       u.lastActivityAt ? new Date(u.lastActivityAt).toISOString() : '',
+      u.refused,
     ]);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

@@ -6,18 +6,20 @@
 export const ACTION_TO_STATUS = {
   not_home: 'not_home',
   wrong_address: 'wrong_address',
+  refused: 'refused', // someone answered but declined — a contact, NOT a completion
   lit_dropped: 'lit_dropped',
   survey_submitted: 'surveyed',
   // note_added has no effect on door status
 };
 
-// Kept for any rank-based comparisons / sorting needs.
+// Kept for any rank-based comparisons / sorting needs (currently no consumers).
 export const STATUS_RANK = {
   unknocked: 0,
   not_home: 1,
   wrong_address: 2,
-  lit_dropped: 3,
-  surveyed: 4,
+  refused: 3,
+  lit_dropped: 4,
+  surveyed: 5,
 };
 
 const COMPLETION_ACTION = { survey: 'survey_submitted', lit_drop: 'lit_dropped' };

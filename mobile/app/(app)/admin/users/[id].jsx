@@ -25,6 +25,7 @@ const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
   not_home: 'Not home',
   wrong_address: 'Wrong address',
+  refused: 'Refused',
   lit_dropped: 'Lit dropped',
 };
 
@@ -79,6 +80,7 @@ export default function AdminUserDetail() {
     survey_submitted: colors.status.surveyed,
     not_home: colors.status.not_home,
     wrong_address: colors.status.wrong_address,
+    refused: colors.status.refused,
     lit_dropped: colors.status.lit_dropped,
   };
   const router = useRouter();

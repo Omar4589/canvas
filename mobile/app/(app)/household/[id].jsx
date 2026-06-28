@@ -44,9 +44,18 @@ function StatusPill({ status }) {
   const styles = useThemedStyles(makeStyles);
   const dotColor = colors.status[status] || colors.textMuted;
   const isDone = status === 'surveyed' || status === 'lit_dropped';
-  const bg = isDone ? colors.successBg : colors.bg;
-  const border = isDone ? colors.successBorder : colors.border;
-  const textColor = isDone ? colors.success : colors.textSecondary;
+  const isRefused = status === 'refused';
+  const bg = isDone ? colors.successBg : isRefused ? colors.warnBg : colors.bg;
+  const border = isDone
+    ? colors.successBorder
+    : isRefused
+    ? colors.warnBorder
+    : colors.border;
+  const textColor = isDone
+    ? colors.success
+    : isRefused
+    ? colors.warnFg
+    : colors.textSecondary;
   return (
     <View style={[styles.pill, { backgroundColor: bg, borderColor: border }]}>
       <View style={[styles.pillDot, { backgroundColor: dotColor }]} />
@@ -295,6 +304,18 @@ export default function HouseholdDetail() {
               >
                 <Text style={styles.actionButtonText}>Wrong address</Text>
               </Pressable>
+
+              <Pressable
+                onPress={() => submitAction('refused')}
+                disabled={isSubmitting}
+                style={({ pressed }) => [
+                  styles.actionButton,
+                  styles.actionRefused,
+                  { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                ]}
+              >
+                <Text style={styles.actionButtonText}>Refused</Text>
+              </Pressable>
             </>
           )}
         </View>
@@ -488,6 +509,7 @@ function makeStyles(t) {
   },
   actionNotHome: { backgroundColor: colors.info },
   actionWrongAddress: { backgroundColor: colors.danger },
+  actionRefused: { backgroundColor: colors.status.refused },
   actionButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
   });
 }

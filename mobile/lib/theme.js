@@ -34,6 +34,7 @@ const status = {
   not_home: '#3B82F6',
   surveyed: '#22C55E',
   wrong_address: '#EF4444',
+  refused: '#F59E0B',
   lit_dropped: '#A855F7',
   voted: '#14B8A6',
 };
@@ -42,6 +43,7 @@ const statusLabels = {
   not_home: 'Not home',
   surveyed: 'Surveyed',
   wrong_address: 'Wrong address',
+  refused: 'Refused',
   lit_dropped: 'Lit dropped',
   voted: 'Voted',
 };

@@ -27,6 +27,8 @@ function actionLabel(t) {
       return 'Not home';
     case 'wrong_address':
       return 'Wrong address';
+    case 'refused':
+      return 'Refused';
     case 'survey_submitted':
       return 'Survey submitted';
     case 'lit_dropped':

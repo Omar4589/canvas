@@ -5,6 +5,7 @@ const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
   not_home: 'Not home',
   wrong_address: 'Wrong address',
+  refused: 'Refused',
   lit_dropped: 'Lit dropped',
 };
 
@@ -12,6 +13,7 @@ const DOT_CLS = {
   survey_submitted: 'bg-green-500',
   not_home: 'bg-blue-500',
   wrong_address: 'bg-red-500',
+  refused: 'bg-amber-500',
   lit_dropped: 'bg-purple-500',
 };
 

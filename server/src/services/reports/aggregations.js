@@ -5,7 +5,7 @@
 
 // Action types that count as a "knock" (a door interaction). note_added is excluded
 // because it can be left without an actual visit decision.
-export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
+export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 
 // Billable "knock" = one distinct (household, pass). Re-knocking a house within the SAME
 // pass (a correction, or a second/overlapping canvasser) counts once; going back in a NEW
@@ -22,6 +22,7 @@ export function knocksPipeline(match, { byCampaign = false } = {}) {
         _id: inner,
         hasSurvey: { $max: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
         hasLit: { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
+        hasRefused: { $max: { $cond: [{ $eq: ['$actionType', 'refused'] }, 1, 0] } },
       },
     },
     {
@@ -30,6 +31,7 @@ export function knocksPipeline(match, { byCampaign = false } = {}) {
         knocks: { $sum: 1 },
         surveyedKnocks: { $sum: '$hasSurvey' },
         litKnocks: { $sum: '$hasLit' },
+        refusedKnocks: { $sum: '$hasRefused' },
       },
     },
   ];
@@ -43,6 +45,15 @@ export function knocksPipeline(match, { byCampaign = false } = {}) {
 export function connectionRate({ knocks = 0, surveyedKnocks = 0, litKnocks = 0 } = {}) {
   if (!knocks) return 0;
   return Math.round(((surveyedKnocks + litKnocks) / knocks) * 100);
+}
+
+// "Reached a person" / contact rate = of the knocks we made, how many reached a live person —
+// a completed survey OR a refusal (both mean someone answered the door). Always a subset of
+// knocks, so always <= 100. Distinct from connectionRate (survey/lit completions only): a
+// refused door is reached but not surveyed, so it lifts the contact rate without the survey rate.
+export function contactRate({ knocks = 0, surveyedKnocks = 0, refusedKnocks = 0 } = {}) {
+  if (!knocks) return 0;
+  return Math.round(((surveyedKnocks + refusedKnocks) / knocks) * 100);
 }
 
 // Coverage-funnel bucket. Doors that are fully early-voted AND otherwise unknocked are pulled

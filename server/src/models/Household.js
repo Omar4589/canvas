@@ -42,7 +42,7 @@ const householdSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['unknocked', 'not_home', 'surveyed', 'wrong_address', 'lit_dropped'],
+      enum: ['unknocked', 'not_home', 'surveyed', 'wrong_address', 'refused', 'lit_dropped'],
       default: 'unknocked',
       index: true,
     },

@@ -109,6 +109,7 @@ const SURVEY_FILTER_OPTIONS = [
   { key: 'not_home', label: 'Not home' },
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'wrong_address', label: 'Wrong addr' },
+  { key: 'refused', label: 'Refused' },
 ];
 
 const LIT_DROP_FILTER_OPTIONS = [
@@ -161,15 +162,26 @@ function StatusPill({ status, compact = false }) {
   const { colors } = useTheme();
   const dotColor = colors.status[status] || colors.textMuted;
   const isDone = status === 'surveyed' || status === 'lit_dropped';
+  const isRefused = status === 'refused';
   const isMiss = status === 'not_home' || status === 'wrong_address';
-  const bg = isDone ? colors.successBg : isMiss ? colors.dangerBg : colors.bg;
+  const bg = isDone
+    ? colors.successBg
+    : isRefused
+    ? colors.warnBg
+    : isMiss
+    ? colors.dangerBg
+    : colors.bg;
   const border = isDone
     ? colors.successBorder
+    : isRefused
+    ? colors.warnBorder
     : isMiss
     ? colors.dangerBorder
     : colors.border;
   const textColor = isDone
     ? colors.success
+    : isRefused
+    ? colors.warnFg
     : isMiss
     ? colors.danger
     : colors.textSecondary;
@@ -788,6 +800,7 @@ export default function MapScreen() {
             'house-not_home': require('../../assets/icons/house-not_home.png'),
             'house-surveyed': require('../../assets/icons/house-surveyed.png'),
             'house-wrong_address': require('../../assets/icons/house-wrong_address.png'),
+            'house-refused': require('../../assets/icons/house-refused.png'),
             'house-lit_dropped': require('../../assets/icons/house-surveyed.png'),
             'building-grey': require('../../assets/icons/building-grey.png'),
             'building-yellow': require('../../assets/icons/building-yellow.png'),
@@ -826,6 +839,7 @@ export default function MapScreen() {
                 'not_home', 'house-not_home',
                 'surveyed', 'house-surveyed',
                 'wrong_address', 'house-wrong_address',
+                'refused', 'house-refused',
                 'lit_dropped', 'house-lit_dropped',
                 'house-unknocked',
               ],
@@ -1041,7 +1055,7 @@ function RecenterButton({
   );
 }
 
-const SURVEY_LEGEND = ['unknocked', 'not_home', 'surveyed', 'wrong_address'];
+const SURVEY_LEGEND = ['unknocked', 'surveyed', 'refused', 'not_home', 'wrong_address'];
 const LIT_DROP_LEGEND = ['unknocked', 'lit_dropped', 'wrong_address'];
 
 // Connection rate = surveyed homes ÷ knocked homes (DISTINCT homes), so it's bounded ≤100% and

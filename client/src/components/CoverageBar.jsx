@@ -5,6 +5,7 @@ import Card from './ui/Card.jsx';
 // hues read on both light and dark surfaces; only the chrome uses tokens.
 const SEGMENTS = [
   { key: 'surveyed', label: 'Surveyed', color: 'bg-green-500' },
+  { key: 'refused', label: 'Refused', color: 'bg-amber-500' },
   { key: 'lit_dropped', label: 'Lit dropped', color: 'bg-purple-500' },
   { key: 'not_home', label: 'Not home', color: 'bg-blue-500' },
   { key: 'wrong_address', label: 'Wrong address', color: 'bg-red-500' },

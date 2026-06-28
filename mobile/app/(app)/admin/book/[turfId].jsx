@@ -28,6 +28,7 @@ const STATUS_LABEL = {
   not_home: 'Not home',
   surveyed: 'Surveyed',
   wrong_address: 'Wrong address',
+  refused: 'Refused',
   lit_dropped: 'Lit dropped',
 };
 
@@ -307,6 +308,7 @@ export default function AdminBookDetail() {
               'house-not_home': require('../../../../assets/icons/house-not_home.png'),
               'house-surveyed': require('../../../../assets/icons/house-surveyed.png'),
               'house-wrong_address': require('../../../../assets/icons/house-wrong_address.png'),
+              'house-refused': require('../../../../assets/icons/house-refused.png'),
               'house-lit_dropped': require('../../../../assets/icons/house-surveyed.png'),
             }}
           />
@@ -339,6 +341,7 @@ export default function AdminBookDetail() {
                   'not_home', 'house-not_home',
                   'surveyed', 'house-surveyed',
                   'wrong_address', 'house-wrong_address',
+                  'refused', 'house-refused',
                   'lit_dropped', 'house-lit_dropped',
                   'house-unknocked',
                 ],

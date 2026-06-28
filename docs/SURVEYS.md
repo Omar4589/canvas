@@ -1,12 +1,14 @@
 # Surveys
 
-How surveys are built, run at the door, stored, and reported — and the one thing you must **not**
-do to a survey that's already collecting answers.
+How surveys are built, run at the door, stored, and reported — including conditional questions,
+read-aloud option scripts, "Other (specify)", and the (now much more permissive) rules for editing a
+survey that's already collecting answers.
 
-- **Part 1 — For everyone** is plain language: what a survey is, how to build one, and the safe
-  way to change one.
-- **Part 2 — Technical reference** is for developers (and Claude): models, endpoints, the
-  question/answer join that reporting relies on, and the integrity risk in editing a used survey.
+- **Part 1 — For everyone** is plain language: what a survey is, how to build one (including
+  branching logic and per-option scripts), and what you can safely change once it has answers.
+- **Part 2 — Technical reference** is for developers (and Claude): the data model, dual-read
+  reporting, the soft-retire reconcile, the shared visibility evaluator, answer normalization, and
+  the migration.
 
 Related: [METRICS.md](METRICS.md) ("Surveys" and "Surveyed voters" definitions),
 [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (one survey per voter **per pass**),
@@ -39,11 +41,47 @@ dropped. (See [METRICS.md](METRICS.md) for how the two campaign types count.)
 
 On the **Surveys** page you create a template: give it a name, write the intro/closing, then add
 questions — set each one's wording, type, options, and whether it's required. You can reorder
-questions and remove them. When you attach the survey to a campaign, canvassers on that campaign
-start seeing it.
+questions, add and remove them, and rename anything. When you attach the survey to a campaign,
+canvassers on that campaign start seeing it.
 
-The Surveys list also shows, for each survey, **which campaigns use it** — so you can see at a
-glance whether a survey is live before you touch it.
+The Surveys list also shows, for each survey, **which campaigns use it** and a **response count** —
+so you can see at a glance whether a survey is live before you touch it.
+
+Beyond plain questions and options, the builder supports three extras:
+
+### Conditional questions ("Show only if…")
+
+You can make a question appear **only when an earlier answer matches**. On any question (after the
+first), open **Show only if…** and add one or more rules. A rule reads:
+
+> *"`<earlier question>` **is / is not / is any of** `<option(s)>`"* — or, for a text question,
+> *"is answered / is not answered."*
+
+With multiple rules you choose **Match ALL** (every rule must hold) or **Match ANY** (one is enough).
+Rules can reference **only earlier questions** — the builder won't let you point at a later or the
+same question — so the survey can never tangle itself into a loop. This one mechanism covers all the
+common shapes: **branch** ("show the follow-up only if they picked X"), **skip** ("hide this unless
+they're a supporter"), and **skip-to-end** (the last questions simply don't appear).
+
+At the door, hidden questions never show, and **their answers aren't saved** — a question someone
+never sees can't accidentally count in your reports.
+
+### Read-aloud option scripts
+
+Any choice option can carry a short **read-aloud script** — a line the canvasser sees the moment
+they pick that option. Add it with **+ read-aloud script** under the option. It's perfect for
+follow-up prompts ("Great — what would change your mind?") or rebuttals tied to a specific answer.
+It's guidance for the canvasser only; nothing about it changes how the answer is stored or counted.
+
+### "Other (specify)"
+
+Turn on **Other (specify)** on a choice question and the door form gains an **Other** choice with a
+small free-text box. Whatever the voter says is captured alongside the structured answer, so you keep
+the clean option counts *and* the verbatim text.
+
+> **Note — "Refused to answer" is not built yet.** A per-question "Refused" choice is a planned,
+> separate **door-outcome** feature; it does not exist today. Don't expect a Refused toggle in the
+> builder.
 
 ## The campaign's "Survey" tab (which survey this campaign uses)
 
@@ -75,37 +113,44 @@ A few rules this tab enforces:
 
 ## What a canvasser sees (mobile)
 
-At a voter, the canvasser opens the survey, reads the intro, answers the questions (required ones
-must be filled), can add a free-form note, and submits. Surveys submitted while offline are queued
-and sync later. **One survey is kept per voter, per pass** — if a canvasser re-submits for the same
-voter in the same pass, the new one replaces the old. A house with three voters surveyed in one
-visit produces **three survey responses but counts as one knock** (see [METRICS.md](METRICS.md)).
+At a voter, the canvasser opens the survey, reads the intro, and answers the questions. As they go:
+
+- **Conditional questions appear and disappear live** — answer the parent and any dependent question
+  reveals itself (or hides) immediately.
+- When they pick an option that has a **read-aloud script**, that line shows up right under the
+  choice.
+- An **Other** choice pops a "Please specify" box for free text.
+- Required questions must be filled — but **only the questions that are actually showing**. A hidden
+  question is never required and is never saved.
+
+They can add a free-form note and submit. Surveys submitted while offline are queued and sync later.
+**One survey is kept per voter, per pass** — if a canvasser re-submits for the same voter in the
+same pass, the new one replaces the old. A house with three voters surveyed in one visit produces
+**three survey responses but counts as one knock** (see [METRICS.md](METRICS.md)).
 
 ## Editing a survey — what's allowed once it has answers
 
-Before a survey collects any answers, edit it freely. **Once it has responses, the app protects
-your reports**: you can still make safe edits, but the changes that would corrupt past results are
-blocked, and the Surveys list shows a response count so you know which surveys are "live."
+Before a survey collects any answers, edit it freely. **Once it has responses you can still edit it
+almost completely** — the app now protects your reports automatically instead of locking the
+controls, so the old "this is blocked" warnings are gone for nearly everything.
 
-Why the protection exists: every answer is filed under a question's short **id** (not its full
-text), and reporting reads your **current** questions and pulls answers that match those ids. Change
-the questions out from under the stored answers and the charts quietly go wrong.
+Why it's safe: every option has a hidden, **stable id** that never changes, and every stored answer
+remembers that id. Reports add up answers by id, so you can **rename** an option or **reword** a
+question and the counts follow along untouched. And when you **remove** a question or an option, the
+app doesn't delete it — it quietly **retires** it (keeps it, hidden from the field) so the answers
+people already gave still appear in your reports under a clearly labeled "retired" bucket.
 
 Once a survey has responses:
 
-- **Still allowed (safe):** rename the survey, edit the **intro/closing**, reword a question, toggle
-  **Required**, **reorder** questions, **add** a new question, and **add** a new option. These don't
-  disturb stored answers.
-- **Blocked (would corrupt reports):** **deleting** a question, **changing a question's type**, and
-  **removing or renaming** an existing option. The builder locks these controls and the server
-  rejects them with a clear reason.
+- **Safe (do it freely):** rename the survey, edit the **intro/closing**, **reword** a question,
+  **rename** an option, toggle **Required**, **reorder** questions, **add** a question or option,
+  **remove** a question or option (it's retired, not deleted), and add/edit **conditions**,
+  **read-aloud scripts**, or **Other (specify)**.
+- **The one blocked change:** changing a question's **answer type** (e.g. single-choice → text). The
+  stored answers were recorded in the old shape and can't be re-totaled in the new one, so the type
+  control is locked and the server refuses the change.
 
-Why those are blocked, concretely: say 100 people answered "What's your top issue?" with options
-*Economy / Schools / Crime*. If you renamed *Economy* to *The Economy*, every stored "Economy"
-answer would no longer match an option and would **drop off the chart** — silently. So that edit is
-refused.
-
-**Need to change the locked parts?** Use **Duplicate** on the Surveys list. It makes a fresh,
+**Need to change a question's type?** Use **Duplicate** on the Surveys list. It makes a fresh,
 fully-editable copy (reset to v1); point your campaign at the copy on the Campaigns page. The
 original stays intact so its existing reports keep working. Note: after you repoint a campaign, that
 campaign's new answers report under the **copy**, separate from the answers already gathered under
@@ -116,9 +161,11 @@ the original — the Campaigns page shows a heads-up when you pick a survey that
 # Part 2 — Technical reference
 
 The implementation lives in
-[`server/src/routes/admin/surveys.js`](../server/src/routes/admin/surveys.js) (authoring),
-[`server/src/routes/mobile/canvass.js`](../server/src/routes/mobile/canvass.js) (submission), and
-the `survey-results` handler in
+[`server/src/routes/admin/surveys.js`](../server/src/routes/admin/surveys.js) (authoring,
+reconcile + rule-graph validation),
+[`server/src/routes/mobile/canvass.js`](../server/src/routes/mobile/canvass.js) (submission), the
+shared [`server/src/services/surveys/`](../server/src/services/surveys/) helpers (visibility,
+normalization, dual-read aggregation, edit classification), and the `survey-results` handler in
 [`server/src/routes/admin/reports.js`](../server/src/routes/admin/reports.js) (reporting).
 
 ## A. Data model
@@ -126,108 +173,193 @@ the `survey-results` handler in
 | Model | File | Fields that matter |
 |---|---|---|
 | `SurveyTemplate` | [models/SurveyTemplate.js](../server/src/models/SurveyTemplate.js) | `organizationId`, `name`, `isActive`, `version` (default 1), `intro`, `closing`, `questions[]`, `createdBy`. Org-scoped, **not** campaign-scoped (a campaign points at a template via `Campaign.surveyTemplateId`). |
-| `SurveyTemplate.questions[]` | same | Embedded sub-doc **`{ _id: false }`** → questions have **no stable database id**. `key` (string, required), `label`, `type` (`single_choice`/`multiple_choice`/`text`), `options[]`, `required`, `order`. The `key` is the only durable handle on a question. |
-| `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `surveyTemplateId`, **`surveyTemplateVersion`** (snapshot at submit), `answers[]`, `voterId`, `householdId`, `userId`, `campaignId`, `organizationId`, `passId`/`turfId` (metadata, nullable), `location`, `submittedAt`, `wasOfflineSubmission`, `editedBy`/`editedAt`. Indexes: `{voterId, passId}` (within-pass dedup), `{householdId, passId}`. |
-| `SurveyResponse.answers[]` | same | Embedded `{ _id: false }`: `questionKey` (matches a template question's `key`), `questionLabel` (**snapshot** of the question text at submit time), `answer` (Mixed — string, or string[] for multiple choice, or null). |
+| `SurveyTemplate.questions[]` | same (`questionSchema`, `{ _id: false }`) | `key` (stable per-survey slug, **the join handle** — never reused once retired), `label`, `type` (`single_choice`/`multiple_choice`/`text`), `options[]`, `required`, `order`, **`retired`** (soft-retire a whole question), **`visibleIf`** (conditional display, default `null`), **`otherOption`** (boolean — adds an "Other: ___" choice), **`refusalOption`** (boolean — reserved for a future door-outcome feature; **no UI, not wired**). |
+| `SurveyTemplate…options[]` | same (`optionSchema`, `{ _id: false }`) | **`id`** (stable per-question id — reports/conditions join on this, so `text` is freely editable), `text`, `tag` (group label, default `null`; no builder UI yet), **`script`** (per-option read-aloud line), **`retired`** (soft-hide from the field, keep in reports), `order`. |
+| `SurveyTemplate…visibleIf` | same (`visibleIfSchema`) | `logic` (`all`/`any`, default `all`) + `rules[]`. Each rule (`ruleSchema`): `questionKey` (an **earlier** question), `op` (`is`/`is_not`/`any_of`/`answered`/`not_answered`), `optionIds[]`. |
+| `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `surveyTemplateId`, **`surveyTemplateVersion`** (snapshot at submit), `answers[]`, `voterId`, `householdId`, `userId`, `campaignId`, `organizationId`, `passId`/`turfId`/`effortId` (metadata, nullable), `location`, `submittedAt`, `wasOfflineSubmission`, `editedBy`/`editedAt`. Unique index `{voterId, passId}` (within-pass dedup, DB-enforced); index `{householdId, passId}`. |
+| `SurveyResponse.answers[]` | same (`answerSchema`, `{ _id: false }`) | `questionKey` (matches a template question's `key`), `questionLabel` (**snapshot** at submit), **`optionIds[]`** (stable id(s) chosen — the id-native tracking key; single → 1, multi → N, empty for free-text), **`otherText`** (free text typed into the `__other__` option), `answer` (Mixed — string \| string[] \| free text; **kept as a human-readable snapshot AND the legacy reporting fallback** for rows recorded before stable ids existed). |
 
-The `key` is generated in the builder by slugifying the label, with collision suffixes
-(`top_issue`, `top_issue_2`, …). It is the join key between a response and its question.
+The `key` is derived in the builder by slugifying the label, with collision suffixes
+(`top_issue`, `top_issue_2`, …); option `id`s are derived the same way within a question. Both are
+minted once and held immutable so conditions and stored answers keep pointing at the right thing.
 
 ## B. Endpoints (authoring)
 
 All under `/admin/surveys`, guarded by `requireAuth, orgContext, requireOrgRole('admin')`.
 
-| Method · path | Purpose | Guard on used surveys? |
-|---|---|---|
-| `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` plus **`responseCount`** / **`hasResponses`** (one `SurveyResponse.aggregate` count per template). | n/a |
-| `POST /admin/surveys` | Create (Zod `upsertSchema`); sets `version: 1`, `createdBy`. | n/a |
-| `PATCH /admin/surveys/:surveyId` | Update; if `data.questions` present, diff vs the stored questions and **block destructive edits** when responses exist; else apply and bump `version`. | **Yes** (see below). |
-| `POST /admin/surveys/:surveyId/duplicate` | Clone into a fresh template (`name: "<name> (Copy)"`, `version: 1`, `isActive: false`, no campaign link). | n/a |
+| Method · path | Purpose |
+|---|---|
+| `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` plus **`responseCount`** / **`hasResponses`** (one `SurveyResponse.aggregate` count per template). |
+| `POST /admin/surveys` | Create (Zod `upsertSchema`); `assignOptionIds` mints ids for any id-less option, `validateVisibleIfIntegrity` checks the rule graph, then sets `version: 1`, `createdBy`. |
+| `PATCH /admin/surveys/:surveyId` | Update. When `questions` are present: if the survey **has responses**, `classifyQuestionEdits` blocks **only a question type change** → `409 { code: 'survey-has-responses', reasons }`. Otherwise `reconcileQuestions` (soft-retire absent items, mint ids for new options), `validateVisibleIfIntegrity`, apply, and bump `version`. |
+| `POST /admin/surveys/:surveyId/duplicate` | Clone into a fresh template (`name: "<name> (Copy)"`, `version: 1`, `isActive: false`, no campaign link, questions copied verbatim). |
 
-> **Edit guard (implemented).** When the survey has responses and the PATCH includes `questions`,
-> `classifyQuestionEdits(old, new)` ([services/surveys/diffQuestions.js](../server/src/services/surveys/diffQuestions.js))
-> flags **destructive** changes — a question removed or its `key` changed, a `type` change, or an
-> existing `option` removed/renamed. Any of those → **`409 { code: 'survey-has-responses', reasons }`**.
-> Safe changes (name/intro/closing, add question, add option, label/`required`, reorder) pass through
-> and still bump `version`. The builder ([client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx))
-> mirrors this — it shows the response count, locks the destructive controls on existing questions,
-> and offers **Duplicate** — with the server as the source of truth (it surfaces the `409` reasons).
+> **Soft-retire reconcile (replaces the old "blocked destructive edits" model).** The PATCH route no
+> longer deletes anything structural. `reconcileQuestions(existingQuestions, incomingQuestions)`
+> (in [surveys.js](../server/src/routes/admin/surveys.js)): matches incoming questions to existing
+> ones by `key`, **preserves existing option ids**, mints ids for new (id-less) options, and
+> **re-appends as `retired: true`** any existing option a question dropped and any existing question
+> the payload dropped — ids and text preserved. So removing/renaming/reordering questions and
+> options is non-destructive: history is kept, reports keep counting it.
 
-## C. Why those edits are blocked (the integrity risk being guarded)
+> **The one hard block.** `classifyQuestionEdits(old, new)`
+> ([services/surveys/diffQuestions.js](../server/src/services/surveys/diffQuestions.js)) walks
+> still-present questions (matched by `key`) and returns a reason **only** when a question's `type`
+> changed — the stored answer shape can no longer be aggregated. That's the lone `409` once responses
+> exist; the builder mirrors it by locking the type control and offering **Duplicate**.
 
-The guard in §B exists because reporting (`GET /admin/reports/survey-results`,
-[reports.js:636](../server/src/routes/admin/reports.js)) joins answers to the **current** template by
-`questionKey`, ignoring the stored `surveyTemplateVersion` and `questionLabel` snapshot:
+> **Rule-graph validation (on save, after reconcile).** `validateVisibleIfIntegrity(questions)`
+> enforces, over the **final reconciled** questions, that every rule on a non-retired question:
+> references a **strictly earlier non-retired** question (forward/self/dangling → error, which also
+> makes cycles impossible); uses an op valid for the referenced type (`text` questions support only
+> `answered`/`not_answered`); and (for `is`/`is_not`/`any_of`) names `optionIds` that exist on the
+> referenced question (retired-inclusive) or the `'__other__'` sentinel when it allows Other. Any
+> violation → `400`. The Zod `ruleSchema` additionally requires exactly one `optionId` for
+> `is`/`is_not` and at least one for `any_of`.
 
-```js
-template = await SurveyTemplate.findOne({ _id: surveyTemplateId, organizationId }).lean(); // current
-const sortedQs = [...(template.questions || [])].sort((a,b) => (a.order||0) - (b.order||0));
-for (const q of sortedQs) {
-  const pipeline = [
-    { $match: match },                              // all responses for this template
-    { $unwind: '$answers' },
-    { $match: { 'answers.questionKey': q.key } },    // join by key — NOT by version
-    // q.type === 'multiple_choice' ? $unwind '$answers.answer'
-    { $group: { _id: '$answers.answer', count: { $sum: 1 }, /* preview ids */ } },
-  ];
-}
-```
+## C. Dual-read reporting (stable id, legacy text fallback)
+
+Reporting joins answers to the **current** template by `questionKey`, and joins choice answers to
+options by **stable option id with a legacy `answer`-text fallback**. The shared helpers in
+[`services/surveys/answerAgg.js`](../server/src/services/surveys/answerAgg.js) are the single source
+of that logic:
+
+| Helper | Role |
+|---|---|
+| `choiceKeyStages(questionKey)` | Aggregation fragment: after the caller's `$match`, `$unwind` answers, match the `questionKey`, then emit one `_answerKeys` row per chosen key — the **`optionIds`** for id-native rows, or the literal **`answer`** text (wrapped to an array) for legacy rows. Works for single + multiple. |
+| `mergeOptionRows(question, rows, opts)` | Merge raw `$group` rows (`{ _id, count, responseIds? }`) onto the question's **current options** — matched **by id, then by text**. Leftover values with no current option collapse into a **retired orphan bucket** (`id: null`, `retired: true`, `text` = the raw value). Returns `[{ id, text, retired, count, responseIds }]` sorted by count desc. |
+| `voterAnswerClause(questionKey, optionId, optionText)` | "Voters who chose this option" filter: id-native `$elemMatch` on `optionIds` **OR** legacy `$elemMatch` on `answer` text (the latter also matches multi-select arrays containing the text). |
+| `answerFilterClause(questionKey, values, texts)` | Saved-Search / targeted-round filter: match any chosen option **id** (`optionIds.$in`) **OR** their texts (`answer.$in`), tolerating legacy saved filters that stored literal text. |
+
+Consumers:
+
+- `GET /admin/reports/survey-results`
+  ([reports.js `survey-results` handler](../server/src/routes/admin/reports.js)) — builds the
+  per-question pipelines with `choiceKeyStages` (choice) or a plain text group, then
+  `mergeOptionRows` onto the current options. `voters-by-answer` uses `voterAnswerClause`.
+- `computeSurveyBreakdowns`
+  ([services/reports/computeReport.js](../server/src/services/reports/computeReport.js)) — the
+  client-report freeze; same `choiceKeyStages` + `mergeOptionRows` math.
+- `resolveWalkList` ([services/walklist/resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js))
+  and `GET /admin/households` ([routes/admin/households.js](../server/src/routes/admin/households.js))
+  — `answerFilterClause` / `voterAnswerClause` for survey-answer targeting.
+
+**Consequences:** renaming an option **keeps its count** (the id is stable); removing one surfaces
+its past answers as a **retired** bucket rather than dropping them. Each response still snapshots
+`surveyTemplateVersion`, `questionLabel`, and `answer`, so raw data stays recoverable and pre-id
+rows keep reporting via the text fallback.
 
 > **Percentages are per-question (share of that question's answers).** Each option's `percent` = its
-> `count` ÷ **that question's own answer total** — the Σ of its non-null option counts — *not* the
-> global response count. So a **single-choice** question's bars sum to ~100% of the people who answered
-> it (skips don't dilute it), and a **multiple-choice** question's sum to ~100% of all *selections*
-> (one respondent can contribute several). Counts are the raw `$group` totals. The "N answered" header
-> ([QuestionResults.jsx](../client/src/components/QuestionResults.jsx)) is the same per-question Σ, so
-> bars and header agree. The client report freezes the identical math
-> ([computeSurveyBreakdowns](../server/src/services/reports/computeReport.js)), and the report bars
-> ([ReportBreakdown.jsx](../client/src/components/ReportBreakdown.jsx)) re-derive the percent from the
-> counts they display — so a published snapshot is always self-consistent (and an old one self-heals).
+> `count` ÷ **that question's own answer total** (the Σ of its merged option counts) — *not* the
+> global response count. A **single-choice** question's bars sum to ~100% of the people who answered
+> it; a **multiple-choice** question's sum to ~100% of all *selections* (one respondent can
+> contribute several). Counts are the raw `$group` totals merged onto the current options. The "N
+> answered" header ([QuestionResults.jsx](../client/src/components/QuestionResults.jsx)) is the same
+> per-question Σ, so bars and header agree. The client report freezes the identical math
+> (`computeSurveyBreakdowns`), and the report bars
+> ([ReportBreakdown.jsx](../client/src/components/ReportBreakdown.jsx)) re-derive percent from the
+> counts they display — so a published snapshot is always self-consistent.
 
-Because the join is `key`-only against the live questions, the following edits would corrupt reports
-if they were allowed — which is exactly why the PATCH guard refuses them once responses exist:
+## D. The visibility evaluator (shared, three copies, drift-guarded)
 
-| Edit after responses exist | Effect on reporting |
-|---|---|
-| **Reword a question** (same `key`) | Old + new answers merge under one question; the chart's title is the new wording but the bars include old-context answers. |
-| **Change / rename options** | Old answers whose option text is no longer a current option still appear as their own `_id` bucket in the `$group` — orphan rows that don't line up with the current option set. |
-| **Remove an option** | Old answers for it survive as an orphan bucket (count is right, label is "stale"); they're easy to misread or get filtered out downstream. |
-| **Change a question's `type`** | e.g. `text` → `single_choice`: the `multiple_choice` `$unwind` / option grouping no longer matches how the old answers were shaped; aggregation is meaningless. |
-| **Delete a question** | Its `key` is gone from `sortedQs`, so those answers are **never queried** — they vanish from reports while still sitting in the database. |
-| **Reuse a `key` for a different question** | Worst case: two semantically different questions share a `key`; their answers are silently pooled. |
+Conditional display is decided by one **pure** evaluator with **no I/O**, so the server, web builder
+preview, and mobile field app always agree on which questions show.
 
-Each response also snapshots `surveyTemplateVersion` and `questionLabel`, so the raw data is
-recoverable even if a destructive change somehow lands (e.g. via a direct DB write).
+- **Canonical:** [`server/src/services/surveys/visibility.js`](../server/src/services/surveys/visibility.js).
+- **Mirrors (byte-for-byte below the `// ==== BEGIN MIRRORED BODY ====` marker):**
+  [`client/src/lib/surveyVisibility.js`](../client/src/lib/surveyVisibility.js) and
+  [`mobile/lib/surveyVisibility.js`](../mobile/lib/surveyVisibility.js).
+- **Fixtures:** [`__fixtures__/visibility.fixtures.json`](../server/src/services/surveys/__fixtures__/visibility.fixtures.json).
+- **Tests:** [`visibility.test.js`](../server/src/services/surveys/visibility.test.js) (run via
+  `npm test` in `server/`) — exercises the fixtures, op semantics, and a **drift guard** that reads
+  each file from the marker on and asserts the three bodies are identical.
 
-> **What's implemented vs. still open.** The write path now **blocks** the destructive edits above
-> once responses exist (§B), and **Duplicate** is the supported way to evolve a live survey's
-> questions. Still *not* done (intentionally, for now): making the **read path version-aware** — the
-> report still joins to the current questions by `key`, so it can't render answers from two different
-> question-sets of the *same* template side by side. With the write guard + Duplicate in place this
-> is largely moot (structural change ⇒ a new template), but a future "duplicate as new version" that
-> keeps both under one campaign report would need per-version question snapshots in `survey-results`.
+Exported API:
 
-## D. Submission & dedup invariants
+- `makeCell(type, optionIds, text)` → `{ optionIds, text }`. **Choice questions carry NO text into
+  the evaluator** (only `type === 'text'` keeps text); this is the key invariant that keeps server,
+  web, and mobile in agreement when a choice answer's `optionIds` is empty.
+- `evaluateVisibleIf(visibleIf, answersByKey)` — pure single-question evaluation. Op semantics:
+  `is`/`is_not` compare against `optionIds[0]`; `any_of` is set intersection; `answered`/
+  `not_answered` test the cell; an **unknown op fails OPEN** (visible) so a future op can't strand a
+  question. `null`/empty rules → visible.
+- `visibleQuestionKeys(questions, rawAnswersByKey)` — the order-aware driver. Walks **non-retired**
+  questions in authoring order, exposing each **visible** question's answer only to questions
+  **after** it (a hidden parent's stale answer is withheld from its children). A rule referencing a
+  **later or self** active question **fails CLOSED** (the question hides). Returns a `Set` of visible
+  keys.
 
-`POST /mobile/voters/:voterId/survey` ([canvass.js:218](../server/src/routes/mobile/canvass.js)):
+## E. Answer normalization & dropHidden modes
 
-- Validates the template exists and matches the campaign; resolves `passId`/`turfId` from the
-  submission timestamp (see [PASSES_AND_TURF.md](PASSES_AND_TURF.md) for pass attribution).
-- **Deletes any prior response for the same `(voterId, passId)`** before inserting → at most one
-  `SurveyResponse` per voter per pass (mirrors the knock dedup in [METRICS.md](METRICS.md)).
-- Stores `surveyTemplateVersion: template.version || 1` and the `answers` array verbatim from the
-  client (so `questionKey` + `questionLabel` are snapshotted).
+Both write paths funnel through `normalizeAndFilterAnswers(template, rawAnswers, { dropHidden })`
+([services/surveys/normalizeAnswers.js](../server/src/services/surveys/normalizeAnswers.js)) so they
+**can't drift**. It **never throws / never 400s**:
+
+- Drops rows whose `questionKey` is unknown to the template.
+- Computes valid ids = the question's option ids **plus `'__other__'`** when `otherOption` is on;
+  **keeps retired ids**, drops ids the template doesn't recognize.
+- Phase-1 backfill: a row with no `optionIds` but an `answer` snapshot maps each answer text to an
+  option id by exact text match before filtering.
+- Stores `otherText` only when `'__other__'` is among the kept ids.
+- Builds the evaluator's answer map with `makeCell` and computes `visibleQuestionKeys`; then returns
+  **all** rows (`dropHidden:false`) or **only visible** rows (`dropHidden:true`).
+
+| Caller | Mode | Why |
+|---|---|---|
+| `POST /mobile/voters/:voterId/survey` ([canvass.js](../server/src/routes/mobile/canvass.js)) | `dropHidden: true` (default) | Drop ghost answers to questions the current logic hides — a question the voter never saw can't count. |
+| `PATCH /admin/:voterId/surveys/:responseId` ([routes/admin/voters.js](../server/src/routes/admin/voters.js)) | `dropHidden: false` | **Preserve recorded history** — keep answers even if newer `visibleIf` logic would now hide them. (If the template is missing, the edit is stored as-is rather than wiped.) |
+
+### The `'__other__'` sentinel
+
+"Other (specify)" is a per-question `otherOption` toggle, not a real option. On mobile it renders as
+a synthetic choice `{ id: '__other__', text: 'Other (specify)' }`; when picked it shows a free-text
+box whose value is submitted as `answer.otherText`, with `'__other__'` carried in `optionIds`. The
+sentinel is accepted everywhere a real option id is: `normalizeAndFilterAnswers` (valid id set),
+`validateVisibleIfIntegrity` / the builder's condition editor (a pickable rule target), and the
+visibility evaluator (just another id).
+
+## F. Submission & dedup invariants
+
+`POST /mobile/voters/:voterId/survey` ([canvass.js](../server/src/routes/mobile/canvass.js)):
+
+- Validates the template exists and matches the campaign (resolving a **per-effort survey override**
+  — the door's effort survey wins over the campaign default; see [EFFORTS.md](EFFORTS.md)); resolves
+  `passId`/`turfId`/`effortId` from the submission timestamp (see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)).
+- Runs `normalizeAndFilterAnswers(template, data.answers)` (`dropHidden:true`) before persisting.
+- **Atomic upsert keyed on `(voterId, passId)`** (`findOneAndUpdate(..., { upsert: true })`) → at
+  most one `SurveyResponse` per voter per pass; a re-submit replaces the prior answers, and a
+  double-tap race that hits the unique index (`11000`) falls back to an update of the winner's row.
+- Stores `surveyTemplateVersion: template.version || 1` and resets `editedBy`/`editedAt` (a fresh
+  canvasser submission clears any prior admin-edit audit).
 - Writes a `survey_submitted` `CanvassActivity` (household-scoped dedup → one knock per
   user/house/pass even for a multi-voter house) and updates `Voter.surveyStatus` / household status.
 
-## E. Frontend mapping
+## G. Frontend mapping
 
 | File | Renders |
 |---|---|
-| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`); derives `key` from label with collision suffixes; shows `usedByCampaigns` + **response count**; when a survey has responses, locks destructive controls on existing questions and surfaces PATCH `409` reasons; **Duplicate** action per row. Also the **auto-attach return loop**: a `?attachTo=<campaignId>` query param opens the create form pre-tagged to that campaign, then on save `PATCH /admin/campaigns/:attachTo { surveyTemplateId }` and `navigate('/campaigns/:attachTo/survey')` (cancel/back also returns there). |
-| [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`, route in [App.jsx](../client/src/App.jsx)). Pure **association** UI — no authoring. Three states: **attached** (header + `SurveyPreview` + **Change survey** / **Edit in library →**), **no survey yet** (Pick a survey / Create new → `?attachTo`), **lit-drop** (surveys-not-used note). Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }` (no server change — route pre-existed); warns when the chosen template has responses; unknown/wrong-org campaign → `Navigate('/campaigns')`. No standalone unlink. |
-| [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options shown as radio/checkbox glyphs, text questions as a free-text placeholder. No edit affordances (the builder's `QuestionCard` is module-local to `SurveysPage`). |
+| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`). Derives question `key` (`deriveKey`) and option `id` (`optionId`) by slugify-with-collision-suffix, both minted once and held immutable. Per-option **read-aloud script** field (`OptionRow`), **Other (specify)** toggle, and a **Show only if…** condition editor (`ConditionEditor`) that only lets a rule reference **earlier** questions and restricts text questions to `answered`/`not_answered` (`opsForType`); live `ruleError` validation mirrors the server. On a survey with responses it does **not** lock everything — only the **type** control is disabled (and removals soft-retire with a **Restore** affordance); it surfaces the PATCH `409 reasons`. Shows `usedByCampaigns` + `responseCount`; per-row **Duplicate**. **Auto-attach return loop**: `?attachTo=<campaignId>` opens the create form pre-tagged, then on save `PATCH /admin/campaigns/:attachTo { surveyTemplateId }` and `navigate('/campaigns/:attachTo/survey')` (cancel/back also returns there). No `tag`/`refusalOption` UI. |
+| [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`). Pure **association** UI — no authoring. States: **attached** (header + `SurveyPreview` + **Change survey** / **Edit in library →**), **no survey yet** (Pick / Create new → `?attachTo`), **lit-drop** (surveys-not-used note). Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }`; warns when the chosen template has responses. No standalone unlink. |
+| [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options as radio/checkbox glyphs, text as a placeholder. |
+| [client/src/lib/surveyVisibility.js](../client/src/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded) — powers the builder's live condition validity and any preview gating. |
 | [client/src/pages/CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) | Survey-template dropdown shows a heads-up when the chosen survey already has responses (repointing reports new answers separately). |
-| [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results`. |
+| [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results` (retired/legacy buckets included). |
 | [client/src/components/CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx) | A canvasser's individual responses (shows template `version`). |
-| [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | The at-the-door survey form (single/multiple/text), required-validation, note, offline queue. |
+| [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | The at-the-door form. Imports `makeCell` + `visibleQuestionKeys` and recomputes `visibleQuestions` live as answers change; renders single/multiple/text, inline **option scripts** on the picked option, the synthetic **`__other__`** choice with a "Please specify" box. Required-validation runs over **visible** questions only. Submits `{ optionIds, answer (snapshot), otherText, questionKey, questionLabel }` per visible answer; offline queue + optimistic recolor via `optimisticSubmit`. |
+| [mobile/lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded). |
+
+## H. Migration
+
+`npm run migrate:survey-option-ids`
+([migrations/migrateSurveyOptionIds.js](../server/src/migrations/migrateSurveyOptionIds.js)) — the
+additive, **idempotent**, dry-run-by-default backfill that establishes stable ids. Two steps:
+
+- **A. Templates** — convert each question's plain-string options into `{ id, text, tag, script,
+  retired, order }` objects, minting a stable per-question `id` via the same slugify-collision rule
+  the builder/route use. Already-object options are left untouched.
+- **B. Responses** — enrich each answer with `optionIds[]` by mapping its snapshot `answer` text to
+  the template's option ids (exact text match). Nothing is rewritten: the `answer` text stays as the
+  legacy/display fallback; unmatched values (renamed/removed options, free text, Other) simply get no
+  id and keep reporting via text.
+
+Run `--apply` with/before the deploy that ships dual-read reporting; safe to re-run.

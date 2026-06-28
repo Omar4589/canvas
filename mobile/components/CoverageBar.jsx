@@ -8,6 +8,7 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // bar (per-campaign cards); full adds a wrapping legend (cumulative + detail).
 const SEGMENTS = [
   { key: 'surveyed', label: 'Surveyed' },
+  { key: 'refused', label: 'Refused' },
   { key: 'lit_dropped', label: 'Lit dropped' },
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },

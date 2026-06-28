@@ -10,6 +10,7 @@ const ACTION_TO_PIN = {
   survey_submitted: 'surveyed',
   not_home: 'not_home',
   wrong_address: 'wrong_address',
+  refused: 'refused',
   lit_dropped: 'lit_dropped',
   note_added: 'unknocked',
 };
@@ -18,6 +19,7 @@ const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
   not_home: 'Not home',
   wrong_address: 'Wrong address',
+  refused: 'Refused',
   lit_dropped: 'Lit dropped',
   note_added: 'Note added',
 };

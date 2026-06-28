@@ -28,6 +28,7 @@ const ACTION_TABS = [
   { key: 'survey_submitted', label: 'Surveys' },
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },
+  { key: 'refused', label: 'Refused' },
   { key: 'lit_dropped', label: 'Lit drop' },
   { key: 'note_added', label: 'Notes' },
 ];

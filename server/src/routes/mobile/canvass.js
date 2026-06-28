@@ -62,7 +62,7 @@ function distanceFromHouse(household, location) {
   return Math.round(haversineMeters(hLat, hLng, location.lat, location.lng));
 }
 
-const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
+const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 
 // Deterministic attribution: a door belongs to its book on one of the campaign's
 // ACTIVE rounds. Efforts are door-disjoint, so a household is in at most one
@@ -165,6 +165,24 @@ router.post('/households/:householdId/wrong-address', async (req, res, next) => 
       householdId: req.params.householdId,
       actionType: 'wrong_address',
       status: 'wrong_address',
+      body: req.body,
+      requireCampaignType: 'survey',
+    });
+    if (result.error) return res.status(result.error.status).json({ error: result.error.message });
+    res.status(201).json(result);
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+router.post('/households/:householdId/refused', async (req, res, next) => {
+  try {
+    const result = await recordHouseholdAction({
+      req,
+      householdId: req.params.householdId,
+      actionType: 'refused',
+      status: 'refused',
       body: req.body,
       requireCampaignType: 'survey',
     });

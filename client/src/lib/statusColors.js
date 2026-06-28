@@ -8,6 +8,7 @@ export const STATUS_COLORS = {
   not_home: '#3b82f6', // blue-500
   surveyed: '#22c55e', // green-500
   wrong_address: '#ef4444', // red-500
+  refused: '#f59e0b', // amber-500
   lit_dropped: '#a855f7', // purple-500
   voted: '#14b8a6', // teal-500
 };
@@ -17,6 +18,7 @@ export const STATUS_LABELS = {
   not_home: 'Not home',
   surveyed: 'Surveyed',
   wrong_address: 'Wrong address',
+  refused: 'Refused',
   lit_dropped: 'Lit dropped',
   voted: 'Voted',
 };

@@ -52,6 +52,7 @@ export default function DayDetail() {
     survey_submitted: colors.status.surveyed,
     not_home: colors.status.not_home,
     wrong_address: colors.status.wrong_address,
+    refused: colors.status.refused,
     lit_dropped: colors.status.lit_dropped,
     note_added: colors.textMuted,
   };
@@ -212,6 +213,7 @@ export default function DayDetail() {
                       'survey_submitted', ACTION_COLOR.survey_submitted,
                       'not_home', ACTION_COLOR.not_home,
                       'wrong_address', ACTION_COLOR.wrong_address,
+                      'refused', ACTION_COLOR.refused,
                       'lit_dropped', ACTION_COLOR.lit_dropped,
                       colors.textMuted,
                     ],

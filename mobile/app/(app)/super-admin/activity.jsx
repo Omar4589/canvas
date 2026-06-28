@@ -20,6 +20,7 @@ const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
   not_home: 'Not home',
   wrong_address: 'Wrong address',
+  refused: 'Refused',
   lit_dropped: 'Lit dropped',
 };
 
@@ -44,6 +45,7 @@ export default function ActivityScreen() {
     survey_submitted: colors.success,
     not_home: colors.brand,
     wrong_address: colors.danger,
+    refused: colors.status.refused,
     lit_dropped: colors.accentPurple,
   };
 

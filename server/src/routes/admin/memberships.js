@@ -13,7 +13,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
 
-const DOOR_ACTIONS = ['not_home', 'wrong_address', 'survey_submitted', 'lit_dropped'];
+const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 const phoneSchema = z.string().trim().max(40).optional();
 
 const addSchema = z.object({

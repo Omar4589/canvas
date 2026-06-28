@@ -1164,7 +1164,7 @@ export default function TurfsPage() {
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-fg-muted">Status:</span>
-                    {['unknocked', 'not_home', 'surveyed', 'lit_dropped', 'wrong_address'].map((s) => (
+                    {['unknocked', 'not_home', 'surveyed', 'refused', 'lit_dropped', 'wrong_address'].map((s) => (
                       <label key={s} className="flex items-center gap-1 capitalize">
                         <input type="checkbox" checked={targetFilter.priorPassStatuses.includes(s)} onChange={() => toggleTargetStatus(s)} />
                         {s.replace('_', ' ')}

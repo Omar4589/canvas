@@ -57,7 +57,7 @@ export async function statusesFromDoorPass(doorPass, campaignType) {
 }
 
 export function statusCountsFromMap(map, householdIds) {
-  const counts = { unknocked: 0, not_home: 0, wrong_address: 0, lit_dropped: 0, surveyed: 0 };
+  const counts = { unknocked: 0, not_home: 0, wrong_address: 0, refused: 0, lit_dropped: 0, surveyed: 0 };
   for (const id of householdIds) {
     const s = map.get(String(id))?.status || 'unknocked';
     counts[s] = (counts[s] || 0) + 1;
