@@ -20,6 +20,7 @@
     "migrate:timezones": "npm --prefix server run migrate:timezones --",
     "migrate:survey-dedup": "npm --prefix server run migrate:survey-dedup --",
     "migrate:survey-option-ids": "npm --prefix server run migrate:survey-option-ids --",
+    "migrate:org-tags": "npm --prefix server run migrate:org-tags --",
     "migrate:cleanup-client-role": "npm --prefix server run migrate:cleanup-client-role --"
   },
   "devDependencies": {

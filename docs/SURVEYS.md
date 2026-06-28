@@ -9,7 +9,8 @@ survey that's already collecting answers.
   you can safely change once it has answers.
 - **Part 2 — Technical reference** is for developers (and Claude): the data model, dual-read
   reporting, the soft-retire reconcile, the shared visibility evaluator, answer normalization, the
-  migration, and the **tags** rollup / by-tag walk lists / CSV export.
+  migrations, and the **tags** story — the org-level `Tag` library + management API, the
+  cross-question rollup, by-tag walk lists, and CSV export.
 
 Related: [METRICS.md](METRICS.md) ("Surveys" and "Surveyed voters" definitions),
 [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (one survey per voter **per pass**),
@@ -92,12 +93,35 @@ questions**. Maybe Q1 asks "Who are you voting for?" and Q5 asks "Would you put 
 tag the "Our candidate" option in Q1 *and* the "Yes" option in Q5 both **"Supporter,"** and the app
 can now treat anyone who picked **either** as a supporter, with no double-counting.
 
-**Adding a tag.** In the builder, each answer option has a small **+ tag** link; click it and a
-**Tag** box appears. Start typing and it suggests tags you've already used elsewhere in this survey
-(so you reuse the exact same one instead of inventing "Supporter" here and "supporters" there) — or
-just type a brand-new one. Tags are **not case-sensitive**: "Supporter," "supporter," and
-"SUPPORTER" are all the same tag, and when you save, the survey tidies them up to one spelling
-everywhere.
+**Tags are an organization library now.** Instead of being typed fresh into each survey, your tags
+live in **one managed list** that belongs to your organization and is shared across **every** survey
+and saved search. That single list is the source of truth — so "Supporter" means the same thing
+everywhere, and you can't accidentally end up with "Supporter," "supporters," and "Suporter" all
+floating around as separate things.
+
+**Adding a tag in the builder.** Each answer option has a small **+ tag** link; click it and a
+**pick-or-create** box appears. As you type it filters your organization's existing tags — click one
+to use it. If what you typed doesn't match any tag, you get an explicit **"Create '…'"** action; only
+then is a brand-new tag added to the library. There's no silent typo that quietly forks the list — you
+either pick something that already exists or deliberately create a new one. Matching is **not
+case-sensitive**: "Supporter," "supporter," and "SUPPORTER" are all the same tag.
+
+**Managing the library (the Tags page).** A dedicated **Tags** page in the main (organization) nav
+lists every tag with a **usage summary** — how many options carry it, across how many surveys, and how
+many saved searches filter by it. From there you can:
+
+- **Create** a tag up front (or just let the builder create it the first time you use one).
+- **Rename** a tag — the new name is rewritten **everywhere at once**: every survey option, every
+  survey's tag list, and every saved-search "by tag" filter. Your reports and lists keep working;
+  only the label changes.
+- **Merge** two tags into one — pick a target and the source's options, surveys, and saved searches
+  all fold into the target, then the duplicate is removed. (If you try to *rename* a tag to a name
+  that already exists, the page tells you it would collide and offers to **merge into it** instead.)
+- **Delete** a tag — it's removed from the library and **untagged everywhere** it was used (you're
+  shown its usage and asked to confirm first).
+
+Rename, merge, and delete all **heal across every survey and saved search** in one move — there's no
+hunting through individual surveys to fix a label.
 
 > **Tags are an admin-only convenience.** They're metadata you attach for *your* reporting and list-
 > building. **Canvassers never see tags** at the door — the mobile survey is unchanged.
@@ -204,7 +228,8 @@ normalization, dual-read aggregation, edit classification), and the `survey-resu
 
 | Model | File | Fields that matter |
 |---|---|---|
-| `SurveyTemplate` | [models/SurveyTemplate.js](../server/src/models/SurveyTemplate.js) | `organizationId`, `name`, `isActive`, `version` (default 1), `intro`, `closing`, `questions[]`, **`tags: [String]`** (the **tag palette** — display casing for the survey's tags; matching is case-insensitive, see §I), `createdBy`. Org-scoped, **not** campaign-scoped (a campaign points at a template via `Campaign.surveyTemplateId`). |
+| `SurveyTemplate` | [models/SurveyTemplate.js](../server/src/models/SurveyTemplate.js) | `organizationId`, `name`, `isActive`, `version` (default 1), `intro`, `closing`, `questions[]`, **`tags: [String]`** (a per-survey **palette** — the distinct display casings of the tags its options use; **derived/kept-in-sync on save**, no longer the source of truth — the org-level **`Tag`** library is, see §I), `createdBy`. Org-scoped, **not** campaign-scoped (a campaign points at a template via `Campaign.surveyTemplateId`). |
+| `Tag` | [models/Tag.js](../server/src/models/Tag.js) | The **org-level managed tag library** (Phase 3.1): `organizationId`, `name` (canonical display), **`normalizedName`** (trim+lowercase dedupe key), `color` (reserved for a future colored-chip UI, default `null`), `createdBy`, timestamps. **Unique index `{ organizationId, normalizedName }`** makes duplicate tags structurally impossible. Survey options still reference a tag by its display `name` **as a string** (`option.tag`); this collection is the picklist + the target of rename/merge/delete (see §I). |
 | `SurveyTemplate.questions[]` | same (`questionSchema`, `{ _id: false }`) | `key` (stable per-survey slug, **the join handle** — never reused once retired), `label`, `type` (`single_choice`/`multiple_choice`/`text`), `options[]`, `required`, `order`, **`retired`** (soft-retire a whole question), **`visibleIf`** (conditional display, default `null`), **`otherOption`** (boolean — adds an "Other: ___" choice), **`refusalOption`** (boolean — reserved for a future door-outcome feature; **no UI, not wired**). |
 | `SurveyTemplate…options[]` | same (`optionSchema`, `{ _id: false }`) | **`id`** (stable per-question id — reports/conditions join on this, so `text` is freely editable), `text`, **`tag`** (cross-question group label, default `null`; canonicalized to the palette's casing on save — see §I), **`script`** (per-option read-aloud line), **`retired`** (soft-hide from the field, keep in reports), `order`. |
 | `SurveyTemplate…visibleIf` | same (`visibleIfSchema`) | `logic` (`all`/`any`, default `all`) + `rules[]`. Each rule (`ruleSchema`): `questionKey` (an **earlier** question), `op` (`is`/`is_not`/`any_of`/`answered`/`not_answered`), `optionIds[]`. |
@@ -222,8 +247,8 @@ All under `/admin/surveys`, guarded by `requireAuth, orgContext, requireOrgRole(
 | Method · path | Purpose |
 |---|---|
 | `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` plus **`responseCount`** / **`hasResponses`** (one `SurveyResponse.aggregate` count per template). |
-| `POST /admin/surveys` | Create (Zod `upsertSchema`, which accepts an optional `tags: [String]` palette); `assignOptionIds` mints ids for any id-less option, `validateVisibleIfIntegrity` checks the rule graph, then `canonicalizeTags(withIds, data.tags)` collapses the palette + every `option.tag` to one case-insensitive casing (see §I), and sets `version: 1`, `createdBy`. |
-| `PATCH /admin/surveys/:surveyId` | Update. When `questions` are present: if the survey **has responses**, `classifyQuestionEdits` blocks **only a question type change** → `409 { code: 'survey-has-responses', reasons }`. Otherwise `reconcileQuestions` (soft-retire absent items, mint ids for new options), `validateVisibleIfIntegrity`, then `canonicalizeTags(reconciled, data.tags ?? existing.tags)` (writes back both `existing.tags` and the canonicalized option tags), apply, and bump `version`. |
+| `POST /admin/surveys` | Create (Zod `upsertSchema`, which accepts an optional `tags: [String]` palette); `assignOptionIds` mints ids for any id-less option, `validateVisibleIfIntegrity` checks the rule graph, then `canonicalizeTags(withIds, data.tags)` collapses the palette + every `option.tag` to one case-insensitive casing (see §I), and sets `version: 1`, `createdBy`. **Then `ensureTags(orgId, tags, userId)`** auto-upserts org `Tag` docs for the survey's tags so the library stays complete even for API/legacy writes (see §I). |
+| `PATCH /admin/surveys/:surveyId` | Update. When `questions` are present: if the survey **has responses**, `classifyQuestionEdits` blocks **only a question type change** → `409 { code: 'survey-has-responses', reasons }`. Otherwise `reconcileQuestions` (soft-retire absent items, mint ids for new options), `validateVisibleIfIntegrity`, then `canonicalizeTags(reconciled, data.tags ?? existing.tags)` (writes back both `existing.tags` and the canonicalized option tags), apply, and bump `version`. After save, **`ensureTags(orgId, existing.tags, userId)`** auto-upserts the library (see §I). |
 | `POST /admin/surveys/:surveyId/duplicate` | Clone into a fresh template (`name: "<name> (Copy)"`, `version: 1`, `isActive: false`, no campaign link, questions copied verbatim). |
 
 > **Soft-retire reconcile (replaces the old "blocked destructive edits" model).** The PATCH route no
@@ -374,7 +399,9 @@ visibility evaluator (just another id).
 
 | File | Renders |
 |---|---|
-| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`). Derives question `key` (`deriveKey`) and option `id` (`optionId`) by slugify-with-collision-suffix, both minted once and held immutable. Per-option **read-aloud script** field (`OptionRow`), **Other (specify)** toggle, and a **Show only if…** condition editor (`ConditionEditor`) that only lets a rule reference **earlier** questions and restricts text questions to `answered`/`not_answered` (`opsForType`); live `ruleError` validation mirrors the server. On a survey with responses it does **not** lock everything — only the **type** control is disabled (and removals soft-retire with a **Restore** affordance); it surfaces the PATCH `409 reasons`. Shows `usedByCampaigns` + `responseCount`; per-row **Duplicate**. Per option, a **+ tag** affordance reveals a **Tag combobox** (`OptionRow`: a text input + a shared `<datalist id="survey-tags">`), so you pick an existing palette tag or type a new one; `tagPalette` (a `useMemo`) is the case-insensitive union of `initial.tags` + every option's `tag` and is submitted as the survey's `tags`. **Auto-attach return loop**: `?attachTo=<campaignId>` opens the create form pre-tagged, then on save `PATCH /admin/campaigns/:attachTo { surveyTemplateId }` and `navigate('/campaigns/:attachTo/survey')` (cancel/back also returns there). No `refusalOption` UI. |
+| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`). Derives question `key` (`deriveKey`) and option `id` (`optionId`) by slugify-with-collision-suffix, both minted once and held immutable. Per-option **read-aloud script** field (`OptionRow`), **Other (specify)** toggle, and a **Show only if…** condition editor (`ConditionEditor`) that only lets a rule reference **earlier** questions and restricts text questions to `answered`/`not_answered` (`opsForType`); live `ruleError` validation mirrors the server. On a survey with responses it does **not** lock everything — only the **type** control is disabled (and removals soft-retire with a **Restore** affordance); it surfaces the PATCH `409 reasons`. Shows `usedByCampaigns` + `responseCount`; per-row **Duplicate**. Per option, a **+ tag** affordance reveals a **`TagPicker`** combobox ([components/TagPicker.jsx](../client/src/components/TagPicker.jsx)) backed by the **org Tag library** (`SurveysPage` loads it via `useQuery(['admin','tags'])` → `GET /admin/tags`, passed down as `orgTags`/`tags`): you filter and pick an existing org tag, or take an explicit **"Create '…'"** action — `onCreate` (`createTag`) `POST`s `/admin/tags`, invalidates the `['admin','tags']` query, and returns the canonical name. The old per-survey free-text `<datalist>` is gone (no silent typo-fork). On submit, `SurveyForm` still derives the survey's `tags` palette as the case-insensitive distinct set of every option's `tag` (first casing wins) and submits it — but the server's `ensureTags` upsert and the library are now the source of truth, not this palette. **Auto-attach return loop**: `?attachTo=<campaignId>` opens the create form pre-tagged, then on save `PATCH /admin/campaigns/:attachTo { surveyTemplateId }` and `navigate('/campaigns/:attachTo/survey')` (cancel/back also returns there). No `refusalOption` UI. |
+| [client/src/components/TagPicker.jsx](../client/src/components/TagPicker.jsx) | The per-option **pick-or-create** tag combobox used by `SurveysPage`'s `OptionRow`. Filters the org `tags` prop case-insensitively; selecting an existing tag is the default, and a new one is an **explicit "Create '…'" action** that only appears when nothing matches (calls `onCreate`). Renders a selected tag as a clearable chip. |
+| [client/src/pages/TagsPage.jsx](../client/src/pages/TagsPage.jsx) | The **org-level Tags management page** (route `/tags`, an `ORG_NAV` entry — [navItems.js](../client/src/components/navItems.js)). Lists every org `Tag` from `GET /admin/tags` with a `usageSummary` ("on M options, across N surveys, K saved searches"), plus search. **Create** (`POST /admin/tags`), inline **Rename** (`PATCH /admin/tags/:id`; a `409 { code: 'tag-exists' }` surfaces a **"merge into it"** button targeting the clashing `tagId`), **Merge** (`POST /admin/tags/:id/merge { targetId }` via a target picker), and **Delete** (`DELETE /admin/tags/:id` behind a usage-aware `confirm`). Delete also invalidates `['admin','surveys']` since the builder reads tagged options. |
 | [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`). Pure **association** UI — no authoring. States: **attached** (header + `SurveyPreview` + **Change survey** / **Edit in library →**), **no survey yet** (Pick / Create new → `?attachTo`), **lit-drop** (surveys-not-used note). Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }`; warns when the chosen template has responses. No standalone unlink. |
 | [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options as radio/checkbox glyphs, text as a placeholder. |
 | [client/src/lib/surveyVisibility.js](../client/src/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded) — powers the builder's live condition validity and any preview gating. |
@@ -387,9 +414,9 @@ visibility evaluator (just another id).
 | [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | The at-the-door form. Imports `makeCell` + `visibleQuestionKeys` and recomputes `visibleQuestions` live as answers change; renders single/multiple/text, inline **option scripts** on the picked option, the synthetic **`__other__`** choice with a "Please specify" box. Required-validation runs over **visible** questions only. Submits `{ optionIds, answer (snapshot), otherText, questionKey, questionLabel }` per visible answer; offline queue + optimistic recolor via `optimisticSubmit`. |
 | [mobile/lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded). |
 
-## H. Migration
+## H. Migrations
 
-`npm run migrate:survey-option-ids`
+**Stable ids.** `npm run migrate:survey-option-ids`
 ([migrations/migrateSurveyOptionIds.js](../server/src/migrations/migrateSurveyOptionIds.js)) — the
 additive, **idempotent**, dry-run-by-default backfill that establishes stable ids. Two steps:
 
@@ -403,24 +430,79 @@ additive, **idempotent**, dry-run-by-default backfill that establishes stable id
 
 Run `--apply` with/before the deploy that ships dual-read reporting; safe to re-run.
 
+**Org tag library (Phase 3.1).** `npm run migrate:org-tags`
+([migrations/migrateOrgTags.js](../server/src/migrations/migrateOrgTags.js)) — seeds the `Tag`
+library from existing usage and canonicalizes case across surveys. Additive + **idempotent**,
+**dry-run by default** (`--apply` to write). It `syncIndexes()` on `Tag`, then per org gathers every
+distinct `option.tag` / palette tag (deduped by `normalizeTag`, **first-seen display casing wins**),
+upserts a `Tag` doc via `ensureTags`, and runs `rewriteTag` so that display is canonicalized across
+all surveys + saved-search filters (so "Supporter"/"supporter" collapse to one). Existing string tags
+keep working throughout, so this is **non-breaking** — run it with the Phase 3.1 deploy.
+
 ## I. Tags (cross-question rollup, by-tag lists, CSV export)
 
 A **tag** labels a survey **option** and groups options **across questions**, so reports and walk
 lists can roll up everyone who picked **any** option carrying that tag. Tags are pure **admin
-metadata** — the mobile field app is **unchanged** (canvassers never see them).
+metadata** — the mobile field app is **unchanged** (canvassers never see them). As of **Phase 3.1**
+tags are an **org-level managed library** (the `Tag` collection), not per-survey free text — but the
+**reporting/list-building plumbing below (rollup, by-tag walk lists, CSV export) is unchanged**,
+because options still store the tag's display name as a string.
 
-**Where tags live.** Each `SurveyTemplate…option.tag` is a `String` (default `null`); the template
-also carries a **palette** `SurveyTemplate.tags: [String]` (the distinct display casings). The
-builder authors both from one combobox (see §G — `OptionRow` + the shared `<datalist
-id="survey-tags">`, fed by `tagPalette`).
+**The org tag library (`Tag`).** [models/Tag.js](../server/src/models/Tag.js) is the source of truth:
+`{ organizationId, name, normalizedName, color, createdBy }` with a **unique index
+`{ organizationId, normalizedName }`** that makes duplicate tags structurally impossible.
+`normalizedName = normalizeTag(name)` (trim+lowercase), so matching/dedup is case-insensitive.
+Survey options reference a tag only by its display **`name` (a plain string** in `option.tag`).
 
-**Case-insensitive matching + the save chokepoint.** All grouping/dedup keys off
+**The three string homes.** A tag's display name is written into exactly **three** places, and that's
+the entire surface rename/merge/delete must rewrite:
+
+1. `SurveyTemplate.questions[].options[].tag` — the per-option label (what the rollup actually reads),
+2. `SurveyTemplate.tags[]` — the per-survey **palette** (derived/kept-in-sync, see §A),
+3. `WalkList.filter.answerTagFilters[].tag` — saved-search "by tag" filters.
+
+**Library operations.** [services/surveys/tagOps.js](../server/src/services/surveys/tagOps.js)
+implements the bounded bulk rewrite over those three homes:
+
+| Helper ([tagOps.js](../server/src/services/surveys/tagOps.js)) | Role |
+|---|---|
+| `rewriteTag(orgId, fromKey, toDisplay)` | The primitive: rewrite every occurrence whose `normalizeTag` === `fromKey` to `toDisplay` across all three homes; re-dedups each survey's palette case-insensitively after the rewrite (so a merge collapses A+B in a survey that used both). Returns `{ surveys, options, savedSearches }` counts. |
+| `renameTag(orgId, tag, newName)` | `rewriteTag` to the new display, then update the `Tag` doc's `name`/`normalizedName`. |
+| `mergeTags(orgId, sourceTag, targetTag)` | `rewriteTag` all source occurrences → the target's display, then **delete the source `Tag`**. |
+| `deleteTag(orgId, tag)` | Null every matching `option.tag`, drop it from palettes + `answerTagFilters`, then delete the `Tag`. Returns the cleared usage. |
+| `tagUsage(orgId)` | `Map<normalizedKey, { surveys, options, savedSearches }>` — the usage counts the Tags page and `GET /admin/tags` display. |
+| `ensureTags(orgId, names, createdBy)` | Idempotent `Tag.updateOne(..., { upsert: true })` per name (deduped by `normalizedName`); the unique index keeps it safe. Called on **every survey save** so the library stays complete even for API/legacy writes. |
+
+**The Tags API.** [routes/admin/tags.js](../server/src/routes/admin/tags.js), mounted at
+`/admin/tags` ([routes/index.js](../server/src/routes/index.js)), guarded by
+`requireAuth, orgContext, requireOrgRole('admin')`:
+
+- `GET /admin/tags` — list the org's tags (sorted by name) each annotated with its `tagUsage` block.
+- `POST /admin/tags` — create; **upserts by `normalizedName`**, so a case-variant of an existing tag
+  returns the existing one (`existed: true`) instead of fracturing. An `11000` race falls back to the
+  same lookup.
+- `PATCH /admin/tags/:id` — **rename** (→ `renameTag`, bulk-rewrites the three homes). If the new
+  normalized name collides with another tag, returns **`409 { code: 'tag-exists', tagId }`** so the
+  client can offer a **merge** instead.
+- `POST /admin/tags/:id/merge { targetId }` — merge this tag **into** the target (→ `mergeTags`);
+  refuses self-merge.
+- `DELETE /admin/tags/:id` — delete + **cascade-untag** every option/palette/saved-search (→
+  `deleteTag`); the client confirms first using the usage counts.
+
+**Authoring (the pick-or-create combobox).** The survey builder no longer uses a free-text
+`<datalist>`. Each option's tag field is a **`TagPicker`** combobox
+([components/TagPicker.jsx](../client/src/components/TagPicker.jsx)) fed the org library: you filter
+and pick an existing tag, or take an explicit **"Create '…'"** action (which `POST`s `/admin/tags`
+and stores the canonical name) — so a typo can't silently fork the picklist (see §G).
+
+**Case-insensitive matching + the save chokepoint.** All grouping/dedup still keys off
 `normalizeTag(s) = String(s).trim().toLowerCase()`
 ([services/surveys/tags.js](../server/src/services/surveys/tags.js)). On every save, the authoring
 routes (§B) run `canonicalizeTags(questions, declaredTags)` from the same module: it dedups the
 palette case-insensitively (**first casing wins** as the display form), rewrites **every**
 `option.tag` to that canonical casing, and drops tags that aren't on a real option — so
-"Supporter"/"supporter" collapse to **one** tag everywhere. The other two helpers there:
+"Supporter"/"supporter" collapse to **one** tag within the survey; the route then calls `ensureTags`
+to mirror those tags into the library. The other two helpers there:
 
 | Helper ([tags.js](../server/src/services/surveys/tags.js)) | Role |
 |---|---|

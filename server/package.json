@@ -22,6 +22,7 @@
     "migrate:timezones": "node src/migrations/migrateTimeZones.js",
     "migrate:survey-dedup": "node src/migrations/migrateSurveyDedup.js",
     "migrate:survey-option-ids": "node src/migrations/migrateSurveyOptionIds.js",
+    "migrate:org-tags": "node src/migrations/migrateOrgTags.js",
     "migrate:cleanup-client-role": "node src/migrations/cleanupClientRole.js",
     "migrate:persons": "node src/migrations/migratePersons.js"
   },

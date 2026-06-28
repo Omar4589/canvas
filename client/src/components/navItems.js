@@ -18,6 +18,7 @@ export const ORG_NAV = [
   { to: '/admin', label: 'Overview', end: true },
   { to: '/campaigns', label: 'Campaigns' },
   { to: '/surveys', label: 'Surveys' },
+  { to: '/tags', label: 'Tags' },
   { to: '/voters', label: 'Voters' },
   { to: '/users', label: 'Users' },
   { to: '/admin/duplicate-surveys', label: 'Duplicate Surveys' },

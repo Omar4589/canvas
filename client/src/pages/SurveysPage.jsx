@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import TagPicker from '../components/TagPicker.jsx';
 
 const QUESTION_TYPES = [
   { value: 'single_choice', label: 'Single choice', hint: 'Pick one' },
@@ -117,7 +118,7 @@ function TypePills({ value, onChange, disabled }) {
   );
 }
 
-function OptionRow({ index, value, onChange, onRemove, tags = [] }) {
+function OptionRow({ index, value, onChange, onRemove, tags = [], onCreateTag }) {
   const retired = !!value.retired;
   const [showScript, setShowScript] = useState(!!value.script);
   const [showTag, setShowTag] = useState(!!value.tag);
@@ -169,12 +170,11 @@ function OptionRow({ index, value, onChange, onRemove, tags = [] }) {
           {showTag || value.tag ? (
             <label className="flex items-center gap-1.5">
               <span className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">Tag</span>
-              <input
+              <TagPicker
                 value={value.tag || ''}
-                onChange={(e) => onChange({ ...value, tag: e.target.value })}
-                list="survey-tags"
-                placeholder="e.g. Supporter"
-                className="w-40 rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                onChange={(name) => onChange({ ...value, tag: name })}
+                tags={tags}
+                onCreate={onCreateTag}
               />
             </label>
           ) : (
@@ -369,7 +369,7 @@ function ConditionEditor({ value, onChange, priorQuestions }) {
   );
 }
 
-function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, priorQuestions = [], tags = [], error }) {
+function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, priorQuestions = [], tags = [], onCreateTag, error }) {
   const isChoice = value.type === 'single_choice' || value.type === 'multiple_choice';
 
   function updateOption(optIdx, next) {
@@ -504,6 +504,7 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
                   onChange={(v) => updateOption(i, v)}
                   onRemove={() => removeOption(i)}
                   tags={tags}
+                  onCreateTag={onCreateTag}
                 />
               ))}
             </div>
@@ -534,7 +535,7 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
   );
 }
 
-function SurveyForm({ initial, onSave, onCancel, saving }) {
+function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateTag }) {
   const [name, setName] = useState(initial?.name || '');
   const [intro, setIntro] = useState(initial?.intro || '');
   const [closing, setClosing] = useState(initial?.closing || '');
@@ -553,23 +554,6 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
   // closing, label/required, reorder, ADD questions, ADD options. Destructive
   // ones (remove question/option, rename option, change type) are locked per
   // existing question; brand-new questions added here are fully editable.
-  // The tag palette feeding every option's datalist: the case-insensitive union of
-  // initial.tags + every option's tag across all questions, preserving the first
-  // display casing we see. Recomputes as options change, so a tag typed on one
-  // option immediately appears in the other options' datalists.
-  const tagPalette = useMemo(() => {
-    const seen = new Map(); // lowercased -> display
-    const add = (t) => {
-      const trimmed = (t || '').trim();
-      if (!trimmed) return;
-      const key = trimmed.toLowerCase();
-      if (!seen.has(key)) seen.set(key, trimmed);
-    };
-    (initial?.tags || []).forEach(add);
-    for (const q of questions) for (const o of q.options || []) add(o.tag);
-    return Array.from(seen.values());
-  }, [questions, initial?._id]);
-
   const locked = !!initial?.hasResponses;
   const originalByKey = useMemo(() => {
     const m = new Map();
@@ -668,17 +652,21 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
       const visibleIf = q.visibleIf && (q.visibleIf.rules || []).length ? q.visibleIf : null;
       return { ...q, key, options, visibleIf };
     });
-    onSave({ name, intro, closing, questions: reorder(cleaned), tags: tagPalette });
+    // The org Tag library is the managed picklist now, but each survey still
+    // carries the distinct set of tags its options reference (server upserts
+    // them by normalized name). Dedupe case-insensitively, first-casing wins.
+    const seen = new Map();
+    for (const q of cleaned) {
+      for (const o of q.options || []) {
+        const t = (o.tag || '').trim();
+        if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
+      }
+    }
+    onSave({ name, intro, closing, questions: reorder(cleaned), tags: Array.from(seen.values()) });
   }
 
   return (
     <form onSubmit={submit} className="space-y-6 pb-24">
-      {/* Shared tag palette — referenced by every per-option tag input via list="survey-tags". */}
-      <datalist id="survey-tags">
-        {tagPalette.map((t) => (
-          <option key={t} value={t} />
-        ))}
-      </datalist>
       {locked && (
         <div className="rounded-lg border-l-4 border-warning/40 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
           <p className="font-medium">
@@ -772,7 +760,8 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
                 onMoveDown={() => move(i, 1)}
                 hasResponses={locked}
                 priorQuestions={priorQuestions}
-                tags={tagPalette}
+                tags={orgTags}
+                onCreateTag={onCreateTag}
                 error={{ ...(errors.questions[i] || {}), condition: errors.questions[i]?.condition || condition }}
               />
             );
@@ -836,6 +825,21 @@ export default function SurveysPage() {
     queryKey: ['surveys'],
     queryFn: () => api('/admin/surveys'),
   });
+  const { data: tagsData } = useQuery({
+    queryKey: ['admin', 'tags'],
+    queryFn: () => api('/admin/tags'),
+  });
+  const orgTags = tagsData?.tags || [];
+
+  // Explicit "Create <tag>" action from a TagPicker: upsert in the org library
+  // (case-insensitive on the server), refresh the picklist, return the canonical
+  // name so the option stores exactly what the library holds.
+  async function createTag(name) {
+    const res = await api('/admin/tags', { method: 'POST', body: { name } });
+    qc.invalidateQueries({ queryKey: ['admin', 'tags'] });
+    return res.tag.name;
+  }
+
   const [selectedId, setSelectedId] = useState(null);
   const [creating, setCreating] = useState(false);
 
@@ -995,6 +999,8 @@ export default function SurveysPage() {
               onSave={(body) => create.mutate(body)}
               onCancel={closeEditor}
               saving={create.isPending}
+              orgTags={orgTags}
+              onCreateTag={createTag}
             />
           ) : (
             <SurveyForm
@@ -1002,6 +1008,8 @@ export default function SurveysPage() {
               onSave={(body) => update.mutate({ id: selected._id, body })}
               onCancel={closeEditor}
               saving={update.isPending}
+              orgTags={orgTags}
+              onCreateTag={createTag}
             />
           )}
           {(create.error || update.error) && (

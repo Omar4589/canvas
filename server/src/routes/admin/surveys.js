@@ -7,6 +7,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Campaign } from '../../models/Campaign.js';
 import { classifyQuestionEdits } from '../../services/surveys/diffQuestions.js';
 import { canonicalizeTags } from '../../services/surveys/tags.js';
+import { ensureTags } from '../../services/surveys/tagOps.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -247,6 +248,7 @@ router.post('/', async (req, res, next) => {
       createdBy: req.user._id,
       version: 1,
     });
+    await ensureTags(activeOrgId(req), tags, req.user._id);
     res.status(201).json({ survey });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -295,6 +297,7 @@ router.patch('/:surveyId', async (req, res, next) => {
       existing.version = (existing.version || 1) + 1;
     }
     await existing.save();
+    await ensureTags(activeOrgId(req), existing.tags, req.user._id);
 
     res.json({ survey: existing });
   } catch (err) {
