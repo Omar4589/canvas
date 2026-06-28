@@ -138,6 +138,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="answer-voters" options={{ href: null }} />
       <Tabs.Screen name="users/[id]" options={{ href: null }} />
       <Tabs.Screen name="overlaps" options={{ href: null }} />
+      <Tabs.Screen name="timeline" options={{ href: null }} />
       <Tabs.Screen name="campaign/[campaignId]" options={{ href: null }} />
       <Tabs.Screen name="book/[turfId]" options={{ href: null }} />
       <Tabs.Screen name="campaign-assignments/[campaignId]" options={{ href: null }} />

@@ -165,6 +165,15 @@ export function IconReport({ size = 22 }) {
   );
 }
 
+export function IconClock({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.5 2" />
+    </svg>
+  );
+}
+
 export function IconDot({ size = 22 }) {
   return (
     <svg width={size} height={size} {...baseProps}>
@@ -202,6 +211,7 @@ export const NAV_ICONS = {
   '/import': IconUpload,
   '/efforts': IconLayers,
   '/early-voting': IconBallot,
+  '/timeline': IconClock,
   '/admin/client-reports': IconReport,
   '/users': IconUser,
   '/surveys': IconClipboard,

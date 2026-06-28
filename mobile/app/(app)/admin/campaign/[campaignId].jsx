@@ -317,6 +317,10 @@ export default function CampaignDetail() {
 
           {/* Quick links */}
           <View style={styles.quickLinkRow}>
+            <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/timeline')}>
+              <Text style={styles.quickLinkIcon}>🕘</Text>
+              <Text style={styles.quickLinkText}>Timeline</Text>
+            </Pressable>
             <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/map')}>
               <Text style={styles.quickLinkIcon}>🗺️</Text>
               <Text style={styles.quickLinkText}>Live map</Text>

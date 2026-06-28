@@ -253,6 +253,8 @@ then rolls up to **one card per household** listing its colliding passes. Respon
 `passId: null` (legacy) is its own bucket — 2+ distinct canvassers there still flag.
 `roundLabel` falls back to `"Legacy / no pass"` when there's no `Pass`.
 
+The aggregation+rollup above lives in `computeOverlaps` ([services/reports/overlaps.js](../server/src/services/reports/overlaps.js)) — a shared helper called by **both** `/overlaps` and `/canvasser-timeline` (so they can't drift). The **web Daily Timeline** (below) is the first web overlaps surface; the standalone web `/overlaps` page is still a backlog item.
+
 ## E. Endpoint reference
 
 | Endpoint | Scope | Key returns | Range basis |
@@ -266,6 +268,7 @@ then rolls up to **one card per household** listing its colliding passes. Respon
 | `GET /admin/reports/canvassers/:id/daily` | one canvasser, per day | `days[{ homesKnocked, surveyKnocks, surveysSubmitted, connectionRatePct, … }]` | same |
 | `GET /admin/reports/overlaps` | overlap review | see §D | `timestamp` |
 | `GET /admin/reports/duplicate-surveys` | voters with >1 survey response | `duplicates[{ voter, household, responses[{ canvasser, submittedAt, roundLabel }], sameCanvasserSameDay, differentCanvassers }]` | `submittedAt` |
+| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** | `{ date, tz, hours[], canvassers[{ knocksByHour, surveysByHour, dayKnocks, daySurveys, connectionRate, inOverlap }], hourTotals{}, grandKnocks, billableKnocks, overlapDoors, overlaps[] }` | single day on `timestamp` (campaign tz); hour buckets via `$hour` |
 
 **Cumulative summability:** `households`, `homesKnocked`, `knocks`, `surveyedKnocks`,
 `litKnocks`, `surveysSubmitted`, `surveyedVoters`, `litDropped` are summed across campaigns
@@ -315,12 +318,14 @@ mobile [mobile/lib/rates.js](../mobile/lib/rates.js) (`rateFromPct` for the serv
 | [components/CanvasserTable.jsx](../client/src/components/CanvasserTable.jsx) | Leaderboard table: Surveys, Lit drops, Not home, Wrong addr, **Knocks**, **Connection**, Last activity. |
 | [components/CoverageBar.jsx](../client/src/components/CoverageBar.jsx) | Segmented bar + numeric legend (counts + %). |
 | [components/StatCard.jsx](../client/src/components/StatCard.jsx) | `label / value / hint / accent`. |
+| [pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx) + [components/TimelineGrid.jsx](../client/src/components/TimelineGrid.jsx) + [components/TimelineOverlaps.jsx](../client/src/components/TimelineOverlaps.jsx) | **Daily Timeline** (`/campaigns/:id/timeline`, `/canvasser-timeline`): heatmap grid (canvassers × hours), day stepper, Knocks/Surveys toggle, 30s live refresh on today, inline overlaps reconciliation. First web overlaps surface. |
 
 ### Mobile ([mobile/app/(app)/admin](../mobile/app/(app)/admin))
 | File | Renders |
 |---|---|
 | [index.jsx](../mobile/app/(app)/admin/index.jsx) | Org Overview. `DateRangeBar` → `/campaign-rollup`. Cumulative card: `CoverageBar` + two stat rows (Knocks/Surveys/Surveyed; Connection/Lit/Canvassers). `CampaignCard`: full `CoverageBar` + coverage line + inline (knocks/surveys/voters/conn/canv); archived rows show knocks. |
-| [campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | **Activity** tiles (Knocks, Surveys/Lit, Surveyed voters, Connection rate via `rateFromPct`) from rollup; **Coverage** (all-time) from overview; Top canvassers from `/canvassers`. |
+| [campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | **Activity** tiles (Knocks, Surveys/Lit, Surveyed voters, Connection rate via `rateFromPct`) from rollup; **Coverage** (all-time) from overview; Top canvassers from `/canvassers`; "Timeline" quick-link. |
+| [timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) | **Daily Timeline** (`/canvasser-timeline`): frozen-name-column + horizontal-scroll heatmap grid (canvassers × hours), day stepper, Knocks/Surveys toggle, reconciliation card + the day's overlap cards. |
 | [canvassers.jsx](../mobile/app/(app)/admin/canvassers.jsx) | Leaderboard. `rowDerived` uses `r.knocks` + `r.connectionRate`; totals use `knocks` + `completionKnocks`; overlap banner. |
 | [overlaps.jsx](../mobile/app/(app)/admin/overlaps.jsx) | Renders `overlaps[].passes[]` grouped by `roundLabel`. |
 | [canvasser/[id]/index.jsx](../mobile/app/(app)/admin/canvasser/[id]/index.jsx), [compare.jsx](../mobile/app/(app)/admin/canvasser/compare.jsx), [[id]/days.jsx](../mobile/app/(app)/admin/canvasser/[id]/days.jsx), [[id]/day/[date].jsx](../mobile/app/(app)/admin/canvasser/[id]/day/[date].jsx) | Per-canvasser drilldowns; `kpi.homesKnocked` (= knocks) + `connectionRatePct`. |

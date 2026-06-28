@@ -23,6 +23,7 @@ import {
   coverageBucketExpr,
 } from '../../services/reports/aggregations.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
+import { computeOverlaps } from '../../services/reports/overlaps.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -1016,115 +1017,136 @@ router.get('/voters-by-answer', async (req, res, next) => {
 router.get('/overlaps', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const orgId = activeOrgId(req);
-    const cFilter = baseFilter(req);
-    const dateRange = parseDateRange(req, 'timestamp');
-    const match = {
-      ...cFilter,
-      ...dateRange,
-      actionType: { $in: KNOCK_ACTIONS },
-    };
+    const match = { ...baseFilter(req), ...parseDateRange(req, 'timestamp') };
+    const { overlaps, total } = await computeOverlaps(match, { organizationId: activeOrgId(req) });
+    res.json({ overlaps, total });
+  } catch (err) {
+    next(err);
+  }
+});
 
-    const collisions = await CanvassActivity.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: { householdId: '$householdId', passId: '$passId' },
-          canvassers: { $addToSet: '$userId' },
-          events: {
-            $push: { userId: '$userId', actionType: '$actionType', timestamp: '$timestamp' },
+// Per-campaign DAILY TIMELINE: rows = canvassers, columns = hours of ONE day (campaign tz),
+// cells = knocks (+ a survey subset). A single canvasser has <=1 knock activity per
+// (household, pass), so a row total == that canvasser's billable knocks (matches the leaderboard);
+// the only sum-vs-billable gap across canvassers IS the overlap count, surfaced inline as
+// `overlapDoors` (= grandKnocks - billableKnocks). Reuses knocksPipeline + computeOverlaps. Serves
+// both web and mobile admin. See docs/METRICS.md.
+router.get('/canvasser-timeline', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const tz = tzOf(req);
+    let day = String(req.query.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) day = zonedDayStr(new Date(), tz);
+    const dayRange = zonedDayRange(day, day, tz); // full 24h of that campaign-tz day
+    const scoped = { ...baseFilter(req), timestamp: dayRange };
+
+    const [hourAgg, knockAgg, overlapRes] = await Promise.all([
+      CanvassActivity.aggregate([
+        { $match: { ...scoped, actionType: { $in: KNOCK_ACTIONS } } },
+        {
+          $group: {
+            _id: { userId: '$userId', hour: { $hour: { date: '$timestamp', timezone: tz } } },
+            knocks: { $sum: 1 },
+            surveys: { $sum: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
+            lit: { $sum: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
           },
         },
-      },
-      { $set: { distinctCount: { $size: '$canvassers' } } },
-      { $match: { distinctCount: { $gt: 1 } } },
-      { $sort: { distinctCount: -1 } },
-      { $limit: 200 },
+      ]),
+      CanvassActivity.aggregate(knocksPipeline(scoped)),
+      computeOverlaps(scoped, { organizationId: orgId }),
     ]);
 
-    if (!collisions.length) {
-      return res.json({ overlaps: [], total: 0 });
-    }
+    const billableKnocks = knockAgg[0]?.knocks || 0;
 
-    const householdIds = [...new Set(collisions.map((c) => String(c._id.householdId)))];
-    const passIds = [
-      ...new Set(collisions.map((c) => c._id.passId).filter(Boolean).map(String)),
-    ];
-    const userIds = [
-      ...new Set(collisions.flatMap((c) => c.events.map((e) => String(e.userId)))),
-    ];
-
-    const [households, users, passes] = await Promise.all([
-      Household.find(
-        { _id: { $in: householdIds }, organizationId: orgId },
-        'addressLine1 addressLine2 city state zipCode location'
-      ).lean(),
-      User.find({ _id: { $in: userIds } }, 'firstName lastName email').lean(),
-      passIds.length
-        ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean()
-        : [],
-    ]);
-
-    const hMap = new Map(households.map((h) => [String(h._id), h]));
-    const uMap = new Map(users.map((u) => [String(u._id), u]));
-    const pMap = new Map(passes.map((p) => [String(p._id), p]));
-
-    // Roll the (household, pass) collisions up into one card per household, listing each
-    // colliding pass and the canvassers who knocked that door in it.
-    const byHousehold = new Map();
-    for (const c of collisions) {
-      const h = hMap.get(String(c._id.householdId));
-      if (!h) continue;
-      const hid = String(c._id.householdId);
-      if (!byHousehold.has(hid)) {
-        byHousehold.set(hid, {
-          household: {
-            id: hid,
-            addressLine1: h.addressLine1,
-            addressLine2: h.addressLine2 || null,
-            city: h.city,
-            state: h.state,
-            zipCode: h.zipCode,
-          },
-          passes: [],
-          canvasserSet: new Set(),
-        });
+    // Per-(user, hour) tally → per-canvasser rows.
+    const byUser = new Map();
+    const activeHours = new Set();
+    for (const r of hourAgg) {
+      const uid = String(r._id.userId);
+      activeHours.add(r._id.hour);
+      if (!byUser.has(uid)) {
+        byUser.set(uid, { knocksByHour: {}, surveysByHour: {}, dayKnocks: 0, daySurveys: 0, dayLit: 0 });
       }
-      const entry = byHousehold.get(hid);
-      const pass = c._id.passId ? pMap.get(String(c._id.passId)) : null;
-      const roundNumber = pass?.roundNumber ?? null;
-      entry.passes.push({
-        passId: c._id.passId ? String(c._id.passId) : null,
-        roundNumber,
-        roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
-        canvassers: c.events
-          .map((e) => {
-            const u = uMap.get(String(e.userId));
-            return {
-              userId: String(e.userId),
-              firstName: u?.firstName || '',
-              lastName: u?.lastName || '',
-              email: u?.email || '',
-              actionType: e.actionType,
-              timestamp: e.timestamp,
-            };
-          })
-          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
-      });
-      for (const e of c.events) entry.canvasserSet.add(String(e.userId));
+      const row = byUser.get(uid);
+      row.knocksByHour[r._id.hour] = r.knocks;
+      if (r.surveys) row.surveysByHour[r._id.hour] = r.surveys;
+      row.dayKnocks += r.knocks;
+      row.daySurveys += r.surveys;
+      row.dayLit += r.lit;
     }
 
-    const result = [...byHousehold.values()]
-      .map((e) => ({
-        household: e.household,
-        passes: e.passes.sort(
-          (a, b) => (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity)
-        ),
-        totalCanvassers: e.canvasserSet.size,
-      }))
-      .sort((a, b) => b.totalCanvassers - a.totalCanvassers);
+    // Contiguous active-hour window (min..max) so the grid has no gaps; [] when no activity.
+    const hours = [];
+    if (activeHours.size) {
+      const min = Math.min(...activeHours);
+      const max = Math.max(...activeHours);
+      for (let h = min; h <= max; h++) hours.push(h);
+    }
 
-    res.json({ overlaps: result, total: result.length });
+    const overlapUserIds = new Set();
+    for (const card of overlapRes.overlaps) {
+      for (const p of card.passes) for (const c of p.canvassers) overlapUserIds.add(String(c.userId));
+    }
+
+    const userIds = [...byUser.keys()];
+    const users = userIds.length
+      ? await User.find({ _id: { $in: userIds } }, 'firstName lastName email isActive').lean()
+      : [];
+    const uMap = new Map(users.map((u) => [String(u._id), u]));
+
+    const canvassers = userIds
+      .map((uid) => {
+        const row = byUser.get(uid);
+        const u = uMap.get(uid);
+        return {
+          userId: uid,
+          firstName: u?.firstName || '',
+          lastName: u?.lastName || '',
+          email: u?.email || '',
+          isActive: u?.isActive ?? false,
+          knocksByHour: row.knocksByHour,
+          surveysByHour: row.surveysByHour,
+          dayKnocks: row.dayKnocks,
+          daySurveys: row.daySurveys,
+          dayLit: row.dayLit,
+          connectionRate: connectionRate({
+            knocks: row.dayKnocks,
+            surveyedKnocks: row.daySurveys,
+            litKnocks: row.dayLit,
+          }),
+          inOverlap: overlapUserIds.has(uid),
+        };
+      })
+      .sort((a, b) => b.daySurveys - a.daySurveys || b.dayKnocks - a.dayKnocks);
+
+    const hourTotals = { knocks: {}, surveys: {} };
+    let grandKnocks = 0;
+    let grandSurveys = 0;
+    for (const c of canvassers) {
+      grandKnocks += c.dayKnocks;
+      grandSurveys += c.daySurveys;
+      for (const h of hours) {
+        if (c.knocksByHour[h]) hourTotals.knocks[h] = (hourTotals.knocks[h] || 0) + c.knocksByHour[h];
+        if (c.surveysByHour[h])
+          hourTotals.surveys[h] = (hourTotals.surveys[h] || 0) + c.surveysByHour[h];
+      }
+    }
+
+    res.json({
+      date: day,
+      tz,
+      tzAbbrev: tzAbbrev(tz),
+      hours,
+      canvassers,
+      hourTotals,
+      grandKnocks,
+      grandSurveys,
+      billableKnocks,
+      overlapDoors: Math.max(0, grandKnocks - billableKnocks),
+      overlaps: overlapRes.overlaps,
+      overlapCount: overlapRes.total,
+    });
   } catch (err) {
     next(err);
   }
