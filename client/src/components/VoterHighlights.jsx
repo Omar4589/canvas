@@ -89,7 +89,7 @@ export default function VoterHighlights({ surveyResults, onSeeAll, tz }) {
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {q.options.map((opt) => (
+            {q.options.filter((opt) => !opt.retired).map((opt) => (
               <OptionCard
                 key={opt.option}
                 option={opt.option}

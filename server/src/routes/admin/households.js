@@ -7,6 +7,7 @@ import { Voter } from '../../models/Voter.js';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { voterAnswerClause } from '../../services/surveys/answerAgg.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { Campaign } from '../../models/Campaign.js';
@@ -77,6 +78,7 @@ router.get('/map', async (req, res, next) => {
       : null;
     const questionKey = req.query.questionKey || null;
     const answerOption = req.query.option || null;
+    const optionId = req.query.optionId || null;
 
     const campaignId =
       req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
@@ -144,10 +146,10 @@ router.get('/map', async (req, res, next) => {
       surveyMatch.passId = passId;
       activityMatch.passId = passId;
     }
-    if (questionKey && answerOption) {
-      surveyMatch.answers = {
-        $elemMatch: { questionKey, answer: answerOption },
-      };
+    if (questionKey && (optionId || answerOption)) {
+      // Dual-read: match by stable option id (id-native) OR legacy answer text,
+      // so a renamed option still selects its earlier responses.
+      Object.assign(surveyMatch, voterAnswerClause(questionKey, optionId, answerOption));
     }
 
     // Pass scoping: limit to households that sit in this pass's books (Turf.householdIds).
@@ -162,14 +164,14 @@ router.get('/map', async (req, res, next) => {
     }
 
     const filteringInteractions =
-      Boolean(fromDay || toDay || userId || (questionKey && answerOption));
+      Boolean(fromDay || toDay || userId || (questionKey && (optionId || answerOption)));
 
     if (filteringInteractions || passHhSet) {
       let idStrings;
       if (filteringInteractions) {
         const [surveyHIds, activityHIds] = await Promise.all([
           SurveyResponse.distinct('householdId', surveyMatch),
-          questionKey && answerOption
+          questionKey && (optionId || answerOption)
             ? Promise.resolve([])
             : CanvassActivity.distinct('householdId', activityMatch),
         ]);

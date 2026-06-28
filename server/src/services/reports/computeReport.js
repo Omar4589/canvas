@@ -3,6 +3,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Household } from '../../models/Household.js';
 import { resolveStatus } from '../../utils/statusPrecedence.js';
 import { KNOCK_ACTIONS, knocksPipeline, connectionRate } from './aggregations.js';
+import { choiceKeyStages, mergeOptionRows } from '../surveys/answerAgg.js';
 
 // Compute service for the client report builder. Everything here is WINDOWED by an explicit
 // UTC date range so a snapshot can be frozen for a given week (period) AND cumulatively
@@ -40,26 +41,21 @@ export async function computeSurveyBreakdowns({ surveyScopeMatch, template, supp
   const out = [];
   for (const q of sortedQs) {
     if (q.type !== 'single_choice' && q.type !== 'multiple_choice') continue;
-    const pipeline = [
+    // Dual-read: group on stable option ids (id-native) or legacy answer text.
+    const agg = await SurveyResponse.aggregate([
       { $match: templateMatch },
-      { $unwind: '$answers' },
-      { $match: { 'answers.questionKey': q.key } },
-    ];
-    if (q.type === 'multiple_choice') pipeline.push({ $unwind: '$answers.answer' });
-    pipeline.push({ $group: { _id: '$answers.answer', count: { $sum: 1 } } });
-    pipeline.push({ $sort: { count: -1 } });
-    const agg = await SurveyResponse.aggregate(pipeline);
-
-    const validAgg = agg.filter((r) => r._id !== null && r._id !== undefined && r._id !== '');
-    const questionTotal = validAgg.reduce((s, r) => s + r.count, 0);
-    const options = validAgg.map((r) => {
-      const optionKey = typeof r._id === 'string' ? r._id : String(r._id);
-      return {
-        option: optionKey,
-        count: r.count,
-        percent: questionTotal > 0 ? Math.round((r.count / questionTotal) * 1000) / 10 : 0,
-      };
-    });
+      ...choiceKeyStages(q.key),
+      { $group: { _id: '$_answerKeys', count: { $sum: 1 } } },
+    ]);
+    const merged = mergeOptionRows(q, agg);
+    const questionTotal = merged.reduce((s, o) => s + o.count, 0);
+    const options = merged.map((o) => ({
+      option: o.text,
+      id: o.id,
+      retired: o.retired,
+      count: o.count,
+      percent: questionTotal > 0 ? Math.round((o.count / questionTotal) * 1000) / 10 : 0,
+    }));
 
     out.push({
       questionKey: q.key,

@@ -3,6 +3,7 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
+import { answerFilterClause } from '../surveys/answerAgg.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const arr = (a) => (Array.isArray(a) && a.length ? a : null);
@@ -101,7 +102,7 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
       if (!af.questionKey || !arr(af.values)) continue;
       const srMatch = {
         campaignId,
-        answers: { $elemMatch: { questionKey: af.questionKey, answer: { $in: af.values } } },
+        ...answerFilterClause(af.questionKey, af.values, af.texts),
       };
       if (filter.priorPassId) srMatch.passId = oid(filter.priorPassId);
       predicateSets.push(new Set((await SurveyResponse.distinct('householdId', srMatch)).map(String)));

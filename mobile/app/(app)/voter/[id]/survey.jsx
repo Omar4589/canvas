@@ -29,28 +29,16 @@ function SingleChoice({ q, value, onChange }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.optionGrid}>
-      {q.options.map((opt) => {
-        const selected = value === opt;
+      {q.options.filter((o) => !o.retired).map((opt) => {
+        const selected = value === opt.id;
         return (
           <Pressable
-            key={opt}
-            onPress={() => onChange(opt)}
+            key={opt.id}
+            onPress={() => onChange(opt.id)}
             style={[styles.option, selected && styles.optionSelected]}
           >
-            <Text
-              style={[
-                styles.optionText,
-                selected && styles.optionTextSelected,
-              ]}
-            >
-              {opt}
-            </Text>
-            <View
-              style={[
-                styles.radio,
-                selected && styles.radioSelected,
-              ]}
-            >
+            <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{opt.text}</Text>
+            <View style={[styles.radio, selected && styles.radioSelected]}>
               {selected && <View style={styles.radioInner} />}
             </View>
           </Pressable>
@@ -63,34 +51,22 @@ function SingleChoice({ q, value, onChange }) {
 function MultipleChoice({ q, value, onChange }) {
   const styles = useThemedStyles(makeStyles);
   const selected = Array.isArray(value) ? value : [];
-  function toggle(opt) {
-    if (selected.includes(opt)) onChange(selected.filter((s) => s !== opt));
-    else onChange([...selected, opt]);
+  function toggle(id) {
+    if (selected.includes(id)) onChange(selected.filter((s) => s !== id));
+    else onChange([...selected, id]);
   }
   return (
     <View style={styles.optionGrid}>
-      {q.options.map((opt) => {
-        const isOn = selected.includes(opt);
+      {q.options.filter((o) => !o.retired).map((opt) => {
+        const isOn = selected.includes(opt.id);
         return (
           <Pressable
-            key={opt}
-            onPress={() => toggle(opt)}
+            key={opt.id}
+            onPress={() => toggle(opt.id)}
             style={[styles.option, isOn && styles.optionSelected]}
           >
-            <Text
-              style={[
-                styles.optionText,
-                isOn && styles.optionTextSelected,
-              ]}
-            >
-              {opt}
-            </Text>
-            <View
-              style={[
-                styles.checkbox,
-                isOn && styles.checkboxSelected,
-              ]}
-            >
+            <Text style={[styles.optionText, isOn && styles.optionTextSelected]}>{opt.text}</Text>
+            <View style={[styles.checkbox, isOn && styles.checkboxSelected]}>
               {isOn && <Text style={styles.checkboxMark}>✓</Text>}
             </View>
           </Pressable>
@@ -165,12 +141,15 @@ export default function VoterSurvey() {
     );
   }
 
+  // Phase 1: skip retired questions. (Phase 2 adds visibleIf conditional filtering.)
+  const visibleQuestions = survey.questions.filter((q) => !q.retired);
+
   function setAnswer(key, value) {
     setAnswers((prev) => ({ ...prev, [key]: value }));
   }
 
   function validate() {
-    for (const q of survey.questions) {
+    for (const q of visibleQuestions) {
       if (!q.required) continue;
       if (!isAnswered(q, answers[q.key])) {
         return `Please answer: ${q.label}`;
@@ -179,10 +158,8 @@ export default function VoterSurvey() {
     return null;
   }
 
-  const totalQuestions = survey.questions.length;
-  const answeredCount = survey.questions.filter((q) =>
-    isAnswered(q, answers[q.key])
-  ).length;
+  const totalQuestions = visibleQuestions.length;
+  const answeredCount = visibleQuestions.filter((q) => isAnswered(q, answers[q.key])).length;
   const percent =
     totalQuestions === 0 ? 100 : Math.round((answeredCount / totalQuestions) * 100);
 
@@ -203,11 +180,18 @@ export default function VoterSurvey() {
       path: `/mobile/voters/${id}/survey`,
       body: {
         surveyTemplateId: survey._id,
-        answers: survey.questions.map((q) => ({
-          questionKey: q.key,
-          questionLabel: q.label,
-          answer: answers[q.key] ?? null,
-        })),
+        answers: visibleQuestions.map((q) => {
+          const v = answers[q.key];
+          if (q.type === 'text') {
+            return { questionKey: q.key, questionLabel: q.label, answer: v ?? null, optionIds: [] };
+          }
+          // Choice: answer state holds option id(s). Send the ids + a text snapshot.
+          const ids = q.type === 'multiple_choice' ? (Array.isArray(v) ? v : []) : v != null ? [v] : [];
+          const byId = new Map((q.options || []).map((o) => [o.id, o.text]));
+          const texts = ids.map((id) => byId.get(id)).filter((t) => t != null);
+          const answer = q.type === 'multiple_choice' ? texts : texts[0] ?? null;
+          return { questionKey: q.key, questionLabel: q.label, answer, optionIds: ids };
+        }),
         note: note.trim() || null,
       },
       optimisticPatch: (prev) => ({
@@ -308,7 +292,7 @@ export default function VoterSurvey() {
           </View>
         ) : null}
 
-        {survey.questions.map((q, i) => {
+        {visibleQuestions.map((q, i) => {
           const selectMode =
             q.type === 'single_choice'
               ? '(Select one)'

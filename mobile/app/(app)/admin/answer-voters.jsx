@@ -24,6 +24,7 @@ export default function AnswerVoters() {
   const campaignId = one(params.campaignId);
   const questionKey = one(params.questionKey);
   const option = one(params.option);
+  const optionId = one(params.optionId);
   const label = one(params.label);
   const from = one(params.from);
   const to = one(params.to);
@@ -33,7 +34,7 @@ export default function AnswerVoters() {
   const loadedSkips = useRef(new Set());
 
   const q = useQuery({
-    queryKey: ['admin', 'answer-voters', campaignId, questionKey, option, from, to, skip],
+    queryKey: ['admin', 'answer-voters', campaignId, questionKey, optionId, option, from, to, skip],
     queryFn: () => {
       const p = new URLSearchParams({
         campaignId,
@@ -43,6 +44,7 @@ export default function AnswerVoters() {
         limit: String(PAGE),
         skip: String(skip),
       });
+      if (optionId) p.set('optionId', optionId);
       if (from) p.set('from', from);
       if (to) p.set('to', to);
       return api(`/admin/reports/voters-by-answer?${p.toString()}`);

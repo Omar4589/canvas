@@ -142,18 +142,44 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
   const [note, setNote] = useState('');
 
   function startEdit() {
+    // Seed editor state with option IDS (choice) / text (free-text). Prefer stored
+    // optionIds; fall back to mapping the snapshot text back to ids for legacy rows.
     const map = {};
-    for (const a of survey.answers) map[a.questionKey] = a.answer;
+    for (const q of survey.questions) {
+      const a = survey.answers.find((x) => x.questionKey === q.key);
+      if (q.type === 'text') {
+        map[q.key] = a?.answer ?? '';
+        continue;
+      }
+      let ids = Array.isArray(a?.optionIds) && a.optionIds.length ? a.optionIds : null;
+      if (!ids && a?.answer != null) {
+        const byText = new Map((q.options || []).map((o) => [o.text, o.id]));
+        const texts = Array.isArray(a.answer) ? a.answer : [a.answer];
+        ids = texts.map((t) => byText.get(t)).filter(Boolean);
+      }
+      ids = ids || [];
+      map[q.key] = q.type === 'multiple_choice' ? ids : ids[0] ?? '';
+    }
     setVals(map);
     setNote(survey.note || '');
     setEdit(true);
   }
   function submit() {
-    const answers = survey.questions.map((q) => ({
-      questionKey: q.key,
-      questionLabel: q.label,
-      answer: vals[q.key] ?? null,
-    }));
+    const editable = survey.questions.filter((q) => !q.retired);
+    const answers = editable.map((q) => {
+      const v = vals[q.key];
+      if (q.type === 'text') {
+        return { questionKey: q.key, questionLabel: q.label, answer: v ?? null, optionIds: [] };
+      }
+      const ids = q.type === 'multiple_choice' ? (Array.isArray(v) ? v : []) : v ? [v] : [];
+      const byId = new Map((q.options || []).map((o) => [o.id, o.text]));
+      const texts = ids.map((id) => byId.get(id)).filter((t) => t != null);
+      const answer = q.type === 'multiple_choice' ? texts : texts[0] ?? null;
+      return { questionKey: q.key, questionLabel: q.label, answer, optionIds: ids };
+    });
+    // Carry through answers to retired/removed questions (not shown in the editor).
+    const editedKeys = new Set(editable.map((q) => q.key));
+    for (const a of survey.answers) if (!editedKeys.has(a.questionKey)) answers.push(a);
     onSave({ answers, note: note || null }, () => setEdit(false));
   }
   function toggleMulti(key, opt) {
@@ -194,7 +220,7 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
         </>
       ) : (
         <div className="space-y-3">
-          {survey.questions.map((q) => (
+          {survey.questions.filter((q) => !q.retired).map((q) => (
             <div key={q.key}>
               <div className="mb-1 text-xs font-medium text-fg-muted">{q.label}</div>
               {q.type === 'single_choice' ? (
@@ -204,14 +230,14 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
                   className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
                 >
                   <option value="">—</option>
-                  {q.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                  {q.options.filter((o) => !o.retired).map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
                 </select>
               ) : q.type === 'multiple_choice' ? (
                 <div className="flex flex-wrap gap-3">
-                  {q.options.map((o) => (
-                    <label key={o} className="flex items-center gap-1 text-sm">
-                      <input type="checkbox" checked={Array.isArray(vals[q.key]) && vals[q.key].includes(o)} onChange={() => toggleMulti(q.key, o)} />
-                      {o}
+                  {q.options.filter((o) => !o.retired).map((o) => (
+                    <label key={o.id} className="flex items-center gap-1 text-sm">
+                      <input type="checkbox" checked={Array.isArray(vals[q.key]) && vals[q.key].includes(o.id)} onChange={() => toggleMulti(q.key, o.id)} />
+                      {o.text}
                     </label>
                   ))}
                 </div>

@@ -10,13 +10,29 @@ import { classifyQuestionEdits } from '../../services/surveys/diffQuestions.js';
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
 
+const optionSchema = z.object({
+  id: z.string().optional(),
+  text: z.string().min(1),
+  tag: z.string().nullable().optional(),
+  script: z.string().nullable().optional(),
+  retired: z.boolean().optional(),
+  order: z.number().optional(),
+});
+
 const questionSchema = z.object({
   key: z.string().min(1),
   label: z.string().min(1),
   type: z.enum(['single_choice', 'multiple_choice', 'text']),
-  options: z.array(z.string()).optional().default([]),
+  options: z.array(optionSchema).optional().default([]),
   required: z.boolean().optional().default(false),
   order: z.number().optional().default(0),
+  retired: z.boolean().optional(),
+  visibleIf: z
+    .object({ logic: z.enum(['all', 'any']), rules: z.array(z.any()) })
+    .nullable()
+    .optional(),
+  otherOption: z.boolean().optional(),
+  refusalOption: z.boolean().optional(),
 });
 
 const upsertSchema = z.object({
@@ -25,6 +41,85 @@ const upsertSchema = z.object({
   closing: z.string().optional().default(''),
   questions: z.array(questionSchema).default([]),
 });
+
+// Stable option-id helpers — mirror src/migrations/migrateSurveyOptionIds.js
+// (and the builder's deriveKey collision rule) so ids generated here line up
+// with everything else that references them.
+function slugify(s) {
+  return (s || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+}
+
+// Unique option id within one question.
+function optionId(text, used) {
+  const base = slugify(text) || 'opt';
+  let id = base;
+  let n = 2;
+  while (used.has(id)) id = `${base}_${n++}`;
+  used.add(id);
+  return id;
+}
+
+// Give every option in every question a stable id, generating one only for
+// options that lack it (existing ids are preserved and reserved against
+// collisions). Mutates/returns the questions array shape unchanged otherwise.
+function assignOptionIds(questions = []) {
+  return (questions || []).map((q) => {
+    const used = new Set();
+    for (const o of q.options || []) {
+      if (o && o.id) used.add(o.id);
+    }
+    const options = (q.options || []).map((o) => {
+      if (o && o.id) return o;
+      return { ...o, id: optionId(o?.text, used) };
+    });
+    return { ...q, options };
+  });
+}
+
+// Reconcile incoming questions against the existing survey so soft-retired
+// history is never lost: match by question key, preserve existing option ids,
+// generate ids for new (id-less) options, and re-append anything the payload
+// dropped as retired:true (existing options absent from a question, and
+// existing questions absent from the array) keeping their ids + text.
+function reconcileQuestions(existingQuestions = [], incomingQuestions = []) {
+  const existingByKey = new Map((existingQuestions || []).map((q) => [q.key, q]));
+  const incomingKeys = new Set((incomingQuestions || []).map((q) => q.key));
+
+  const reconciled = (incomingQuestions || []).map((inc) => {
+    const prev = existingByKey.get(inc.key);
+    const used = new Set();
+    for (const o of inc.options || []) {
+      if (o && o.id) used.add(o.id);
+    }
+    const options = (inc.options || []).map((o) => {
+      if (o && o.id) return o;
+      return { ...o, id: optionId(o?.text, used) };
+    });
+
+    // Re-append existing options that the payload dropped, as retired.
+    if (prev) {
+      const incomingOptionIds = new Set(options.map((o) => o.id));
+      for (const po of prev.options || []) {
+        const plain = po && po.toObject ? po.toObject() : po;
+        const pid = plain && typeof plain === 'object' ? plain.id : null;
+        if (pid && !incomingOptionIds.has(pid)) {
+          options.push({ ...plain, retired: true });
+        }
+      }
+    }
+
+    return { ...inc, options };
+  });
+
+  // Re-append existing questions the payload dropped, as retired.
+  for (const eq of existingQuestions || []) {
+    if (!incomingKeys.has(eq.key)) {
+      reconciled.push({ ...(eq.toObject ? eq.toObject() : eq), retired: true });
+    }
+  }
+
+  return reconciled;
+}
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -81,6 +176,7 @@ router.post('/', async (req, res, next) => {
     const data = upsertSchema.parse(req.body);
     const survey = await SurveyTemplate.create({
       ...data,
+      questions: assignOptionIds(data.questions),
       organizationId: activeOrgId(req),
       createdBy: req.user._id,
       version: 1,
@@ -102,18 +198,18 @@ router.patch('/:surveyId', async (req, res, next) => {
     });
     if (!existing) return res.status(404).json({ error: 'Survey not found' });
 
-    // Guard: once responses exist, editing the question structure can corrupt
-    // existing reports (answers join to the current questions by `key`). Block
-    // destructive question edits; safe edits (name/intro/closing, add question,
-    // add option, label/required, reorder) still go through. Duplicate to make
-    // structural changes against a fresh template.
+    // Question edits are now reconciled, not blocked: removed questions/options
+    // are soft-retired (kept with their stable ids) so existing reports keep
+    // working, and new options get fresh ids. The ONLY remaining hard block is
+    // changing a question's TYPE once responses exist — the stored answer shape
+    // no longer aggregates. Duplicate to make that change against a fresh template.
     if (data.questions) {
       const hasResponses = await SurveyResponse.exists({ surveyTemplateId: existing._id });
       if (hasResponses) {
         const reasons = classifyQuestionEdits(existing.questions, data.questions);
         if (reasons.length) {
           return res.status(409).json({
-            error: 'This survey has responses, so its question structure is locked to protect existing reports. Duplicate it to make these changes.',
+            error: 'This survey has responses, so a question\'s answer type can\'t change. Duplicate it to make these changes.',
             code: 'survey-has-responses',
             reasons,
           });
@@ -121,8 +217,12 @@ router.patch('/:surveyId', async (req, res, next) => {
       }
     }
 
+    const priorQuestions = existing.questions;
     Object.assign(existing, data);
-    if (data.questions) existing.version = (existing.version || 1) + 1;
+    if (data.questions) {
+      existing.questions = reconcileQuestions(priorQuestions, data.questions);
+      existing.version = (existing.version || 1) + 1;
+    }
     await existing.save();
 
     res.json({ survey: existing });

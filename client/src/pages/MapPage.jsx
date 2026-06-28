@@ -49,7 +49,7 @@ export default function MapPage() {
   const [dateRange, setDateRange] = useState(() => defaultRange('all'));
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState('');
-  const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '' });
+  const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '', optionId: '' });
   const [showCanvasserPins, setShowCanvasserPins] = useState(false);
   // Live auto-refresh of the map (web admins are at a desk + connected). Gates
   // the poll interval below; pauses automatically when the tab is backgrounded.
@@ -122,6 +122,7 @@ export default function MapPage() {
     userId: canvasserId,
     questionKey: answerFilter.questionKey,
     option: answerFilter.option,
+    optionId: answerFilter.optionId,
     includeActivities: showCanvasserPins ? '1' : '',
     effortId: scopeEffortId,
     passId: scopePassId,
@@ -139,6 +140,7 @@ export default function MapPage() {
       canvasserId,
       answerFilter.questionKey,
       answerFilter.option,
+      answerFilter.optionId,
       showCanvasserPins,
       scopeEffortId,
       scopePassId,

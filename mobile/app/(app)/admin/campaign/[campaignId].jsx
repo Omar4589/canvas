@@ -141,6 +141,7 @@ export default function CampaignDetail() {
         campaignId: cId,
         questionKey: qn.key,
         option: String(opt.option),
+        optionId: String(opt.id ?? ''),
         label: qn.label,
         ...(range?.from ? { from: range.from } : {}),
         ...(range?.to ? { to: range.to } : {}),

@@ -22,9 +22,13 @@ function blankQuestion() {
     key: '',
     label: '',
     type: 'single_choice',
-    options: ['', ''],
+    options: [{ text: '' }, { text: '' }],
     required: false,
     order: 0,
+    retired: false,
+    visibleIf: null, // Phase 2 (conditional display)
+    otherOption: false,
+    refusalOption: false,
   };
 }
 
@@ -68,47 +72,45 @@ function TypePills({ value, onChange, disabled }) {
   );
 }
 
-function OptionRow({ index, value, onChange, onRemove, canRemove, locked }) {
+function OptionRow({ index, value, onChange, onRemove }) {
+  const retired = !!value.retired;
   return (
     <div className="flex items-center gap-2">
-      <span className="w-6 text-right text-xs font-medium text-fg-subtle">
-        {index + 1}.
-      </span>
+      <span className="w-6 text-right text-xs font-medium text-fg-subtle">{index + 1}.</span>
       <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        readOnly={locked}
+        value={value.text || ''}
+        onChange={(e) => onChange({ ...value, text: e.target.value })}
+        readOnly={retired}
         placeholder={`Option ${index + 1}`}
         className={
           'flex-1 rounded border border-border-strong px-3 py-2 text-sm placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ' +
-          (locked ? 'bg-sunken text-fg-muted' : 'bg-card text-fg')
+          (retired ? 'bg-sunken text-fg-subtle line-through' : 'bg-card text-fg')
         }
       />
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={!canRemove || locked}
-        className="rounded p-2 text-fg-subtle hover:bg-danger-tint hover:text-danger disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-fg-subtle"
-        title={locked ? 'Locked — survey has responses' : 'Remove option'}
-      >
-        ×
-      </button>
+      {retired ? (
+        <button
+          type="button"
+          onClick={() => onChange({ ...value, retired: false })}
+          className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-brand-accent hover:bg-brand-tint"
+          title="Restore option"
+        >
+          Restore
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded p-2 text-fg-subtle hover:bg-danger-tint hover:text-danger"
+          title="Remove / retire option"
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 }
 
-function QuestionCard({
-  index,
-  total,
-  value,
-  onChange,
-  onRemove,
-  onMoveUp,
-  onMoveDown,
-  locked = false,
-  lockedOptionCount = 0,
-  error,
-}) {
+function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, error }) {
   const isChoice = value.type === 'single_choice' || value.type === 'multiple_choice';
 
   function updateOption(optIdx, next) {
@@ -118,22 +120,25 @@ function QuestionCard({
   }
 
   function addOption() {
-    onChange({ ...value, options: [...value.options, ''] });
+    onChange({ ...value, options: [...value.options, { text: '' }] });
   }
 
   function removeOption(optIdx) {
-    onChange({ ...value, options: value.options.filter((_, i) => i !== optIdx) });
+    const o = value.options[optIdx];
+    if (hasResponses && o.id) {
+      // Soft-retire an existing option — kept so its past answers still report.
+      const options = value.options.slice();
+      options[optIdx] = { ...o, retired: true };
+      onChange({ ...value, options });
+    } else {
+      onChange({ ...value, options: value.options.filter((_, i) => i !== optIdx) });
+    }
   }
 
   function setType(t) {
-    if (t === 'text') {
-      onChange({ ...value, type: t, options: [] });
-    } else if (!isChoice) {
-      // switching from text -> choice, give them two starter slots
-      onChange({ ...value, type: t, options: ['', ''] });
-    } else {
-      onChange({ ...value, type: t });
-    }
+    if (t === 'text') onChange({ ...value, type: t, options: [] });
+    else if (!isChoice) onChange({ ...value, type: t, options: [{ text: '' }, { text: '' }] });
+    else onChange({ ...value, type: t });
   }
 
   return (
@@ -141,7 +146,7 @@ function QuestionCard({
       <div className="flex items-center justify-between border-b border-border bg-sunken px-4 py-2.5">
         <div className="flex items-center gap-3">
           <span className="rounded bg-brand-600 px-2 py-0.5 text-xs font-semibold text-white">
-            Q{index + 1}
+            Q{displayNum ?? index + 1}
           </span>
           <span className="text-xs text-fg-muted">
             {QUESTION_TYPES.find((t) => t.value === value.type)?.hint}
@@ -169,11 +174,10 @@ function QuestionCard({
           <button
             type="button"
             onClick={onRemove}
-            disabled={locked}
-            className="ml-2 rounded px-2 py-1 text-xs text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:text-fg-subtle disabled:hover:bg-transparent"
-            title={locked ? 'Locked — survey has responses (Duplicate to remove)' : 'Remove question'}
+            className="ml-2 rounded px-2 py-1 text-xs text-danger hover:bg-danger-tint"
+            title={hasResponses ? 'Retire question — kept for reports' : 'Remove question'}
           >
-            Remove
+            {hasResponses ? 'Retire' : 'Remove'}
           </button>
         </div>
       </div>
@@ -197,7 +201,10 @@ function QuestionCard({
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-muted">
               Type
             </label>
-            <TypePills value={value.type} onChange={setType} disabled={locked} />
+            <TypePills value={value.type} onChange={setType} disabled={hasResponses} />
+            {hasResponses && (
+              <p className="mt-1 text-[11px] text-fg-subtle">Type is locked once there are responses — Duplicate to change it.</p>
+            )}
           </div>
           <label className="flex cursor-pointer items-center gap-2 rounded border border-border bg-sunken px-3 py-2 text-sm">
             <input
@@ -217,13 +224,11 @@ function QuestionCard({
             <div className="space-y-2">
               {value.options.map((opt, i) => (
                 <OptionRow
-                  key={i}
+                  key={opt.id || i}
                   index={i}
                   value={opt}
                   onChange={(v) => updateOption(i, v)}
                   onRemove={() => removeOption(i)}
-                  canRemove={value.options.length > 1}
-                  locked={locked && i < lockedOptionCount}
                 />
               ))}
             </div>
@@ -282,7 +287,14 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
   }
 
   function removeQuestion(index) {
-    setQuestions((prev) => reorder(prev.filter((_, i) => i !== index)));
+    setQuestions((prev) => {
+      const q = prev[index];
+      if (initial?.hasResponses && q?.key) {
+        // Soft-retire an existing question — kept so its past answers still report.
+        return prev.map((p, i) => (i === index ? { ...p, retired: true } : p));
+      }
+      return reorder(prev.filter((_, i) => i !== index));
+    });
   }
 
   function addQuestion() {
@@ -305,10 +317,12 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
     if (!name.trim()) e.name = 'Give your survey a name.';
     if (!questions.length) e.noQuestions = 'Add at least one question before saving.';
     questions.forEach((q, i) => {
+      if (q.retired) return; // retired questions are kept for reports, not edited
       const qe = {};
       if (!q.label.trim()) qe.label = 'This question needs a label.';
       const isChoice = q.type === 'single_choice' || q.type === 'multiple_choice';
-      if (isChoice && !(q.options || []).some((o) => o.trim())) qe.options = 'Add at least one answer option.';
+      if (isChoice && !(q.options || []).some((o) => !o.retired && (o.text || '').trim()))
+        qe.options = 'Add at least one answer option.';
       if (Object.keys(qe).length) e.questions[i] = qe;
     });
     return e;
@@ -325,8 +339,10 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
     const cleaned = questions.map((q, i, all) => {
       const key = q.key && q.key.trim() ? q.key : deriveKey(q, i, all);
       const isChoice = q.type === 'single_choice' || q.type === 'multiple_choice';
+      // Keep existing (id'd) + retired options; drop brand-new blank ones. Never
+      // regenerate an option id — the server assigns ids to id-less new options.
       const options = isChoice
-        ? q.options.map((o) => o.trim()).filter(Boolean)
+        ? q.options.map((o) => ({ ...o, text: (o.text || '').trim() })).filter((o) => o.text || o.retired || o.id)
         : [];
       return { ...q, key, options };
     });
@@ -338,15 +354,13 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
       {locked && (
         <div className="rounded-lg border-l-4 border-warning/40 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
           <p className="font-medium">
-            This survey has {initial.responseCount} response
-            {initial.responseCount === 1 ? '' : 's'} — question structure is locked to protect existing
-            reports.
+            This survey has {initial.responseCount} response{initial.responseCount === 1 ? '' : 's'}.
           </p>
           <p className="mt-1 text-warning-fg">
-            You can still rename it, edit the greeting/closing, reword a question, toggle Required,
-            reorder, add new questions, and add new options. To remove a question or option, change a
-            question's type, or rename an option, use <strong>Duplicate</strong> from the survey list to
-            edit a fresh copy.
+            You can freely rename it, reword questions and options, reorder, add questions or options, and
+            retire ones you no longer ask (retired items stay in your reports). The only change that needs a
+            fresh copy is changing a question's <strong>type</strong> — use <strong>Duplicate</strong> from
+            the survey list for that.
           </p>
         </div>
       )}
@@ -397,19 +411,36 @@ function SurveyForm({ initial, onSave, onCancel, saving }) {
         </div>
         <div className="space-y-3">
           {questions.map((q, i) => {
-            const original = originalByKey.get(q.key);
+            if (q.retired) {
+              return (
+                <div
+                  key={i}
+                  className="flex items-center justify-between rounded-lg border border-dashed border-border bg-sunken px-4 py-2.5 text-sm text-fg-subtle"
+                >
+                  <span className="line-through">{q.label || 'Untitled question'}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateQuestion(i, { ...q, retired: false })}
+                    className="rounded px-2 py-1 text-[11px] font-medium text-brand-accent hover:bg-brand-tint"
+                  >
+                    Restore
+                  </button>
+                </div>
+              );
+            }
+            const displayNum = questions.slice(0, i).filter((x) => !x.retired).length + 1;
             return (
               <QuestionCard
                 key={i}
                 index={i}
+                displayNum={displayNum}
                 total={questions.length}
                 value={q}
                 onChange={(next) => updateQuestion(i, next)}
                 onRemove={() => removeQuestion(i)}
                 onMoveUp={() => move(i, -1)}
                 onMoveDown={() => move(i, 1)}
-                locked={locked && !!original}
-                lockedOptionCount={original?.options?.length || 0}
+                hasResponses={locked}
                 error={errors.questions[i]}
               />
             );

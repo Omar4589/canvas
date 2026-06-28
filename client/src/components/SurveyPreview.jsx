@@ -35,17 +35,22 @@ export default function SurveyPreview({ survey }) {
 
               {isChoice && (q.options || []).length > 0 && (
                 <ul className="mt-2 space-y-1">
-                  {(q.options || []).map((opt, oi) => (
-                    <li key={oi} className="flex items-center gap-2 text-sm text-fg-muted">
-                      <span
-                        className={
-                          'inline-block h-3 w-3 shrink-0 border border-border-strong ' +
-                          (q.type === 'single_choice' ? 'rounded-full' : 'rounded-sm')
-                        }
-                      />
-                      {opt || <span className="text-fg-subtle">(empty option)</span>}
-                    </li>
-                  ))}
+                  {(q.options || [])
+                    .filter((opt) => typeof opt === 'string' || !opt.retired)
+                    .map((opt, oi) => {
+                      const text = typeof opt === 'string' ? opt : opt?.text;
+                      return (
+                        <li key={oi} className="flex items-center gap-2 text-sm text-fg-muted">
+                          <span
+                            className={
+                              'inline-block h-3 w-3 shrink-0 border border-border-strong ' +
+                              (q.type === 'single_choice' ? 'rounded-full' : 'rounded-sm')
+                            }
+                          />
+                          {text || <span className="text-fg-subtle">(empty option)</span>}
+                        </li>
+                      );
+                    })}
                 </ul>
               )}
               {q.type === 'text' && (

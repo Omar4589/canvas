@@ -10,6 +10,7 @@ import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { choiceKeyStages, mergeOptionRows, voterAnswerClause } from '../../services/surveys/answerAgg.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Organization } from '../../models/Organization.js';
 import { zonedDayRange, tzAbbrev, zonedDayStr } from '../../utils/timezone.js';
@@ -725,62 +726,29 @@ router.get('/survey-results', async (req, res, next) => {
 
     const aggResults = [];
     for (const q of sortedQs) {
-      const pipeline = [
-        { $match: match },
-        { $unwind: '$answers' },
-        { $match: { 'answers.questionKey': q.key } },
-      ];
+      const isText = q.type === 'text';
+      const wantsPreview = voterPreviewLimit > 0 && !isText;
 
-      if (q.type === 'multiple_choice') {
-        pipeline.push({ $unwind: '$answers.answer' });
-      }
-
-      const wantsPreview = voterPreviewLimit > 0 && q.type !== 'text';
-      if (wantsPreview) {
-        pipeline.push({ $sort: { submittedAt: -1 } });
-      }
-
-      const groupStage = {
-        _id: '$answers.answer',
-        count: { $sum: 1 },
-      };
-      if (wantsPreview) {
-        groupStage.responseIds = { $push: '$_id' };
-      }
-      pipeline.push({ $group: groupStage });
-
-      if (wantsPreview) {
-        pipeline.push({
-          $project: {
-            count: 1,
-            responseIds: { $slice: ['$responseIds', voterPreviewLimit] },
-          },
-        });
-      }
-
-      pipeline.push({ $sort: { count: -1 } });
-      if (q.type === 'text') {
-        pipeline.push({ $limit: 10 });
-      }
-
-      const agg = await SurveyResponse.aggregate(pipeline);
-
-      let orgAgg = null;
-      if (compareToOrg) {
-        // Same pipeline but matched against the whole org (no userId scope) so we
-        // can show "this canvasser vs everyone" on each option.
-        const orgPipeline = [
-          { $match: baseMatch },
-          { $unwind: '$answers' },
-          { $match: { 'answers.questionKey': q.key } },
-        ];
-        if (q.type === 'multiple_choice') {
-          orgPipeline.push({ $unwind: '$answers.answer' });
+      // Choice questions group on the STABLE option id (id-native) or the legacy answer
+      // text (pre-id rows) via choiceKeyStages; text questions group on the free text.
+      const buildPipeline = (scope, withPreview) => {
+        const p = isText
+          ? [{ $match: scope }, { $unwind: '$answers' }, { $match: { 'answers.questionKey': q.key } }]
+          : [{ $match: scope }, ...choiceKeyStages(q.key)];
+        if (withPreview) p.push({ $sort: { submittedAt: -1 } });
+        const groupStage = { _id: isText ? '$answers.answer' : '$_answerKeys', count: { $sum: 1 } };
+        if (withPreview) groupStage.responseIds = { $push: '$_id' };
+        p.push({ $group: groupStage });
+        if (withPreview) {
+          p.push({ $project: { count: 1, responseIds: { $slice: ['$responseIds', voterPreviewLimit] } } });
         }
-        orgPipeline.push({ $group: { _id: '$answers.answer', count: { $sum: 1 } } });
-        orgAgg = await SurveyResponse.aggregate(orgPipeline);
-      }
+        p.push({ $sort: { count: -1 } });
+        if (isText) p.push({ $limit: 10 });
+        return p;
+      };
 
+      const agg = await SurveyResponse.aggregate(buildPipeline(match, wantsPreview));
+      const orgAgg = compareToOrg ? await SurveyResponse.aggregate(buildPipeline(baseMatch, false)) : null;
       aggResults.push({ q, agg, orgAgg });
     }
 
@@ -833,77 +801,72 @@ router.get('/survey-results', async (req, res, next) => {
     }
 
     for (const { q, agg, orgAgg } of aggResults) {
-      const orgMap = new Map();
-      if (orgAgg) {
-        for (const r of orgAgg) {
-          const key = typeof r._id === 'string' ? r._id : String(r._id);
-          orgMap.set(key, r.count);
-        }
-      }
-
-      // Percent denominator is THIS question's own answer total (Σ of its non-null option counts):
-      // single-choice → 100% of answerers, multiple-choice → 100% of selections. NOT the global
-      // totalResponses, which over-counts pick-many questions and under-counts skipped ones.
-      const validAgg = agg.filter((r) => r._id !== null && r._id !== undefined && r._id !== '');
-      const questionTotal = validAgg.reduce((s, r) => s + r.count, 0);
-      let orgQuestionTotal = 0;
-      if (compareToOrg) {
-        for (const [k, c] of orgMap.entries()) {
-          if (k === '' || k === 'null' || k === 'undefined') continue;
-          orgQuestionTotal += c;
-        }
-      }
-
-      const options = validAgg
-        .map((r) => {
-          const optionKey = typeof r._id === 'string' ? r._id : String(r._id);
-          const out = {
-            option: optionKey,
+      if (q.type === 'text') {
+        const valid = agg.filter((r) => r._id != null && r._id !== '');
+        const total = valid.reduce((s, r) => s + r.count, 0);
+        questions.push({
+          key: q.key,
+          label: q.label,
+          type: q.type,
+          options: valid.map((r) => ({
+            option: String(r._id),
             count: r.count,
-            percent: questionTotal > 0 ? Math.round((r.count / questionTotal) * 1000) / 10 : 0,
-          };
-          if (compareToOrg) {
-            const orgCount = orgMap.get(optionKey) || 0;
-            out.orgCount = orgCount;
-            out.orgPercent =
-              orgQuestionTotal > 0
-                ? Math.round((orgCount / orgQuestionTotal) * 1000) / 10
-                : 0;
-          }
-          if (voterPreviewLimit > 0 && q.type !== 'text') {
-            out.voters = (r.responseIds || [])
-              .map((id) => responseLookup.get(String(id)))
-              .filter(Boolean)
-              .map(shapeVoter);
-          }
-          return out;
+            percent: total > 0 ? Math.round((r.count / total) * 1000) / 10 : 0,
+          })),
         });
+        continue;
+      }
 
-      // When comparing, also surface org-only options the canvasser never picked
-      // (so the bar chart shows zero for them rather than hiding the gap).
+      // Choice: dual-read merge onto the question's CURRENT options (by id, then text);
+      // removed options surface as retired/legacy buckets (id:null). Percent denominator
+      // is this question's own answer total (single → answerers, multi → selections).
+      const merged = mergeOptionRows(q, agg, { previewLimit: voterPreviewLimit });
+      const orgMerged = orgAgg ? mergeOptionRows(q, orgAgg) : [];
+      const keyOf = (o) => o.id || `legacy:${o.text}`;
+      const orgByKey = new Map(orgMerged.map((o) => [keyOf(o), o.count]));
+      const questionTotal = merged.reduce((s, o) => s + o.count, 0);
+      const orgQuestionTotal = orgMerged.reduce((s, o) => s + o.count, 0);
+
+      const options = merged.map((o) => {
+        const out = {
+          option: o.text, // display label — existing chart code keys off this
+          id: o.id,
+          retired: o.retired,
+          count: o.count,
+          percent: questionTotal > 0 ? Math.round((o.count / questionTotal) * 1000) / 10 : 0,
+        };
+        if (compareToOrg) {
+          const orgCount = orgByKey.get(keyOf(o)) || 0;
+          out.orgCount = orgCount;
+          out.orgPercent = orgQuestionTotal > 0 ? Math.round((orgCount / orgQuestionTotal) * 1000) / 10 : 0;
+        }
+        if (voterPreviewLimit > 0) {
+          out.voters = (o.responseIds || [])
+            .map((id) => responseLookup.get(String(id)))
+            .filter(Boolean)
+            .map(shapeVoter);
+        }
+        return out;
+      });
+
+      // Org-only options the canvasser never picked → show a zero bar for the gap.
       if (compareToOrg) {
-        const seen = new Set(options.map((o) => o.option));
-        for (const [opt, orgCount] of orgMap.entries()) {
-          if (seen.has(opt) || opt === '' || opt === 'null' || opt === 'undefined') continue;
+        const seen = new Set(merged.map(keyOf));
+        for (const o of orgMerged) {
+          if (seen.has(keyOf(o))) continue;
           options.push({
-            option: opt,
+            option: o.text,
+            id: o.id,
+            retired: o.retired,
             count: 0,
             percent: 0,
-            orgCount,
-            orgPercent:
-              orgQuestionTotal > 0
-                ? Math.round((orgCount / orgQuestionTotal) * 1000) / 10
-                : 0,
+            orgCount: o.count,
+            orgPercent: orgQuestionTotal > 0 ? Math.round((o.count / orgQuestionTotal) * 1000) / 10 : 0,
           });
         }
       }
 
-      questions.push({
-        key: q.key,
-        label: q.label,
-        type: q.type,
-        options,
-      });
+      questions.push({ key: q.key, label: q.label, type: q.type, options });
     }
 
     res.json({
@@ -927,18 +890,19 @@ router.get('/voters-by-answer', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
-    const { questionKey, option, surveyTemplateId } = req.query;
-    if (!questionKey || !option) {
-      return res.status(400).json({ error: 'questionKey and option are required' });
+    const { questionKey, option, optionId, surveyTemplateId } = req.query;
+    if (!questionKey || (!option && !optionId)) {
+      return res.status(400).json({ error: 'questionKey and option (or optionId) are required' });
     }
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
     const dateRange = parseDateRange(req, 'submittedAt');
     const cFilter = baseFilter(req);
+    // Dual-read: match the stable option id (id-native) OR the legacy answer text.
     const filter = {
       ...dateRange,
       ...cFilter,
-      answers: { $elemMatch: { questionKey, answer: option } },
+      ...voterAnswerClause(questionKey, optionId || null, option ?? null),
     };
     if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
       filter.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);

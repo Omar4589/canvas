@@ -26,6 +26,13 @@ const STEP_DEFS = [
     value: (_c, campaign) => campaign.name,
   },
   {
+    key: 'voters',
+    label: 'Voters imported',
+    route: '/import',
+    satisfied: (counts) => (counts.households || 0) > 0,
+    value: (counts) => ((counts.households || 0) > 0 ? `${fmt(counts.households)} households` : 'Import a CSV'),
+  },
+  {
     key: 'survey',
     label: 'Survey ready',
     route: '/survey',
@@ -33,13 +40,6 @@ const STEP_DEFS = [
     satisfied: (_counts, campaign) => Boolean(campaign.surveyTemplateId),
     value: (_c, campaign, status) =>
       status === 'skipped' ? 'Not needed (lit drop)' : campaign.surveyTemplateId ? 'Survey linked' : 'Pick a survey',
-  },
-  {
-    key: 'voters',
-    label: 'Voters imported',
-    route: '/import',
-    satisfied: (counts) => (counts.households || 0) > 0,
-    value: (counts) => ((counts.households || 0) > 0 ? `${fmt(counts.households)} households` : 'Import a CSV'),
   },
   {
     key: 'doorsOwned',

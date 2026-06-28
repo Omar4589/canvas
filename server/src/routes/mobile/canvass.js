@@ -201,6 +201,8 @@ const surveySchema = z.object({
         questionKey: z.string(),
         questionLabel: z.string(),
         answer: z.unknown().nullable(),
+        optionIds: z.array(z.string()).optional().default([]),
+        otherText: z.string().nullable().optional(),
       })
     )
     .default([]),
@@ -252,6 +254,42 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     const distance = distanceFromHouse(household, data.location);
     const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
 
+    // Normalize each answer's stable optionIds against the template. Build a per-question lookup
+    // of valid option ids (INCLUDING retired ones) plus an exact-text→id map for back-compat.
+    const questionByKey = new Map(
+      (template.questions || []).map((q) => [q.key, q])
+    );
+    const answers = (data.answers || []).map((a) => {
+      const q = questionByKey.get(a.questionKey);
+      const validIds = q ? new Set((q.options || []).map((o) => o.id)) : null;
+      const textToId = q
+        ? new Map((q.options || []).map((o) => [o.text, o.id]))
+        : null;
+
+      let optionIds = Array.isArray(a.optionIds) ? a.optionIds.slice() : [];
+      // Older mobile build sent answer text but no optionIds — best-effort map text→id by EXACT match.
+      if (optionIds.length === 0 && textToId) {
+        const texts = Array.isArray(a.answer)
+          ? a.answer
+          : a.answer != null
+          ? [a.answer]
+          : [];
+        optionIds = texts
+          .map((t) => textToId.get(t))
+          .filter((id) => id != null);
+      }
+      // Drop ids the template doesn't know about (don't 400). Accept retired ids.
+      if (validIds) optionIds = optionIds.filter((id) => validIds.has(id));
+
+      return {
+        questionKey: a.questionKey,
+        questionLabel: a.questionLabel,
+        answer: a.answer ?? null,
+        optionIds,
+        otherText: a.otherText ?? null,
+      };
+    });
+
     // One survey per voter PER PASS (prior-pass surveys are preserved). ATOMIC upsert keyed on
     // (voterId, passId): a re-submit REPLACES the prior answer (self-heal), and — backed by the
     // unique index — two concurrent submits (a double-tap) can never persist two rows; the loser
@@ -265,7 +303,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       userId: req.user._id,
       surveyTemplateId: template._id,
       surveyTemplateVersion: template.version || 1,
-      answers: data.answers,
+      answers,
       note: data.note ?? null,
       location: data.location,
       distanceFromHouseMeters: distance,

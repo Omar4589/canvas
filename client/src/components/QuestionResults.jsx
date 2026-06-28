@@ -21,7 +21,7 @@ function formatDate(d, tz) {
 
 const PAGE_SIZE = 25;
 
-function VoterList({ questionKey, option, surveyTemplateId, dateRange, campaignId, tz }) {
+function VoterList({ questionKey, optionId, option, surveyTemplateId, dateRange, campaignId, tz }) {
   const [skip, setSkip] = useState(0);
   const [accumulated, setAccumulated] = useState([]);
 
@@ -29,10 +29,11 @@ function VoterList({ questionKey, option, surveyTemplateId, dateRange, campaignI
   useEffect(() => {
     setSkip(0);
     setAccumulated([]);
-  }, [questionKey, option, surveyTemplateId, dateRange?.from, dateRange?.to, campaignId]);
+  }, [questionKey, optionId, option, surveyTemplateId, dateRange?.from, dateRange?.to, campaignId]);
 
   const queryString = buildQuery({
     questionKey,
+    optionId,
     option,
     surveyTemplateId,
     campaignId,
@@ -46,6 +47,7 @@ function VoterList({ questionKey, option, surveyTemplateId, dateRange, campaignI
       'reports',
       'voters-by-answer',
       questionKey,
+      optionId,
       option,
       surveyTemplateId,
       campaignId,
@@ -135,6 +137,7 @@ function OptionRow({
   expanded,
   onToggle,
   expandable,
+  retired,
 }) {
   const width = Math.max(0, Math.min(100, percent || 0));
   return (
@@ -144,7 +147,8 @@ function OptionRow({
       disabled={!expandable}
       className={
         'grid w-full grid-cols-12 items-center gap-3 py-1.5 text-left text-sm ' +
-        (expandable ? 'cursor-pointer rounded px-1 hover:bg-sunken' : 'px-1')
+        (expandable ? 'cursor-pointer rounded px-1 hover:bg-sunken' : 'px-1') +
+        (retired ? ' opacity-50' : '')
       }
     >
       <div className="col-span-4 flex items-center gap-1 truncate text-fg-muted" title={option}>
@@ -158,6 +162,14 @@ function OptionRow({
           </span>
         )}
         <span className="truncate">{option}</span>
+        {retired && (
+          <span
+            className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-subtle"
+            title="This option is no longer asked"
+          >
+            retired
+          </span>
+        )}
       </div>
       <div className="col-span-6">
         <div className="h-2 w-full overflow-hidden rounded-full bg-sunken">
@@ -236,6 +248,7 @@ export default function QuestionResults({
                   <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">
                     <VoterList
                       questionKey={key}
+                      optionId={o.id}
                       option={o.option}
                       surveyTemplateId={surveyTemplateId}
                       dateRange={dateRange}

@@ -61,21 +61,21 @@ export default function MapFilters({
     survey?.questions?.filter((q) => q.type === 'single_choice' || q.type === 'multiple_choice') ||
     [];
 
-  function setAnswer(questionKey, option) {
+  function setAnswer(questionKey, option, optionId) {
     if (
       answerFilter?.questionKey === questionKey &&
       answerFilter?.option === option
     ) {
-      onAnswerChange({ questionKey: '', option: '' });
+      onAnswerChange({ questionKey: '', option: '', optionId: '' });
     } else {
-      onAnswerChange({ questionKey, option });
+      onAnswerChange({ questionKey, option, optionId: optionId || '' });
     }
   }
 
   function clearAll() {
     onStatusChange([]);
     onCanvasserChange?.('');
-    onAnswerChange({ questionKey: '', option: '' });
+    onAnswerChange({ questionKey: '', option: '', optionId: '' });
   }
 
   const hasActiveFilters =
@@ -159,14 +159,14 @@ export default function MapFilters({
               <div key={q.key}>
                 <div className="mb-1 text-xs font-medium text-fg-muted">{q.label}</div>
                 <div className="flex flex-wrap gap-1">
-                  {q.options.map((opt) => {
+                  {q.options.filter((opt) => !opt.retired).map((opt) => {
                     const active =
                       answerFilter?.questionKey === q.key && answerFilter?.option === opt.option;
                     return (
                       <button
                         key={opt.option}
                         type="button"
-                        onClick={() => setAnswer(q.key, opt.option)}
+                        onClick={() => setAnswer(q.key, opt.option, opt.id)}
                         className={
                           'rounded-full px-2.5 py-1 text-xs transition-colors ' +
                           (active

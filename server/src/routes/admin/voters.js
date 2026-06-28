@@ -320,6 +320,8 @@ const editSurveySchema = z.object({
         questionKey: z.string(),
         questionLabel: z.string(),
         answer: z.any(),
+        optionIds: z.array(z.string()).optional(),
+        otherText: z.string().nullable().optional(),
       })
     )
     .optional(),

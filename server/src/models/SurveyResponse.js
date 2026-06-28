@@ -4,7 +4,14 @@ const answerSchema = new mongoose.Schema(
   {
     questionKey: { type: String, required: true },
     questionLabel: { type: String, required: true },
+    // Snapshot text (string | string[] | free text). Kept for human display AND as the
+    // legacy reporting fallback for responses recorded before stable option ids existed.
     answer: { type: mongoose.Schema.Types.Mixed, default: null },
+    // Stable option id(s) chosen — the id-native tracking key. Single → 1, multi → N,
+    // empty for free-text. Reporting groups on this, falling back to `answer` text.
+    optionIds: { type: [String], default: [] },
+    // Text typed into an "Other: ___" option.
+    otherText: { type: String, default: null },
   },
   { _id: false }
 );
