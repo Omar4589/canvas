@@ -144,16 +144,21 @@ Once options are tagged, tags show up in two places:
 Each campaign has its own **Survey** tab (open a campaign, then **Survey** in the sidebar). It shows
 **which survey the campaign uses** and a **read-only preview** of it — the intro, the questions and
 their options, and the closing — so you can confirm the right questionnaire is attached without
-opening the builder. This tab is about **association, not authoring**: surveys stay reusable
-**org-level templates**, and you still write and edit the actual questions in the **Surveys
-library**.
+opening the builder. Surveys stay reusable **org-level templates**, but you no longer get bounced to the org-wide Surveys
+list to work on one: **creating and editing a campaign's survey now happens right here in the
+drill-in** — the builder opens in place and returns you to this tab on save. The org **Surveys
+library** is still there as the deliberate place to **see, duplicate, and reuse** templates across
+campaigns.
 
 From here you can:
 
 - **Change survey** — pick a different template from your library for this campaign.
-- **Edit in library →** — jump to the Surveys page to edit the attached survey's questions.
-- **Create new** — open the builder pre-tagged to this campaign; when you save, the new survey is
-  **automatically attached** here and you land back on this tab.
+- **Edit survey** — open the builder **right here in the campaign** to edit the attached survey's
+  questions; saving returns you to this tab. If that survey is **shared by other campaigns**, the
+  builder warns you that edits apply to all of them and offers a one-click **Duplicate** so you can
+  edit just this campaign's own copy.
+- **Create new survey** — open the builder **in the campaign**, write your questions, and on save the
+  new survey is **automatically attached** here and you land back on this tab.
 
 A few rules this tab enforces:
 
@@ -166,6 +171,28 @@ A few rules this tab enforces:
   — nothing is lost or mixed. If the survey you pick **already has responses**, the tab warns you
   that new answers will report **separately** from those.
 - There's **no "unlink"** — to stop using a survey you simply **change to a different one**.
+
+## Reading results when a campaign used more than one survey
+
+Because a swapped-out survey keeps its own responses, a campaign can end up with answers under **two
+or more** surveys over its life. The campaign **dashboard's "Survey results"** section handles this
+with a **survey switcher**: when the campaign has answers under a survey other than the one currently
+attached, a dropdown appears in the section header. It defaults to the **current** survey (labeled
+"current") and lets you jump to any **past** survey's results in one click — so nothing a campaign
+collected is ever hidden. A campaign that has only ever used one survey shows no switcher.
+
+How the counts split, so you can trust the numbers:
+
+- **Per-answer breakdowns and tag rollups are per (campaign + survey).** Each response is stamped with
+  both its `campaignId` and the `surveyTemplateId` that was attached when it was recorded, so
+  "Support: 40" always means *40 for the survey you're looking at* — surveys never bleed into each
+  other.
+- **The gross "surveys submitted" tally is per-campaign** and sums across every survey the campaign
+  used (it counts responses, not a particular answer).
+- **Tags do not roll up across different surveys.** A "Supporter" tag on survey A and a "Supporter"
+  tag on survey B are counted independently. If you want one combined supporter universe, **evolve a
+  single survey by editing it** (add the new question — see "Editing a survey…" below) rather than
+  standing up a second survey for the same question.
 
 ## What a canvasser sees (mobile)
 
@@ -399,15 +426,16 @@ visibility evaluator (just another id).
 
 | File | Renders |
 |---|---|
-| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | Surveys list + builder (`SurveyForm`). Derives question `key` (`deriveKey`) and option `id` (`optionId`) by slugify-with-collision-suffix, both minted once and held immutable. Per-option **read-aloud script** field (`OptionRow`), **Other (specify)** toggle, and a **Show only if…** condition editor (`ConditionEditor`) that only lets a rule reference **earlier** questions and restricts text questions to `answered`/`not_answered` (`opsForType`); live `ruleError` validation mirrors the server. On a survey with responses it does **not** lock everything — only the **type** control is disabled (and removals soft-retire with a **Restore** affordance); it surfaces the PATCH `409 reasons`. Shows `usedByCampaigns` + `responseCount`; per-row **Duplicate**. Per option, a **+ tag** affordance reveals a **`TagPicker`** combobox ([components/TagPicker.jsx](../client/src/components/TagPicker.jsx)) backed by the **org Tag library** (`SurveysPage` loads it via `useQuery(['admin','tags'])` → `GET /admin/tags`, passed down as `orgTags`/`tags`): you filter and pick an existing org tag, or take an explicit **"Create '…'"** action — `onCreate` (`createTag`) `POST`s `/admin/tags`, invalidates the `['admin','tags']` query, and returns the canonical name. The old per-survey free-text `<datalist>` is gone (no silent typo-fork). On submit, `SurveyForm` still derives the survey's `tags` palette as the case-insensitive distinct set of every option's `tag` (first casing wins) and submits it — but the server's `ensureTags` upsert and the library are now the source of truth, not this palette. **Auto-attach return loop**: `?attachTo=<campaignId>` opens the create form pre-tagged, then on save `PATCH /admin/campaigns/:attachTo { surveyTemplateId }` and `navigate('/campaigns/:attachTo/survey')` (cancel/back also returns there). No `refusalOption` UI. |
+| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | The org **Surveys library** (list, reuse, **Duplicate**). Hosts the shared survey builder, now extracted to [components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) (`SurveyForm` + `QuestionCard`/`OptionRow`/`ConditionEditor` + helpers) and imported by both this page and the in-campaign builder. Derives question `key` (`deriveKey`) and option `id` (`optionId`) by slugify-with-collision-suffix, both minted once and held immutable. Per-option **read-aloud script** field (`OptionRow`), **Other (specify)** toggle, and a **Show only if…** condition editor (`ConditionEditor`) that only lets a rule reference **earlier** questions and restricts text questions to `answered`/`not_answered` (`opsForType`); live `ruleError` validation mirrors the server. On a survey with responses it does **not** lock everything — only the **type** control is disabled (and removals soft-retire with a **Restore** affordance); it surfaces the PATCH `409 reasons`. Shows `usedByCampaigns` + `responseCount`; per-row **Duplicate**. Per option, a **+ tag** affordance reveals a **`TagPicker`** combobox ([components/TagPicker.jsx](../client/src/components/TagPicker.jsx)) backed by the **org Tag library** (`SurveysPage` loads it via `useQuery(['admin','tags'])` → `GET /admin/tags`, passed down as `orgTags`/`tags`): you filter and pick an existing org tag, or take an explicit **"Create '…'"** action — `onCreate` (`createTag`) `POST`s `/admin/tags`, invalidates the `['admin','tags']` query, and returns the canonical name. The old per-survey free-text `<datalist>` is gone (no silent typo-fork). On submit, `SurveyForm` still derives the survey's `tags` palette as the case-insensitive distinct set of every option's `tag` (first casing wins) and submits it — but the server's `ensureTags` upsert and the library are now the source of truth, not this palette. **Auto-attach return loop** (now a fallback — in-campaign create/edit happens in the drill-in, see `CampaignSurveyBuilderPage`): `?attachTo=<campaignId>` opens the create form, then on save `PATCH /admin/campaigns/:attachTo { surveyTemplateId }` and `navigate('/campaigns/:attachTo/survey')` (cancel/back also returns there). No `refusalOption` UI. |
 | [client/src/components/TagPicker.jsx](../client/src/components/TagPicker.jsx) | The per-option **pick-or-create** tag combobox used by `SurveysPage`'s `OptionRow`. Filters the org `tags` prop case-insensitively; selecting an existing tag is the default, and a new one is an **explicit "Create '…'" action** that only appears when nothing matches (calls `onCreate`). Renders a selected tag as a clearable chip. |
 | [client/src/pages/TagsPage.jsx](../client/src/pages/TagsPage.jsx) | The **org-level Tags management page** (route `/tags`, an `ORG_NAV` entry — [navItems.js](../client/src/components/navItems.js)). Lists every org `Tag` from `GET /admin/tags` with a `usageSummary` ("on M options, across N surveys, K saved searches"), plus search. **Create** (`POST /admin/tags`), inline **Rename** (`PATCH /admin/tags/:id`; a `409 { code: 'tag-exists' }` surfaces a **"merge into it"** button targeting the clashing `tagId`), **Merge** (`POST /admin/tags/:id/merge { targetId }` via a target picker), and **Delete** (`DELETE /admin/tags/:id` behind a usage-aware `confirm`). Delete also invalidates `['admin','surveys']` since the builder reads tagged options. |
-| [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`). Pure **association** UI — no authoring. States: **attached** (header + `SurveyPreview` + **Change survey** / **Edit in library →**), **no survey yet** (Pick / Create new → `?attachTo`), **lit-drop** (surveys-not-used note). Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }`; warns when the chosen template has responses. No standalone unlink. |
+| [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`). **Association** UI (preview + attach); authoring is handed off to the drill-in builder. States: **attached** (header + `SurveyPreview` + **Change survey** / **Edit survey** → `/campaigns/:id/survey/edit`), **no survey yet** (Pick / **Create new survey** → `/campaigns/:id/survey/new`), **lit-drop** (surveys-not-used note). Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }`; warns when the chosen template has responses. No standalone unlink. |
+| [client/src/pages/CampaignSurveyBuilderPage.jsx](../client/src/pages/CampaignSurveyBuilderPage.jsx) | **In-drill-in survey builder** (`/campaigns/:campaignId/survey/new` and `/survey/edit`). Renders the shared `SurveyForm` from [components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) inside the campaign so authoring never bounces to the org list. **New**: `POST /admin/surveys` → `PATCH /admin/campaigns/:id { surveyTemplateId }` (attach) → back to the Survey tab. **Edit**: loads the campaign's attached template → `PATCH /admin/surveys/:id`. When the template is **shared by other campaigns** (`usedByCampaigns`) it warns and offers **Duplicate** (copy → attach the copy → re-enter edit on the now-unshared copy). Loads the org tag library (`['admin','tags']`) for the `TagPicker`, same as the org page. |
 | [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options as radio/checkbox glyphs, text as a placeholder. |
 | [client/src/lib/surveyVisibility.js](../client/src/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded) — powers the builder's live condition validity and any preview gating. |
 | [client/src/pages/CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) | Survey-template dropdown shows a heads-up when the chosen survey already has responses (repointing reports new answers separately). |
 | [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results` (retired/legacy buckets included). Exports **`TagResults`** — the report's **"Tags"** panel: one `TagRow` per `tags[]` entry (bar scaled to the most-reached tag, **distinct** `voterCount`), expandable to its contributing options and an inline `VoterList` that drills via `voters-by-answer?tag=<tag>&surveyTemplateId=<id>` (see §I). |
-| [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Renders `<TagResults>` below the per-question charts when `surveyResultsQ.data.tags` is non-empty, passing `surveyTemplateId` for the tag drill. |
+| [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Renders the **Survey results** section. A **survey switcher** appears in the section header when the campaign has answers under a survey other than the one currently attached: `GET /admin/reports/surveys?campaignId=` now returns **every** survey with responses for the campaign (each row flagged **`current`**, current-first), and picking a past one re-queries `survey-results` with that `surveyTemplateId` and shows a "no longer attached" note — so a swapped campaign's old answers are one click away, never hidden. Renders `<TagResults>` below the per-question charts when `surveyResultsQ.data.tags` is non-empty, passing `surveyTemplateId` for the tag drill. |
 | [client/src/components/AnswerFilters.jsx](../client/src/components/AnswerFilters.jsx) | The saved-search / targeted-round answer-filter chips. Beyond per-question `answerFilters`, it renders a **"By tag"** chip row from the `tags` palette prop (falling back to the case-insensitive union of option tags) and emits selected tags to the parent via `onTagChange` as **`answerTagFilters: [{ tag }]`** (case-insensitive, display-cased). |
 | [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | Saved-search builder. Wires `AnswerFilters` with `tags={surveyTags}` (from `survey-results` `tags[]`) + `answerTagFilters` into the filter (sent to `resolveWalkList`). Per saved search, **Export CSV** (`exportCsv`) does an **authenticated blob download**: `fetch` the export endpoint with `Authorization: Bearer` + `X-Org-Id` headers, read `res.blob()`, then click a synthetic `<a download>` (filename from `Content-Disposition`). |
 | [client/src/components/CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx) | A canvasser's individual responses (shows template `version`). |

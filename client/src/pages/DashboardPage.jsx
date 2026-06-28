@@ -375,25 +375,45 @@ export default function DashboardPage() {
 
       {selectedCampaign?.type === 'survey' && (
         <section className="mb-8" ref={surveyResultsRef}>
-          <SectionHeading
-            title="Survey results"
-            right={
-              (surveysQ.data || []).length > 1 ? (
-                <select
-                  value={selectedTemplateId}
-                  onChange={(e) => setSelectedTemplateId(e.target.value)}
-                  className="rounded border border-border bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                >
-                  <option value="">Campaign survey</option>
-                  {(surveysQ.data || []).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} · {s.responseCount}
-                    </option>
-                  ))}
-                </select>
-              ) : null
-            }
-          />
+          {(() => {
+            // A campaign can swap surveys over time; each keeps its own responses. Offer a
+            // switcher when there's a past survey to view, defaulting to the current one.
+            const surveys = surveysQ.data || [];
+            const past = surveys.filter((s) => !s.current);
+            const current = surveys.find((s) => s.current);
+            const viewingPast = !!selectedTemplateId && past.some((s) => s.id === selectedTemplateId);
+            return (
+              <>
+                <SectionHeading
+                  title="Survey results"
+                  right={
+                    past.length ? (
+                      <select
+                        value={selectedTemplateId}
+                        onChange={(e) => setSelectedTemplateId(e.target.value)}
+                        className="rounded border border-border bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                      >
+                        <option value="">
+                          {current ? `${current.name} (current) · ${current.responseCount}` : 'Current survey'}
+                        </option>
+                        {past.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} · {s.responseCount}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null
+                  }
+                />
+                {viewingPast && (
+                  <p className="mb-3 text-xs text-warning-fg">
+                    Showing a survey no longer attached to this campaign — its responses still count toward
+                    this campaign's totals.
+                  </p>
+                )}
+              </>
+            );
+          })()}
           {surveyResultsQ.isLoading ? (
             <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
               Loading survey results…

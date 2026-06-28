@@ -136,10 +136,10 @@ export default function CampaignSurveyPage() {
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" onClick={() => setChanging(true)}>Change survey</Button>
               <Link
-                to="/surveys"
+                to={`/campaigns/${campaignId}/survey/edit`}
                 className="rounded-md border border-border-strong bg-card px-3 py-1.5 text-sm font-medium text-fg-muted hover:bg-sunken"
               >
-                Edit in library →
+                Edit survey
               </Link>
             </div>
           </div>
@@ -167,7 +167,7 @@ export default function CampaignSurveyPage() {
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={() => setChanging(true)}>Pick a survey</Button>
-            <Button variant="secondary" onClick={() => navigate(`/surveys?attachTo=${campaignId}`)}>
+            <Button variant="secondary" onClick={() => navigate(`/campaigns/${campaignId}/survey/new`)}>
               Create new survey
             </Button>
           </div>

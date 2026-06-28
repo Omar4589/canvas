@@ -25,6 +25,7 @@ const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const TagsPage = lazy(() => import('./pages/TagsPage.jsx'));
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
 const CampaignSurveyPage = lazy(() => import('./pages/CampaignSurveyPage.jsx'));
+const CampaignSurveyBuilderPage = lazy(() => import('./pages/CampaignSurveyBuilderPage.jsx'));
 const CampaignTeamPage = lazy(() => import('./pages/CampaignTeamPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
 const TurfsPage = lazy(() => import('./pages/TurfsPage.jsx'));
@@ -111,6 +112,8 @@ export default function App() {
           <Route path="/campaigns/:campaignId/import" element={<ImportPage />} />
           <Route path="/campaigns/:campaignId/map" element={<MapPage />} />
           <Route path="/campaigns/:campaignId/survey" element={<CampaignSurveyPage />} />
+          <Route path="/campaigns/:campaignId/survey/new" element={<CampaignSurveyBuilderPage mode="new" />} />
+          <Route path="/campaigns/:campaignId/survey/edit" element={<CampaignSurveyBuilderPage mode="edit" />} />
           <Route path="/campaigns/:campaignId/team" element={<CampaignTeamPage />} />
           <Route path="/campaigns/:campaignId/timeline" element={<TimelinePage />} />
           <Route path="/campaigns/:campaignId/early-voting" element={<EarlyVotingPage />} />

@@ -667,13 +667,23 @@ router.get('/surveys', async (req, res, next) => {
     const cFilter = baseFilter(req);
 
     let templateFilter = { organizationId: orgId };
+    let currentId = null;
     if (cFilter.campaignId) {
-      const campaign = await Campaign.findOne({ _id: cFilter.campaignId, organizationId: orgId }).lean();
-      if (campaign?.surveyTemplateId) {
-        templateFilter = { _id: campaign.surveyTemplateId, organizationId: orgId };
-      } else {
-        return res.json([]);
-      }
+      const campaign = await Campaign.findOne(
+        { _id: cFilter.campaignId, organizationId: orgId },
+        'surveyTemplateId'
+      ).lean();
+      currentId = campaign?.surveyTemplateId ? String(campaign.surveyTemplateId) : null;
+      // A campaign attaches one survey at a time but can swap over time; surface every
+      // survey that has responses for this campaign (each keeps its own) plus the current one.
+      const respIds = await SurveyResponse.distinct('surveyTemplateId', cFilter);
+      const ids = new Set(respIds.filter(Boolean).map(String));
+      if (currentId) ids.add(currentId);
+      if (!ids.size) return res.json([]);
+      templateFilter = {
+        _id: { $in: [...ids].map((id) => new mongoose.Types.ObjectId(id)) },
+        organizationId: orgId,
+      };
     }
 
     const [templates, responseCounts] = await Promise.all([
@@ -691,9 +701,11 @@ router.get('/surveys', async (req, res, next) => {
         name: t.name,
         version: t.version,
         responseCount: counts.get(String(t._id)) || 0,
+        current: String(t._id) === currentId,
       }))
-      .filter((t) => t.responseCount > 0 || !cFilter.campaignId)
-      .sort((a, b) => b.responseCount - a.responseCount);
+      // keep the current survey even at 0 responses so it's always selectable
+      .filter((t) => t.responseCount > 0 || t.current || !cFilter.campaignId)
+      .sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || b.responseCount - a.responseCount);
 
     res.json(rows);
   } catch (err) {
