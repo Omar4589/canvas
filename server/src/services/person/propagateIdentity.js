@@ -40,6 +40,29 @@ export function buildCanonicalSet(person, identity, { orgId = null, source = 'im
   return { fields, set };
 }
 
+// Projection + per-voter op for the identity fan-out — shared by propagate's per-person
+// path and the batched import path so both write Voter caches identically: honor
+// locallyEditedFields and snapshot identityBackup once before the first overwrite.
+export const VOTER_FANOUT_PROJ = (() => {
+  // personId is needed by the batched import path to map each voter back to its Person's
+  // fields (the per-person propagate path queries by a single personId and ignores it).
+  const p = { _id: 1, personId: 1, locallyEditedFields: 1, identityBackup: 1 };
+  for (const f of IDENTITY_FIELDS) p[f] = 1;
+  return p;
+})();
+export function buildVoterFanoutOp(voter, fields) {
+  const locked = new Set(voter.locallyEditedFields || []);
+  const vset = {};
+  for (const [f, val] of Object.entries(fields)) if (!locked.has(f)) vset[f] = val;
+  if (!Object.keys(vset).length) return null;
+  if (voter.identityBackup == null) {
+    const snap = {};
+    for (const f of IDENTITY_FIELDS) snap[f] = voter[f] ?? null;
+    vset.identityBackup = snap;
+  }
+  return { updateOne: { filter: { _id: voter._id }, update: { $set: vset } } };
+}
+
 /**
  * The SINGLE chokepoint that writes a Person's shared identity and fans it to every
  * org's denormalized Voter cache. Used by import reconciliation, the admin edit path,
@@ -69,35 +92,18 @@ export async function propagateIdentity(personId, identity, { orgId = null, sour
   }
   const fields = built.fields;
 
-  // 2. Fan out to the Person's Voter caches across all orgs — per-voter so we honor
-  //    locallyEditedFields and snapshot identityBackup once before the first overwrite.
-  const proj = { _id: 1, locallyEditedFields: 1, identityBackup: 1 };
-  for (const f of IDENTITY_FIELDS) proj[f] = 1;
-  // Paginate by _id (lean) so a Person with thousands of cross-org voters never holds the
-  // whole set in memory — flush a bulkWrite per page. Same ops as a single pass, just batched.
-  const PAGE = 1000;
+  // 2. Fan out to the Person's Voter caches across all orgs, paginated by _id (lean) so a
+  //    Person with thousands of cross-org voters never holds the whole set in memory.
   let lastId = null;
   for (;;) {
     const q = { personId: person._id };
     if (lastId) q._id = { $gt: lastId };
-    const voters = await Voter.find(q, proj).sort({ _id: 1 }).limit(PAGE).lean().session(session || null);
+    const voters = await Voter.find(q, VOTER_FANOUT_PROJ).sort({ _id: 1 }).limit(1000).lean().session(session || null);
     if (!voters.length) break;
     const ops = [];
-    for (const v of voters) {
-      lastId = v._id;
-      const locked = new Set(v.locallyEditedFields || []);
-      const vset = {};
-      for (const [f, val] of Object.entries(fields)) if (!locked.has(f)) vset[f] = val;
-      if (!Object.keys(vset).length) continue;
-      if (v.identityBackup == null) {
-        const snap = {};
-        for (const f of IDENTITY_FIELDS) snap[f] = v[f] ?? null;
-        vset.identityBackup = snap;
-      }
-      ops.push({ updateOne: { filter: { _id: v._id }, update: { $set: vset } } });
-    }
+    for (const v of voters) { lastId = v._id; const op = buildVoterFanoutOp(v, fields); if (op) ops.push(op); }
     if (ops.length) await Voter.bulkWrite(ops, { ordered: false, session: session || undefined });
-    if (voters.length < PAGE) break;
+    if (voters.length < 1000) break;
   }
 
   return person;

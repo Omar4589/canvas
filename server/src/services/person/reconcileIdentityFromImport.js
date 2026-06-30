@@ -2,7 +2,7 @@ import { Person } from '../../models/Person.js';
 import { Voter } from '../../models/Voter.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
 import { resolvePersonsBatch } from './resolvePerson.js';
-import { propagateIdentity, buildCanonicalSet } from './propagateIdentity.js';
+import { buildCanonicalSet, buildVoterFanoutOp, VOTER_FANOUT_PROJ } from './propagateIdentity.js';
 
 const IDENTITY_FIELDS = [
   'firstName', 'lastName', 'fullName', 'phone', 'phoneType', 'cellPhone',
@@ -13,6 +13,32 @@ function identityOf(voter) {
   const out = {};
   for (const f of IDENTITY_FIELDS) out[f] = voter[f] ?? null;
   return out;
+}
+
+// Batched identity fan-out for a chunk's owner Persons that already have voters: ONE $in
+// find (paginated by _id, lean) + ONE bulkWrite per page, instead of a find + write per
+// person. Reuses buildVoterFanoutOp so locallyEditedFields + the identityBackup snapshot are
+// honored exactly as the per-person propagate path.
+async function fanOutVoters(fanOut, session) {
+  const fieldsByPerson = new Map(fanOut.map((f) => [String(f.personId), f.fields]));
+  const ids = fanOut.map((f) => f.personId);
+  let lastId = null;
+  for (;;) {
+    const q = { personId: { $in: ids } };
+    if (lastId) q._id = { $gt: lastId };
+    const voters = await Voter.find(q, VOTER_FANOUT_PROJ).sort({ _id: 1 }).limit(2000).lean().session(session || null);
+    if (!voters.length) break;
+    const ops = [];
+    for (const v of voters) {
+      lastId = v._id;
+      const fields = fieldsByPerson.get(String(v.personId));
+      if (!fields) continue;
+      const op = buildVoterFanoutOp(v, fields);
+      if (op) ops.push(op);
+    }
+    if (ops.length) await Voter.bulkWrite(ops, { ordered: false, session: session || undefined });
+    if (voters.length < 2000) break;
+  }
 }
 
 /**
@@ -72,7 +98,7 @@ export async function reconcileIdentityFromImport(validRows, { orgId, uidSource 
     const ids = chunk.map((p) => p.personId);
     const personById = new Map();
     const orgsByPerson = new Map();
-    const docs = await Person.find({ _id: { $in: ids } }).lean().session(session || null);
+    const docs = await Person.find({ _id: { $in: ids }, mergedInto: null }).lean().session(session || null);
     for (const d of docs) personById.set(String(d._id), d);
     const aggRows = await Voter.aggregate([
       { $match: { personId: { $in: ids } } },
@@ -82,6 +108,7 @@ export async function reconcileIdentityFromImport(validRows, { orgId, uidSource 
 
     const personOps = [];
     const proposalOps = [];
+    const fanOut = [];
     for (const { personId, repRow } of chunk) {
       const person = personById.get(String(personId));
       if (!person) continue;
@@ -121,23 +148,21 @@ export async function reconcileIdentityFromImport(validRows, { orgId, uidSource 
       }
 
       if (isOwner) {
-        // A person with NO existing voters needs no fan-out, so batch its canonical identity
-        // write (the same $set + dotted provenance + version bump propagate would do) instead
-        // of a per-person round-trip — a just-created person has no concurrent writer, so the
-        // optimistic version filter always matches. Persons WITH existing voters still go
-        // through propagate for the per-voter fan-out + retry.
-        if (orgs.length === 0) {
-          const built = buildCanonicalSet(person, identityOf(repRow.voter), { orgId, source: 'import' });
-          if (built) {
-            personOps.push({
-              updateOne: {
-                filter: { _id: personId, identityVersion: person.identityVersion },
-                update: { $set: built.set, $inc: { identityVersion: 1 } },
-              },
-            });
-          }
-        } else {
-          await propagateIdentity(personId, identityOf(repRow.voter), { orgId, source: 'import', session });
+        // Batch the canonical identity write for ALL owners (same $set + dotted provenance +
+        // version bump propagate would do); persons that already have voters additionally get
+        // a batched fan-out after the loop. No per-person round-trip. The version filter still
+        // prevents a stale overwrite — a concurrently-edited person's op simply no-ops (its
+        // canonical stays correct and the next import re-applies); concurrently-merged persons
+        // were excluded by the mergedInto:null preload.
+        const built = buildCanonicalSet(person, identityOf(repRow.voter), { orgId, source: 'import' });
+        if (built) {
+          personOps.push({
+            updateOne: {
+              filter: { _id: personId, identityVersion: person.identityVersion },
+              update: { $set: built.set, $inc: { identityVersion: 1 } },
+            },
+          });
+          if (orgs.length > 0) fanOut.push({ personId, fields: built.fields });
         }
       } else {
         const fields = {};
@@ -162,6 +187,7 @@ export async function reconcileIdentityFromImport(validRows, { orgId, uidSource 
     }
     if (personOps.length) await Person.bulkWrite(personOps, { ordered: false, session: session || undefined });
     if (proposalOps.length) await PersonEditProposal.bulkWrite(proposalOps, { ordered: false, session: session || undefined });
+    if (fanOut.length) await fanOutVoters(fanOut, session);
   }
 
   return { linked: validRows.length, personsTouched: byPerson.size, proposals };

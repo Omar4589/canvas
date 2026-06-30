@@ -21,8 +21,8 @@ const V = (svid, extra = {}) => ({
   voter: { stateVoterId: svid, registeredState: 'FL', firstName: 'F' + svid, lastName: 'L' + svid, party: 'REP', ...extra },
   household: { state: 'FL' },
 });
-const seedVoter = (org, svid, name, personId) =>
-  Voter.create({ organizationId: org, stateVoterId: svid, registeredState: 'FL', firstName: name, lastName: name, fullName: name + ' ' + name, party: 'REP', personId, householdId: new mongoose.Types.ObjectId() });
+const seedVoter = (org, svid, name, personId, extra = {}) =>
+  Voter.create({ organizationId: org, stateVoterId: svid, registeredState: 'FL', firstName: name, lastName: name, fullName: name + ' ' + name, party: 'REP', personId, householdId: new mongoose.Types.ObjectId(), ...extra });
 
 before(async () => { if (URI) { await mongoose.connect(URI); await Person.syncIndexes(); await Voter.syncIndexes(); } });
 after(async () => { if (URI) await mongoose.disconnect(); });
@@ -108,4 +108,26 @@ test('uid-only person + row with that uid and a new svid → svid promoted onto 
   const reloaded = await Person.findById(p._id).lean();
   assert.strictEqual(reloaded.svidKeys.length, 1);                 // gained the svid
   assert.strictEqual(reloaded.svidKeys[0].stateVoterId, 'S8');
+});
+
+test('re-import fans the new identity to the canonical Person AND every org\'s voter cache', { skip }, async () => {
+  const p = await Person.create({ svidKeys: [{ registeredState: 'FL', stateVoterId: 'S1', source: 'import' }], firstName: 'OldF', lastName: 'OldL', fullName: 'OldF OldL', party: 'REP', identityOwnerOrgId: orgA, ownerProvisional: true, identityVersion: 1 });
+  await seedVoter(orgA, 'S1', 'OldF', p._id);
+  await seedVoter(orgB, 'S1', 'OldF', p._id);          // same person, voter in a second org
+  await reconcileIdentityFromImport([V('S1', { firstName: 'NewF', lastName: 'NewL' })], { orgId: orgA });
+  assert.strictEqual((await Person.findById(p._id).lean()).firstName, 'NewF'); // canonical
+  for (const org of [orgA, orgB]) {
+    const v = await Voter.findOne({ organizationId: org, stateVoterId: 'S1' }).lean();
+    assert.strictEqual(v.firstName, 'NewF', 'fan-out reached this org');
+    assert.ok(v.identityBackup, 'identityBackup snapshotted once');
+  }
+});
+
+test('fan-out honors a locally-edited voter field (preserves it; still updates the rest)', { skip }, async () => {
+  const p = await Person.create({ svidKeys: [{ registeredState: 'FL', stateVoterId: 'S2', source: 'import' }], firstName: 'OldF', lastName: 'OldL', fullName: 'OldF OldL', party: 'REP', identityOwnerOrgId: orgA, ownerProvisional: true, identityVersion: 1 });
+  await seedVoter(orgA, 'S2', 'KeepF', p._id, { locallyEditedFields: ['firstName'] });
+  await reconcileIdentityFromImport([V('S2', { firstName: 'NewF', lastName: 'NewL' })], { orgId: orgA });
+  const v = await Voter.findOne({ organizationId: orgA, stateVoterId: 'S2' }).lean();
+  assert.strictEqual(v.firstName, 'KeepF'); // locked → preserved
+  assert.strictEqual(v.lastName, 'NewL');   // unlocked → updated
 });
