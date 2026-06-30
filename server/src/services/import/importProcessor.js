@@ -14,6 +14,20 @@ import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
 import { reapplyVotedLists } from '../voted/reapplyVotedLists.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 
+// Chunk a large $in lookup so a 25k-element query document never balloons memory.
+// Returns the same lean docs as the inline query it replaces, just fetched in pages.
+async function findInChunks(Model, baseFilter, field, values, projection, chunk = 5000) {
+  const out = [];
+  for (let i = 0; i < values.length; i += chunk) {
+    const docs = await Model.find(
+      { ...baseFilter, [field]: { $in: values.slice(i, i + chunk) } },
+      projection
+    ).lean();
+    for (const d of docs) out.push(d);
+  }
+  return out;
+}
+
 // BullMQ processor for the `import-queue`. Idempotent: household upserts on
 // {campaignId, normalizedAddress} and voter upserts on {organizationId,
 // stateVoterId} converge on retry, and counts are computed by diff.
@@ -138,10 +152,9 @@ export async function processImportJob(job) {
     // Re-housing audit: capture each incoming voter's CURRENT household BEFORE the
     // upsert reassigns it, so we can detect moves + emptied doors afterward.
     const svids = validRows.map((r) => r.voter.stateVoterId);
-    const priorVoters = await Voter.find(
-      { organizationId: orgId, stateVoterId: { $in: svids } },
-      { stateVoterId: 1, householdId: 1 }
-    ).lean();
+    const priorVoters = await findInChunks(
+      Voter, { organizationId: orgId }, 'stateVoterId', svids, { stateVoterId: 1, householdId: 1 }
+    );
     const priorHhBySvid = new Map(
       priorVoters.map((v) => [v.stateVoterId, v.householdId ? String(v.householdId) : null])
     );
@@ -204,19 +217,17 @@ export async function processImportJob(job) {
 
     // Re-house cleanup: count voters that changed doors, then deactivate doors this
     // import emptied (and reactivate any refilled) — bounded to the touched households.
-    const postVoters = await Voter.find(
-      { organizationId: orgId, stateVoterId: { $in: svids } },
-      { stateVoterId: 1, householdId: 1 }
-    ).lean();
+    const postVoters = await findInChunks(
+      Voter, { organizationId: orgId }, 'stateVoterId', svids, { stateVoterId: 1, householdId: 1 }
+    );
     let movedVoters = 0;
     for (const v of postVoters) {
       const prior = priorHhBySvid.get(v.stateVoterId);
       if (prior && prior !== String(v.householdId)) movedVoters += 1;
     }
-    const destHouseholds = await Household.find(
-      { campaignId: campaign._id, normalizedAddress: { $in: [...householdMap.keys()] } },
-      { _id: 1 }
-    ).lean();
+    const destHouseholds = await findInChunks(
+      Household, { campaignId: campaign._id }, 'normalizedAddress', [...householdMap.keys()], { _id: 1 }
+    );
     const touchedHhIds = [...new Set([...sourceHhIds, ...destHouseholds.map((h) => String(h._id))])];
     const { deactivated: deactivatedDoors } = await recomputeHouseholdActive(campaign._id, touchedHhIds);
 

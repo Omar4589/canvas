@@ -65,21 +65,32 @@ export async function propagateIdentity(personId, identity, { orgId = null, sour
   //    locallyEditedFields and snapshot identityBackup once before the first overwrite.
   const proj = { _id: 1, locallyEditedFields: 1, identityBackup: 1 };
   for (const f of IDENTITY_FIELDS) proj[f] = 1;
-  const voters = await Voter.find({ personId: person._id }, proj).session(session || null);
-  const ops = [];
-  for (const v of voters) {
-    const locked = new Set(v.locallyEditedFields || []);
-    const vset = {};
-    for (const [f, val] of Object.entries(fields)) if (!locked.has(f)) vset[f] = val;
-    if (!Object.keys(vset).length) continue;
-    if (v.identityBackup == null) {
-      const snap = {};
-      for (const f of IDENTITY_FIELDS) snap[f] = v[f] ?? null;
-      vset.identityBackup = snap;
+  // Paginate by _id (lean) so a Person with thousands of cross-org voters never holds the
+  // whole set in memory — flush a bulkWrite per page. Same ops as a single pass, just batched.
+  const PAGE = 1000;
+  let lastId = null;
+  for (;;) {
+    const q = { personId: person._id };
+    if (lastId) q._id = { $gt: lastId };
+    const voters = await Voter.find(q, proj).sort({ _id: 1 }).limit(PAGE).lean().session(session || null);
+    if (!voters.length) break;
+    const ops = [];
+    for (const v of voters) {
+      lastId = v._id;
+      const locked = new Set(v.locallyEditedFields || []);
+      const vset = {};
+      for (const [f, val] of Object.entries(fields)) if (!locked.has(f)) vset[f] = val;
+      if (!Object.keys(vset).length) continue;
+      if (v.identityBackup == null) {
+        const snap = {};
+        for (const f of IDENTITY_FIELDS) snap[f] = v[f] ?? null;
+        vset.identityBackup = snap;
+      }
+      ops.push({ updateOne: { filter: { _id: v._id }, update: { $set: vset } } });
     }
-    ops.push({ updateOne: { filter: { _id: v._id }, update: { $set: vset } } });
+    if (ops.length) await Voter.bulkWrite(ops, { ordered: false, session: session || undefined });
+    if (voters.length < PAGE) break;
   }
-  if (ops.length) await Voter.bulkWrite(ops, { ordered: false, session: session || undefined });
 
   return person;
 }

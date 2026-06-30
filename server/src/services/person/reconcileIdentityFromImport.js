@@ -62,7 +62,7 @@ export async function reconcileIdentityFromImport(validRows, { orgId, uidSource 
   // 3. Per Person: ownership → propagate (owner) or propose (non-owner).
   let proposals = 0;
   for (const { personId, repRow } of byPerson.values()) {
-    const person = await Person.findById(personId).session(session || null);
+    const person = await Person.findById(personId).lean().session(session || null); // read-only here
     if (!person) continue;
 
     const orgs = await Voter.distinct('organizationId', { personId });

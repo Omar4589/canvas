@@ -78,15 +78,26 @@ function evaluate(r, h) {
   };
 }
 
-async function writeCache(cacheKey, unitlessKey, fields) {
+// Build one cache upsert op; flushed in batches per geocode batch (vs. ~15k single writes).
+function cacheOp(cacheKey, unitlessKey, fields) {
+  return {
+    updateOne: {
+      filter: { cacheKey, provider: 'geocodio' },
+      update: { $set: { unitlessKey: unitlessKey ?? null, ...fields }, $inc: { attempts: 1 } },
+      upsert: true,
+    },
+  };
+}
+async function flushCacheOps(ops) {
+  if (!ops.length) return;
   try {
-    await GeocodeCache.updateOne(
-      { cacheKey, provider: 'geocodio' },
-      { $set: { unitlessKey: unitlessKey ?? null, ...fields }, $inc: { attempts: 1 } },
-      { upsert: true }
-    );
+    await GeocodeCache.bulkWrite(ops, { ordered: false });
   } catch (err) {
-    if (!(err && err.code === 11000)) throw err; // concurrent insert — fine, it's cached now
+    // Concurrent imports can race to insert the same cacheKey → 11000; ordered:false still
+    // applied every other op and it's cached now. Re-throw anything that isn't a dup key.
+    const errs = err?.writeErrors || [];
+    const onlyDup = err?.code === 11000 || (errs.length > 0 && errs.every((e) => (e?.code ?? e?.err?.code) === 11000));
+    if (!onlyDup) throw err;
   }
 }
 
@@ -116,11 +127,20 @@ export async function resolve(householdMap, opts = {}) {
   }
   if (!targets.length) return { unmatched, stats };
 
-  // 2. Cache lookup (cacheKeys + unitlessKeys in one query).
+  // 2. Cache lookup — chunk the $in (a 25k import can have ~30k keys) and PROJECT OUT the
+  //    heavy `raw` blob (read but never used here), building the map directly so no large
+  //    intermediate array survives.
   const allKeys = new Set();
   for (const t of targets) { allKeys.add(t.cacheKey); if (t.unitlessKey) allKeys.add(t.unitlessKey); }
-  const cacheRows = await GeocodeCache.find({ provider: 'geocodio', cacheKey: { $in: [...allKeys] } }).lean();
-  const cacheByKey = new Map(cacheRows.map((r) => [r.cacheKey, r]));
+  let cacheByKey = new Map();
+  const keyList = [...allKeys];
+  for (let i = 0; i < keyList.length; i += 5000) {
+    const rows = await GeocodeCache.find(
+      { provider: 'geocodio', cacheKey: { $in: keyList.slice(i, i + 5000) } },
+      { raw: 0 }
+    ).lean();
+    for (const r of rows) cacheByKey.set(r.cacheKey, r);
+  }
 
   const fillFrom = (h, entry) => {
     const [lng, lat] = entry.location.coordinates;
@@ -150,6 +170,7 @@ export async function resolve(householdMap, opts = {}) {
     if (!g) { g = { h: t.h, unitlessKey: t.unitlessKey, members: [] }; toGeocode.set(t.cacheKey, g); }
     g.members.push(t);
   }
+  cacheByKey = null; // cache lookup done — release it before the geocode batches
   if (!toGeocode.size) return { unmatched, stats };
 
   if (!apiKey) {
@@ -179,29 +200,31 @@ export async function resolve(householdMap, opts = {}) {
       if (onProgress) await onProgress(processed, entries.length);
       continue;
     }
+    const cacheOps = [];
     for (let j = 0; j < chunk.length; j += 1) {
       const [cacheKey, g] = chunk[j];
       const r = results[j];
       const d = evaluate(r, g.h);
       if (d.ok) {
-        await writeCache(cacheKey, g.unitlessKey, {
+        cacheOps.push(cacheOp(cacheKey, g.unitlessKey, {
           status: 'matched', location: { type: 'Point', coordinates: d.location },
           accuracyType: d.accuracyType, accuracy: d.accuracy, confidence: d.confidence,
           matchedAddress: d.matchedAddress, raw: r?.raw ?? null,
-        });
+        }));
         for (const t of g.members) {
           t.h.longitude = d.location[0]; t.h.latitude = d.location[1];
           t.h.coordSource = 'geocodio'; t.h.coordConfidence = d.confidence === 'none' ? null : d.confidence;
         }
         stats.geocodedNew += g.members.length;
       } else {
-        await writeCache(cacheKey, g.unitlessKey, {
+        cacheOps.push(cacheOp(cacheKey, g.unitlessKey, {
           status: 'unmatched', location: null, accuracyType: r?.accuracyType ?? null,
           accuracy: r?.accuracy ?? null, confidence: 'none', matchedAddress: r?.matchedAddress ?? null, raw: r?.raw ?? null,
-        });
+        }));
         for (const t of g.members) { unmatched.set(t.normAddr, { code: d.code, detail: d.detail }); stats.geocodeUnmatched += 1; }
       }
     }
+    await flushCacheOps(cacheOps);
     processed += chunk.length;
     if (onProgress) await onProgress(processed, entries.length);
   }

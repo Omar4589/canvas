@@ -11,7 +11,7 @@
     "reconcile:counts": "node src/utils/reconcileCounts.js",
     "audit:voted-doors": "node src/utils/auditVotedDoors.js",
     "migrate:multitenant": "node src/utils/migrateToMultiTenant.js",
-    "worker": "node src/worker.js",
+    "worker": "node --max-old-space-size=${WORKER_MAX_OLD_SPACE:-384} src/worker.js",
     "migrate:voter-scope": "node src/migrations/migrateVoterScope.js",
     "migrate:passes": "node src/migrations/migratePasses.js",
     "migrate:cut-attributes": "node src/migrations/migrateCutAttributes.js",
