@@ -15,17 +15,29 @@ function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
 }
 
+const STATUS_LABEL = {
+  pending: 'Pending',
+  parsing: 'Parsing',
+  geocoding: 'Geocoding',
+  importing: 'Importing',
+  completed: 'Completed',
+  failed: 'Failed',
+};
+
 function StatusBadge({ job }) {
   const cls = {
     pending: 'bg-sunken text-fg-muted',
     parsing: 'bg-warning-tint text-warning-fg',
+    geocoding: 'bg-warning-tint text-warning-fg',
+    importing: 'bg-brand-tint text-brand-accent',
     completed: 'bg-success-tint text-success',
     failed: 'bg-danger-tint text-danger',
   }[job.status] || 'bg-sunken text-fg-muted';
-  const showPct = (job.status === 'parsing' || job.status === 'pending') && job.progress != null;
+  const inProgress = ['pending', 'parsing', 'geocoding', 'importing'].includes(job.status);
+  const showPct = inProgress && job.progress != null;
   return (
     <span className={`rounded px-2 py-0.5 text-xs ${cls}`}>
-      {job.status}
+      {STATUS_LABEL[job.status] || job.status}
       {showPct ? ` ${job.progress}%` : ''}
     </span>
   );
@@ -251,7 +263,7 @@ export default function ImportPage() {
     queryFn: () => api(`/admin/imports?campaignId=${campaignId}`),
     refetchInterval: (q) => {
       const jobs = q.state.data?.jobs || [];
-      return jobs.some((j) => j.status === 'pending' || j.status === 'parsing' || j.status === 'geocoding') ? 1500 : false;
+      return jobs.some((j) => ['pending', 'parsing', 'geocoding', 'importing'].includes(j.status)) ? 1500 : false;
     },
   });
   const workerStatusQ = useQuery({

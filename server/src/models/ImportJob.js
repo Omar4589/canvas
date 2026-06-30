@@ -18,7 +18,7 @@ const importJobSchema = new mongoose.Schema(
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     status: {
       type: String,
-      enum: ['pending', 'parsing', 'geocoding', 'completed', 'failed'],
+      enum: ['pending', 'parsing', 'geocoding', 'importing', 'completed', 'failed'],
       default: 'pending',
       index: true,
     },

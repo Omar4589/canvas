@@ -168,6 +168,10 @@ export async function processImportJob(job) {
       }
     }
 
+    // Write phase — switch the status off "geocoding" so the UI shows the real stage, and
+    // floor progress at 20% (geocode is 0–20%) even when geocoding was all cache hits.
+    await ImportJob.updateOne({ _id: importJobId }, { $set: { status: 'importing', progress: 20 } });
+
     const counts = await applyImport({
       campaign,
       orgId,
