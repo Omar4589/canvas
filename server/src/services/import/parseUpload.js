@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
 import ExcelJS from 'exceljs';
+import { Readable } from 'node:stream';
 
 // Turn an uploaded CSV or XLSX buffer into a uniform row set the importer can
 // validate. Returns { headers, rows, format, cellMeta }:
@@ -47,37 +48,56 @@ function readCell(cell) {
 }
 
 async function parseXlsx(buffer) {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
-  const ws = wb.worksheets[0];
-  if (!ws) return { headers: [], rows: [], format: 'xlsx', cellMeta: {} };
+  // Stream the workbook row-by-row instead of `wb.xlsx.load(buffer)`, which hydrates the
+  // ENTIRE workbook (every cell as a rich object) into memory and balloons to hundreds of
+  // MB on a 25k-row file. sharedStrings/styles are cached so string cells resolve to text
+  // and date cells keep their type — same per-cell output as the full-load path, via the
+  // shared readCell(). Only the first worksheet is read (matches the old wb.worksheets[0]).
+  const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), {
+    worksheets: 'emit',
+    sharedStrings: 'cache',
+    styles: 'cache',
+    hyperlinks: 'ignore',
+    entries: 'ignore',
+  });
 
   const headerByCol = {}; // colNumber -> header label
-  ws.getRow(1).eachCell({ includeEmpty: false }, (cell, col) => {
-    const h = String(cell.text ?? cell.value ?? '').trim();
-    if (h) headerByCol[col] = h;
-  });
-  const headers = Object.values(headerByCol);
-
+  let headers = [];
   const rows = [];
   const cellMeta = {};
-  for (let r = 2; r <= ws.rowCount; r++) {
-    const row = ws.getRow(r);
-    if (!row.hasValues) continue;
-    const obj = {};
-    let any = false;
-    for (const colStr of Object.keys(headerByCol)) {
-      const col = Number(colStr);
-      const h = headerByCol[col];
-      const { value, numeric } = readCell(row.getCell(col));
-      obj[h] = value;
-      if (value !== '') any = true;
-      if (numeric) {
-        if (!cellMeta[h]) cellMeta[h] = { numeric: false };
-        cellMeta[h].numeric = true;
-      }
+  let sawSheet = false;
+
+  for await (const ws of reader) {
+    if (sawSheet) {
+      // Drain any further worksheets so the underlying stream finishes cleanly.
+      for await (const _row of ws) { void _row; }
+      continue;
     }
-    if (any) rows.push(obj);
+    sawSheet = true;
+    for await (const row of ws) {
+      if (row.number === 1) {
+        row.eachCell({ includeEmpty: false }, (cell, col) => {
+          const h = String(cell.text ?? cell.value ?? '').trim();
+          if (h) headerByCol[col] = h;
+        });
+        headers = Object.values(headerByCol);
+        continue;
+      }
+      const obj = {};
+      let any = false;
+      for (const colStr of Object.keys(headerByCol)) {
+        const col = Number(colStr);
+        const h = headerByCol[col];
+        const { value, numeric } = readCell(row.getCell(col));
+        obj[h] = value;
+        if (value !== '') any = true;
+        if (numeric) {
+          if (!cellMeta[h]) cellMeta[h] = { numeric: false };
+          cellMeta[h].numeric = true;
+        }
+      }
+      if (any) rows.push(obj);
+    }
   }
   return { headers, rows, format: 'xlsx', cellMeta };
 }
