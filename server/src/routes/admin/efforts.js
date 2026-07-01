@@ -155,8 +155,11 @@ router.get('/', async (req, res, next) => {
 // list's Intake households) — see /:id/claim for the full claim/re-carve flow.
 router.post('/', async (req, res, next) => {
   try {
-    const { name, surveyTemplateId, seedWalkListId } = req.body || {};
+    const { name, surveyTemplateId, seedWalkListId, claimAllIntake } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
+    // The creator picks ONE door source. "All remaining (Intake)" wins over a saved-search
+    // seed if both somehow arrive, so we never both claim-all and seed.
+    const seedId = !claimAllIntake && seedWalkListId && mongoose.isValidObjectId(seedWalkListId) ? seedWalkListId : null;
     const effort = await Effort.create({
       organizationId: req.campaign.organizationId,
       campaignId: req.campaign._id,
@@ -164,21 +167,31 @@ router.post('/', async (req, res, next) => {
       // Lit-drop campaigns never carry a survey (mirrors Campaign type rule).
       surveyTemplateId:
         req.campaign.type === 'survey' && surveyTemplateId ? surveyTemplateId : null,
-      seededFromWalkListId: seedWalkListId && mongoose.isValidObjectId(seedWalkListId) ? seedWalkListId : null,
+      seededFromWalkListId: seedId,
       status: 'active',
       createdBy: req.user._id,
     });
-    // Optional immediate seed from a walk list (Intake-only claim).
-    if (effort.seededFromWalkListId) {
+    // Give the new walk list its doors immediately, from the chosen source.
+    let claimed = 0;
+    if (claimAllIntake) {
+      // All unowned (Intake) doors — identical to the claim endpoint's { all: true } path.
+      const r = await Household.updateMany(
+        { campaignId: req.campaign._id, isActive: true, effortId: null },
+        { $set: { effortId: effort._id } }
+      );
+      claimed = r.modifiedCount || 0;
+    } else if (effort.seededFromWalkListId) {
+      // Intake-only claim of a saved search's doors.
       const wl = await WalkList.findOne({ _id: effort.seededFromWalkListId, campaignId: req.campaign._id }, { householdIds: 1 }).lean();
       if (wl?.householdIds?.length) {
-        await Household.updateMany(
+        const r = await Household.updateMany(
           { _id: { $in: wl.householdIds }, campaignId: req.campaign._id, effortId: null },
           { $set: { effortId: effort._id } }
         );
+        claimed = r.modifiedCount || 0;
       }
     }
-    res.status(201).json({ effort });
+    res.status(201).json({ effort, claimed });
   } catch (err) {
     next(err);
   }

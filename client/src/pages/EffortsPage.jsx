@@ -240,7 +240,8 @@ export default function EffortsPage() {
   const isSurveyType = selected?.type === 'survey';
   const [name, setName] = useState('');
   const [surveyTemplateId, setSurveyTemplateId] = useState('');
-  const [seedWalkListId, setSeedWalkListId] = useState('');
+  // Door source for the new walk list: '__intake__' (all remaining) | a saved-search id | '' (none).
+  const [doorSource, setDoorSource] = useState('__intake__');
 
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
@@ -270,10 +271,22 @@ export default function EffortsPage() {
   );
   const totalDoors = useMemo(() => efforts.reduce((sum, e) => sum + (e.doorCount || 0), 0), [efforts]);
 
+  // "All remaining (Intake)" falls back to None once Intake is empty, so the default is honest.
+  const effectiveSource = doorSource === '__intake__' && intakeCount === 0 ? '' : doorSource;
+
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
   const create = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/efforts`, { method: 'POST', body: { name, surveyTemplateId: surveyTemplateId || undefined, seedWalkListId: seedWalkListId || undefined } }),
-    onSuccess: () => { setName(''); setSurveyTemplateId(''); setSeedWalkListId(''); invalidate(); },
+    mutationFn: () => {
+      const doors =
+        effectiveSource === '__intake__' ? { claimAllIntake: true }
+        : effectiveSource ? { seedWalkListId: effectiveSource }
+        : {};
+      return api(`/admin/campaigns/${campaignId}/efforts`, {
+        method: 'POST',
+        body: { name, surveyTemplateId: surveyTemplateId || undefined, ...doors },
+      });
+    },
+    onSuccess: () => { setName(''); setSurveyTemplateId(''); setDoorSource('__intake__'); invalidate(); },
   });
   const update = useMutation({ mutationFn: ({ id, body }) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'PATCH', body }), onSuccess: invalidate });
   const archive = useMutation({ mutationFn: (id) => api(`/admin/campaigns/${campaignId}/efforts/${id}/archive`, { method: 'POST' }), onSuccess: invalidate });
@@ -318,10 +331,13 @@ export default function EffortsPage() {
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="w-56" />
           </label>
           <label className="text-sm">
-            <span className={fieldLabel}>Seed door-set (saved search)</span>
-            <Select value={seedWalkListId} onChange={(e) => setSeedWalkListId(e.target.value)}>
-              <option value="">None (claim doors later)</option>
-              {walkLists.map((w) => <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>)}
+            <span className={fieldLabel}>Doors</span>
+            <Select value={effectiveSource} onChange={(e) => setDoorSource(e.target.value)}>
+              <option value="__intake__" disabled={intakeCount === 0}>
+                All remaining doors (Intake){intakeCount ? ` — ${intakeCount.toLocaleString()}` : ''}
+              </option>
+              {walkLists.map((w) => <option key={w._id} value={w._id}>From: {w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>)}
+              <option value="">None — claim doors later</option>
             </Select>
           </label>
           {isSurveyType && (
@@ -338,7 +354,14 @@ export default function EffortsPage() {
           </Button>
         </div>
         {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
-        <p className="mt-2 text-xs text-fg-muted">Saved searches can be built from filters or an uploaded Voter-ID CSV (Saved Searches page). Seeding from either claims only that list's <em>unowned</em> doors; to move doors already in another walk list, open the walk list → Claim → Re-carve.</p>
+        {create.data?.effort && (
+          <p className="mt-2 text-xs text-success-fg">
+            Created <strong>{create.data.effort.name}</strong>
+            {create.data.claimed ? ` with ${create.data.claimed.toLocaleString()} door${create.data.claimed === 1 ? '' : 's'}` : ''}.{' '}
+            <Link to={`/campaigns/${campaignId}/passes?effortId=${create.data.effort._id}`} className="font-semibold underline">Create a round →</Link>
+          </p>
+        )}
+        <p className="mt-2 text-xs text-fg-muted"><strong>All remaining doors (Intake)</strong> claims every unassigned door in the campaign — the usual whole-district list. Pick a <strong>saved search</strong> to seed only that list's <em>unowned</em> doors, or <strong>None</strong> to create an empty list and claim doors later (open the list → Claim). Saved searches are built from filters or a Voter-ID CSV on the Saved Searches page.</p>
       </Card>
 
       <Card className="overflow-hidden">
