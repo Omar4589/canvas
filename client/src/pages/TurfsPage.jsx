@@ -253,8 +253,8 @@ function DiscardModal({ isActive, bookCount, passLabel, knockCount, clearKnocks,
         {worked ? (
           <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
             ⚠️ <strong>{knockCount.toLocaleString()} knock{knockCount === 1 ? '' : 's'} already recorded</strong> in this
-            round{isActive ? ' — and it is LIVE' : ''}. Discarding removes its books and{' '}
-            <strong>all canvasser assignments</strong>{isActive ? ' and reverts the round to draft' : ''}. Knock history
+            pass{isActive ? ' — and it is LIVE' : ''}. Discarding removes its books and{' '}
+            <strong>all canvasser assignments</strong>{isActive ? ' and reverts the pass to draft' : ''}. Knock history
             is kept (unless you check the box below), and a snapshot is saved — restorable from{' '}
             <strong>Undo / snapshots</strong>.
           </div>
@@ -949,7 +949,7 @@ export default function TurfsPage() {
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Turf Cutting</h1>
-          <p className="mt-0.5 text-sm text-fg-muted">Cut this round's doors into walkable books, then assign them to canvassers.</p>
+          <p className="mt-0.5 text-sm text-fg-muted">Cut this pass's doors into walkable books, then assign them to canvassers.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {campaignId && <PassPicker campaignId={campaignId} passId={passId} onChange={setPassId} />}
@@ -965,7 +965,7 @@ export default function TurfsPage() {
         <NextStepBanner tone="info" className="mb-5">Pick a campaign above to start cutting turf.</NextStepBanner>
       )}
       {campaignId && !passId && (
-        <NextStepBanner tone="info" className="mb-5">Pick a round (pass) above to cut its doors into books.</NextStepBanner>
+        <NextStepBanner tone="info" className="mb-5">Pick a pass above to cut its doors into books.</NextStepBanner>
       )}
       {campaignId && passId && !hasNoDoors && turfs.length === 0 && doorsQ.data && (
         <NextStepBanner tone="info" className="mb-5">No books yet — pick a cutting mode on the left and click Generate.</NextStepBanner>
@@ -1160,7 +1160,7 @@ export default function TurfsPage() {
               {showTarget && (
                 <div className="mt-2 space-y-2 rounded-md border border-border-strong bg-sunken px-3 py-2">
                   <p className="text-[11px] text-fg-muted">
-                    Cut this round over only the doors that match — e.g. follow up on the unknocked, re-try not-homes, or GOTV your supporters.
+                    Cut this pass over only the doors that match — e.g. follow up on the unknocked, re-try not-homes, or GOTV your supporters.
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-fg-muted">Status:</span>
@@ -1304,11 +1304,11 @@ export default function TurfsPage() {
               className="mt-3"
               title="Books accepted."
               action={{
-                label: 'Activate round',
-                to: `/campaigns/${campaignId}/passes?effortId=${selectedPass.effortId || ''}`,
+                label: 'Activate pass',
+                to: `/campaigns/${campaignId}/efforts/${selectedPass.effortId || ''}/passes`,
               }}
             >
-              Assign canvassers to books below, then activate the round to send it to the field.
+              Assign canvassers to books below, then activate the pass to send it to the field.
             </NextStepBanner>
           )}
 

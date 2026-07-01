@@ -12,6 +12,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
+import { createNextPass } from '../../services/passes/createPass.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -72,34 +73,22 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// Create a round within an effort. roundNumber auto-increments PER EFFORT.
+// Create a pass within an effort. roundNumber auto-increments PER EFFORT. `name` is
+// optional — blank auto-labels "Pass {roundNumber}" so "New pass" is a single click.
 router.post('/', async (req, res, next) => {
   try {
     const { name, effortId } = req.body || {};
-    if (!name) return res.status(400).json({ error: 'name is required' });
     if (!mongoose.isValidObjectId(effortId)) return res.status(400).json({ error: 'effortId is required' });
     const effort = await Effort.findOne({ _id: effortId, campaignId: req.campaign._id }).select('_id').lean();
     if (!effort) return res.status(404).json({ error: 'Walk list not found' });
-    let pass;
-    for (let attempt = 0; attempt < 5 && !pass; attempt += 1) {
-      const last = await Pass.findOne({ effortId }).sort({ roundNumber: -1 }).select('roundNumber').lean();
-      const roundNumber = (last?.roundNumber || 0) + 1;
-      try {
-        pass = await Pass.create({
-          organizationId: req.campaign.organizationId,
-          campaignId: req.campaign._id,
-          effortId,
-          roundNumber,
-          name: String(name).trim(),
-          status: 'draft',
-          createdBy: req.user._id,
-        });
-      } catch (err) {
-        if (err.code === 11000) continue; // (effortId, roundNumber) race — retry
-        throw err;
-      }
-    }
-    if (!pass) return res.status(409).json({ error: 'Could not allocate a round number; retry' });
+    const pass = await createNextPass({
+      organizationId: req.campaign.organizationId,
+      campaignId: req.campaign._id,
+      effortId,
+      name,
+      userId: req.user._id,
+    });
+    if (!pass) return res.status(409).json({ error: 'Could not allocate a pass number; retry' });
     res.status(201).json({ pass });
   } catch (err) {
     next(err);
@@ -129,7 +118,7 @@ router.post('/:id/activate', async (req, res, next) => {
     // Survey requirement (moved here from campaign creation): a survey campaign can be built
     // out freely, but a round can't go LIVE without a survey for canvassers to submit.
     if (req.campaign.type === 'survey' && !req.campaign.surveyTemplateId) {
-      return res.status(400).json({ error: 'Add a survey to this campaign before activating a round.', code: 'survey-required' });
+      return res.status(400).json({ error: 'Add a survey to this campaign before activating a pass.', code: 'survey-required' });
     }
     const published = await Turf.countDocuments({ passId: pass._id, status: 'published' });
     if (!published) return res.status(400).json({ error: 'Generate and accept books before activating this pass' });
@@ -163,8 +152,8 @@ router.post('/:id/archive', async (req, res, next) => {
         return res.status(409).json({
           error:
             pass.status === 'active'
-              ? 'This round is live. Confirm to archive it.'
-              : 'This round has recorded knocks. Confirm to archive it.',
+              ? 'This pass is live. Confirm to archive it.'
+              : 'This pass has recorded knocks. Confirm to archive it.',
           code: 'archive-confirm-required',
           isActive: pass.status === 'active',
           knockCount,

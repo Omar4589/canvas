@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
+import PassManager from '../components/PassManager.jsx';
 import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -143,8 +144,8 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
       {claim.data && (
         <p className="mt-2 text-xs text-success-fg">
           Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other walk lists)` : ''}.{' '}
-          <Link to={`/campaigns/${campaignId}/passes?effortId=${effort._id}`} className="font-semibold underline">
-            Create a round →
+          <Link to={`/campaigns/${campaignId}/efforts/${effort._id}/passes`} className="font-semibold underline">
+            Manage passes →
           </Link>
         </p>
       )}
@@ -220,11 +221,19 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
                   {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
                 </select>
               )}
-              <a href={`/campaigns/${campaignId}/passes?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Manage passes →</a>
               {effort.activeRound && (
                 <a href={`/campaigns/${campaignId}/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-accent hover:underline">Cut / assign books →</a>
               )}
               <a href={`/campaigns/${campaignId}/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Audit on map →</a>
+            </div>
+            <div className="mt-4 rounded-lg border border-border bg-sunken/40 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Passes</div>
+                <Link to={`/campaigns/${campaignId}/efforts/${effort._id}/passes`} className="text-xs font-medium text-brand-accent hover:underline">
+                  Open full view →
+                </Link>
+              </div>
+              <PassManager campaignId={campaignId} effortId={effort._id} tz={tz} variant="compact" />
             </div>
           </td>
         </tr>
@@ -357,8 +366,13 @@ export default function EffortsPage() {
         {create.data?.effort && (
           <p className="mt-2 text-xs text-success-fg">
             Created <strong>{create.data.effort.name}</strong>
-            {create.data.claimed ? ` with ${create.data.claimed.toLocaleString()} door${create.data.claimed === 1 ? '' : 's'}` : ''}.{' '}
-            <Link to={`/campaigns/${campaignId}/passes?effortId=${create.data.effort._id}`} className="font-semibold underline">Create a round →</Link>
+            {create.data.claimed ? ` with ${create.data.claimed.toLocaleString()} door${create.data.claimed === 1 ? '' : 's'}` : ''}
+            {create.data.pass ? ' — Pass 1 is ready.' : '.'}{' '}
+            {create.data.pass ? (
+              <Link to={`/campaigns/${campaignId}/turfs?passId=${create.data.pass._id}`} className="font-semibold underline">Cut its books →</Link>
+            ) : (
+              <Link to={`/campaigns/${campaignId}/efforts/${create.data.effort._id}/passes`} className="font-semibold underline">Manage passes →</Link>
+            )}
           </p>
         )}
         <p className="mt-2 text-xs text-fg-muted"><strong>All remaining doors (Intake)</strong> claims every unassigned door in the campaign — the usual whole-district list. Pick a <strong>saved search</strong> to seed only that list's <em>unowned</em> doors, or <strong>None</strong> to create an empty list and claim doors later (open the list → Claim). Saved searches are built from filters or a Voter-ID CSV on the Saved Searches page.</p>

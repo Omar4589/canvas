@@ -833,7 +833,7 @@ router.post('/move-door', async (req, res, next) => {
 
     // Disjointness: a book may only hold doors owned by the book's effort.
     const toPass = await Pass.findById(to.passId, { effortId: 1 }).lean();
-    if (!toPass) return res.status(409).json({ error: 'That book’s round no longer exists.' });
+    if (!toPass) return res.status(409).json({ error: 'That book’s pass no longer exists.' });
     const movingHh = await Household.findOne({ _id: householdId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!movingHh) return res.status(404).json({ error: 'Household not found' });
     if (String(movingHh.effortId) !== String(toPass.effortId)) {
@@ -875,7 +875,7 @@ router.post('/move-doors', async (req, res, next) => {
 
     // Disjointness: a book may only hold doors owned by the book's effort.
     const toPass = await Pass.findById(to.passId, { effortId: 1 }).lean();
-    if (!toPass) return res.status(409).json({ error: 'That book’s round no longer exists.' });
+    if (!toPass) return res.status(409).json({ error: 'That book’s pass no longer exists.' });
     const moving = await Household.find({ _id: { $in: ids }, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     const foreign = moving.filter((h) => String(h.effortId) !== String(toPass.effortId)).length;
     if (foreign) {

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
@@ -51,6 +51,20 @@ function PageFallback() {
 function DashboardRedirect() {
   const { campaignId } = useParams();
   return <Navigate to={`/campaigns/${campaignId}`} replace />;
+}
+
+// Back-compat: passes are now walk-list-scoped. Old /campaigns/:id/passes?effortId=X →
+// /campaigns/:id/efforts/X/passes; without an effort, land on the Walk Lists page.
+function LegacyPassesRedirect() {
+  const { campaignId } = useParams();
+  const [params] = useSearchParams();
+  const effortId = params.get('effortId');
+  return (
+    <Navigate
+      to={effortId ? `/campaigns/${campaignId}/efforts/${effortId}/passes` : `/campaigns/${campaignId}/efforts`}
+      replace
+    />
+  );
 }
 
 export default function App() {
@@ -107,7 +121,8 @@ export default function App() {
           <Route path="/campaigns/:campaignId" element={<DashboardPage />} />
           <Route path="/campaigns/:campaignId/efforts" element={<EffortsPage />} />
           <Route path="/campaigns/:campaignId/turfs" element={<TurfsPage />} />
-          <Route path="/campaigns/:campaignId/passes" element={<PassesPage />} />
+          <Route path="/campaigns/:campaignId/efforts/:effortId/passes" element={<PassesPage />} />
+          <Route path="/campaigns/:campaignId/passes" element={<LegacyPassesRedirect />} />
           <Route path="/campaigns/:campaignId/walklists" element={<WalkListsPage />} />
           <Route path="/campaigns/:campaignId/import" element={<ImportPage />} />
           <Route path="/campaigns/:campaignId/map" element={<MapPage />} />

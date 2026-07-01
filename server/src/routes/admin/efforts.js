@@ -13,6 +13,7 @@ import { WalkList } from '../../models/WalkList.js';
 import { Membership } from '../../models/Membership.js';
 import { recomputeTurf } from '../../services/turf/generateTurf.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
+import { createNextPass } from '../../services/passes/createPass.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -191,7 +192,19 @@ router.post('/', async (req, res, next) => {
         claimed = r.modifiedCount || 0;
       }
     }
-    res.status(201).json({ effort, claimed });
+    // Every walk list starts its first pass automatically, so the common path skips the
+    // create-and-name-a-pass step. Best-effort — a hiccup here must not fail effort creation
+    // (the admin can add Pass 1 from the walk list's Passes panel).
+    let pass = null;
+    try {
+      pass = await createNextPass({
+        organizationId: req.campaign.organizationId,
+        campaignId: req.campaign._id,
+        effortId: effort._id,
+        userId: req.user._id,
+      });
+    } catch { /* non-fatal: Pass 1 can be created manually */ }
+    res.status(201).json({ effort, claimed, pass });
   } catch (err) {
     next(err);
   }
@@ -393,7 +406,7 @@ router.delete('/:id', loadEffort, async (req, res, next) => {
   try {
     const liveRounds = await Pass.countDocuments({ effortId: req.effort._id, status: { $ne: 'draft' } });
     if (liveRounds) {
-      return res.status(400).json({ error: 'Walk list has active/archived rounds; archive it instead of deleting.' });
+      return res.status(400).json({ error: 'Walk list has active/archived passes; archive it instead of deleting.' });
     }
     await Household.updateMany({ campaignId: req.campaign._id, effortId: req.effort._id }, { $set: { effortId: null, turfId: null, walkOrder: null } });
     // Remove the effort's (draft) rounds AND their books + assignments so nothing dangles.

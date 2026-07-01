@@ -39,11 +39,11 @@ const CONTACT_HELP = {
   lit_dropped: 'Doors where we dropped literature.',
 };
 const KPI_HELP = {
-  doorsKnocked: 'Every door we knocked, counted once per round. Going back in a later round counts again. This is the billable number.',
-  surveysTaken: 'Total survey forms collected — one per voter per round. A home with two voters surveyed in one visit counts as two surveys.',
+  doorsKnocked: 'Every door we knocked, counted once per pass. Going back in a later pass counts again. This is the billable number.',
+  surveysTaken: 'Total survey forms collected — one per voter per pass. A home with two voters surveyed in one visit counts as two surveys.',
   surveyedVoters: 'How many distinct people we surveyed — not how many forms were filled out.',
-  litDropped: 'Doors where we dropped literature, counted once per door per round.',
-  homesKnocked: 'Distinct homes we have reached at least once (a home counts once no matter how many rounds).',
+  litDropped: 'Doors where we dropped literature, counted once per door per pass.',
+  homesKnocked: 'Distinct homes we have reached at least once (a home counts once no matter how many passes).',
   surveyRate: 'Of the doors we knocked, the share where we completed at least one survey.',
   litRate: 'Of the doors we knocked, the share where we dropped literature.',
 };

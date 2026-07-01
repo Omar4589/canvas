@@ -108,12 +108,12 @@ export default function HouseholdDetailPanel({
 
       {rounds.length > 0 && (
         <div className="border-b border-border px-4 py-3">
-          <div className="mb-2 text-xs uppercase tracking-wide text-fg-muted">History by round</div>
+          <div className="mb-2 text-xs uppercase tracking-wide text-fg-muted">History by pass</div>
           <div className="space-y-2">
             {rounds.map((r) => (
               <div key={r.passId || 'none'}>
                 <div className="text-xs font-semibold text-fg">
-                  {r.roundNumber != null ? `Round ${r.roundNumber}` : r.name}
+                  {r.roundNumber != null ? `Pass ${r.roundNumber}` : r.name}
                   {r.roundNumber != null && r.name ? <span className="font-normal text-fg-muted"> · {r.name}</span> : null}
                 </div>
                 <ul className="mt-0.5 space-y-0.5">

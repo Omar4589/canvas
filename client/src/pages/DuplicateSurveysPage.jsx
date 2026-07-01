@@ -57,7 +57,7 @@ export default function DuplicateSurveysPage() {
           <p className="mt-1 max-w-xl text-sm text-fg-muted">
             Voters with more than one survey response — the reason “Surveys” can read higher than
             “Surveyed voters.” Same canvasser, same day is usually a mistake; different canvassers or a
-            different round is usually a legitimate revisit. Open the voter to delete an extra response.
+            different pass is usually a legitimate revisit. Open the voter to delete an extra response.
           </p>
         </div>
         <CampaignSelector

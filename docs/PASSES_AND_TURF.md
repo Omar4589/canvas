@@ -14,15 +14,18 @@ the billing unit), [TURF_RUNBOOK.md](../TURF_RUNBOOK.md) (operational runbook),
 [SURVEYS.md](SURVEYS.md) (one survey per voter per pass), [VOTERS.md](VOTERS.md),
 [MAPS.md](MAPS.md) (how books/turf show on the map).
 
-> **Updated — passes are now "Rounds" inside Efforts.** A campaign is split into **efforts** (areas
-> or teams), and a "pass" is now one **Round** within an effort (still the cut/assign/billing unit).
-> The mechanics below — generating books, accept/discard, move/merge/split, supplemental books — are
-> unchanged and apply **per round**. What changed: (1) a campaign can have **several active rounds at
-> once** (one per active effort), not one; (2) a round's door-set comes from its **effort's owned
-> doors** (`Household.effortId`), not a walk list; (3) knock attribution is **deterministic by
-> door → book → effort**, not the `activatedAt` time-window; (4) new-address imports go to **Intake**
-> until assigned to an effort. See [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md). The
-> per-pass details below remain correct read as "per round."
+> **Updated — a "pass" lives inside a walk list.** The user-facing term is **Pass** again (Pass 1,
+> Pass 2, …; the `Pass` model stores the counter as `roundNumber`). A campaign is split into **walk
+> lists** (efforts — areas or teams), and each pass belongs to **one walk list** (still the
+> cut/assign/billing unit) — you manage passes *inside* the walk list, not on a top-level page. For
+> the pass **lifecycle, numbering, auto Pass 1, and where they're managed**, see the dedicated
+> **[PASSES.md](PASSES.md)**. The **turf-cutting** mechanics below — generating books, accept/discard,
+> move/merge/split, supplemental books — are unchanged and apply **per pass**. What also changed:
+> (1) a campaign can have **several active passes at once** (one per active walk list), not one;
+> (2) a pass's door-set comes from its **walk list's owned doors** (`Household.effortId`);
+> (3) knock attribution is **deterministic by door → book → walk list**, not the `activatedAt`
+> time-window; (4) new-address imports go to **Intake** until assigned to a walk list. See
+> [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md).
 
 ---
 

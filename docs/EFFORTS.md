@@ -4,17 +4,17 @@
 
 How a campaign is split into several **walk lists** that run at the same time — different areas
 (North/E/W/S) or different teams (volunteers vs paid) — each with its own doors, survey, crew, and
-rounds. This supersedes the old "one active pass per campaign" model.
+passes. This supersedes the old "one active pass per campaign" model.
 
 - **Part 1 — For everyone** is plain language: the pieces, the rules, and the workflows.
 - **Part 2 — Technical reference** is for developers (and Claude): models, ownership/intake,
   attribution, per-walk-list survey/reporting, and the migration.
 
-Related: [WALKLISTS.md](WALKLISTS.md) (build a saved search — by filter or uploaded Voter-ID CSV — to
-seed/claim a walk list's doors), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (rounds + turf cutting — a
-"pass" is now a Round within a walk list), [METRICS.md](METRICS.md) (per-walk-list reporting),
-[SURVEYS.md](SURVEYS.md) (per-walk-list survey), [IMPORTS.md](IMPORTS.md) (how new voters reach a walk list
-via Intake).
+Related: [PASSES.md](PASSES.md) (a walk list's **passes** — lifecycle, auto Pass 1, and where they're
+managed), [WALKLISTS.md](WALKLISTS.md) (build a saved search — by filter or uploaded Voter-ID CSV — to
+seed/claim a walk list's doors), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (cutting a pass's doors into
+books), [METRICS.md](METRICS.md) (per-walk-list reporting), [SURVEYS.md](SURVEYS.md) (per-walk-list
+survey), [IMPORTS.md](IMPORTS.md) (how new voters reach a walk list via Intake).
 
 ---
 
@@ -25,30 +25,31 @@ via Intake).
 ```
 Campaign
   └─ Walk list         a parallel operation (an area or a team)
-       └─ Round        one sweep within the walk list (= a "pass"; the billing unit)
-            └─ Book     a walkable slice of the round (a canvasser's turf)
+       └─ Pass         one billable sweep within the walk list (Pass 1, Pass 2, …)
+            └─ Book     a walkable slice of the pass (a canvasser's turf)
                  └─ Doors → Voters
 ```
 
 A **walk list** is the persistent thing — "North Dallas", "the volunteer crew". It **owns a disjoint
-set of doors**, an optional **survey**, and a **crew** of canvassers. Inside it you run **Rounds**
-(Round 1, Round 2, …) — each round is cut into **books** and assigned, exactly like passes worked
-before. Round numbers restart per walk list (North Round 1, South Round 1).
+set of doors**, an optional **survey**, and a **crew** of canvassers. Inside it you run **passes**
+(Pass 1, Pass 2, …) — each pass is cut into **books** and assigned. Pass numbers restart per walk
+list (North Pass 1, South Pass 1). Passes are managed *inside* the walk list — see [PASSES.md](PASSES.md).
 
 ## How the pieces relate — and the order you build them
 
 Each piece depends on the one above it, so you build top-down:
 
 1. **Walk list** — create it first (it owns the doors + survey + crew). Nothing else can exist without it.
+   Creating one also creates its **Pass 1** automatically.
 2. **Doors** — give the walk list its doors by claiming a **saved search** or **Intake** (see below). A
    walk list with no doors has nothing to cut.
-3. **Round** — make a round *inside* the walk list. A round can't exist on its own; it belongs to one
-   walk list. (Round 2 later = a new round in the same walk list.)
-4. **Books** — cut the round into books (turf). A book belongs to one round; re-cutting makes new books.
+3. **Pass** — Pass 1 already exists; add a follow-up **inside** the walk list when you need one. A pass
+   can't exist on its own; it belongs to one walk list. (Pass 2 later = a new pass in the same walk list.)
+4. **Books** — cut the pass into books (turf). A book belongs to one pass; re-cutting makes new books.
 5. **Assignment** — assign a book to a canvasser. This is the link between a person and a book — and
    it's what fills the walk list's **crew** automatically (next section).
 
-In short: **walk list → doors → round → books → assign**. The step-by-step below walks each one.
+In short: **walk list → doors → pass → books → assign**. The step-by-step below walks each one.
 
 ## Door ownership and Intake
 
@@ -64,9 +65,9 @@ See [IMPORTS.md](IMPORTS.md) for the full import behavior.
 
 ## Several walk lists at once
 
-A campaign can have **many active walk lists**, each with its **one active round**. Canvassers see only
-the books assigned to them, across whatever walk lists they're on. Activating a round only archives the
-*previous round of that same walk list* — other walk lists keep running.
+A campaign can have **many active walk lists**, each with its **one active pass**. Canvassers see only
+the books assigned to them, across whatever walk lists they're on. Activating a pass only archives the
+*previous pass of that same walk list* — other walk lists keep running.
 
 Because book numbers restart per walk list, a canvasser assigned to two walk lists could otherwise see two
 "Book 6"s at once. So when a canvasser is on **more than one** walk list, the phone's **Books** screen shows
@@ -76,7 +77,7 @@ A canvasser on a single walk list sees no switcher.
 ## The crew
 
 A walk list's **crew** (the "Crew" count on the Walk Lists page) is **automatically whoever is assigned to
-its current round's books**. You don't maintain it — assign a book to someone and they're on the crew;
+its current pass's books**. You don't maintain it — assign a book to someone and they're on the crew;
 unassign them and they drop off; re-carve doors into a different walk list and the crews follow the
 assignments. It's always an accurate picture of who's actually working the walk list, and it does **not**
 restrict who you can assign (any active canvasser is still assignable to any book).
@@ -105,14 +106,16 @@ people leave when you unassign their book on the Turf page).
    door-set**.
 3. Click **Create walk list**. It now owns that saved search's unclaimed (Intake) doors.
 
-### Run a round (canvass a walk list)
-1. **Rounds** page → choose the walk list (top-right) → **New round** → name it → **Create round**.
-2. **Turf Cutting** page → pick that round → generate books (it cuts from the walk list's doors) →
+### Run a pass (canvass a walk list)
+1. **Walk Lists** page → open the walk list (**Manage**) → the **Passes** panel. Pass 1 already exists
+   (it's created with the walk list); the panel is also where you add a follow-up with **New pass**.
+2. **Turf Cutting** page → pick that pass → generate books (it cuts from the walk list's doors) →
    **Accept**.
 3. Still on Turf Cutting → **Assign** each book to canvassers (use the walk list's roster).
-4. **Rounds** page → **Activate** the round. Canvassers on those books now see their doors.
-5. For Round 2 later: make a new round in the same walk list and repeat — activating it archives the
-   walk list's previous round (other walk lists are untouched).
+4. Back in the walk list's **Passes** panel → **Activate** the pass. Canvassers on those books now see
+   their doors.
+5. For Pass 2 later: **New pass** in the same walk list and repeat — activating it archives the walk
+   list's previous pass (other walk lists are untouched). See [PASSES.md](PASSES.md) for the details.
 
 ### Split your existing campaign into walk lists (re-carve)
 Your campaign starts as one default walk list ("Main") owning every door.
@@ -133,8 +136,8 @@ Your campaign starts as one default walk list ("Main") owning every door.
      the import (it matches by Voter ID — see [WALKLISTS.md](WALKLISTS.md)) and seed/claim the new walk list
      from it. **Claim all Intake** is the quick path *only* when all current Intake is just these new
      addresses — it grabs **every** unowned door, so use a saved search when other Intake is mixed in.
-3. **Turf Cutting** → that walk list's round → **Add new doors → supplemental book** → **Accept** →
-   **Assign** (a brand-new walk list needs a round created first). The new doors are now in the field.
+3. **Turf Cutting** → that walk list's pass → **Add new doors → supplemental book** → **Accept** →
+   **Assign**. The new doors are now in the field.
    (New voters at addresses a walk list *already* owns appear automatically — no steps needed.)
 
 ---
@@ -142,8 +145,11 @@ Your campaign starts as one default walk list ("Main") owning every door.
 # Part 2 — Technical reference
 
 Server: [routes/admin/efforts.js](../server/src/routes/admin/efforts.js) (walk-list CRUD + roster +
-claim/intake), [routes/admin/passes.js](../server/src/routes/admin/passes.js) (rounds, now
-walk-list-scoped), [services/passes/activePasses.js](../server/src/services/passes/activePasses.js).
+claim/intake — also auto-creates **Pass 1** on create via `createNextPass`),
+[routes/admin/passes.js](../server/src/routes/admin/passes.js) (passes, walk-list-scoped),
+[services/passes/createPass.js](../server/src/services/passes/createPass.js) (the shared
+`createNextPass` allocator), [services/passes/activePasses.js](../server/src/services/passes/activePasses.js).
+See [PASSES.md](PASSES.md) for the pass lifecycle in full.
 
 ## A. Data model
 
@@ -171,19 +177,23 @@ walk-list-scoped), [services/passes/activePasses.js](../server/src/services/pass
   Voter-ID CSV are both just frozen `householdIds` (`WalkList.source` = `'filter' | 'csv'`), so
   seed/claim/re-carve treat them identically. See [WALKLISTS.md](WALKLISTS.md).
 - **Archiving doesn't release doors.** Archive is only a status flag — it does **not** set `effortId`
-  back to `null` (only **deleting** a walk list does, and a walk list with non-draft rounds can't be
+  back to `null` (only **deleting** a walk list does, and a walk list with non-draft passes can't be
   deleted). So a newly imported voter at an address an archived walk list already owns stays on that walk list
   (the importer never re-owns a door). To move such doors into a new walk list, claim them with a
   **re-carve** — precisely targetable by uploading that voter list as a saved search
   ([WALKLISTS.md](WALKLISTS.md)).
 
-## C. Rounds & "active"
+## C. Passes & "active"
 
 - `activePassIds(campaignId)` = `Pass.find({campaignId, status:'active'})` — one per active walk list.
   Replaces the single `Campaign.activePassId`.
-- Activation ([passes.js](../server/src/routes/admin/passes.js)) archives other active rounds **of the
-  same walk list only**. Create scopes `roundNumber` per walk list; `GET /passes?effortId=` filters.
-- Turf cut scope ([generateTurf.js](../server/src/services/turf/generateTurf.js)) = the round's
+- Creation goes through `createNextPass` ([createPass.js](../server/src/services/passes/createPass.js)),
+  which scopes `roundNumber` per walk list (unique `{effortId, roundNumber}`, with an E11000 retry) and
+  auto-labels a blank name `Pass {roundNumber}`. Called explicitly by `POST /passes` and implicitly
+  (best-effort) by effort-create for **Pass 1**.
+- Activation ([passes.js](../server/src/routes/admin/passes.js)) archives other active passes **of the
+  same walk list only**. `GET /passes?effortId=` filters.
+- Turf cut scope ([generateTurf.js](../server/src/services/turf/generateTurf.js)) = the pass's
   **walk list's owned doors** (`{campaignId, isActive, effortId, coords}`); `addSupplementalBooks` adds
   the walk list's owned-but-unbooked doors.
 
@@ -272,8 +282,9 @@ The displayed crew is computed in [efforts.js](../server/src/routes/admin/effort
 
 | File | Renders |
 |---|---|
-| [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | Walk Lists list/create, crew (derived) + pre-add, claim/re-carve, Intake banner + assign, survey override. |
-| [client/src/pages/PassesPage.jsx](../client/src/pages/PassesPage.jsx) | "Rounds" — walk-list-scoped (selector + `?effortId=`); create a round in a walk list. |
-| [client/src/pages/TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) | Turf cutting; PassPicker labels rounds by walk list and defaults to an active round. |
+| [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | Walk Lists list/create, crew (derived) + pre-add, claim/re-carve, Intake banner + assign, survey override. Drawer embeds `<PassManager variant="compact">`. |
+| [client/src/components/PassManager.jsx](../client/src/components/PassManager.jsx) | All pass UI (new pass, activate, archive, per-pass detail). Shared by the drawer (compact) and the scoped page (full). |
+| [client/src/pages/PassesPage.jsx](../client/src/pages/PassesPage.jsx) | Thin wrapper at `/campaigns/:campaignId/efforts/:effortId/passes` — renders `<PassManager variant="full">` for one walk list (no picker). |
+| [client/src/pages/TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) | Turf cutting; PassPicker labels passes by walk list and defaults to an active pass. |
 | [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Walk-list filter → passes `effortId` to the reports endpoints. |
 | [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | Resolves the survey per door from `books`/`surveys`. |

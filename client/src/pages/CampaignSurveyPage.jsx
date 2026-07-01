@@ -162,7 +162,7 @@ export default function CampaignSurveyPage() {
         <Card className="p-6">
           <h2 className="text-base font-semibold text-fg">No survey attached yet</h2>
           <p className="mt-1 max-w-prose text-sm text-fg-muted">
-            Canvassers can't submit responses until you attach a survey — and you can't activate a round on a survey
+            Canvassers can't submit responses until you attach a survey — and you can't activate a pass on a survey
             campaign without one.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">

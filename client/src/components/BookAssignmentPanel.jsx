@@ -275,7 +275,7 @@ export default function BookAssignmentPanel({
 
         {crewLoad && crewLoad.length > 0 && (
           <div className="mt-3 border-t border-border pt-3">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Crew load · this round</div>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Crew load · this pass</div>
             <ul className="space-y-0.5 text-xs">
               {crewLoad.map((c) => (
                 <li key={c.user.id} className="flex items-center justify-between gap-2">

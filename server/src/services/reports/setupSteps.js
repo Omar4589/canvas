@@ -56,12 +56,12 @@ const STEP_DEFS = [
   },
   {
     key: 'roundCreated',
-    label: 'Round created',
-    route: '/passes',
+    label: 'Pass created',
+    route: '/efforts',
     satisfied: (counts) => (counts.passes || 0) >= 1,
     value: (counts) => {
       const n = counts.passes || 0;
-      return n > 0 ? `${n} round${n === 1 ? '' : 's'}` : 'No rounds yet';
+      return n > 0 ? `${n} pass${n === 1 ? '' : 'es'}` : 'No passes yet';
     },
   },
   {
@@ -88,8 +88,8 @@ const STEP_DEFS = [
   },
   {
     key: 'roundActivated',
-    label: 'Round activated',
-    route: '/passes',
+    label: 'Pass activated',
+    route: '/efforts',
     satisfied: (counts) => (counts.activePasses || 0) >= 1,
     value: (counts) => ((counts.activePasses || 0) >= 1 ? 'Live' : 'Not live'),
   },

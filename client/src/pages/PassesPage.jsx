@@ -1,404 +1,48 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
-import StatCard from '../components/StatCard.jsx';
-import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
+import PassManager from '../components/PassManager.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
-import { formatInTz } from '../lib/datetime.js';
 
-const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
-
-const SEG_COLORS = {
-  surveyed: '#22c55e',
-  lit_dropped: '#a855f7',
-  not_home: '#3b82f6',
-  wrong_address: '#ef4444',
-  refused: '#f59e0b',
-  unknocked: '#9ca3af',
-};
-
-function ProgressBar({ counts = {}, total = 0 }) {
-  if (!total) return <span className="text-xs text-fg-subtle">no doors</span>;
-  return (
-    <div className="flex h-2 w-40 overflow-hidden rounded bg-sunken">
-      {['surveyed', 'refused', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'].map((k) =>
-        counts[k] ? (
-          <div key={k} style={{ width: `${(counts[k] / total) * 100}%`, background: SEG_COLORS[k] }} />
-        ) : null
-      )}
-    </div>
-  );
-}
-
-function PassProgress({ campaignId, passId }) {
-  const q = useQuery({
-    queryKey: ['pass-progress', campaignId, passId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/passes/${passId}/progress`),
-    enabled: !!campaignId && !!passId,
-  });
-  if (q.isLoading) return <span className="text-xs text-fg-subtle">…</span>;
-  const { counts, total } = q.data || {};
-  const done = total ? Math.round(((total - (counts?.unknocked || 0)) / total) * 100) : 0;
-  return (
-    <div className="flex items-center gap-2">
-      <ProgressBar counts={counts || {}} total={total || 0} />
-      <span className="text-xs tabular-nums text-fg-muted">{done}%</span>
-    </div>
-  );
-}
-
-// Stacked initials avatars for a book's assigned canvassers (hover = full names).
-function Avatars({ users = [] }) {
-  if (!users.length) return <span className="text-xs text-fg-subtle">Unassigned</span>;
-  const shown = users.slice(0, 3);
-  return (
-    <span
-      className="flex items-center -space-x-1"
-      title={users.map((u) => `${u.firstName} ${u.lastName}`).join(', ')}
-    >
-      {shown.map((u) => (
-        <span
-          key={u.id}
-          className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand-tint text-[9px] font-semibold text-brand-tint-fg ring-1 ring-card"
-        >
-          {((u.firstName?.[0] || '') + (u.lastName?.[0] || '')).toUpperCase()}
-        </span>
-      ))}
-      {users.length > 3 && <span className="pl-1.5 text-[10px] text-fg-subtle">+{users.length - 3}</span>}
-    </span>
-  );
-}
-
-// Expanded detail for a pass: its books (with assignees) + quick-nav buttons.
-// Activate a round, but guard the silent dead-end: a round with published books
-// but ZERO canvasser assignments activates fine yet shows the field nothing. Warn
-// (non-blocking) when that's the case; "Activate anyway" proceeds.
-function ActivateButton({ campaignId, pass, onActivate }) {
-  const [confirm, setConfirm] = useState(false);
-  const asgQ = useQuery({
-    queryKey: ['turf-pass-assignments', campaignId, pass._id],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/assignments?passId=${pass._id}`),
-    enabled: !!campaignId && !!pass._id,
-  });
-  const assignmentCount = (asgQ.data?.assignments || []).length;
-
-  function click() {
-    if (asgQ.isSuccess && assignmentCount === 0) setConfirm(true);
-    else onActivate();
-  }
-
-  return (
-    <>
-      <button onClick={click} className="text-xs font-semibold text-success hover:underline">
-        Activate
-      </button>
-      {confirm && (
-        <Modal
-          size="md"
-          onClose={() => setConfirm(false)}
-          title="Activate with no canvassers assigned?"
-          footer={
-            <>
-              <Button variant="secondary" size="sm" onClick={() => setConfirm(false)}>Cancel</Button>
-              <Button variant="primary" size="sm" onClick={() => { setConfirm(false); onActivate(); }}>Activate anyway</Button>
-            </>
-          }
-        >
-          <p className="text-sm text-fg-muted">
-            No books in this round are assigned to a canvasser. Canvassers only see books assigned to them,
-            so nobody will have work until you assign them on the Turf Cutting page. You can activate now and
-            assign later.
-          </p>
-        </Modal>
-      )}
-    </>
-  );
-}
-
-function PassDetail({ campaignId, pass, tz }) {
-  const turfsQ = useQuery({
-    queryKey: ['turfs', campaignId, pass._id],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs?passId=${pass._id}`),
-    enabled: !!campaignId,
-  });
-  const asgQ = useQuery({
-    queryKey: ['turf-pass-assignments', campaignId, pass._id],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/assignments?passId=${pass._id}`),
-    enabled: !!campaignId,
-  });
-  const turfs = turfsQ.data?.turfs || [];
-  const byTurf = new Map();
-  for (const a of asgQ.data?.assignments || []) {
-    const key = String(a.turfId);
-    const arr = byTurf.get(key) || [];
-    arr.push(a.user);
-    byTurf.set(key, arr);
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3 text-xs text-fg-muted">
-        {pass.activatedAt && (
-          <span>Activated {formatInTz(pass.activatedAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false)}</span>
-        )}
-        <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut / assign books →</a>
-        <a href={`/campaigns/${campaignId}/map?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Audit →</a>
-      </div>
-      {turfsQ.isLoading ? (
-        <div className="text-xs text-fg-muted">Loading books…</div>
-      ) : !turfs.length ? (
-        <div className="text-xs text-fg-muted">
-          No books cut yet.{' '}
-          <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut books →</a>
-        </div>
-      ) : (
-        <ul className="divide-y divide-border overflow-hidden rounded-md border border-border bg-card">
-          {turfs.map((t) => (
-            <li key={t._id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-              <div className="min-w-0">
-                <span className="font-medium text-fg">{t.name}</span>
-                <span className="ml-2 text-xs text-fg-muted">{(t.eligibleDoorCount ?? t.doorCount ?? 0).toLocaleString()} doors</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <Avatars users={byTurf.get(String(t._id)) || []} />
-                <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="shrink-0 text-xs font-medium text-brand-accent hover:underline">Open in Turf →</a>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
+// Full-page view of one walk list's passes. The effort is fixed by the route
+// (/campaigns/:campaignId/efforts/:effortId/passes) — no walk-list picker. The same
+// <PassManager> also renders inline in the Walk Lists drawer (compact variant).
 export default function PassesPage() {
-  const qc = useQueryClient();
-  const { campaignId } = useParams();
+  const { campaignId, effortId } = useParams();
   const { selected } = useCampaignSelection(campaignId);
   const orgTz = useOrgTimeZone();
   const tz = selected?.timeZone || orgTz;
-  const [searchParams] = useSearchParams();
-  const [name, setName] = useState('');
-  const [effortId, setEffortId] = useState(searchParams.get('effortId') || '');
-  const [openId, setOpenId] = useState(null);
-  const [archiveTarget, setArchiveTarget] = useState(null); // pass pending archive-confirm
-  const [archiveText, setArchiveText] = useState('');
 
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
     enabled: !!campaignId,
   });
-  const efforts = (effortsQ.data?.efforts || []).filter((e) => e.status !== 'archived');
-
-  // Default the effort once efforts load (URL ?effortId wins, else first effort).
-  useEffect(() => {
-    if (effortId || !efforts.length) return;
-    setEffortId(String(efforts[0]._id));
-  }, [effortId, efforts]);
-
-  const passesQ = useQuery({
-    queryKey: ['admin', 'passes', campaignId, effortId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/passes?effortId=${effortId}`),
-    enabled: !!campaignId && !!effortId,
-  });
-  const passes = passesQ.data?.passes || [];
-
-  const totalBooks = useMemo(() => passes.reduce((s, p) => s + (p.turfCount || 0), 0), [passes]);
-  const activePass = passes.find((p) => p.status === 'active');
-
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
-    qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
-    qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
-  };
-
-  const create = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/passes`, { method: 'POST', body: { name, effortId } }),
-    onSuccess: () => { setName(''); invalidate(); },
-  });
-  const action = useMutation({
-    mutationFn: ({ id, op }) => api(`/admin/campaigns/${campaignId}/passes/${id}/${op}`, { method: 'POST' }),
-    onSuccess: invalidate,
-  });
-  const archive = useMutation({
-    mutationFn: (id) => api(`/admin/campaigns/${campaignId}/passes/${id}/archive`, { method: 'POST', body: { confirmArchive: true } }),
-    onSuccess: () => { setArchiveTarget(null); setArchiveText(''); invalidate(); },
-  });
-  const del = useMutation({
-    mutationFn: (id) => api(`/admin/campaigns/${campaignId}/passes/${id}`, { method: 'DELETE' }),
-    onSuccess: invalidate,
-  });
+  const effort = (effortsQ.data?.efforts || []).find((e) => String(e._id) === String(effortId));
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight text-fg">Passes</h1>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">Walk list</span>
-            <Select value={effortId} onChange={(e) => setEffortId(e.target.value)} className="py-1">
-              <option value="">Choose a walk list…</option>
-              {efforts.map((ef) => <option key={ef._id} value={ef._id}>{ef.name}</option>)}
-            </Select>
-          </label>
-        </div>
+      <div className="mb-5">
+        <Link to={`/campaigns/${campaignId}/efforts`} className="text-xs font-medium text-brand-accent hover:underline">
+          ← Walk Lists
+        </Link>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-fg">
+          Passes{effort ? ` — ${effort.name}` : ''}
+        </h1>
+        <p className="mt-1 text-sm text-fg-muted">
+          Each pass is a billable trip through this walk list's doors. Cut a pass's books on the Turf Cutting page, then activate it here.
+        </p>
       </div>
 
-      {effortId && (
-        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <StatCard label="Passes" value={passes.length.toLocaleString()} />
-          <StatCard
-            label="Active pass"
-            value={activePass ? `Pass ${activePass.roundNumber}` : '—'}
-            accent={activePass ? 'green' : undefined}
-            hint={activePass ? activePass.name : undefined}
-          />
-          <StatCard label="Total books" value={totalBooks.toLocaleString()} />
-        </div>
-      )}
-
-      <Card as="section" className="mb-6 p-5">
-        <h2 className="mb-3 text-base font-semibold text-fg">New pass</h2>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-fg">Name</span>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. GOTV pass" className="w-56" />
-          </label>
-          <Button onClick={() => name && effortId && create.mutate()} disabled={!name || !effortId} loading={create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create pass'}
-          </Button>
-        </div>
-        {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
-        <p className="mt-2 text-xs text-fg-muted">
-          Passes belong to the selected walk list. Create a pass → cut its books on the Turf Cutting page → Activate it here. Passes are one-way (draft → active → archived); each walk list can have one active pass.
+      {effortId ? (
+        <PassManager campaignId={campaignId} effortId={effortId} tz={tz} variant="full" />
+      ) : (
+        <p className="text-sm text-fg-muted">
+          Pick a walk list from{' '}
+          <Link to={`/campaigns/${campaignId}/efforts`} className="font-medium text-brand-accent hover:underline">Walk Lists</Link>{' '}
+          to manage its passes.
         </p>
-      </Card>
-
-      <Card className="overflow-hidden">
-        <table className="min-w-full text-sm">
-          <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
-            <tr>
-              <th className="px-4 py-2 text-left">Pass</th>
-              <th className="px-4 py-2 text-left">Name</th>
-              <th className="px-4 py-2 text-left">Status</th>
-              <th className="px-4 py-2 text-right">Books</th>
-              <th className="px-4 py-2 text-right">Knocks</th>
-              <th className="px-4 py-2 text-left">Progress</th>
-              <th className="px-4 py-2 text-left">Created</th>
-              <th className="px-4 py-2 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {passes.map((p) => {
-              const open = openId === p._id;
-              return (
-                <Fragment key={p._id}>
-                  <tr
-                    onClick={() => setOpenId(open ? null : p._id)}
-                    className="cursor-pointer border-t border-border transition-colors hover:bg-sunken/60"
-                  >
-                    <td className="px-4 py-2 text-fg-muted">
-                      <span className="mr-1.5 inline-block text-fg-subtle">{open ? '▾' : '▸'}</span>
-                      {p.roundNumber}
-                    </td>
-                    <td className="px-4 py-2 text-fg">
-                      {p.name}
-                      {p.status === 'active' && (
-                        <Badge variant="success" className="ml-2">ACTIVE</Badge>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">
-                      <Badge variant={STATUS_VARIANT[p.status] || 'neutral'} className="capitalize">{p.status}</Badge>
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-fg">{p.turfCount}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-fg">{(p.knockCount || 0).toLocaleString()}</td>
-                    <td className="px-4 py-2"><PassProgress campaignId={campaignId} passId={p._id} /></td>
-                    <td className="px-4 py-2 text-fg-muted">
-                      {p.createdAt ? formatInTz(p.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : '—'}
-                    </td>
-                    <td className="space-x-2 px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                      {p.status === 'draft' && (
-                        <ActivateButton
-                          campaignId={campaignId}
-                          pass={p}
-                          onActivate={() => action.mutate({ id: p._id, op: 'activate' })}
-                        />
-                      )}
-                      {p.status === 'active' && (
-                        <button onClick={() => { setArchiveText(''); setArchiveTarget(p); }} className="text-xs text-fg-muted hover:underline">
-                          Archive
-                        </button>
-                      )}
-                      {p.status === 'draft' && (
-                        <button onClick={() => del.mutate(p._id)} className="text-xs text-danger hover:underline">
-                          Delete
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                  {open && (
-                    <tr className="border-t border-border bg-sunken/50">
-                      <td colSpan="8" className="px-4 py-3">
-                        <PassDetail campaignId={campaignId} pass={p} tz={tz} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-            {!passes.length && (
-              <tr><td colSpan="8" className="px-4 py-6 text-center text-fg-muted">No passes yet.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
-      {action.error && <div className="mt-2 text-sm text-danger">{action.error.message}</div>}
-
-      {archiveTarget && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={() => setArchiveTarget(null)}>
-          <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-fg">
-              Archive Pass {archiveTarget.roundNumber} — {archiveTarget.name}?
-            </h3>
-            <p className="mt-2 text-sm text-fg-muted">
-              Archiving is <strong>one-way</strong> — a round can't be reopened, and canvassers lose it in the field.
-              <strong> Knock history is kept</strong> (cut a new round to keep going).
-            </p>
-            {archiveTarget.knockCount > 0 && (
-              <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-                ⚠️ {archiveTarget.knockCount.toLocaleString()} knock{archiveTarget.knockCount === 1 ? '' : 's'} already recorded in this round.
-              </div>
-            )}
-            {archiveTarget.knockCount > 0 && (
-              <label className="mt-3 block text-sm">
-                <span className="mb-1 block text-xs font-medium text-fg-muted">Type <strong>archive</strong> to confirm</span>
-                <input
-                  value={archiveText}
-                  onChange={(e) => setArchiveText(e.target.value)}
-                  autoFocus
-                  placeholder="archive"
-                  className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-danger focus:outline-none"
-                />
-              </label>
-            )}
-            {archive.error && <div className="mt-2 text-xs text-danger">{archive.error.message}</div>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setArchiveTarget(null)} disabled={archive.isPending} className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-sunken">
-                Cancel
-              </button>
-              <button
-                onClick={() => archive.mutate(archiveTarget._id)}
-                disabled={archive.isPending || (archiveTarget.knockCount > 0 && archiveText.trim().toLowerCase() !== 'archive')}
-                className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-              >
-                {archive.isPending ? 'Archiving…' : 'Archive round'}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

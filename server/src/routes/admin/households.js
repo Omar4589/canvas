@@ -400,7 +400,7 @@ router.get('/:householdId/activity', async (req, res, next) => {
         return {
           passId: key === 'none' ? null : key,
           roundNumber: p?.roundNumber ?? null,
-          name: p?.name || (key === 'none' ? 'Before rounds' : 'Round'),
+          name: p?.name || (key === 'none' ? 'Before passes' : 'Pass'),
           entries: items,
         };
       })
