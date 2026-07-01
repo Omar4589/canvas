@@ -693,14 +693,34 @@ export default function ImportPage() {
       </section>
 
       <h2 className="mb-3 text-base font-medium">Recent imports</h2>
-      {undo.data && (
-        <div className="mb-3 rounded border border-success/30 bg-success-tint px-3 py-2 text-sm text-green-800">
-          Undo complete — removed {fmt(undo.data.doorsDeleted)} door(s) and {fmt(undo.data.votersDeleted)} voter(s).
-          {(undo.data.doorsSkipped > 0 || undo.data.votersSkipped > 0)
-            ? ` Kept ${fmt(undo.data.doorsSkipped)} door(s) and ${fmt(undo.data.votersSkipped)} voter(s) already in use.`
-            : ''}
-        </div>
-      )}
+      {undo.data && (() => {
+        const d = undo.data;
+        const removed = (d.doorsDeleted || 0) + (d.votersDeleted || 0);
+        const tracked = (d.trackedDoors || 0) + (d.trackedVoters || 0);
+        const ok = removed > 0;
+        return (
+          <div className={`mb-3 rounded border px-3 py-2 text-sm ${ok ? 'border-success/30 bg-success-tint text-green-800' : 'border-warning/30 bg-warning-tint text-warning-fg'}`}>
+            {removed > 0 ? (
+              <>
+                Removed {fmt(d.doorsDeleted)} door(s) and {fmt(d.votersDeleted)} voter(s)
+                {d.jobsUndone > 1 ? ` across ${fmt(d.jobsUndone)} upload attempts` : ''}.
+                {d.doorsSkipped > 0 || d.votersSkipped > 0
+                  ? ` Kept ${fmt(d.doorsSkipped)} door(s) and ${fmt(d.votersSkipped)} voter(s) already in use.`
+                  : ''}
+                {d.jobsUndone > 1 && (
+                  <div className="mt-1 text-xs">
+                    If some doors remain, an earlier crashed attempt created them without a record — undo can’t reach those; re-import the file to fully reset.
+                  </div>
+                )}
+              </>
+            ) : tracked > 0 ? (
+              <>Nothing removed — the {fmt(tracked)} record(s) tracked for this file are all claimed or canvassed, so they were kept.</>
+            ) : (
+              <>Nothing to undo — no insert records were found for this file. An earlier crashed attempt created its rows without recording them, so undo can’t reach them. Re-import the file to start fresh.</>
+            )}
+          </div>
+        );
+      })()}
       {undo.error && (
         <div className="mb-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{undo.error.message}</div>
       )}

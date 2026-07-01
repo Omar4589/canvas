@@ -11,7 +11,7 @@ import { saveRawImport } from '../../services/import/rawImportStore.js';
 import { buildImportRows } from '../../services/import/csvImporter.js';
 import { parseUpload } from '../../services/import/parseUpload.js';
 import { computeImportDiff } from '../../services/import/computeImportDiff.js';
-import { undoImport } from '../../services/import/undoImport.js';
+import { undoFileImport } from '../../services/import/undoImport.js';
 import {
   CANONICAL_FIELDS,
   REQUIRED_FIELDS,
@@ -384,23 +384,24 @@ router.post('/:importId/undo', async (req, res, next) => {
       return res.status(400).json({ error: 'This import was already undone' });
     }
     try {
-      const result = await undoImport(job);
+      // Undo the whole file across all its (crash-retry) upload attempts, not just this job.
+      const enriched = await undoFileImport(job, activeOrgId(req), req.user._id);
       await ImportJob.updateOne(
         { _id: job._id },
         {
           $set: {
             undoResult: {
-              doorsDeleted: result.doorsDeleted,
-              doorsSkipped: result.doorsSkipped,
-              votersDeleted: result.votersDeleted,
-              votersSkipped: result.votersSkipped,
+              doorsDeleted: enriched.doorsDeleted,
+              doorsSkipped: enriched.doorsSkipped,
+              votersDeleted: enriched.votersDeleted,
+              votersSkipped: enriched.votersSkipped,
             },
           },
         }
       );
-      res.json(result);
+      res.json(enriched);
     } catch (err) {
-      // Roll the claim back so the admin can retry.
+      // Roll the clicked job's claim back (undoFileImport rolls back the siblings itself).
       await ImportJob.updateOne(
         { _id: job._id },
         { $set: { undone: false, undoneAt: null, undoneBy: null } }

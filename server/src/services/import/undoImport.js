@@ -8,6 +8,7 @@ import { Person } from '../../models/Person.js';
 import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
 import { PersonMergeLog } from '../../models/PersonMergeLog.js';
+import { ImportJob } from '../../models/ImportJob.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
@@ -193,4 +194,38 @@ export async function undoImport(importJob) {
     votersSkipped: vinDocs.length - votersDeleted,
     skipReasons,
   };
+}
+
+/**
+ * Undo a file's import ROBUSTLY. The same file is often uploaded several times (crash
+ * retries), so the net-new records get split across jobs. Given the already-claimed clicked
+ * job, gather this campaign's OTHER not-yet-undone apply-jobs for the SAME filename, mark
+ * them undone too, and undo the UNION of everyone's inserted ids — so "undo this file" clears
+ * the lot while the per-door skip guards in undoImport still protect claimed/canvassed doors.
+ * Rolls the sibling claims back if the delete throws (the caller owns the clicked job's claim).
+ * Returns undoImport's counts plus jobsUndone + trackedDoors/trackedVoters (+ newHouseholds).
+ */
+export async function undoFileImport(job, orgId, actorId) {
+  const siblings = job.filename
+    ? await ImportJob.find(
+        { organizationId: orgId, campaignId: job.campaignId, filename: job.filename, kind: 'apply', undone: { $ne: true }, _id: { $ne: job._id } },
+        { insertedHouseholdIds: 1, insertedVoterIds: 1 }
+      ).lean()
+    : [];
+  const siblingIds = siblings.map((s) => s._id);
+  if (siblingIds.length) {
+    await ImportJob.updateMany({ _id: { $in: siblingIds } }, { $set: { undone: true, undoneAt: new Date(), undoneBy: actorId || null } });
+  }
+  try {
+    const all = [job, ...siblings];
+    const insertedHouseholdIds = [...new Set(all.flatMap((j) => (j.insertedHouseholdIds || []).map(String)))];
+    const insertedVoterIds = [...new Set(all.flatMap((j) => (j.insertedVoterIds || []).map(String)))];
+    const result = await undoImport({ campaignId: job.campaignId, insertedHouseholdIds, insertedVoterIds });
+    return { ...result, jobsUndone: siblingIds.length + 1, trackedDoors: insertedHouseholdIds.length, trackedVoters: insertedVoterIds.length, newHouseholds: job.newHouseholds || 0 };
+  } catch (err) {
+    if (siblingIds.length) {
+      await ImportJob.updateMany({ _id: { $in: siblingIds } }, { $set: { undone: false, undoneAt: null, undoneBy: null } });
+    }
+    throw err;
+  }
 }
