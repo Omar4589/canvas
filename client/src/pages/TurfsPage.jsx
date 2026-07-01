@@ -589,8 +589,8 @@ export default function TurfsPage() {
   const selectedEffort = (effortsQ.data?.efforts || []).find((e) => String(e._id) === String(selectedPass?.effortId)) || null;
   const passLabel = selectedPass ? `${selectedEffort?.name || 'Walk list'} · Round ${selectedPass.roundNumber}` : '';
 
-  // Targeted-round filter: the effort's survey questions (for answer chips) + a live count.
-  const campaign = campaigns.find((c) => String(c._id) === String(campaignId)) || null;
+  // Targeted-pass filter: the effort's survey questions (for answer chips) + a live count.
+  const campaign = selected || null;
   const targetSurveyTemplateId = selectedEffort?.surveyTemplateId || campaign?.surveyTemplateId || null;
   const targetSurveyQ = useQuery({
     queryKey: ['reports', 'survey-results', campaignId, targetSurveyTemplateId],
