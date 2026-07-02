@@ -10,6 +10,7 @@
     "seed:admin": "node src/utils/seedAdmin.js",
     "reconcile:counts": "node src/utils/reconcileCounts.js",
     "audit:voted-doors": "node src/utils/auditVotedDoors.js",
+    "cleanup:test-campaigns": "node src/utils/deleteTestCampaigns.js",
     "migrate:multitenant": "node src/utils/migrateToMultiTenant.js",
     "worker": "node --max-old-space-size=${WORKER_MAX_OLD_SPACE:-384} src/worker.js",
     "migrate:voter-scope": "node src/migrations/migrateVoterScope.js",
