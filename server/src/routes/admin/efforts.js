@@ -10,10 +10,10 @@ import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Household } from '../../models/Household.js';
 import { WalkList } from '../../models/WalkList.js';
-import { Membership } from '../../models/Membership.js';
 import { recomputeTurf } from '../../services/turf/generateTurf.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
 import { createNextPass } from '../../services/passes/createPass.js';
+import { partitionAssignable } from '../../services/campaignRoster.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -359,9 +359,13 @@ router.post('/:id/members', loadEffort, async (req, res, next) => {
   try {
     const { userId } = req.body || {};
     if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ error: 'userId is required' });
-    // Must be an active member of the org.
-    const member = await Membership.exists({ organizationId: req.campaign.organizationId, userId, isActive: true });
-    if (!member) return res.status(400).json({ error: 'User is not an active org member' });
+    // Pre-staging is limited to the campaign team (or an org admin) — mirrors book assignment.
+    const { allowed } = await partitionAssignable({
+      campaignId: req.campaign._id,
+      organizationId: req.campaign.organizationId,
+      userIds: [userId],
+    });
+    if (!allowed.length) return res.status(409).json({ error: 'Add them to the campaign team first.', code: 'not-on-team' });
     const doc = await EffortMember.findOneAndUpdate(
       { effortId: req.effort._id, userId },
       {

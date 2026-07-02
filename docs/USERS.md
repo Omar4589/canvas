@@ -9,8 +9,8 @@ belongs to another.
 - **Part 2 — Technical reference** is for developers (and Claude): the data model, the auth/password
   flow, the cross-org guards, and the one-time migration.
 
-Related: [EFFORTS.md](EFFORTS.md) (crews are drawn from an org's canvassers), [METRICS.md](METRICS.md)
-(per-user, per-org stats).
+Related: [EFFORTS.md](EFFORTS.md) (crews are drawn from an org's canvassers), [CAMPAIGNS.md](CAMPAIGNS.md)
+(the campaign a team belongs to), [METRICS.md](METRICS.md) (per-user, per-org stats).
 
 ---
 
@@ -65,7 +65,27 @@ You set it two ways, both on the Users page:
 
 The Users list shows a **Coordinator** column, and a **Coordinator filter** lets you narrow the list to
 everyone a given admin oversees (or "No coordinator"). This is about *people management*; dividing the
-*work* itself is what Efforts do ([EFFORTS.md](EFFORTS.md)) — the two are independent and complementary.
+*work* itself is what walk lists do ([EFFORTS.md](EFFORTS.md)) — the two are independent and complementary.
+
+## The campaign team (who can work a campaign)
+
+Being in the org isn't the same as being on a **campaign**. Each campaign has its own **team** — the
+subset of org members who work it. The team is what:
+
+- **gates the mobile app** — a canvasser only sees campaigns they're on (admins & super-admins see all); and
+- **gates book assignment** — you can only assign books to people on the team.
+
+Manage it on the campaign's **Team** page (two panes: add org members on the left, the current team on
+the right). A person joins a campaign's team three ways, all equivalent:
+
+1. **Team page → Add** — the explicit way.
+2. **Walk Lists → Manage → Pre-add** — pre-stage someone onto a walk list (also puts them on the team).
+3. **Assigning them a book** — an admin assigning a book adds that person to the team automatically.
+
+Because assignment is now **team-only**, the everyday flow is: add people on the Team page first, then
+assign their books. **Admins & super-admins are the exception** — they can be assigned (including
+themselves) on the fly and are added to the team at that moment, so an admin can always self-assign a
+book without a separate step. Everyone appears in these lists, including you — there's no "hide myself."
 
 ## Passwords & lockouts
 
@@ -167,6 +187,32 @@ no extra query/populate). The web UI lives in [UsersPage.jsx](../client/src/page
 dropdown + table column + filter) and [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx)
 (save-on-change dropdown). No migration needed — absent → `null`. Distinct from **Efforts**, which
 partition the *doors/work*; the coordinator partitions *people*.
+
+## Campaign roster & assignment gating
+
+- **`CampaignAssignment`** ([server/src/models/CampaignAssignment.js](../server/src/models/CampaignAssignment.js))
+  — the per-campaign roster, unique `{campaignId, userId}`. It's the source of truth for **campaign
+  membership** (distinct from org `Membership` and from per-walk-list `EffortMember`).
+- **Team page endpoints** ([server/src/routes/admin/assignments.js](../server/src/routes/admin/assignments.js)):
+  `GET /admin/campaigns/:id/assignments` returns the roster enriched with each member's `role` +
+  `isSuperAdmin` (joined from `Membership`/`User`) so pickers/Team page can render badges; `POST`
+  (add) / `DELETE /:userId` (remove) manage it.
+- **Mobile visibility gate** — [bootstrap.js](../server/src/routes/mobile/bootstrap.js) filters a
+  canvasser's campaigns to their `CampaignAssignment`s (`assertCampaignAccess`); org admins/super-admins
+  bypass and see all.
+- **Assignment gate** — `partitionAssignable({campaignId, organizationId, userIds})`
+  ([campaignRoster.js](../server/src/services/campaignRoster.js)) returns `{ allowed, notOnTeam }`:
+  allowed = already on the roster **or** an org admin/super-admin. Both assign paths use it —
+  single-book [turfAssignments.js](../server/src/routes/admin/turfAssignments.js) `POST /` and bulk
+  [turfs.js](../server/src/routes/admin/turfs.js) `assign-bulk` — returning `409 { code:'not-on-team',
+  notOnTeam }` when nothing is allowed. `EffortMember` pre-staging ([efforts.js](../server/src/routes/admin/efforts.js)
+  `POST /:id/members`) applies the same gate. After a successful assign, `ensureCampaignAssignments`
+  adds any admin assigned on the fly to the roster (a no-op for existing members), so self-assign grants
+  mobile visibility.
+- **Client** — the three book pickers and the walk-list RosterPanel source their candidate list from
+  the shared [useCampaignTeam(campaignId)](../client/src/lib/useCampaignTeam.js) hook (roster + the
+  current admin, so self-assign always works) instead of the org-wide `GET /admin/memberships`. Each
+  offers a "＋ Add someone to the team →" link to the Team page ([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx)).
 
 ## In-app "added to org" notice
 

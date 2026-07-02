@@ -4,8 +4,7 @@ import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
-import { Membership } from '../../models/Membership.js';
-import { ensureCampaignAssignments } from '../../services/campaignRoster.js';
+import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -56,11 +55,17 @@ router.post('/', async (req, res, next) => {
       return res.status(409).json({ error: 'Accept the books first — only published books can be assigned.', code: 'not-accepted' });
     }
     const orgId = activeOrgId(req);
+    // Only people on this campaign's team (or an org admin/superadmin) can be assigned.
+    const { allowed, notOnTeam } = await partitionAssignable({
+      campaignId: req.turf.campaignId,
+      organizationId: orgId,
+      userIds: userIds.filter((id) => mongoose.isValidObjectId(id)),
+    });
+    if (!allowed.length) {
+      return res.status(409).json({ error: 'Add them to the campaign team first.', code: 'not-on-team', notOnTeam });
+    }
     const created = [];
-    for (const uid of userIds) {
-      if (!mongoose.isValidObjectId(uid)) continue;
-      const member = await Membership.exists({ userId: uid, organizationId: orgId, isActive: true });
-      if (!member) continue;
+    for (const uid of allowed) {
       const a = await TurfAssignment.findOneAndUpdate(
         { turfId: req.turf._id, userId: uid },
         {
@@ -77,8 +82,9 @@ router.post('/', async (req, res, next) => {
       created.push(a);
     }
     // Book given → make sure they're on the campaign roster (gates mobile visibility).
+    // (No-op for existing members; covers an admin assigned on the fly, incl. self.)
     await ensureCampaignAssignments(req.turf.campaignId, created.map((a) => a.userId), orgId, req.user._id);
-    res.status(201).json({ assignments: created });
+    res.status(201).json({ assignments: created, notOnTeam });
   } catch (err) {
     next(err);
   }

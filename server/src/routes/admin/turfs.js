@@ -8,7 +8,6 @@ import { Turf } from '../../models/Turf.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { Household } from '../../models/Household.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
-import { Membership } from '../../models/Membership.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
@@ -20,7 +19,7 @@ import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
-import { ensureCampaignAssignments } from '../../services/campaignRoster.js';
+import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
 import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
 
 const router = Router({ mergeParams: true });
@@ -74,12 +73,13 @@ router.post('/assign-bulk', async (req, res, next) => {
       return res.status(409).json({ error: 'Accept the books first — only published books can be assigned.', code: 'not-accepted' });
     }
 
-    // Keep only active org members (admins included).
-    const validUsers = [];
-    for (const uid of uids) {
-      if (await Membership.exists({ userId: uid, organizationId: orgId, isActive: true })) validUsers.push(uid);
-    }
-    if (!validUsers.length) return res.status(400).json({ error: 'No valid org members in userIds' });
+    // Only people on this campaign's team (or an org admin/superadmin) can be assigned.
+    const { allowed: validUsers, notOnTeam } = await partitionAssignable({
+      campaignId: req.campaign._id,
+      organizationId: orgId,
+      userIds: uids,
+    });
+    if (!validUsers.length) return res.status(409).json({ error: 'Add them to the campaign team first.', code: 'not-on-team', notOnTeam });
 
     // Deterministic, spatially-sensible order (book names are spatially numbered).
     turfs.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
@@ -132,7 +132,7 @@ router.post('/assign-bulk', async (req, res, next) => {
     }
     // Books given → make sure those users are on the campaign roster (gates mobile visibility).
     await ensureCampaignAssignments(req.campaign._id, validUsers, orgId, req.user._id);
-    res.json({ books: turfs.length, users: validUsers.length, assignments, mode: ['everyone', 'balance'].includes(mode) ? mode : 'distribute', replaced: !!replace });
+    res.json({ books: turfs.length, users: validUsers.length, assignments, mode: ['everyone', 'balance'].includes(mode) ? mode : 'distribute', replaced: !!replace, notOnTeam });
   } catch (err) {
     next(err);
   }

@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 
 export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const base = `/admin/campaigns/${campaignId}/turfs/${turf._id}/assignments`;
 
-  const membersQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
+  // Assignable = the campaign team (+ you) — not the whole org.
+  const { members, isLoading: membersLoading } = useCampaignTeam(campaignId);
   const assignmentsQ = useQuery({ queryKey: ['turf-assignments', turf._id], queryFn: () => api(base) });
 
   useEffect(() => {
@@ -20,12 +23,15 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
     () => new Set((assignmentsQ.data?.assignments || []).map((a) => String(a.userId?._id || a.userId))),
     [assignmentsQ.data]
   );
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['turf-assignments', turf._id] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['turf-assignments', turf._id] });
+    qc.invalidateQueries({ queryKey: ['turf-pass-assignments'] });
+    // Self-assign may have added the admin to the roster — refresh the candidate list.
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
+  };
   const assignMut = useMutation({ mutationFn: (userIds) => api(base, { method: 'POST', body: { userIds } }), onSuccess: invalidate });
   const unassignMut = useMutation({ mutationFn: (userId) => api(`${base}/${userId}`, { method: 'DELETE' }), onSuccess: invalidate });
 
-  // Anyone active in the org can be assigned a book — admins canvass too.
-  const members = (membersQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
   const filtered = members.filter((m) => {
     if (!search.trim()) return true;
     const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
@@ -79,12 +85,8 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
               </button>
             )}
           </div>
-          {membersQ.isLoading || assignmentsQ.isLoading ? (
+          {membersLoading || assignmentsQ.isLoading ? (
             <div className="py-8 text-center text-sm text-fg-muted">Loading…</div>
-          ) : members.length === 0 ? (
-            <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
-              No members in this org yet. Add one from the Users page.
-            </div>
           ) : (
             <ul className="max-h-80 divide-y divide-border overflow-auto rounded-md border border-border">
               {filtered.map((m) => {
@@ -97,6 +99,9 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
                         <span className="font-medium text-fg">{u.firstName} {u.lastName}</span>
                         {m.role === 'admin' && (
                           <span className="rounded bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">admin</span>
+                        )}
+                        {u.isSelf && (
+                          <span className="rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">you</span>
                         )}
                       </div>
                       <div className="text-xs text-fg-muted">{u.email}</div>
@@ -116,6 +121,12 @@ export default function TurfAssignmentsModal({ campaignId, turf, onClose }) {
               {!filtered.length && <li className="px-3 py-3 text-center text-sm text-fg-muted">No matches.</li>}
             </ul>
           )}
+          <Link
+            to={`/campaigns/${campaignId}/team`}
+            className="mt-2 inline-block text-xs font-medium text-brand-accent hover:underline"
+          >
+            ＋ Add someone to the team →
+          </Link>
         </div>
 
         <div className="border-t border-border px-6 py-3 text-right">

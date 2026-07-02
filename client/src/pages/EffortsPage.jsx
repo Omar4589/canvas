@@ -6,6 +6,7 @@ import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import PassManager from '../components/PassManager.jsx';
+import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -20,7 +21,8 @@ function RosterPanel({ campaignId, effort }) {
     queryKey: ['effort-crew', effort._id],
     queryFn: () => api(`/admin/campaigns/${campaignId}/efforts/${effort._id}/members`),
   });
-  const orgQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
+  // Pre-stage from the campaign team (+ you), not the whole org — mirrors book assignment.
+  const { members } = useCampaignTeam(campaignId);
   const [userId, setUserId] = useState('');
 
   const invalidate = () => {
@@ -38,7 +40,6 @@ function RosterPanel({ campaignId, effort }) {
 
   const crew = crewQ.data?.crew || [];
   const crewIds = new Set(crew.map((c) => String(c.user.id)));
-  const members = (orgQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
   const addable = members.filter((m) => !crewIds.has(String(m.user.id)));
 
   return (
@@ -69,15 +70,18 @@ function RosterPanel({ campaignId, effort }) {
       )}
       <div className="flex items-center gap-2">
         <select value={userId} onChange={(e) => setUserId(e.target.value)} className={COMPACT}>
-          <option value="">Pre-add person…</option>
+          <option value="">Pre-add from team…</option>
           {addable.map((m) => (
             <option key={m.user.id} value={m.user.id}>
-              {m.user.firstName} {m.user.lastName}{m.role === 'admin' ? ' (admin)' : ''}
+              {m.user.firstName} {m.user.lastName}{m.role === 'admin' ? ' (admin)' : ''}{m.user.isSelf ? ' — you' : ''}
             </option>
           ))}
         </select>
         <Button size="sm" onClick={() => userId && add.mutate(userId)} disabled={!userId || add.isPending}>Add</Button>
       </div>
+      <Link to={`/campaigns/${campaignId}/team`} className="mt-1.5 inline-block text-[11px] font-medium text-brand-accent hover:underline">
+        ＋ Add someone to the team →
+      </Link>
     </div>
   );
 }

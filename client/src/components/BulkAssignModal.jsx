@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 
 // Assign many selected books to many people in one go.
 //   Distribute = round-robin (split the books evenly across the crew, one per book)
@@ -12,7 +14,8 @@ export default function BulkAssignModal({ campaignId, turfIds, onClose }) {
   const [mode, setMode] = useState('distribute');
   const [replace, setReplace] = useState(false);
 
-  const membersQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
+  // Assignable = the campaign team (+ you) — not the whole org.
+  const { members, isLoading: membersLoading } = useCampaignTeam(campaignId);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -20,7 +23,6 @@ export default function BulkAssignModal({ campaignId, turfIds, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const members = (membersQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
   const filtered = members.filter((m) => {
     if (!search.trim()) return true;
     const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
@@ -36,6 +38,7 @@ export default function BulkAssignModal({ campaignId, turfIds, onClose }) {
       qc.invalidateQueries({ queryKey: ['turf-pass-assignments'] });
       qc.invalidateQueries({ queryKey: ['turf-assignments'] });
       qc.invalidateQueries({ queryKey: ['turfs'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
       onClose();
     },
   });
@@ -98,12 +101,8 @@ export default function BulkAssignModal({ campaignId, turfIds, onClose }) {
             </button>
           </div>
 
-          {membersQ.isLoading ? (
+          {membersLoading ? (
             <div className="py-8 text-center text-sm text-fg-muted">Loading…</div>
-          ) : members.length === 0 ? (
-            <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
-              No members in this org yet. Add one from the Users page.
-            </div>
           ) : (
             <ul className="max-h-72 divide-y divide-border overflow-auto rounded-md border border-border">
               {filtered.map((m) => {
@@ -121,6 +120,9 @@ export default function BulkAssignModal({ campaignId, turfIds, onClose }) {
                         {m.role === 'admin' && (
                           <span className="rounded bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">admin</span>
                         )}
+                        {u.isSelf && (
+                          <span className="rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">you</span>
+                        )}
                       </span>
                       <span className="text-xs text-fg-muted">{u.email}</span>
                     </button>
@@ -130,6 +132,12 @@ export default function BulkAssignModal({ campaignId, turfIds, onClose }) {
               {!filtered.length && <li className="px-3 py-3 text-center text-sm text-fg-muted">No matches.</li>}
             </ul>
           )}
+          <Link
+            to={`/campaigns/${campaignId}/team`}
+            className="mt-2 inline-block text-xs font-medium text-brand-accent hover:underline"
+          >
+            ＋ Add someone to the team →
+          </Link>
 
           <label className="mt-3 flex items-center gap-2 text-xs text-fg-muted">
             <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />

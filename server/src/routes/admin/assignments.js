@@ -33,8 +33,16 @@ router.get('/', async (req, res, next) => {
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     const assignments = await CampaignAssignment.find({ campaignId: campaign._id })
-      .populate({ path: 'userId', select: 'firstName lastName email isActive' })
+      .populate({ path: 'userId', select: 'firstName lastName email isActive isSuperAdmin' })
       .lean();
+    // Join org roles so the pickers/Team page can show the "admin" badge + search.
+    const userIds = assignments.filter((a) => a.userId).map((a) => a.userId._id);
+    const roleByUser = new Map(
+      (await Membership.find({ organizationId: campaign.organizationId, userId: { $in: userIds } })
+        .select('userId role')
+        .lean()
+      ).map((m) => [String(m.userId), m.role])
+    );
     res.json({
       assignments: assignments
         .filter((a) => a.userId)
@@ -44,6 +52,8 @@ router.get('/', async (req, res, next) => {
           lastName: a.userId.lastName,
           email: a.userId.email,
           isActive: a.userId.isActive,
+          isSuperAdmin: !!a.userId.isSuperAdmin,
+          role: roleByUser.get(String(a.userId._id)) || 'canvasser',
           assignedAt: a.assignedAt,
         })),
     });

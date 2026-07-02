@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 
 // Floating panel over the turf map: assign canvassers to the currently-selected
 // book(s) — from either the list or the map. One book → instant per-person
@@ -23,7 +24,6 @@ export default function BookAssignmentPanel({
   mergePending,
 }) {
   const qc = useQueryClient();
-  const location = useLocation();
   const single = books.length === 1;
   // Only published (accepted) books can be assigned — re-cutting would wipe drafts.
   const draftSelected = books.some((b) => b.status && b.status !== 'published');
@@ -35,8 +35,8 @@ export default function BookAssignmentPanel({
   const [mode, setMode] = useState('distribute');
   const [replace, setReplace] = useState(false);
 
-  const membersQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
-  const members = (membersQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
+  // Assignable = the campaign team (+ you, so admins can self-assign) — not the whole org.
+  const { members, isLoading: membersLoading } = useCampaignTeam(campaignId);
   const filtered = members.filter((m) => {
     if (!search.trim()) return true;
     const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
@@ -61,6 +61,8 @@ export default function BookAssignmentPanel({
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] });
     qc.invalidateQueries({ queryKey: ['turf-assignments'] });
+    // Self-assign may have added the admin to the roster — refresh the candidate list.
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
   };
 
   const assignOne = useMutation({
@@ -191,18 +193,8 @@ export default function BookAssignmentPanel({
               )}
           </div>
 
-          {membersQ.isLoading ? (
+          {membersLoading ? (
             <div className="py-6 text-center text-xs text-fg-muted">Loading…</div>
-          ) : !members.length ? (
-            <div className="rounded border border-dashed border-border bg-sunken px-3 py-4 text-center text-xs text-fg-muted">
-              No members in this org yet.{' '}
-              <Link
-                to={`/users?return=${encodeURIComponent(location.pathname + location.search)}`}
-                className="font-medium text-brand-accent underline hover:no-underline"
-              >
-                Manage Users →
-              </Link>
-            </div>
           ) : (
             <ul className="max-h-56 divide-y divide-border overflow-auto rounded-md border border-border">
               {filtered.map((m) => {
@@ -214,6 +206,7 @@ export default function BookAssignmentPanel({
                       <span className="flex min-w-0 items-center gap-1.5">
                         <span className="truncate font-medium text-fg">{u.firstName} {u.lastName}</span>
                         {m.role === 'admin' && <span className="rounded bg-sunken px-1 text-[9px] font-semibold uppercase text-fg-muted">admin</span>}
+                        {u.isSelf && <span className="rounded bg-brand-tint px-1 text-[9px] font-semibold uppercase text-brand-accent">you</span>}
                       </span>
                       <button
                         onClick={() => toggleSingle(u.id)}
@@ -236,6 +229,7 @@ export default function BookAssignmentPanel({
                         <span className={['flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px]', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-border-strong'].join(' ')}>{on ? '✓' : ''}</span>
                         <span className="truncate font-medium text-fg">{u.firstName} {u.lastName}</span>
                         {m.role === 'admin' && <span className="rounded bg-sunken px-1 text-[9px] font-semibold uppercase text-fg-muted">admin</span>}
+                        {u.isSelf && <span className="rounded bg-brand-tint px-1 text-[9px] font-semibold uppercase text-brand-accent">you</span>}
                       </span>
                     </button>
                   </li>
@@ -244,6 +238,13 @@ export default function BookAssignmentPanel({
               {!filtered.length && <li className="px-2.5 py-2 text-center text-xs text-fg-muted">No matches.</li>}
             </ul>
           )}
+
+          <Link
+            to={`/campaigns/${campaignId}/team`}
+            className="mt-2 inline-block text-[11px] font-medium text-brand-accent hover:underline"
+          >
+            ＋ Add someone to the team →
+          </Link>
 
           {!single && (
             <>
