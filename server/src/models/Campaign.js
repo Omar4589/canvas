@@ -28,6 +28,10 @@ const campaignSchema = new mongoose.Schema(
     // rounds (one per active effort). Derive them via activePassIds() from
     // Pass.status === 'active' (services/passes/activePasses.js).
     timeZone: { type: String, default: 'America/New_York' },
+    // When an admin dismisses the "Setup complete — this campaign is live" dashboard
+    // banner. Set once (for all admins of the campaign); null = never dismissed. Only
+    // silences the go-live confirmation — incomplete-setup guidance still shows.
+    setupLiveDismissedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

@@ -82,7 +82,25 @@ router.get('/', async (req, res, next) => {
       },
     });
 
-    res.json({ ...result, hasCanvassed: Boolean(activity || responses), effortsNeedingSetup });
+    res.json({
+      ...result,
+      hasCanvassed: Boolean(activity || responses),
+      effortsNeedingSetup,
+      liveDismissed: Boolean(req.campaign.setupLiveDismissedAt),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Dismiss the "Setup complete — this campaign is live" dashboard banner. Stamped on
+// the campaign, so it stays hidden for every admin (and across reloads). Only the
+// go-live confirmation is silenced; the setup checklist still shows while incomplete.
+router.post('/dismiss-live', async (req, res, next) => {
+  try {
+    req.campaign.setupLiveDismissedAt = new Date();
+    await req.campaign.save();
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

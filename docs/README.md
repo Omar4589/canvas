@@ -21,13 +21,15 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 
 | Doc | What it covers |
 |---|---|
-| [CAMPAIGNS.md](CAMPAIGNS.md) | Start here: the full first-campaign flow (create → import → effort → round → cut → assign → activate) and the on-screen Setup-progress guide, plus managing a campaign (edit rules, type-lock, archive vs. delete) and extending a live one with a new effort. |
+| [GETTING_STARTED.md](GETTING_STARTED.md) | **Start here:** the click-by-click first-run walkthrough — create campaign → import voters → survey → walk list (auto Pass 1) → cut & accept books → assign → activate — with the two gotchas (books before activation; assigning can come after). |
+| [CAMPAIGNS.md](CAMPAIGNS.md) | The setup flow at a glance and the on-screen Setup-progress guide, plus managing a campaign (edit rules, type-lock, archive vs. delete) and extending a live one with a new walk list. Full walkthrough in GETTING_STARTED.md. |
 | [METRICS.md](METRICS.md) | Every number on the dashboards — knocks, surveys, coverage, connection rate — and the duplicate-knock ("overlap") warning. The source of truth for counting. |
 | [DATE_FILTERS.md](DATE_FILTERS.md) | The date-range control on the dashboards (and map): presets, what each page defaults to, the custom picker, the boundary math, and why the map narrows its pins. |
 | [TIMEZONES.md](TIMEZONES.md) | What "a day" is and which clock every date/time is shown in: every campaign owns its timezone (the org's for org-wide rollups), the anchor-tz date window, day bucketing, and timestamp display labels. |
-| [EFFORTS.md](EFFORTS.md) | Parallel canvassing within a campaign: efforts (areas/teams) that own disjoint doors, a survey, and a crew, each with its own rounds. Door ownership + Intake, per-effort survey/reporting, concurrency. |
-| [WALKLISTS.md](WALKLISTS.md) | Saved, frozen door sets you carve efforts from — built from the filter builder or an uploaded Voter-ID CSV — and how a list seeds/claims an effort's doors. |
-| [PASSES_AND_TURF.md](PASSES_AND_TURF.md) | Rounds (a "pass" within an effort), books (walkable turf), turf-cutting & recutting, and the mechanics that apply per round. |
+| [EFFORTS.md](EFFORTS.md) | Parallel canvassing within a campaign: walk lists (areas/teams) that own disjoint doors, a survey, and a crew, each with its own passes. Door ownership + Intake, per-walk-list survey/reporting, concurrency. |
+| [WALKLISTS.md](WALKLISTS.md) | Saved, frozen door sets you carve walk lists from — built from the filter builder or an uploaded Voter-ID CSV — and how a saved search seeds/claims a walk list's doors. |
+| [PASSES.md](PASSES.md) | A walk list's passes — the billable sweeps: auto Pass 1, per-walk-list numbering, the draft → active → archived lifecycle, and where they're managed (inside the walk list, not a top-level page). |
+| [PASSES_AND_TURF.md](PASSES_AND_TURF.md) | Cutting a pass's doors into books (walkable turf), turf-cutting & recutting, and the mechanics that apply per pass. |
 | [SURVEYS.md](SURVEYS.md) | Building, running, and reporting surveys — per-effort overrides, and the guardrails on editing a survey that's already collecting answers. |
 | [CLIENT_PORTAL.md](CLIENT_PORTAL.md) | Client reports & shareable links: building & publishing frozen weekly report snapshots (KPIs with this-week deltas, support/survey/contact breakdowns, authored observations, a coverage map), and the public per-campaign **share link** (`/r/<token>`, optional password, rotate/revoke) that opens a no-login report hub. |
 | [IMPORTS.md](IMPORTS.md) | Voter uploads: how rows match, what goes live, and how new addresses reach the field through Intake. |

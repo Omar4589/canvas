@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import NextStepBanner from './NextStepBanner.jsx';
-import { Card, Badge, Button, SkeletonRows } from './ui/index.js';
+import { Card, Badge, Button, IconButton, IconX, SkeletonRows } from './ui/index.js';
 
 // Per-campaign cold-start checklist. NON-BLOCKING: it signposts the ordered
 // chain (survey → campaign → voters → doors → round → books → assign → live) and
@@ -24,13 +24,22 @@ const STATUS_BADGE = {
 
 export default function SetupProgress({ campaignId }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [showSteps, setShowSteps] = useState(false);
+  const [dismissedLocal, setDismissedLocal] = useState(false); // optimistic hide
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'setup-status', campaignId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/setup-status`),
     enabled: !!campaignId,
     refetchInterval: 30_000,
+  });
+
+  // Dismiss the go-live banner for every admin (stamped on the campaign server-side).
+  const dismissLive = useMutation({
+    mutationFn: () => api(`/admin/campaigns/${campaignId}/setup-status/dismiss-live`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] }),
+    onError: () => setDismissedLocal(false), // POST failed — let the banner come back
   });
 
   if (!campaignId) return null;
@@ -54,7 +63,7 @@ export default function SetupProgress({ campaignId }) {
     );
   }
 
-  const { steps, stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute, hasCanvassed, effortsNeedingSetup } = data;
+  const { steps, stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute, hasCanvassed, effortsNeedingSetup, liveDismissed } = data;
 
   // Once the round is live AND knocks have started, the dashboard is for monitoring.
   // Drop the hub — UNLESS a newer effort still isn't live (the campaign-level
@@ -73,7 +82,12 @@ export default function SetupProgress({ campaignId }) {
     return null;
   }
 
-  // Done + live but no knocks yet: a slim go-live confirmation (re-openable).
+  // Once dismissed (server-stamped, or optimistically this session), the go-live
+  // confirmation stays gone. Only silences the "complete" congrats — an incomplete
+  // campaign still falls through to the full checklist below.
+  if (complete && (liveDismissed || dismissedLocal)) return null;
+
+  // Done + live but no knocks yet: a slim go-live confirmation (re-openable, dismissable).
   if (complete && !showSteps) {
     return (
       <Card className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
@@ -81,13 +95,22 @@ export default function SetupProgress({ campaignId }) {
           <Badge variant="success" dot>Live</Badge>
           <span className="text-sm text-fg-muted">Setup complete — this campaign is live.</span>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowSteps(true)}
-          className="text-xs font-semibold text-fg-muted underline underline-offset-2"
-        >
-          Show steps
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowSteps(true)}
+            className="text-xs font-semibold text-fg-muted underline underline-offset-2"
+          >
+            Show steps
+          </button>
+          <IconButton
+            label="Dismiss"
+            onClick={() => { setDismissedLocal(true); dismissLive.mutate(); }}
+            className="-mr-1"
+          >
+            <IconX size={16} />
+          </IconButton>
+        </div>
       </Card>
     );
   }

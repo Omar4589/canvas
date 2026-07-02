@@ -1,21 +1,22 @@
 # Campaigns (start one, manage it, extend it)
 
-The campaign is the top-level container for a canvassing project — its voters, efforts, rounds,
-surveys, and reports all hang off it. This doc is the **getting-started guide** (how to take a brand
--new campaign all the way to canvassers knocking doors) plus the rules for **managing** a campaign
-afterward (editing, archiving, deleting) and **extending** a live one (adding more doors as a new
-effort).
+The campaign is the top-level container for a canvassing project — its voters, walk lists, passes,
+surveys, and reports all hang off it. This doc covers the **setup flow at a glance** plus the rules
+for **managing** a campaign afterward (editing, archiving, deleting) and **extending** a live one
+(adding more doors as a new walk list). For a click-by-click first-run walkthrough, see
+[GETTING_STARTED.md](GETTING_STARTED.md).
 
-- **Part 1 — For everyone** is plain language: the first-campaign flow, the on-screen guide that
-  walks it, and the management/extend rules.
+- **Part 1 — For everyone** is plain language: the first-campaign flow at a glance, the on-screen
+  guide that walks it, and the management/extend rules.
 - **Part 2 — Technical reference** is for developers (and Claude): the model, endpoints, the
   setup-progress derivation, the delete cascade, and the frontend files.
 
-Related: [EFFORTS.md](EFFORTS.md) (efforts own the doors and rounds), [IMPORTS.md](IMPORTS.md) (how a
-CSV matches and reaches Intake), [WALKLISTS.md](WALKLISTS.md) (route a specific CSV to one effort),
-[SURVEYS.md](SURVEYS.md) (attach a survey before activating a round), [PASSES_AND_TURF.md](PASSES_AND_TURF.md)
-(rounds + cutting books), [METRICS.md](METRICS.md) (the numbers), [TIMEZONES.md](TIMEZONES.md) (why a
-timezone change matters).
+Related: [GETTING_STARTED.md](GETTING_STARTED.md) (the step-by-step first-run walkthrough),
+[EFFORTS.md](EFFORTS.md) (walk lists own the doors and passes), [IMPORTS.md](IMPORTS.md) (how a
+CSV matches and reaches Intake), [WALKLISTS.md](WALKLISTS.md) (route a specific CSV to one walk list),
+[SURVEYS.md](SURVEYS.md) (attach a survey before activating a pass), [PASSES.md](PASSES.md) (passes:
+lifecycle + where they're managed), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (cutting books),
+[METRICS.md](METRICS.md) (the numbers), [TIMEZONES.md](TIMEZONES.md) (why a timezone change matters).
 
 ---
 
@@ -25,28 +26,27 @@ timezone change matters).
 
 A campaign goes from "created" to "canvassers in the field" through one ordered chain. The **Setup
 progress** card on the campaign's dashboard walks you through it — it's a live checklist with a
-"next step" button, so you never have to remember the order. The steps:
+"next step" button, so you never have to remember the order. At a glance:
 
 1. **Create the campaign** — **Campaigns → New campaign**: name, type (survey / lit drop), state,
-   timezone (auto-fills from the state). A survey is **not** required at creation. After it's created
-   you'll be nudged to import voters.
-2. **Attach a survey** *(survey campaigns only)* — on the campaign's **Survey** tab, pick (or build)
-   the survey to use. You can do this any time before you activate a round; the requirement is
-   enforced at **round activation**, not at creation. (Lit-drop campaigns skip this.) See
-   [SURVEYS.md](SURVEYS.md).
-3. **Import voters** — **Voter Import**: upload a voter file. If it already has latitude / longitude
-   columns they're used as-is; otherwise the app **geocodes** the addresses for you (via Geocodio).
-   New addresses land in **Intake** (owned by no effort yet). See [IMPORTS.md](IMPORTS.md).
-4. **Create an effort and give it doors** — **Efforts → New effort**, then **Claim** its doors (from
-   a walk list, or "Claim all Intake"). An effort owns a disjoint set of doors; nothing gets
-   canvassed until an effort owns it. See [EFFORTS.md](EFFORTS.md).
-5. **Create a round** — **Passes**: a round (a "pass") inside the effort.
-6. **Cut and accept books** — **Turf Cutting**: cut the round's doors into walkable books
-   (geometric, or by attribute like precinct), then **Accept** them.
-7. **Assign canvassers** — assign books to people (add canvassers on **Users** first if you have
-   none).
-8. **Activate the round** — **Passes → Activate**. Now it's live and the field app shows the work.
+   timezone (auto-fills from the state). A survey is **not** required at creation.
+2. **Import voters** — **Voter Import**: upload a voter file (geocoded for you if it has no lat/lng).
+   New addresses land in **Intake** (owned by no walk list yet). See [IMPORTS.md](IMPORTS.md).
+3. **Attach a survey** *(survey campaigns only)* — on the campaign's **Survey** tab, pick or build
+   the survey. Timing is flexible: any time before you activate a pass (the requirement is enforced
+   at **activation**, not creation). Lit-drop campaigns skip this. See [SURVEYS.md](SURVEYS.md).
+4. **Create a walk list and give it doors** — **Walk Lists → New walk list**, then **Claim** its
+   doors (from a saved search, or "Claim all Intake"). Creating the walk list **auto-creates its
+   Pass 1** — no separate "make a pass" step. See [EFFORTS.md](EFFORTS.md) and [PASSES.md](PASSES.md).
+5. **Cut and accept books** — **Turf Cutting**: cut the pass's doors into walkable books (geometric,
+   or by attribute like precinct), then **Accept** them. See [PASSES_AND_TURF.md](PASSES_AND_TURF.md).
+6. **Assign canvassers** — assign books to people (add canvassers on **Users** first if you have
+   none). This can be done **before or after** activation.
+7. **Activate the pass** — open the walk list's **Passes** panel → **Activate**. Now it's live and
+   the field app shows the work. Activation is **gated on books**: you can't activate until the pass
+   has at least one **accepted** book (and, for survey campaigns, a survey attached).
 
+For the full click-by-click version of each step, see [GETTING_STARTED.md](GETTING_STARTED.md).
 Inside a campaign the left sidebar lists that campaign's tabs in roughly this order, so the nav
 mirrors the chain. How that drill-in works is below.
 
@@ -54,29 +54,32 @@ mirrors the chain. How that drill-in works is below.
 
 The **Campaigns** page is the launchpad. **Click a campaign** to *drill in*: the left sidebar swaps
 from the org-level items to **that campaign's tabs** — Home, Survey, Voter Import, Walk Lists,
-Efforts, Turf Cutting, Passes, Map, Early Voting, Client Reports — with a **"‹ Campaigns"** link to
-exit and a **campaign switcher** dropdown to hop to another campaign without leaving the page you're
-on. The **URL is the active campaign**: `/campaigns/:id` is its Home (dashboard), and each tab is
+Saved Searches, Turf Cutting, Team, Daily Timeline, Map, Early Voting, Client Reports — with a
+**"‹ Campaigns"** link to exit and a **campaign switcher** dropdown to hop to another campaign
+without leaving the page you're on. (Passes aren't a top-level tab — they live inside each walk
+list; see [PASSES.md](PASSES.md).) The **URL is the active campaign**: `/campaigns/:id` is its Home (dashboard), and each tab is
 `/campaigns/:id/…`. There are no more per-screen "Campaign" dropdowns — the URL plus the sidebar
 switcher are how you pick which campaign you're working in.
 
 ### The Setup progress card
 
-On a campaign's dashboard, the **Setup progress** card shows where you are in that 8-step chain —
+On a campaign's dashboard, the **Setup progress** card shows where you are in that setup chain —
 each step has a status (done / now / to-do), a deep link to its screen, and one highlighted **next
-step** button. It's non-blocking (you can still jump anywhere). The Campaigns list and the Overview
+step** button. (Creating a walk list auto-satisfies the "Pass created" step, so it's one fewer thing
+to do by hand.) It's non-blocking (you can still jump anywhere). The Campaigns list and the Overview
 cards show a compact **"Setup x/N"** chip so you can spot a half-set-up campaign at a glance.
 
-Once the round is **activated**, the card collapses to a slim **"Live"** confirmation; once real
-**knocks start coming in**, it disappears entirely — the dashboard is for monitoring from then on.
-(The one exception: if you later add an effort that isn't live yet, a small nudge reappears — see
-"Add more doors" below.)
+Once the pass is **activated**, the card collapses to a slim **"Live"** confirmation. You can
+dismiss that confirmation with its **✕** — it then stays hidden for every admin of the campaign. It
+also disappears on its own once real **knocks start coming in** — the dashboard is for monitoring
+from then on. (The one exception: if you later add a walk list that isn't live yet, a small nudge
+reappears — see "Add more doors" below.)
 
 The app also signposts each hand-off: after you create a campaign it points you to Import; after an
-import it points you to Efforts to claim; after a claim it points you to make a round; after
+import it points you to Walk Lists to claim; after a claim it points you to cut books; after
 accepting books it points you to assign + activate. And it guards the two silent dead-ends: it won't
-let you cut books for an effort that owns **0 doors**, and it asks you to confirm if you activate a
-round with **0 canvassers assigned**.
+let you cut books for a walk list that owns **0 doors**, and it asks you to confirm if you activate a
+pass with **0 canvassers assigned**.
 
 ## Manage a campaign — what you can change, and when
 
@@ -105,26 +108,27 @@ once canvassing has started:
   Once a campaign has field activity, **Delete is disabled** ("Archive instead") — you can't destroy
   real canvassing history.
 
-## Add more doors later (a new effort on a live campaign)
+## Add more doors later (a new walk list on a live campaign)
 
-Common case: the first efforts targeted specific precincts, and now you want to add "the rest of the
-city" without disturbing the completed work. The right move is a **new effort** (efforts own disjoint
-doors, so a new one stays cleanly separate). The flow:
+Common case: the first walk lists targeted specific precincts, and now you want to add "the rest of
+the city" without disturbing the completed work. The right move is a **new walk list** (walk lists
+own disjoint doors, so a new one stays cleanly separate). The flow:
 
 1. **Import the CSV first.** The import **preview** shows the split before you commit — *new doors*,
    *existing doors* (updated in place, never duplicated, ownership untouched), *moved voters*, and
    *near-duplicates* (watch this — see the caveat below). New addresses land in Intake.
-2. **Build a Walk List from that same CSV** (**Walk Lists → from CSV** — it matches by Voter ID).
-   This freezes exactly the doors in your file, and tells you how many are already in another effort.
-3. **Create the new effort** and **claim that walk list** (or seed it at creation). This claims only
-   the list's doors — precise.
-4. **Round → cut books (by precinct if you like) → accept → assign → activate.**
+2. **Build a saved search from that same CSV** (**Saved Searches → from CSV** — it matches by Voter
+   ID). This freezes exactly the doors in your file, and tells you how many are already in another
+   walk list.
+3. **Create the new walk list** and **claim that saved search** (or seed it at creation). This claims
+   only the list's doors — precise. Its **Pass 1** is created automatically.
+4. **Cut books (by precinct if you like) → accept → assign → activate.**
 
-**Why a walk list instead of "Claim all Intake"?** "Claim all Intake" grabs **every** unowned door
+**Why a saved search instead of "Claim all Intake"?** "Claim all Intake" grabs **every** unowned door
 in the campaign — so if any leftover Intake exists from an earlier import, it gets swept into the new
-effort. The button shows the exact count and asks you to confirm, steering you to a walk list when
-Intake is mixed. Quick check: if the Intake count equals the doors you just imported, "Claim all
-Intake" is clean; if it's higher, use the walk list.
+walk list. The button shows the exact count and asks you to confirm, steering you to a saved search
+when Intake is mixed. Quick check: if the Intake count equals the doors you just imported, "Claim all
+Intake" is clean; if it's higher, use the saved search.
 
 **How "new" is decided:** doors are matched by **normalized address** (within the campaign); voters
 by **state Voter ID** (within the org). So re-uploading addresses you've imported before is safe and
@@ -135,11 +139,11 @@ and "123 North Main Street" as the same door. If your vendor reformats a previou
 it'll be treated as a **new** door (a duplicate). The import preview flags these as **near-
 duplicates**; if that count is above zero, inspect the samples before committing.
 
-**Seeing a new effort's progress:** each effort row on the **Efforts** page shows its own readiness —
-either **Live**, or **"Setup x/5 · next: …"** (doors → round → books → assigned → activated) — so a
-fresh effort surfaces what's left. And if a live campaign has an effort that isn't live yet, the
-dashboard shows a small **"N effort(s) still need setup"** nudge so it isn't masked by the campaign
-already reading "complete."
+**Seeing a new walk list's progress:** each walk list row on the **Walk Lists** page shows its own
+readiness — either **Live**, or **"Setup x/5 · next: …"** (doors → pass → books → assigned →
+activated) — so a fresh walk list surfaces what's left. And if a live campaign has a walk list that
+isn't live yet, the dashboard shows a small **"N walk list(s) still need setup"** nudge so it isn't
+masked by the campaign already reading "complete."
 
 ---
 
