@@ -189,7 +189,7 @@ router.get('/map', async (req, res, next) => {
 
     let households = await Household.find(
       householdFilter,
-      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy'
+      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt'
     ).lean();
 
     if (!households.length) {
@@ -321,6 +321,9 @@ router.get('/map', async (req, res, next) => {
           : null,
         voters: votersByHh.get(String(h._id)) || [],
         surveys: surveysByHh.get(String(h._id)) || [],
+        coordSource: h.coordSource || null,
+        coordConfidence: h.coordConfidence || null,
+        correctedAt: h.correctedAt || null,
       };
     });
 

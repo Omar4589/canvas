@@ -78,10 +78,23 @@ you're in more than one effort, an **effort switcher** sits at the top to flip b
 book, then **Enter** to open it on the houses map. The same **bottom-right controls** as the houses
 map are here too — Refresh, the terrain / base-map picker, and recenter (follow your location).
 
+## Map or list — two ways to work the same doors
+
+A **Map / List** toggle at the top switches between the pin map and a scrollable **list** of the same
+doors (same book scope, same status filter). The list is handy on spread-out/rural routes and for
+anyone who prefers a checklist. Your choice is remembered per campaign.
+
+Each **list row** shows the address, the door's status, how many voters (and how many surveyed), and
+the **distance to you**; tap a row to open the door, or use its inline quick-action (**Not home** /
+**Lit dropped**) — which recolors instantly and syncs like everywhere else. Apartment buildings show
+as one row that opens the building's units. Sort the list by **Nearest to me** (uses your GPS),
+**Walk order**, or **Status**. The map stays live underneath, so switching back is instant and the
+"nearest" sort keeps updating as you move.
+
 ## The houses map
 
-The top of the map is intentionally calm — just the logo on the left, the menu on the right, and one
-**context card** that tells you where you are:
+The top of the map is intentionally calm — just the logo on the left, the menu on the right, the
+Map/List toggle, and one **context card** that tells you where you are:
 
 - The **campaign** name, with a **Switch** link.
 - The **book** you're in and its **progress bar** (done / total houses); tap it to jump back to the
@@ -113,6 +126,18 @@ home** (nobody answered) and **Wrong address** (the door doesn't belong to your 
 on **survey** campaigns. It counts as a real knock and as having reached a person, just not a completed
 survey, so it gets its own **amber** color everywhere (the pin, the status pill). Like the other door
 buttons, it recolors the pin to amber immediately and syncs in the background.
+
+### Fix a wrong pin
+
+Sometimes a door's pin sits in the wrong place (an "Approximate location" badge on the door detail
+flags the ones most likely to be off). Since you're standing right there, you can fix it: tap **Fix
+pin location →**, then either **Use my current location** (drops the pin where you are — it warns if
+your GPS is weak) or **drag the blue pin** on the mini-map to the right spot, and **Save**. If the
+address shares a pin with other units (an apartment), it asks whether to move **just this unit** or the
+**whole building**. The correction saves optimistically and syncs in the background like a knock —
+including **offline**: the fix holds and uploads when you're back on signal (writing the spot you
+picked, not wherever you are at sync time). It never changes anyone's book or walk order — just the
+pin. See [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
 
 ### Taking a survey
 

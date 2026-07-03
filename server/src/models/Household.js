@@ -33,12 +33,16 @@ const householdSchema = new mongoose.Schema(
     normalizedAddress: { type: String, required: true, index: true },
 
     location: { type: pointSchema, default: null },
-    // How the coordinates were obtained: 'file' (supplied in the import) or 'geocodio'
-    // (geocoded). coordConfidence is the geocoder's precision ('exact' rooftop vs
-    // 'interpolated'); null for file-supplied coords. Lets the map/turf tooling flag and
-    // re-verify interpolated pins.
+    // How the coordinates were obtained: 'file' (supplied in the import), 'geocodio'
+    // (geocoded), or 'corrected' (a canvasser/admin moved the pin — see updateHouseholdLocation).
+    // coordConfidence is the geocoder's precision ('exact' rooftop vs 'interpolated'); null for
+    // file-supplied and corrected coords. Lets the map/turf tooling flag and re-verify pins.
     coordSource: { type: String, default: null },
     coordConfidence: { type: String, default: null },
+    // Pin-correction provenance (set only when coordSource === 'corrected').
+    correctedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    correctedAt: { type: Date, default: null },
+    previousLocation: { type: pointSchema, default: null }, // the pre-correction point (context/undo)
 
     status: {
       type: String,

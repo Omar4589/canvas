@@ -125,6 +125,23 @@ Your campaign starts as one default walk list ("Main") owning every door.
    and join "North" (and drop out of Main's books cleanly).
 3. Repeat for each area. Rename or delete the leftover "Main" walk list when it's empty.
 
+### Run two crews (e.g. paid + volunteer) in one walk list
+When two teams work the **same** territory, you don't need two walk lists — walk lists own *disjoint
+doors*, so splitting the territory is one option, but the simpler path is one walk list where each crew
+gets its own books:
+1. **Users** → set each canvasser's **Coordinator** to their crew lead (an org admin) — e.g. paid folks
+   under "Paid Lead", volunteers under "Vol Lead". This is what defines a crew. See [USERS.md](USERS.md).
+2. **Team** tab → add both crews to the campaign (grouped by crew, so you can see each team).
+3. **Turf Cutting** → cut the walk list's pass into books (draw the crews' areas, or by size/precinct) → **Accept**.
+4. Still on Turf Cutting → in the assign panel, use the **crew filter** to show just "Paid Lead", **Select
+   all**, and assign them to the paid books; repeat for the volunteers. Books are disjoint and each
+   canvasser only sees their own, so the crews never overlap (a book with both crews shows a "mixed crews" flag).
+5. **Activate** the pass. Both crews go live.
+
+Note: per-crew *reporting* isn't split yet (reports scope by walk list via `effortId`, not by coordinator)
+— you'd read productivity per person. If you need clean team-vs-team totals, use **two walk lists**
+(split the territory by saved search) instead.
+
 ### Assign new voters (Intake)
 1. After a voter upload, the **Walk Lists** page shows an **Intake** count (new addresses). The import
    never assigns a walk list — new addresses always wait in Intake until you claim them. (The same import

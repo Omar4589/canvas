@@ -31,6 +31,8 @@ export function useCampaignTeam(campaignId) {
           isActive: a.isActive !== false,
           isSuperAdmin: !!a.isSuperAdmin,
           isSelf: String(a.userId) === String(user?.id),
+          coordinatorId: a.coordinatorId || null,
+          coordinatorName: a.coordinatorName || null,
         },
       }));
     // Guarantee the current admin can self-assign even if not on the roster yet.
@@ -46,6 +48,8 @@ export function useCampaignTeam(campaignId) {
           isActive: true,
           isSuperAdmin: !!isSuperAdmin,
           isSelf: true,
+          coordinatorId: null,
+          coordinatorName: null,
         },
       });
     }

@@ -46,6 +46,13 @@ export default function MapPage() {
   const [selected, setSelected] = useState(null);
   const [selectedActivityId, setSelectedActivityId] = useState(null);
 
+  // "Move pin" mode: a draggable marker to correct a household's location.
+  const moveMarkerRef = useRef(null);
+  const [moveTarget, setMoveTarget] = useState(null); // the household being repositioned
+  const [moveCoords, setMoveCoords] = useState(null); // { lng, lat } from the drag
+  const [moveSaving, setMoveSaving] = useState(false);
+  const [moveErr, setMoveErr] = useState(null);
+
   const [dateRange, setDateRange] = useState(() => defaultRange('all'));
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState('');
@@ -278,6 +285,41 @@ export default function MapPage() {
     [selected, households]
   );
 
+  // "Move pin" mode: drop a draggable marker at the target's current spot; the drag
+  // updates moveCoords; Save PATCHes the new location and refetches.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !moveTarget?.location) return undefined;
+    const start = [moveTarget.location.lng, moveTarget.location.lat];
+    setMoveCoords({ lng: start[0], lat: start[1] });
+    const marker = new mapboxgl.Marker({ draggable: true, color: '#2563eb' }).setLngLat(start).addTo(map);
+    marker.on('dragend', () => {
+      const ll = marker.getLngLat();
+      setMoveCoords({ lng: ll.lng, lat: ll.lat });
+    });
+    moveMarkerRef.current = marker;
+    return () => { marker.remove(); moveMarkerRef.current = null; };
+  }, [moveTarget]);
+
+  async function saveMovedPin() {
+    if (!moveTarget || !moveCoords) return;
+    setMoveSaving(true);
+    setMoveErr(null);
+    try {
+      await api(`/admin/campaigns/${campaignId}/households/${moveTarget.id}/location`, {
+        method: 'PATCH',
+        body: { lat: moveCoords.lat, lng: moveCoords.lng },
+      });
+      setMoveTarget(null);
+      setMoveCoords(null);
+      await householdsQ.refetch();
+    } catch (err) {
+      setMoveErr(err?.message || 'Could not move the pin.');
+    } finally {
+      setMoveSaving(false);
+    }
+  }
+
   const selectedActivity = useMemo(
     () => activities.find((a) => a.id === selectedActivityId) || null,
     [selectedActivityId, activities]
@@ -383,7 +425,7 @@ export default function MapPage() {
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
           <MapStyleControl value={styleId} onChange={setStyle} menuDirection="down" className="absolute left-4 top-4 z-10 items-start" />
-          {selectedHousehold && (
+          {selectedHousehold && !moveTarget && (
             <div
               style={{
                 position: 'absolute',
@@ -400,10 +442,39 @@ export default function MapPage() {
               <HouseholdDetailPanel
                 household={selectedHousehold}
                 onClose={() => setSelected(null)}
+                onMovePin={() => { setMoveErr(null); setMoveTarget(selectedHousehold); }}
                 statusColors={STATUS_COLORS}
                 statusLabels={STATUS_LABELS}
                 tz={tz}
               />
+            </div>
+          )}
+          {moveTarget && (
+            <div
+              style={{ position: 'absolute', right: 16, top: 16, zIndex: 11, width: 320, maxWidth: 'calc(100% - 32px)' }}
+              className="rounded-lg border border-border bg-card p-4 shadow-lg"
+            >
+              <div className="text-sm font-semibold text-fg">Move pin</div>
+              <p className="mt-1 text-xs text-fg-muted">
+                Drag the blue marker to <strong>{moveTarget.addressLine1}</strong>'s correct spot, then Save.
+              </p>
+              {moveErr && <div className="mt-2 text-xs text-danger">{moveErr}</div>}
+              <div className="mt-3 flex justify-end gap-2">
+                <button
+                  onClick={() => { setMoveTarget(null); setMoveCoords(null); setMoveErr(null); }}
+                  disabled={moveSaving}
+                  className="rounded-md border border-border-strong px-3 py-1.5 text-sm font-medium text-fg-muted hover:bg-sunken"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveMovedPin}
+                  disabled={moveSaving}
+                  className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+                >
+                  {moveSaving ? 'Saving…' : 'Save location'}
+                </button>
+              </div>
             </div>
           )}
           {selectedActivity && !selectedHousehold && (

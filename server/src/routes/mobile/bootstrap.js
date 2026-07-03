@@ -202,6 +202,9 @@ router.get('/bootstrap', async (req, res, next) => {
       status: 1,
       lastActionAt: 1,
       turfId: 1,
+      walkOrder: 1, // list-view "walk order" sort
+      coordSource: 1, // pin provenance: 'file' | 'geocodio' | 'corrected'
+      coordConfidence: 1, // 'exact' | 'interpolated' | null (approximate-pin badge)
     }).lean();
 
     const householdIds = households.map((h) => h._id);
@@ -318,6 +321,9 @@ router.get('/changes', async (req, res, next) => {
       lastActionAt: 1,
       isActive: 1,
       fullyVoted: 1, // client drops doors where everyone has now voted
+      location: 1, // so an admin pin-move (or another canvasser's fix) reflects live
+      coordSource: 1,
+      coordConfidence: 1,
     }).lean();
     // Per-round status from the canvasser's book round (same as bootstrap) so deltas
     // don't re-introduce a global status for a door fresh in its current round.

@@ -119,10 +119,30 @@ Turf polygons/cutting are documented in [PASSES_AND_TURF.md](PASSES_AND_TURF.md)
 ## B. How a door gets on the map
 
 Households store a GeoJSON point: `Household.location = { type: 'Point', coordinates: [lng, lat] }`
-([models/Household.js](../server/src/models/Household.js)). Coordinates come **straight from the CSV**
-(`p_Latitude` / `p_Longitude`); the importer **requires** valid lat/lng and **rejects rows without
-them** ([services/import/csvImporter.js](../server/src/services/import/csvImporter.js)). There is **no
-geocoding** — an older Census/Mapbox geocoder was removed. See [IMPORTS.md](IMPORTS.md).
+([models/Household.js](../server/src/models/Household.js)). Coordinates come from the CSV
+(`p_Latitude` / `p_Longitude`) when present, otherwise the address is **geocoded** at import via
+Geocodio ([services/import/geocode/geocodeService.js](../server/src/services/import/geocode/geocodeService.js));
+rows that still have no usable point are rejected. Each door records **`coordSource`**
+(`file` | `geocodio` | `corrected`) and **`coordConfidence`** (`exact` | `interpolated` | null) — see
+[IMPORTS.md](IMPORTS.md) for the import side.
+
+### Coordinate provenance & pin correction
+A geocode can land off-spot (usually `interpolated` matches). The maps surface this and let it be fixed:
+
+- **Approximate pins are flagged.** The web admin map draws an **amber ring** under any `interpolated`
+  pin ([lib/mapRender.js](../client/src/lib/mapRender.js)), and the door detail panel shows an
+  "Approximate location" / "Pin corrected" badge.
+- **Correcting a pin.** An admin drags the pin (MapPage "Move pin" → `PATCH
+  /admin/campaigns/:id/households/:householdId/location`); a canvasser fixes it in the field (drop it at
+  their GPS spot or drag it → `POST /mobile/households/:householdId/location`). Both go through the shared
+  `updateHouseholdLocation` service ([services/households/updateHouseholdLocation.js](../server/src/services/households/updateHouseholdLocation.js)),
+  which validates a **state-bounding-box** guardrail, sets `coordSource='corrected'` + provenance
+  (`correctedBy`/`correctedAt`/`previousLocation`), and logs a `HouseholdLocationChange` audit row. A
+  `scope:'building'` move repositions every unit sharing the pin. **A correction never re-cuts turf** —
+  book membership is `turfId` (set at cut), not derived from coordinates — and `walkOrder`/`status` are
+  untouched.
+- **Caveat:** a published `ClientReportMapPoint` snapshot is frozen at publish time and won't reflect a
+  later correction until the report is republished.
 
 ## C. How an action becomes a ping
 
@@ -257,7 +277,9 @@ address). The same hex drives the house pin and the canvasser **ping** circle (t
 
 ## I. Invariants / gotchas
 
-- **No geocoding.** Coordinates are imported, not derived; uncoordinated rows never reach a map.
+- **Coordinates are imported or geocoded (Geocodio), and can be corrected** (see §B); rows with no
+  usable point never reach a map. A pin correction is deterministic (`updateHouseholdLocation`) and
+  never re-cuts turf.
 - **Native symbol layers, not MarkerView; no clustering** — one GeoJSON feature collection per layer.
 - **Fully-voted doors drop off** the canvasser's bootstrap/map (see EARLY_VOTING.md).
 - **Pings are per-action GPS stamps**, not live tracking — there is no continuous location feed.

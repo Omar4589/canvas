@@ -8,6 +8,7 @@ const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
 const ACTIVE_ORG_NAME_KEY = 'canvass.activeOrgName';
 const SELECTED_BOOKS_KEY = 'canvass.selectedBooks';
 const CURRENT_EFFORT_KEY = 'canvass.currentEffort';
+const VIEW_MODE_KEY = 'canvass.viewMode';
 const MAP_STYLE_KEY = 'canvass.mapStyle';
 const SERVER_META_KEY = 'canvass.serverMeta';
 const THEME_KEY = 'canvass.themePreference';
@@ -190,6 +191,31 @@ export async function loadCurrentEffort(campaignId) {
 
 export async function clearCurrentEffort() {
   await AsyncStorage.removeItem(CURRENT_EFFORT_KEY);
+}
+
+// Whether the door-working screen opens as a 'map' or a 'list'. Scoped to a
+// campaign (mirrors saveSelectedBooks) so it never leaks across campaigns.
+export async function saveViewMode(campaignId, mode) {
+  if (!campaignId || !mode) {
+    await AsyncStorage.removeItem(VIEW_MODE_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(
+    VIEW_MODE_KEY,
+    JSON.stringify({ campaignId: String(campaignId), mode: String(mode) })
+  );
+}
+
+export async function loadViewMode(campaignId) {
+  const raw = await AsyncStorage.getItem(VIEW_MODE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (String(parsed.campaignId) !== String(campaignId)) return null;
+    return parsed.mode === 'list' ? 'list' : 'map';
+  } catch {
+    return null;
+  }
 }
 
 // Which base map style the user last picked (id from lib/mapStyles). Persisted

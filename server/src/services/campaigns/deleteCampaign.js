@@ -17,6 +17,7 @@ import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { ImportJob } from '../../models/ImportJob.js';
+import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js';
 import { Campaign } from '../../models/Campaign.js';
 
 // Hard-delete a campaign and everything it owns. Mirrors the effort-delete cascade
@@ -41,7 +42,7 @@ export async function deleteCampaignCascade(campaign) {
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
     WalkList, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
     ClientReport, ClientReportMapPoint, ReportShareLink, CanvassActivity,
-    SurveyResponse, ImportJob,
+    SurveyResponse, ImportJob, HouseholdLocationChange,
   ];
   const counts = { voters: voters.deletedCount || 0 };
   for (const Model of CAMPAIGN_SCOPED) {

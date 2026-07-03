@@ -43,6 +43,7 @@ function actionLabel(t) {
 export default function HouseholdDetailPanel({
   household,
   onClose,
+  onMovePin,
   statusColors,
   statusLabels,
   tz,
@@ -77,6 +78,26 @@ export default function HouseholdDetailPanel({
           <div className="text-xs text-fg-muted">
             {h.city}, {h.state} {h.zipCode}
           </div>
+          {h.coordSource === 'corrected' ? (
+            <div className="mt-1.5 inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
+              Pin corrected{h.correctedAt ? ` · ${formatInTz(h.correctedAt, zone, { month: 'short', day: 'numeric' }, false)}` : ''}
+            </div>
+          ) : h.coordConfidence === 'interpolated' ? (
+            <div className="mt-1.5 inline-flex items-center rounded bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
+              Approximate location
+            </div>
+          ) : null}
+          {onMovePin && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={onMovePin}
+                className="rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken"
+              >
+                Move pin →
+              </button>
+            </div>
+          )}
         </div>
         <button
           type="button"

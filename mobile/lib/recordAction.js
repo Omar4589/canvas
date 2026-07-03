@@ -29,6 +29,19 @@ function setHouseholdStatus(prev, householdId, status) {
   };
 }
 
+// Patch a household's coordinates in the bootstrap cache (pin-correction optimistic move).
+// coords are [lng, lat].
+function setHouseholdLocation(prev, householdId, coords) {
+  return {
+    ...prev,
+    households: (prev.households || []).map((h) =>
+      String(h._id) === String(householdId)
+        ? { ...h, location: { type: 'Point', coordinates: coords }, coordSource: 'corrected', coordConfidence: null }
+        : h
+    ),
+  };
+}
+
 // --- Pending optimistic statuses (the un-clobberable guarantee) -------------
 // An optimistic recolor lives in the ['bootstrap'] cache, but a server-sourced
 // write to that cache — a full bootstrap refetch, or the 30s `changes` delta —
@@ -66,6 +79,42 @@ export function reconcilePendingHouseholds(households) {
       return h;
     }
     return { ...h, status: p.status }; // server is stale for this door — hold the optimistic color
+  });
+}
+
+// --- Pending optimistic LOCATIONS (the pin-fix analog of pendingHouseholds) ---------
+// A pin correction is optimistic just like a status change, so a server-sourced
+// bootstrap write (a refetch or the 30s `changes` delta) that arrives BEFORE the
+// queued fix syncs would snap the pin back to the old geocode. Same fix as statuses:
+// hold the canvasser's unconfirmed coordinate and re-apply it on every server write
+// until the server's own coords agree (or a TTL elapses). map.jsx wires
+// reconcilePendingLocations into the same two server writers as reconcilePendingHouseholds.
+const PENDING_LOC_TTL_MS = 5 * 60 * 1000;
+const pendingLocations = new Map(); // id -> { coords:[lng,lat], at }
+
+export function markPendingLocation(id, coords) {
+  pendingLocations.set(String(id), { coords, at: Date.now() });
+}
+export function clearPendingLocation(id) {
+  pendingLocations.delete(String(id));
+}
+
+export function reconcilePendingLocations(households) {
+  if (!pendingLocations.size || !Array.isArray(households)) return households;
+  const now = Date.now();
+  return households.map((h) => {
+    const p = pendingLocations.get(String(h._id));
+    if (!p) return h;
+    if (now - p.at > PENDING_LOC_TTL_MS) {
+      pendingLocations.delete(String(h._id)); // give up; let the server win
+      return h;
+    }
+    const c = h.location?.coordinates;
+    if (c && Math.abs(c[0] - p.coords[0]) < 1e-6 && Math.abs(c[1] - p.coords[1]) < 1e-6) {
+      pendingLocations.delete(String(h._id)); // server caught up — stop overlaying
+      return h;
+    }
+    return { ...h, location: { type: 'Point', coordinates: p.coords }, coordSource: 'corrected', coordConfidence: null };
   });
 }
 
@@ -174,4 +223,29 @@ export function recordHouseholdAction(qc, householdId, action, { note = null } =
     hardFailTitle: 'Action not saved',
     hardFailMessage: 'Could not record this action. Please try again.',
   });
+}
+
+// Correct a household's pin (canvasser). Optimistically moves it (held un-clobberable
+// by pendingLocations until synced), offline-safe via the shared queue. coords in
+// { lat, lng }; the endpoint is POST so flushQueue can replay a queued fix verbatim.
+export function recordLocationCorrection(qc, householdId, { lat, lng, source, accuracy = null, scope = 'unit' }) {
+  markPendingLocation(householdId, [lng, lat]);
+  const p = optimisticSubmit(qc, {
+    path: `/mobile/households/${householdId}/location`,
+    body: { lat, lng, source, accuracy, scope },
+    optimisticPatch: (prev) => setHouseholdLocation(prev, householdId, [lng, lat]),
+    reconcile: (prev, response) => {
+      const coords = response?.household?.location?.coordinates;
+      return coords ? setHouseholdLocation(prev, householdId, coords) : prev;
+    },
+    pending: [], // location overlay is handled by pendingLocations, not the status overlay
+    hardFailTitle: 'Pin not saved',
+    hardFailMessage: 'Could not move this pin. Please try again.',
+  });
+  // On a hard reject (not queued), drop the optimistic move so the invalidate that
+  // optimisticSubmit fires restores the server's real (un-moved) coordinate.
+  p.then((result) => {
+    if (result && !result.ok && !result.queued) clearPendingLocation(householdId);
+  }).catch(() => {});
+  return p;
 }

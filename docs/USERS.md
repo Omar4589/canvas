@@ -64,8 +64,22 @@ You set it two ways, both on the Users page:
 - **Later** — open a member's profile and choose/clear their coordinator (it saves immediately).
 
 The Users list shows a **Coordinator** column, and a **Coordinator filter** lets you narrow the list to
-everyone a given admin oversees (or "No coordinator"). This is about *people management*; dividing the
-*work* itself is what walk lists do ([EFFORTS.md](EFFORTS.md)) — the two are independent and complementary.
+everyone a given admin oversees (or "No coordinator").
+
+**Coordinators are your "crews," and they drive book assignment.** Wherever you assign work in a
+campaign, people are grouped by coordinator:
+
+- The campaign **Team** page groups members into crews (a section per coordinator, plus "No
+  coordinator").
+- The **book-assignment** picker (Turf Cutting) has a **crew filter** — pick "Paid Lead" and you see
+  only that crew, so you can select the whole team and assign them to the chosen books in one action.
+  Each person shows their crew, and a book that ends up with **two crews** flags a "mixed crews" note.
+
+This lets you run, say, a paid team and a volunteer team in **one** walk list: put both crews on the
+Team, set each person's coordinator, cut the books, then assign each crew to its books. (Reporting is
+still **per-person** — there's no per-crew total yet; see the note in [EFFORTS.md](EFFORTS.md).) Dividing
+the *doors* into disjoint areas is still what separate walk lists do ([EFFORTS.md](EFFORTS.md)) —
+coordinators divide the *people*, walk lists divide the *territory*; use whichever (or both) fits.
 
 ## The campaign team (who can work a campaign)
 
@@ -187,6 +201,15 @@ no extra query/populate). The web UI lives in [UsersPage.jsx](../client/src/page
 dropdown + table column + filter) and [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx)
 (save-on-change dropdown). No migration needed — absent → `null`. Distinct from **Efforts**, which
 partition the *doors/work*; the coordinator partitions *people*.
+
+**Surfaced in assignment.** The campaign-roster endpoint `GET /admin/campaigns/:id/assignments`
+([assignments.js](../server/src/routes/admin/assignments.js)) returns each member's `coordinatorId` +
+resolved `coordinatorName` (one `User` lookup over the distinct coordinators). [useCampaignTeam.js](../client/src/lib/useCampaignTeam.js)
+carries it to the book-assignment picker ([BookAssignmentPanel.jsx](../client/src/components/BookAssignmentPanel.jsx)
+— crew filter chips + per-row crew label + a "mixed crews" flag) and the Team page
+([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) — the roster grouped by crew). Reports
+are **not** yet coordinator-scoped (only `effortId` is — see [reports.js](../server/src/routes/admin/reports.js)
+`baseFilter`); per-crew totals would add a `coordinatorId` filter there, mirroring the effort scoping.
 
 ## Campaign roster & assignment gating
 

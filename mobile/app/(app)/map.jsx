@@ -32,10 +32,13 @@ import {
   loadSelectedBooks,
   clearSelectedBooks,
   clearCurrentEffort,
+  saveViewMode,
+  loadViewMode,
 } from '../../lib/cache';
 import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
-import { reconcilePendingHouseholds } from '../../lib/recordAction';
+import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction } from '../../lib/recordAction';
+import { distanceToCoords } from '../../lib/geo';
 import { guardedPush } from '../../lib/navGuard';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { ensureLocationPermission } from '../../lib/location';
@@ -45,6 +48,9 @@ import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { useMapStyle } from '../../lib/mapStyles';
 import MapControlStack from '../../components/MapControlStack';
+import StatusPill from '../../components/StatusPill';
+import TabSwitcher from '../../components/TabSwitcher';
+import DoorList from '../../components/DoorList';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { makeRateColors, formatPace } from '../../lib/rates';
 import { radius, spacing } from '../../lib/theme';
@@ -118,6 +124,13 @@ const LIT_DROP_FILTER_OPTIONS = [
   { key: 'lit_dropped', label: 'Dropped' },
 ];
 
+const SORT_OPTIONS = [
+  { key: 'nearest', label: 'Nearest to me' },
+  { key: 'walk', label: 'Walk order' },
+  { key: 'status', label: 'Status' },
+];
+const SORT_LABELS = { nearest: 'Nearest', walk: 'Walk order', status: 'Status' };
+
 function buildFeatureCollection(households) {
   return {
     type: 'FeatureCollection',
@@ -156,49 +169,6 @@ function buildBuildingFeatureCollection(buildings) {
         geometry: { type: 'Point', coordinates: b.coordinates },
       })),
   };
-}
-
-function StatusPill({ status, compact = false }) {
-  const { colors } = useTheme();
-  const dotColor = colors.status[status] || colors.textMuted;
-  const isDone = status === 'surveyed' || status === 'lit_dropped';
-  const isRefused = status === 'refused';
-  const isMiss = status === 'not_home' || status === 'wrong_address';
-  const bg = isDone
-    ? colors.successBg
-    : isRefused
-    ? colors.warnBg
-    : isMiss
-    ? colors.dangerBg
-    : colors.bg;
-  const border = isDone
-    ? colors.successBorder
-    : isRefused
-    ? colors.warnBorder
-    : isMiss
-    ? colors.dangerBorder
-    : colors.border;
-  const textColor = isDone
-    ? colors.success
-    : isRefused
-    ? colors.warnFg
-    : isMiss
-    ? colors.danger
-    : colors.textSecondary;
-  return (
-    <View
-      style={[
-        pillStyles.pill,
-        { backgroundColor: bg, borderColor: border },
-        compact && pillStyles.compact,
-      ]}
-    >
-      <View style={[pillStyles.dot, { backgroundColor: dotColor }]} />
-      <Text style={[pillStyles.text, { color: textColor }]}>
-        {colors.statusLabels[status] || 'Unknown'}
-      </Text>
-    </View>
-  );
 }
 
 function ProgressStat({ pinStatus, value, label }) {
@@ -281,6 +251,13 @@ export default function MapScreen() {
   // null = none saved, string = the saved book id(s). Used to re-scope the map
   // on cold start when there's no live `selectedBooks` nav param.
   const [restoredBooks, setRestoredBooks] = useState(undefined);
+  // Map vs list view of the same doors. undefined = not restored yet (gates the
+  // loader so it doesn't flash the wrong view on cold start).
+  const [viewMode, setViewMode] = useState(undefined);
+  const [sortMode, setSortMode] = useState('nearest'); // 'nearest' | 'walk' | 'status'
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [userCoords, setUserCoords] = useState(null); // [lng, lat] from the location puck
+  const [chromeH, setChromeH] = useState(0); // measured top-chrome height → list top padding
 
   // Sheet animation state. translateY: 0 = expanded, snapDelta = peek.
   // sheetHeight is the rendered height of the sheet (changes with selection).
@@ -308,6 +285,9 @@ export default function MapScreen() {
       loadSelectedBooks(c.id).then((books) => {
         if (mounted) setRestoredBooks(books);
       });
+      loadViewMode(c.id).then((m) => {
+        if (mounted) setViewMode(m || 'map');
+      });
     });
     return () => {
       mounted = false;
@@ -333,7 +313,7 @@ export default function MapScreen() {
         const fresh = await api(`/mobile/bootstrap?campaignId=${activeCampaign.id}`);
         // Hold any just-recorded, server-not-yet-confirmed statuses over this full
         // refetch so it can't revert a fresh optimistic recolor (see recordAction).
-        fresh.households = reconcilePendingHouseholds(fresh.households);
+        fresh.households = reconcilePendingLocations(reconcilePendingHouseholds(fresh.households));
         await saveBootstrap(fresh);
         return fresh;
       } catch (err) {
@@ -526,17 +506,26 @@ export default function MapScreen() {
         const vMap = new Map(voters.map((v) => [String(v._id), v]));
         const next = {
           ...prev,
-          // Hold just-recorded, server-not-yet-confirmed statuses over the delta so
-          // a poll that predates the action can't revert a fresh optimistic recolor.
-          households: reconcilePendingHouseholds(
-            prev.households
-              .map((h) => {
-                const c = hMap.get(String(h._id));
-                if (!c) return h;
-                if (c.isActive === false || c.fullyVoted === true) return null; // archived or everyone voted — drop
-                return { ...h, status: c.status, lastActionAt: c.lastActionAt };
-              })
-              .filter(Boolean)
+          // Hold just-recorded, server-not-yet-confirmed statuses AND pin fixes over
+          // the delta so a poll that predates the action can't revert a fresh
+          // optimistic recolor / move. Also apply a server-side location change
+          // (e.g. an admin pin-move) so it reflects live without a full re-bootstrap.
+          households: reconcilePendingLocations(
+            reconcilePendingHouseholds(
+              prev.households
+                .map((h) => {
+                  const c = hMap.get(String(h._id));
+                  if (!c) return h;
+                  if (c.isActive === false || c.fullyVoted === true) return null; // archived or everyone voted — drop
+                  return {
+                    ...h,
+                    status: c.status,
+                    lastActionAt: c.lastActionAt,
+                    ...(c.location ? { location: c.location, coordSource: c.coordSource, coordConfidence: c.coordConfidence } : {}),
+                  };
+                })
+                .filter(Boolean)
+            )
           ),
           voters: prev.voters.map((v) => {
             const c = vMap.get(String(v._id));
@@ -646,6 +635,47 @@ export default function MapScreen() {
   const features = useMemo(() => buildFeatureCollection(singles), [singles]);
   const buildingFeatures = useMemo(() => buildBuildingFeatureCollection(buildings), [buildings]);
 
+  // List-view entries: the SAME scoped/grouped doors as the map, filtered by the
+  // active status chip, mapped to normalized entries with a distance-to-me, then
+  // sorted. Buildings show if any unit matches the filter.
+  const listEntries = useMemo(() => {
+    if (viewMode !== 'list') return []; // don't compute while on the map
+    const STATUS_ORDER = { unknocked: 0, not_home: 1, wrong_address: 2, refused: 3, lit_dropped: 4, surveyed: 5 };
+    const matches = (s) => activeFilter === 'all' || (s || 'unknocked') === activeFilter;
+    const entries = [];
+    for (const h of singles) {
+      if (!matches(h.status)) continue;
+      entries.push({
+        kind: 'single',
+        key: String(h._id),
+        household: h,
+        distanceM: distanceToCoords(userCoords, h.location?.coordinates),
+        _walk: h.walkOrder ?? Infinity,
+        _status: STATUS_ORDER[h.status || 'unknocked'] ?? 9,
+      });
+    }
+    for (const b of buildings) {
+      if (activeFilter !== 'all' && !b.units.some((u) => (u.status || 'unknocked') === activeFilter)) continue;
+      entries.push({
+        kind: 'building',
+        key: String(b.key),
+        building: b,
+        distanceM: distanceToCoords(userCoords, b.coordinates),
+        _walk: Math.min(...b.units.map((u) => u.walkOrder ?? Infinity)),
+        _status: 0, // buildings sort to the top of a status sort (mixed)
+      });
+    }
+    const hasUser = Array.isArray(userCoords);
+    entries.sort((a, b) => {
+      if (sortMode === 'nearest' && hasUser) {
+        return (a.distanceM ?? Infinity) - (b.distanceM ?? Infinity);
+      }
+      if (sortMode === 'status') return a._status - b._status || a._walk - b._walk;
+      return a._walk - b._walk; // 'walk' (and 'nearest' fallback when no GPS fix)
+    });
+    return entries;
+  }, [viewMode, singles, buildings, activeFilter, userCoords, sortMode]);
+
   const householdsById = useMemo(() => {
     const m = new Map();
     for (const h of data?.households || []) m.set(String(h._id), h);
@@ -678,6 +708,14 @@ export default function MapScreen() {
     [router]
   );
 
+  // List-view row handlers (stable so DoorListRow's memo holds).
+  const onListOpen = useCallback((id) => guardedPush(router, `/(app)/household/${id}`), [router]);
+  const onListOpenBuilding = useCallback(
+    (b) => guardedPush(router, { pathname: '/(app)/building', params: { bkey: b.key } }),
+    [router]
+  );
+  const onListQuick = useCallback((id, action) => recordHouseholdAction(qc, id, action), [qc]);
+
   async function onLogout() {
     qc.clear();
     await signOut();
@@ -706,6 +744,7 @@ export default function MapScreen() {
   }
   if (
     activeCampaign === undefined ||
+    viewMode === undefined ||
     (activeCampaign && isLoading) ||
     (!params.selectedBooks && restoredBooks === undefined)
   ) {
@@ -792,7 +831,19 @@ export default function MapScreen() {
         {/* Plain location dot. We deliberately don't use androidRenderMode="compass":
             the compass puck keeps the magnetometer polling the whole time the map is
             open (the primary screen), which is a real battery drain for little gain. */}
-        <Mapbox.UserLocation visible />
+        <Mapbox.UserLocation
+          visible
+          onUpdate={(loc) => {
+            const c = loc?.coords;
+            if (!c) return;
+            const next = [c.longitude, c.latitude];
+            // Only re-sort the list when the canvasser has actually moved (~>10m).
+            setUserCoords((prev) => {
+              if (prev && distanceToCoords(prev, next) < 10) return prev;
+              return next;
+            });
+          }}
+        />
 
         <Mapbox.Images
           images={{
@@ -894,11 +945,42 @@ export default function MapScreen() {
         </Mapbox.ShapeSource>
       </Mapbox.MapView>
 
+      {/* List view — a full-bleed overlay over the (still-mounted, GPS-warm) map.
+          Its top padding clears the floating chrome, which renders on top. */}
+      {viewMode === 'list' && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bg, paddingTop: chromeH }]}>
+          <DoorList
+            entries={listEntries}
+            campaignType={activeCampaign?.type}
+            votersByHousehold={votersByHousehold}
+            onOpen={onListOpen}
+            onQuick={onListQuick}
+            onOpenBuilding={onListOpenBuilding}
+          />
+        </View>
+      )}
+
       {/* Top chrome */}
-      <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
+      <SafeAreaView
+        edges={['top']}
+        style={styles.topBarWrap}
+        pointerEvents="box-none"
+        onLayout={(e) => setChromeH(e.nativeEvent.layout.height)}
+      >
         <CanvasserHeader variant="floating" />
 
-        {activeCampaign && (
+        <View style={styles.viewToggleRow}>
+          <TabSwitcher
+            tabs={[{ key: 'map', label: 'Map' }, { key: 'list', label: 'List' }]}
+            activeKey={viewMode}
+            onChange={(m) => {
+              setViewMode(m);
+              if (activeCampaign) saveViewMode(activeCampaign.id, m);
+            }}
+          />
+        </View>
+
+        {viewMode === 'map' && activeCampaign && (
           <MapContextCard
             campaignName={activeCampaign.name}
             effortName={bookStrip?.effortName}
@@ -914,7 +996,7 @@ export default function MapScreen() {
 
         <View style={styles.filterRow}>
           <Pressable
-            onPress={() => setFilterMenuOpen((v) => !v)}
+            onPress={() => { setFilterMenuOpen((v) => !v); setSortMenuOpen(false); }}
             style={[
               styles.filterChip,
               activeFilter !== 'all' && styles.filterChipActive,
@@ -932,7 +1014,38 @@ export default function MapScreen() {
             </Text>
             <Text style={styles.filterChevron}>{filterMenuOpen ? '▴' : '▾'}</Text>
           </Pressable>
+
+          {viewMode === 'list' && (
+            <Pressable
+              onPress={() => { setSortMenuOpen((v) => !v); setFilterMenuOpen(false); }}
+              style={[styles.filterChip, { marginLeft: spacing.sm }]}
+            >
+              <Text style={styles.filterChipText} numberOfLines={1}>Sort: {SORT_LABELS[sortMode]}</Text>
+              <Text style={styles.filterChevron}>{sortMenuOpen ? '▴' : '▾'}</Text>
+            </Pressable>
+          )}
         </View>
+
+        {viewMode === 'list' && sortMenuOpen && (
+          <View style={styles.filterMenu}>
+            <Text style={styles.filterMenuLabel}>Sort by</Text>
+            {SORT_OPTIONS.map((opt) => {
+              const isActive = opt.key === sortMode;
+              return (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => { setSortMode(opt.key); setSortMenuOpen(false); }}
+                  style={[styles.filterMenuItem, isActive && styles.filterMenuItemActive]}
+                >
+                  <View style={styles.filterDotPlaceholder} />
+                  <Text style={[styles.filterMenuItemText, isActive && styles.filterMenuItemTextActive]}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
 
         {filterMenuOpen && (
           <View style={styles.filterMenu}>
@@ -976,50 +1089,55 @@ export default function MapScreen() {
         )}
       </SafeAreaView>
 
-      {/* Recenter button — rides above the sheet's top edge so it's always
-          reachable regardless of sheet expansion. */}
-      <RecenterButton
-        translateY={sheetTranslateY}
-        sheetHeight={sheetHeight}
-        following={following}
-        onPress={() => setFollowing((v) => !v)}
-        styleId={styleId}
-        onStyleChange={setStyle}
-        onRefresh={onRefresh}
-        refreshing={isFetching}
-        pendingCount={pendingCount}
-      />
+      {/* Map-only chrome: recenter + bottom sheet. Hidden in list mode (the list
+          overlay covers the map; the map stays mounted underneath for GPS warmth). */}
+      {viewMode === 'map' && (
+        <>
+          {/* Recenter button — rides above the sheet's top edge so it's always
+              reachable regardless of sheet expansion. */}
+          <RecenterButton
+            translateY={sheetTranslateY}
+            sheetHeight={sheetHeight}
+            following={following}
+            onPress={() => setFollowing((v) => !v)}
+            styleId={styleId}
+            onStyleChange={setStyle}
+            onRefresh={onRefresh}
+            refreshing={isFetching}
+            pendingCount={pendingCount}
+          />
 
-      {/* Bottom sheet. Always rendered; content branches on `selected`. The
-          peek view sits at the top of the children; pulling up reveals the
-          divider and the legend / voter list below it. */}
-      <PullableSheet
-        translateY={sheetTranslateY}
-        snapDelta={sheetSnapDelta}
-        sheetHeight={sheetHeight}
-      >
-        {selected ? (
-          <SelectedHouseSheetContent
-            selected={selected}
-            voters={selectedVoters}
-            surveyedCount={selectedSurveyedCount}
-            lastSeen={selectedLastSeen}
-            isLitDrop={isLitDrop}
-            timeZone={activeCampaign?.timeZone}
-            onOpen={() => {
-              setSelected(null);
-              guardedPush(router, `/(app)/household/${selected._id}`);
-            }}
-            onClose={() => setSelected(null)}
-          />
-        ) : (
-          <ProgressSheetContent
-            today={today}
-            isLitDrop={isLitDrop}
-            onViewHistory={() => guardedPush(router, '/(app)/stats')}
-          />
-        )}
-      </PullableSheet>
+          {/* Bottom sheet. Content branches on `selected`. The peek view sits at
+              the top; pulling up reveals the divider and legend / voter list. */}
+          <PullableSheet
+            translateY={sheetTranslateY}
+            snapDelta={sheetSnapDelta}
+            sheetHeight={sheetHeight}
+          >
+            {selected ? (
+              <SelectedHouseSheetContent
+                selected={selected}
+                voters={selectedVoters}
+                surveyedCount={selectedSurveyedCount}
+                lastSeen={selectedLastSeen}
+                isLitDrop={isLitDrop}
+                timeZone={activeCampaign?.timeZone}
+                onOpen={() => {
+                  setSelected(null);
+                  guardedPush(router, `/(app)/household/${selected._id}`);
+                }}
+                onClose={() => setSelected(null)}
+              />
+            ) : (
+              <ProgressSheetContent
+                today={today}
+                isLitDrop={isLitDrop}
+                onViewHistory={() => guardedPush(router, '/(app)/stats')}
+              />
+            )}
+          </PullableSheet>
+        </>
+      )}
     </View>
   );
 }
@@ -1355,6 +1473,11 @@ function makeStyles(t) {
     top: 0,
     left: 0,
     right: 0,
+  },
+  viewToggleRow: {
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    alignItems: 'flex-start',
   },
   // Row holding just the status filter chip, below the merged context card,
   // pushed to the right so it sits under the hamburger.
@@ -1714,16 +1837,3 @@ function makeStyles(t) {
   });
 }
 
-const pillStyles = StyleSheet.create({
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  compact: { paddingHorizontal: 8, paddingVertical: 3 },
-  dot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
-  text: { fontSize: 11, fontWeight: '700' },
-});

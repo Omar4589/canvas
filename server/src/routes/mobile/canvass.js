@@ -13,8 +13,10 @@ import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
+import { canvasserHouseholdScope } from '../../services/canvass/canvasserScope.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
+import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -139,6 +141,56 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
 
   return { household, activity };
 }
+
+// Fix a door's pin. The move coords are top-level lat/lng (chosen in the UI at fix
+// time, frozen in any offline-queued body). `location` (the merged GPS stamp from the
+// client's optimistic layer) is ignored for the move; only the audit accuracy is used.
+const locationCorrectionSchema = z.object({
+  lat: z.number(),
+  lng: z.number(),
+  source: z.enum(['gps', 'drag']),
+  accuracy: z.number().nullable().optional(),
+  scope: z.enum(['unit', 'building']).optional(),
+});
+
+router.post('/households/:householdId/location', async (req, res, next) => {
+  try {
+    const household = await Household.findById(req.params.householdId);
+    if (!household) return res.status(404).json({ error: 'Household not found' });
+
+    const access = await assertHouseholdAccess(req, household);
+    if (access.error) return res.status(access.error.status).json({ error: access.error.message });
+
+    const campaign = await Campaign.findById(household.campaignId).lean();
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    // Non-admins can only fix pins for doors in the books they're actively working.
+    if (!isOrgAdminOrSuper(req)) {
+      const scope = await canvasserHouseholdScope(req, campaign);
+      if (!scope.some((id) => String(id) === String(household._id))) {
+        return res.status(403).json({ error: 'You can only fix pins for doors in your assigned books.' });
+      }
+    }
+
+    const data = locationCorrectionSchema.parse(req.body);
+    try {
+      const { updated } = await updateHouseholdLocation(
+        household,
+        { lat: data.lat, lng: data.lng },
+        { source: data.source, byUserId: req.user._id, accuracy: data.accuracy ?? null, scope: data.scope || 'unit' }
+      );
+      return res.status(201).json({ household: updated[0], moved: updated.length });
+    } catch (err) {
+      if (err.code === 'out_of_bounds' || err.code === 'invalid_coords') {
+        return res.status(400).json({ error: err.message, code: err.code });
+      }
+      throw err;
+    }
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
 
 router.post('/households/:householdId/not-home', async (req, res, next) => {
   try {

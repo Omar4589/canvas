@@ -34,10 +34,24 @@ export default function BookAssignmentPanel({
   const [picked, setPicked] = useState(() => new Set()); // multi-book mode
   const [mode, setMode] = useState('distribute');
   const [replace, setReplace] = useState(false);
+  const [teamFilter, setTeamFilter] = useState('all'); // 'all' | coordinatorId | 'none'
 
   // Assignable = the campaign team (+ you, so admins can self-assign) — not the whole org.
   const { members, isLoading: membersLoading } = useCampaignTeam(campaignId);
+  const memberById = useMemo(() => new Map(members.map((m) => [String(m.user.id), m.user])), [members]);
+  // Crews present on this campaign = the distinct coordinators (team leads), + a "No team" bucket.
+  const teams = useMemo(() => {
+    const byId = new Map();
+    let hasNoTeam = false;
+    for (const m of members) {
+      if (m.user.coordinatorId) byId.set(m.user.coordinatorId, m.user.coordinatorName || 'Team');
+      else hasNoTeam = true;
+    }
+    return { list: [...byId.entries()].map(([id, name]) => ({ id, name })), hasNoTeam };
+  }, [members]);
   const filtered = members.filter((m) => {
+    if (teamFilter === 'none' && m.user.coordinatorId) return false;
+    if (teamFilter !== 'all' && teamFilter !== 'none' && m.user.coordinatorId !== teamFilter) return false;
     if (!search.trim()) return true;
     const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
     return hay.includes(search.trim().toLowerCase());
@@ -57,6 +71,12 @@ export default function BookAssignmentPanel({
     return [...m.values()];
   }, [books, assignedByTurf]);
   const assignedSet = useMemo(() => new Set(union.map((e) => e.user.id)), [union]);
+  // Distinct crews among the already-assigned people → a "mixed crews" heads-up.
+  const mixedCrews = useMemo(() => {
+    const s = new Set();
+    for (const e of union) s.add(memberById.get(String(e.user.id))?.coordinatorId || 'none');
+    return s.size > 1;
+  }, [union, memberById]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] });
@@ -118,8 +138,11 @@ export default function BookAssignmentPanel({
 
       <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
         <div className="mb-3">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
+          <div className="mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
             Assigned{single ? '' : ' across selection'}
+            {mixedCrews && (
+              <span className="rounded bg-warning-tint px-1 py-0.5 text-[9px] font-semibold normal-case text-warning-fg">mixed crews</span>
+            )}
           </div>
           {union.length === 0 ? (
             <p className="text-xs text-fg-subtle">No one assigned yet.</p>
@@ -132,6 +155,9 @@ export default function BookAssignmentPanel({
                       {initials(e.user)}
                     </span>
                     <span className="truncate text-fg">{e.user.firstName} {e.user.lastName}</span>
+                    {memberById.get(String(e.user.id))?.coordinatorName && (
+                      <span className="shrink-0 text-[10px] text-fg-subtle">· {memberById.get(String(e.user.id)).coordinatorName}</span>
+                    )}
                     {!single && <span className="shrink-0 text-[10px] text-fg-subtle">in {e.inBooks.size}/{books.length}</span>}
                   </span>
                   <button
@@ -172,6 +198,23 @@ export default function BookAssignmentPanel({
             </div>
           )}
 
+          {teams.list.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1">
+              {[{ id: 'all', name: 'All' }, ...teams.list, ...(teams.hasNoTeam ? [{ id: 'none', name: 'No team' }] : [])].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTeamFilter(t.id)}
+                  className={[
+                    'rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                    teamFilter === t.id ? 'border-brand-accent bg-brand-tint text-brand-accent' : 'border-border-strong text-fg-muted hover:bg-sunken',
+                  ].join(' ')}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="mb-2 flex items-center gap-2">
             <input
               type="search"
@@ -207,6 +250,7 @@ export default function BookAssignmentPanel({
                         <span className="truncate font-medium text-fg">{u.firstName} {u.lastName}</span>
                         {m.role === 'admin' && <span className="rounded bg-sunken px-1 text-[9px] font-semibold uppercase text-fg-muted">admin</span>}
                         {u.isSelf && <span className="rounded bg-brand-tint px-1 text-[9px] font-semibold uppercase text-brand-accent">you</span>}
+                        {u.coordinatorName && <span className="truncate text-[10px] text-fg-subtle">· {u.coordinatorName}</span>}
                       </span>
                       <button
                         onClick={() => toggleSingle(u.id)}
@@ -230,6 +274,7 @@ export default function BookAssignmentPanel({
                         <span className="truncate font-medium text-fg">{u.firstName} {u.lastName}</span>
                         {m.role === 'admin' && <span className="rounded bg-sunken px-1 text-[9px] font-semibold uppercase text-fg-muted">admin</span>}
                         {u.isSelf && <span className="rounded bg-brand-tint px-1 text-[9px] font-semibold uppercase text-brand-accent">you</span>}
+                        {u.coordinatorName && <span className="truncate text-[10px] text-fg-subtle">· {u.coordinatorName}</span>}
                       </span>
                     </button>
                   </li>

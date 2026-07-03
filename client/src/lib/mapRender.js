@@ -100,6 +100,9 @@ export function householdsToGeoJSON(households) {
         properties: {
           id: h.id,
           status: h.status,
+          // Pin provenance — drives the "approximate" ring + detail badge.
+          coordConfidence: h.coordConfidence || '',
+          coordSource: h.coordSource || '',
         },
       })),
   };
@@ -193,6 +196,25 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       'icon-ignore-placement': true,
     },
   });
+
+  // Amber "approximate" ring under any interpolated (non-rooftop) geocode, so admins
+  // can spot the pins most likely to be off and correct them. Below the house icon.
+  map.addLayer(
+    {
+      id: 'household-approx-ring',
+      type: 'circle',
+      source: 'households',
+      filter: ['==', ['get', 'coordConfidence'], 'interpolated'],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 13, 17, 18],
+        'circle-color': 'rgba(0,0,0,0)',
+        'circle-stroke-color': '#f59e0b',
+        'circle-stroke-width': 2,
+        'circle-stroke-opacity': 0.9,
+      },
+    },
+    'households-symbols'
+  );
 
   if (!withCanvassers) return;
 

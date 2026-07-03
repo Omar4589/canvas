@@ -35,27 +35,42 @@ router.get('/', async (req, res, next) => {
     const assignments = await CampaignAssignment.find({ campaignId: campaign._id })
       .populate({ path: 'userId', select: 'firstName lastName email isActive isSuperAdmin' })
       .lean();
-    // Join org roles so the pickers/Team page can show the "admin" badge + search.
+    // Join org roles + coordinator (the "team" grouping) so the pickers/Team page can
+    // show the admin badge, search, and group/assign by crew.
     const userIds = assignments.filter((a) => a.userId).map((a) => a.userId._id);
-    const roleByUser = new Map(
-      (await Membership.find({ organizationId: campaign.organizationId, userId: { $in: userIds } })
-        .select('userId role')
-        .lean()
-      ).map((m) => [String(m.userId), m.role])
+    const memberships = await Membership.find({ organizationId: campaign.organizationId, userId: { $in: userIds } })
+      .select('userId role coordinatorId')
+      .lean();
+    const roleByUser = new Map(memberships.map((m) => [String(m.userId), m.role]));
+    const coordByUser = new Map(memberships.map((m) => [String(m.userId), m.coordinatorId ? String(m.coordinatorId) : null]));
+    // Resolve the distinct coordinator (lead) ids to display names for the crew label.
+    const coordIds = [...new Set([...coordByUser.values()].filter(Boolean))];
+    const coordNameById = new Map(
+      coordIds.length
+        ? (await User.find({ _id: { $in: coordIds } }).select('firstName lastName').lean()).map((u) => [
+            String(u._id),
+            `${u.firstName} ${u.lastName}`.trim(),
+          ])
+        : []
     );
     res.json({
       assignments: assignments
         .filter((a) => a.userId)
-        .map((a) => ({
-          userId: String(a.userId._id),
-          firstName: a.userId.firstName,
-          lastName: a.userId.lastName,
-          email: a.userId.email,
-          isActive: a.userId.isActive,
-          isSuperAdmin: !!a.userId.isSuperAdmin,
-          role: roleByUser.get(String(a.userId._id)) || 'canvasser',
-          assignedAt: a.assignedAt,
-        })),
+        .map((a) => {
+          const coordinatorId = coordByUser.get(String(a.userId._id)) || null;
+          return {
+            userId: String(a.userId._id),
+            firstName: a.userId.firstName,
+            lastName: a.userId.lastName,
+            email: a.userId.email,
+            isActive: a.userId.isActive,
+            isSuperAdmin: !!a.userId.isSuperAdmin,
+            role: roleByUser.get(String(a.userId._id)) || 'canvasser',
+            coordinatorId,
+            coordinatorName: coordinatorId ? coordNameById.get(coordinatorId) || null : null,
+            assignedAt: a.assignedAt,
+          };
+        }),
     });
   } catch (err) {
     next(err);

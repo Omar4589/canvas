@@ -253,6 +253,10 @@ is **cache-only** (zero provider calls); the opt-in `POST /admin/imports/geocode
 live geocode (cost-confirmed, worker-backed) and caches results so a later apply is free. Off ⇒
 today's `bad_coords` behavior byte-for-byte. `GeocodeCache` indexes build at worker boot.
 
+`coordSource`/`coordConfidence` are no longer import-only bookkeeping: the maps now **surface** them
+(an amber "approximate" ring on `interpolated` pins) and a pin can be **corrected** — which sets
+`coordSource='corrected'`. See [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
+
 **Batching:** 1000 addresses/request with a 180s timeout by default (`GEOCODE_BATCH_SIZE` /
 `GEOCODE_BATCH_TIMEOUT_MS`) — Geocodio's hard cap is 10000, but smaller batches stay within the
 per-batch timeout, make retries cheap, and cache incrementally (the worker has no platform request

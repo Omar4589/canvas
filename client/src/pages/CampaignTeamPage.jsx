@@ -21,6 +21,27 @@ function YouBadge() {
     <span className="rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">you</span>
   );
 }
+function TeamMemberRow({ a, isSelf, onRemove, busy }) {
+  return (
+    <li className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-medium text-fg">{a.firstName} {a.lastName}</span>
+          <RoleBadge role={a.role} />
+          {isSelf && <YouBadge />}
+        </div>
+        <div className="truncate text-xs text-fg-muted">{a.email}</div>
+      </div>
+      <button
+        onClick={onRemove}
+        disabled={busy}
+        className="shrink-0 rounded-md border border-danger/30 bg-danger-tint px-3 py-1 text-xs font-semibold text-danger disabled:opacity-50"
+      >
+        Remove
+      </button>
+    </li>
+  );
+}
 
 export default function CampaignTeamPage() {
   const { campaignId } = useParams();
@@ -54,6 +75,19 @@ export default function CampaignTeamPage() {
     [assignmentsQ.data]
   );
   const assignedSet = useMemo(() => new Set(team.map((a) => a.userId)), [team]);
+  // Group the team by coordinator ("crew") — named crews first, "No coordinator" last.
+  const hasCrews = useMemo(() => team.some((a) => a.coordinatorId), [team]);
+  const teamGroups = useMemo(() => {
+    const byCoord = new Map();
+    for (const a of team) {
+      const key = a.coordinatorId || 'none';
+      if (!byCoord.has(key)) byCoord.set(key, { key, name: a.coordinatorName || null, members: [] });
+      byCoord.get(key).members.push(a);
+    }
+    return [...byCoord.values()].sort((a, b) =>
+      a.key === 'none' ? 1 : b.key === 'none' ? -1 : (a.name || '').localeCompare(b.name || '')
+    );
+  }, [team]);
   const orgMembers = (membersQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
   const candidates = orgMembers
     .filter((m) => !assignedSet.has(m.user.id))
@@ -150,28 +184,39 @@ export default function CampaignTeamPage() {
             <div className="rounded border border-dashed border-border bg-sunken px-4 py-8 text-center text-sm text-fg-muted">
               No one yet — add people from the left.
             </div>
-          ) : (
+          ) : !hasCrews ? (
             <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
               {team.map((a) => (
-                <li key={a.userId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-medium text-fg">{a.firstName} {a.lastName}</span>
-                      <RoleBadge role={a.role} />
-                      {String(a.userId) === String(user?.id) && <YouBadge />}
-                    </div>
-                    <div className="truncate text-xs text-fg-muted">{a.email}</div>
-                  </div>
-                  <button
-                    onClick={() => unassignMut.mutate(a.userId)}
-                    disabled={busy}
-                    className="shrink-0 rounded-md border border-danger/30 bg-danger-tint px-3 py-1 text-xs font-semibold text-danger disabled:opacity-50"
-                  >
-                    Remove
-                  </button>
-                </li>
+                <TeamMemberRow
+                  key={a.userId}
+                  a={a}
+                  isSelf={String(a.userId) === String(user?.id)}
+                  onRemove={() => unassignMut.mutate(a.userId)}
+                  busy={busy}
+                />
               ))}
             </ul>
+          ) : (
+            <div className="space-y-3">
+              {teamGroups.map((g) => (
+                <div key={g.key}>
+                  <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                    {g.name || 'No coordinator'} <span className="text-fg-subtle">({g.members.length})</span>
+                  </div>
+                  <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+                    {g.members.map((a) => (
+                      <TeamMemberRow
+                        key={a.userId}
+                        a={a}
+                        isSelf={String(a.userId) === String(user?.id)}
+                        onRemove={() => unassignMut.mutate(a.userId)}
+                        busy={busy}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
       </div>

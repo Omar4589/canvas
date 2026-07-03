@@ -14,6 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { recordHouseholdAction } from '../../../lib/recordAction';
 import { guardedPush } from '../../../lib/navGuard';
+import { buildingKey } from '../../../lib/buildings';
+import FixPinModal from '../../../components/FixPinModal';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -147,10 +149,19 @@ export default function HouseholdDetail() {
   const { household, voters } = findHouseholdAndVoters(bootstrap, id);
 
   const [note, setNote] = useState('');
+  const [showFixPin, setShowFixPin] = useState(false);
   // Once any action fires, lock the screen (firedRef blocks a second tap synchronously;
   // isSubmitting disables the buttons) — then we navigate back.
   const [isSubmitting, setIsSubmitting] = useState(false);
   const firedRef = useRef(false);
+
+  // Other units sharing this door's pin (for the "just this unit / whole building?" prompt).
+  const myKey = household ? buildingKey(household) : null;
+  const siblingCount = myKey
+    ? (bootstrap?.households || []).filter(
+        (h) => String(h._id) !== String(household._id) && buildingKey(h) === myKey
+      ).length
+    : 0;
 
   if (!household) {
     return (
@@ -222,6 +233,27 @@ export default function HouseholdDetail() {
           </View>
           <StatusPill status={household.status} />
         </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm }}>
+          {household.coordSource === 'corrected' ? (
+            <Text style={{ color: colors.brand, fontSize: 12, fontWeight: '700' }}>● Pin corrected</Text>
+          ) : household.coordConfidence === 'interpolated' ? (
+            <Text style={{ color: colors.warnFg, fontSize: 12, fontWeight: '700' }}>● Approximate location</Text>
+          ) : (
+            <View />
+          )}
+          <Pressable onPress={() => setShowFixPin(true)} hitSlop={6}>
+            <Text style={{ color: colors.brand, fontSize: 13, fontWeight: '700' }}>Fix pin location →</Text>
+          </Pressable>
+        </View>
+
+        <FixPinModal
+          visible={showFixPin}
+          household={household}
+          qc={qc}
+          siblingCount={siblingCount}
+          onClose={() => setShowFixPin(false)}
+        />
 
         {campaignType === 'survey' && (
           <>
