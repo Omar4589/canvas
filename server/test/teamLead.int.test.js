@@ -18,6 +18,9 @@ const { User } = await import('../src/models/User.js');
 const { Membership } = await import('../src/models/Membership.js');
 const { Campaign } = await import('../src/models/Campaign.js');
 const { CampaignManager } = await import('../src/models/CampaignManager.js');
+const { Household } = await import('../src/models/Household.js');
+const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
+const bcrypt = (await import('bcryptjs')).default;
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -29,7 +32,7 @@ const ctx = {}; // { org, A, B, adminTok, leadTok }
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CampaignManager]) await M.deleteMany({});
+  for (const M of [Organization, User, Membership, Campaign, CampaignManager, Household, ReportShareLink]) await M.deleteMany({});
 
   const org = await Organization.create({ name: 'Test Org', slug: 'test-org-lead', isActive: true });
   const admin = await User.create({ firstName: 'Ada', lastName: 'Admin', email: 'admin@t.co', passwordHash: 'x', isActive: true });
@@ -40,8 +43,27 @@ before(async () => {
   const B = await Campaign.create({ organizationId: org._id, name: 'Campaign B', type: 'survey', state: 'KY', isActive: true });
   await CampaignManager.create({ campaignId: A._id, userId: lead._id, organizationId: org._id, grantedBy: admin._id });
 
+  // A household in each campaign, for the /:householdId/activity scoping test. Raw insert
+  // (bypass schema requireds) — the handler only needs _id + organizationId + campaignId.
+  const hhA = new mongoose.Types.ObjectId();
+  const hhB = new mongoose.Types.ObjectId();
+  await Household.collection.insertMany([
+    { _id: hhA, campaignId: A._id, organizationId: org._id, isActive: true },
+    { _id: hhB, campaignId: B._id, organizationId: org._id, isActive: true },
+  ]);
+
+  // A password-protected share link for the unlock rate-limit test.
+  const shareToken = 'ratelimit-test-token';
+  await ReportShareLink.collection.insertOne({
+    token: shareToken,
+    organizationId: org._id,
+    campaignId: A._id,
+    passwordHash: await bcrypt.hash('the-real-password', 10),
+    isActive: true,
+  });
+
   Object.assign(ctx, {
-    org, A, B,
+    org, A, B, hhA, hhB, shareToken,
     adminTok: signUserToken(admin),
     leadTok: signUserToken(lead),
   });
@@ -158,4 +180,30 @@ test('lead can create a canvasser onto a managed campaign via /crew, not onto B'
     body: { firstName: 'No', lastName: 'Pe', email: 'nope@t.co', password: 'password123' },
   });
   assert.strictEqual(no.status, 403, 'crew create on B');
+});
+
+test('lead can load the campaign map for A, not B, and never org-wide', { skip }, async () => {
+  const { leadTok, org, A, B } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  assert.strictEqual((await call('GET', `/api/admin/households/map?campaignId=${A._id}`, opt)).status, 200, 'map A');
+  assert.strictEqual((await call('GET', `/api/admin/households/map?campaignId=${B._id}`, opt)).status, 403, 'map B');
+  assert.strictEqual((await call('GET', '/api/admin/households/map', opt)).status, 403, 'map org-wide');
+});
+
+test('lead household-activity is scoped to a managed campaign', { skip }, async () => {
+  const { leadTok, org, hhA, hhB } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  assert.strictEqual((await call('GET', `/api/admin/households/${hhA}/activity`, opt)).status, 200, 'activity A');
+  assert.strictEqual((await call('GET', `/api/admin/households/${hhB}/activity`, opt)).status, 403, 'activity B');
+});
+
+test('share-link unlock is rate-limited after repeated wrong passwords', { skip }, async () => {
+  const { shareToken } = ctx;
+  const statuses = [];
+  for (let i = 0; i < 11; i++) {
+    const r = await call('POST', `/api/share/${shareToken}/unlock`, { body: { password: 'wrong-guess' } });
+    statuses.push(r.status);
+  }
+  assert.strictEqual(statuses[0], 401, 'first wrong attempt is 401');
+  assert.strictEqual(statuses[10], 429, '11th attempt in the window is rate-limited (429)');
 });

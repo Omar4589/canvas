@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { isOrgAdmin, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { User } from '../../models/User.js';
@@ -18,7 +19,9 @@ import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+// Team leads reach the campaign Map (and its household-activity popup), so both routes
+// here allow leads — scoped per-request to a campaign they manage (see the gates below).
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -84,6 +87,17 @@ router.get('/map', async (req, res, next) => {
       req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
         ? new mongoose.Types.ObjectId(req.query.campaignId)
         : null;
+
+    // A team lead may only pull the map for a campaign they manage — and never org-wide
+    // (no campaignId). Admins/super are unrestricted.
+    if (!isOrgAdmin(req)) {
+      if (!campaignId) {
+        return res.status(403).json({ error: 'A team lead must scope the map to a campaign they manage.' });
+      }
+      if (!(await canManageCampaign(req, campaignId))) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
 
     // Scoped audit: narrow the map to one effort's doors, or one pass's books.
     const effortId =
@@ -364,6 +378,14 @@ router.get('/:householdId/activity', async (req, res, next) => {
     const { householdId } = req.params;
     if (!mongoose.isValidObjectId(householdId)) return res.status(400).json({ error: 'Invalid id' });
     const hid = new mongoose.Types.ObjectId(householdId);
+    // A lead may only see activity for a household in a campaign they manage.
+    if (!isOrgAdmin(req)) {
+      const hh = await Household.findOne({ _id: hid, organizationId: orgId }, { campaignId: 1 }).lean();
+      if (!hh) return res.status(404).json({ error: 'Household not found' });
+      if (!(await canManageCampaign(req, hh.campaignId))) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
     const name = (u) => (u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : null);
 
     const [acts, surveys] = await Promise.all([

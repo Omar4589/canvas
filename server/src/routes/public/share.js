@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
+import rateLimit from 'express-rate-limit';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
@@ -82,7 +83,20 @@ router.get('/:token', loadShare, async (req, res, next) => {
 
 const unlockSchema = z.object({ password: z.string().min(1) });
 
-router.post('/:token/unlock', loadShare, async (req, res, next) => {
+// Throttle password guessing on a share link. Keyed by IP + token so guessing one link
+// can't lock the IP out of others; only FAILED attempts count (a legit viewer unlocks in
+// a try or two). `trust proxy` (app.js) makes req.ip the real client behind Heroku.
+const unlockLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => `${req.ip}:${req.params.token}`,
+  message: { error: 'Too many attempts. Try again in a few minutes.', code: 'rate-limited' },
+});
+
+router.post('/:token/unlock', unlockLimiter, loadShare, async (req, res, next) => {
   try {
     const issue = () =>
       res.json({ accessToken: signShareToken({ shareId: req.share._id, campaignId: req.share.campaignId }) });

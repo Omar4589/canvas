@@ -63,7 +63,13 @@ export default function AdminBooks() {
   const currentEffort = effortList.find((e) => e.id === currentEffortId) || null;
   const passId = currentEffort?.activeRound?._id ? String(currentEffort.activeRound._id) : null;
 
-  const membersQ = useQuery({ queryKey: ['admin', 'memberships'], queryFn: () => api('/admin/memberships') });
+  // Campaign-scoped crew endpoint (not the org-wide /admin/memberships) so the assign
+  // picker works for team leads too, not just org admins.
+  const membersQ = useQuery({
+    queryKey: ['admin', 'campaign-crew', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/crew`),
+    enabled: !!cId,
+  });
   const rosterQ = useQuery({
     queryKey: ['admin', 'campaign-assignments', cId],
     queryFn: () => api(`/admin/campaigns/${cId}/assignments`),

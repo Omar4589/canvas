@@ -121,10 +121,15 @@ check, so ownership and management are enforced independently.
 library (to attach a survey / filter by tag), but every mutation carries a per-route
 `requireOrgRole('admin')`.
 
-**Org-only, leads blocked** — `memberships` (org Users admin), `voters` / `households` (org voter
-directory), `queues` stay `requireOrgRole('admin')`. `activities` (`GET /admin/activities/:id`, the map
-ping detail) allows leads but authorizes on the activity's `campaignId`, so a lead sees ping detail only
-for a campaign they manage.
+**Org-only, leads blocked** — `memberships` (org Users admin), `voters` (org voter directory), `queues`
+stay `requireOrgRole('admin')`.
+
+**Campaign-map data — allows leads, authorized per campaign.** The campaign Map tab is lead-visible, so
+its data endpoints allow `('admin','lead')` and gate leads on the campaign: `households`
+([households.js](../server/src/routes/admin/households.js)) — `GET /map` requires a managed `campaignId`
+(no org-wide map), and `GET /:householdId/activity` authorizes on the household's `campaignId`; and
+`activities` (`GET /admin/activities/:id`, the ping detail) authorizes on the activity's `campaignId`. So
+a lead sees the map + ping/household detail only for campaigns they manage.
 
 **The lead's crew surface** — `leadCrew` ([leadCrew.js](../server/src/routes/admin/leadCrew.js)) at
 `/admin/campaigns/:campaignId/crew`, behind `requireCampaignManager`: `GET /` (org members for the
