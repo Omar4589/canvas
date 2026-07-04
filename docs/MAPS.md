@@ -90,14 +90,29 @@ An organizer sees the whole campaign at once:
 
 ## Where the dots come from (and how live it is)
 
-- **Coordinates come from your uploaded voter file.** Each row brings its own latitude/longitude, and
-  that's where the pin lands. The app **does not look up addresses** — a row without coordinates won't
-  appear on the map (see [IMPORTS.md](IMPORTS.md)).
+- **Coordinates come from your voter file — or are looked up when it doesn't have them.** If a row
+  includes latitude/longitude, that's where the pin lands. If it doesn't, the address is **geocoded**
+  (looked up) at import so the door still gets a pin; only rows we genuinely can't place are left off
+  the map (see [IMPORTS.md](IMPORTS.md)).
 - **A "ping" is a GPS stamp.** When a canvasser logs an action, the app records where the phone was at
   that moment. That's the dot you see on the admin map, along with how far it was from the house.
 - **How fresh:** the web map refreshes ~every 20s; the mobile app keeps doors in sync ~every 30s.
   Mobile stays deliberately light on battery (canvassers open and close the app all day), while the
   web map can be more live because admins sit at a connected desk.
+
+## Approximate pins, and fixing them
+
+A **looked-up (geocoded)** pin is a best guess — it can land a house or two off, especially in rural
+areas or on long roads. The web admin map flags these with a faint **amber ring** around the pin, and
+the door's detail panel shows **"Approximate location."** To fix one, an admin **drags the pin** to the
+right spot ("Move pin" → Save); a canvasser can also nudge it from the field. Once it's moved the amber
+ring disappears and the door reads **"Pin corrected."** Three things worth knowing:
+
+- **Moving a pin doesn't re-cut books.** A correction only fixes *where the dot sits* — the door keeps
+  whatever book (turf) it's already in until you re-cut ([PASSES_AND_TURF.md](PASSES_AND_TURF.md)).
+- **Canvassers see corrections automatically** on their next sync — you don't have to tell them.
+- A report you've already **published** keeps the map it was frozen with; republish it to pick up
+  corrections made afterward.
 
 ---
 

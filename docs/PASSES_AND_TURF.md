@@ -166,12 +166,13 @@ reopened** (you make a new round). Archiving a **live or already-worked** round 
 confirmation (knocks are kept either way); only the *auto*-archive when you activate the next round is
 silent.
 
-## Only one pass runs at a time
+## One active pass per walk list
 
-A campaign can have **only one active pass**. Activating a pass automatically **archives** any other
-active pass. Canvassers only ever see the **active** pass — and within it, only the **books assigned
-to them**. You can have lots of passes sitting in draft or archived, but the field only ever sees
-the one that's live.
+Each **walk list** runs **one active pass at a time** — activating a pass archives the other active
+pass *in that same walk list*, but other walk lists keep theirs. So a campaign can have **several active
+passes at once** (one per active walk list — see the banner above and [EFFORTS.md](EFFORTS.md)).
+Canvassers only ever see an **active** pass, and within it only the **books assigned to them**; passes
+sitting in draft or archived are never shown in the field.
 
 ## How the numbers add up across passes
 
@@ -228,9 +229,9 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 
 | Model | File | Fields that matter |
 |---|---|---|
-| `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `roundNumber` (unique per campaign, never reused), `name`, `walkListId` (null = all voters), `status` (`draft`/`active`/`archived`), `activatedAt` (monotonic — drives pass attribution), `archivedAt`, `recutLock{lockedAt,lockedBy}`. Unique index `{campaignId, roundNumber}`. |
+| `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `roundNumber` (unique per campaign, never reused), `name`, `walkListId` (null = all voters), `status` (`draft`/`active`/`archived`), `activatedAt` (set on activation; knock attribution is now door→book→walk-list, not this timestamp — see the banner), `archivedAt`, `recutLock{lockedAt,lockedBy}`. Unique index `{campaignId, roundNumber}`. |
 | `Turf` (= "book") | [models/Turf.js](../server/src/models/Turf.js) | `passId` (required), `campaignId`, `name`, `mode` (`attribute`/`geometric`/`manual`), `params`, `householdIds[]` (**ordered** = walk sequence), `doorCount`, `boundary`/`centroid` (GeoJSON, **display-only**, not geo-indexed), `status` (`draft`/`published`/`archived`), `generationJobId`, `generatedBy`. |
-| `Campaign.activePassId` | [models/Campaign.js](../server/src/models/Campaign.js) | Single ObjectId (not an array) → the one active pass; `null` when none. |
+| Active passes (derived) | [services/passes/activePasses.js](../server/src/services/passes/activePasses.js) | `activePassIds(campaignId)` derives the live passes from `Pass.status==='active'` — **one per active walk list** (a campaign can have several at once). There is **no** `Campaign.activePassId` field. |
 | `Household.turfId` / `walkOrder` | [models/Household.js](../server/src/models/Household.js) | Denormalized mirror of "which book + position" for the household; `null` until assigned by a cut. |
 | `TurfAssignment` | [models/TurfAssignment.js](../server/src/models/TurfAssignment.js) | Which user is assigned which book on which pass (`{userId, campaignId, passId, turfId}`); drives the mobile bootstrap's per-canvasser scoping. |
 | `WalkList` | [models/WalkList.js](../server/src/models/WalkList.js) | Frozen `householdIds[]` snapshot a pass can target; **immutable** w.r.t. later imports. |

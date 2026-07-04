@@ -125,7 +125,10 @@ per published report (its own collection so a large campaign can't blow the 16 M
 **[ReportShareLink](../server/src/models/ReportShareLink.js)** — a public, revocable link to **one
 campaign's** published reports. `{ organizationId, campaignId, token (unique), label, passwordHash |
 null, isActive, createdBy, lastAccessedAt }`. The `token` is `crypto.randomBytes(24).toString('base64url')`
-— an unguessable capability string that appears in the URL. A campaign may have several links.
+— an unguessable capability string that appears in the URL. A campaign may have several links. A
+password link exchanges the password for a short-lived share JWT via `POST /share/:token/unlock`; that
+endpoint is **rate-limited** — 10 attempts / 15 min per **IP + token**, counting only failed guesses —
+so a link's password can't be brute-forced ([share.js](../server/src/routes/public/share.js)).
 
 ## The numbers (dual window)
 
