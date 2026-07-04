@@ -14,9 +14,12 @@ export const SUPER_NAV = [
   { to: '/queues', label: 'Jobs' },
 ];
 
+// `leadVisible` marks the top-level items a team lead sees. A lead is a campaign-scoped
+// admin: they get Campaigns (their granted campaigns), but not the org-wide Overview,
+// survey/tag libraries, Voters, or Users administration.
 export const ORG_NAV = [
   { to: '/admin', label: 'Overview', end: true },
-  { to: '/campaigns', label: 'Campaigns' },
+  { to: '/campaigns', label: 'Campaigns', leadVisible: true },
   { to: '/surveys', label: 'Surveys' },
   { to: '/tags', label: 'Tags' },
   { to: '/voters', label: 'Voters' },

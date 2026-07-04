@@ -100,6 +100,15 @@ export function AuthProvider({ children }) {
 
   const isSuperAdmin = !!user?.isSuperAdmin;
   const isOrgAdmin = isSuperAdmin || activeMembership?.role === 'admin';
+  // A team lead is a campaign-scoped admin: they reach the console, but only for the
+  // campaigns granted to them (managedCampaignIds). isConsoleUser = anyone who may see
+  // the admin console at all (super/admin/lead).
+  const isLead = !isOrgAdmin && activeMembership?.role === 'lead';
+  const isConsoleUser = isOrgAdmin || isLead;
+  const managedCampaignIds = useMemo(
+    () => (isLead ? activeMembership?.managedCampaignIds || [] : []),
+    [isLead, activeMembership]
+  );
   const mustChangePassword = !!user?.mustChangePassword;
   // Org-wide audit timestamps (imports, walk lists, turf snapshots, user profiles) render
   // in the active org's timezone so they read the same for every admin.
@@ -115,6 +124,9 @@ export function AuthProvider({ children }) {
         orgTimeZone,
         isSuperAdmin,
         isOrgAdmin,
+        isLead,
+        isConsoleUser,
+        managedCampaignIds,
         mustChangePassword,
         loading,
         login,

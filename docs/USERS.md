@@ -22,8 +22,8 @@ There is **one account per email address, shared across the whole platform.** A 
 with their email + password — no organization is chosen at sign-in.
 
 Belonging to an organization is a separate thing called a **membership**: it links your one account
-to an org and gives you a **role** there (Admin or Canvasser). The same person can have memberships
-in several orgs, each with its own role, and switch between them with the org switcher.
+to an org and gives you a **role** there (Admin, Team lead, or Canvasser). The same person can have
+memberships in several orgs, each with its own role, and switch between them with the org switcher.
 
 ```
 Account (one per email)
@@ -51,16 +51,35 @@ When you add someone, **they're told.** The next time they sign in they see an i
 been added to *{org}* as *{role}*." They dismiss it and it's gone. (There's no email system yet, so
 the notice is in-app.)
 
+## Roles: admin, team lead, canvasser
+
+A membership's **role** decides what a person can do in that org:
+
+- **Admin** — runs the whole organization: every campaign, plus the org-wide setup (the survey
+  template library, tags, the voter directory, and Users administration).
+- **Team lead** — a **campaign-scoped admin**. Within the specific campaigns they're *granted*, a lead
+  does everything an admin does (import voters, attach a survey, build walk lists, cut turf, run passes,
+  assign books, manage the crew, and see the reports / map / timeline). They **cannot** create, archive,
+  or delete a campaign, touch the org-wide survey/tag libraries or Users administration, or see any
+  campaign they weren't granted. Grant a lead their campaigns on the Users page (set role → Team lead,
+  then check the campaigns).
+- **Canvasser** — walks the doors in the mobile app for the campaigns they're on. No console access.
+
+Team lead is how you hand a trusted person a campaign to run **without** making them a full org admin.
+The full power matrix and enforcement details are in [ROLES.md](ROLES.md).
+
 ## Coordinators (who oversees whom)
 
 Each member can optionally have a **coordinator** — an admin in the same org who oversees them. Use it
 when one campaign has several admins splitting the team (e.g. two vendors, or a paid vs. volunteer
 crew): tag each canvasser with the admin who runs their group, so you can see and report on "who
-reports to whom." A coordinator must be an **admin in this org**; you can leave it as *None*.
+reports to whom." A coordinator must be an **admin or team lead in this org**; you can leave it as
+*None*.
 
 You set it two ways, both on the Users page:
 
-- **When adding a member** — pick a "Coordinator (optional)" from the dropdown of this org's admins.
+- **When adding a member** — pick a "Coordinator (optional)" from the dropdown of this org's admins and
+  team leads.
 - **Later** — open a member's profile and choose/clear their coordinator (it saves immediately).
 
 The Users list shows a **Coordinator** column, and a **Coordinator filter** lets you narrow the list to
@@ -123,8 +142,9 @@ Because the account is shared, some things are global and some are per-org:
 | Name, phone | Shared (one profile) | Any admin of an org they belong to, or a super-admin |
 | **Login email** | Shared (it's how they sign in everywhere) | The user or a super-admin only, **if** they're in 2+ orgs |
 | Password | Shared | Any of their org's admins (as a *temporary* password) or the user |
-| Role | Per-org | Each org's admin sets the role in their own org |
-| Coordinator | Per-org (membership) | Each org's admin — points to an admin in the same org |
+| Role | Per-org | Each org's admin (admin / team lead / canvasser) — see [ROLES.md](ROLES.md) |
+| Team-lead campaign grants | Per-org (`CampaignManager`) | Each org's admin — which campaigns a lead manages |
+| Coordinator | Per-org (membership) | Each org's admin — points to an admin or team lead in the same org |
 | Active / inactive | Per-org (membership) | Each org's admin, for their own org |
 | Removed from org | Per-org (membership) | Each org's admin — only removes *their* membership |
 
@@ -145,12 +165,19 @@ their login email** (that would change how they sign into the *other* orgs). The
   - `tempPasswordSetAt: Date` — when the temp password was set; used to expire it (72h).
   - `isSuperAdmin: Boolean` — platform-wide; bypasses org-role checks.
 - **`Membership`** ([server/src/models/Membership.js](../server/src/models/Membership.js)) — join table
-  `{ userId, organizationId, role: 'admin'|'canvasser', isActive, addedBy }`, unique on
-  `(userId, organizationId)`. New fields:
+  `{ userId, organizationId, role: 'admin'|'lead'|'canvasser', isActive, addedBy }`, unique on
+  `(userId, organizationId)`. The `'lead'` (team lead) role is a **campaign-scoped admin** — its
+  authority is the set of campaigns granted via `CampaignManager` (below). The enum add is additive, so
+  **no migration** is needed. Fields:
   - `acknowledgedAt: Date|null` — `null` = the "added to org" banner is still pending; a timestamp =
     dismissed.
-  - `coordinatorId: ObjectId|null` (ref `User`) — the supervising admin in this org, or `null`. Indexed
-    `{ organizationId, coordinatorId }`.
+  - `coordinatorId: ObjectId|null` (ref `User`) — the supervising admin **or team lead** in this org, or
+    `null`. Indexed `{ organizationId, coordinatorId }`.
+- **`CampaignManager`** ([server/src/models/CampaignManager.js](../server/src/models/CampaignManager.js))
+  — a team lead's grant to manage one campaign: `{ campaignId, userId, organizationId, grantedBy,
+  grantedAt }`, unique `(campaignId, userId)`, indexed `{ userId, organizationId }`. Deliberately
+  **separate** from `CampaignAssignment` (the walker roster) so a lead can *manage* a campaign without
+  walking it — and can also walk it independently. The full authz contract is in [ROLES.md](ROLES.md).
 
 ## Auth & the forced-password-change flow
 
@@ -192,10 +219,11 @@ mitigation envelope.
 
 ## Coordinators
 
-A per-org supervisory link: `Membership.coordinatorId` → a `User` who is an **active `admin` in the same
-org**. Set on **create** (`POST /admin/memberships`, optional `coordinatorId`) and **update**
-(`PATCH /admin/memberships/:userId`, nullable `coordinatorId`); a shared validator (`resolveCoordinatorId`)
-rejects a non-admin / cross-org / self reference with `400`, and `''`/`null` clears it. `GET /admin/memberships`
+A per-org supervisory link: `Membership.coordinatorId` → a `User` who is an **active `admin` or `lead`
+in the same org**. Set on **create** (`POST /admin/memberships`, optional `coordinatorId`) and **update**
+(`PATCH /admin/memberships/:userId`, nullable `coordinatorId`); a shared validator (`resolveCoordinatorId`,
+in [createMember.js](../server/src/services/memberships/createMember.js)) rejects a non-admin/lead /
+cross-org / self reference with `400`, and `''`/`null` clears it. `GET /admin/memberships`
 returns each member's `coordinatorId` (a plain id — the client resolves the name from the same roster, so
 no extra query/populate). The web UI lives in [UsersPage.jsx](../client/src/pages/UsersPage.jsx) (Add-member
 dropdown + table column + filter) and [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx)

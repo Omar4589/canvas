@@ -16,7 +16,9 @@ const membershipSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'canvasser'],
+      // 'lead' = team lead: a campaign-scoped admin whose authority is the set of
+      // campaigns granted via CampaignManager. Additive enum — no migration needed.
+      enum: ['admin', 'lead', 'canvasser'],
       required: true,
     },
     isActive: { type: Boolean, default: true },

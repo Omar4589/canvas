@@ -8,7 +8,6 @@ export default function SelectOrgPage() {
   const { user, memberships, isSuperAdmin, switchOrg, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from?.pathname || '/admin';
 
   const [allOrgs, setAllOrgs] = useState([]);
   const [loadingOrgs, setLoadingOrgs] = useState(false);
@@ -22,9 +21,13 @@ export default function SelectOrgPage() {
       .finally(() => setLoadingOrgs(false));
   }, [isSuperAdmin]);
 
-  function pick(orgId) {
+  function pick(orgId, role) {
     switchOrg(orgId);
-    navigate(from === '/select-org' ? '/admin' : from, { replace: true });
+    // A team lead has no org Overview — send them to their campaigns. Honor a real
+    // deep link if one brought them here.
+    const deepLink = location.state?.from?.pathname;
+    const home = role === 'lead' ? '/campaigns' : '/admin';
+    navigate(deepLink && deepLink !== '/select-org' ? deepLink : home, { replace: true });
   }
 
   function pickPlatform() {
@@ -84,7 +87,7 @@ export default function SelectOrgPage() {
             {items.map((m) => (
               <li key={m.organizationId}>
                 <button
-                  onClick={() => pick(m.organizationId)}
+                  onClick={() => pick(m.organizationId, m.role)}
                   className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-brand-tint"
                   disabled={!m.isActive}
                 >

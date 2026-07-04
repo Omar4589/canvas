@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+router.use(requireAuth, orgContext, requireCampaignManager);
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

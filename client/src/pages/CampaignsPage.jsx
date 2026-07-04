@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import { Modal, Button } from '../components/ui/index.js';
@@ -206,6 +207,9 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
 export default function CampaignsPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  // Team leads see only the campaigns granted to them (server-scoped) and manage them,
+  // but creating / editing / archiving / deleting a campaign stays with org admins.
+  const { isOrgAdmin } = useAuth();
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
   const [assigningCampaign, setAssigningCampaign] = useState(null);
@@ -261,7 +265,7 @@ export default function CampaignsPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Campaigns</h1>
-        {!creating && !editing && (
+        {isOrgAdmin && !creating && !editing && (
           <button
             onClick={() => setCreating(true)}
             className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
@@ -367,11 +371,17 @@ export default function CampaignsPage() {
                       items={[
                         { label: 'View dashboard', onClick: () => navigate(`/campaigns/${c._id}`) },
                         { label: 'Assignments', onClick: () => setAssigningCampaign(c) },
-                        { label: 'Edit', onClick: () => setEditing(c) },
-                        { label: c.isActive ? 'Archive' : 'Reactivate', onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }) },
-                        c.deletable === true
-                          ? { label: 'Delete', danger: true, onClick: () => setDeleting(c) }
-                          : { label: 'Delete', disabled: true, title: 'Archive instead — this campaign has canvassing data' },
+                        // Edit / Archive / Delete are org-admin acts — a lead runs the
+                        // campaign but doesn't reshape or remove it.
+                        ...(isOrgAdmin
+                          ? [
+                              { label: 'Edit', onClick: () => setEditing(c) },
+                              { label: c.isActive ? 'Archive' : 'Reactivate', onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }) },
+                              c.deletable === true
+                                ? { label: 'Delete', danger: true, onClick: () => setDeleting(c) }
+                                : { label: 'Delete', disabled: true, title: 'Archive instead — this campaign has canvassing data' },
+                            ]
+                          : []),
                       ]}
                     />
                   </td>
@@ -380,7 +390,11 @@ export default function CampaignsPage() {
               {!campaigns.length && (
                 <tr>
                   <td colSpan="10" className="px-4 py-10 text-center text-fg-muted">
-                    No campaigns yet. Click <strong>New campaign</strong> to create one.
+                    {isOrgAdmin ? (
+                      <>No campaigns yet. Click <strong>New campaign</strong> to create one.</>
+                    ) : (
+                      <>No campaigns assigned to you yet. Ask an org admin to grant you one.</>
+                    )}
                   </td>
                 </tr>
               )}

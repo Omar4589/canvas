@@ -10,7 +10,10 @@ import { canonicalizeTags } from '../../services/surveys/tags.js';
 import { ensureTags } from '../../services/surveys/tagOps.js';
 
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+// Team leads may READ the template library (to attach a survey to their campaign and
+// to use tags in walk lists / reports); managing the library itself (create/edit/
+// duplicate templates) stays with org admins via requireOrgRole('admin') per route.
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 const optionSchema = z.object({
   id: z.string().optional(),
@@ -232,7 +235,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', async (req, res, next) => {
+router.post('/', requireOrgRole('admin'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const data = upsertSchema.parse(req.body);
@@ -256,7 +259,7 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-router.patch('/:surveyId', async (req, res, next) => {
+router.patch('/:surveyId', requireOrgRole('admin'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const data = upsertSchema.partial().parse(req.body);
@@ -309,7 +312,7 @@ router.patch('/:surveyId', async (req, res, next) => {
 // Clone a survey into a fresh, fully-editable template (version reset, inactive,
 // no campaign link). Used as the escape hatch when an in-use survey needs
 // structural changes — the original stays intact so its reports keep working.
-router.post('/:surveyId/duplicate', async (req, res, next) => {
+router.post('/:surveyId/duplicate', requireOrgRole('admin'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);

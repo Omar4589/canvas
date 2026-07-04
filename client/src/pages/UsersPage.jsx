@@ -27,7 +27,10 @@ const EMPTY_FORM = {
   password: '',
   role: 'canvasser',
   coordinatorId: '',
+  managedCampaignIds: [],
 };
+
+const ROLE_LABEL = { admin: 'Admin', lead: 'Team lead', canvasser: 'Canvasser' };
 
 const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name A–Z' },
@@ -62,6 +65,9 @@ export default function UsersPage() {
     queryKey: ['memberships'],
     queryFn: () => api('/admin/memberships'),
   });
+  // Campaigns to grant a team lead (their managed set).
+  const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
+  const campaigns = campaignsQ.data?.campaigns || [];
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -93,9 +99,9 @@ export default function UsersPage() {
     ? members.find((m) => m.user.id === selectedUserId) || null
     : null;
 
-  // Active admins in this org — the eligible coordinators.
-  const admins = useMemo(
-    () => members.filter((m) => m.role === 'admin' && m.user.isActive && m.isActive),
+  // Active admins + team leads in this org — the eligible coordinators.
+  const coordinators = useMemo(
+    () => members.filter((m) => (m.role === 'admin' || m.role === 'lead') && m.user.isActive && m.isActive),
     [members]
   );
   // userId → "First Last", for rendering a coordinatorId as a name.
@@ -148,6 +154,7 @@ export default function UsersPage() {
       linkExisting: emailLookup,
       coordinatorId: form.coordinatorId || null,
     };
+    if (form.role === 'lead') body.managedCampaignIds = form.managedCampaignIds;
     if (!emailLookup) {
       body.firstName = form.firstName;
       body.lastName = form.lastName;
@@ -155,6 +162,15 @@ export default function UsersPage() {
       body.password = form.password;
     }
     addMember.mutate(body);
+  }
+
+  function toggleFormCampaign(id, checked) {
+    setForm((s) => ({
+      ...s,
+      managedCampaignIds: checked
+        ? [...new Set([...s.managedCampaignIds, id])]
+        : s.managedCampaignIds.filter((x) => x !== id),
+    }));
   }
 
   const labelCls = 'block text-xs font-medium text-fg';
@@ -206,9 +222,39 @@ export default function UsersPage() {
               className="mt-1 w-full"
             >
               <option value="canvasser">Canvasser</option>
+              <option value="lead">Team lead</option>
               <option value="admin">Admin</option>
             </Select>
           </div>
+          {form.role === 'lead' && (
+            <div className="md:col-span-3 rounded-md border border-border bg-sunken p-3">
+              <label className={labelCls}>Campaigns this lead manages</label>
+              <p className="mt-0.5 text-xs text-fg-muted">
+                A team lead fully runs the campaigns you check here — and only those.
+              </p>
+              <div className="mt-2 max-h-44 space-y-1 overflow-auto rounded border border-border-strong bg-card p-2">
+                {campaigns.length === 0 && (
+                  <p className="px-1 py-2 text-xs text-fg-muted">No campaigns yet — create one first.</p>
+                )}
+                {campaigns.map((c) => {
+                  const id = String(c._id);
+                  return (
+                    <label key={id} className="flex cursor-pointer items-center gap-2 px-1 py-0.5 text-sm text-fg">
+                      <input
+                        type="checkbox"
+                        checked={form.managedCampaignIds.includes(id)}
+                        onChange={(e) => toggleFormCampaign(id, e.target.checked)}
+                      />
+                      <span className="truncate">
+                        {c.name}
+                        {c.isActive === false ? ' · Archived' : ''}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="md:col-span-3">
             <label className={labelCls}>
               Coordinator <span className="text-fg-subtle">(optional)</span>
@@ -219,7 +265,7 @@ export default function UsersPage() {
               className="mt-1 w-full"
             >
               <option value="">— None —</option>
-              {admins.map((m) => (
+              {coordinators.map((m) => (
                 <option key={m.user.id} value={m.user.id}>
                   {m.user.firstName} {m.user.lastName}
                 </option>
@@ -294,6 +340,7 @@ export default function UsersPage() {
         <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
           <option value="all">All roles</option>
           <option value="admin">Admins</option>
+          <option value="lead">Team leads</option>
           <option value="canvasser">Canvassers</option>
         </Select>
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -304,7 +351,7 @@ export default function UsersPage() {
         <Select value={coordinatorFilter} onChange={(e) => setCoordinatorFilter(e.target.value)}>
           <option value="all">All coordinators</option>
           <option value="none">No coordinator</option>
-          {admins.map((m) => (
+          {coordinators.map((m) => (
             <option key={m.user.id} value={m.user.id}>
               {m.user.firstName} {m.user.lastName}
             </option>
@@ -363,8 +410,8 @@ export default function UsersPage() {
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <Badge variant={m.role === 'admin' ? 'brand' : 'neutral'}>
-                    {m.role === 'admin' ? 'Admin' : 'Canvasser'}
+                  <Badge variant={m.role === 'admin' ? 'brand' : m.role === 'lead' ? 'info' : 'neutral'}>
+                    {ROLE_LABEL[m.role] || 'Canvasser'}
                   </Badge>
                 </td>
                 <td className="px-4 py-3 text-fg-muted">

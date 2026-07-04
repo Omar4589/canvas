@@ -3,6 +3,7 @@ import multer from 'multer';
 import mongoose from 'mongoose';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { ImportProfile } from '../../models/ImportProfile.js';
 import { Campaign } from '../../models/Campaign.js';
@@ -20,7 +21,17 @@ import {
 } from '../../services/import/canonicalFields.js';
 
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+// Imports target a campaign, so team leads may import — but only into a campaign
+// they manage. Each campaign-targeted endpoint enforces that via manages() below.
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
+
+// True if the requester may manage `campaignId` (super/admin always; lead only for
+// a granted campaign); otherwise writes a 403 and returns false.
+async function manages(req, res, campaignId) {
+  if (await canManageCampaign(req, campaignId)) return true;
+  res.status(403).json({ error: 'Forbidden' });
+  return false;
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -145,6 +156,7 @@ router.post('/csv', uploadCsv, async (req, res, next) => {
     if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
       return res.status(400).json({ error: 'campaignId is required' });
     }
+    if (!(await manages(req, res, campaignId))) return;
 
     // Resolve the field mapping: inline JSON, a saved profile, or the default.
     const resolved = await resolveImportMapping(req);
@@ -189,6 +201,7 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
       return res.status(400).json({ error: 'campaignId is required' });
     }
+    if (!(await manages(req, res, campaignId))) return;
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
     const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
@@ -216,6 +229,7 @@ router.post('/csv/preview-enqueue', uploadCsv, async (req, res, next) => {
     if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
       return res.status(400).json({ error: 'campaignId is required' });
     }
+    if (!(await manages(req, res, campaignId))) return;
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
     const { mapping, importProfileId } = resolved;
@@ -261,6 +275,7 @@ router.post('/geocode-check', uploadCsv, async (req, res, next) => {
     if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
       return res.status(400).json({ error: 'campaignId is required' });
     }
+    if (!(await manages(req, res, campaignId))) return;
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
     const { mapping, importProfileId } = resolved;
@@ -319,6 +334,15 @@ router.get('/', async (req, res, next) => {
     // ephemeral large-file previews don't clutter the import history.
     const filter = { organizationId: activeOrgId(req), kind: { $nin: ['preview', 'geocode_check'] } };
     if (req.query.campaignId) filter.campaignId = req.query.campaignId;
+    // A lead only sees import history for the campaigns they manage.
+    if (!isOrgAdmin(req)) {
+      const managed = (await managedCampaignIds(req)).map(String);
+      if (req.query.campaignId) {
+        if (!managed.includes(String(req.query.campaignId))) return res.status(403).json({ error: 'Forbidden' });
+      } else {
+        filter.campaignId = { $in: managed };
+      }
+    }
     const jobs = await ImportJob.find(filter, { errors: 0 })
       .sort({ createdAt: -1 })
       .limit(50)
@@ -338,6 +362,7 @@ router.get('/:importId', async (req, res, next) => {
       organizationId: activeOrgId(req),
     }).populate('uploadedBy', 'firstName lastName email');
     if (!job) return res.status(404).json({ error: 'Import not found' });
+    if (!(await manages(req, res, job.campaignId))) return;
     res.json({ job });
   } catch (err) {
     next(err);
@@ -349,9 +374,10 @@ router.get('/:importId/errors', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     const job = await ImportJob.findOne(
       { _id: req.params.importId, organizationId: activeOrgId(req) },
-      { errors: 1, errorCount: 1 }
+      { errors: 1, errorCount: 1, campaignId: 1 }
     );
     if (!job) return res.status(404).json({ error: 'Import not found' });
+    if (!(await manages(req, res, job.campaignId))) return;
     res.json({ errors: job.errors, total: job.errorCount });
   } catch (err) {
     next(err);
@@ -366,6 +392,16 @@ router.post('/:importId/undo', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.importId)) {
       return res.status(400).json({ error: 'Invalid import id' });
+    }
+    // A lead may only undo an import into a campaign they manage — check before
+    // claiming (admins skip this fast path; the claim query is org-scoped anyway).
+    if (!isOrgAdmin(req)) {
+      const pre = await ImportJob.findOne(
+        { _id: req.params.importId, organizationId: activeOrgId(req) },
+        { campaignId: 1 }
+      ).lean();
+      if (!pre) return res.status(404).json({ error: 'Import not found' });
+      if (!(await manages(req, res, pre.campaignId))) return;
     }
     // Atomically claim the undo (compare-and-set on `undone`) so two concurrent
     // requests can't both run it — only the winner gets a non-null job.

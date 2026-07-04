@@ -11,6 +11,7 @@ import { VotedUpload } from '../../models/VotedUpload.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { VotedPendingId } from '../../models/VotedPendingId.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
+import { CampaignManager } from '../../models/CampaignManager.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
@@ -41,8 +42,8 @@ export async function deleteCampaignCascade(campaign) {
   const CAMPAIGN_SCOPED = [
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
     WalkList, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
-    ClientReport, ClientReportMapPoint, ReportShareLink, CanvassActivity,
-    SurveyResponse, ImportJob, HouseholdLocationChange,
+    CampaignManager, ClientReport, ClientReportMapPoint, ReportShareLink,
+    CanvassActivity, SurveyResponse, ImportJob, HouseholdLocationChange,
   ];
   const counts = { voters: voters.deletedCount || 0 };
   for (const Model of CAMPAIGN_SCOPED) {

@@ -1,0 +1,153 @@
+import { Router } from 'express';
+import mongoose from 'mongoose';
+import { z } from 'zod';
+import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
+import { orgContext } from '../../middleware/orgContext.js';
+import { Campaign } from '../../models/Campaign.js';
+import { Membership } from '../../models/Membership.js';
+import { CampaignAssignment } from '../../models/CampaignAssignment.js';
+import {
+  createOrgMember,
+  MemberError,
+  resolveCoordinatorId,
+} from '../../services/memberships/createMember.js';
+
+// A team lead's crew surface, scoped to ONE campaign they manage (requireCampaignManager
+// gates the mount). It gives a lead the crew-building an org admin does on the Users
+// page — WITHOUT the org-wide Users administration: list org members to add, create a
+// brand-new canvasser onto this campaign, and set a crew member's coordinator. Adding/
+// removing existing members and reading the roster still go through .../assignments.
+const router = Router({ mergeParams: true });
+router.use(requireAuth, orgContext, requireCampaignManager);
+
+function activeOrgId(req) {
+  return req.activeOrg?._id;
+}
+
+async function loadOwnedCampaign(req) {
+  if (!mongoose.isValidObjectId(req.params.campaignId)) return null;
+  const orgId = activeOrgId(req);
+  if (!orgId) return null;
+  const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
+  return campaign || null;
+}
+
+// A lead creates NET-NEW canvassers only. Linking an existing global account (by email)
+// pulls someone across orgs — that stays an org-admin act on the Users page — so we
+// require the new-account fields and never take a linkExisting flag here.
+const createSchema = z.object({
+  email: z.string().email(),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  phone: z.string().trim().max(40).optional(),
+  password: z.string().min(8),
+  coordinatorId: z.string().nullable().optional(),
+});
+
+// The active org members a lead can pick from to add to their campaign.
+router.get('/', async (req, res, next) => {
+  try {
+    const campaign = await loadOwnedCampaign(req);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    const memberships = await Membership.find({ organizationId: campaign.organizationId, isActive: true })
+      .populate({ path: 'userId', select: 'firstName lastName email isActive isSuperAdmin' })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({
+      members: memberships
+        .filter((m) => m.userId && m.userId.isActive)
+        .map((m) => ({
+          role: m.role,
+          isActive: m.isActive,
+          coordinatorId: m.coordinatorId ? String(m.coordinatorId) : null,
+          user: {
+            id: String(m.userId._id),
+            firstName: m.userId.firstName,
+            lastName: m.userId.lastName,
+            email: m.userId.email,
+            isActive: m.userId.isActive,
+            isSuperAdmin: !!m.userId.isSuperAdmin,
+          },
+        })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Create a brand-new canvasser and put them on this campaign in one step.
+router.post('/', async (req, res, next) => {
+  try {
+    const campaign = await loadOwnedCampaign(req);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    const orgId = activeOrgId(req);
+    const data = createSchema.parse(req.body);
+
+    const coordRes = await resolveCoordinatorId({ orgId, raw: data.coordinatorId, memberUserId: null });
+    if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
+
+    let user;
+    try {
+      ({ user } = await createOrgMember({
+        orgId,
+        addedBy: req.user._id,
+        data, // no linkExisting → create-new path; existing email → EMAIL_EXISTS_USE_LINK
+        role: 'canvasser', // a lead can only create canvassers for their crew
+        coordinatorId: coordRes.value || null,
+      }));
+    } catch (err) {
+      if (err instanceof MemberError) return res.status(err.status).json({ error: err.message, code: err.code });
+      throw err;
+    }
+
+    await CampaignAssignment.updateOne(
+      { campaignId: campaign._id, userId: user._id },
+      {
+        $setOnInsert: {
+          campaignId: campaign._id,
+          userId: user._id,
+          organizationId: orgId,
+          assignedBy: req.user._id,
+          assignedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+
+    res.status(201).json({ user: user.toSafeJSON() });
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'Conflict' });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Set (or clear) a crew member's coordinator. Scoped to this campaign's roster so a
+// lead can only reorganize their own crew, not arbitrary org members.
+router.patch('/:userId/coordinator', async (req, res, next) => {
+  try {
+    const campaign = await loadOwnedCampaign(req);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (!mongoose.isValidObjectId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+    const orgId = activeOrgId(req);
+
+    const onCampaign = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.params.userId });
+    if (!onCampaign) return res.status(404).json({ error: 'That member is not on this campaign' });
+
+    const coordRes = await resolveCoordinatorId({ orgId, raw: req.body?.coordinatorId, memberUserId: req.params.userId });
+    if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
+    if (coordRes.skip) return res.status(400).json({ error: 'coordinatorId is required' });
+
+    const membership = await Membership.findOneAndUpdate(
+      { userId: req.params.userId, organizationId: orgId },
+      { coordinatorId: coordRes.value ?? null },
+      { new: true }
+    );
+    if (!membership) return res.status(404).json({ error: 'Member not in this org' });
+    res.json({ ok: true, coordinatorId: membership.coordinatorId ? String(membership.coordinatorId) : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;

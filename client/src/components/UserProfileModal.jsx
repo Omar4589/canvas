@@ -119,10 +119,16 @@ export default function UserProfileModal({ membership, onClose }) {
   const [newPassword, setNewPassword] = useState('');
   const [feedback, setFeedback] = useState(null);
   const [coordinatorId, setCoordinatorId] = useState(membership.coordinatorId || '');
+  // The campaigns this member manages when their role is 'lead' (edited alongside the role).
+  const [managedCampaignIds, setManagedCampaignIds] = useState(membership.managedCampaignIds || []);
 
   useEffect(() => {
     setCoordinatorId(membership.coordinatorId || '');
   }, [membership.coordinatorId]);
+
+  useEffect(() => {
+    setManagedCampaignIds(membership.managedCampaignIds || []);
+  }, [(membership.managedCampaignIds || []).join(',')]);
 
   function flash(type, text) {
     setFeedback({ type, text });
@@ -151,12 +157,15 @@ export default function UserProfileModal({ membership, onClose }) {
     enabled: !!user.id,
   });
 
-  // Org roster (cached, shared with the Users page) → the eligible coordinators
-  // are the active admins in this org, excluding this member themselves.
+  // Org roster (cached, shared with the Users page) → the eligible coordinators are the
+  // active admins AND team leads in this org, excluding this member themselves.
   const orgQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
-  const admins = (orgQ.data?.members || []).filter(
-    (m) => m.role === 'admin' && m.user.isActive && m.isActive && m.user.id !== user.id
+  const coordinators = (orgQ.data?.members || []).filter(
+    (m) => (m.role === 'admin' || m.role === 'lead') && m.user.isActive && m.isActive && m.user.id !== user.id
   );
+  // Campaigns available to grant when this member is a team lead.
+  const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
+  const campaigns = campaignsQ.data?.campaigns || [];
 
   const saveProfile = useMutation({
     mutationFn: (body) =>
@@ -169,14 +178,18 @@ export default function UserProfileModal({ membership, onClose }) {
   });
 
   const saveRole = useMutation({
-    mutationFn: (role) =>
-      api(`/admin/memberships/${user.id}`, { method: 'PATCH', body: { role } }),
+    mutationFn: (body) =>
+      api(`/admin/memberships/${user.id}`, { method: 'PATCH', body }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['memberships'] });
       flash('success', 'Role updated.');
     },
     onError: (err) => flash('error', err.message),
   });
+
+  function toggleManagedCampaign(id, checked) {
+    setManagedCampaignIds((ids) => (checked ? [...new Set([...ids, id])] : ids.filter((x) => x !== id)));
+  }
 
   const saveCoordinator = useMutation({
     mutationFn: (cid) =>
@@ -242,7 +255,13 @@ export default function UserProfileModal({ membership, onClose }) {
     (!emailLocked && form.email !== (user.email || '')) ||
     form.phone !== (user.phone || '');
 
-  const isRoleDirty = form.role !== (membership.role || 'canvasser');
+  // A lead's grant set is part of the role edit — dirty if the checked campaigns differ.
+  const currentManaged = membership.managedCampaignIds || [];
+  const managedDirty =
+    form.role === 'lead' &&
+    (managedCampaignIds.length !== currentManaged.length ||
+      managedCampaignIds.some((id) => !currentManaged.includes(id)));
+  const isRoleDirty = form.role !== (membership.role || 'canvasser') || managedDirty;
 
   function onSaveProfile(e) {
     e.preventDefault();
@@ -257,7 +276,9 @@ export default function UserProfileModal({ membership, onClose }) {
 
   function onSaveRole() {
     if (!isRoleDirty) return;
-    saveRole.mutate(form.role);
+    // Sending managedCampaignIds only matters for leads; the server clears grants for
+    // any other role.
+    saveRole.mutate(form.role === 'lead' ? { role: 'lead', managedCampaignIds } : { role: form.role });
   }
 
   function onResetPw(e) {
@@ -309,10 +330,12 @@ export default function UserProfileModal({ membership, onClose }) {
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                     membership.role === 'admin'
                       ? 'bg-brand-tint text-brand-accent'
-                      : 'bg-sunken text-fg-muted'
+                      : membership.role === 'lead'
+                        ? 'bg-info-tint text-info-fg'
+                        : 'bg-sunken text-fg-muted'
                   }`}
                 >
-                  {membership.role === 'admin' ? 'Admin' : 'Canvasser'}
+                  {membership.role === 'admin' ? 'Admin' : membership.role === 'lead' ? 'Team lead' : 'Canvasser'}
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -438,37 +461,70 @@ export default function UserProfileModal({ membership, onClose }) {
               You can&apos;t change your own role. Ask another admin.
             </div>
           ) : (
-            <div className="flex items-center gap-3">
-              <div className="flex flex-1 gap-2">
-                {['canvasser', 'admin'].map((r) => (
-                  <label
-                    key={r}
-                    className={`flex flex-1 cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm ${
-                      form.role === r
-                        ? 'border-brand-600 bg-brand-tint font-semibold text-brand-accent'
-                        : 'border-border-strong text-fg-muted hover:bg-sunken'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="role"
-                      value={r}
-                      checked={form.role === r}
-                      onChange={() => setForm((f) => ({ ...f, role: r }))}
-                      className="sr-only"
-                    />
-                    {r === 'admin' ? 'Admin' : 'Canvasser'}
-                  </label>
-                ))}
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="flex flex-1 gap-2">
+                  {['canvasser', 'lead', 'admin'].map((r) => (
+                    <label
+                      key={r}
+                      className={`flex flex-1 cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm ${
+                        form.role === r
+                          ? 'border-brand-600 bg-brand-tint font-semibold text-brand-accent'
+                          : 'border-border-strong text-fg-muted hover:bg-sunken'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="role"
+                        value={r}
+                        checked={form.role === r}
+                        onChange={() => setForm((f) => ({ ...f, role: r }))}
+                        className="sr-only"
+                      />
+                      {r === 'admin' ? 'Admin' : r === 'lead' ? 'Team lead' : 'Canvasser'}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={onSaveRole}
+                  disabled={!isRoleDirty || saveRole.isPending}
+                  className="rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {saveRole.isPending ? 'Saving…' : 'Save role'}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={onSaveRole}
-                disabled={!isRoleDirty || saveRole.isPending}
-                className="rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
-              >
-                {saveRole.isPending ? 'Saving…' : 'Save role'}
-              </button>
+
+              {form.role === 'lead' && (
+                <div className="rounded-md border border-border bg-sunken p-3">
+                  <div className="mb-1 text-xs font-medium text-fg">Campaigns this lead manages</div>
+                  <p className="mb-2 text-xs text-fg-muted">
+                    A team lead can fully run the campaigns you check here — and only those.
+                  </p>
+                  <div className="max-h-44 space-y-1 overflow-auto rounded border border-border-strong bg-card p-2">
+                    {campaigns.length === 0 && (
+                      <p className="px-1 py-2 text-xs text-fg-muted">No campaigns yet.</p>
+                    )}
+                    {campaigns.map((c) => {
+                      const id = String(c._id);
+                      return (
+                        <label key={id} className="flex cursor-pointer items-center gap-2 px-1 py-0.5 text-sm text-fg">
+                          <input
+                            type="checkbox"
+                            checked={managedCampaignIds.includes(id)}
+                            onChange={(e) => toggleManagedCampaign(id, e.target.checked)}
+                          />
+                          <span className="truncate">
+                            {c.name}
+                            {c.isActive === false ? ' · Archived' : ''}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs text-fg-muted">Click <strong>Save role</strong> to apply.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -484,14 +540,14 @@ export default function UserProfileModal({ membership, onClose }) {
             className={`${inputCls} disabled:opacity-60`}
           >
             <option value="">— No coordinator —</option>
-            {admins.map((m) => (
+            {coordinators.map((m) => (
               <option key={m.user.id} value={m.user.id}>
                 {m.user.firstName} {m.user.lastName}
               </option>
             ))}
           </select>
           <p className="mt-2 text-xs text-fg-muted">
-            The admin who oversees this member. Saved immediately.
+            The admin or team lead who oversees this member. Saved immediately.
           </p>
         </div>
 

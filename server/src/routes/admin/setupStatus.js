@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
@@ -15,7 +15,7 @@ import { activePassIds } from '../../services/passes/activePasses.js';
 import { deriveSetupSteps } from '../../services/reports/setupSteps.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+router.use(requireAuth, orgContext, requireCampaignManager);
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

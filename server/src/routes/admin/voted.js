@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import mongoose from 'mongoose';
-import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
@@ -13,7 +13,7 @@ import { parseAndMatch, NOT_FOUND_CAP } from '../../services/import/parseVoterId
 import { recomputeFullyVoted } from '../../services/voted/recomputeFullyVoted.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+router.use(requireAuth, orgContext, requireCampaignManager);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 

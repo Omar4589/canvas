@@ -96,8 +96,11 @@ export default function AdminLayout() {
   const isSuperAdmin = !!user.isSuperAdmin;
   const activeMembership = memberships.find((m) => m.organizationId === activeOrgId);
   const isOrgAdmin = activeMembership?.role === 'admin';
+  // Team leads are campaign-scoped admins — they get the admin tab too. The data
+  // itself is scoped server-side to the campaigns they manage.
+  const isLead = activeMembership?.role === 'lead';
 
-  if (!isSuperAdmin && !isOrgAdmin) {
+  if (!isSuperAdmin && !isOrgAdmin && !isLead) {
     return <Redirect href="/" />;
   }
 

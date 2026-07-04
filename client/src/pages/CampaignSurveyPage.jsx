@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate, Navigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { Card, Badge, Button, Select } from '../components/ui';
 import Modal from '../components/ui/Modal.jsx';
 import SurveyPreview from '../components/SurveyPreview.jsx';
@@ -65,6 +66,9 @@ export default function CampaignSurveyPage() {
   const { campaignId } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  // Leads can ATTACH a template (campaign PATCH), but authoring templates lives in the
+  // org survey library — so the build/edit affordances are org-admin only.
+  const { isOrgAdmin } = useAuth();
   const [changing, setChanging] = useState(false);
 
   const campaignsQ = useQuery({
@@ -135,12 +139,14 @@ export default function CampaignSurveyPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" onClick={() => setChanging(true)}>Change survey</Button>
-              <Link
-                to={`/campaigns/${campaignId}/survey/edit`}
-                className="rounded-md border border-border-strong bg-card px-3 py-1.5 text-sm font-medium text-fg-muted hover:bg-sunken"
-              >
-                Edit survey
-              </Link>
+              {isOrgAdmin && (
+                <Link
+                  to={`/campaigns/${campaignId}/survey/edit`}
+                  className="rounded-md border border-border-strong bg-card px-3 py-1.5 text-sm font-medium text-fg-muted hover:bg-sunken"
+                >
+                  Edit survey
+                </Link>
+              )}
             </div>
           </div>
 
@@ -167,9 +173,11 @@ export default function CampaignSurveyPage() {
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={() => setChanging(true)}>Pick a survey</Button>
-            <Button variant="secondary" onClick={() => navigate(`/campaigns/${campaignId}/survey/new`)}>
-              Create new survey
-            </Button>
+            {isOrgAdmin && (
+              <Button variant="secondary" onClick={() => navigate(`/campaigns/${campaignId}/survey/new`)}>
+                Create new survey
+              </Button>
+            )}
           </div>
         </Card>
       )}

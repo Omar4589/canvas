@@ -1,5 +1,6 @@
 import { verifyToken } from '../services/auth/tokens.js';
 import { User } from '../models/User.js';
+import { canManageCampaign } from '../services/authz/campaignManagement.js';
 
 export async function requireAuth(req, res, next) {
   try {
@@ -43,4 +44,18 @@ export function requireOrgMember(req, res, next) {
   if (req.user.isSuperAdmin) return next();
   if (!req.activeMembership) return res.status(403).json({ error: 'No active org membership' });
   next();
+}
+
+// Gate a campaign-nested route on management authority for req.params.campaignId:
+// super/org-admin always pass; a team lead passes only for a campaign they were
+// granted. Runs AFTER orgContext (needs req.activeMembership/activeOrg) and, on
+// the campaign routers, BEFORE loadCampaign (which still enforces org ownership).
+export function requireCampaignManager(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  Promise.resolve(canManageCampaign(req, req.params.campaignId))
+    .then((ok) => {
+      if (!ok) return res.status(403).json({ error: 'Forbidden' });
+      next();
+    })
+    .catch(next);
 }

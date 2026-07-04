@@ -7,7 +7,9 @@ import { normalizeTag } from '../../services/surveys/tags.js';
 import { renameTag, mergeTags, deleteTag, tagUsage } from '../../services/surveys/tagOps.js';
 
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+// Team leads may READ the tag library (to filter walk lists / reports by tag);
+// managing the library (create/rename/merge/delete) stays with org admins per route.
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -44,7 +46,7 @@ const nameSchema = z.object({ name: z.string().min(1) });
 
 // POST /admin/tags — create. Upserts by normalizedName, so a case-variant returns the
 // existing tag instead of fracturing.
-router.post('/', async (req, res, next) => {
+router.post('/', requireOrgRole('admin'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
@@ -68,7 +70,7 @@ router.post('/', async (req, res, next) => {
 
 // PATCH /admin/tags/:id — rename (bulk-rewrites every option tag, palette, and saved-search
 // filter for that tag). Renaming onto an existing tag is a merge — blocked with a hint.
-router.patch('/:id', async (req, res, next) => {
+router.patch('/:id', requireOrgRole('admin'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
@@ -99,7 +101,7 @@ router.patch('/:id', async (req, res, next) => {
 const mergeSchema = z.object({ targetId: z.string().min(1) });
 
 // POST /admin/tags/:id/merge — merge this tag INTO targetId, then delete this one.
-router.post('/:id/merge', async (req, res, next) => {
+router.post('/:id/merge', requireOrgRole('admin'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
@@ -122,7 +124,7 @@ router.post('/:id/merge', async (req, res, next) => {
 
 // DELETE /admin/tags/:id — delete + cascade (untag every option/palette/saved-search).
 // The client confirms first using the usage counts from GET /admin/tags.
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requireOrgRole('admin'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);

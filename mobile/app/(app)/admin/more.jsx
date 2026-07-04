@@ -6,6 +6,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { signOut } from '../../../lib/authState';
 import {
   loadCurrentUser,
+  loadMemberships,
+  loadActiveOrgId,
   loadActiveCampaign,
   saveActiveCampaign,
   clearBootstrap,
@@ -58,9 +60,18 @@ export default function AdminMore() {
   const styles = useThemedStyles(makeStyles);
   const [user, setUser] = useState(null);
   const [webNote, setWebNote] = useState(null);
+  // Team leads don't get the org Users admin (it's admin-only, and would 403). They
+  // manage their crew's book assignments from the campaign-scoped Books tab instead.
+  const [isLead, setIsLead] = useState(false);
 
   useEffect(() => {
-    loadCurrentUser().then((u) => setUser(u));
+    Promise.all([loadCurrentUser(), loadMemberships(), loadActiveOrgId()]).then(
+      ([u, memberships, activeOrgId]) => {
+        setUser(u);
+        const mem = (memberships || []).find((m) => m.organizationId === activeOrgId);
+        setIsLead(!u?.isSuperAdmin && mem?.role === 'lead');
+      }
+    );
   }, []);
 
   async function onLogout() {
@@ -114,7 +125,7 @@ export default function AdminMore() {
 
         <Text style={styles.sectionLabel}>Manage</Text>
         <View style={styles.group}>
-          <Row icon="👥" label="Users" onPress={() => router.push('/(app)/admin/users')} />
+          {!isLead && <Row icon="👥" label="Users" onPress={() => router.push('/(app)/admin/users')} />}
           <Row icon="🚪" label="Switch to canvass mode" onPress={onCanvassMode} />
         </View>
 

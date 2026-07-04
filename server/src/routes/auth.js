@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
+import { CampaignManager } from '../models/CampaignManager.js';
 import { signUserToken } from '../services/auth/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
 import { MIN_CLIENT_API_VERSION } from '../config/clientVersion.js';
@@ -31,23 +32,37 @@ const updateProfileSchema = z.object({
 });
 
 async function loadMembershipsForUser(userId) {
-  return Membership.find({ userId, isActive: true })
+  const rows = await Membership.find({ userId, isActive: true })
     .populate({ path: 'organizationId', select: 'name slug isActive timeZone' })
-    .lean()
-    .then((rows) =>
-      rows
-        .filter((m) => m.organizationId && m.organizationId.isActive)
-        .map((m) => ({
-          membershipId: String(m._id),
-          organizationId: String(m.organizationId._id),
-          organizationName: m.organizationId.name,
-          organizationSlug: m.organizationId.slug,
-          organizationTimeZone: m.organizationId.timeZone || 'America/New_York',
-          role: m.role,
-          // null acknowledgedAt = the user hasn't dismissed the "added to org" banner yet.
-          isNew: !m.acknowledgedAt,
-        }))
-    );
+    .lean();
+  const active = rows.filter((m) => m.organizationId && m.organizationId.isActive);
+
+  // For a team lead, ship the campaigns they manage (per org) so the client can scope
+  // its console + nav to those campaigns without an extra round-trip on load.
+  const grantsByOrg = new Map();
+  if (active.some((m) => m.role === 'lead')) {
+    const grants = await CampaignManager.find({ userId }).select('organizationId campaignId').lean();
+    for (const g of grants) {
+      const k = String(g.organizationId);
+      if (!grantsByOrg.has(k)) grantsByOrg.set(k, []);
+      grantsByOrg.get(k).push(String(g.campaignId));
+    }
+  }
+
+  return active.map((m) => ({
+    membershipId: String(m._id),
+    organizationId: String(m.organizationId._id),
+    organizationName: m.organizationId.name,
+    organizationSlug: m.organizationId.slug,
+    organizationTimeZone: m.organizationId.timeZone || 'America/New_York',
+    role: m.role,
+    // Only leads carry a managed-campaign scope; admins/canvassers omit it.
+    ...(m.role === 'lead'
+      ? { managedCampaignIds: grantsByOrg.get(String(m.organizationId._id)) || [] }
+      : {}),
+    // null acknowledgedAt = the user hasn't dismissed the "added to org" banner yet.
+    isNew: !m.acknowledgedAt,
+  }));
 }
 
 router.post('/login', async (req, res, next) => {

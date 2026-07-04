@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
-import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
 
@@ -11,7 +11,7 @@ import { updateHouseholdLocation } from '../../services/households/updateHouseho
 // (PATCH .../households/:householdId/location). Mounted at
 // /admin/campaigns/:campaignId/households (mergeParams to read :campaignId).
 const router = Router({ mergeParams: true });
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+router.use(requireAuth, orgContext, requireCampaignManager);
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

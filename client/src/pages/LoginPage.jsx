@@ -9,7 +9,6 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from?.pathname || '/admin';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,8 +30,9 @@ export default function LoginPage() {
         return;
       }
       const memberships = res.memberships || [];
-      const adminMemberships = memberships.filter((m) => m.role === 'admin');
-      const canAccessConsole = res.user.isSuperAdmin || adminMemberships.length > 0;
+      // Admins AND team leads (campaign-scoped admins) can use the console.
+      const consoleMemberships = memberships.filter((m) => m.role === 'admin' || m.role === 'lead');
+      const canAccessConsole = res.user.isSuperAdmin || consoleMemberships.length > 0;
 
       // Super admin: straight to the console (or org picker).
       if (res.user.isSuperAdmin) {
@@ -42,14 +42,16 @@ export default function LoginPage() {
       }
 
       if (!canAccessConsole) {
-        setError('You need an admin role on at least one organization to use the dashboard.');
+        setError('You need an admin or team-lead role on at least one organization to use the dashboard.');
         return;
       }
       if (memberships.length > 1) {
         navigate('/select-org', { replace: true });
         return;
       }
-      navigate(from, { replace: true });
+      // A team lead has no org Overview — land them on their campaigns instead.
+      const home = memberships[0]?.role === 'lead' ? '/campaigns' : '/admin';
+      navigate(location.state?.from?.pathname || home, { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

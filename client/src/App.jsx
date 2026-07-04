@@ -108,14 +108,15 @@ export default function App() {
           <Route path="/super-admin/people/:personId" element={<PersonDetailPage />} />
           <Route path="/organizations" element={<OrganizationsPage />} />
         </Route>
+        {/* Campaign console — team leads (campaign-scoped admins) reach these too; the
+            server scopes every response to the campaigns they manage. */}
         <Route
           element={
-            <ProtectedRoute requireOrgAdmin>
+            <ProtectedRoute requireConsoleUser>
               <Layout />
             </ProtectedRoute>
           }
         >
-          <Route path="/admin" element={<OverviewPage />} />
           <Route path="/campaigns" element={<CampaignsPage />} />
           {/* Campaign drill-in — the URL is the active campaign */}
           <Route path="/campaigns/:campaignId" element={<DashboardPage />} />
@@ -127,8 +128,6 @@ export default function App() {
           <Route path="/campaigns/:campaignId/import" element={<ImportPage />} />
           <Route path="/campaigns/:campaignId/map" element={<MapPage />} />
           <Route path="/campaigns/:campaignId/survey" element={<CampaignSurveyPage />} />
-          <Route path="/campaigns/:campaignId/survey/new" element={<CampaignSurveyBuilderPage mode="new" />} />
-          <Route path="/campaigns/:campaignId/survey/edit" element={<CampaignSurveyBuilderPage mode="edit" />} />
           <Route path="/campaigns/:campaignId/team" element={<CampaignTeamPage />} />
           <Route path="/campaigns/:campaignId/timeline" element={<TimelinePage />} />
           <Route path="/campaigns/:campaignId/early-voting" element={<EarlyVotingPage />} />
@@ -145,6 +144,21 @@ export default function App() {
           <Route path="/early-voting" element={<Navigate to="/campaigns" replace />} />
           <Route path="/admin/client-reports" element={<Navigate to="/campaigns" replace />} />
           <Route path="/admin/client-reports/:id" element={<Navigate to="/campaigns" replace />} />
+        </Route>
+        {/* Org administration — org admins / super only (NOT team leads). */}
+        <Route
+          element={
+            <ProtectedRoute requireOrgAdmin>
+              <Layout />
+            </ProtectedRoute>
+          }
+        >
+          <Route path="/admin" element={<OverviewPage />} />
+          {/* The survey-TEMPLATE builder edits the org library, so it stays admin-only —
+              even though its URL sits under a campaign. Route ranking keeps these ahead
+              of the console group's /campaigns/:campaignId/survey. */}
+          <Route path="/campaigns/:campaignId/survey/new" element={<CampaignSurveyBuilderPage mode="new" />} />
+          <Route path="/campaigns/:campaignId/survey/edit" element={<CampaignSurveyBuilderPage mode="edit" />} />
           {/* Org-level screens */}
           <Route path="/queues" element={<QueuesPage />} />
           <Route path="/users" element={<UsersPage />} />

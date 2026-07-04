@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { Campaign } from '../../models/Campaign.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Household } from '../../models/Household.js';
@@ -13,7 +14,10 @@ import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { deleteCampaignCascade } from '../../services/campaigns/deleteCampaign.js';
 
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+// Team leads reach this router too, but scoped: the list returns only campaigns
+// they manage, PATCH is limited to editable config, and create/archive/delete are
+// gated to org admins inside the handlers below.
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -107,7 +111,12 @@ async function withCounts(campaigns, organizationId) {
 router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const campaigns = await Campaign.find({ organizationId: activeOrgId(req) })
+    const filter = { organizationId: activeOrgId(req) };
+    // A lead sees only the campaigns they manage; admins/super see the whole org.
+    if (!isOrgAdmin(req)) {
+      filter._id = { $in: await managedCampaignIds(req) };
+    }
+    const campaigns = await Campaign.find(filter)
       .sort({ isActive: -1, createdAt: -1 })
       .populate('surveyTemplateId', 'name version')
       .lean();
@@ -121,6 +130,9 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    // Creating a campaign is an org-admin act — a lead is handed campaigns, not
+    // allowed to spin up new ones.
+    if (!isOrgAdmin(req)) return res.status(403).json({ error: 'Only an org admin can create a campaign.' });
     const orgId = activeOrgId(req);
     const data = createSchema.parse(req.body);
     // Survey template is OPTIONAL at creation — create the campaign now, attach a survey
@@ -154,7 +166,21 @@ router.patch('/:campaignId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
+    // Leads may only PATCH a campaign they manage; admins/super any in the org.
+    if (!(await canManageCampaign(req, req.params.campaignId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     const data = updateSchema.parse(req.body);
+    // A lead is a campaign-scoped admin: they can edit their campaign's name,
+    // survey, and timezone — but archiving (isActive), the type, and the state
+    // stay with org admins.
+    if (!isOrgAdmin(req)) {
+      for (const field of ['isActive', 'type', 'state']) {
+        if (data[field] !== undefined) {
+          return res.status(403).json({ error: `Only an org admin can change a campaign's ${field}.` });
+        }
+      }
+    }
     const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
@@ -200,6 +226,8 @@ router.patch('/:campaignId', async (req, res, next) => {
 router.delete('/:campaignId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    // Deleting a campaign is destructive + org-wide — org admins only.
+    if (!isOrgAdmin(req)) return res.status(403).json({ error: 'Only an org admin can delete a campaign.' });
     const orgId = activeOrgId(req);
     if (!mongoose.isValidObjectId(req.params.campaignId)) {
       return res.status(400).json({ error: 'Invalid campaignId' });

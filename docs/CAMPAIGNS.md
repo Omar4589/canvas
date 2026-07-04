@@ -16,7 +16,8 @@ Related: [GETTING_STARTED.md](GETTING_STARTED.md) (the step-by-step first-run wa
 CSV matches and reaches Intake), [WALKLISTS.md](WALKLISTS.md) (route a specific CSV to one walk list),
 [SURVEYS.md](SURVEYS.md) (attach a survey before activating a pass), [PASSES.md](PASSES.md) (passes:
 lifecycle + where they're managed), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (cutting books),
-[METRICS.md](METRICS.md) (the numbers), [TIMEZONES.md](TIMEZONES.md) (why a timezone change matters).
+[METRICS.md](METRICS.md) (the numbers), [TIMEZONES.md](TIMEZONES.md) (why a timezone change matters),
+[ROLES.md](ROLES.md) (delegating a campaign to a team lead).
 
 ---
 

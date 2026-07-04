@@ -85,7 +85,8 @@ export default function Index() {
   );
   const role = activeMembership?.role;
 
-  if (role === 'admin' || isSuperAdmin) {
+  // Team leads land in the admin tab (scoped to their managed campaigns), like admins.
+  if (role === 'admin' || role === 'lead' || isSuperAdmin) {
     return <Redirect href="/(app)/admin" />;
   }
   if (!boot?.campaign) return <Redirect href="/(app)/campaigns" />;

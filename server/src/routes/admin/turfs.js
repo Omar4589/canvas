@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Pass } from '../../models/Pass.js';
@@ -23,7 +23,7 @@ import { ensureCampaignAssignments, partitionAssignable } from '../../services/c
 import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+router.use(requireAuth, orgContext, requireCampaignManager);
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

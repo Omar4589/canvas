@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { Card, Button } from '../components/ui';
+import { Card, Button, Modal } from '../components/ui';
 
 // In-campaign roster (/campaigns/:campaignId/team). Surfaces CampaignAssignment — the
 // per-campaign roster that GATES mobile visibility AND who can be assigned books — so
@@ -43,14 +43,88 @@ function TeamMemberRow({ a, isSelf, onRemove, busy }) {
   );
 }
 
+// A team lead's inline "create a canvasser and put them on this campaign" form —
+// the crew equivalent of the org Users admin's add-member flow, scoped to one campaign.
+function CreateCrewMemberModal({ onClose, onCreate, saving, error }) {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  function submit(e) {
+    e?.preventDefault();
+    onCreate({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+    });
+  }
+  const inputClass =
+    'w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
+  return (
+    <Modal
+      size="md"
+      onClose={onClose}
+      title="Create a canvasser"
+      footer={
+        <>
+          <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" loading={saving} onClick={submit}>Create &amp; add</Button>
+        </>
+      }
+    >
+      <form onSubmit={submit} className="space-y-3">
+        <p className="text-sm text-fg-muted">
+          Adds a brand-new canvasser to your organization and puts them on this campaign. They&apos;ll
+          set their own password at first sign-in.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">First name</label>
+            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} required className={inputClass} />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Last name</label>
+            <input value={lastName} onChange={(e) => setLastName(e.target.value)} required className={inputClass} />
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">Email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className={inputClass} />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password</label>
+          <input
+            type="text"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={8}
+            placeholder="At least 8 characters"
+            className={inputClass}
+          />
+        </div>
+        {error && <p className="text-sm text-danger">{error.message}</p>}
+      </form>
+    </Modal>
+  );
+}
+
 export default function CampaignTeamPage() {
   const { campaignId } = useParams();
   const qc = useQueryClient();
   const { selected, isLoading: campaignLoading } = useCampaignSelection(campaignId);
-  const { user } = useAuth();
+  const { user, isOrgAdmin } = useAuth();
   const [search, setSearch] = useState('');
+  const [creatingMember, setCreatingMember] = useState(false);
 
-  const membersQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
+  // Admins list the whole org from the Users admin; team leads can't reach that, so they
+  // read the same picker list from the campaign-scoped crew endpoint instead.
+  const membersQ = useQuery({
+    queryKey: isOrgAdmin ? ['memberships'] : ['admin', 'campaign-crew', campaignId],
+    queryFn: () => api(isOrgAdmin ? '/admin/memberships' : `/admin/campaigns/${campaignId}/crew`),
+    enabled: isOrgAdmin || !!campaignId,
+  });
   const assignmentsQ = useQuery({
     queryKey: ['admin', 'campaign-assignments', campaignId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/assignments`),
@@ -65,6 +139,16 @@ export default function CampaignTeamPage() {
   const unassignMut = useMutation({
     mutationFn: (userId) => api(`/admin/campaigns/${campaignId}/assignments/${userId}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+  });
+  // Team leads create net-new canvassers straight onto this campaign (they can't reach the
+  // org Users admin). Admins use the Users page link instead.
+  const createMemberMut = useMutation({
+    mutationFn: (body) => api(`/admin/campaigns/${campaignId}/crew`, { method: 'POST', body }),
+    onSuccess: () => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', campaignId] });
+      setCreatingMember(false);
+    },
   });
   const busy = assignMut.isPending || unassignMut.isPending;
 
@@ -118,7 +202,11 @@ export default function CampaignTeamPage() {
         <Card className="flex flex-col p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-fg">Add to the campaign</h2>
-            <Link to={usersReturn} className="text-xs font-medium text-brand-accent hover:underline">Create a new member →</Link>
+            {isOrgAdmin ? (
+              <Link to={usersReturn} className="text-xs font-medium text-brand-accent hover:underline">Create a new member →</Link>
+            ) : (
+              <button onClick={() => setCreatingMember(true)} className="text-xs font-medium text-brand-accent hover:underline">Create a new member →</button>
+            )}
           </div>
           <div className="mb-3 flex items-center gap-2">
             <input
@@ -139,7 +227,11 @@ export default function CampaignTeamPage() {
           ) : !orgMembers.length ? (
             <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
               No members in this org yet.{' '}
-              <Link to={usersReturn} className="font-medium text-brand-accent hover:underline">Add one on Users →</Link>
+              {isOrgAdmin ? (
+                <Link to={usersReturn} className="font-medium text-brand-accent hover:underline">Add one on Users →</Link>
+              ) : (
+                <button onClick={() => setCreatingMember(true)} className="font-medium text-brand-accent hover:underline">Create one →</button>
+              )}
             </div>
           ) : !candidates.length ? (
             <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
@@ -220,6 +312,15 @@ export default function CampaignTeamPage() {
           )}
         </Card>
       </div>
+
+      {creatingMember && (
+        <CreateCrewMemberModal
+          onClose={() => setCreatingMember(false)}
+          onCreate={(body) => createMemberMut.mutate(body)}
+          saving={createMemberMut.isPending}
+          error={createMemberMut.error}
+        />
+      )}
     </div>
   );
 }

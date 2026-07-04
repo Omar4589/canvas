@@ -9,7 +9,7 @@ export default function ProtectedRoute({
   requireActiveOrg = true,
   allowPasswordChange = false,
 }) {
-  const { user, memberships, activeOrgId, isSuperAdmin, isOrgAdmin, mustChangePassword, loading } =
+  const { user, memberships, activeOrgId, isSuperAdmin, isOrgAdmin, isConsoleUser, mustChangePassword, loading } =
     useAuth();
   const location = useLocation();
 
@@ -56,9 +56,10 @@ export default function ProtectedRoute({
     return <div className="p-8 text-danger">Forbidden — admin access required for this org.</div>;
   }
 
-  // Console (admin/super-admin) surfaces reachable without an active org — e.g. the shared
-  // /profile page, which a super admin in platform view must still be able to open.
-  if (requireConsoleUser && !isOrgAdmin && !isSuperAdmin) {
+  // Console surfaces (super/admin/team-lead) reachable without an active org — e.g. the
+  // shared /profile page, which a super admin in platform view must still be able to open.
+  // Team leads are console users too, scoped to the campaigns they manage.
+  if (requireConsoleUser && !isConsoleUser) {
     return <div className="p-8 text-danger">Forbidden — admin access required.</div>;
   }
 

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Pass } from '../../models/Pass.js';
 import { Household } from '../../models/Household.js';
@@ -26,7 +27,31 @@ import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps } from '../../services/reports/overlaps.js';
 
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
+
+// Reports are campaign-scoped via ?campaignId. Historically baseFilter trusted any
+// campaignId with no ownership check. Team leads may pull reports ONLY for a campaign
+// they manage — and never org-wide (no campaignId), which would span other campaigns.
+// Admins/super stay unscoped. (This also closes the trust-any-campaignId gap.)
+router.use(async (req, res, next) => {
+  try {
+    if (isOrgAdmin(req)) return next();
+    // The cross-campaign rollup is the lead's campaign LIST (e.g. the mobile admin
+    // landing). It self-scopes to their managed campaigns below, so it's allowed
+    // without a single campaignId — unlike every other (per-campaign) report.
+    if (req.path === '/campaign-rollup') return next();
+    const campaignId = req.query.campaignId;
+    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+      return res.status(403).json({ error: 'A team lead must scope reports to a campaign they manage.' });
+    }
+    if (!(await canManageCampaign(req, campaignId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Resolve the ANCHOR timezone for every report request: the campaign's zone when a
 // single campaign is scoped, else the org's zone. Every date window + day-bucket uses
@@ -253,6 +278,19 @@ router.get('/campaign-rollup', async (req, res, next) => {
       filter._id = new mongoose.Types.ObjectId(req.query.campaignId);
     } else if (scope === 'active') filter.isActive = true;
     else if (scope === 'archived') filter.isActive = false;
+
+    // A team lead's rollup covers only the campaigns they manage — intersect the
+    // requested campaignId (must be managed) or restrict the whole list to the grant set.
+    if (!isOrgAdmin(req)) {
+      const managed = (await managedCampaignIds(req)).map(String);
+      if (req.query.campaignId) {
+        if (!managed.includes(String(req.query.campaignId))) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
+      } else {
+        filter._id = { $in: managed.map((id) => new mongoose.Types.ObjectId(id)) };
+      }
+    }
 
     const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1 }).lean();
     const ids = campaigns.map((c) => c._id);

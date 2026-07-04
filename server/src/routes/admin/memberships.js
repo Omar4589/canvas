@@ -5,10 +5,18 @@ import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { Organization } from '../../models/Organization.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
+import { CampaignManager } from '../../models/CampaignManager.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import {
+  createOrgMember,
+  MemberError,
+  memberIdentityShape,
+  resolveCoordinatorId,
+  resolveManagedCampaigns,
+} from '../../services/memberships/createMember.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -17,23 +25,19 @@ const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted'
 const phoneSchema = z.string().trim().max(40).optional();
 
 const addSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(['admin', 'canvasser']).default('canvasser'),
-  firstName: z.string().min(1).optional(),
-  lastName: z.string().min(1).optional(),
-  phone: phoneSchema,
-  password: z.string().min(8).optional(),
-  // true = the admin intends to link an EXISTING global account by email.
-  // false = create a brand-new account. Lets us give a clear error either way.
-  linkExisting: z.boolean().optional().default(false),
-  // Optional supervising admin (in this org). Empty string / null = none.
+  ...memberIdentityShape,
+  role: z.enum(['admin', 'lead', 'canvasser']).default('canvasser'),
+  // Optional supervising admin/lead (in this org). Empty string / null = none.
   coordinatorId: z.string().nullable().optional(),
+  // For role: 'lead' — the campaigns this lead may manage (CampaignManager grants).
+  managedCampaignIds: z.array(z.string()).optional(),
 });
 
 const updateMembershipSchema = z.object({
-  role: z.enum(['admin', 'canvasser']).optional(),
+  role: z.enum(['admin', 'lead', 'canvasser']).optional(),
   isActive: z.boolean().optional(),
   coordinatorId: z.string().nullable().optional(),
+  managedCampaignIds: z.array(z.string()).optional(),
 });
 
 const updateUserSchema = z.object({
@@ -57,29 +61,22 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
-// Validate a coordinatorId for a membership in THIS org. A coordinator must be an
-// active admin in the same org, and can't be the member themselves. Returns
-// { ok, value } where value is the normalized ObjectId|null (null = clear). When
-// `raw` is undefined the field wasn't sent → { ok, skip:true } (leave unchanged).
-async function resolveCoordinatorId(req, raw, memberUserId) {
-  if (raw === undefined) return { ok: true, skip: true };
-  if (raw === null || raw === '') return { ok: true, value: null };
-  if (!mongoose.isValidObjectId(raw)) {
-    return { ok: false, error: 'Invalid coordinatorId.' };
-  }
-  if (memberUserId && String(raw) === String(memberUserId)) {
-    return { ok: false, error: "A member can't be their own coordinator." };
-  }
-  const coord = await Membership.findOne({
-    userId: raw,
-    organizationId: activeOrgId(req),
-    role: 'admin',
-    isActive: true,
+// Replace a lead's CampaignManager grants in this org with exactly `campaignIds`
+// (an array of ObjectId already validated by resolveManagedCampaigns). Additive
+// upserts keep existing grantedBy/grantedAt; anything not in the set is removed.
+async function reconcileManagedCampaigns({ orgId, userId, grantedBy, campaignIds }) {
+  await CampaignManager.deleteMany({
+    userId,
+    organizationId: orgId,
+    campaignId: { $nin: campaignIds },
   });
-  if (!coord) {
-    return { ok: false, error: 'Coordinator must be an active admin in this organization.' };
+  for (const campaignId of campaignIds) {
+    await CampaignManager.updateOne(
+      { userId, organizationId: orgId, campaignId },
+      { $setOnInsert: { userId, organizationId: orgId, campaignId, grantedBy, grantedAt: new Date() } },
+      { upsert: true }
+    );
   }
-  return { ok: true, value: new mongoose.Types.ObjectId(String(raw)) };
 }
 
 function haversineMeters(lat1, lon1, lat2, lon2) {
@@ -112,6 +109,18 @@ router.get('/', async (req, res, next) => {
     ]);
     const orgCount = new Map(counts.map((c) => [String(c._id), c.count]));
 
+    // The campaigns each team lead is granted (CampaignManager), so the Users page
+    // can show + edit a lead's scope without a per-row fetch.
+    const grants = await CampaignManager.find({ organizationId: activeOrgId(req) })
+      .select('userId campaignId')
+      .lean();
+    const managedByUser = new Map();
+    for (const g of grants) {
+      const k = String(g.userId);
+      if (!managedByUser.has(k)) managedByUser.set(k, []);
+      managedByUser.get(k).push(String(g.campaignId));
+    }
+
     res.json({
       members: members.map((m) => ({
         membershipId: String(m._id),
@@ -119,6 +128,7 @@ router.get('/', async (req, res, next) => {
         isActive: m.isActive,
         addedAt: m.createdAt,
         coordinatorId: m.coordinatorId ? String(m.coordinatorId) : null,
+        managedCampaignIds: managedByUser.get(String(m.userId._id)) || [],
         user: {
           id: String(m.userId._id),
           firstName: m.userId.firstName,
@@ -141,62 +151,45 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
     const data = addSchema.parse(req.body);
-    const email = data.email.toLowerCase().trim();
-    let user = await User.findOne({ email });
 
-    if (data.linkExisting) {
-      // Link-an-existing-account intent: there must already be an account.
-      if (!user) {
-        return res.status(404).json({
-          error: "No account exists with that email. Uncheck 'Existing user' to create a new one.",
-          code: 'EMAIL_NOT_FOUND',
-        });
-      }
-    } else if (user) {
-      // Create-new intent but the email is already taken globally — guide the
-      // admin to the link path instead of silently reusing the other account.
-      return res.status(409).json({
-        error:
-          "An account with this email already exists. Check 'Existing user (by email)' to link them to this org instead.",
-        code: 'EMAIL_EXISTS_USE_LINK',
-      });
-    } else {
-      if (!data.password || !data.firstName || !data.lastName) {
-        return res.status(400).json({
-          error: 'New user requires firstName, lastName, and password.',
-        });
-      }
-      const passwordHash = await User.hashPassword(data.password);
-      user = await User.create({
-        firstName: data.firstName,
-        lastName: data.lastName,
-        email,
-        phone: data.phone || null,
-        passwordHash,
-        isActive: true,
-      });
-    }
-
-    const existing = await Membership.findOne({
-      userId: user._id,
-      organizationId: activeOrgId(req),
-    });
-    if (existing) {
-      return res.status(409).json({ error: 'User already a member of this org' });
-    }
-
-    const coordRes = await resolveCoordinatorId(req, data.coordinatorId, user._id);
+    const coordRes = await resolveCoordinatorId({ orgId, raw: data.coordinatorId, memberUserId: null });
     if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
 
-    const membership = await Membership.create({
-      userId: user._id,
-      organizationId: activeOrgId(req),
-      role: data.role,
-      isActive: true,
-      addedBy: req.user._id,
-      coordinatorId: coordRes.value || null,
-    });
+    // Validate the grant set up front (fail before creating anything) for leads.
+    let managed = [];
+    if (data.role === 'lead') {
+      const mres = await resolveManagedCampaigns({ orgId, raw: data.managedCampaignIds ?? [] });
+      if (!mres.ok) return res.status(400).json({ error: mres.error });
+      managed = mres.value;
+    }
+
+    let user;
+    let membership;
+    try {
+      ({ user, membership } = await createOrgMember({
+        orgId,
+        addedBy: req.user._id,
+        data,
+        role: data.role,
+        coordinatorId: coordRes.value || null,
+      }));
+    } catch (err) {
+      if (err instanceof MemberError) {
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
+      throw err;
+    }
+
+    if (data.role === 'lead' && managed.length) {
+      await reconcileManagedCampaigns({
+        orgId,
+        userId: user._id,
+        grantedBy: req.user._id,
+        campaignIds: managed,
+      });
+    }
 
     res.status(201).json({
       membership: {
@@ -205,6 +198,7 @@ router.post('/', async (req, res, next) => {
         isActive: membership.isActive,
         addedAt: membership.createdAt,
         coordinatorId: membership.coordinatorId ? String(membership.coordinatorId) : null,
+        managedCampaignIds: managed.map((id) => String(id)),
         user: user.toSafeJSON(),
       },
     });
@@ -221,9 +215,12 @@ router.patch('/:userId', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    const orgId = activeOrgId(req);
     const data = updateMembershipSchema.parse(req.body);
+    // You can't strip your own org-admin (demote yourself to lead or canvasser) —
+    // that would lock you out of org administration. Ask another admin.
     if (
-      data.role === 'canvasser' &&
+      data.role && data.role !== 'admin' &&
       String(req.params.userId) === String(req.user._id) &&
       !req.user.isSuperAdmin
     ) {
@@ -231,18 +228,59 @@ router.patch('/:userId', async (req, res, next) => {
         error: "You can't change your own role. Ask another admin.",
       });
     }
+
+    const membership = await Membership.findOne({
+      userId: req.params.userId,
+      organizationId: orgId,
+    });
+    if (!membership) return res.status(404).json({ error: 'Membership not found' });
+
     if ('coordinatorId' in data) {
-      const coordRes = await resolveCoordinatorId(req, data.coordinatorId, req.params.userId);
+      const coordRes = await resolveCoordinatorId({
+        orgId,
+        raw: data.coordinatorId,
+        memberUserId: req.params.userId,
+      });
       if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
       data.coordinatorId = coordRes.value ?? null;
     }
-    const membership = await Membership.findOneAndUpdate(
-      { userId: req.params.userId, organizationId: activeOrgId(req) },
-      data,
-      { new: true }
-    );
-    if (!membership) return res.status(404).json({ error: 'Membership not found' });
-    res.json({ membership });
+
+    const nextRole = data.role || membership.role;
+    // Validate the grant set before writing anything (only when the result is a lead).
+    let managedResult = null;
+    if (nextRole === 'lead' && data.managedCampaignIds !== undefined) {
+      const mres = await resolveManagedCampaigns({ orgId, raw: data.managedCampaignIds });
+      if (!mres.ok) return res.status(400).json({ error: mres.error });
+      managedResult = mres.value;
+    }
+
+    // managedCampaignIds lives in CampaignManager, not on the membership doc.
+    const { managedCampaignIds: _omitGrants, ...membershipUpdate } = data;
+    Object.assign(membership, membershipUpdate);
+    await membership.save();
+
+    // Reconcile grants: leaving the lead role clears every grant; staying/becoming
+    // a lead with an explicit set replaces it (an omitted set leaves grants as-is).
+    if (nextRole !== 'lead') {
+      await CampaignManager.deleteMany({ userId: req.params.userId, organizationId: orgId });
+    } else if (managedResult !== null) {
+      await reconcileManagedCampaigns({
+        orgId,
+        userId: membership.userId,
+        grantedBy: req.user._id,
+        campaignIds: managedResult,
+      });
+    }
+
+    const finalGrants = await CampaignManager.find({ userId: req.params.userId, organizationId: orgId })
+      .select('campaignId')
+      .lean();
+    res.json({
+      membership: {
+        ...membership.toObject(),
+        managedCampaignIds: finalGrants.map((g) => String(g.campaignId)),
+      },
+    });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -264,6 +302,7 @@ router.delete('/:userId', async (req, res, next) => {
     const orgId = activeOrgId(req);
     await Membership.deleteOne({ userId: req.params.userId, organizationId: orgId });
     await CampaignAssignment.deleteMany({ userId: req.params.userId, organizationId: orgId });
+    await CampaignManager.deleteMany({ userId: req.params.userId, organizationId: orgId });
     res.json({ ok: true });
   } catch (err) {
     next(err);

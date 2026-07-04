@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
@@ -22,10 +23,20 @@ import {
 // observations / visibility / support question, preview it exactly as the client will see it,
 // then publish — which FREEZES the numbers and snapshots the map. See docs/CLIENT_PORTAL.md.
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+// Client reports are per-campaign, so team leads may build them — but only for a
+// campaign they manage. Each handler authorizes via manages() on the report/share/
+// campaign's campaignId (admins/super are unscoped).
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
+}
+
+// True if the requester may manage `campaignId`; otherwise writes 403 and returns false.
+async function manages(req, res, campaignId) {
+  if (await canManageCampaign(req, campaignId)) return true;
+  res.status(403).json({ error: 'Forbidden' });
+  return false;
 }
 function ensureOrgScoped(req, res) {
   if (!activeOrgId(req)) {
@@ -170,6 +181,7 @@ router.get('/shares', async (req, res, next) => {
     if (!req.query.campaignId || !mongoose.isValidObjectId(req.query.campaignId)) {
       return res.status(400).json({ error: 'campaignId required' });
     }
+    if (!(await manages(req, res, req.query.campaignId))) return;
     const shares = await ReportShareLink.find({
       organizationId: activeOrgId(req),
       campaignId: req.query.campaignId,
@@ -189,6 +201,7 @@ router.post('/shares', async (req, res, next) => {
     const data = shareCreateSchema.parse(req.body);
     const campaign = await loadCampaignInOrg(orgId, data.campaignId);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found in this org' });
+    if (!(await manages(req, res, campaign._id))) return;
     const share = await ReportShareLink.create({
       organizationId: orgId,
       campaignId: campaign._id,
@@ -214,6 +227,7 @@ async function loadShareInOrg(req, res) {
     res.status(404).json({ error: 'Share link not found' });
     return null;
   }
+  if (!(await manages(req, res, share.campaignId))) return null;
   return share;
 }
 
@@ -272,6 +286,7 @@ router.post('/', async (req, res, next) => {
     }
     const campaign = await loadCampaignInOrg(orgId, data.campaignId);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found in this org' });
+    if (!(await manages(req, res, campaign._id))) return;
 
     const tz = campaign.timeZone || 'America/New_York';
     const range = zonedDayRange(data.weekStart, data.weekEnd, tz);
@@ -315,7 +330,13 @@ router.get('/', async (req, res, next) => {
       if (!mongoose.isValidObjectId(req.query.campaignId)) {
         return res.status(400).json({ error: 'Invalid campaignId' });
       }
+      if (!isOrgAdmin(req) && !(await canManageCampaign(req, req.query.campaignId))) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
       filter.campaignId = new mongoose.Types.ObjectId(req.query.campaignId);
+    } else if (!isOrgAdmin(req)) {
+      // A lead's report list spans only the campaigns they manage.
+      filter.campaignId = { $in: await managedCampaignIds(req) };
     }
     const reports = await ClientReport.find(filter).sort({ weekStart: -1, createdAt: -1 }).lean();
     res.json({ reports: reports.map(adminListRow) });
@@ -331,6 +352,7 @@ router.get('/:id', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: activeOrgId(req) });
     if (!report) return res.status(404).json({ error: 'Report not found' });
+    if (!(await manages(req, res, report.campaignId))) return;
     // Campaign + org names let the builder's PDF export carry the same header the client sees.
     const campaign = await Campaign.findById(report.campaignId, { name: 1 }).lean();
     res.json({ report, campaignName: campaign?.name || '', orgName: req.activeOrg?.name || '' });
@@ -346,6 +368,7 @@ router.patch('/:id', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: activeOrgId(req) });
     if (!report) return res.status(404).json({ error: 'Report not found' });
+    if (!(await manages(req, res, report.campaignId))) return;
     if (report.status !== 'draft') {
       return res.status(400).json({ error: 'Only draft reports can be edited. Unpublish first.' });
     }
@@ -379,6 +402,7 @@ router.post('/:id/recompute', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: orgId });
     if (!report) return res.status(404).json({ error: 'Report not found' });
+    if (!(await manages(req, res, report.campaignId))) return;
     if (report.status !== 'draft') {
       return res.status(400).json({ error: 'Only draft reports can be recomputed. Unpublish first.' });
     }
@@ -401,6 +425,7 @@ router.get('/:id/preview', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: activeOrgId(req) });
     if (!report) return res.status(404).json({ error: 'Report not found' });
+    if (!(await manages(req, res, report.campaignId))) return;
     res.json({ report: shapeReportForClient(report), survey: mapFilterSurvey(report) });
   } catch (err) {
     next(err);
@@ -416,6 +441,7 @@ router.get('/:id/preview/map', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: orgId });
     if (!report) return res.status(404).json({ error: 'Report not found' });
+    if (!(await manages(req, res, report.campaignId))) return;
     const campaign = await loadCampaignInOrg(orgId, report.campaignId);
     if (!campaign) return res.status(400).json({ error: 'Campaign no longer exists' });
     const { points } = await buildFrozenMapPoints({
@@ -438,6 +464,7 @@ router.post('/:id/publish', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: orgId });
     if (!report) return res.status(404).json({ error: 'Report not found' });
+    if (!(await manages(req, res, report.campaignId))) return;
     const campaign = await loadCampaignInOrg(orgId, report.campaignId);
     if (!campaign) return res.status(400).json({ error: 'Campaign no longer exists' });
     const template = await resolveTemplate(orgId, campaign);
@@ -472,12 +499,19 @@ router.post('/:id/unpublish', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+    const orgId = activeOrgId(req);
+    // Authorize on the report's campaign BEFORE mutating it.
+    const existing = await ClientReport.findOne(
+      { _id: req.params.id, organizationId: orgId },
+      { campaignId: 1 }
+    ).lean();
+    if (!existing) return res.status(404).json({ error: 'Report not found' });
+    if (!(await manages(req, res, existing.campaignId))) return;
     const report = await ClientReport.findOneAndUpdate(
-      { _id: req.params.id, organizationId: activeOrgId(req) },
+      { _id: req.params.id, organizationId: orgId },
       { status: 'draft', publishedAt: null, publishedBy: null },
       { new: true }
     );
-    if (!report) return res.status(404).json({ error: 'Report not found' });
     res.json({ report });
   } catch (err) {
     next(err);
@@ -491,6 +525,7 @@ router.delete('/:id', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: orgId });
     if (!report) return res.status(404).json({ error: 'Report not found' });
+    if (!(await manages(req, res, report.campaignId))) return;
     await ClientReportMapPoint.deleteMany({ clientReportId: report._id });
     await ClientReport.deleteOne({ _id: report._id, organizationId: orgId });
     res.json({ ok: true });

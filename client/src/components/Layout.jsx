@@ -60,7 +60,11 @@ function ThemeToggle({ collapsed, dark, toggle }) {
 }
 
 export default function Layout() {
-  const { user, logout, isSuperAdmin } = useAuth();
+  const { user, logout, isSuperAdmin, isLead } = useAuth();
+  // A team lead is a campaign-scoped admin: the top-level nav collapses to the items
+  // they can use (Campaigns). The campaign drill-in nav stays full — inside a granted
+  // campaign a lead does everything an admin does.
+  const orgNav = isLead ? ORG_NAV.filter((n) => n.leadVisible) : ORG_NAV;
   const { dark, toggle: toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
@@ -134,6 +138,7 @@ export default function Layout() {
         {!collapsed && (
           <div className="mb-4 px-1 text-xs text-fg-muted shrink-0">
             Admin console{isSuperAdmin && <span className="ml-1 text-brand-accent">· super</span>}
+            {isLead && <span className="ml-1 text-brand-accent">· team lead</span>}
           </div>
         )}
 
@@ -177,7 +182,7 @@ export default function Layout() {
             </>
           ) : (
             <>
-              {ORG_NAV.map((n) => (
+              {orgNav.map((n) => (
                 <NavItem key={n.to} n={n} collapsed={collapsed} />
               ))}
               {isSuperAdmin && (

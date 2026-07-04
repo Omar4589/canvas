@@ -2,11 +2,14 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+// A team lead can open ping details on their campaign's map, so allow leads here and
+// authorize on the activity's campaign below.
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 router.get('/:activityId', async (req, res, next) => {
   try {
@@ -24,6 +27,10 @@ router.get('/:activityId', async (req, res, next) => {
       .populate('voterId', 'fullName party')
       .lean();
     if (!activity) return res.status(404).json({ error: 'Activity not found' });
+    // Leads only see activity in a campaign they manage (admins/super are unscoped).
+    if (!(await canManageCampaign(req, activity.campaignId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
 
     let surveyResponse = null;
     if (activity.actionType === 'survey_submitted' && activity.voterId) {

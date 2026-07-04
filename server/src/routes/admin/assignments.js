@@ -5,11 +5,11 @@ import { Campaign } from '../../models/Campaign.js';
 import { Membership } from '../../models/Membership.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { User } from '../../models/User.js';
-import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
+import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+router.use(requireAuth, orgContext, requireCampaignManager);
 
 const assignSchema = z.object({
   userIds: z.array(z.string()).min(1),

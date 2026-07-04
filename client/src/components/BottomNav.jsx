@@ -41,7 +41,7 @@ function sheetLinkClass({ isActive }) {
 }
 
 export default function BottomNav() {
-  const { user, logout, isSuperAdmin } = useAuth();
+  const { user, logout, isSuperAdmin, isLead } = useAuth();
   const [open, setOpen] = useState(false);
   const campaignMatch = useMatch('/campaigns/:campaignId/*');
   const inCampaign = !!campaignMatch;
@@ -66,9 +66,11 @@ export default function BottomNav() {
     tabs = CAMPAIGN_NAV.filter((n) => CAMPAIGN_PRIMARY.includes(n.slug)).map(toItem);
     moreItems = all.filter((it) => !tabs.some((t) => t.key === it.key));
   } else {
+    // A team lead only sees the campaign-scoped top-level items (Campaigns).
+    const orgNav = isLead ? ORG_NAV.filter((n) => n.leadVisible) : ORG_NAV;
     const toItem = (n) => ({ key: n.to, to: n.to, label: n.label, icon: n.to, end: n.end });
-    const all = ORG_NAV.map(toItem);
-    tabs = ORG_NAV.filter((n) => ORG_PRIMARY.includes(n.to)).map(toItem);
+    const all = orgNav.map(toItem);
+    tabs = orgNav.filter((n) => ORG_PRIMARY.includes(n.to)).map(toItem);
     moreItems = all.filter((it) => !tabs.some((t) => t.key === it.key));
   }
 
