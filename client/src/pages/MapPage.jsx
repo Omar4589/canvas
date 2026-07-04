@@ -458,6 +458,10 @@ export default function MapPage() {
               <p className="mt-1 text-xs text-fg-muted">
                 Drag the blue marker to <strong>{moveTarget.addressLine1}</strong>'s correct spot, then Save.
               </p>
+              <p className="mt-2 rounded border border-warning/30 bg-warning-tint px-2 py-1.5 text-[11px] leading-snug text-warning-fg">
+                Corrects the pin only — this door keeps its current book until you re-cut turf. Canvassers see the new
+                spot on their next sync.
+              </p>
               {moveErr && <div className="mt-2 text-xs text-danger">{moveErr}</div>}
               <div className="mt-3 flex justify-end gap-2">
                 <button

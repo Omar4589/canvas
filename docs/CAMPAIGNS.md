@@ -29,8 +29,8 @@ A campaign goes from "created" to "canvassers in the field" through one ordered 
 progress** card on the campaign's dashboard walks you through it — it's a live checklist with a
 "next step" button, so you never have to remember the order. At a glance:
 
-1. **Create the campaign** — **Campaigns → New campaign**: name, type (survey / lit drop), state,
-   timezone (auto-fills from the state). A survey is **not** required at creation.
+1. **Create the campaign** — **Campaigns → New campaign**: name, type (survey / lit drop), state (a
+   dropdown of real US states), timezone (auto-fills from the state). A survey is **not** required at creation.
 2. **Import voters** — **Voter Import**: upload a voter file (geocoded for you if it has no lat/lng).
    New addresses land in **Intake** (owned by no walk list yet). See [IMPORTS.md](IMPORTS.md).
 3. **Attach a survey** *(survey campaigns only)* — on the campaign's **Survey** tab, pick or build
@@ -153,7 +153,8 @@ masked by the campaign already reading "complete."
 ## Model
 
 [Campaign.js](../server/src/models/Campaign.js): `organizationId`, `name`, `type` (`survey` |
-`lit_drop`), `state` (2-char, uppercased), `surveyTemplateId` (nullable), `isActive` (the
+`lit_drop`), `state` (2-char, uppercased — validated against the real US-state list via `usStateSchema`
+in [validators.js](../server/src/utils/validators.js)), `surveyTemplateId` (nullable), `isActive` (the
 archive flag), `timeZone`. A `pre('validate')` invariant enforces that a `survey` campaign has a
 `surveyTemplateId` and a `lit_drop` campaign never does (it nulls it on save). There is no `draft`
 state — `isActive` is the only lifecycle flag (active ⇄ archived).

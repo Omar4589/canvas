@@ -11,9 +11,11 @@ import { Card, Button, Modal, PhoneInput } from '../components/ui';
 // admins manage the campaign's team in context. Two panes: add org members on the left,
 // the current team on the right. Reuses the /admin/campaigns/:id/assignments endpoints.
 function RoleBadge({ role }) {
-  if (role !== 'admin') return null;
+  if (role !== 'admin' && role !== 'lead') return null;
   return (
-    <span className="rounded bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">admin</span>
+    <span className="rounded bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+      {role === 'lead' ? 'lead' : 'admin'}
+    </span>
   );
 }
 function YouBadge() {
@@ -21,23 +23,23 @@ function YouBadge() {
     <span className="rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">you</span>
   );
 }
-function TeamMemberRow({ a, isSelf, onRemove, busy }) {
+// A pressable roster row — opens the campaign-scoped member panel (activity, crew, remove).
+function TeamMemberRow({ a, isSelf, onOpen }) {
   return (
-    <li className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium text-fg">{a.firstName} {a.lastName}</span>
-          <RoleBadge role={a.role} />
-          {isSelf && <YouBadge />}
-        </div>
-        <div className="truncate text-xs text-fg-muted">{a.email}</div>
-      </div>
+    <li>
       <button
-        onClick={onRemove}
-        disabled={busy}
-        className="shrink-0 rounded-md border border-danger/30 bg-danger-tint px-3 py-1 text-xs font-semibold text-danger disabled:opacity-50"
+        onClick={() => onOpen(a)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-sunken"
       >
-        Remove
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium text-fg">{a.firstName} {a.lastName}</span>
+            <RoleBadge role={a.role} />
+            {isSelf && <YouBadge />}
+          </div>
+          <div className="truncate text-xs text-fg-muted">{a.email}</div>
+        </div>
+        <span className="shrink-0 text-fg-subtle" aria-hidden>›</span>
       </button>
     </li>
   );
@@ -46,7 +48,7 @@ function TeamMemberRow({ a, isSelf, onRemove, busy }) {
 // Inline "create a canvasser and put them on this campaign" form — the crew equivalent
 // of the org Users admin's add-member flow, scoped to one campaign. Used by admins AND
 // team leads (both may POST to the campaign's crew endpoint).
-function CreateCrewMemberModal({ onClose, onCreate, saving, error }) {
+function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, error }) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -113,8 +115,137 @@ function CreateCrewMemberModal({ onClose, onCreate, saving, error }) {
             className={inputClass}
           />
         </div>
-        {error && <p className="text-sm text-danger">{error.message}</p>}
+        {error && (
+          error.data?.code === 'EMAIL_EXISTS_USE_LINK' ? (
+            // The person already has an account — creating is a dead end here (this quick
+            // form only makes brand-new canvassers). Point them at the add-existing flow.
+            <div className="rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
+              Someone with that email already has an account. If they&apos;re already in your organization,
+              find them under <strong>Add to the campaign</strong> and click Add. Otherwise an org admin can
+              add them from the Users page.
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => onFoundExisting?.(email.trim().toLowerCase())}
+                  className="font-semibold text-brand-accent hover:underline"
+                >
+                  Search my members for “{email.trim().toLowerCase()}” →
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-danger">{error.message}</p>
+          )
+        )}
       </form>
+    </Modal>
+  );
+}
+
+function StatBox({ label, value }) {
+  return (
+    <div className="rounded-md border border-border bg-sunken px-3 py-2">
+      <div className="text-lg font-semibold tabular-nums text-fg">{value}</div>
+      <div className="text-[11px] text-fg-muted">{label}</div>
+    </div>
+  );
+}
+
+// A lighter, campaign-scoped member panel (not the org Users modal): their activity in THIS
+// campaign, set their crew (coordinator), and remove them from the campaign. Admins get a
+// link to the full account on the Users page.
+function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrgAdmin, onClose, onRemove, removing }) {
+  const qc = useQueryClient();
+  const summaryQ = useQuery({
+    queryKey: ['admin', 'campaign-member-summary', campaignId, member.userId],
+    queryFn: () => api(`/admin/reports/canvassers/${member.userId}/summary?campaignId=${campaignId}`),
+  });
+  const [coordinatorId, setCoordinatorId] = useState(member.coordinatorId || '');
+  const setCoordMut = useMutation({
+    mutationFn: (cid) =>
+      api(`/admin/campaigns/${campaignId}/crew/${member.userId}/coordinator`, {
+        method: 'PATCH',
+        body: { coordinatorId: cid || null },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] }),
+    onError: () => setCoordinatorId(member.coordinatorId || ''), // revert on failure
+  });
+  function onChangeCoordinator(e) {
+    const val = e.target.value;
+    setCoordinatorId(val);
+    setCoordMut.mutate(val);
+  }
+
+  const kpi = summaryQ.data?.kpi;
+  const isSurvey = campaignType !== 'lit_drop';
+  const usersReturn = `/users?return=${encodeURIComponent(`/campaigns/${campaignId}/team`)}`;
+
+  return (
+    <Modal
+      size="md"
+      onClose={onClose}
+      title={`${member.firstName} ${member.lastName}`}
+      footer={
+        <>
+          <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
+          <Button variant="danger" size="sm" loading={removing} onClick={() => onRemove(member.userId)}>
+            Remove from campaign
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm text-fg-muted">
+          <span className="truncate">{member.email}</span>
+          <RoleBadge role={member.role} />
+        </div>
+
+        <div>
+          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-fg-muted">Activity in this campaign</div>
+          {summaryQ.isLoading ? (
+            <div className="text-sm text-fg-muted">Loading…</div>
+          ) : kpi ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <StatBox label="Doors knocked" value={(kpi.homesKnocked ?? 0).toLocaleString()} />
+              {isSurvey ? (
+                <StatBox label="Surveys" value={(kpi.surveysSubmitted ?? 0).toLocaleString()} />
+              ) : (
+                <StatBox label="Lit drops" value={(kpi.litDropped ?? 0).toLocaleString()} />
+              )}
+              <StatBox label="Days active" value={(kpi.daysActive ?? 0).toLocaleString()} />
+              <StatBox label={isSurvey ? 'Survey rate' : 'Drop rate'} value={`${kpi.connectionRatePct ?? 0}%`} />
+            </div>
+          ) : (
+            <div className="rounded border border-dashed border-border bg-sunken px-3 py-4 text-center text-sm text-fg-muted">
+              No activity in this campaign yet.
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-muted">Crew (coordinator)</label>
+          <select
+            value={coordinatorId}
+            onChange={onChangeCoordinator}
+            disabled={setCoordMut.isPending}
+            className="w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
+          >
+            <option value="">— No coordinator —</option>
+            {coordinators
+              .filter((c) => String(c.id) !== String(member.userId))
+              .map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+          </select>
+          <p className="mt-1 text-xs text-fg-muted">The admin or team lead who oversees this member. Saved immediately.</p>
+        </div>
+
+        {isOrgAdmin && (
+          <Link to={usersReturn} onClick={onClose} className="inline-block text-xs font-medium text-brand-accent hover:underline">
+            Manage this person&apos;s account →
+          </Link>
+        )}
+      </div>
     </Modal>
   );
 }
@@ -126,6 +257,7 @@ export default function CampaignTeamPage() {
   const { user, isOrgAdmin } = useAuth();
   const [search, setSearch] = useState('');
   const [creatingMember, setCreatingMember] = useState(false);
+  const [selectedMember, setSelectedMember] = useState(null);
 
   // Admins list the whole org from the Users admin; team leads can't reach that, so they
   // read the same picker list from the campaign-scoped crew endpoint instead.
@@ -183,6 +315,14 @@ export default function CampaignTeamPage() {
     );
   }, [team]);
   const orgMembers = (membersQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
+  // Eligible coordinators for the member panel's crew picker — active admins + team leads.
+  const coordinators = useMemo(
+    () =>
+      (membersQ.data?.members || [])
+        .filter((m) => (m.role === 'admin' || m.role === 'lead') && m.user.isActive && m.isActive)
+        .map((m) => ({ id: m.user.id, name: `${m.user.firstName} ${m.user.lastName}` })),
+    [membersQ.data]
+  );
   const candidates = orgMembers
     .filter((m) => !assignedSet.has(m.user.id))
     .filter((m) => {
@@ -290,8 +430,7 @@ export default function CampaignTeamPage() {
                   key={a.userId}
                   a={a}
                   isSelf={String(a.userId) === String(user?.id)}
-                  onRemove={() => unassignMut.mutate(a.userId)}
-                  busy={busy}
+                  onOpen={setSelectedMember}
                 />
               ))}
             </ul>
@@ -308,8 +447,7 @@ export default function CampaignTeamPage() {
                         key={a.userId}
                         a={a}
                         isSelf={String(a.userId) === String(user?.id)}
-                        onRemove={() => unassignMut.mutate(a.userId)}
-                        busy={busy}
+                        onOpen={setSelectedMember}
                       />
                     ))}
                   </ul>
@@ -324,8 +462,22 @@ export default function CampaignTeamPage() {
         <CreateCrewMemberModal
           onClose={() => setCreatingMember(false)}
           onCreate={(body) => createMemberMut.mutate(body)}
+          onFoundExisting={(email) => { setSearch(email); setCreatingMember(false); }}
           saving={createMemberMut.isPending}
           error={createMemberMut.error}
+        />
+      )}
+
+      {selectedMember && (
+        <TeamMemberPanel
+          member={selectedMember}
+          campaignId={campaignId}
+          campaignType={selected?.type}
+          coordinators={coordinators}
+          isOrgAdmin={isOrgAdmin}
+          onClose={() => setSelectedMember(null)}
+          onRemove={(userId) => unassignMut.mutate(userId, { onSuccess: () => setSelectedMember(null) })}
+          removing={unassignMut.isPending}
         />
       )}
     </div>

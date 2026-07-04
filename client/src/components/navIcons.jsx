@@ -174,6 +174,35 @@ export function IconClock({ size = 22 }) {
   );
 }
 
+export function IconTag({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <path d="M3 3h8l9 9-8 8-9-9V3Z" />
+      <circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function IconVoters({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="8" cy="10.5" r="2" />
+      <path d="M5.4 15.2c.4-1.2 1.3-1.9 2.6-1.9s2.2.7 2.6 1.9" />
+      <path d="M14 10h4M14 13.5h4" />
+    </svg>
+  );
+}
+
+export function IconDuplicate({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
 export function IconDot({ size = 22 }) {
   return (
     <svg width={size} height={size} {...baseProps}>
@@ -215,6 +244,9 @@ export const NAV_ICONS = {
   '/admin/client-reports': IconReport,
   '/users': IconUser,
   '/surveys': IconClipboard,
+  '/tags': IconTag,
+  '/voters': IconVoters,
+  '/admin/duplicate-surveys': IconDuplicate,
   '/super-admin': IconGauge,
   '/super-admin/users': IconUsers,
   '/super-admin/people': IconUsers,

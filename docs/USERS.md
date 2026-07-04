@@ -44,6 +44,12 @@ On the Users page, "Add member" has two modes:
   This finds a person who *already has an account* (e.g. they canvass for another campaign) and adds
   a membership to your org, without creating a duplicate.
 
+You can also add a **new canvasser inline from a campaign's Team page** (the **+ New canvasser** button)
+— it creates the account and puts them on that campaign in one step, on **both** the web console and the
+mobile admin app. (That inline form only makes canvassers; use the Users page for admins/leads or to link
+an existing account.) The **phone** field is optional and **auto-formats to `(555) 123-4567`** as you
+type — it won't accept letters.
+
 If you try to create a **new** user with an email that already exists anywhere, you'll get a clear
 error telling you to use the "Existing user" box instead (and the box auto-checks for you).
 
@@ -109,9 +115,12 @@ subset of org members who work it. The team is what:
 - **gates book assignment** — you can only assign books to people on the team.
 
 Manage it on the campaign's **Team** page (two panes: add org members on the left, the current team on
-the right). A person joins a campaign's team three ways, all equivalent:
+the right — **click a team member** to open a quick, campaign-scoped panel: their activity in this
+campaign, set their crew/coordinator, or remove them from the campaign). A person joins a campaign's team
+these ways, all equivalent:
 
-1. **Team page → Add** — the explicit way.
+1. **Team page → Add** an existing org member — or **+ New canvasser** to create a brand-new person
+   straight onto the team (works on the web console **and** the mobile admin app's Assignments screen).
 2. **Walk Lists → Manage → Pre-add** — pre-stage someone onto a walk list (also puts them on the team).
 3. **Assigning them a book** — an admin assigning a book adds that person to the team automatically.
 
@@ -285,6 +294,26 @@ are **not** yet coordinator-scoped (only `effortId` is — see [reports.js](../s
   itself, via `allowPasswordChange`). `LoginPage` redirects on the flag; `api/client.js` funnels an
   in-flight `PASSWORD_CHANGE_REQUIRED` 403 to the same page.
 - Mobile: `app/index.jsx` redirects to `app/change-password.jsx` when the cached user has the flag.
+
+## Input validation
+
+Member/user fields (and campaign/org/survey fields) validate the same way everywhere via shared Zod
+schemas in [server/src/utils/validators.js](../server/src/utils/validators.js):
+
+- `phoneSchema` — US phone: strips to digits, **rejects letters**, stores canonical `(555) 123-4567`
+  (optional/empty → `undefined`). Replaced a duplicated inline schema in `memberships.js`/`createMember.js`.
+- `usStateSchema` — 2-letter, uppercased, checked against the **real** state set (the exported `STATE_TZ`
+  keys in [usStateTimeZone.js](../server/src/utils/usStateTimeZone.js)) — so `"XX"` is rejected.
+- `nameSchema` (trim, 1–80), `emailSchema` (`.email()` + max), `passwordSchema` (min 8 — **no** complexity
+  rule, since it's a temporary password the user replaces at first login), `slugSchema` (kebab-case, orgs).
+
+The **server is the authoritative guard**; the clients mirror it for UX only — plain-JS helpers in
+[client/src/lib/validators.js](../client/src/lib/validators.js) power the reusable
+[PhoneInput](../client/src/components/ui/PhoneInput.jsx) (auto-format) and the campaign **State** dropdown
+(`US_STATES`), and [mobile/lib/validators.js](../mobile/lib/validators.js) formats the phone field on
+mobile. No new dependency, and **no migration** — phone is display-only contact info (new writes are
+normalized; old values format best-effort). Locked by
+[validators.test.js](../server/test/validators.test.js).
 
 ## Migration (run once at deploy)
 
