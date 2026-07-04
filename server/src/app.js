@@ -60,13 +60,29 @@ export function createApp() {
     });
   }
 
-  const authLimiter = rateLimit({
+  // Login throttles. Both count only FAILED attempts (skipSuccessfulRequests), so a
+  // canvass-day crowd logging in from one shared-wifi IP can't lock itself out.
+  // Per-IP catches one machine guessing many accounts; per-email catches many
+  // machines (rotating IPs) guessing one account. The email key relies on
+  // express.json() being mounted above; a body with no email falls back to IP.
+  const loginIpLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 50,
     standardHeaders: true,
     legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: { error: 'Too many login attempts. Try again in a few minutes.', code: 'rate-limited' },
   });
-  app.use('/api/auth/login', authLimiter);
+  const loginEmailLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => String(req.body?.email || '').trim().toLowerCase() || req.ip,
+    message: { error: 'Too many login attempts for this account. Try again in a few minutes.', code: 'rate-limited' },
+  });
+  app.use('/api/auth/login', loginIpLimiter, loginEmailLimiter);
 
   app.use('/api', routes);
 
