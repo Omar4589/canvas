@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { US_STATES } from '../lib/validators.js';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import { Modal, Button } from '../components/ui/index.js';
@@ -57,6 +58,7 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
+          maxLength={120}
           placeholder="Kentucky 2026"
           className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
@@ -99,16 +101,19 @@ function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-muted">
-            State (2-letter)
+            State
           </label>
-          <input
+          <select
             value={state}
             onChange={(e) => setState(e.target.value)}
             required
-            maxLength={2}
-            placeholder="KY"
-            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm uppercase text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          />
+            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            <option value="">Select a state…</option>
+            {US_STATES.map((s) => (
+              <option key={s.value} value={s.value}>{s.value} — {s.label}</option>
+            ))}
+          </select>
         </div>
       </div>
 

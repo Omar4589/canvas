@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
 import { loadCurrentUser } from '../../../../lib/cache';
+import { formatUsPhoneInput } from '../../../../lib/validators';
 import PasswordInput from '../../../../components/PasswordInput';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
@@ -420,7 +421,7 @@ export default function AdminUserDetail() {
             </Text>
             <TextInput
               value={form.phone}
-              onChangeText={(v) => setForm((f) => ({ ...f, phone: v }))}
+              onChangeText={(v) => setForm((f) => ({ ...f, phone: formatUsPhoneInput(v) }))}
               keyboardType="phone-pad"
               placeholder="(555) 123-4567"
               placeholderTextColor={colors.textMuted}

@@ -6,6 +6,9 @@ import {
   ScrollView,
   ActivityIndicator,
   TextInput,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
   StyleSheet,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,6 +18,7 @@ import { api } from '../../../../lib/api';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
+import { formatUsPhoneInput } from '../../../../lib/validators';
 
 export default function CampaignAssignmentsScreen() {
   const { colors } = useTheme();
@@ -24,15 +28,19 @@ export default function CampaignAssignmentsScreen() {
   const { campaignId } = useLocalSearchParams();
   const cId = Array.isArray(campaignId) ? campaignId[0] : campaignId;
   const [search, setSearch] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
     queryFn: () => api('/admin/campaigns'),
   });
 
+  // The campaign-scoped crew endpoint (not the org-wide /admin/memberships) so this
+  // screen works for team leads too, not just org admins.
   const membersQ = useQuery({
-    queryKey: ['admin', 'memberships'],
-    queryFn: () => api('/admin/memberships'),
+    queryKey: ['admin', 'campaign-crew', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/crew`),
+    enabled: !!cId,
   });
 
   const assignmentsQ = useQuery({
@@ -56,6 +64,16 @@ export default function CampaignAssignmentsScreen() {
       api(`/admin/campaigns/${cId}/assignments/${userId}`, { method: 'DELETE' }),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] }),
+  });
+
+  // Create a net-new canvasser straight onto this campaign (auto-assigned by the endpoint).
+  const createMut = useMutation({
+    mutationFn: (body) => api(`/admin/campaigns/${cId}/crew`, { method: 'POST', body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cId] });
+      setShowCreate(false);
+    },
   });
 
   const campaign = (campaignsQ.data?.campaigns || []).find(
@@ -103,7 +121,9 @@ export default function CampaignAssignmentsScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           Assignments
         </Text>
-        <View style={{ width: 60 }} />
+        <Pressable onPress={() => setShowCreate(true)} hitSlop={8} style={{ width: 60, alignItems: 'flex-end' }}>
+          <Text style={styles.newBtn}>+ New</Text>
+        </Pressable>
       </View>
 
       <View style={styles.subHeader}>
@@ -177,7 +197,82 @@ export default function CampaignAssignmentsScreen() {
           })
         )}
       </ScrollView>
+
+      {showCreate && (
+        <CreateCanvasserModal
+          onClose={() => setShowCreate(false)}
+          onCreate={(body) => createMut.mutate(body)}
+          submitting={createMut.isPending}
+          error={createMut.error}
+          colors={colors}
+          styles={styles}
+        />
+      )}
     </SafeAreaView>
+  );
+}
+
+function CreateCanvasserModal({ onClose, onCreate, submitting, error, colors, styles }) {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const valid = firstName.trim() && lastName.trim() && email.trim() && password.length >= 8;
+
+  function submit() {
+    if (!valid || submitting) return;
+    onCreate({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone.trim() || undefined,
+      password,
+    });
+  }
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.modalRoot}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={onClose} />
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>New canvasser</Text>
+          <Text style={styles.modalSub}>
+            Creates a canvasser and adds them to this campaign. They set their own password at first sign-in.
+          </Text>
+          <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>
+            <View style={styles.formRow2}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.formLabel}>First name</Text>
+                <TextInput value={firstName} onChangeText={setFirstName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.formLabel}>Last name</Text>
+                <TextInput value={lastName} onChangeText={setLastName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+              </View>
+            </View>
+            <Text style={styles.formLabel}>Email</Text>
+            <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" placeholder="jane@example.com" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+            <Text style={styles.formLabel}>Phone (optional)</Text>
+            <TextInput value={phone} onChangeText={(t) => setPhone(formatUsPhoneInput(t))} keyboardType="phone-pad" placeholder="(555) 123-4567" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+            <Text style={styles.formLabel}>Temporary password (min 8)</Text>
+            <TextInput value={password} onChangeText={setPassword} autoCapitalize="none" autoCorrect={false} placeholder="At least 8 characters" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+            {error ? <Text style={styles.modalError}>{error.message}</Text> : null}
+          </ScrollView>
+          <View style={styles.modalActions}>
+            <Pressable onPress={onClose} style={styles.modalCancel}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable onPress={submit} disabled={!valid || submitting} style={[styles.modalCreate, (!valid || submitting) && { opacity: 0.5 }]}>
+              <Text style={styles.modalCreateText}>{submitting ? 'Creating…' : 'Create & add'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -265,5 +360,50 @@ function makeStyles(t) {
   actionText: { fontSize: 12, fontWeight: '700' },
   actionTextAssign: { color: colors.brand },
   actionTextUnassign: { color: colors.danger },
+
+  newBtn: { color: colors.brand, fontWeight: '700', fontSize: 15 },
+
+  modalRoot: { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.backdrop },
+  modalCard: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xl || radius.lg,
+    borderTopRightRadius: radius.xl || radius.lg,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+  },
+  modalTitle: { ...type.h2, fontSize: 18 },
+  modalSub: { ...type.caption, marginTop: 2, marginBottom: spacing.md },
+  formRow2: { flexDirection: 'row', gap: spacing.sm },
+  formLabel: { ...type.caption, color: colors.textSecondary, marginTop: spacing.sm, marginBottom: 4 },
+  modalInput: {
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    fontSize: 14,
+    color: colors.textPrimary,
+  },
+  modalError: { ...type.caption, color: colors.danger, marginTop: spacing.sm },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm, marginTop: spacing.lg },
+  modalCancel: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalCancelText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+  modalCreate: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    backgroundColor: colors.brand,
+  },
+  modalCreateText: { fontSize: 14, fontWeight: '700', color: colors.textInverse },
   });
 }

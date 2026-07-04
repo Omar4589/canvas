@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { Campaign } from '../../models/Campaign.js';
+import { phoneSchema, nameSchema, emailSchema, passwordSchema } from '../../utils/validators.js';
 
 // Shared member-creation + validation used by the org Users admin (memberships.js)
 // and the team-lead crew router (leadCrew.js). Keeping it in one place means a lead
@@ -19,16 +20,15 @@ export class MemberError extends Error {
   }
 }
 
-const phoneSchema = z.string().trim().max(40).optional();
-
 // The user-identity fields shared by "add a member" bodies. Callers add the
 // role/coordinator/managed-campaign fields that make sense for their surface.
+// Validation (phone/name/email/password) is centralized in utils/validators.js.
 export const memberIdentityShape = {
-  email: z.string().email(),
-  firstName: z.string().min(1).optional(),
-  lastName: z.string().min(1).optional(),
+  email: emailSchema,
+  firstName: nameSchema.optional(),
+  lastName: nameSchema.optional(),
   phone: phoneSchema,
-  password: z.string().min(8).optional(),
+  password: passwordSchema.optional(),
   // true = link an EXISTING global account by email; false = create a new one.
   linkExisting: z.boolean().optional().default(false),
 };

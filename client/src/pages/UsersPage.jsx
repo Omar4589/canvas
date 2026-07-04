@@ -13,6 +13,7 @@ import {
   EmptyState,
   SkeletonRows,
   Input,
+  PhoneInput,
   Select,
   IconSearch,
   IconChevronRight,
@@ -297,15 +298,14 @@ export default function UsersPage() {
                 <label className={labelCls}>
                   Phone <span className="text-fg-subtle">(optional)</span>
                 </label>
-                <Input
-                  type="tel"
+                <PhoneInput
                   value={form.phone}
                   onChange={(e) => setForm((s) => ({ ...s, phone: e.target.value }))}
                   className="mt-1"
                 />
               </div>
               <div className="md:col-span-3">
-                <label className={labelCls}>Initial password</label>
+                <label className={labelCls}>Initial password <span className="text-fg-subtle">(min 8 characters)</span></label>
                 <div className="mt-1">
                   <PasswordInput
                     value={form.password}

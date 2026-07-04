@@ -11,6 +11,7 @@ import {
   MemberError,
   resolveCoordinatorId,
 } from '../../services/memberships/createMember.js';
+import { phoneSchema, nameSchema, emailSchema, passwordSchema } from '../../utils/validators.js';
 
 // A team lead's crew surface, scoped to ONE campaign they manage (requireCampaignManager
 // gates the mount). It gives a lead the crew-building an org admin does on the Users
@@ -36,11 +37,11 @@ async function loadOwnedCampaign(req) {
 // pulls someone across orgs — that stays an org-admin act on the Users page — so we
 // require the new-account fields and never take a linkExisting flag here.
 const createSchema = z.object({
-  email: z.string().email(),
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
-  phone: z.string().trim().max(40).optional(),
-  password: z.string().min(8),
+  email: emailSchema,
+  firstName: nameSchema,
+  lastName: nameSchema,
+  phone: phoneSchema,
+  password: passwordSchema,
   coordinatorId: z.string().nullable().optional(),
 });
 

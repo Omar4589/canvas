@@ -5,19 +5,20 @@ import { Organization } from '../../models/Organization.js';
 import { Membership } from '../../models/Membership.js';
 import { Campaign } from '../../models/Campaign.js';
 import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
+import { slugSchema } from '../../utils/validators.js';
 
 const router = Router();
 router.use(requireAuth, requireSuperAdmin);
 
 const createSchema = z.object({
-  name: z.string().min(1).max(120),
-  slug: z.string().min(1).max(64).optional(),
+  name: z.string().trim().min(1).max(120),
+  slug: slugSchema.optional(),
   isActive: z.boolean().optional(),
 });
 
 const updateSchema = z.object({
-  name: z.string().min(1).max(120).optional(),
-  slug: z.string().min(1).max(64).optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  slug: slugSchema.optional(),
   isActive: z.boolean().optional(),
 });
 

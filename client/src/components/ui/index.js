@@ -2,6 +2,7 @@ export { default as Badge } from './Badge.jsx';
 export { default as Button } from './Button.jsx';
 export { default as Card } from './Card.jsx';
 export { Input, Select, Textarea, FIELD_CLS } from './Input.jsx';
+export { default as PhoneInput } from './PhoneInput.jsx';
 export { default as IconButton } from './IconButton.jsx';
 export { Avatar, AvatarGroup } from './Avatar.jsx';
 export { default as Skeleton, SkeletonRows } from './Skeleton.jsx';

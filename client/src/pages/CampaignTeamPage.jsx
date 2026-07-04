@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { Card, Button, Modal } from '../components/ui';
+import { Card, Button, Modal, PhoneInput } from '../components/ui';
 
 // In-campaign roster (/campaigns/:campaignId/team). Surfaces CampaignAssignment — the
 // per-campaign roster that GATES mobile visibility AND who can be assigned books — so
@@ -43,12 +43,14 @@ function TeamMemberRow({ a, isSelf, onRemove, busy }) {
   );
 }
 
-// A team lead's inline "create a canvasser and put them on this campaign" form —
-// the crew equivalent of the org Users admin's add-member flow, scoped to one campaign.
+// Inline "create a canvasser and put them on this campaign" form — the crew equivalent
+// of the org Users admin's add-member flow, scoped to one campaign. Used by admins AND
+// team leads (both may POST to the campaign's crew endpoint).
 function CreateCrewMemberModal({ onClose, onCreate, saving, error }) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   function submit(e) {
     e?.preventDefault();
@@ -56,6 +58,7 @@ function CreateCrewMemberModal({ onClose, onCreate, saving, error }) {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.trim().toLowerCase(),
+      phone: phone.trim() || undefined,
       password,
     });
   }
@@ -93,7 +96,13 @@ function CreateCrewMemberModal({ onClose, onCreate, saving, error }) {
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className={inputClass} />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password</label>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">
+            Phone <span className="text-fg-subtle">(optional)</span>
+          </label>
+          <PhoneInput value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password <span className="text-fg-subtle">(min 8 characters)</span></label>
           <input
             type="text"
             value={password}
@@ -140,13 +149,14 @@ export default function CampaignTeamPage() {
     mutationFn: (userId) => api(`/admin/campaigns/${campaignId}/assignments/${userId}`, { method: 'DELETE' }),
     onSuccess: invalidate,
   });
-  // Team leads create net-new canvassers straight onto this campaign (they can't reach the
-  // org Users admin). Admins use the Users page link instead.
+  // Create a net-new canvasser straight onto this campaign, in one step. Available to
+  // admins AND leads (the crew endpoint accepts both); the new canvasser is auto-assigned.
   const createMemberMut = useMutation({
     mutationFn: (body) => api(`/admin/campaigns/${campaignId}/crew`, { method: 'POST', body }),
     onSuccess: () => {
       invalidate();
       qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', campaignId] });
+      qc.invalidateQueries({ queryKey: ['memberships'] });
       setCreatingMember(false);
     },
   });
@@ -202,11 +212,12 @@ export default function CampaignTeamPage() {
         <Card className="flex flex-col p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-fg">Add to the campaign</h2>
-            {isOrgAdmin ? (
-              <Link to={usersReturn} className="text-xs font-medium text-brand-accent hover:underline">Create a new member →</Link>
-            ) : (
-              <button onClick={() => setCreatingMember(true)} className="text-xs font-medium text-brand-accent hover:underline">Create a new member →</button>
-            )}
+            <div className="flex items-center gap-3">
+              <button onClick={() => setCreatingMember(true)} className="text-xs font-medium text-brand-accent hover:underline">+ New canvasser</button>
+              {isOrgAdmin && (
+                <Link to={usersReturn} className="text-xs font-medium text-fg-muted hover:underline">Manage users →</Link>
+              )}
+            </div>
           </div>
           <div className="mb-3 flex items-center gap-2">
             <input
@@ -227,11 +238,7 @@ export default function CampaignTeamPage() {
           ) : !orgMembers.length ? (
             <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
               No members in this org yet.{' '}
-              {isOrgAdmin ? (
-                <Link to={usersReturn} className="font-medium text-brand-accent hover:underline">Add one on Users →</Link>
-              ) : (
-                <button onClick={() => setCreatingMember(true)} className="font-medium text-brand-accent hover:underline">Create one →</button>
-              )}
+              <button onClick={() => setCreatingMember(true)} className="font-medium text-brand-accent hover:underline">Create one →</button>
             </div>
           ) : !candidates.length ? (
             <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">

@@ -17,9 +17,9 @@ router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 const optionSchema = z.object({
   id: z.string().optional(),
-  text: z.string().min(1),
+  text: z.string().trim().min(1).max(500),
   tag: z.string().nullable().optional(),
-  script: z.string().nullable().optional(),
+  script: z.string().max(5000).nullable().optional(),
   retired: z.boolean().optional(),
   order: z.number().optional(),
 });
@@ -43,8 +43,8 @@ const ruleSchema = z
   );
 
 const questionSchema = z.object({
-  key: z.string().min(1),
-  label: z.string().min(1),
+  key: z.string().min(1).max(200),
+  label: z.string().trim().min(1).max(1000),
   type: z.enum(['single_choice', 'multiple_choice', 'text']),
   options: z.array(optionSchema).optional().default([]),
   required: z.boolean().optional().default(false),
@@ -59,9 +59,9 @@ const questionSchema = z.object({
 });
 
 const upsertSchema = z.object({
-  name: z.string().min(1),
-  intro: z.string().optional().default(''),
-  closing: z.string().optional().default(''),
+  name: z.string().trim().min(1).max(200),
+  intro: z.string().max(5000).optional().default(''),
+  closing: z.string().max(5000).optional().default(''),
   questions: z.array(questionSchema).default([]),
   tags: z.array(z.string()).optional().default([]),
 });

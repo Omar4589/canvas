@@ -10,6 +10,7 @@ import { Household } from '../../models/Household.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
+import { usStateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { deleteCampaignCascade } from '../../services/campaigns/deleteCampaign.js';
 
@@ -20,9 +21,9 @@ const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 const createSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
   type: z.enum(['survey', 'lit_drop']),
-  state: z.string().min(2).max(2),
+  state: usStateSchema,
   surveyTemplateId: z.string().nullable().optional(),
   isActive: z.boolean().optional().default(true),
   timeZone: z.string().optional(),

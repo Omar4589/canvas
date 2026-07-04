@@ -969,7 +969,8 @@ export default function MapScreen() {
       >
         <CanvasserHeader variant="floating" />
 
-        <View style={styles.viewToggleRow}>
+        {/* Map/List toggle (left) shares one row with the houses filter + sort (right). */}
+        <View style={styles.controlRow}>
           <TabSwitcher
             tabs={[{ key: 'map', label: 'Map' }, { key: 'list', label: 'List' }]}
             activeKey={viewMode}
@@ -978,6 +979,38 @@ export default function MapScreen() {
               if (activeCampaign) saveViewMode(activeCampaign.id, m);
             }}
           />
+
+          <View style={styles.filterGroup}>
+            <Pressable
+              onPress={() => { setFilterMenuOpen((v) => !v); setSortMenuOpen(false); }}
+              style={[
+                styles.filterChip,
+                activeFilter !== 'all' && styles.filterChipActive,
+              ]}
+            >
+              <Text style={styles.filterIcon}>⌕</Text>
+              <Text
+                style={[
+                  styles.filterChipText,
+                  activeFilter !== 'all' && styles.filterChipTextActive,
+                ]}
+                numberOfLines={1}
+              >
+                {activeOption.label}
+              </Text>
+              <Text style={styles.filterChevron}>{filterMenuOpen ? '▴' : '▾'}</Text>
+            </Pressable>
+
+            {viewMode === 'list' && (
+              <Pressable
+                onPress={() => { setSortMenuOpen((v) => !v); setFilterMenuOpen(false); }}
+                style={[styles.filterChip, { marginLeft: spacing.sm }]}
+              >
+                <Text style={styles.filterChipText} numberOfLines={1}>Sort: {SORT_LABELS[sortMode]}</Text>
+                <Text style={styles.filterChevron}>{sortMenuOpen ? '▴' : '▾'}</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
 
         {viewMode === 'map' && activeCampaign && (
@@ -993,38 +1026,6 @@ export default function MapScreen() {
             onBooks={() => router.replace('/(app)/books')}
           />
         )}
-
-        <View style={styles.filterRow}>
-          <Pressable
-            onPress={() => { setFilterMenuOpen((v) => !v); setSortMenuOpen(false); }}
-            style={[
-              styles.filterChip,
-              activeFilter !== 'all' && styles.filterChipActive,
-            ]}
-          >
-            <Text style={styles.filterIcon}>⌕</Text>
-            <Text
-              style={[
-                styles.filterChipText,
-                activeFilter !== 'all' && styles.filterChipTextActive,
-              ]}
-              numberOfLines={1}
-            >
-              {activeOption.label}
-            </Text>
-            <Text style={styles.filterChevron}>{filterMenuOpen ? '▴' : '▾'}</Text>
-          </Pressable>
-
-          {viewMode === 'list' && (
-            <Pressable
-              onPress={() => { setSortMenuOpen((v) => !v); setFilterMenuOpen(false); }}
-              style={[styles.filterChip, { marginLeft: spacing.sm }]}
-            >
-              <Text style={styles.filterChipText} numberOfLines={1}>Sort: {SORT_LABELS[sortMode]}</Text>
-              <Text style={styles.filterChevron}>{sortMenuOpen ? '▴' : '▾'}</Text>
-            </Pressable>
-          )}
-        </View>
 
         {viewMode === 'list' && sortMenuOpen && (
           <View style={styles.filterMenu}>
@@ -1474,19 +1475,17 @@ function makeStyles(t) {
     left: 0,
     right: 0,
   },
-  viewToggleRow: {
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    alignItems: 'flex-start',
-  },
-  // Row holding just the status filter chip, below the merged context card,
-  // pushed to the right so it sits under the hamburger.
-  filterRow: {
+  // One row: the Map/List toggle on the left, the houses filter (+ sort) on the right.
+  controlRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     marginTop: spacing.sm,
+  },
+  filterGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 
   filterChip: {

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import PasswordInput from './PasswordInput.jsx';
+import PhoneInput from './ui/PhoneInput.jsx';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
@@ -433,12 +434,9 @@ export default function UserProfileModal({ membership, onClose }) {
             )}
           </Field>
           <Field label="Phone" className="mt-3">
-            <input
-              type="tel"
+            <PhoneInput
               value={form.phone}
               onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-              placeholder="Optional"
-              className={inputCls}
             />
           </Field>
           <div className="mt-4 flex justify-end">

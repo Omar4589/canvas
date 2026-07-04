@@ -17,12 +17,12 @@ import {
   resolveCoordinatorId,
   resolveManagedCampaigns,
 } from '../../services/memberships/createMember.js';
+import { phoneSchema, nameSchema, emailSchema, passwordSchema as passwordField } from '../../utils/validators.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
 
 const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
-const phoneSchema = z.string().trim().max(40).optional();
 
 const addSchema = z.object({
   ...memberIdentityShape,
@@ -41,13 +41,13 @@ const updateMembershipSchema = z.object({
 });
 
 const updateUserSchema = z.object({
-  firstName: z.string().min(1).optional(),
-  lastName: z.string().min(1).optional(),
-  email: z.string().email().optional(),
+  firstName: nameSchema.optional(),
+  lastName: nameSchema.optional(),
+  email: emailSchema.optional(),
   phone: phoneSchema,
 });
 
-const passwordSchema = z.object({ password: z.string().min(8) });
+const passwordSchema = z.object({ password: passwordField });
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

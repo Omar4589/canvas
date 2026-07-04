@@ -2,7 +2,7 @@
 // straddle two zones (TX→El Paso, FL→panhandle, TN/KY, the Dakotas, etc.), so this is a
 // sensible DEFAULT only — the campaign's timezone is overridable in the UI.
 
-const STATE_TZ = {
+export const STATE_TZ = {
   AL: 'America/Chicago', AK: 'America/Anchorage', AZ: 'America/Phoenix', AR: 'America/Chicago',
   CA: 'America/Los_Angeles', CO: 'America/Denver', CT: 'America/New_York', DE: 'America/New_York',
   DC: 'America/New_York', FL: 'America/New_York', GA: 'America/New_York', HI: 'Pacific/Honolulu',
