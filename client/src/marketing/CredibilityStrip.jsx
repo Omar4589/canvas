@@ -13,8 +13,8 @@ const TRUTHS = [
     body: 'Actions queue on the phone and sync the moment coverage returns.',
   },
   {
-    title: 'Billing-grade counts',
-    body: 'One knock per door per round — numbers clean enough to invoice from.',
+    title: 'Counts you can trust',
+    body: 'One knock per door per pass — no double-counting, no guesswork.',
   },
   {
     title: "Reports that can't drift",

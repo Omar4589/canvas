@@ -77,16 +77,16 @@ export default function Hero() {
         <div className="grid grid-cols-1 items-center gap-12 py-20 sm:py-24 lg:grid-cols-[5fr_6fr] lg:gap-14">
           <Reveal>
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
-              Canvassing operations for political consulting firms
+              Canvassing software for campaigns and causes
             </p>
             <h1 className="mt-4 text-4xl font-extrabold leading-[1.06] tracking-tight text-stone-900 [text-wrap:balance] sm:text-5xl xl:text-[3.4rem]">
-              Run every door program you sell.{' '}
-              <em className="not-italic text-brand-600">Prove every knock you bill.</em>
+              Cut the turf. Walk the doors.{' '}
+              <em className="not-italic text-brand-600">Know exactly what happened.</em>
             </h1>
             <p className="mt-5 max-w-[46ch] text-lg text-stone-600">
-              Doorline takes a raw voter file to walkable turf, puts a GPS-stamped, offline-first
-              app in every canvasser&apos;s hand, and turns the day&apos;s knocks into reports your
-              clients can open from a link — no login, no spreadsheet.
+              Doorline takes a voter file to walkable turf, puts a GPS-stamped, offline-first app
+              in every canvasser&apos;s hand, and lands every door and every result on one live map
+              — no clipboards, no spreadsheet.
             </p>
             <div className="mt-8 flex flex-wrap gap-3.5">
               <a

@@ -12,7 +12,7 @@ const SECTIONS = [
   { href: '#turf', label: 'Turf' },
   { href: '#field', label: 'Field app' },
   { href: '#oversight', label: 'Oversight' },
-  { href: '#reports', label: 'Client reports' },
+  { href: '#reports', label: 'Reports' },
   { href: '#how', label: 'How it works' },
 ];
 

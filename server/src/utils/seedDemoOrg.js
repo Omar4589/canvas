@@ -1,15 +1,20 @@
 // Seed (or reset) the permanent Doorline demo environment: a fictional consulting
-// org + campaign with ~1,100 fabricated households / ~2,500 fabricated voters placed
-// along REAL Beaverdale (Des Moines, IA) streets, cut into books, assigned to demo
-// canvassers, with six days of staged canvass history, early-vote drops, and one
-// published client report + share link. Serves landing-page screenshots, Apple/Google
-// app-review demo accounts, and live prospect demos.
+// org + campaign of ~1,145 households on REAL Des Moines (Beaverdale/Drake) addresses
+// with ~2,600 fabricated voters, cut into books, assigned to demo canvassers, with
+// staged canvass history, early-vote drops, and one published report + share link.
+// Serves landing-page screenshots, Apple/Google app-review demo accounts, and live
+// prospect demos. Addresses/coordinates are real (from demoAddresses.json); every
+// voter identity is fabricated.
 //
 // Usage (from server/):
 //   node src/utils/seedDemoOrg.js                    # dry run — prints plan, writes nothing
 //   node src/utils/seedDemoOrg.js --apply            # full build (idempotent)
 //   node src/utils/seedDemoOrg.js --reset --apply    # wipe activity layer, restage fresh
-//                                                    # (books/voters/accounts/share link survive)
+//                                                    # (households/books/accounts/share link survive)
+//   node src/utils/seedDemoOrg.js --rebuild --apply  # WIPE the campaign (doors, voters,
+//                                                    # books, history) and rebuild from
+//                                                    # scratch — use after the address set
+//                                                    # changes (org + users survive)
 // Full teardown (also purges the campaign's orphaned Persons):
 //   npm run cleanup:test-campaigns -- --ids=<campaignId> --mock=<campaignId> --apply
 //
@@ -57,6 +62,11 @@ import { VotedPendingId } from '../models/VotedPendingId.js';
 import { ClientReport } from '../models/ClientReport.js';
 import { ClientReportMapPoint } from '../models/ClientReportMapPoint.js';
 import { ReportShareLink } from '../models/ReportShareLink.js';
+import { Person } from '../models/Person.js';
+import { PersonMergeCandidate } from '../models/PersonMergeCandidate.js';
+import { PersonEditProposal } from '../models/PersonEditProposal.js';
+import { PersonMergeLog } from '../models/PersonMergeLog.js';
+import { deleteCampaignCascade } from '../services/campaigns/deleteCampaign.js';
 import { buildImportRows } from '../services/import/csvImporter.js';
 import { applyImport } from '../services/import/csvImporter.js';
 import { DEFAULT_PROFILE_MAPPING } from '../services/import/canonicalFields.js';
@@ -85,11 +95,31 @@ import {
 
 const APPLY = process.argv.includes('--apply');
 const RESET = process.argv.includes('--reset');
+// Full teardown of the existing demo campaign (doors, voters, books, history, report)
+// before rebuilding — needed when the addresses themselves change and turf must re-cut.
+// Keeps the org + user accounts. Set SEED_DEMO_SHARE_TOKEN to keep the /r/<token> URL.
+const REBUILD = process.argv.includes('--rebuild');
 
 // Hide credentials but keep host/db visible so the operator can confirm the target.
 function maskUri(uri) {
   if (!uri) return '(MONGODB_URI unset)';
   return uri.replace(/\/\/[^@/]+@/, '//***:***@');
+}
+
+// Delete the canonical Persons this demo created that have no remaining linked voters
+// (mirrors deleteTestCampaigns.js purgeOrphanedPersons — kept local because that CLI
+// self-executes main() on import). Persons still linked to a real org are left alone.
+async function purgeOrphanedDemoPersons(personIds) {
+  let purged = 0;
+  for (const pid of personIds) {
+    if ((await Voter.countDocuments({ personId: pid })) > 0) continue;
+    await Person.deleteOne({ _id: pid });
+    await PersonMergeCandidate.deleteMany({ $or: [{ personIdA: pid }, { personIdB: pid }] });
+    await PersonEditProposal.deleteMany({ personId: pid });
+    await PersonMergeLog.deleteMany({ $or: [{ survivorId: pid }, { victimId: pid }] });
+    purged += 1;
+  }
+  return purged;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,64 +152,36 @@ const CANVASSER_EMAIL = (process.env.SEED_DEMO_CANVASSER_EMAIL || 'demo-canvasse
 const CANVASSER_PASSWORD = process.env.SEED_DEMO_CANVASSER_PASSWORD || 'Victory26!';
 
 // ---------------------------------------------------------------------------
-// Synthetic data generation (deterministic — same voters every run)
+// Household generation — REAL addresses (real rooftops on real streets, from the
+// demoAddresses.json fixture), with fabricated voters attached at seed time. Only
+// the address + coordinates are real; every voter identity is synthetic.
 // ---------------------------------------------------------------------------
-
-// Move `meters` along the bearing perpendicular to segment a→b, to `side` (+1/-1).
-function offsetPoint([lng, lat], [lng2, lat2], meters, side) {
-  const dLat = lat2 - lat;
-  const dLng = (lng2 - lng) * Math.cos((lat * Math.PI) / 180);
-  const len = Math.hypot(dLat, dLng) || 1e-9;
-  // Unit normal (perpendicular), in degree-space corrected for latitude.
-  const nLat = (-dLng / len) * side;
-  const nLng = (dLat / len) * side;
-  const mPerDegLat = 111320;
-  const mPerDegLng = mPerDegLat * Math.cos((lat * Math.PI) / 180);
-  return [lng + (nLng * meters) / mPerDegLng, lat + (nLat * meters) / mPerDegLat];
-}
-
 function generateHouseholds(rng) {
   const fixture = JSON.parse(
-    fs.readFileSync(path.resolve(__dirname, 'demoData/demoStreets.json'), 'utf8')
+    fs.readFileSync(path.resolve(__dirname, 'demoData/demoAddresses.json'), 'utf8')
   );
   const households = [];
-  fixture.streets.forEach((street, streetIdx) => {
-    if (households.length >= MAX_HOUSEHOLDS) return;
-    // Plausible Des Moines block numbering: stable per street segment.
-    let houseNumber = rng.int(26, 42) * 100 + rng.int(0, 12) * 2;
-    const precinct = `Des Moines ${41 + (streetIdx % 4)}`;
-    const zip = street.coords[0][1] > 41.608 ? '50310' : '50311';
-    let side = 1;
-    // Walk the polyline dropping a house every 16–26 m, alternating sides.
-    for (let i = 1; i < street.coords.length; i += 1) {
-      const a = street.coords[i - 1];
-      const b = street.coords[i];
-      const segMeters = haversineMeters(a[1], a[0], b[1], b[0]);
-      let along = rng.int(8, 16);
-      while (along < segMeters && households.length < MAX_HOUSEHOLDS) {
-        const t = along / segMeters;
-        const center = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-        const setback = rng.int(10, 14) + rng.next() * 3;
-        const [lng, lat] = offsetPoint(center, b, setback, side);
-        if (inStateBounds(CAMPAIGN_STATE, lat, lng) !== false) {
-          households.push({
-            addressLine1: `${houseNumber + (side > 0 ? 0 : 1)} ${street.name}`,
-            city: 'Des Moines',
-            state: CAMPAIGN_STATE,
-            zip,
-            county: 'Polk',
-            precinct,
-            lat: Number(lat.toFixed(6)),
-            lng: Number(lng.toFixed(6)),
-          });
-        }
-        houseNumber += 2;
-        side = -side;
-        // Houses alternate street sides, so ~11 m along = ~22 m between same-side neighbors.
-        along += rng.int(9, 13);
-      }
+  // Group precincts by street so a whole street shares one precinct (realistic).
+  const precinctByStreet = new Map();
+  for (const addr of fixture.addresses) {
+    if (households.length >= MAX_HOUSEHOLDS) break;
+    // Belt-and-suspenders: real IA coords always pass, but keep the guard.
+    if (inStateBounds(CAMPAIGN_STATE, addr.lat, addr.lng) === false) continue;
+    if (!precinctByStreet.has(addr.street)) {
+      precinctByStreet.set(addr.street, `Des Moines ${41 + (precinctByStreet.size % 4)}`);
     }
-  });
+    households.push({
+      addressLine1: `${addr.housenumber} ${addr.street}`,
+      city: addr.city || 'Des Moines',
+      state: CAMPAIGN_STATE,
+      // Real postcode when OSM had one, else split north/south (cosmetic only).
+      zip: addr.zip || (addr.lat > 41.61 ? '50310' : '50311'),
+      county: 'Polk',
+      precinct: precinctByStreet.get(addr.street),
+      lat: addr.lat,
+      lng: addr.lng,
+    });
+  }
   return households;
 }
 
@@ -215,15 +217,18 @@ function buildCsv(voters) {
     'Official State House District', 'Precinct', 'Address', 'Address Line 2',
     'City', 'Zip Code', 'County', 'p_Latitude', 'p_Longitude',
   ];
-  const lines = [headers.join(',')];
+  // Quote every field (RFC-4180) so a stray comma in real address data can't shift columns.
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const row = (arr) => arr.map(cell).join(',');
+  const lines = [row(headers)];
   for (const v of voters) {
-    lines.push([
+    lines.push(row([
       v.svid, v.firstName, v.lastName, v.phone, v.party, v.gender,
       v.dob, 'Active', CAMPAIGN_STATE, '3', '17', '34',
       v.household.precinct, v.household.addressLine1, '',
       v.household.city, v.household.zip, v.household.county,
       v.household.lat, v.household.lng,
-    ].join(','));
+    ]));
   }
   return lines.join('\n');
 }
@@ -634,7 +639,14 @@ async function resetActivityLayer(campaign) {
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
-  console.log(`mode: ${APPLY ? (RESET ? 'RESET + APPLY (activity layer restaged)' : 'APPLY (writes WILL happen)') : 'DRY RUN (no writes)'}`);
+  const modeLabel = !APPLY
+    ? 'DRY RUN (no writes)'
+    : REBUILD
+      ? 'REBUILD + APPLY (existing demo campaign wiped, then rebuilt)'
+      : RESET
+        ? 'RESET + APPLY (activity layer restaged)'
+        : 'APPLY (writes WILL happen)';
+  console.log(`mode: ${modeLabel}`);
   console.log(`DB:   ${maskUri(process.env.MONGODB_URI)}`);
   if (!/127\.0\.0\.1|localhost/.test(process.env.MONGODB_URI || '')) {
     console.log('⚠️  Non-local database — for production, take an Atlas snapshot first.');
@@ -644,21 +656,39 @@ async function main() {
   const plannedHouseholds = generateHouseholds(rng);
   const plannedVoters = generateVoters(rng, plannedHouseholds);
   console.log(`\nplan: org '${DEMO_ORG_NAME}' (${DEMO_ORG_SLUG}) · campaign '${DEMO_CAMPAIGN_NAME}'`);
-  console.log(`  ${plannedHouseholds.length} households · ${plannedVoters.length} voters along ${new Set(plannedHouseholds.map((h) => h.addressLine1.split(' ').slice(1).join(' '))).size} real Beaverdale streets`);
+  console.log(`  ${plannedHouseholds.length} households · ${plannedVoters.length} voters on ${new Set(plannedHouseholds.map((h) => h.precinct)).size} precincts of real Des Moines addresses`);
   console.log(`  accounts: admin ${ADMIN_EMAIL} · canvasser ${CANVASSER_EMAIL} · ${DEMO_CANVASSERS.length} background canvassers`);
 
   await connectDb(process.env.MONGODB_URI);
 
   const existingOrg = await Organization.findOne({ slug: DEMO_ORG_SLUG });
-  const existingCampaign = existingOrg
+  let existingCampaign = existingOrg
     ? await Campaign.findOne({ organizationId: existingOrg._id, name: DEMO_CAMPAIGN_NAME })
     : null;
   console.log(`  exists: org=${existingOrg ? existingOrg._id : 'no'} · campaign=${existingCampaign ? existingCampaign._id : 'no'}`);
 
   if (!APPLY) {
-    console.log('\nDry run — re-run with --apply to build (add --reset to restage activity).');
+    const next = REBUILD
+      ? 're-run with --rebuild --apply to WIPE the existing demo campaign and rebuild it'
+      : 're-run with --apply to build (add --reset to restage activity, or --rebuild to wipe + rebuild)';
+    console.log(`\nDry run — ${next}.`);
     await mongoose.disconnect();
     return;
+  }
+
+  // --rebuild: hard-delete the existing demo campaign (cascade) + purge the fake
+  // Persons it created, then fall through to a fresh build. Org + users survive.
+  if (REBUILD && existingCampaign) {
+    console.log('\nrebuild: wiping the existing demo campaign (doors, voters, books, history, report)');
+    const hhIds = await Household.find({ campaignId: existingCampaign._id }).distinct('_id');
+    const personIds = hhIds.length
+      ? await Voter.find({ householdId: { $in: hhIds }, personId: { $ne: null } }).distinct('personId')
+      : [];
+    const counts = await deleteCampaignCascade(existingCampaign);
+    const purged = await purgeOrphanedDemoPersons(personIds);
+    const nonzero = Object.entries(counts).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(', ');
+    console.log(`  deleted: ${nonzero || '(nothing)'} · purged ${purged} orphaned demo Person(s)`);
+    existingCampaign = null; // rebuilt below
   }
 
   // 1. Org + users -----------------------------------------------------------

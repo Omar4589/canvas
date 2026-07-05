@@ -9,7 +9,7 @@ const STEPS = [
   },
   {
     title: 'Cut the turf',
-    body: 'Claim doors into a walk list, cut a round into balanced books, and assign each book to a canvasser.',
+    body: 'Claim doors into a walk list, cut a pass into balanced books, and assign each book to a canvasser.',
   },
   {
     title: 'Knock the doors',

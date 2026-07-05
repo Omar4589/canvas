@@ -20,8 +20,8 @@ export default function MarketingFooter() {
           <div className="max-w-xl">
             <Logo size={24} />
             <p className="mt-4 text-sm text-stone-500">
-              Doorline is the door-to-door canvassing platform for political consulting firms
-              and campaigns — a web operations console plus an offline-first mobile field app.
+              Doorline is the door-to-door canvassing platform for political campaigns and every
+              cause that knocks doors — a web operations console plus an offline-first field app.
             </p>
             <div className="mt-5 flex gap-2.5" aria-label="Available on iOS and Android">
               <span className="flex flex-col rounded-lg bg-stone-900 px-3.5 py-1.5 leading-tight text-white">

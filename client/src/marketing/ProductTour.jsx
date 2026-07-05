@@ -50,7 +50,7 @@ function FieldAppSketch() {
     <PhoneFrame className="mx-auto w-[290px]">
       <div role="img" aria-label="The Doorline field app: a walk list of doors with status colors, a Knock button, and an offline sync indicator">
         <div className="flex items-center justify-between border-b border-stone-200 px-2 pb-2.5 pt-1 text-[12.5px] font-bold text-stone-900">
-          Book 7 <span className="font-semibold text-stone-500">Round 1</span>
+          Book 7 <span className="font-semibold text-stone-500">Pass 1</span>
         </div>
         {rows.map((r) => (
           <div key={r.addr} className="flex items-center justify-between gap-2 border-b border-stone-100 px-2 py-2.5">
@@ -115,7 +115,7 @@ export default function ProductTour() {
         >
           Import the voter file and every door lands on the map, geocoded and deduped. Cut books
           geometrically with balanced door counts, by precinct or district, or draw them by hand —
-          then re-cut between rounds without losing a single knock of history.
+          then re-cut between passes without losing a single knock of history.
         </TourRow>
 
         <TourRow
@@ -148,7 +148,7 @@ export default function ProductTour() {
             <BrowserFrame url="doorline.app/campaigns/alvarez/timeline">
               <img
                 src={shotTimeline}
-                alt="The daily timeline in Doorline: knocks per canvasser by hour, with overlap door-passes reconciled against billable knocks"
+                alt="The daily timeline in Doorline: knocks per canvasser by hour, with overlap door-passes reconciled against real coverage"
                 width="1600"
                 height="1000"
                 loading="lazy"
@@ -160,7 +160,7 @@ export default function ProductTour() {
         >
           The live map shows every pin and every canvasser ping as it happens. The daily timeline
           lays out knocks per canvasser, hour by hour — and when two walkers hit the same door,
-          the overlap is caught and reconciled against what you bill.
+          the overlap is caught so your coverage numbers stay honest.
         </TourRow>
       </div>
     </section>

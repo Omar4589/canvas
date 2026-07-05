@@ -21,9 +21,9 @@ const FEATURES = [
   },
   {
     Icon: IconRouteCheck,
-    title: 'Rounds & re-knocks',
+    title: 'Passes & re-knocks',
     blurb:
-      'Each pass through the turf is its own round with its own status — re-knock not-homes without corrupting coverage.',
+      'Each pass through the turf keeps its own status — re-knock not-homes without corrupting your coverage.',
   },
   {
     Icon: IconBallot,
@@ -39,9 +39,9 @@ const FEATURES = [
   },
   {
     Icon: IconLayers,
-    title: 'Multi-client orgs',
+    title: 'Many campaigns, one login',
     blurb:
-      'Every campaign is walled off with its own team, turf, and reports — one login for your whole firm.',
+      'Every campaign is walled off with its own team, turf, and reports — run all of them from one account.',
   },
   {
     Icon: IconUser,
@@ -72,7 +72,7 @@ export default function FeatureGrid() {
             And the rest of the operation
           </p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-4xl">
-            Built for firms running many races at once
+            Built to run many campaigns at once
           </h2>
         </Reveal>
         <div className="mt-10 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">

@@ -19,11 +19,11 @@
   <text x="190" y="170" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="700" letter-spacing="-2" fill="#111827">Doorline</text>
 
   <!-- headline -->
-  <text x="100" y="332" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="700" letter-spacing="-1" fill="#111827">Run every door program you sell.</text>
-  <text x="100" y="410" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="700" letter-spacing="-1" fill="#DC2626">Prove every knock you bill.</text>
+  <text x="100" y="332" font-family="Arial, Helvetica, sans-serif" font-size="62" font-weight="700" letter-spacing="-1" fill="#111827">Cut the turf. Walk the doors.</text>
+  <text x="100" y="410" font-family="Arial, Helvetica, sans-serif" font-size="62" font-weight="700" letter-spacing="-1" fill="#DC2626">Know exactly what happened.</text>
 
   <!-- tagline -->
-  <text x="102" y="472" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="400" fill="#6B7280">Turf cutting &#183; offline field app &#183; live oversight &#183; client reports</text>
+  <text x="102" y="472" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="400" fill="#6B7280">Turf cutting &#183; offline field app &#183; live oversight &#183; shared reports</text>
 
   <!-- footer: turf-color dots + url -->
   <g transform="translate(113,552)">

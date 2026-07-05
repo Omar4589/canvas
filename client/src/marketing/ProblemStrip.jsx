@@ -12,8 +12,8 @@ const PAINS = [
     body: '“Where are you?” “Did anyone do Maple St?” Coverage lives in texts and memory until someone types it up.',
   },
   {
-    title: 'The client report is a Friday-night deck',
-    body: 'Hours of copy-paste into a PowerPoint the client skims once — and questions the numbers anyway.',
+    title: 'The recap is a Friday-night deck',
+    body: 'Hours of copy-paste into a PowerPoint that gets skimmed once — and the numbers get questioned anyway.',
   },
 ];
 

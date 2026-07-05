@@ -12,12 +12,12 @@ const ITEMS = [
     a: 'Nothing bad. Every knock and survey queues on the phone and syncs automatically the moment coverage returns — flagged as an offline submission so you can audit it later.',
   },
   {
-    q: 'What exactly do our clients see?',
+    q: 'What shows up in a shared report?',
     a: 'Only what you publish: a frozen weekly report with coverage, results, and a door-status map. Canvasser identities and voter names are stripped by design. Links are revocable and can be password-protected.',
   },
   {
     q: 'Can different teams work the same campaign?',
-    a: "Yes — split a campaign into walk lists with separate crews, rounds, and even different surveys, without ever double-knocking each other's doors.",
+    a: "Yes — split a campaign into walk lists with separate crews, passes, and even different surveys, without ever double-knocking each other's doors.",
   },
 ];
 

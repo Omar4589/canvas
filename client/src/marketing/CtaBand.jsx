@@ -10,12 +10,12 @@ export default function CtaBand() {
         <Reveal className="py-20 text-center sm:py-24">
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">Get started</p>
           <h2 className="mx-auto mt-3 max-w-2xl text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-[2.6rem] sm:leading-tight">
-            See Doorline run your next door program
+            See Doorline run your next canvass
           </h2>
           <p className="mx-auto mt-4 max-w-[54ch] text-base text-stone-600">
             We&apos;ll walk you through the console and the field app together, on a live demo
-            campaign with turf, canvassers, and a client report — so you can judge it the way
-            your clients will.
+            campaign with turf, canvassers, and a published report — so you can see exactly
+            what your team gets.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3.5">
             <a

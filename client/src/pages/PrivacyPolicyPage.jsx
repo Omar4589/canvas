@@ -18,347 +18,218 @@ export default function PrivacyPolicyPage() {
 
         <Section title="Overview">
           <p>
-            {APP_NAME} is a door-to-door canvassing platform operated for
-            customer organizations — typically political consulting firms and
-            campaigns. Customers use a web console to manage campaigns and
-            voter data, their canvassers use the {APP_NAME} mobile app for iOS
-            and Android in the field, and the customer&apos;s own clients can
-            view published reports through tokenized share links without
-            creating an account.
+            {APP_NAME} provides door-to-door canvassing software to
+            organizations that run field campaigns — including political
+            campaigns, advocacy and issue organizations, and the firms that
+            run canvassing on their behalf. This Privacy Policy describes how
+            we collect, use, disclose, and protect personal information in
+            connection with our web console, our mobile applications, and the
+            public report pages available at doorline.app (together, the
+            &quot;Services&quot;). We encourage you to read it in full.
           </p>
           <p>
-            This policy explains what information the {APP_NAME} platform
-            collects, how it is used, who it is shared with, and the choices
-            available to you. It applies to the {APP_NAME} web console, the
-            mobile app, and the public report pages at doorline.app.
+            Our customers use the Services to manage their campaigns and to
+            record the work of their canvassers. In doing so, our customers
+            upload and control voter and constituent information. Where we
+            process that information on a customer&apos;s behalf and under its
+            instructions, the customer — not {APP_NAME} — is responsible for it
+            and for its lawful collection and use. We process our customers&apos;
+            uploaded information only to provide the Services, and each customer
+            represents that it has the right to use that information for
+            canvassing. We do not sell personal information, and we do not use
+            it for advertising.
           </p>
         </Section>
 
-        <Section title="Two roles: our data and our customers' data">
+        <Section title="Personal information we collect and how we use it">
           <p>
-            {APP_NAME} handles two distinct categories of personal
-            information, and our responsibilities differ between them:
+            We collect the following categories of personal information and use
+            each of them to provide, secure, and support the Services:
           </p>
           <ul className="ml-5 list-disc">
             <li>
-              <strong>Platform account data.</strong> Information about the
-              people who use {APP_NAME} itself — administrators, team leads,
-              and canvassers. {APP_NAME} determines how this data is collected
-              and used, and is directly responsible for it.
+              <strong>Account information.</strong> When an administrator
+              creates an account for you, we collect your name, email address,
+              phone number, and a password you set. We use this information to
+              authenticate you, administer your account, and keep it secure.
             </li>
             <li>
-              <strong>Customer-uploaded voter file data.</strong> Voter and
-              constituent records that a customer organization uploads to the
-              platform. The customer controls this data: it decides what to
-              upload, who on its team can see it, and how long it is kept.
-              {APP_NAME} processes it only on the customer&apos;s behalf and
-              under the customer&apos;s instructions. Each customer warrants
-              that it lawfully obtained its voter file data and has the right
-              to use it for canvassing.
-            </li>
-          </ul>
-          <p>
-            {APP_NAME} does not sell either category of data, and does not use
-            either category for advertising.
-          </p>
-        </Section>
-
-        <Section title="Information we collect">
-          <h3 className="mt-3 font-semibold text-gray-800">Account information</h3>
-          <ul className="ml-5 list-disc">
-            <li>
-              Your name, email address, and phone number, provided when your
-              organization&apos;s administrator creates your account.
+              <strong>Canvassing activity.</strong> When a canvasser records
+              activity at a door — such as a survey response, a door status, or
+              a note — we collect that activity, the record it relates to, and
+              the time it occurred. Authorized administrators within the same
+              organization may review this activity. We use it to operate the
+              canvass and to provide reporting to that organization.
             </li>
             <li>
-              A password you choose. Passwords are hashed with bcrypt and are
-              never stored or transmitted in plaintext.
-            </li>
-          </ul>
-
-          <h3 className="mt-4 font-semibold text-gray-800">
-            Location information (canvassers only)
-          </h3>
-          <ul className="ml-5 list-disc">
-            <li>
-              Your device&apos;s GPS coordinates and reported accuracy are
-              captured <strong>only at the moment you record a canvass
-              action</strong> (for example, marking a door &quot;not
-              home&quot; or submitting a survey), along with the computed
-              distance between your position and the door. Location is never
-              collected continuously or in the background.
-            </li>
-            <li>
-              The map screen shows your live position to help you navigate to
-              assigned households. That live position is rendered on your
-              device only; it is not transmitted to our servers unless you
-              record an action.
-            </li>
-            <li>
-              If you record actions while offline, they are stored on your
-              device and synced to our servers when connectivity returns.
-              Synced actions are flagged as offline submissions.
-            </li>
-          </ul>
-
-          <h3 className="mt-4 font-semibold text-gray-800">Canvass activity</h3>
-          <ul className="ml-5 list-disc">
-            <li>
-              Survey responses you record at a household, the voter the
-              response is associated with, the door status you set, the
-              timestamp of the action, and any notes you add. Your
-              organization&apos;s administrators can review this activity,
-              including the location and timestamp of recorded actions.
-            </li>
-          </ul>
-
-          <h3 className="mt-4 font-semibold text-gray-800">
-            Customer-uploaded voter file data
-          </h3>
-          <ul className="ml-5 list-disc">
-            <li>
-              Customer organizations upload voter records that may include
-              names, residential addresses, party affiliation, date of birth,
-              phone numbers, electoral districts, and state voter
-              identification numbers. Voters do not interact with {APP_NAME}{' '}
-              directly. This data is used solely to organize and record the
-              uploading organization&apos;s door-to-door outreach, and access
-              to it is limited to that organization&apos;s authorized users.
-            </li>
-          </ul>
-
-          <h3 className="mt-4 font-semibold text-gray-800">
-            Technical information
-          </h3>
-          <ul className="ml-5 list-disc">
-            <li>
-              Standard server logs (timestamp, IP address, request path,
-              status code) are retained for security and debugging purposes.
+              <strong>Voter and constituent information.</strong> Our customers
+              upload records that may include names, residential addresses,
+              party affiliation, date of birth, telephone numbers, electoral
+              districts, and voter identification numbers. Voters do not
+              interact with the Services directly. We use this information only
+              to provide the Services to the customer that uploaded it, and
+              access is limited to that customer&apos;s authorized users.
             </li>
           </ul>
         </Section>
 
-        <Section title="Local storage, tokens, and tracking">
+        <Section title="Location information">
           <p>
-            {APP_NAME} uses local storage on your device in place of
-            traditional cookies to keep you signed in:
-          </p>
-          <ul className="ml-5 list-disc">
-            <li>
-              On the web, an authentication token (JWT) is stored in your
-              browser&apos;s local storage.
-            </li>
-            <li>
-              On mobile, the authentication token is stored in the
-              device&apos;s secure enclave — the iOS Keychain or the Android
-              Keystore.
-            </li>
-          </ul>
-          <p>
-            {APP_NAME} uses <strong>no advertising cookies, no third-party
-            analytics, and no trackers</strong> on any of its pages or in the
-            mobile app.
+            When a canvasser records an action in our mobile app, we collect
+            the device&apos;s location and reported accuracy at that moment,
+            together with the approximate distance between the device and the
+            door. We collect location <strong>only at the time an action is
+            recorded</strong>; we do not track location continuously or in the
+            background. The app may display a canvasser&apos;s live position on
+            their own device to aid navigation, but that live position is not
+            transmitted to us unless an action is recorded. Actions recorded
+            without a connection are stored on the device and transmitted when
+            connectivity returns.
           </p>
         </Section>
 
-        <Section title="How we use information">
-          <ul className="ml-5 list-disc">
-            <li>To authenticate you and keep your account secure.</li>
-            <li>
-              To display the canvassing map, route canvassers to assigned
-              households, and record and review field activity.
-            </li>
-            <li>
-              To let customer administrators manage their teams, audit
-              canvasser activity, and generate reports about their outreach.
-            </li>
-            <li>
-              To publish aggregate reports that a customer chooses to share
-              with its clients.
-            </li>
-            <li>To provide support, and to secure and debug the platform.</li>
-          </ul>
-          <p className="mt-3">
-            We do <strong>not</strong> sell, rent, or share any information on
-            the platform for advertising purposes, and we do not use
-            customer-uploaded voter data for any purpose other than providing
-            the service to that customer.
+        <Section title="Information collected automatically">
+          <p>
+            When you use the Services, we automatically collect limited
+            technical information, such as your IP address, the pages or
+            resources you request, and the date and time of your request. We
+            use this information to operate, secure, and troubleshoot the
+            Services. We use local storage on your device to keep you signed
+            in. We do <strong>not</strong> use advertising cookies, third-party
+            analytics, or tracking technologies on our sites or in our apps.
           </p>
         </Section>
 
-        <Section title="Public report links">
+        <Section title="Published reports">
           <p>
-            A customer can publish a report for its own clients at a
-            tokenized link (doorline.app/r/…). Published reports are built to
-            expose only aggregate information:
-          </p>
-          <ul className="ml-5 list-disc">
-            <li>Aggregate canvassing statistics for the campaign.</li>
-            <li>
-              A map of door statuses. Canvasser identities, voter names, and
-              action timestamps are stripped from published report data by
-              design — the published map stores none of them.
-            </li>
-          </ul>
-          <p>
-            Report links can be revoked by the customer at any time and can be
-            protected with a password.
+            A customer may choose to publish a report and make it available at
+            a unique link. Published reports are designed to present only
+            aggregate campaign statistics and a map of door statuses;
+            individual canvasser identities, voter names, and action timestamps
+            are excluded from published reports by design. A customer may
+            protect a report link with a password and may revoke it at any
+            time.
           </p>
         </Section>
 
-        <Section title="Service providers (subprocessors)">
-          <p>
-            We use the following service providers to operate {APP_NAME}. Each
-            handles only the limited data required to provide its service:
-          </p>
+        <Section title="With whom we share information">
+          <p>We may share personal information as follows:</p>
           <ul className="ml-5 list-disc">
             <li>
-              <strong>MongoDB Atlas</strong> — cloud database hosting for
-              account data, voter data, and canvassing records.
+              <strong>Within your organization.</strong> Information is
+              available to authorized users of the customer organization you
+              belong to, according to their role. It is not shared with other
+              customer organizations.
             </li>
             <li>
-              <strong>Heroku (Salesforce)</strong> — application hosting for
-              the backend API and web console.
+              <strong>Service providers.</strong> We share information with
+              service providers that perform functions on our behalf — for
+              example, hosting our systems and databases, providing maps and
+              converting addresses into map coordinates, and distributing and
+              updating our mobile app. These providers are authorized to use
+              the information only as necessary to perform services for us. A
+              current list of our service providers is available on request.
             </li>
             <li>
-              <strong>Redis</strong> (via a Heroku add-on) — background job
-              queue for processing tasks such as voter file imports.
+              <strong>Legal and safety.</strong> We may disclose information
+              where we believe in good faith that doing so is required by law
+              or legal process, or is necessary to protect our rights, our
+              users, or the public.
             </li>
             <li>
-              <strong>Mapbox</strong> — map tiles and map display.
-            </li>
-            <li>
-              <strong>Geocodio</strong> — geocoding. When a customer uploads a
-              voter file that lacks coordinates, street addresses are sent to
-              Geocodio to be converted into map coordinates.
-            </li>
-            <li>
-              <strong>Expo / EAS</strong> — mobile app builds and
-              over-the-air updates.
-            </li>
-            <li>
-              <strong>Apple App Store / Google Play</strong> — distribution
-              and installation of the mobile app.
-            </li>
-          </ul>
-        </Section>
-
-        <Section title="Security">
-          <ul className="ml-5 list-disc">
-            <li>Passwords are hashed with bcrypt; plaintext passwords are never stored.</li>
-            <li>All traffic is encrypted in transit via HTTPS.</li>
-            <li>
-              Access is role-based and scoped to your organization — users in
-              one organization cannot see another organization&apos;s data.
-            </li>
-            <li>Login attempts are rate-limited.</li>
-            <li>
-              Accounts can be deactivated immediately by an administrator,
-              which cuts off access to the platform.
+              <strong>Business transfers.</strong> Information may be
+              transferred in connection with a merger, acquisition, financing,
+              or sale of assets, subject to this Policy.
             </li>
           </ul>
           <p>
-            Despite these measures, no system can guarantee absolute security.
+            We do not sell personal information, and we do not share it for
+            advertising purposes.
           </p>
         </Section>
 
-        <Section title="Data retention">
+        <Section title="How we protect information">
           <p>
-            Account and campaign data are retained for the life of the
-            customer relationship, or as otherwise instructed by the customer
-            organization that controls the data. Customers can request an
-            export of their data or deletion of some or all of it. When a
-            customer relationship ends, the customer&apos;s data is deleted or
-            returned per its instructions.
+            We maintain reasonable administrative, technical, and physical
+            safeguards designed to protect personal information against
+            unauthorized access, use, or disclosure. These include encryption
+            of data in transit, access controls that limit each user to the
+            information of their own organization, and the ability for
+            administrators to disable access promptly. No method of
+            transmission or storage is completely secure, and we cannot
+            guarantee absolute security.
           </p>
+        </Section>
+
+        <Section title="How long we keep information">
           <p>
-            Platform users may request deletion of their own account at any
-            time by contacting us at the address below or by asking their
-            organization&apos;s administrator.
+            We retain account and campaign information for as long as the
+            related account is active, or as otherwise instructed by the
+            customer organization that controls the information, and thereafter
+            as needed to comply with our legal obligations or resolve disputes.
+            A customer may request export or deletion of the information it
+            controls. Individual users may request deletion of their own
+            account by contacting us or their organization&apos;s
+            administrator.
           </p>
         </Section>
 
         <Section title="Your privacy rights">
           <p>
-            Depending on where you live, state privacy laws (such as the
-            California Consumer Privacy Act, as amended by the CPRA) may give
-            you the right to:
-          </p>
-          <ul className="ml-5 list-disc">
-            <li>
-              <strong>Know and access</strong> the personal information we
-              hold about you.
-            </li>
-            <li>
-              <strong>Correct</strong> inaccurate personal information.
-            </li>
-            <li>
-              <strong>Delete</strong> your personal information, subject to
-              legal exceptions.
-            </li>
-            <li>
-              <strong>Non-discrimination</strong> — we will not treat you
-              differently for exercising these rights.
-            </li>
-          </ul>
-          <p>
-            To exercise any of these rights, email{' '}
+            Depending on where you live and subject to applicable law, you may
+            have the right to request access to the personal information we
+            hold about you, to correct or delete it, and to not be treated
+            differently for exercising these rights. To make a request, contact
+            us at{' '}
             <a
               href={`mailto:${CONTACT_EMAIL}`}
               className="text-brand-accent underline hover:text-brand-accent"
             >
               {CONTACT_EMAIL}
             </a>
-            . We may need to verify your identity before acting on a request.
+            . We may need to verify your identity before responding, and we
+            will respond as required by applicable law.
           </p>
           <p>
-            <strong>If you are a voter whose information appears in a
-            customer&apos;s uploaded file:</strong> the organization that
-            uploaded your data controls it. You may contact that organization
-            directly, or contact us and we will route your request to the
-            controlling organization and assist in fulfilling it.
+            If your information appears in a file uploaded by one of our
+            customers, that customer controls the information. You may contact
+            that organization directly, or contact us and we will refer your
+            request to the controlling organization and assist as appropriate.
           </p>
         </Section>
 
         <Section title="Your choices">
-          <ul className="ml-5 list-disc">
-            <li>
-              You may decline location permission on your device. Without
-              location access you can still browse the map and view voter
-              information, but you will not be able to record canvass actions.
-            </li>
-            <li>
-              You may request access to, correction of, or deletion of your
-              personal information by emailing us.
-            </li>
-            <li>
-              You may ask your organization&apos;s administrator to deactivate
-              your account.
-            </li>
-          </ul>
+          <p>
+            You may decline the location permission on your device; you will
+            still be able to browse the map and view records, but you will not
+            be able to record canvass actions. You may request access to,
+            correction of, or deletion of your personal information by
+            contacting us, and you may ask your organization&apos;s
+            administrator to disable your account.
+          </p>
         </Section>
 
         <Section title="Children">
           <p>
-            {APP_NAME} is not intended for use by anyone under 18 years of
-            age, and we do not knowingly collect personal information from
-            children.
+            The Services are not directed to, and are not intended for use by,
+            anyone under 18 years of age, and we do not knowingly collect
+            personal information from children.
           </p>
         </Section>
 
         <Section title="Changes to this policy">
           <p>
-            We may update this policy from time to time. The &quot;Last
-            updated&quot; date at the top of the page reflects the most recent
-            revision. Material changes will be communicated to customer
-            organizations and active users.
+            We may update this Privacy Policy from time to time. The &quot;Last
+            updated&quot; date above reflects the most recent revision, and
+            material changes will be communicated to affected customers and
+            users.
           </p>
         </Section>
 
-        <Section title="Contact">
+        <Section title="How to contact us">
           <p>
-            Questions about this policy or about your information can be sent
-            to{' '}
+            If you have questions about this Privacy Policy or about your
+            personal information, contact us at{' '}
             <a
               href={`mailto:${CONTACT_EMAIL}`}
               className="text-brand-accent underline hover:text-brand-accent"
