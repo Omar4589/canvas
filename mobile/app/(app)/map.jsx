@@ -969,6 +969,21 @@ export default function MapScreen() {
       >
         <CanvasserHeader variant="floating" />
 
+        {/* Context banner (walk list + book) sits ABOVE the toggle/filter pills. */}
+        {viewMode === 'map' && activeCampaign && (
+          <MapContextCard
+            campaignName={activeCampaign.name}
+            effortName={bookStrip?.effortName}
+            bookName={bookStrip?.bookName}
+            done={bookStrip?.done}
+            total={bookStrip?.total}
+            pct={bookStrip?.pct}
+            hasBooks={(data?.books?.length || 0) > 0}
+            onSwitch={switchCampaign}
+            onBooks={() => router.replace('/(app)/books')}
+          />
+        )}
+
         {/* Map/List toggle (left) shares one row with the houses filter + sort (right). */}
         <View style={styles.controlRow}>
           <TabSwitcher
@@ -1012,20 +1027,6 @@ export default function MapScreen() {
             )}
           </View>
         </View>
-
-        {viewMode === 'map' && activeCampaign && (
-          <MapContextCard
-            campaignName={activeCampaign.name}
-            effortName={bookStrip?.effortName}
-            bookName={bookStrip?.bookName}
-            done={bookStrip?.done}
-            total={bookStrip?.total}
-            pct={bookStrip?.pct}
-            hasBooks={(data?.books?.length || 0) > 0}
-            onSwitch={switchCampaign}
-            onBooks={() => router.replace('/(app)/books')}
-          />
-        )}
 
         {viewMode === 'list' && sortMenuOpen && (
           <View style={styles.filterMenu}>
