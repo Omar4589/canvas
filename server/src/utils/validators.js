@@ -51,9 +51,39 @@ export const nameSchema = z.string().trim().min(1).max(80);
 // A login email. Lowercasing stays in the handlers (some compare against existing values).
 export const emailSchema = z.string().trim().email().max(254);
 
-// A password (admin-set temporary or user-chosen). Min 8; no complexity rule — these are
-// temporary passwords the user replaces at first login, so complexity would only add friction.
+// An admin-set TEMPORARY password (create user / admin reset / create canvasser). Min 8, no
+// complexity rule — it's short-lived and the user replaces it at first login, so complexity
+// would only add friction. User-CHOSEN passwords use the stronger rules below.
 export const passwordSchema = z.string().min(8).max(200);
+
+// Strength rules for USER-CHOSEN passwords (self-service change, incl. the forced change after
+// a temp password). Mirrored verbatim in client/src/lib/validators.js and mobile/lib/validators.js
+// so the live checklist agrees with the server — the server stays the real guard.
+export const PASSWORD_MIN = 8;
+export const PASSWORD_RULES = [
+  { key: 'length', label: 'At least 8 characters', test: (p) => p.length >= PASSWORD_MIN },
+  { key: 'upper', label: 'An uppercase letter', test: (p) => /[A-Z]/.test(p) },
+  { key: 'lower', label: 'A lowercase letter', test: (p) => /[a-z]/.test(p) },
+  { key: 'number', label: 'A number', test: (p) => /[0-9]/.test(p) },
+  { key: 'special', label: 'A special character', test: (p) => /[^A-Za-z0-9]/.test(p) },
+];
+
+export const passwordChecklist = (pw) =>
+  PASSWORD_RULES.map((r) => ({ key: r.key, label: r.label, ok: r.test(String(pw ?? '')) }));
+
+export const isStrongPassword = (pw) => PASSWORD_RULES.every((r) => r.test(String(pw ?? '')));
+
+export const passwordProblem = (pw) => {
+  const miss = PASSWORD_RULES.filter((r) => !r.test(String(pw ?? '')));
+  return miss.length ? `Password needs: ${miss.map((r) => r.label.toLowerCase()).join(', ')}.` : null;
+};
+
+// Zod schema for a user-chosen password — enforces the complexity rules with a single,
+// human-readable message. (Kept separate from passwordSchema so admin temp passwords stay lax.)
+export const strongPasswordSchema = z.string().max(200).superRefine((val, ctx) => {
+  const msg = passwordProblem(val);
+  if (msg) ctx.addIssue({ code: z.ZodIssueCode.custom, message: msg });
+});
 
 // An org slug: lowercase kebab-case.
 export const slugSchema = z

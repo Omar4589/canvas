@@ -3,6 +3,7 @@ import { demoMailto } from './contact.js';
 import BrowserFrame from './frames/BrowserFrame.jsx';
 import { Reveal } from './useReveal.jsx';
 import shotMap from '../assets/marketing/shot-map.webp';
+import shotPhoneDoor from '../assets/marketing/shot-phone-door.webp';
 
 // Hero — owns the page's single <h1>. Copy left; right is a real screenshot of
 // the live campaign map in browser chrome with a miniature field-app card
@@ -33,33 +34,22 @@ function DoorDots() {
   );
 }
 
+// A real field-app screenshot (the door recording screen) peeking over the map's
+// corner — the "console and field app on the same map" story. Decorative, so hidden
+// from assistive tech (the map image carries the descriptive alt).
 function MiniPhone() {
-  const rows = [
-    { dot: 'bg-green-500', addr: '3812 38th St', meta: 'surveyed' },
-    { dot: 'bg-blue-500', addr: '3816 38th St', meta: 'not home' },
-    { dot: 'bg-gray-400', addr: '3820 38th St', meta: '4 voters', knock: true },
-  ];
   return (
     <div
-      className="absolute -bottom-8 -right-2 z-10 hidden w-44 rounded-[1.4rem] border border-stone-200 bg-white p-2.5 shadow-[0_18px_50px_rgba(28,25,23,0.22)] lg:block"
+      className="absolute -bottom-10 -right-3 z-10 hidden w-44 overflow-hidden rounded-[1.6rem] border border-stone-200 bg-white p-1.5 shadow-[0_18px_50px_rgba(28,25,23,0.22)] lg:block xl:w-52"
       aria-hidden="true"
     >
-      <div className="mx-auto mb-1.5 h-1 w-12 rounded-full bg-stone-200" />
-      <div className="flex items-center justify-between border-b border-stone-200 px-1.5 pb-1.5 text-[11px] font-bold text-stone-900">
-        Book 7 <span className="font-medium text-stone-500">12/54</span>
-      </div>
-      {rows.map((r) => (
-        <div key={r.addr} className="flex items-center gap-2 border-b border-stone-100 px-1.5 py-1.5 last:border-0">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${r.dot}`} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[10.5px] font-semibold text-stone-900">{r.addr}</div>
-            <div className="text-[9px] text-stone-500">{r.meta}</div>
-          </div>
-          {r.knock && (
-            <span className="rounded-md bg-brand-600 px-2 py-0.5 text-[9.5px] font-bold text-white">Knock</span>
-          )}
-        </div>
-      ))}
+      <img
+        src={shotPhoneDoor}
+        alt=""
+        width="1206"
+        height="2622"
+        className="block w-full rounded-[1.2rem]"
+      />
     </div>
   );
 }
@@ -74,7 +64,7 @@ export default function Hero() {
       />
       <DoorDots />
       <div className="relative mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 items-center gap-12 py-12 sm:py-24 lg:grid-cols-[5fr_6fr] lg:gap-14">
+        <div className="grid grid-cols-1 items-center gap-12 py-12 sm:py-24 lg:grid-cols-[5fr_7fr] lg:gap-12">
           <Reveal>
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
               Canvassing software for campaigns and causes

@@ -14,6 +14,8 @@ import { useAuthToken } from '../lib/authState';
 import { saveCurrentUser, saveMemberships } from '../lib/cache';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
+import PasswordRequirements from '../components/PasswordRequirements';
+import { isStrongPassword, passwordProblem } from '../lib/validators';
 import { radius, spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
@@ -36,8 +38,8 @@ export default function ChangePassword() {
 
   async function onSubmit() {
     setError(null);
-    if (newPassword.length < 8) {
-      setError('New password must be at least 8 characters.');
+    if (!isStrongPassword(newPassword)) {
+      setError(passwordProblem(newPassword));
       return;
     }
     if (newPassword !== confirm) {
@@ -83,7 +85,7 @@ export default function ChangePassword() {
           />
 
           <Text style={[styles.label, { marginTop: spacing.md }]}>
-            New password (min 8 chars)
+            New password
           </Text>
           <PasswordInput
             value={newPassword}
@@ -91,6 +93,7 @@ export default function ChangePassword() {
             autoComplete="new-password"
             placeholder="••••••••"
           />
+          <PasswordRequirements password={newPassword} />
 
           <Text style={[styles.label, { marginTop: spacing.md }]}>
             Confirm new password

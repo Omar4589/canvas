@@ -292,6 +292,8 @@ export default function VoterSurvey() {
         ),
       }),
       pending: [{ id: voter.householdId, status: 'surveyed' }],
+      // Refresh the canvasser's Today's Progress counts (Responses/Remaining) on submit.
+      invalidateKeys: [['mobile', 'me']],
       reconcile: (prev, response) => {
         const status = response?.household?.status;
         if (!status) return prev;

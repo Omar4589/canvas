@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId, setActiveOrgId } from '../api/client.js';
 import PasswordInput from '../components/PasswordInput.jsx';
+import PasswordRequirements from '../components/PasswordRequirements.jsx';
+import { isStrongPassword, passwordProblem } from '../lib/validators.js';
 import Logo from '../components/Logo.jsx';
 
 export default function ChangePasswordPage() {
@@ -44,8 +46,8 @@ export default function ChangePasswordPage() {
   async function onSubmit(e) {
     e.preventDefault();
     setError(null);
-    if (newPassword.length < 8) {
-      setError('New password must be at least 8 characters.');
+    if (!isStrongPassword(newPassword)) {
+      setError(passwordProblem(newPassword));
       return;
     }
     if (newPassword !== confirm) {
@@ -90,7 +92,7 @@ export default function ChangePasswordPage() {
           </div>
 
           <label className="mt-4 block text-xs font-semibold text-fg-muted">
-            New password (min 8 chars)
+            New password
           </label>
           <div className="mt-1">
             <PasswordInput
@@ -100,6 +102,7 @@ export default function ChangePasswordPage() {
               required
             />
           </div>
+          <PasswordRequirements password={newPassword} />
 
           <label className="mt-4 block text-xs font-semibold text-fg-muted">
             Confirm new password

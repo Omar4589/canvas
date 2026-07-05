@@ -469,9 +469,9 @@ export default function MapScreen() {
     },
     enabled: !!activeCampaign?.id,
     staleTime: 30 * 1000,
-    // These are the canvasser's own stats and already refetch the moment they
-    // submit an action, so a slow background poll is plenty — keeps the radio
-    // asleep longer without the user ever waiting on it.
+    // The record flow invalidates ['mobile','me'] on a confirmed knock/survey (see
+    // recordAction.js), so these counts refresh the moment an action lands. This slow
+    // background poll is just a backstop — keeps the radio asleep longer between knocks.
     refetchInterval: 120 * 1000,
   });
 

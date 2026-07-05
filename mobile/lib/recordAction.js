@@ -145,6 +145,11 @@ export function optimisticSubmit(qc, {
   optimisticPatch,
   reconcile,
   pending = [],
+  // Query keys to invalidate once the server CONFIRMS the write (result.ok). Opt-in per
+  // caller because this helper also powers pin corrections, which don't change these. Used
+  // to refresh the canvasser's daily stats (['mobile','me']) so the Today's Progress counter
+  // updates the moment a knock/survey lands, not just on the slow poll / manual refresh.
+  invalidateKeys = [],
   hardFailTitle = 'Not saved',
   hardFailMessage = 'Please try again.',
 }) {
@@ -179,6 +184,10 @@ export function optimisticSubmit(qc, {
     });
     if (result.ok) {
       if (reconcile) writeBootstrap(qc, (prev) => reconcile(prev, result.response));
+      // Server has now COMMITTED the action — refetch anything derived from it (the
+      // canvasser's daily counts). Only on confirmed writes: a queued/offline write hasn't
+      // been counted yet, so refetching would show the pre-knock number.
+      for (const key of invalidateKeys) qc.invalidateQueries({ queryKey: key });
       // Re-point each pending entry at the server-authoritative status we just
       // wrote, so the next server fetch (which returns that same status) CLEARS the
       // overlay instead of the overlay fighting the server forever.
@@ -220,6 +229,8 @@ export function recordHouseholdAction(qc, householdId, action, { note = null } =
       return status ? setHouseholdStatus(prev, householdId, status) : prev;
     },
     pending: [{ id: householdId, status: action }],
+    // Refresh the canvasser's Today's Progress counts once the knock is recorded.
+    invalidateKeys: [['mobile', 'me']],
     hardFailTitle: 'Action not saved',
     hardFailMessage: 'Could not record this action. Please try again.',
   });

@@ -16,6 +16,8 @@ import * as Updates from 'expo-updates';
 import { api } from '../../lib/api';
 import { loadCurrentUser, saveCurrentUser, saveMemberships } from '../../lib/cache';
 import PasswordInput from '../../components/PasswordInput';
+import PasswordRequirements from '../../components/PasswordRequirements';
+import { isStrongPassword, passwordProblem } from '../../lib/validators';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -92,8 +94,8 @@ export default function ProfileScreen() {
   async function onChangePassword() {
     setPwError(null);
     setPwSaved(false);
-    if (newPassword.length < 8) {
-      setPwError('New password must be at least 8 characters.');
+    if (!isStrongPassword(newPassword)) {
+      setPwError(passwordProblem(newPassword));
       return;
     }
     if (newPassword !== confirm) {
@@ -236,7 +238,7 @@ export default function ProfileScreen() {
               placeholder="••••••••"
             />
 
-            <Text style={[styles.label, { marginTop: spacing.md }]}>New password (min 8 chars)</Text>
+            <Text style={[styles.label, { marginTop: spacing.md }]}>New password</Text>
             <PasswordInput
               value={newPassword}
               onChangeText={(t) => {
@@ -246,6 +248,7 @@ export default function ProfileScreen() {
               autoComplete="new-password"
               placeholder="••••••••"
             />
+            <PasswordRequirements password={newPassword} />
 
             <Text style={[styles.label, { marginTop: spacing.md }]}>Confirm new password</Text>
             <PasswordInput

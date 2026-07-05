@@ -7,6 +7,7 @@ import { CampaignManager } from '../models/CampaignManager.js';
 import { signUserToken } from '../services/auth/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
 import { MIN_CLIENT_API_VERSION } from '../config/clientVersion.js';
+import { strongPasswordSchema } from '../utils/validators.js';
 
 const router = Router();
 
@@ -22,7 +23,8 @@ const loginSchema = z.object({
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
-  newPassword: z.string().min(8),
+  // A user's own new password must meet the complexity rules (not just min 8).
+  newPassword: strongPasswordSchema,
 });
 
 const updateProfileSchema = z.object({

@@ -16,9 +16,9 @@ const BUDGETS = {
   'turfs.png': { out: 'shot-turfs.webp', width: 1600 },
   'timeline.png': { out: 'shot-timeline.webp', width: 1600 },
   'portal.png': { out: 'shot-portal.webp', width: 1600 },
-  'dashboard.png': { out: 'shot-dashboard.webp', width: 1600 },
-  'phone-books.png': { out: 'shot-phone-books.webp', width: 900 },
-  'phone-door.png': { out: 'shot-phone-door.webp', width: 900 },
+  'phone-books.png': { out: 'shot-phone-books.webp', width: 760 },   // real device shots (1206 wide)
+  'phone-door.png': { out: 'shot-phone-door.webp', width: 760 },
+  'phone-survey.png': { out: 'shot-phone-survey.webp', width: 760 },
 };
 
 fs.mkdirSync(OUT, { recursive: true });

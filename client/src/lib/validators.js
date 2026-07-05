@@ -30,6 +30,28 @@ export function isValidEmail(raw) {
   return EMAIL_RE.test(String(raw ?? '').trim());
 }
 
+// Strength rules for USER-CHOSEN passwords (self-service change). Mirror of
+// server/src/utils/validators.js and mobile/lib/validators.js — the server is the real
+// guard; these drive the live requirements checklist. Admin-set temp passwords stay min-8.
+export const PASSWORD_MIN = 8;
+export const PASSWORD_RULES = [
+  { key: 'length', label: 'At least 8 characters', test: (p) => p.length >= PASSWORD_MIN },
+  { key: 'upper', label: 'An uppercase letter', test: (p) => /[A-Z]/.test(p) },
+  { key: 'lower', label: 'A lowercase letter', test: (p) => /[a-z]/.test(p) },
+  { key: 'number', label: 'A number', test: (p) => /[0-9]/.test(p) },
+  { key: 'special', label: 'A special character', test: (p) => /[^A-Za-z0-9]/.test(p) },
+];
+
+export const passwordChecklist = (pw) =>
+  PASSWORD_RULES.map((r) => ({ key: r.key, label: r.label, ok: r.test(String(pw ?? '')) }));
+
+export const isStrongPassword = (pw) => PASSWORD_RULES.every((r) => r.test(String(pw ?? '')));
+
+export const passwordProblem = (pw) => {
+  const miss = PASSWORD_RULES.filter((r) => !r.test(String(pw ?? '')));
+  return miss.length ? `Password needs: ${miss.map((r) => r.label.toLowerCase()).join(', ')}.` : null;
+};
+
 // The 50 states + DC, for the campaign State picker. { value: 2-letter, label }.
 export const US_STATES = [
   { value: 'AL', label: 'Alabama' }, { value: 'AK', label: 'Alaska' },

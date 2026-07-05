@@ -33,7 +33,7 @@ export default function PortalSpotlight() {
               src={shotPortal}
               alt="A published Doorline client report: doors knocked, surveys taken, connection rate, voter contact breakdown, and candidate support results"
               width="1600"
-              height="1000"
+              height="1406"
               loading="lazy"
               decoding="async"
               className="block w-full"

@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { Card, Button, Modal, PhoneInput } from '../components/ui';
+import PasswordInput from '../components/PasswordInput.jsx';
 
 // In-campaign roster (/campaigns/:campaignId/team). Surfaces CampaignAssignment — the
 // per-campaign roster that GATES mobile visibility AND who can be assigned books — so
@@ -105,14 +106,12 @@ function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, err
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password <span className="text-fg-subtle">(min 8 characters)</span></label>
-          <input
-            type="text"
+          <PasswordInput
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={8}
+            autoComplete="new-password"
             placeholder="At least 8 characters"
-            className={inputClass}
           />
         </div>
         {error && (

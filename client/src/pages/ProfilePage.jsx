@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
+import PasswordRequirements from '../components/PasswordRequirements.jsx';
+import { isStrongPassword, passwordProblem } from '../lib/validators.js';
 import { Card, Button, Input } from '../components/ui/index.js';
 
 // Self-serve account page for the admin / super-admin console (/profile). Edit name/phone
@@ -56,8 +58,8 @@ export default function ProfilePage() {
   async function savePassword(e) {
     e.preventDefault();
     setPwMsg(null);
-    if (pw.next.length < 8) {
-      setPwMsg({ type: 'error', text: 'New password must be at least 8 characters.' });
+    if (!isStrongPassword(pw.next)) {
+      setPwMsg({ type: 'error', text: passwordProblem(pw.next) });
       return;
     }
     if (pw.next !== pw.confirm) {
@@ -154,7 +156,7 @@ export default function ProfilePage() {
             </div>
           </div>
           <div>
-            <label className={labelCls}>New password (min 8 chars)</label>
+            <label className={labelCls}>New password</label>
             <div className="mt-1">
               <PasswordInput
                 value={pw.next}
@@ -163,6 +165,7 @@ export default function ProfilePage() {
                 required
               />
             </div>
+            <PasswordRequirements password={pw.next} />
           </div>
           <div>
             <label className={labelCls}>Confirm new password</label>

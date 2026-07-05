@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
+import PasswordInput from '../../../../components/PasswordInput';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
@@ -259,7 +260,7 @@ function CreateCanvasserModal({ onClose, onCreate, submitting, error, colors, st
             <Text style={styles.formLabel}>Phone (optional)</Text>
             <TextInput value={phone} onChangeText={(t) => setPhone(formatUsPhoneInput(t))} keyboardType="phone-pad" placeholder="(555) 123-4567" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
             <Text style={styles.formLabel}>Temporary password (min 8)</Text>
-            <TextInput value={password} onChangeText={setPassword} autoCapitalize="none" autoCorrect={false} placeholder="At least 8 characters" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+            <PasswordInput value={password} onChangeText={setPassword} autoComplete="new-password" placeholder="At least 8 characters" />
             {error ? <Text style={styles.modalError}>{error.message}</Text> : null}
           </ScrollView>
           <View style={styles.modalActions}>

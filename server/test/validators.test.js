@@ -5,6 +5,10 @@ import {
   usStateSchema,
   nameSchema,
   slugSchema,
+  passwordSchema,
+  strongPasswordSchema,
+  isStrongPassword,
+  passwordProblem,
 } from '../src/utils/validators.js';
 
 // Pure schema tests — no DB, always run. Locks the "phone can't hold letters" fix and
@@ -41,4 +45,33 @@ test('nameSchema trims + bounds; slugSchema enforces kebab-case', () => {
   assert.strictEqual(slugSchema.parse('acme-campaigns-2026'), 'acme-campaigns-2026');
   assert.throws(() => slugSchema.parse('Acme Campaigns'));
   assert.throws(() => slugSchema.parse('-leading-hyphen'));
+});
+
+test('strongPasswordSchema accepts a compliant user-chosen password', () => {
+  assert.strictEqual(strongPasswordSchema.parse('Str0ng!pw'), 'Str0ng!pw');
+  assert.ok(isStrongPassword('Str0ng!pw'));
+  assert.strictEqual(passwordProblem('Str0ng!pw'), null);
+});
+
+test('strongPasswordSchema rejects a password missing ANY required class', () => {
+  const cases = {
+    'password123!': 'uppercase', // no uppercase
+    'PASSWORD123!': 'lowercase', // no lowercase
+    'Password!!!': 'number', // no number
+    'Password123': 'special', // no special
+    'Ab1!': 'characters', // too short
+    // the classic weak password the report flagged — no uppercase, no special
+    password123: 'password needs',
+  };
+  for (const [bad, needle] of Object.entries(cases)) {
+    assert.strictEqual(isStrongPassword(bad), false, `${bad} should be weak`);
+    assert.throws(() => strongPasswordSchema.parse(bad), new RegExp(needle, 'i'), `reject ${bad}`);
+  }
+});
+
+test('admin temp passwordSchema stays lax (min 8, no complexity) — password123 ok', () => {
+  // Admin-set temporary passwords are replaced at first login; complexity is intentionally
+  // NOT required here (keeps existing create/reset flows + fixtures working).
+  assert.strictEqual(passwordSchema.parse('password123'), 'password123');
+  assert.throws(() => passwordSchema.parse('short')); // still enforces min 8
 });
