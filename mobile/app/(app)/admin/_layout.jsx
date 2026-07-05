@@ -106,6 +106,11 @@ export default function AdminLayout() {
 
   return (
     <Tabs
+      // Return to the PREVIOUSLY-focused tab/screen on back (header button, hardware
+      // back, edge-swipe) instead of the default 'firstRoute', which always jumped to
+      // Overview. These admin pages (Books, Users, and the href:null detail screens) are
+      // all siblings in this one Tabs navigator, so this single prop fixes them all.
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.brand,
