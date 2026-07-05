@@ -15,6 +15,7 @@ import { saveActiveCampaign, clearBootstrap } from '../../../../lib/cache';
 import CoverageBar from '../../../../components/CoverageBar';
 import VoterRow from '../../../../components/VoterRow';
 import SectionHeader from '../../../../components/SectionHeader';
+import NavTileGrid from '../../../../components/NavTileGrid';
 import DateRangeBar from '../../../../components/DateRangeBar';
 import { rangeFor, deviceTimezone } from '../../../../lib/dateRanges';
 import { formatRange } from '../../../../lib/datetime';
@@ -315,27 +316,17 @@ export default function CampaignDetail() {
             </>
           )}
 
-          {/* Quick links */}
-          <View style={styles.quickLinkRow}>
-            <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/timeline')}>
-              <Text style={styles.quickLinkIcon}>🕘</Text>
-              <Text style={styles.quickLinkText}>Timeline</Text>
-            </Pressable>
-            <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/map')}>
-              <Text style={styles.quickLinkIcon}>🗺️</Text>
-              <Text style={styles.quickLinkText}>Live map</Text>
-            </Pressable>
-            <Pressable style={styles.quickLink} onPress={() => router.push('/(app)/admin/users')}>
-              <Text style={styles.quickLinkIcon}>👥</Text>
-              <Text style={styles.quickLinkText}>Users</Text>
-            </Pressable>
-            <Pressable
-              style={styles.quickLink}
-              onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}
-            >
-              <Text style={styles.quickLinkIcon}>🔗</Text>
-              <Text style={styles.quickLinkText}>Assignments</Text>
-            </Pressable>
+          {/* Quick actions */}
+          <SectionHeader title="Quick actions" />
+          <View style={styles.quickActions}>
+            <NavTileGrid
+              items={[
+                { label: 'Timeline', subtitle: 'Hourly knock grid', onPress: () => router.push('/(app)/admin/timeline') },
+                { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
+                { label: 'Users', subtitle: 'Manage people', onPress: () => router.push('/(app)/admin/users') },
+                { label: 'Assignments', subtitle: 'Books & canvassers', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },
+              ]}
+            />
           </View>
 
           {!isArchived && (
@@ -428,19 +419,7 @@ function makeStyles(t) {
   verbatim: { marginBottom: spacing.sm, paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   verbatimText: { ...type.body, fontSize: 14, fontStyle: 'italic' },
 
-  quickLinkRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm, marginBottom: spacing.lg },
-  quickLink: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    ...shadow.card,
-  },
-  quickLinkIcon: { fontSize: 28, marginBottom: spacing.xs },
-  quickLinkText: { ...type.bodyStrong },
+  quickActions: { marginTop: spacing.sm, marginBottom: spacing.lg },
 
   canvassButton: { backgroundColor: colors.brand, borderRadius: radius.md, paddingVertical: spacing.md + 2, alignItems: 'center' },
   canvassButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },

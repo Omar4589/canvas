@@ -21,6 +21,7 @@ import {
   clearBootstrap,
 } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
+import NavTileGrid from '../../../components/NavTileGrid';
 import { ThemeIconButton } from '../../../components/ThemeToggle';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -178,29 +179,15 @@ export default function SuperAdminHome() {
           </View>
         </View>
 
-        {/* Quick links */}
-        <View style={styles.quickLinkRow}>
-          <Pressable
-            style={styles.quickLink}
-            onPress={() => router.push('/(app)/super-admin/organizations')}
-          >
-            <Text style={styles.quickLinkIcon}>🏢</Text>
-            <Text style={styles.quickLinkText}>Organizations</Text>
-          </Pressable>
-          <Pressable
-            style={styles.quickLink}
-            onPress={() => router.push('/(app)/super-admin/users')}
-          >
-            <Text style={styles.quickLinkIcon}>👥</Text>
-            <Text style={styles.quickLinkText}>All users</Text>
-          </Pressable>
-          <Pressable
-            style={styles.quickLink}
-            onPress={() => router.push('/(app)/super-admin/activity')}
-          >
-            <Text style={styles.quickLinkIcon}>📡</Text>
-            <Text style={styles.quickLinkText}>Activity</Text>
-          </Pressable>
+        {/* Quick actions */}
+        <View style={styles.quickActions}>
+          <NavTileGrid
+            items={[
+              { label: 'Organizations', subtitle: 'All orgs', onPress: () => router.push('/(app)/super-admin/organizations') },
+              { label: 'All users', subtitle: 'Platform users', onPress: () => router.push('/(app)/super-admin/users') },
+              { label: 'Activity', subtitle: 'System activity', onPress: () => router.push('/(app)/super-admin/activity') },
+            ]}
+          />
         </View>
 
         {/* All organizations */}
@@ -361,23 +348,7 @@ function makeStyles(t) {
   todayValue: { ...type.h2, fontSize: 18, fontVariant: ['tabular-nums'] },
   todayCellLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
 
-  quickLinkRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  quickLink: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    ...shadow.card,
-  },
-  quickLinkIcon: { fontSize: 22, marginBottom: 2 },
-  quickLinkText: { ...type.caption, fontWeight: '700', color: colors.textPrimary },
+  quickActions: { marginBottom: spacing.lg },
 
   sectionLabel: {
     fontSize: 11,

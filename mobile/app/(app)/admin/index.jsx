@@ -181,10 +181,6 @@ export default function AdminOverview() {
           />
         }
       >
-        <View style={{ paddingHorizontal: spacing.lg }}>
-          <Text style={styles.greeting}>Hi {user?.firstName || 'there'} 👋</Text>
-        </View>
-
         <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
         {activeQ.data?.tzAbbrev ? (
           <Text style={{ paddingHorizontal: spacing.lg, marginTop: 2, fontSize: 11, color: colors.textSecondary }}>
@@ -294,7 +290,6 @@ function makeStyles(t) {
     justifyContent: 'space-between',
   },
   headerLabel: { ...type.caption, color: colors.textSecondary },
-  greeting: { ...type.title, marginTop: spacing.xs, marginBottom: spacing.sm },
 
   card: {
     backgroundColor: colors.card,
