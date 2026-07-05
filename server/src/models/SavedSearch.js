@@ -1,8 +1,15 @@
 import mongoose from 'mongoose';
 
-// A saved, named, FROZEN selection of voters/households from a campaign's pool.
-// The `filter` is kept for reference/reproducibility; the frozen householdIds/
-// voterIds are the source of truth (decision 8 — lists do not re-resolve).
+// A saved, named, FROZEN selection of voters/households from a campaign's pool — the thing
+// users see as a "Saved search". The `filter` is kept for reference/reproducibility; the frozen
+// householdIds/voterIds are the source of truth (decision 8 — lists do not re-resolve).
+//
+// NAMING: this model was formerly `WalkList`. It was renamed to `SavedSearch` because that's what
+// it actually is, and because the user-facing "Walk List" is the *Effort* model (see Effort.js) —
+// having a `WalkList` model that ISN'T the user's walk list was a persistent trap. The DB
+// collection is deliberately PINNED to `walklists` below, so this is a code-only rename with NO
+// data migration. (Historical wire names — the `/walklists` route, the `walkLists` response key,
+// and Effort.seededFromWalkListId — are likewise retained for compatibility.)
 const answerFilterSchema = new mongoose.Schema(
   {
     questionKey: { type: String, required: true },
@@ -39,7 +46,7 @@ const filterSchema = new mongoose.Schema(
   { _id: false }
 );
 
-const walkListSchema = new mongoose.Schema(
+const savedSearchSchema = new mongoose.Schema(
   {
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -76,6 +83,8 @@ const walkListSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-walkListSchema.index({ campaignId: 1, createdAt: -1 });
+savedSearchSchema.index({ campaignId: 1, createdAt: -1 });
 
-export const WalkList = mongoose.model('WalkList', walkListSchema);
+// Third arg pins the collection to `walklists` (was auto-derived from the old model name) so the
+// rename needs no data migration.
+export const SavedSearch = mongoose.model('SavedSearch', savedSearchSchema, 'walklists');

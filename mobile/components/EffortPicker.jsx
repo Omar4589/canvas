@@ -47,9 +47,9 @@ export default function EffortPicker({ efforts = [], value, onChange }) {
     <View>
       <Pressable style={styles.chip} onPress={() => setOpen((v) => !v)}>
         <View style={styles.dot} />
-        <Text style={styles.label}>Effort</Text>
+        <Text style={styles.label}>Walk list</Text>
         <Text style={styles.chipText} numberOfLines={1}>
-          {current?.name || 'Pick an effort'}
+          {current?.name || 'Pick a walk list'}
         </Text>
         <Text style={styles.chevron}>{open ? '▴' : '▾'}</Text>
       </Pressable>

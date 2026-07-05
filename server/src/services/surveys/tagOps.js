@@ -1,11 +1,11 @@
 // Org-level tag library operations (Phase 3.1). A tag's display name is stored as a
 // STRING in exactly THREE homes — survey palettes (SurveyTemplate.tags), survey option
 // tags (SurveyTemplate.questions[].options[].tag), and saved-search filters
-// (WalkList.filter.answerTagFilters[].tag) — so rename/merge/delete are a bounded bulk
+// (SavedSearch.filter.answerTagFilters[].tag) — so rename/merge/delete are a bounded bulk
 // rewrite over those three. The Tag collection is the managed picklist; the reporting
 // rollup (answerAgg.answerTagClause / tags.tagOptionMap) reads option.tag unchanged.
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
-import { WalkList } from '../../models/WalkList.js';
+import { SavedSearch } from '../../models/SavedSearch.js';
 import { Tag } from '../../models/Tag.js';
 import { normalizeTag } from './tags.js';
 
@@ -50,7 +50,7 @@ export async function rewriteTag(orgId, fromKey, toDisplay) {
     }
   }
 
-  const walklists = await WalkList.find({ organizationId: orgId });
+  const walklists = await SavedSearch.find({ organizationId: orgId });
   for (const w of walklists) {
     const tfs = (w.filter && w.filter.answerTagFilters) || [];
     let changed = false;
@@ -117,7 +117,7 @@ export async function deleteTag(orgId, tag) {
     }
   }
 
-  const walklists = await WalkList.find({ organizationId: orgId });
+  const walklists = await SavedSearch.find({ organizationId: orgId });
   for (const w of walklists) {
     const tfs = (w.filter && w.filter.answerTagFilters) || [];
     const next = tfs.filter((tf) => normalizeTag(tf.tag) !== key);
@@ -154,7 +154,7 @@ export async function tagUsage(orgId) {
     }
     for (const k of surveyKeys) bump(k, 'surveys');
   }
-  const walklists = await WalkList.find({ organizationId: orgId }, 'filter.answerTagFilters').lean();
+  const walklists = await SavedSearch.find({ organizationId: orgId }, 'filter.answerTagFilters').lean();
   for (const w of walklists) {
     for (const tf of (w.filter && w.filter.answerTagFilters) || []) {
       const k = normalizeTag(tf.tag);

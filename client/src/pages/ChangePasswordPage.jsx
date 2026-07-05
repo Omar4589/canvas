@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId, setActiveOrgId } from '../api/client.js';
+import { homePathForRole } from '../lib/homePath.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import PasswordRequirements from '../components/PasswordRequirements.jsx';
 import { isStrongPassword, passwordProblem } from '../lib/validators.js';
 import Logo from '../components/Logo.jsx';
 
 export default function ChangePasswordPage() {
-  const { user, mustChangePassword, changePassword } = useAuth();
+  const { user, mustChangePassword, changePassword, homePath } = useAuth();
   const navigate = useNavigate();
 
   const [currentPassword, setCurrentPassword] = useState('');
@@ -24,8 +25,8 @@ export default function ChangePasswordPage() {
   // If a user lands here without owing a change (e.g. navigated manually), send
   // them on their way.
   useEffect(() => {
-    if (user && !mustChangePassword) navigate('/admin', { replace: true });
-  }, [user, mustChangePassword, navigate]);
+    if (user && !mustChangePassword) navigate(homePath, { replace: true });
+  }, [user, mustChangePassword, homePath, navigate]);
 
   function routeOnward(res) {
     const memberships = res.memberships || [];
@@ -40,7 +41,8 @@ export default function ChangePasswordPage() {
     if (memberships.length === 1) {
       setActiveOrgId(memberships[0].organizationId);
     }
-    navigate('/admin', { replace: true });
+    // A team lead has no org Overview — land them on /campaigns, not the admin-only /admin.
+    navigate(homePathForRole(memberships[0]?.role), { replace: true });
   }
 
   async function onSubmit(e) {

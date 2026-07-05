@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
-import { WalkList } from '../../models/WalkList.js';
+import { SavedSearch } from '../../models/SavedSearch.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { Effort } from '../../models/Effort.js';
@@ -43,7 +43,7 @@ router.use(loadCampaign);
 
 router.get('/', async (req, res, next) => {
   try {
-    const walkLists = await WalkList.find(
+    const walkLists = await SavedSearch.find(
       { campaignId: req.campaign._id },
       { householdIds: 0, voterIds: 0 }
     )
@@ -75,7 +75,7 @@ router.post('/', async (req, res, next) => {
     const { name, filter } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
     const r = await resolveWalkList(req.campaign, filter || {});
-    const walkList = await WalkList.create({
+    const walkList = await SavedSearch.create({
       organizationId: req.campaign.organizationId,
       campaignId: req.campaign._id,
       name: String(name).trim(),
@@ -157,7 +157,7 @@ router.post('/from-csv/preview', upload.single('file'), async (req, res, next) =
 });
 
 // Save a frozen walk list from an uploaded Voter-ID CSV (matched by stateVoterId).
-// The result is an ordinary frozen WalkList — it seeds/claims efforts via the same
+// The result is an ordinary frozen SavedSearch — it seeds/claims efforts via the same
 // path as a filter-built list, so disjointness/claim/re-carve are reused unchanged.
 router.post('/from-csv', upload.single('file'), async (req, res, next) => {
   try {
@@ -167,7 +167,7 @@ router.post('/from-csv', upload.single('file'), async (req, res, next) => {
     const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn);
     if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
     const r = await resolveHouseholdsFromVoterMatch(req.campaign, m.inCampaign);
-    const walkList = await WalkList.create({
+    const walkList = await SavedSearch.create({
       organizationId: req.campaign.organizationId,
       campaignId: req.campaign._id,
       name: String(name).trim(),
@@ -254,7 +254,7 @@ function ageOf(dob) {
 router.get('/:id/export.csv', async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
-    const walkList = await WalkList.findOne(
+    const walkList = await SavedSearch.findOne(
       { _id: req.params.id, campaignId: req.campaign._id },
       { name: 1, voterIds: 1, householdIds: 1 }
     ).lean();
@@ -295,7 +295,7 @@ router.get('/:id/export.csv', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
-    const walkList = await WalkList.findOne(
+    const walkList = await SavedSearch.findOne(
       { _id: req.params.id, campaignId: req.campaign._id },
       { householdIds: 0, voterIds: 0 }
     ).lean();
@@ -308,7 +308,7 @@ router.get('/:id', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
   try {
-    const r = await WalkList.deleteOne({ _id: req.params.id, campaignId: req.campaign._id });
+    const r = await SavedSearch.deleteOne({ _id: req.params.id, campaignId: req.campaign._id });
     res.json({ deleted: r.deletedCount });
   } catch (err) {
     next(err);

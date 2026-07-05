@@ -319,7 +319,7 @@ export default function AdminBooks() {
           <ActivityIndicator color={colors.brand} />
         ) : !passId ? (
           <Empty styles={styles}>
-            No active round for {currentEffort?.name || 'this effort'}. Cut/activate a round on the web dashboard.
+            No active round for {currentEffort?.name || 'this walk list'}. Cut/activate a round on the web dashboard.
           </Empty>
         ) : books.length === 0 ? (
           <Empty styles={styles}>No published books in this round yet. Cut turf on the web dashboard.</Empty>

@@ -151,11 +151,14 @@ export default function CampaignSurveyPage() {
           </div>
 
           {attachedSurvey.responseCount > 0 && (
-            <div className="border-b border-border bg-warning-tint px-5 py-3 text-xs text-warning-fg">
-              ⚠️ This survey has {attachedSurvey.responseCount.toLocaleString()} response
-              {attachedSurvey.responseCount === 1 ? '' : 's'}. Its questions are locked — to change them, Duplicate it
-              on the Surveys page. (Swapping this campaign to a different survey is fine; new answers report under the
-              new one.)
+            <div className="border-b border-border bg-sunken px-5 py-3 text-xs text-fg-muted">
+              This survey has {attachedSurvey.responseCount.toLocaleString()} response
+              {attachedSurvey.responseCount === 1 ? '' : 's'}. You can still reword questions and answers, add or
+              retire questions and options, reorder, and edit the read-aloud logic — your past answers keep
+              reporting. The only change that needs a fresh copy (
+              <strong className="font-medium text-fg">Duplicate</strong> on the Surveys page) is changing a
+              question&apos;s <strong className="font-medium text-fg">answer type</strong>. You can also swap this
+              campaign to a different survey anytime — new answers report under the new one.
             </div>
           )}
 

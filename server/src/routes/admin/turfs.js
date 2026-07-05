@@ -11,7 +11,7 @@ import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
-import { WalkList } from '../../models/WalkList.js';
+import { SavedSearch } from '../../models/SavedSearch.js';
 import { Voter } from '../../models/Voter.js';
 import { recomputeTurf, recomputePassTerritories, addSupplementalBooks } from '../../services/turf/generateTurf.js';
 import { ATTR_COLUMN } from '../../services/turf/attributeCut.js';
@@ -658,7 +658,7 @@ router.get('/doors', async (req, res, next) => {
       'location.coordinates': { $exists: true, $ne: null },
     };
     if (pass.walkListId) {
-      const wl = await WalkList.findById(pass.walkListId, { householdIds: 1 }).lean();
+      const wl = await SavedSearch.findById(pass.walkListId, { householdIds: 1 }).lean();
       if (wl?.householdIds?.length) filter._id = { $in: wl.householdIds };
     }
 

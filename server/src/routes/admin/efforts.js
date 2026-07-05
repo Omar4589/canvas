@@ -9,7 +9,7 @@ import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Household } from '../../models/Household.js';
-import { WalkList } from '../../models/WalkList.js';
+import { SavedSearch } from '../../models/SavedSearch.js';
 import { recomputeTurf } from '../../services/turf/generateTurf.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
 import { createNextPass } from '../../services/passes/createPass.js';
@@ -183,7 +183,7 @@ router.post('/', async (req, res, next) => {
       claimed = r.modifiedCount || 0;
     } else if (effort.seededFromWalkListId) {
       // Intake-only claim of a saved search's doors.
-      const wl = await WalkList.findOne({ _id: effort.seededFromWalkListId, campaignId: req.campaign._id }, { householdIds: 1 }).lean();
+      const wl = await SavedSearch.findOne({ _id: effort.seededFromWalkListId, campaignId: req.campaign._id }, { householdIds: 1 }).lean();
       if (wl?.householdIds?.length) {
         const r = await Household.updateMany(
           { _id: { $in: wl.householdIds }, campaignId: req.campaign._id, effortId: null },
@@ -240,7 +240,7 @@ router.post('/:id/claim', loadEffort, async (req, res, next) => {
     let idFilter;
     if (walkListId) {
       if (!mongoose.isValidObjectId(walkListId)) return res.status(400).json({ error: 'Invalid walkListId' });
-      const wl = await WalkList.findOne({ _id: walkListId, campaignId: cId }, { householdIds: 1 }).lean();
+      const wl = await SavedSearch.findOne({ _id: walkListId, campaignId: cId }, { householdIds: 1 }).lean();
       if (!wl) return res.status(404).json({ error: 'Saved search not found' });
       idFilter = { _id: { $in: wl.householdIds || [] } };
     } else if (all) {

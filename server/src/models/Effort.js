@@ -23,9 +23,10 @@ const effortSchema = new mongoose.Schema(
     // Optional per-effort survey; falls back to Campaign.surveyTemplateId.
     // Only meaningful for survey-type campaigns (lit-drop efforts carry none).
     surveyTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: 'SurveyTemplate', default: null },
-    // Audit only: which walk list seeded this effort's door-set. Ownership is
-    // materialized on Household.effortId, NOT re-derived from this list.
-    seededFromWalkListId: { type: mongoose.Schema.Types.ObjectId, ref: 'WalkList', default: null },
+    // Audit only: which SAVED SEARCH seeded this effort's door-set. Ownership is
+    // materialized on Household.effortId, NOT re-derived from this list. (Field name
+    // kept as seededFromWalkListId for back-compat; it refs the SavedSearch model.)
+    seededFromWalkListId: { type: mongoose.Schema.Types.ObjectId, ref: 'SavedSearch', default: null },
     status: {
       type: String,
       enum: ['draft', 'active', 'archived'],

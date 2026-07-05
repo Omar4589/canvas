@@ -6,7 +6,7 @@ import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
-import { WalkList } from '../../models/WalkList.js';
+import { SavedSearch } from '../../models/SavedSearch.js';
 import { VotedUpload } from '../../models/VotedUpload.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { VotedPendingId } from '../../models/VotedPendingId.js';
@@ -41,7 +41,7 @@ export async function deleteCampaignCascade(campaign) {
   // Every campaignId-scoped collection (audited via grep over models/).
   const CAMPAIGN_SCOPED = [
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
-    WalkList, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
+    SavedSearch, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
     CampaignManager, ClientReport, ClientReportMapPoint, ReportShareLink,
     CanvassActivity, SurveyResponse, ImportJob, HouseholdLocationChange,
   ];

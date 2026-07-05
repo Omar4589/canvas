@@ -146,7 +146,7 @@ export default function CampaignsScreen() {
                   <Text style={styles.cardTitle}>{c.name}</Text>
                   <Text style={styles.cardMeta}>
                     {c.state}
-                    {expandable ? ` · ${efforts.length} efforts` : ''}
+                    {expandable ? ` · ${efforts.length} walk lists` : ''}
                   </Text>
                 </View>
                 {busy && !expanded ? (
@@ -160,7 +160,7 @@ export default function CampaignsScreen() {
 
               {expandable && expanded && (
                 <View style={styles.effortList}>
-                  <Text style={styles.effortListLabel}>Choose your effort</Text>
+                  <Text style={styles.effortListLabel}>Choose your walk list</Text>
                   {efforts.map((e) => (
                     <Pressable
                       key={e.id}

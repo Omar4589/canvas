@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId } from '../api/client.js';
+import { homePathForRole } from '../lib/homePath.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import Logo from '../components/Logo.jsx';
 
@@ -50,7 +51,7 @@ export default function LoginPage() {
         return;
       }
       // A team lead has no org Overview — land them on their campaigns instead.
-      const home = memberships[0]?.role === 'lead' ? '/campaigns' : '/admin';
+      const home = homePathForRole(memberships[0]?.role);
       navigate(location.state?.from?.pathname || home, { replace: true });
     } catch (err) {
       setError(err.message);

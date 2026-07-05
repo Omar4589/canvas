@@ -6,6 +6,7 @@ import {
   getActiveOrgId,
   setActiveOrgId,
 } from '../api/client.js';
+import { homePathForRole } from '../lib/homePath.js';
 
 const AuthContext = createContext(null);
 
@@ -110,6 +111,10 @@ export function AuthProvider({ children }) {
     [isLead, activeMembership]
   );
   const mustChangePassword = !!user?.mustChangePassword;
+  // Post-auth landing for THIS user (see lib/homePath.js): leads have no org Overview, so
+  // they land on /campaigns; admins/super land on /admin. Render-time link/redirect sites
+  // read this instead of hardcoding /admin (which a lead can't reach).
+  const homePath = homePathForRole(activeMembership?.role);
   // Org-wide audit timestamps (imports, walk lists, turf snapshots, user profiles) render
   // in the active org's timezone so they read the same for every admin.
   const orgTimeZone = activeMembership?.organizationTimeZone || 'America/New_York';
@@ -127,6 +132,7 @@ export function AuthProvider({ children }) {
         isLead,
         isConsoleUser,
         managedCampaignIds,
+        homePath,
         mustChangePassword,
         loading,
         login,

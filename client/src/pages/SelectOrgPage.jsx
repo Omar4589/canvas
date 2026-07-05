@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
+import { homePathForRole } from '../lib/homePath.js';
 import Logo from '../components/Logo.jsx';
 
 export default function SelectOrgPage() {
@@ -26,7 +27,7 @@ export default function SelectOrgPage() {
     // A team lead has no org Overview — send them to their campaigns. Honor a real
     // deep link if one brought them here.
     const deepLink = location.state?.from?.pathname;
-    const home = role === 'lead' ? '/campaigns' : '/admin';
+    const home = homePathForRole(role);
     navigate(deepLink && deepLink !== '/select-org' ? deepLink : home, { replace: true });
   }
 

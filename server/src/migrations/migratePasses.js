@@ -4,7 +4,7 @@ import { connectDb } from '../config/db.js';
 import { Campaign } from '../models/Campaign.js';
 import { Household } from '../models/Household.js';
 import { Voter } from '../models/Voter.js';
-import { WalkList } from '../models/WalkList.js';
+import { SavedSearch } from '../models/SavedSearch.js';
 import { Pass } from '../models/Pass.js';
 
 // M-a: give every existing campaign a frozen "All voters (initial)" walk list +
@@ -36,7 +36,7 @@ async function main() {
     console.log(`  ${c.name}: ${householdIds.length} households / ${voterIds.length} voters`);
     if (!APPLY) continue;
 
-    const walkList = await WalkList.create({
+    const walkList = await SavedSearch.create({
       organizationId: c.organizationId,
       campaignId: c._id,
       name: 'All voters (initial)',
