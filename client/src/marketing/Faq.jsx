@@ -5,7 +5,7 @@ import { Reveal } from './useReveal.jsx';
 const ITEMS = [
   {
     q: 'How fast can we be knocking doors?',
-    a: "Same week. Send us your voter file in any vendor's format — once it's imported and cut, your crews download the app and walk. We set up your first campaign with you on the demo call.",
+    a: "Same day. Send us your voter file in any vendor's format — once it's imported and cut, your crews download the app and walk. We set up your first campaign with you on the demo call.",
   },
   {
     q: 'What happens when a canvasser loses signal?',

@@ -74,7 +74,7 @@ export default function Hero() {
       />
       <DoorDots />
       <div className="relative mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 items-center gap-12 py-20 sm:py-24 lg:grid-cols-[5fr_6fr] lg:gap-14">
+        <div className="grid grid-cols-1 items-center gap-12 py-12 sm:py-24 lg:grid-cols-[5fr_6fr] lg:gap-14">
           <Reveal>
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
               Canvassing software for campaigns and causes
