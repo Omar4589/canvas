@@ -138,6 +138,10 @@ super-admin isn't around. How it works:
 - The next time that person signs in, they're **required to choose a new password** before they can
   do anything. The temporary one stops working the moment they set their own.
 - A temporary password is only good for **72 hours** — after that an admin has to set a new one.
+- When the person sets **their own** password, it has to be reasonably strong: at least 8 characters
+  with an uppercase letter, a lowercase letter, a number, and a special character. A live checklist
+  ticks each rule off as they type. (The admin's *temporary* password isn't held to this — it's
+  short-lived and replaced immediately anyway.)
 
 This means an admin can always rescue someone, but the admin never ends up holding a working password
 to the user's *other* orgs.
@@ -200,8 +204,11 @@ their login email** (that would change how they sign into the *other* orgs). The
   `router.use(['/super-admin','/admin','/mobile'], requireAuth, blockIfMustChangePassword)`. `/auth` is
   deliberately excluded so `change-password`, `me`, `logout` stay reachable.
 - **Self-service change** — `POST /auth/change-password` (`requireAuth` only, no org context). Verifies
-  `currentPassword`, rejects reuse, sets `{ passwordHash, mustChangePassword: false, tempPasswordSetAt: null }`,
-  returns fresh `{ user, memberships }`. The existing JWT stays valid (payload is unaffected).
+  `currentPassword`, **enforces strength on `newPassword` via `strongPasswordSchema`** (8+ with an
+  uppercase, a lowercase, a number, and a special character), rejects reuse, sets
+  `{ passwordHash, mustChangePassword: false, tempPasswordSetAt: null }`, returns fresh
+  `{ user, memberships }`. The existing JWT stays valid (payload is unaffected). This is the endpoint
+  the **forced change** after a temp password also hits, so a rescued user's replacement is strong.
 - **Admin reset** — `PATCH /admin/memberships/:userId/password` now sets a **temporary** password:
   `{ passwordHash, mustChangePassword: true, tempPasswordSetAt: now }`. Still gated by membership in the
   caller's active org, so any of a multi-org user's admins can issue one.
@@ -304,8 +311,18 @@ schemas in [server/src/utils/validators.js](../server/src/utils/validators.js):
   (optional/empty → `undefined`). Replaced a duplicated inline schema in `memberships.js`/`createMember.js`.
 - `usStateSchema` — 2-letter, uppercased, checked against the **real** state set (the exported `STATE_TZ`
   keys in [usStateTimeZone.js](../server/src/utils/usStateTimeZone.js)) — so `"XX"` is rejected.
-- `nameSchema` (trim, 1–80), `emailSchema` (`.email()` + max), `passwordSchema` (min 8 — **no** complexity
-  rule, since it's a temporary password the user replaces at first login), `slugSchema` (kebab-case, orgs).
+- `nameSchema` (trim, 1–80), `emailSchema` (`.email()` + max), `slugSchema` (kebab-case, orgs).
+- **Two password schemas, by who sets it.** `passwordSchema` (min 8, **no** complexity) gates
+  admin-set **temporary** passwords (create-user, admin reset, create-canvasser) — the user replaces
+  them at first login, so complexity would only add friction. `strongPasswordSchema` (8+ with an
+  uppercase, a lowercase, a number, and a special character, via a shared `passwordProblem` message)
+  gates the passwords a user **chooses for themselves** (`POST /auth/change-password`). The same rule
+  set is mirrored in [client/src/lib/validators.js](../client/src/lib/validators.js) and
+  [mobile/lib/validators.js](../mobile/lib/validators.js) (`PASSWORD_RULES` / `passwordChecklist` /
+  `isStrongPassword`) so the live requirements checklist under the new-password field agrees with the
+  server. The two masked-with-toggle password inputs live at `components/PasswordInput.jsx` on each
+  client; every password field uses it (a couple of create-canvasser fields that once rendered the
+  password in cleartext were switched over).
 
 The **server is the authoritative guard**; the clients mirror it for UX only — plain-JS helpers in
 [client/src/lib/validators.js](../client/src/lib/validators.js) power the reusable

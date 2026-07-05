@@ -3,7 +3,7 @@ import { demoMailto } from './contact.js';
 import BrowserFrame from './frames/BrowserFrame.jsx';
 import { Reveal } from './useReveal.jsx';
 import shotMap from '../assets/marketing/shot-map.webp';
-import shotPhoneDoor from '../assets/marketing/shot-phone-door.webp';
+import shotPhoneBooks from '../assets/marketing/shot-phone-books.webp';
 
 // Hero — owns the page's single <h1>. Copy left; right is a real screenshot of
 // the live campaign map in browser chrome with a miniature field-app card
@@ -34,9 +34,9 @@ function DoorDots() {
   );
 }
 
-// A real field-app screenshot (the door recording screen) peeking over the map's
-// corner — the "console and field app on the same map" story. Decorative, so hidden
-// from assistive tech (the map image carries the descriptive alt).
+// A real field-app screenshot (the books map) peeking over the console map's corner
+// — the "console and field app on the same map" story. Decorative, so hidden from
+// assistive tech (the map image carries the descriptive alt).
 function MiniPhone() {
   return (
     <div
@@ -44,7 +44,7 @@ function MiniPhone() {
       aria-hidden="true"
     >
       <img
-        src={shotPhoneDoor}
+        src={shotPhoneBooks}
         alt=""
         width="1206"
         height="2622"

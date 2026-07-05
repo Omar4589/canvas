@@ -3,7 +3,7 @@ import { Reveal } from './useReveal.jsx';
 import shotTurfs from '../assets/marketing/shot-turfs.webp';
 import shotTimeline from '../assets/marketing/shot-timeline.webp';
 import shotPhoneBooks from '../assets/marketing/shot-phone-books.webp';
-import shotPhoneDoor from '../assets/marketing/shot-phone-door.webp';
+import shotPhoneSurvey from '../assets/marketing/shot-phone-survey.webp';
 
 // Product tour — alternating copy + real screenshots for the three operating surfaces
 // (turf cutting, the field app, live oversight), all captured from the seeded demo.
@@ -76,8 +76,8 @@ function FieldAppShots() {
         className="relative z-10 w-[236px] shrink-0 sm:w-[264px]"
       />
       <PhoneShot
-        src={shotPhoneDoor}
-        alt="The Doorline door screen: the address, the voters there, and one-tap Not home, Wrong address, and Refused buttons"
+        src={shotPhoneSurvey}
+        alt="The Doorline survey screen: a door script, the support question with read-aloud text, and conditional follow-up questions"
         className="-ml-14 mb-10 hidden w-[210px] shrink-0 sm:block sm:w-[232px]"
       />
     </div>

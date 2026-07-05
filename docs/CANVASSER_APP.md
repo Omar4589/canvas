@@ -248,8 +248,11 @@ for both, since the endpoints are role-agnostic.
   multi-org guard). On success the screen re-caches the user (`saveCurrentUser` / `saveMemberships`) so
   the drawer's account card and greetings refresh.
 - **Change password:** current / new / confirm, inline. Posts to the existing
-  `POST /auth/change-password` (requires the current password, new ≥ 8 chars) and clears the fields on
-  success. There is no email-reset flow — the user is logged in, so it's always a known-password change.
+  `POST /auth/change-password` (requires the current password; the **new** password must meet the
+  strength rules — 8+ with an uppercase, a lowercase, a number, and a special character — shown as a
+  **live checklist** under the field as you type, `isStrongPassword` /`PasswordRequirements` from
+  [lib/validators.js](../mobile/lib/validators.js)) and clears the fields on success. There is no
+  email-reset flow — the user is logged in, so it's always a known-password change.
 
 ## The My Stats page
 

@@ -201,7 +201,7 @@ the reconnect listener drains it the moment signal returns, without the canvasse
 | `GET /admin/households/map` | [routes/admin/households.js](../server/src/routes/admin/households.js) | `{ households, canvassers[], activities[], total }` | Params: `campaignId, from, to, status, userId, questionKey, option, includeActivities, effortId, passId`. Heavy: all matching households + 5 parallel queries (voters, surveys, last-activity aggregate, canvasser directory, optional activities). `activities` (pings) only when `includeActivities=1`. **With `passId`** the door set is scoped to that round's books AND each door's `status`/`lastAction`/surveys are resolved **per-round** (`getPassStatusMap` + `passId`-scoped activity/survey queries; a door untouched that round reads `unknocked`) — the audit reflects the selected round, not the global latest. The `status=` **filter** is also applied against the per-round status when `passId` is set, so the door set matches the colors shown. |
 | `GET /mobile/bootstrap` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ user, campaign, surveys, households[], voters[], books[], generatedAt }` | Canvasser-scoped to assigned books on active rounds; fully-voted doors dropped. The map's initial load. |
 | `GET /mobile/changes?since=` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ serverTime, households[], voters[] }` | Delta: households with `updatedAt > since` (+ their voters). Client patches the bootstrap cache so multiple canvassers stay in sync. |
-| `GET /mobile/me/today?since=` | [routes/mobile/me.js](../server/src/routes/mobile/me.js) | Shift stats | Powers the bottom-sheet progress (doors, responses, pace, distance). |
+| `GET /mobile/me/today?since=` | [routes/mobile/me.js](../server/src/routes/mobile/me.js) | Shift stats | Powers the bottom-sheet **Today's Progress** (doors, responses, remaining, pace, distance). Refetched on the 120s poll **and immediately when a knock/survey is confirmed** — the record flow invalidates `['mobile','me']` (see the intervals note below). |
 | `GET /admin/reports/canvassers/:userId/path` | [routes/admin/reports.js](../server/src/routes/admin/reports.js) | One canvasser's pings | Feeds the single-canvasser path map. |
 
 `GET /admin/households/map` activity shape: `{ id, householdId, actionType, timestamp,
@@ -241,6 +241,16 @@ Recording an action does **not** wait for any of these intervals: the optimistic
 recolors the door immediately and the submit runs in the background. The 30s `changes` poll only
 *reconciles* other canvassers' edits — it returns only households the server changed since `since=`, so
 it won't revert a local optimistic change the server hasn't recorded yet.
+
+The **Today's Progress counter** likewise doesn't wait for the 120s `me/today` poll: on a
+**server-confirmed** knock/survey, the record flow invalidates `['mobile','me']` (`invalidateKeys` in
+[recordAction.js](../mobile/lib/recordAction.js), passed from `recordHouseholdAction` and the survey
+submit), so the counter refetches the **authoritative** counts within the write's round-trip — no
+optimistic increment, so re-knocking a door already counted today can't double-count. A
+**queued/offline** write skips it (the server hasn't counted it yet, so a refetch would show the
+pre-knock number); those counts catch up on the next poll, the reconnect-flush, or a manual refresh.
+The 120s poll is now just a backstop. (Pin correction uses the same `optimisticSubmit` but does **not**
+opt into `invalidateKeys` — moving a pin doesn't change the daily counts.)
 
 **A full `bootstrap` refetch is the one thing that *would* clobber an optimistic recolor** — it returns
 the server's current state, which lags a just-recorded action by the round-trip, so one resolving right
