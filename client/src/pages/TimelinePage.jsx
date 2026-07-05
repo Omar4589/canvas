@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import Segmented from '../components/ui/Segmented.jsx';
 import { todayInTz, shiftDays, formatDay } from '../lib/datePresets.js';
 import TimelineGrid from '../components/TimelineGrid.jsx';
@@ -22,6 +22,7 @@ function buildQuery(params) {
 export default function TimelinePage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
+  const { homePath } = useAuth(); // /admin for admins, /campaigns for leads (no Overview)
   const [day, setDay] = useState(null);
   const dayTouchedRef = useRef(false);
   const [metric, setMetric] = useState('knocks');
@@ -78,10 +79,10 @@ export default function TimelinePage() {
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
         <h1 className="text-xl font-semibold text-fg">Campaign not found</h1>
         <Link
-          to="/admin"
+          to={homePath}
           className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
         >
-          Go to Overview
+          {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
         </Link>
       </div>
     );

@@ -1,6 +1,6 @@
 # Saved searches (saved door sets you carve walk lists from)
 
-> Filename is `WALKLISTS.md` and the underlying model is `WalkList`; this feature is shown to users as a **Saved search**.
+> Filename is `WALKLISTS.md` and the underlying model is `SavedSearch` (formerly `WalkList`; the DB collection is still `walklists`, and the `/walklists` route + `walkLists` payload key are unchanged). This feature is shown to users as a **Saved search**.
 
 A **saved search** is a saved, named, **frozen** set of doors carved out of a campaign's voter pool. You
 build one, then hand it to a **walk list** to give that walk list its doors. Saved searches are the bridge
@@ -132,7 +132,7 @@ resolver), [services/import/parseVoterIdList.js](../server/src/services/import/p
 
 | Model | File | Notes |
 |---|---|---|
-| `WalkList` | [models/WalkList.js](../server/src/models/WalkList.js) | A **frozen** selection (the `WalkList` model backs the user-facing **saved search**). `filter` (the builder's criteria, kept for reference), frozen `householdIds`/`voterIds` + `householdCount`/`voterCount` (the source of truth — saved searches do **not** re-resolve), `source` (`'filter'` \| `'csv'`), and `sourceMeta` (`fileName`, `idColumn`, `idsInFile`, `matchedVoters`, `notFound`) for CSV provenance/audit. |
+| `SavedSearch` | [models/SavedSearch.js](../server/src/models/SavedSearch.js) | A **frozen** selection (the `SavedSearch` model — formerly `WalkList`, collection still `walklists` — backs the user-facing **saved search**). `filter` (the builder's criteria, kept for reference), frozen `householdIds`/`voterIds` + `householdCount`/`voterCount` (the source of truth — saved searches do **not** re-resolve), `source` (`'filter'` \| `'csv'`), and `sourceMeta` (`fileName`, `idColumn`, `idsInFile`, `matchedVoters`, `notFound`) for CSV provenance/audit. |
 
 Inside `filter`, survey predicates are split across two fields because they combine differently:
 

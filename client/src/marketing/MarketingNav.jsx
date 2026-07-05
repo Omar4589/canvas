@@ -17,7 +17,7 @@ const SECTIONS = [
 ];
 
 export default function MarketingNav() {
-  const { user, loading } = useAuth();
+  const { user, loading, homePath } = useAuth();
   const [open, setOpen] = useState(false);
 
   return (
@@ -53,7 +53,7 @@ export default function MarketingNav() {
             {!loading &&
               (user ? (
                 <Link
-                  to="/admin"
+                  to={homePath}
                   className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4"
                 >
                   <span className="sm:hidden">Dashboard</span>

@@ -234,7 +234,7 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 | Active passes (derived) | [services/passes/activePasses.js](../server/src/services/passes/activePasses.js) | `activePassIds(campaignId)` derives the live passes from `Pass.status==='active'` — **one per active walk list** (a campaign can have several at once). There is **no** `Campaign.activePassId` field. |
 | `Household.turfId` / `walkOrder` | [models/Household.js](../server/src/models/Household.js) | Denormalized mirror of "which book + position" for the household; `null` until assigned by a cut. |
 | `TurfAssignment` | [models/TurfAssignment.js](../server/src/models/TurfAssignment.js) | Which user is assigned which book on which pass (`{userId, campaignId, passId, turfId}`); drives the mobile bootstrap's per-canvasser scoping. |
-| `WalkList` | [models/WalkList.js](../server/src/models/WalkList.js) | Frozen `householdIds[]` snapshot a pass can target; **immutable** w.r.t. later imports. |
+| `SavedSearch` | [models/SavedSearch.js](../server/src/models/SavedSearch.js) | Frozen `householdIds[]` snapshot a pass can target; **immutable** w.r.t. later imports. (Formerly `WalkList`.) |
 
 ## B. Generation pipeline
 

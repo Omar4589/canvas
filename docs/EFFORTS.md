@@ -191,7 +191,7 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   `409 doors-owned` unless `force:true` (the re-carve path), which also clears their `turfId`/`walkOrder`
   and pulls them from their old book (`recomputeTurf`). Disjointness can never be violated silently.
 - **Saved searches are source-agnostic here.** A saved search from the filter builder and one from an uploaded
-  Voter-ID CSV are both just frozen `householdIds` (`WalkList.source` = `'filter' | 'csv'`), so
+  Voter-ID CSV are both just frozen `householdIds` (`SavedSearch.source` = `'filter' | 'csv'`), so
   seed/claim/re-carve treat them identically. See [WALKLISTS.md](WALKLISTS.md).
 - **Archiving doesn't release doors.** Archive is only a status flag — it does **not** set `effortId`
   back to `null` (only **deleting** a walk list does, and a walk list with non-draft passes can't be

@@ -14,8 +14,8 @@ survey that's already collecting answers.
 
 Related: [METRICS.md](METRICS.md) ("Surveys" and "Surveyed voters" definitions),
 [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (one survey per voter **per pass**),
-[EFFORTS.md](EFFORTS.md) (an **effort can override** the campaign survey — the door's effort survey
-wins, falling back to the campaign default),
+[EFFORTS.md](EFFORTS.md) (a **walk list can override** the campaign survey — the door's walk-list
+survey wins, falling back to the campaign default),
 [VOTERS.md](VOTERS.md) (editing a single response on a voter's profile).
 
 ---
@@ -171,6 +171,27 @@ A few rules this tab enforces:
   — nothing is lost or mixed. If the survey you pick **already has responses**, the tab warns you
   that new answers will report **separately** from those.
 - There's **no "unlink"** — to stop using a survey you simply **change to a different one**.
+
+## Different surveys for different walk lists
+
+Most campaigns use one survey for everyone — but sometimes different groups need **different
+questions** (say a persuasion script for swing doors and a volunteer-recruitment script for your
+base). You don't need separate campaigns for that: a **walk list can override the campaign's default
+survey with its own**.
+
+- The campaign's **Survey** tab sets the **default** — the survey every door uses unless its walk
+  list says otherwise.
+- On the **Walk Lists** page, each walk list has a **Survey override** dropdown (defaults to
+  "Campaign default"). Point one walk list at "GOTV" and leave another on the default, and each group
+  gets its own questionnaire.
+- In the field the app resolves the survey **per door** (household → its book → its walk list's
+  override, else the campaign default), so a canvasser working doors from two walk lists sees a
+  walk-list switcher and always gets the right questions for the door in front of them. The server
+  rejects a submission that doesn't match the door's survey, so the wrong one can't be recorded.
+- **Reporting keeps them separate.** Every response is stamped with both the survey it used and the
+  walk list it came from, so answers never bleed across surveys and you can filter any report to a
+  single walk list. (See the next section, and [EFFORTS.md](EFFORTS.md) for the mechanics — internally
+  the override lives on the walk list's `Effort.surveyTemplateId`.)
 
 ## Reading results when a campaign used more than one survey
 
@@ -487,7 +508,7 @@ the entire surface rename/merge/delete must rewrite:
 
 1. `SurveyTemplate.questions[].options[].tag` — the per-option label (what the rollup actually reads),
 2. `SurveyTemplate.tags[]` — the per-survey **palette** (derived/kept-in-sync, see §A),
-3. `WalkList.filter.answerTagFilters[].tag` — saved-search "by tag" filters.
+3. `SavedSearch.filter.answerTagFilters[].tag` — saved-search "by tag" filters.
 
 **Library operations.** [services/surveys/tagOps.js](../server/src/services/surveys/tagOps.js)
 implements the bounded bulk rewrite over those three homes:
@@ -563,7 +584,7 @@ already built, and sorts by `voterCount` desc. Rendered by `TagResults`
 this when you expand a tag.
 
 **Collect by tag (walk lists).** The walk-list filter gained `answerTagFilters: [{ tag }]`
-([models/WalkList.js](../server/src/models/WalkList.js) `tagFilterSchema`).
+([models/SavedSearch.js](../server/src/models/SavedSearch.js) `tagFilterSchema`).
 `resolveWalkList` ([services/walklist/resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js))
 loads `campaign.surveyTemplateId` and, for each tag, turns `answerTagClause(template, tag)` into
 **one household predicate** (`SurveyResponse.distinct('householdId', …)`) — a cross-question OR added

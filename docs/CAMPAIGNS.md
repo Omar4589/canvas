@@ -173,7 +173,7 @@ state — `isActive` is the only lifecycle flag (active ⇄ archived).
   Cascades via [deleteCampaign.js](../server/src/services/campaigns/deleteCampaign.js):
   `deleteCampaignCascade()` removes the voters housed in the campaign's households, then
   `deleteMany({ campaignId })` over **every** campaignId-scoped collection (Household, Effort,
-  EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot, WalkList, VotedUpload, VotedVoter,
+  EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot, SavedSearch, VotedUpload, VotedVoter,
   VotedPendingId, CampaignAssignment, ClientReport, ClientReportMapPoint, ReportShareLink,
   CanvassActivity, SurveyResponse, ImportJob), then the campaign. (ImportJob raw files in GridFS are
   a known minor orphan.)

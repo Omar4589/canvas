@@ -12,7 +12,7 @@ import VoterHighlights from '../components/VoterHighlights.jsx';
 import SetupProgress from '../components/SetupProgress.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
-import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const location = useLocation();
   const justCreated = location.state?.justCreated; // set by CampaignsPage right after create
   const orgTz = useOrgTimeZone();
+  const { homePath } = useAuth(); // /admin for admins, /campaigns for leads (no Overview)
   // dateRange stays null until the campaign's timezone is known, so presets resolve in
   // the campaign's clock (not the device's) and range queries never fetch a device-tz window.
   const [dateRange, setDateRange] = useState(null);
@@ -183,13 +184,13 @@ export default function DashboardPage() {
           {!campaignId ? 'No campaign selected' : 'Campaign not found'}
         </h1>
         <p className="text-sm text-fg-muted">
-          Pick a campaign from the Overview to view its dashboard.
+          Pick a campaign to view its dashboard.
         </p>
         <Link
-          to="/admin"
+          to={homePath}
           className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
         >
-          Go to Overview
+          {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
         </Link>
       </div>
     );
