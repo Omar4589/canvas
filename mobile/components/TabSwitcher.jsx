@@ -48,8 +48,8 @@ function makeStyles(t) {
       borderColor: t.colors.border,
     },
     pillActive: {
-      backgroundColor: t.colors.textPrimary,
-      borderColor: t.colors.textPrimary,
+      backgroundColor: t.colors.brand,
+      borderColor: t.colors.brand,
     },
     text: { color: t.colors.textPrimary, fontWeight: '600', fontSize: 13 },
     textActive: { color: t.colors.textInverse },
