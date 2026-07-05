@@ -19,6 +19,9 @@ import {
   householdsToGeoJSON,
   activitiesToPingsGeoJSON,
   activitiesToLinesGeoJSON,
+  pointToGeoJSON,
+  FIRST_KNOCK_COLOR,
+  LAST_KNOCK_COLOR,
   registerLayers,
 } from '../lib/mapRender.js';
 
@@ -280,6 +283,28 @@ export default function MapPage() {
     }
   }, [showCanvasserPins, mapReady, styleEpoch]);
 
+  // First & last knock — only when auditing ONE canvasser with pings on. The endpoint
+  // already scopes `activities` to that userId + date window, so first = earliest ping,
+  // last = most recent. Skip "last" when there's a single ping (don't double-mark it).
+  const firstLastKnock = useMemo(() => {
+    if (!canvasserId || !showCanvasserPins) return { first: null, last: null };
+    const withLoc = activities.filter(
+      (a) => a.location?.lng != null && a.location?.lat != null && a.timestamp
+    );
+    if (!withLoc.length) return { first: null, last: null };
+    const sorted = [...withLoc].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    return { first: sorted[0], last: sorted.length > 1 ? sorted[sorted.length - 1] : null };
+  }, [canvasserId, showCanvasserPins, activities]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const firstSrc = mapRef.current.getSource('first-knock');
+    const lastSrc = mapRef.current.getSource('last-knock');
+    if (!firstSrc || !lastSrc) return;
+    firstSrc.setData(pointToGeoJSON(firstLastKnock.first));
+    lastSrc.setData(pointToGeoJSON(firstLastKnock.last));
+  }, [firstLastKnock, mapReady, styleEpoch]);
+
   const selectedHousehold = useMemo(
     () => households.find((h) => h.id === selected) || null,
     [selected, households]
@@ -425,6 +450,23 @@ export default function MapPage() {
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
           <MapStyleControl value={styleId} onChange={setStyle} menuDirection="down" className="absolute left-4 top-4 z-10 items-start" />
+          {firstLastKnock.first && (
+            <div
+              style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 10 }}
+              className="rounded-lg border border-border bg-card/95 px-3 py-2 text-xs shadow-lg"
+            >
+              <div className="flex items-center gap-2">
+                <span style={{ width: 11, height: 11, borderRadius: 999, border: `2px solid ${FIRST_KNOCK_COLOR}` }} />
+                <span className="text-fg-muted">Start (first knock)</span>
+              </div>
+              {firstLastKnock.last && (
+                <div className="mt-1 flex items-center gap-2">
+                  <span style={{ width: 11, height: 11, borderRadius: 999, border: `2px solid ${LAST_KNOCK_COLOR}` }} />
+                  <span className="text-fg-muted">Latest knock</span>
+                </div>
+              )}
+            </div>
+          )}
           {selectedHousehold && !moveTarget && (
             <div
               style={{

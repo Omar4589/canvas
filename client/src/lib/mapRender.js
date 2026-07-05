@@ -159,6 +159,27 @@ export function activitiesToLinesGeoJSON(activities, householdsById) {
 
 export const EMPTY_FC = { type: 'FeatureCollection', features: [] };
 
+// A single-point FeatureCollection for one activity (or empty when null) — powers the
+// first/last-knock highlight markers (the ping where a canvasser started vs their latest).
+export function pointToGeoJSON(activity) {
+  if (activity?.location?.lng == null || activity?.location?.lat == null) return EMPTY_FC;
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [activity.location.lng, activity.location.lat] },
+        properties: { activityId: activity.id },
+      },
+    ],
+  };
+}
+
+// The first/last-knock highlight colors — deliberately OUTSIDE the status palette
+// (green/blue/red/amber/purple/gray) so they read as route endpoints, not statuses.
+export const FIRST_KNOCK_COLOR = '#0891b2'; // cyan
+export const LAST_KNOCK_COLOR = '#db2777'; // pink
+
 // (Re)create all sources/layers/images. Called on initial `load` AND after every
 // `setStyle` (a style swap wipes custom sources/layers/images), so the basemap can
 // be switched at runtime. `dark` lightens the unknocked pin + ping lines for
@@ -279,4 +300,44 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
     },
     'households-symbols'
   );
+
+  // First & last knock — when auditing ONE canvasser, ring their earliest ping ("Start")
+  // and most-recent ping ("Latest") so you can see where they began and where they are now.
+  // Rendered ON TOP (no beforeId) as a hollow ring + a labeled text badge; empty until a
+  // single canvasser is selected (MapPage pushes the data).
+  for (const [key, color, label] of [
+    ['first-knock', FIRST_KNOCK_COLOR, 'Start'],
+    ['last-knock', LAST_KNOCK_COLOR, 'Latest'],
+  ]) {
+    map.addSource(key, { type: 'geojson', data: EMPTY_FC });
+    map.addLayer({
+      id: `${key}-ring`,
+      type: 'circle',
+      source: key,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 12, 13, 16, 16, 20, 18, 24],
+        'circle-color': 'rgba(0,0,0,0)',
+        'circle-stroke-color': color,
+        'circle-stroke-width': 3,
+      },
+    });
+    map.addLayer({
+      id: `${key}-label`,
+      type: 'symbol',
+      source: key,
+      layout: {
+        'text-field': label,
+        'text-size': 12,
+        'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+        'text-offset': [0, -2.1],
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': color,
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 1.4,
+      },
+    });
+  }
 }

@@ -214,6 +214,9 @@ export default function AdminOverview() {
             <SectionHeader title="All active campaigns" />
             <View style={styles.card}>
               <CoverageBar canvass={cumulative.coverage} />
+              <Text style={styles.coverageLine}>
+                {fmt(cumulative.households)} households · {fmt(cumulative.homesKnocked)} knocked ({cumulative.knockedPct ?? 0}%)
+              </Text>
               <View style={styles.divider} />
               <View style={styles.statRow}>
                 <Stat value={cumulative.knocks} label="Knocks" />

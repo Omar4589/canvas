@@ -14,6 +14,7 @@
     "install:all": "npm --prefix server install && npm --prefix client install --include=dev",
     "heroku-postbuild": "npm run install:all && npm run build",
     "seed:admin": "npm --prefix server run seed:admin",
+    "seed:demo": "npm --prefix server run seed:demo --",
     "reconcile:counts": "npm --prefix server run reconcile:counts --",
     "audit:voted-doors": "npm --prefix server run audit:voted-doors --",
     "cleanup:test-campaigns": "npm --prefix server run cleanup:test-campaigns --",

@@ -8,8 +8,8 @@ import {
   Switch,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../lib/api';
@@ -17,6 +17,8 @@ import { loadActiveCampaign } from '../../../lib/cache';
 import { useMapStyle } from '../../../lib/mapStyles';
 import MapStyleControl from '../../../components/MapStyleControl';
 import CampaignChip from '../../../components/CampaignChip';
+import DateRangeBar from '../../../components/DateRangeBar';
+import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
@@ -29,6 +31,39 @@ if (MAPBOX_PUBLIC_TOKEN) {
 
 const DEFAULT_CENTER = [-84.5, 39.0];
 
+// Status filter options (mirror the web MapFilters set).
+const STATUS_OPTIONS = [
+  { key: 'unknocked', label: 'Unknocked' },
+  { key: 'not_home', label: 'Not home' },
+  { key: 'surveyed', label: 'Surveyed' },
+  { key: 'refused', label: 'Refused' },
+  { key: 'wrong_address', label: 'Wrong addr' },
+  { key: 'lit_dropped', label: 'Lit dropped' },
+];
+
+// The first/last-knock highlight colors — deliberately OUTSIDE the status palette so they
+// read as route endpoints, not statuses (matches the web mapRender constants).
+const FIRST_KNOCK_COLOR = '#0891b2'; // cyan
+const LAST_KNOCK_COLOR = '#db2777'; // pink
+
+const one = (v) => (Array.isArray(v) ? v[0] : v) || '';
+
+function pointFeatures(activity) {
+  if (activity?.location?.lng == null || activity?.location?.lat == null) {
+    return { type: 'FeatureCollection', features: [] };
+  }
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [activity.location.lng, activity.location.lat] },
+        properties: {},
+      },
+    ],
+  };
+}
+
 function householdsToFeatures(households) {
   return {
     type: 'FeatureCollection',
@@ -37,7 +72,11 @@ function householdsToFeatures(households) {
       .map((h) => ({
         type: 'Feature',
         id: String(h.id),
-        properties: { id: String(h.id), status: h.status || 'unknocked' },
+        properties: {
+          id: String(h.id),
+          status: h.status || 'unknocked',
+          coordConfidence: h.coordConfidence || '',
+        },
         geometry: {
           type: 'Point',
           coordinates: [h.location.lng, h.location.lat],
@@ -95,17 +134,71 @@ function formatAnswer(answer) {
   return String(answer);
 }
 
+// A filter chip that opens a dropdown menu (canvasser / status / answer).
+function FilterChip({ label, active, open, onPress }) {
+  const styles = useThemedStyles(makeStyles);
+  return (
+    <Pressable onPress={onPress} style={[styles.filterChip, active && styles.filterChipActive]}>
+      <Text style={[styles.filterChipText, active && styles.filterChipTextActive]} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text style={styles.filterChevron}>{open ? '▴' : '▾'}</Text>
+    </Pressable>
+  );
+}
+
+function MenuItem({ label, active, dotColor, onPress }) {
+  const styles = useThemedStyles(makeStyles);
+  return (
+    <Pressable onPress={onPress} style={[styles.menuItem, active && styles.menuItemActive]}>
+      {dotColor ? (
+        <View style={[styles.menuDot, { backgroundColor: dotColor }]} />
+      ) : (
+        <View style={styles.menuDotPlaceholder} />
+      )}
+      <Text style={[styles.menuItemText, active && styles.menuItemTextActive]} numberOfLines={1}>
+        {label}
+      </Text>
+      {active ? <Text style={styles.menuCheck}>✓</Text> : null}
+    </Pressable>
+  );
+}
+
 export default function AdminMap() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { styleId, styleURL, setStyle } = useMapStyle();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const qc = useQueryClient();
   const cameraRef = useRef(null);
+  const mapRef = useRef(null);
   const [campaign, setCampaign] = useState(undefined);
   const [showPings, setShowPings] = useState(false);
   const [selected, setSelected] = useState(null);
   const [selectedPing, setSelectedPing] = useState(null);
+  const [moveTarget, setMoveTarget] = useState(null); // household being repositioned
+
+  // Deep-link scope (from a walk list / pass / import "view on map" link) — seeded once
+  // from the route params, clearable in the UI.
+  const params = useLocalSearchParams();
+  const [scope, setScope] = useState({
+    effortId: one(params.effortId),
+    passId: one(params.passId),
+    importId: one(params.importId),
+  });
+  const { effortId, passId, importId } = scope;
+
+  // Audit filters — mirror the web admin map. Default to All time so every door shows.
+  const [range, setRange] = useState(() => {
+    const r = rangeFor('all', null, deviceTimezone());
+    return { preset: 'all', from: r.from, to: r.to };
+  });
+  const [statusFilter, setStatusFilter] = useState([]); // [] = all statuses
+  const [canvasserId, setCanvasserId] = useState('');
+  const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', label: '' });
+  const [live, setLive] = useState(true);
+  const [openMenu, setOpenMenu] = useState(null); // 'canvasser' | 'status' | 'answer' | null
 
   const pingDetailQ = useQuery({
     queryKey: ['admin', 'activity', selectedPing?.id],
@@ -119,22 +212,45 @@ export default function AdminMap() {
   }, []);
 
   const cId = campaign?.id;
+  const tz = campaign?.timeZone || deviceTimezone();
 
   const mapQ = useQuery({
-    queryKey: ['admin', 'households', 'map', cId, showPings],
-    queryFn: () =>
-      api(
-        `/admin/households/map?campaignId=${cId}${
-          showPings ? '&includeActivities=1' : ''
-        }`
-      ),
+    queryKey: [
+      'admin', 'households', 'map', cId, range?.from, range?.to, statusFilter.join(','),
+      canvasserId, answerFilter.questionKey, answerFilter.optionId, effortId, passId, importId, showPings,
+    ],
+    queryFn: () => {
+      const p = new URLSearchParams({ campaignId: String(cId) });
+      if (range?.from) p.set('from', range.from);
+      if (range?.to) p.set('to', range.to);
+      if (statusFilter.length) p.set('status', statusFilter.join(','));
+      if (canvasserId) p.set('userId', canvasserId);
+      if (answerFilter.questionKey) {
+        p.set('questionKey', answerFilter.questionKey);
+        if (answerFilter.optionId) p.set('optionId', answerFilter.optionId);
+      }
+      if (effortId) p.set('effortId', effortId);
+      if (passId) p.set('passId', passId);
+      if (importId) p.set('importId', importId);
+      if (showPings) p.set('includeActivities', '1');
+      return api(`/admin/households/map?${p.toString()}`);
+    },
     enabled: !!cId,
     staleTime: 30 * 1000,
-    refetchInterval: showPings ? 30 * 1000 : false,
+    refetchInterval: live ? 20 * 1000 : false,
+  });
+
+  // Survey (for the answer-filter chips) — same source the web map uses.
+  const surveyQ = useQuery({
+    queryKey: ['admin', 'survey-results', cId],
+    queryFn: () => api(`/admin/reports/survey-results?campaignId=${cId}`),
+    enabled: !!cId,
+    staleTime: 5 * 60 * 1000,
   });
 
   const households = mapQ.data?.households || [];
   const activities = mapQ.data?.activities || [];
+  const canvassers = mapQ.data?.canvassers || [];
 
   const householdFeatures = useMemo(() => householdsToFeatures(households), [households]);
   const pingFeatures = useMemo(
@@ -154,8 +270,88 @@ export default function AdminMap() {
     return m;
   }, [activities]);
 
+  // First & last knock — only when auditing ONE canvasser with pings on. The endpoint
+  // already scopes activities to that userId + date window; first = earliest, last = most recent.
+  const firstLastKnock = useMemo(() => {
+    if (!canvasserId || !showPings) return { first: null, last: null };
+    const withLoc = activities.filter(
+      (a) => a.location?.lng != null && a.location?.lat != null && a.timestamp
+    );
+    if (!withLoc.length) return { first: null, last: null };
+    const sorted = [...withLoc].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    return { first: sorted[0], last: sorted.length > 1 ? sorted[sorted.length - 1] : null };
+  }, [canvasserId, showPings, activities]);
+
+  // Labels for the filter chips.
+  const canvasserLabel = useMemo(() => {
+    if (!canvasserId) return 'All canvassers';
+    const c = canvassers.find((x) => String(x.id) === String(canvasserId));
+    return c ? `${c.firstName} ${c.lastName}` : 'Canvasser';
+  }, [canvasserId, canvassers]);
+  const statusLabel = statusFilter.length === 0
+    ? 'All statuses'
+    : statusFilter.length === 1
+      ? (STATUS_OPTIONS.find((s) => s.key === statusFilter[0])?.label || '1 status')
+      : `${statusFilter.length} statuses`;
+
+  // Choice questions for the answer filter (mirror the web MapFilters derivation).
+  const surveyQuestions = useMemo(() => {
+    const qs = surveyQ.data?.questions || [];
+    return qs.filter(
+      (q) => (q.type === 'single_choice' || q.type === 'multiple_choice') && Array.isArray(q.options) && q.options.length
+    );
+  }, [surveyQ.data]);
+
+  const toggleMenu = useCallback((m) => setOpenMenu((cur) => (cur === m ? null : m)), []);
+  const toggleStatus = useCallback(
+    (k) => setStatusFilter((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k])),
+    []
+  );
+
+  // Move-pin: PATCH the door's location, then refetch the map. Mirrors the web endpoint
+  // (scope defaults to 'unit' server-side).
+  const moveMut = useMutation({
+    mutationFn: ({ id, lat, lng }) =>
+      api(`/admin/campaigns/${cId}/households/${id}/location`, { method: 'PATCH', body: { lat, lng } }),
+    onSuccess: () => {
+      setMoveTarget(null);
+      qc.invalidateQueries({ queryKey: ['admin', 'households', 'map'] });
+    },
+  });
+
+  // Enter move mode: close the sheet and center the camera tightly on the door so the
+  // fixed screen crosshair starts right on top of it. The user then drags the map to
+  // reposition the crosshair, and Save reads the map center.
+  function enterMoveMode(h) {
+    setSelected(null);
+    setSelectedPing(null);
+    setOpenMenu(null);
+    moveMut.reset();
+    setMoveTarget(h);
+    if (h?.location != null) {
+      cameraRef.current?.setCamera({
+        centerCoordinate: [h.location.lng, h.location.lat],
+        zoomLevel: 18,
+        animationDuration: 500,
+      });
+    }
+  }
+
+  async function saveMovedPin() {
+    if (!moveTarget || !mapRef.current) return;
+    let center;
+    try {
+      center = await mapRef.current.getCenter(); // [lng, lat]
+    } catch {
+      return;
+    }
+    if (!Array.isArray(center) || center.length < 2) return;
+    moveMut.mutate({ id: moveTarget.id, lng: center[0], lat: center[1] });
+  }
+
   const onPinPress = useCallback(
     (e) => {
+      if (moveTarget) return;
       const f = e.features?.[0];
       if (!f) return;
       const h = householdsById.get(String(f.properties?.id));
@@ -164,11 +360,12 @@ export default function AdminMap() {
         setSelected(h);
       }
     },
-    [householdsById]
+    [householdsById, moveTarget]
   );
 
   const onPingPress = useCallback(
     (e) => {
+      if (moveTarget) return;
       const f = e.features?.[0];
       if (!f) return;
       const a = activitiesById.get(String(f.properties?.id));
@@ -177,7 +374,7 @@ export default function AdminMap() {
         setSelectedPing(a);
       }
     },
-    [activitiesById]
+    [activitiesById, moveTarget]
   );
 
   if (!MAPBOX_PUBLIC_TOKEN) {
@@ -214,7 +411,7 @@ export default function AdminMap() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Mapbox.MapView style={{ flex: 1 }} styleURL={styleURL}>
+      <Mapbox.MapView ref={mapRef} style={{ flex: 1 }} styleURL={styleURL}>
         <Mapbox.Camera
           ref={cameraRef}
           defaultSettings={{ centerCoordinate: initialCenter, zoomLevel: 12 }}
@@ -236,6 +433,19 @@ export default function AdminMap() {
         />
 
         <Mapbox.ShapeSource id="admin-households" shape={householdFeatures} onPress={onPinPress}>
+          {/* Amber "approximate" ring under any interpolated (non-rooftop) geocode, so
+              admins can spot the pins most likely to be off. Below the house icon. */}
+          <Mapbox.CircleLayer
+            id="admin-approx-ring"
+            filter={['==', ['get', 'coordConfidence'], 'interpolated']}
+            style={{
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 13, 17, 18],
+              circleColor: 'rgba(0,0,0,0)',
+              circleStrokeColor: '#f59e0b',
+              circleStrokeWidth: 2,
+              circleStrokeOpacity: 0.9,
+            }}
+          />
           <Mapbox.SymbolLayer
             id="admin-household-pins"
             style={{
@@ -291,9 +501,65 @@ export default function AdminMap() {
             />
           </Mapbox.ShapeSource>
         )}
+
+        {/* First & last knock — when auditing ONE canvasser, ring their earliest ping
+            ("Start") and most-recent ping ("Latest") so you can see where they began and
+            where they are now. Rendered ON TOP as a hollow ring + labeled badge. */}
+        {firstLastKnock.first && (
+          <Mapbox.ShapeSource id="admin-first-knock" shape={pointFeatures(firstLastKnock.first)}>
+            <Mapbox.CircleLayer
+              id="admin-first-ring"
+              style={{
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 12, 13, 16, 16, 20, 18, 24],
+                circleColor: 'rgba(0,0,0,0)',
+                circleStrokeColor: FIRST_KNOCK_COLOR,
+                circleStrokeWidth: 3,
+              }}
+            />
+            <Mapbox.SymbolLayer
+              id="admin-first-label"
+              style={{
+                textField: 'Start',
+                textSize: 12,
+                textColor: FIRST_KNOCK_COLOR,
+                textHaloColor: '#ffffff',
+                textHaloWidth: 1.4,
+                textOffset: [0, -2.1],
+                textAllowOverlap: true,
+                textIgnorePlacement: true,
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
+        {firstLastKnock.last && (
+          <Mapbox.ShapeSource id="admin-last-knock" shape={pointFeatures(firstLastKnock.last)}>
+            <Mapbox.CircleLayer
+              id="admin-last-ring"
+              style={{
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 12, 13, 16, 16, 20, 18, 24],
+                circleColor: 'rgba(0,0,0,0)',
+                circleStrokeColor: LAST_KNOCK_COLOR,
+                circleStrokeWidth: 3,
+              }}
+            />
+            <Mapbox.SymbolLayer
+              id="admin-last-label"
+              style={{
+                textField: 'Latest',
+                textSize: 12,
+                textColor: LAST_KNOCK_COLOR,
+                textHaloColor: '#ffffff',
+                textHaloWidth: 1.4,
+                textOffset: [0, -2.1],
+                textAllowOverlap: true,
+                textIgnorePlacement: true,
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
       </Mapbox.MapView>
 
-      {/* Top bar */}
+      {/* Top chrome — campaign + audit filters (date, canvasser, status, answer) + toggles. */}
       <SafeAreaView edges={['top']} style={styles.topBarWrap} pointerEvents="box-none">
         <View style={styles.topBar}>
           <View style={{ flex: 1 }}>
@@ -301,32 +567,167 @@ export default function AdminMap() {
           </View>
         </View>
 
-        <View style={styles.subBar}>
-          <View style={styles.toggleChip}>
-            <Switch
-              value={showPings}
-              onValueChange={setShowPings}
-              trackColor={{ true: colors.brand, false: colors.border }}
-              thumbColor={colors.card}
-            />
-            <Text style={styles.toggleLabel}>Canvasser pings</Text>
-          </View>
-          <View style={styles.countChip}>
-            <Text style={styles.countText}>
-              <Text style={styles.countStrong}>{households.length}</Text> houses
-            </Text>
+        <View style={styles.chromeCard}>
+          <DateRangeBar value={range} onChange={(v) => { setRange(v); setOpenMenu(null); }} tz={tz} />
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipScroll}
+          >
+            <FilterChip label={canvasserLabel} active={!!canvasserId} open={openMenu === 'canvasser'} onPress={() => toggleMenu('canvasser')} />
+            <FilterChip label={statusLabel} active={statusFilter.length > 0} open={openMenu === 'status'} onPress={() => toggleMenu('status')} />
+            {surveyQuestions.length > 0 && (
+              <FilterChip
+                label={answerFilter.questionKey ? (answerFilter.label || 'Answer') : 'Any answer'}
+                active={!!answerFilter.questionKey}
+                open={openMenu === 'answer'}
+                onPress={() => toggleMenu('answer')}
+              />
+            )}
+          </ScrollView>
+
+          {(effortId || passId || importId) && (
+            <View style={styles.scopeRow}>
+              <Text style={styles.scopeText} numberOfLines={1}>
+                Scoped to {effortId ? 'a walk list' : passId ? 'a pass' : 'an import'}
+              </Text>
+              <Pressable onPress={() => setScope({ effortId: '', passId: '', importId: '' })} hitSlop={8}>
+                <Text style={styles.scopeClear}>✕ clear</Text>
+              </Pressable>
+            </View>
+          )}
+
+          <View style={styles.subBar}>
+            <View style={styles.toggleChip}>
+              <Switch value={showPings} onValueChange={setShowPings} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
+              <Text style={styles.toggleLabel}>Pings</Text>
+            </View>
+            <View style={styles.toggleChip}>
+              <Switch value={live} onValueChange={setLive} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
+              <Text style={styles.toggleLabel}>Live</Text>
+            </View>
+            <View style={styles.countChip}>
+              <Text style={styles.countText}>
+                <Text style={styles.countStrong}>{households.length}</Text> houses
+              </Text>
+            </View>
           </View>
         </View>
+
+        {/* Dropdown menus — one open at a time, rendered below the chrome. */}
+        {openMenu === 'canvasser' && (
+          <View style={styles.menu}>
+            <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
+              <MenuItem label="All canvassers" active={!canvasserId} onPress={() => { setCanvasserId(''); setOpenMenu(null); }} />
+              {canvassers.map((c) => (
+                <MenuItem
+                  key={c.id}
+                  label={`${c.firstName} ${c.lastName}`}
+                  active={String(canvasserId) === String(c.id)}
+                  onPress={() => { setCanvasserId(String(c.id)); setOpenMenu(null); }}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        )}
+        {openMenu === 'status' && (
+          <View style={styles.menu}>
+            <MenuItem label="All statuses" active={statusFilter.length === 0} onPress={() => setStatusFilter([])} />
+            {STATUS_OPTIONS.map((s) => (
+              <MenuItem key={s.key} label={s.label} active={statusFilter.includes(s.key)} dotColor={colors.status[s.key]} onPress={() => toggleStatus(s.key)} />
+            ))}
+          </View>
+        )}
+        {openMenu === 'answer' && (
+          <View style={styles.menu}>
+            <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+              <MenuItem label="Any answer" active={!answerFilter.questionKey} onPress={() => { setAnswerFilter({ questionKey: '', optionId: '', label: '' }); setOpenMenu(null); }} />
+              {surveyQuestions.map((q) => (
+                <View key={q.key}>
+                  <Text style={styles.menuGroup}>{q.label}</Text>
+                  {q.options.filter((o) => !o.retired).map((o) => (
+                    <MenuItem
+                      key={o.id || o.option}
+                      label={o.option}
+                      active={answerFilter.questionKey === q.key && answerFilter.optionId === o.id}
+                      onPress={() => { setAnswerFilter({ questionKey: q.key, optionId: o.id, label: o.option }); setOpenMenu(null); }}
+                    />
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
       </SafeAreaView>
+
+      {/* First/last-knock legend — only while auditing one canvasser. */}
+      {firstLastKnock.first && !selected && !selectedPing && (
+        <View style={[styles.legend, { bottom: insets.bottom + spacing.lg }]}>
+          <View style={styles.legendRow}>
+            <View style={[styles.legendDot, { borderColor: FIRST_KNOCK_COLOR }]} />
+            <Text style={styles.legendText}>Start (first knock)</Text>
+          </View>
+          {firstLastKnock.last && (
+            <View style={styles.legendRow}>
+              <View style={[styles.legendDot, { borderColor: LAST_KNOCK_COLOR }]} />
+              <Text style={styles.legendText}>Latest knock</Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Move-pin mode: a fixed crosshair at screen center + a bottom action bar. The
+          user drags the MAP (not a marker) so the crosshair lands on the true door —
+          this dodges the MarkerView/PointAnnotation pinch-zoom issues on Fabric. */}
+      {moveTarget && (
+        <>
+          <View pointerEvents="none" style={styles.crosshairWrap}>
+            <View style={styles.crosshairRing} />
+            <View style={styles.crosshairDot} />
+          </View>
+          <SafeAreaView edges={['bottom']} style={styles.moveBar}>
+            <Text style={styles.moveTitle}>Move pin</Text>
+            <Text style={styles.moveSub} numberOfLines={2}>
+              Drag the map so the crosshair sits on {moveTarget.addressLine1}, then save.
+            </Text>
+            {moveMut.isError && (
+              <Text style={styles.moveErr}>
+                {moveMut.error?.message || 'Could not move the pin.'}
+              </Text>
+            )}
+            <View style={styles.moveBtnRow}>
+              <Pressable
+                onPress={() => setMoveTarget(null)}
+                disabled={moveMut.isPending}
+                style={[styles.closeButton, { flex: 1, marginRight: 6, marginTop: 0 }]}
+              >
+                <Text style={styles.closeButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={saveMovedPin}
+                disabled={moveMut.isPending}
+                style={[styles.primaryButton, { flex: 1, marginLeft: 6, alignItems: 'center' }]}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {moveMut.isPending ? 'Saving…' : 'Save location'}
+                </Text>
+              </Pressable>
+            </View>
+          </SafeAreaView>
+        </>
+      )}
 
       {/* Base-map picker, bottom-right. Rendered before the selection sheet so it
           tucks behind it when a household is open. */}
-      <MapStyleControl
-        value={styleId}
-        onChange={setStyle}
-        menuDirection="up"
-        style={{ position: 'absolute', right: spacing.lg, bottom: insets.bottom + spacing.lg }}
-      />
+      {!moveTarget && (
+        <MapStyleControl
+          value={styleId}
+          onChange={setStyle}
+          menuDirection="up"
+          style={{ position: 'absolute', right: spacing.lg, bottom: insets.bottom + spacing.lg }}
+        />
+      )}
 
       {selected && (
         <SafeAreaView edges={['bottom']} style={styles.sheet}>
@@ -366,9 +767,20 @@ export default function AdminMap() {
             </View>
           )}
 
-          <Pressable onPress={() => setSelected(null)} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>Close</Text>
-          </Pressable>
+          <View style={styles.sheetButtons}>
+            <Pressable
+              onPress={() => enterMoveMode(selected)}
+              style={[styles.primaryButton, { flex: 1, marginRight: 6, alignItems: 'center' }]}
+            >
+              <Text style={styles.primaryButtonText}>Move pin</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setSelected(null)}
+              style={[styles.closeButton, { flex: 1, marginLeft: 6, marginTop: 0 }]}
+            >
+              <Text style={styles.closeButtonText}>Close</Text>
+            </Pressable>
+          </View>
         </SafeAreaView>
       )}
 
@@ -586,6 +998,141 @@ function makeStyles(t) {
   },
   countText: { fontSize: 12, color: colors.textSecondary },
   countStrong: { color: colors.textPrimary, fontWeight: '700' },
+
+  chromeCard: { paddingTop: spacing.xs },
+  chipScroll: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm, gap: spacing.sm },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+    gap: 6,
+  },
+  filterChipActive: { backgroundColor: colors.brandTint, borderColor: colors.brand },
+  filterChipText: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, maxWidth: 170 },
+  filterChipTextActive: { color: colors.brand },
+  filterChevron: { fontSize: 11, color: colors.textSecondary },
+
+  scopeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.brandTint,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.brand,
+    gap: spacing.sm,
+  },
+  scopeText: { fontSize: 12, fontWeight: '600', color: colors.brand, flex: 1 },
+  scopeClear: { fontSize: 12, fontWeight: '700', color: colors.brand },
+
+  menu: {
+    marginHorizontal: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.raised,
+    paddingVertical: spacing.xs,
+    overflow: 'hidden',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  menuItemActive: { backgroundColor: colors.brandTint },
+  menuDot: { width: 10, height: 10, borderRadius: 5 },
+  menuDotPlaceholder: { width: 10, height: 10 },
+  menuItemText: { flex: 1, fontSize: 14, color: colors.textPrimary },
+  menuItemTextActive: { color: colors.brand, fontWeight: '700' },
+  menuCheck: { color: colors.brand, fontWeight: '700' },
+  menuGroup: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: 2,
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+
+  legend: {
+    position: 'absolute',
+    left: spacing.lg,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: 6,
+    ...shadow.card,
+  },
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  legendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 3,
+    backgroundColor: 'transparent',
+  },
+  legendText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
+
+  // Move-pin reticle — anchored at the exact screen (map) center that Save reads.
+  crosshairWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  crosshairRing: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 3,
+    borderColor: colors.brand,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  crosshairDot: {
+    position: 'absolute',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.brand,
+  },
+  moveBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    ...shadow.raised,
+  },
+  moveTitle: { ...type.h3 },
+  moveSub: { ...type.caption, marginTop: 4 },
+  moveErr: { color: colors.danger, fontSize: 12, marginTop: spacing.sm },
+  moveBtnRow: {
+    flexDirection: 'row',
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
 
   sheet: {
     position: 'absolute',

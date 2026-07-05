@@ -6,34 +6,17 @@ import {
   Pressable,
   StyleSheet,
   Platform,
-  ScrollView,
-  TurboModuleRegistry,
-  NativeModules,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { radius, spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { quickRangeFor } from '../lib/dateRanges';
 
-// The native module behind @react-native-community/datetimepicker ('RNCDatePicker')
-// ships INSIDE the native binary, not over OTA — so an OTA that runs on an older
-// build (which lacks it) would crash the whole admin area with an Invariant
-// Violation. Detect it WITHOUT throwing: getEnforcing() throws when absent, but
-// get()/NativeModules return null. Only load the component when it's actually there;
-// otherwise the calendar is hidden and the preset + quick-range chips still work.
-// The full custom picker returns automatically with the next native build.
-const HAS_NATIVE_DATEPICKER =
-  !!(TurboModuleRegistry?.get && TurboModuleRegistry.get('RNCDatePicker')) ||
-  !!NativeModules?.RNCDatePicker;
-
-let DateTimePicker = null;
-if (HAS_NATIVE_DATEPICKER) {
-  try {
-    DateTimePicker = require('@react-native-community/datetimepicker').default;
-  } catch {
-    DateTimePicker = null;
-  }
-}
+// The native date picker (@react-native-community/datetimepicker) ships in the native
+// binary — it's a committed dependency, so it's present in every build. Imported
+// directly (an earlier fragile runtime-detection guard hid it on New-Arch builds,
+// leaving the Custom From/To buttons inert). Requires a native build, not just OTA.
 
 const QUICK_CHIPS = [
   { key: 'thisWeek', label: 'This week' },
@@ -129,13 +112,6 @@ export default function DateRangePickerModal({
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>Custom date range</Text>
 
-          {!DateTimePicker && (
-            <Text style={styles.unavailableNote}>
-              Tap-to-pick dates need the latest app version — use the quick ranges
-              below for now.
-            </Text>
-          )}
-
           <View style={styles.quickRow}>
             {QUICK_CHIPS.map((c) => (
               <Pressable
@@ -162,7 +138,7 @@ export default function DateRangePickerModal({
               </Pressable>
             ) : null}
           </View>
-          {showFromPicker && DateTimePicker && (
+          {showFromPicker && (
             <View style={styles.pickerHost}>
               <DateTimePicker
                 value={from || new Date()}
@@ -196,7 +172,7 @@ export default function DateRangePickerModal({
               </Pressable>
             ) : null}
           </View>
-          {showToPicker && DateTimePicker && (
+          {showToPicker && (
             <View style={styles.pickerHost}>
               <DateTimePicker
                 value={to || new Date()}
