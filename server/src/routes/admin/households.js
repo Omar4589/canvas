@@ -10,6 +10,7 @@ import { Membership } from '../../models/Membership.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { voterAnswerClause } from '../../services/surveys/answerAgg.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
@@ -38,16 +39,43 @@ async function resolveMapTz(orgId, campaignId) {
   return org?.timeZone || 'America/New_York';
 }
 
-// The full active canvasser roster for this org. The map's canvasser dropdown is
-// populated from this — it must NOT depend on the current filters, or selecting a
-// canvasser (or any filter that yields zero households) would empty the options
-// and wedge the control. So we return it even on the empty-result paths.
-async function loadCanvasserRoster(orgId) {
-  const memberIds = await Membership.find({ organizationId: orgId, isActive: true }).distinct('userId');
-  const users = await User.find(
-    { _id: { $in: memberIds }, isActive: true },
-    'firstName lastName email'
-  )
+// The canvassers to offer in the map's dropdown. Derived from the CAMPAIGN (never the
+// transient status/date/user filters), so selecting a filter that yields zero households
+// can't empty the options and wedge the control — we return it even on empty-result paths.
+//
+// Org-wide map (no campaignId — admins only): every active member. Historical behavior.
+//
+// Campaign-scoped map (the audit case): everyone whose data can appear on THIS campaign's
+// map — anyone who knocked or submitted a survey in it — UNIONED with anyone currently
+// rostered to it (so a just-assigned canvasser with zero knocks is still selectable).
+// Deliberately does NOT gate on User.isActive: a since-deactivated canvasser still has pins
+// on the map, so they must stay filterable — the dropdown must never drop a visible pin's owner.
+async function loadCanvasserRoster(orgId, campaignId = null) {
+  if (!campaignId) {
+    const memberIds = await Membership.find({ organizationId: orgId, isActive: true }).distinct('userId');
+    const users = await User.find(
+      { _id: { $in: memberIds }, isActive: true },
+      'firstName lastName email'
+    )
+      .sort({ firstName: 1 })
+      .lean();
+    return users.map((u) => ({
+      id: String(u._id),
+      firstName: u.firstName,
+      lastName: u.lastName,
+      email: u.email,
+    }));
+  }
+
+  const [activityIds, surveyIds, rosterIds] = await Promise.all([
+    CanvassActivity.distinct('userId', { organizationId: orgId, campaignId }),
+    SurveyResponse.distinct('userId', { organizationId: orgId, campaignId }),
+    CampaignAssignment.distinct('userId', { organizationId: orgId, campaignId }),
+  ]);
+  const ids = [...new Set([...activityIds, ...surveyIds, ...rosterIds].map(String))].map(
+    (id) => new mongoose.Types.ObjectId(id)
+  );
+  const users = await User.find({ _id: { $in: ids } }, 'firstName lastName email')
     .sort({ firstName: 1 })
     .lean();
   return users.map((u) => ({
@@ -135,7 +163,7 @@ router.get('/map', async (req, res, next) => {
       const job = await ImportJob.findOne({ _id: importId, organizationId: orgId }, 'insertedHouseholdIds').lean();
       const ids = job?.insertedHouseholdIds || [];
       if (!ids.length) {
-        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
+        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
       }
       householdFilter._id = { $in: ids };
     }
@@ -173,7 +201,7 @@ router.get('/map', async (req, res, next) => {
       passHhSet = new Set();
       for (const t of turfDocs) for (const id of t.householdIds || []) passHhSet.add(String(id));
       if (passHhSet.size === 0) {
-        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
+        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
       }
     }
 
@@ -196,7 +224,7 @@ router.get('/map', async (req, res, next) => {
         idStrings = [...passHhSet];
       }
       if (!idStrings.length) {
-        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
+        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
       }
       householdFilter._id = { $in: idStrings.map((id) => new mongoose.Types.ObjectId(id)) };
     }
@@ -207,7 +235,7 @@ router.get('/map', async (req, res, next) => {
     ).lean();
 
     if (!households.length) {
-      return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId), activities: [], total: 0 });
+      return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
     }
 
     let householdIds = households.map((h) => h._id);
@@ -226,7 +254,7 @@ router.get('/map', async (req, res, next) => {
       }
     }
 
-    const canvassers = await loadCanvasserRoster(orgId);
+    const canvassers = await loadCanvasserRoster(orgId, campaignId);
 
     const [voters, surveys, lastActivities, activities] = await Promise.all([
       Voter.find(

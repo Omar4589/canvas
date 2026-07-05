@@ -13,9 +13,11 @@
 // Full teardown (also purges the campaign's orphaned Persons):
 //   npm run cleanup:test-campaigns -- --ids=<campaignId> --mock=<campaignId> --apply
 //
-// Env (server/.env): SEED_DEMO_ADMIN_EMAIL / SEED_DEMO_ADMIN_PASSWORD,
-//   SEED_DEMO_CANVASSER_EMAIL / SEED_DEMO_CANVASSER_PASSWORD (both passwords required
-//   for --apply), optional SEED_DEMO_SHARE_TOKEN (stable /r/<token> URL across reseeds).
+// Logins default to demo-admin@doorline.app / admin1234! and
+//   demo-canvasser@doorline.app / Victory26! — override any of them via
+//   SEED_DEMO_ADMIN_EMAIL / SEED_DEMO_ADMIN_PASSWORD / SEED_DEMO_CANVASSER_EMAIL /
+//   SEED_DEMO_CANVASSER_PASSWORD (re-running --apply syncs a changed password onto the
+//   existing account). Optional SEED_DEMO_SHARE_TOKEN pins the /r/<token> URL.
 //
 // Identity safety: every stateVoterId is 'DEMO-IA-......' (real Iowa ids are numeric,
 // so no collision with real data) and no vendor uid column is used, so the shared
@@ -115,9 +117,9 @@ const SUPPORT_WEIGHTS = [
 ];
 
 const ADMIN_EMAIL = (process.env.SEED_DEMO_ADMIN_EMAIL || 'demo-admin@doorline.app').toLowerCase().trim();
-const ADMIN_PASSWORD = process.env.SEED_DEMO_ADMIN_PASSWORD;
+const ADMIN_PASSWORD = process.env.SEED_DEMO_ADMIN_PASSWORD || 'admin1234!';
 const CANVASSER_EMAIL = (process.env.SEED_DEMO_CANVASSER_EMAIL || 'demo-canvasser@doorline.app').toLowerCase().trim();
-const CANVASSER_PASSWORD = process.env.SEED_DEMO_CANVASSER_PASSWORD;
+const CANVASSER_PASSWORD = process.env.SEED_DEMO_CANVASSER_PASSWORD || 'Victory26!';
 
 // ---------------------------------------------------------------------------
 // Synthetic data generation (deterministic — same voters every run)
@@ -279,10 +281,21 @@ function activityDoc({ hh, userId, actionType, ts, rng, passId, turfId, voterId 
 // Build steps
 // ---------------------------------------------------------------------------
 
-async function ensureUser({ email, password, firstName, lastName }) {
+// Passwords are optional: without one the account is created with a random
+// unusable password (it only exists so knocks/books have someone to attribute to).
+// When an env password IS provided, it is synced onto an existing account too, so
+// setting SEED_DEMO_*_PASSWORD later and re-running enables (or rotates) the login.
+async function ensureUser({ email, password, firstName, lastName, syncPassword = false }) {
   let user = await User.findOne({ email });
-  if (user) return { user, created: false };
-  const passwordHash = await User.hashPassword(password);
+  if (user) {
+    if (password && syncPassword) {
+      user.passwordHash = await User.hashPassword(password);
+      user.mustChangePassword = false;
+      await user.save();
+    }
+    return { user, created: false };
+  }
+  const passwordHash = await User.hashPassword(password || randomBytes(18).toString('base64url'));
   user = await User.create({
     firstName, lastName, email, passwordHash,
     isActive: true, mustChangePassword: false, // app-store reviewers must log straight in
@@ -357,11 +370,12 @@ async function stageCanvassHistory({ rng, campaign, template, pass, turfs, assig
     const visitedCount = Math.round(doorIds.length * fraction);
     if (!visitedCount) continue;
 
-    // Split this book's visited doors across 2–3 evening sessions in the last 6 days.
-    const sessionCount = visitedCount > 25 ? 3 : 2;
+    // Longer walks concentrated in the last 4 evenings — crews walk together on the
+    // same days, so the daily timeline shows a full canvasser × hours grid.
+    const sessionCount = visitedCount > 30 ? 2 : 1;
     const perSession = Math.ceil(visitedCount / sessionCount);
     for (let s = 0; s < sessionCount; s += 1) {
-      const dayOffset = -6 + ((b + s * 2) % 6); // spread books across the week
+      const dayOffset = -4 + ((b + s) % 4);
       let minutes = 16 * 60 + 30 + rng.int(0, 40); // ~4:30pm local start
       const doors = doorIds.slice(s * perSession, (s + 1) * perSession);
       for (const hhId of doors) {
@@ -646,20 +660,16 @@ async function main() {
     await mongoose.disconnect();
     return;
   }
-  if (!ADMIN_PASSWORD || !CANVASSER_PASSWORD) {
-    console.error('SEED_DEMO_ADMIN_PASSWORD and SEED_DEMO_CANVASSER_PASSWORD are required for --apply.');
-    process.exit(1);
-  }
 
   // 1. Org + users -----------------------------------------------------------
   const org =
     existingOrg ||
     (await Organization.create({ name: DEMO_ORG_NAME, slug: DEMO_ORG_SLUG, timeZone: CAMPAIGN_TZ }));
   const { user: admin } = await ensureUser({
-    email: ADMIN_EMAIL, password: ADMIN_PASSWORD, firstName: 'Dana', lastName: 'Whitfield',
+    email: ADMIN_EMAIL, password: ADMIN_PASSWORD, firstName: 'Dana', lastName: 'Whitfield', syncPassword: true,
   });
   const { user: reviewer } = await ensureUser({
-    email: CANVASSER_EMAIL, password: CANVASSER_PASSWORD, firstName: 'Sam', lastName: 'Reyes',
+    email: CANVASSER_EMAIL, password: CANVASSER_PASSWORD, firstName: 'Sam', lastName: 'Reyes', syncPassword: true,
   });
   const background = [];
   for (const c of DEMO_CANVASSERS) {
@@ -855,8 +865,8 @@ async function main() {
   console.log(`Demo ready: '${DEMO_ORG_NAME}' / '${DEMO_CAMPAIGN_NAME}'`);
   console.log(`  campaignId: ${campaign._id}`);
   console.log(`  ${hh} doors · ${vv} voters · ${tt} books · ${aa} activities · ${ss} surveys`);
-  console.log(`  admin login:     ${admin.email}  (SEED_DEMO_ADMIN_PASSWORD)`);
-  console.log(`  canvasser login: ${reviewer.email}  (SEED_DEMO_CANVASSER_PASSWORD) — book '${reviewerTurf.name}' is clean for reviewers`);
+  console.log(`  admin login:     ${admin.email} / ${ADMIN_PASSWORD}`);
+  console.log(`  canvasser login: ${reviewer.email} / ${CANVASSER_PASSWORD} — book '${reviewerTurf.name}' is clean for reviewers`);
   console.log(`  client portal:   /r/${share.token}`);
   console.log(`  restage after reviewers knock: node src/utils/seedDemoOrg.js --reset --apply`);
   console.log(`  full teardown:   npm run cleanup:test-campaigns -- --ids=${campaign._id} --mock=${campaign._id} --apply`);

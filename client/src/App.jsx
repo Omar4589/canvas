@@ -3,8 +3,12 @@ import { Routes, Route, Navigate, useParams, useSearchParams } from 'react-route
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
-import LandingPage from './pages/LandingPage.jsx';
 import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
+
+// Lazy so the marketing chunk (screenshot webps + section components) never loads
+// for signed-in users heading straight to the console.
+const LandingPage = lazy(() => import('./pages/LandingPage.jsx'));
+const TermsPage = lazy(() => import('./pages/TermsPage.jsx'));
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
@@ -74,6 +78,7 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
         {/* Public shared report hub — no login. */}
         <Route element={<PublicReportLayout />}>
           <Route path="/r/:token" element={<PublicReportListPage />} />

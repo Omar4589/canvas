@@ -1,18 +1,16 @@
 <title>Doorline landing — design mockup</title>
 <style>
   :root {
-    --ink: #0b0b10;
-    --ink-soft: #14141b;
-    --ink-line: rgba(255, 255, 255, 0.09);
-    --on-dark: #f4f4f6;
-    --on-dark-muted: #a7a7b3;
     --paper: #faf9f7;
+    --warm: #f3f1ed;
     --card: #ffffff;
     --line: #e8e5df;
     --text: #1a1917;
     --muted: #6d6a63;
     --red: #dc2626;
     --red-deep: #b91c1c;
+    --red-tint: #fdf2f2;
+    --red-wash: #fbecec;
     --green: #22c55e;
     --blue: #3b82f6;
     --amber: #f59e0b;
@@ -25,7 +23,7 @@
   .page {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; /* final build: Inter */
     color: var(--text);
-    background: var(--paper);
+    background: var(--card);
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }
@@ -34,7 +32,7 @@
   p { margin: 0; }
   a { color: inherit; }
 
-  /* ---- review affordances ---- */
+  /* ---- review affordances (won't ship) ---- */
   .mock-ribbon {
     background: #fef3c7; color: #92400e;
     font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700;
@@ -42,7 +40,7 @@
   }
   .shot-label {
     position: absolute; top: 10px; right: 10px; z-index: 3;
-    background: rgba(11, 11, 16, 0.72); color: #fde68a;
+    background: rgba(26, 25, 23, 0.75); color: #fde68a;
     font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em;
     padding: 3px 8px; border-radius: 99px; pointer-events: none;
   }
@@ -50,103 +48,103 @@
     font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; color: #b6b2a9;
     text-transform: uppercase; margin-bottom: 10px;
   }
-  .dark .sec-tag { color: #4d4d59; }
 
-  /* ---- shared bits ---- */
+  /* ---- shared ---- */
   .eyebrow {
     display: inline-block; font-size: 12.5px; font-weight: 700;
     letter-spacing: 0.14em; text-transform: uppercase; color: var(--red);
   }
-  .dark .eyebrow { color: #f87171; }
   .btn {
     display: inline-flex; align-items: center; gap: 8px;
     font-size: 15px; font-weight: 600; text-decoration: none;
     padding: 12px 22px; border-radius: 8px; transition: background 0.15s, border-color 0.15s;
   }
-  .btn-red { background: var(--red); color: #fff; }
+  .btn-red { background: var(--red); color: #fff; box-shadow: 0 1px 2px rgba(220,38,38,0.3); }
   .btn-red:hover { background: var(--red-deep); }
-  .btn-ghost-dark { border: 1px solid rgba(255,255,255,0.22); color: var(--on-dark); }
-  .btn-ghost-dark:hover { border-color: rgba(255,255,255,0.45); }
-  .btn-ghost-light { border: 1px solid #d6d2ca; color: var(--text); background: var(--card); }
-  .btn-ghost-light:hover { border-color: #b3aea3; }
+  .btn-ghost { border: 1px solid #d6d2ca; color: var(--text); background: var(--card); }
+  .btn-ghost:hover { border-color: #b3aea3; }
   .btn:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
 
-  /* ---- nav ---- */
+  /* ---- nav : light, sticky ---- */
   .nav {
     position: sticky; top: 0; z-index: 50;
-    background: rgba(11, 11, 16, 0.88); backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--ink-line);
+    background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
   }
   .nav-inner { display: flex; align-items: center; gap: 28px; height: 64px; }
-  .logo { display: flex; align-items: center; gap: 9px; color: var(--on-dark); font-weight: 700; font-size: 17px; text-decoration: none; }
+  .logo { display: flex; align-items: center; gap: 9px; color: var(--text); font-weight: 700; font-size: 17px; text-decoration: none; }
   .logo-mark {
     width: 26px; height: 26px; border-radius: 50% 50% 50% 4px;
-    background: var(--red); position: relative; transform: rotate(-45deg);
+    background: var(--red); position: relative; transform: rotate(-45deg); flex: none;
   }
   .logo-mark::after {
     content: ''; position: absolute; inset: 7px 9px 5px 9px;
     background: #fff; border-radius: 3px 3px 0 0; transform: rotate(45deg);
   }
   .nav-links { display: flex; gap: 24px; margin-left: 12px; flex: 1; }
-  .nav-links a { color: var(--on-dark-muted); font-size: 14px; text-decoration: none; }
-  .nav-links a:hover { color: var(--on-dark); }
-  .nav-cta { display: flex; gap: 12px; align-items: center; }
-  .nav-cta .signin { color: var(--on-dark-muted); font-size: 14px; text-decoration: none; }
+  .nav-links a { color: var(--muted); font-size: 14px; text-decoration: none; }
+  .nav-links a:hover { color: var(--text); }
+  .nav-cta { display: flex; gap: 14px; align-items: center; }
+  .nav-cta .signin { color: var(--muted); font-size: 14px; text-decoration: none; }
+  .nav-cta .signin:hover { color: var(--text); }
   .nav-cta .btn { padding: 9px 16px; font-size: 14px; }
 
-  /* ---- hero ---- */
-  .dark { background: var(--ink); color: var(--on-dark); }
-  .hero { position: relative; overflow: hidden; }
-  .hero-dots { position: absolute; inset: 0; pointer-events: none; opacity: 0.5; }
+  /* ---- hero : white with red glow + door-dot motif ---- */
+  .hero { position: relative; overflow: hidden; background: var(--card); }
+  .hero-dots { position: absolute; inset: 0; pointer-events: none; }
   .hero-inner {
     position: relative; display: grid; grid-template-columns: 5fr 6fr; gap: 56px;
-    align-items: center; padding: 88px 0 96px;
+    align-items: center; padding: 84px 0 92px;
   }
   .hero h1 {
     font-size: clamp(38px, 4.6vw, 58px); font-weight: 800;
-    letter-spacing: -0.03em; line-height: 1.06; margin: 18px 0 22px;
+    letter-spacing: -0.03em; line-height: 1.06; margin: 18px 0 22px; color: var(--text);
   }
-  .hero h1 em { font-style: normal; color: #f87171; }
-  .hero-sub { font-size: 17.5px; color: var(--on-dark-muted); max-width: 46ch; margin-bottom: 32px; }
+  .hero h1 em { font-style: normal; color: var(--red); }
+  .hero-sub { font-size: 17.5px; color: var(--muted); max-width: 46ch; margin-bottom: 32px; }
   .hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; }
-  .hero-note { margin-top: 18px; font-size: 13px; color: #71717d; }
+  .hero-note { margin-top: 18px; font-size: 13px; color: #a5a198; }
+  .hero-glow {
+    position: absolute; width: 640px; height: 640px; border-radius: 50%;
+    right: -140px; top: -120px; pointer-events: none;
+    background: radial-gradient(circle, rgba(220, 38, 38, 0.09), transparent 62%);
+  }
 
-  /* browser + phone frames */
-  .browser { position: relative; border-radius: 12px; overflow: hidden; background: #17171f; border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 24px 80px rgba(0,0,0,0.5); }
-  .browser-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #1d1d26; border-bottom: 1px solid rgba(255,255,255,0.07); }
-  .browser-bar i { width: 10px; height: 10px; border-radius: 50%; background: #3a3a46; }
-  .browser-url { margin-left: 8px; font-size: 11.5px; color: #8b8b97; background: #26262f; border-radius: 6px; padding: 3px 12px; }
-  .light-frame .browser { background: #fff; border-color: var(--line); box-shadow: 0 18px 56px rgba(26, 25, 23, 0.14); }
-  .light-frame .browser-bar { background: #f4f2ee; border-color: var(--line); }
-  .light-frame .browser-bar i { background: #d8d4cc; }
-  .light-frame .browser-url { background: #fff; color: #8a867d; border: 1px solid var(--line); }
-  .hero-glow { position: absolute; width: 560px; height: 560px; border-radius: 50%; right: -120px; top: -80px; background: radial-gradient(circle, rgba(220,38,38,0.28), transparent 65%); pointer-events: none; }
+  /* ---- frames ---- */
+  .browser {
+    position: relative; border-radius: 12px; overflow: hidden; background: #fff;
+    border: 1px solid var(--line); box-shadow: 0 18px 56px rgba(26, 25, 23, 0.13);
+  }
+  .browser-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #f4f2ee; border-bottom: 1px solid var(--line); }
+  .browser-bar i { width: 10px; height: 10px; border-radius: 50%; background: #d8d4cc; }
+  .browser-url { margin-left: 8px; font-size: 11.5px; color: #8a867d; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 3px 12px; }
 
   /* map sketch (placeholder for real screenshot) */
-  .sketch-map { position: relative; height: 400px; background: #101017; }
+  .sketch-map { position: relative; height: 400px; background: #f2f0ec; }
   .sketch-map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
   .map-chip {
     position: absolute; left: 14px; bottom: 14px; background: #fff; color: var(--text);
-    border-radius: 8px; padding: 10px 13px; font-size: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 13px; font-size: 12px;
+    box-shadow: 0 8px 26px rgba(26, 25, 23, 0.14);
   }
   .map-chip b { display: block; font-size: 13px; }
   .map-chip span { color: var(--muted); }
   .live-pill {
     position: absolute; top: 12px; left: 14px; display: inline-flex; align-items: center; gap: 6px;
-    background: rgba(34, 197, 94, 0.15); color: #4ade80; font-size: 11px; font-weight: 700;
+    background: #dcfce7; color: #15803d; font-size: 11px; font-weight: 700;
     padding: 4px 10px; border-radius: 99px;
   }
-  .live-pill i { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; }
+  .live-pill i { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
 
   /* ---- credibility strip ---- */
-  .cred { border-top: 1px solid var(--ink-line); }
+  .cred { background: var(--paper); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
   .cred-inner { display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; padding: 34px 0; }
-  .cred-item { font-size: 13.5px; color: var(--on-dark-muted); line-height: 1.45; }
-  .cred-item b { display: block; color: var(--on-dark); font-size: 14px; margin-bottom: 4px; }
+  .cred-item { font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+  .cred-item b { display: block; color: var(--text); font-size: 14px; margin-bottom: 4px; }
 
-  /* ---- light body sections ---- */
+  /* ---- sections ---- */
   .section { padding: 104px 0; }
-  .section-head { max-width: 640px; margin-bottom: 56px; }
+  .section-head { max-width: 640px; margin-bottom: 48px; }
   .section-head h2 { font-size: clamp(28px, 3.2vw, 40px); font-weight: 800; letter-spacing: -0.025em; line-height: 1.12; margin: 14px 0 14px; }
   .section-head p { font-size: 16.5px; color: var(--muted); }
 
@@ -183,64 +181,113 @@
   .sg-table { display: grid; grid-template-columns: 92px repeat(6, 1fr); gap: 4px; font-size: 10.5px; color: var(--muted); }
   .sg-table .name { line-height: 22px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sg-cell { height: 22px; border-radius: 4px; background: #f2f0ec; text-align: center; line-height: 22px; color: #fff; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .sg-note { margin-top: 14px; font-size: 11.5px; color: var(--amber); background: #fffbeb; border: 1px solid #fde68a; border-radius: 7px; padding: 8px 10px; color: #92400e; }
+  .sg-note { margin-top: 14px; font-size: 11.5px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 7px; padding: 8px 10px; color: #92400e; }
 
-  /* ---- portal spotlight (dark band) ---- */
-  .portal { padding: 96px 0; }
+  /* ---- portal spotlight : soft red wash, the one bold band ---- */
+  .portal { padding: 96px 0; background: var(--red-tint); border-top: 1px solid #f6dcdc; border-bottom: 1px solid #f6dcdc; }
   .portal-grid { display: grid; grid-template-columns: 5fr 6fr; gap: 64px; align-items: center; }
   .portal h2 { font-size: clamp(26px, 3vw, 36px); font-weight: 800; letter-spacing: -0.025em; margin: 14px 0 16px; }
-  .portal p { color: var(--on-dark-muted); font-size: 16px; }
-  .share-pill { margin-top: 22px; display: inline-flex; align-items: center; gap: 10px; background: var(--ink-soft); border: 1px solid var(--ink-line); border-radius: 99px; padding: 9px 16px; font-size: 13px; color: var(--on-dark-muted); }
-  .share-pill code { color: #f87171; font-size: 12.5px; }
-  .report-card { background: #fff; color: var(--text); border-radius: 12px; padding: 22px; box-shadow: 0 24px 80px rgba(0,0,0,0.5); position: relative; }
+  .portal p { color: var(--muted); font-size: 16px; }
+  .share-pill { margin-top: 22px; display: inline-flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #f0d5d5; border-radius: 99px; padding: 9px 16px; font-size: 13px; color: var(--muted); }
+  .share-pill code { color: var(--red); font-size: 12.5px; }
+  .report-card { background: #fff; color: var(--text); border: 1px solid #f0d5d5; border-radius: 12px; padding: 22px; box-shadow: 0 20px 60px rgba(185, 28, 28, 0.10); position: relative; }
   .report-card h4 { margin: 0 0 3px; font-size: 15px; }
   .report-week { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
   .kpi { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
   .kpi b { display: block; font-size: 19px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
   .kpi span { font-size: 10.5px; color: var(--muted); }
-  .kpi i { font-style: normal; font-size: 10.5px; color: var(--green); font-weight: 700; }
+  .kpi i { font-style: normal; font-size: 10.5px; color: #15803d; font-weight: 700; }
   .bar-row { font-size: 11.5px; color: var(--muted); display: grid; grid-template-columns: 110px 1fr 34px; gap: 8px; align-items: center; margin-bottom: 7px; }
   .bar { height: 9px; border-radius: 99px; background: #f0eee9; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--red); border-radius: 99px; }
-  .bar-row b { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+  .bar-row b { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; color: var(--text); }
 
   /* ---- feature grid ---- */
-  .features { background: #f3f1ed; }
+  .features { background: var(--warm); }
   .fgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
   .fcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
-  .fcard .ic { width: 34px; height: 34px; border-radius: 8px; background: #fdeaea; color: var(--red); display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; margin-bottom: 14px; }
+  .fcard .ic { width: 34px; height: 34px; border-radius: 8px; background: var(--red-wash); color: var(--red); display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; margin-bottom: 14px; }
   .fcard h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
   .fcard p { font-size: 13px; color: var(--muted); }
 
   /* ---- how it works ---- */
+  .how { background: var(--card); }
   .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; counter-reset: step; }
   .step { position: relative; padding-top: 18px; border-top: 2px solid var(--line); }
   .step::before {
     counter-increment: step; content: counter(step, decimal-leading-zero);
-    position: absolute; top: -13px; left: 0; background: var(--paper); padding-right: 10px;
+    position: absolute; top: -13px; left: 0; background: var(--card); padding-right: 10px;
     font-size: 13px; font-weight: 800; color: var(--red); letter-spacing: 0.06em; font-variant-numeric: tabular-nums;
   }
   .step h3 { font-size: 16.5px; font-weight: 700; margin-bottom: 8px; }
   .step p { font-size: 13.5px; color: var(--muted); }
 
-  /* ---- CTA band ---- */
-  .cta-band { text-align: center; padding: 104px 0; position: relative; overflow: hidden; }
+  /* ---- CTA band : brand wash ---- */
+  .cta-band { text-align: center; padding: 104px 0; background: var(--red-tint); border-top: 1px solid #f6dcdc; }
   .cta-band h2 { font-size: clamp(30px, 3.6vw, 44px); font-weight: 800; letter-spacing: -0.028em; margin-bottom: 16px; }
-  .cta-band p { color: var(--on-dark-muted); font-size: 16.5px; max-width: 54ch; margin: 0 auto 32px; }
+  .cta-band p { color: var(--muted); font-size: 16.5px; max-width: 54ch; margin: 0 auto 32px; }
   .cta-band .hero-ctas { justify-content: center; }
 
   /* ---- footer ---- */
-  .footer { padding: 44px 0 52px; }
+  .footer { padding: 44px 0 52px; background: var(--card); border-top: 1px solid var(--line); }
   .footer-inner { display: flex; justify-content: space-between; align-items: flex-start; gap: 32px; flex-wrap: wrap; }
   .footer p { max-width: 44ch; font-size: 13px; color: var(--muted); margin-top: 10px; }
   .footer-links { display: flex; gap: 22px; font-size: 13.5px; }
   .footer-links a { color: var(--muted); text-decoration: none; }
   .footer-links a:hover { color: var(--text); }
   .copyright { width: 100%; font-size: 12px; color: #a5a198; margin-top: 26px; }
-  .footer .logo { color: var(--text); }
+
+  /* ---- hero composite: phone overlapping the browser (MiniVAN-style) ---- */
+  .hero-phone {
+    position: absolute; right: -18px; bottom: -34px; z-index: 2;
+    width: 168px; background: #fff; border: 1px solid var(--line); border-radius: 22px;
+    padding: 8px; box-shadow: 0 18px 50px rgba(26,25,23,0.22);
+  }
+  .hero-phone .phone-notch { width: 46px; height: 4px; margin: 2px auto 7px; }
+  .hero-phone .door-row { padding: 7px 5px; }
+  .hero-phone .addr { font-size: 10.5px; }
+  .hero-phone .meta { font-size: 9px; }
+  .hero-phone .door-dot { width: 8px; height: 8px; }
+  .float-chip {
+    position: absolute; z-index: 3; display: inline-flex; align-items: center; gap: 7px;
+    background: #fff; border: 1px solid var(--line); border-radius: 99px;
+    padding: 7px 13px; font-size: 12px; font-weight: 600; color: var(--text);
+    box-shadow: 0 10px 30px rgba(26,25,23,0.14);
+  }
+  .float-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex: none; }
+  .chip-sync { left: -26px; top: 42px; }
+
+  /* ---- problem strip (Qomon-style diagnostic framing) ---- */
+  .problem { background: var(--card); }
+  .problem-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 28px; }
+  .pcard { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+  .pcard h3 { font-size: 15.5px; font-weight: 700; margin-bottom: 7px; }
+  .pcard p { font-size: 13.5px; color: var(--muted); }
+  .pcard .strike { color: #b6b2a9; }
+  .problem-punch { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+  .problem-punch em { font-style: normal; color: var(--red); }
+
+  /* ---- FAQ ---- */
+  .faq { background: var(--card); }
+  .faq-list { max-width: 760px; display: grid; gap: 10px; }
+  .faq-item { border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; background: var(--paper); }
+  .faq-item h3 { font-size: 15.5px; font-weight: 700; margin-bottom: 7px; }
+  .faq-item p { font-size: 14px; color: var(--muted); }
+
+  /* ---- store badges ---- */
+  .store-badges { display: flex; gap: 10px; margin-top: 16px; }
+  .store-badge {
+    display: inline-flex; flex-direction: column; line-height: 1.15; text-decoration: none;
+    background: var(--text); color: #fff; border-radius: 8px; padding: 7px 14px;
+  }
+  .store-badge small { font-size: 8.5px; opacity: 0.75; letter-spacing: 0.04em; text-transform: uppercase; }
+  .store-badge b { font-size: 13px; font-weight: 700; }
 
   @media (max-width: 900px) {
+    .hero-phone { display: none; }
+    .chip-sync { left: 8px; }
+    .problem-grid { grid-template-columns: 1fr; }
     .hero-inner, .tour, .tour.flip, .portal-grid { grid-template-columns: 1fr; gap: 40px; }
     .cred-inner, .fgrid, .steps { grid-template-columns: 1fr 1fr; }
     .nav-links { display: none; }
@@ -257,7 +304,7 @@
 <div class="page">
   <div class="mock-ribbon">Design mockup — panels marked “screenshot” become real product captures from the demo campaign</div>
 
-  <!-- NAV : dark, constant across hero and body -->
+  <!-- NAV -->
   <header class="nav">
     <div class="wrap nav-inner">
       <a class="logo" href="#"><span class="logo-mark"></span>Doorline</a>
@@ -276,15 +323,16 @@
   </header>
 
   <!-- HERO -->
-  <section class="dark hero">
+  <section class="hero">
+    <div class="hero-glow"></div>
     <svg class="hero-dots" aria-hidden="true" viewBox="0 0 1200 640" preserveAspectRatio="xMidYMid slice">
-      <g fill="#22C55E" opacity="0.16">
+      <g fill="#22C55E" opacity="0.35">
         <circle cx="80" cy="90" r="3"/><circle cx="180" cy="200" r="3"/><circle cx="90" cy="340" r="3"/><circle cx="300" cy="560" r="3"/><circle cx="1130" cy="80" r="3"/><circle cx="1010" cy="560" r="3"/>
       </g>
-      <g fill="#3B82F6" opacity="0.14">
+      <g fill="#3B82F6" opacity="0.3">
         <circle cx="240" cy="70" r="3"/><circle cx="60" cy="490" r="3"/><circle cx="380" cy="620" r="3"/><circle cx="1160" cy="300" r="3"/>
       </g>
-      <g fill="#9CA3AF" opacity="0.13">
+      <g fill="#9CA3AF" opacity="0.35">
         <circle cx="150" cy="560" r="3"/><circle cx="320" cy="140" r="3"/><circle cx="40" cy="230" r="3"/><circle cx="1090" cy="180" r="3"/><circle cx="1170" cy="470" r="3"/>
       </g>
     </svg>
@@ -296,12 +344,11 @@
           <p class="hero-sub">Doorline takes a raw voter file to walkable turf, puts a GPS-stamped, offline-first app in every canvasser's hand, and turns the day's knocks into reports your clients can open from a link — no login, no spreadsheet.</p>
           <div class="hero-ctas">
             <a class="btn btn-red" href="#">Request a demo</a>
-            <a class="btn btn-ghost-dark" href="#">Sign in</a>
+            <a class="btn btn-ghost" href="#">Sign in</a>
           </div>
           <p class="hero-note">Web console for the office · iOS &amp; Android app for the field</p>
         </div>
         <div class="frame-slot">
-          <div class="hero-glow"></div>
           <div class="browser">
             <span class="shot-label">SCREENSHOT · live campaign map</span>
             <div class="browser-bar"><i></i><i></i><i></i><span class="browser-url">doorline.app/campaigns/alvarez/map</span></div>
@@ -309,13 +356,13 @@
               <svg viewBox="0 0 640 400" aria-hidden="true">
                 <defs>
                   <pattern id="g" width="40" height="40" patternUnits="userSpaceOnUse">
-                    <path d="M40 0H0V40" fill="none" stroke="#1c1c26" stroke-width="1"/>
+                    <path d="M40 0H0V40" fill="none" stroke="#e2dfd8" stroke-width="1"/>
                   </pattern>
                 </defs>
                 <rect width="640" height="400" fill="url(#g)"/>
-                <polygon points="40,60 260,40 300,180 120,220" fill="#3B82F6" fill-opacity="0.10" stroke="#3B82F6" stroke-opacity="0.5"/>
-                <polygon points="300,40 600,70 560,230 310,190" fill="#22C55E" fill-opacity="0.10" stroke="#22C55E" stroke-opacity="0.5"/>
-                <polygon points="120,230 330,200 380,360 90,380" fill="#F59E0B" fill-opacity="0.10" stroke="#F59E0B" stroke-opacity="0.5"/>
+                <polygon points="40,60 260,40 300,180 120,220" fill="#3B82F6" fill-opacity="0.10" stroke="#3B82F6" stroke-opacity="0.55"/>
+                <polygon points="300,40 600,70 560,230 310,190" fill="#22C55E" fill-opacity="0.10" stroke="#22C55E" stroke-opacity="0.55"/>
+                <polygon points="120,230 330,200 380,360 90,380" fill="#F59E0B" fill-opacity="0.10" stroke="#F59E0B" stroke-opacity="0.55"/>
                 <g>
                   <circle cx="90" cy="100" r="5" fill="#22C55E"/><circle cx="140" cy="90" r="5" fill="#22C55E"/><circle cx="190" cy="120" r="5" fill="#3B82F6"/><circle cx="230" cy="80" r="5" fill="#22C55E"/><circle cx="160" cy="160" r="5" fill="#9CA3AF"/><circle cx="210" cy="170" r="5" fill="#F59E0B"/>
                   <circle cx="360" cy="100" r="5" fill="#22C55E"/><circle cx="410" cy="130" r="5" fill="#22C55E"/><circle cx="470" cy="90" r="5" fill="#3B82F6"/><circle cx="520" cy="140" r="5" fill="#9CA3AF"/><circle cx="440" cy="170" r="5" fill="#22C55E"/>
@@ -330,10 +377,18 @@
               <div class="map-chip"><b>3812 38th Street</b><span>3 voters · Book 7 · surveyed 6:41 pm</span></div>
             </div>
           </div>
+          <div class="float-chip chip-sync"><i></i>Survey recorded · synced</div>
+          <div class="hero-phone" aria-hidden="true">
+            <div class="phone-notch"></div>
+            <div class="phone-head" style="font-size:10.5px">Book 7 <span>12/54</span></div>
+            <div class="door-row"><span class="door-dot" style="background:#22C55E"></span><div style="flex:1"><div class="addr">3812 38th St</div><div class="meta">surveyed</div></div></div>
+            <div class="door-row"><span class="door-dot" style="background:#3B82F6"></span><div style="flex:1"><div class="addr">3816 38th St</div><div class="meta">not home</div></div></div>
+            <div class="door-row" style="border-bottom:0"><span class="door-dot" style="background:#9CA3AF"></span><div style="flex:1"><div class="addr">3820 38th St</div><div class="meta">4 voters</div></div><span class="knock-btn" style="font-size:10px;padding:4px 9px">Knock</span></div>
+          </div>
         </div>
       </div>
     </div>
-    <!-- CREDIBILITY STRIP : product truths, no fake logos -->
+    <!-- CREDIBILITY STRIP -->
     <div class="cred">
       <div class="wrap cred-inner">
         <div class="cred-item"><b>Every knock GPS-stamped</b>Distance-to-door recorded on every contact, flagged when it's off.</div>
@@ -344,8 +399,24 @@
     </div>
   </section>
 
+  <!-- PROBLEM STRIP -->
+  <section class="section problem">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">The way it usually goes</span>
+        <h2>A door program shouldn't live in five tools</h2>
+      </div>
+      <div class="problem-grid">
+        <div class="pcard"><h3>The universe is a spreadsheet</h3><p>The voter file gets sliced in Excel, printed into packets, and nobody can say which doors are actually left.</p></div>
+        <div class="pcard"><h3>The field day is a group chat</h3><p>“Where are you?” “Did anyone do Maple St?” Coverage lives in texts and memory until someone types it up.</p></div>
+        <div class="pcard"><h3>The client report is a Friday-night deck</h3><p>Hours of copy-paste into a PowerPoint the client skims once — and questions the numbers anyway.</p></div>
+      </div>
+      <p class="problem-punch">Doorline replaces all of it with <em>one pipeline</em>: file in, turf out, knocks live, report published.</p>
+    </div>
+  </section>
+
   <!-- PRODUCT TOUR -->
-  <section class="section" id="turf">
+  <section class="section" id="turf" style="padding-top:0">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">The product</span>
@@ -364,7 +435,7 @@
             <li>Walk order optimized inside every book</li>
           </ul>
         </div>
-        <div class="frame-slot light-frame">
+        <div class="frame-slot">
           <div class="browser">
             <span class="shot-label">SCREENSHOT · turf cutting</span>
             <div class="browser-bar"><i></i><i></i><i></i><span class="browser-url">doorline.app/campaigns/alvarez/turfs</span></div>
@@ -429,7 +500,7 @@
             <li>Per-canvasser quality signals: pace, distance-from-door, offline share</li>
           </ul>
         </div>
-        <div class="frame-slot light-frame">
+        <div class="frame-slot">
           <div class="browser">
             <span class="shot-label">SCREENSHOT · daily timeline</span>
             <div class="browser-bar"><i></i><i></i><i></i><span class="browser-url">doorline.app/campaigns/alvarez/timeline</span></div>
@@ -450,8 +521,8 @@
     </div>
   </section>
 
-  <!-- CLIENT PORTAL SPOTLIGHT : dark band -->
-  <section class="dark portal" id="reports">
+  <!-- CLIENT PORTAL SPOTLIGHT -->
+  <section class="portal" id="reports">
     <div class="wrap portal-grid">
       <div>
         <span class="eyebrow">For your clients</span>
@@ -500,7 +571,7 @@
   </section>
 
   <!-- HOW IT WORKS -->
-  <section class="section" id="how">
+  <section class="section how" id="how">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">How it works</span>
@@ -515,25 +586,45 @@
     </div>
   </section>
 
+  <!-- FAQ -->
+  <section class="section faq">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Common questions</span>
+        <h2>Before you ask</h2>
+      </div>
+      <div class="faq-list">
+        <div class="faq-item"><h3>How fast can we be knocking doors?</h3><p>Same week. Send us your voter file in any vendor's format — once it's imported and cut, your crews download the app and walk. We set up your first campaign with you on the demo call.</p></div>
+        <div class="faq-item"><h3>What happens when a canvasser loses signal?</h3><p>Nothing bad. Every knock and survey queues on the phone and syncs automatically the moment coverage returns — flagged as an offline submission so you can audit it later.</p></div>
+        <div class="faq-item"><h3>What exactly do our clients see?</h3><p>Only what you publish: a frozen weekly report with coverage, results, and a door-status map. Canvasser identities and voter names are stripped by design. Links are revocable and can be password-protected.</p></div>
+        <div class="faq-item"><h3>Can different teams work the same campaign?</h3><p>Yes — split a campaign into walk lists with separate crews, rounds, and even different surveys, without ever double-knocking each other's doors.</p></div>
+      </div>
+    </div>
+  </section>
+
   <!-- FINAL CTA -->
-  <section class="dark cta-band">
+  <section class="cta-band">
     <div class="wrap">
       <span class="eyebrow">Get started</span>
       <h2>See Doorline run your next door program</h2>
       <p>We'll walk you through the console and the field app together, on a live demo campaign with turf, canvassers, and a client report — so you can judge it the way your clients will.</p>
       <div class="hero-ctas">
         <a class="btn btn-red" href="#">Request a demo</a>
-        <a class="btn btn-ghost-dark" href="#">Sign in</a>
+        <a class="btn btn-ghost" href="#">Sign in</a>
       </div>
     </div>
   </section>
 
-  <!-- FOOTER : light -->
+  <!-- FOOTER -->
   <footer class="footer">
     <div class="wrap footer-inner">
       <div>
         <a class="logo" href="#"><span class="logo-mark"></span>Doorline</a>
         <p>The door-to-door canvassing platform for political consulting firms — a web operations console plus an offline-first mobile field app.</p>
+        <div class="store-badges">
+          <a class="store-badge" href="#"><small>Download on the</small><b> App Store</b></a>
+          <a class="store-badge" href="#"><small>Get it on</small><b>Google Play</b></a>
+        </div>
       </div>
       <nav class="footer-links">
         <a href="#">Privacy</a>

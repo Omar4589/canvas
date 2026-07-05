@@ -9,9 +9,11 @@ import { demoMailto } from './contact.js';
 // Below md the section links collapse into a disclosure menu so mobile users
 // can still jump to sections.
 const SECTIONS = [
-  { href: '#features', label: 'Features' },
+  { href: '#turf', label: 'Turf' },
+  { href: '#field', label: 'Field app' },
+  { href: '#oversight', label: 'Oversight' },
+  { href: '#reports', label: 'Client reports' },
   { href: '#how', label: 'How it works' },
-  { href: '#mobile', label: 'Mobile app' },
 ];
 
 export default function MarketingNav() {

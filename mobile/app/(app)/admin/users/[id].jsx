@@ -486,6 +486,59 @@ export default function AdminUserDetail() {
             </Pressable>
           </View>
 
+          {/* Password — right under the profile/role section for quick access */}
+          <View style={styles.card}>
+            <Text style={styles.sectionLabel}>Password</Text>
+            <Pressable
+              onPress={() => setShowResetPw((s) => !s)}
+              style={styles.secondaryBtn}
+            >
+              <Text style={styles.secondaryBtnText}>
+                {showResetPw ? 'Cancel' : 'Set temporary password'}
+              </Text>
+            </Pressable>
+
+            {showResetPw && (
+              <View style={styles.resetPwBox}>
+                <Text style={styles.formLabel}>Temporary password (min 8 chars)</Text>
+                <Text
+                  style={{
+                    ...type.caption,
+                    color: colors.textMuted,
+                    marginBottom: spacing.sm,
+                  }}
+                >
+                  The user will be required to choose a new password the next time
+                  they log in.
+                </Text>
+                <PasswordInput
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  autoComplete="new-password"
+                  placeholder="••••••••"
+                />
+                <Pressable
+                  onPress={onResetPw}
+                  disabled={newPassword.length < 8 || resetPw.isPending}
+                  style={[
+                    styles.saveBtn,
+                    {
+                      marginTop: spacing.md,
+                      opacity:
+                        newPassword.length >= 8 && !resetPw.isPending ? 1 : 0.5,
+                    },
+                  ]}
+                >
+                  {resetPw.isPending ? (
+                    <ActivityIndicator color={colors.textInverse} />
+                  ) : (
+                    <Text style={styles.saveBtnText}>Set password</Text>
+                  )}
+                </Pressable>
+              </View>
+            )}
+          </View>
+
           {/* Lifetime stats */}
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Activity (lifetime)</Text>
@@ -570,66 +623,16 @@ export default function AdminUserDetail() {
             )}
           </View>
 
-          {/* Account actions */}
-          <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Account</Text>
-            <Pressable
-              onPress={() => setShowResetPw((s) => !s)}
-              style={styles.secondaryBtn}
-            >
-              <Text style={styles.secondaryBtnText}>
-                {showResetPw ? 'Cancel' : 'Set temporary password'}
-              </Text>
-            </Pressable>
-
-            {showResetPw && (
-              <View style={styles.resetPwBox}>
-                <Text style={styles.formLabel}>Temporary password (min 8 chars)</Text>
-                <Text
-                  style={{
-                    ...type.caption,
-                    color: colors.textMuted,
-                    marginBottom: spacing.sm,
-                  }}
-                >
-                  The user will be required to choose a new password the next time
-                  they log in.
-                </Text>
-                <PasswordInput
-                  value={newPassword}
-                  onChangeText={setNewPassword}
-                  autoComplete="new-password"
-                  placeholder="••••••••"
-                />
-                <Pressable
-                  onPress={onResetPw}
-                  disabled={newPassword.length < 8 || resetPw.isPending}
-                  style={[
-                    styles.saveBtn,
-                    {
-                      marginTop: spacing.md,
-                      opacity:
-                        newPassword.length >= 8 && !resetPw.isPending ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  {resetPw.isPending ? (
-                    <ActivityIndicator color={colors.textInverse} />
-                  ) : (
-                    <Text style={styles.saveBtnText}>Set password</Text>
-                  )}
-                </Pressable>
-              </View>
-            )}
-
-            {!isSelf && (
+          {/* Account actions — deactivate/reactivate lives at the bottom (danger zone). */}
+          {!isSelf && (
+            <View style={styles.card}>
+              <Text style={styles.sectionLabel}>Account</Text>
               <Pressable
                 onPress={onToggleActive}
                 disabled={toggleActive.isPending}
                 style={[
                   styles.secondaryBtn,
                   {
-                    marginTop: spacing.sm,
                     backgroundColor: user.isActive
                       ? colors.dangerBg
                       : colors.successBg,
@@ -650,8 +653,8 @@ export default function AdminUserDetail() {
                   {user.isActive ? 'Deactivate' : 'Reactivate'}
                 </Text>
               </Pressable>
-            )}
-          </View>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

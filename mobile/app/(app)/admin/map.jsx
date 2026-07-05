@@ -17,8 +17,8 @@ import { loadActiveCampaign } from '../../../lib/cache';
 import { useMapStyle } from '../../../lib/mapStyles';
 import MapStyleControl from '../../../components/MapStyleControl';
 import CampaignChip from '../../../components/CampaignChip';
-import DateRangeBar from '../../../components/DateRangeBar';
-import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
+import DateRangePickerModal from '../../../components/DateRangePickerModal';
+import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
@@ -110,6 +110,29 @@ function pingsToFeatures(activities) {
   };
 }
 
+// A dashed connector from each GPS ping to the house it was recorded at, so you can
+// see how far a canvasser stood from the door. Mirrors the web `canvasser-lines` layer.
+function linesToFeatures(activities, householdsById) {
+  const features = [];
+  for (const a of activities || []) {
+    if (a.location?.lng == null || a.location?.lat == null) continue;
+    const h = householdsById.get(String(a.householdId));
+    if (!h?.location) continue;
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [a.location.lng, a.location.lat],
+          [h.location.lng, h.location.lat],
+        ],
+      },
+      properties: { id: String(a.id) },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
 function actionLabel(t) {
   if (t === 'survey_submitted') return 'Survey submitted';
   if (t === 'lit_dropped') return 'Lit dropped';
@@ -198,7 +221,8 @@ export default function AdminMap() {
   const [canvasserId, setCanvasserId] = useState('');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', label: '' });
   const [live, setLive] = useState(true);
-  const [openMenu, setOpenMenu] = useState(null); // 'canvasser' | 'status' | 'answer' | null
+  const [openMenu, setOpenMenu] = useState(null); // 'date' | 'canvasser' | 'status' | 'answer' | null
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
 
   const pingDetailQ = useQuery({
     queryKey: ['admin', 'activity', selectedPing?.id],
@@ -263,6 +287,11 @@ export default function AdminMap() {
     for (const h of households) m.set(String(h.id), h);
     return m;
   }, [households]);
+
+  const lineFeatures = useMemo(
+    () => (showPings ? linesToFeatures(activities, householdsById) : { type: 'FeatureCollection', features: [] }),
+    [showPings, activities, householdsById]
+  );
 
   const activitiesById = useMemo(() => {
     const m = new Map();
@@ -432,6 +461,21 @@ export default function AdminMap() {
           }}
         />
 
+        {/* Ping-to-house connector lines, drawn beneath the pins so the markers sit on top. */}
+        {showPings && (
+          <Mapbox.ShapeSource id="admin-lines" shape={lineFeatures}>
+            <Mapbox.LineLayer
+              id="admin-line-strokes"
+              style={{
+                lineColor: colors.textSecondary,
+                lineWidth: 1,
+                lineOpacity: 0.5,
+                lineDasharray: [2, 2],
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
+
         <Mapbox.ShapeSource id="admin-households" shape={householdFeatures} onPress={onPinPress}>
           {/* Amber "approximate" ring under any interpolated (non-rooftop) geocode, so
               admins can spot the pins most likely to be off. Below the house icon. */}
@@ -568,13 +612,12 @@ export default function AdminMap() {
         </View>
 
         <View style={styles.chromeCard}>
-          <DateRangeBar value={range} onChange={(v) => { setRange(v); setOpenMenu(null); }} tz={tz} />
-
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipScroll}
           >
+            <FilterChip label={labelForRange(range)} active={range.preset !== 'all'} open={openMenu === 'date'} onPress={() => toggleMenu('date')} />
             <FilterChip label={canvasserLabel} active={!!canvasserId} open={openMenu === 'canvasser'} onPress={() => toggleMenu('canvasser')} />
             <FilterChip label={statusLabel} active={statusFilter.length > 0} open={openMenu === 'status'} onPress={() => toggleMenu('status')} />
             {surveyQuestions.length > 0 && (
@@ -616,6 +659,26 @@ export default function AdminMap() {
         </View>
 
         {/* Dropdown menus — one open at a time, rendered below the chrome. */}
+        {openMenu === 'date' && (
+          <View style={styles.menu}>
+            {PRESETS.map((p) => (
+              <MenuItem
+                key={p.key}
+                label={p.label}
+                active={range.preset === p.key}
+                onPress={() => {
+                  setOpenMenu(null);
+                  if (p.key === 'custom') {
+                    setDatePickerOpen(true);
+                    return;
+                  }
+                  const r = rangeFor(p.key, null, tz);
+                  setRange({ preset: p.key, from: r.from, to: r.to });
+                }}
+              />
+            ))}
+          </View>
+        )}
         {openMenu === 'canvasser' && (
           <View style={styles.menu}>
             <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
@@ -660,6 +723,19 @@ export default function AdminMap() {
           </View>
         )}
       </SafeAreaView>
+
+      {/* Custom date range picker — opened from the date chip's "Custom" item. */}
+      <DateRangePickerModal
+        visible={datePickerOpen}
+        initialFrom={range.from}
+        initialTo={range.to}
+        tz={tz}
+        onClose={() => setDatePickerOpen(false)}
+        onApply={({ from, to }) => {
+          setRange({ preset: 'custom', from, to });
+          setDatePickerOpen(false);
+        }}
+      />
 
       {/* First/last-knock legend — only while auditing one canvasser. */}
       {firstLastKnock.first && !selected && !selectedPing && (

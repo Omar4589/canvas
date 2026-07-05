@@ -15,6 +15,11 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        // InterVariable is self-hosted via @fontsource-variable/inter (main.jsx);
+        // the system stack is the graceful fallback if it ever fails to load.
+        sans: ['InterVariable', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+      },
       colors: {
         brand: {
           50: '#FEF2F2',   // brandTint — selected backgrounds, soft washes
