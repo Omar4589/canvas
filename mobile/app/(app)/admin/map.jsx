@@ -19,6 +19,7 @@ import { loadActiveCampaign } from '../../../lib/cache';
 import { useMapStyle } from '../../../lib/mapStyles';
 import MapStyleControl from '../../../components/MapStyleControl';
 import CampaignChip from '../../../components/CampaignChip';
+import LiveStatus from '../../../components/LiveStatus';
 import DateRangePickerModal from '../../../components/DateRangePickerModal';
 import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
@@ -652,10 +653,14 @@ export default function AdminMap() {
               <Switch value={showPings} onValueChange={setShowPings} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
               <Text style={styles.toggleLabel}>Pings</Text>
             </View>
-            <View style={styles.toggleChip}>
-              <Switch value={live} onValueChange={setLive} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
-              <Text style={styles.toggleLabel}>Live</Text>
-            </View>
+            <LiveStatus
+              live={live}
+              onToggle={() => setLive((v) => !v)}
+              isFetching={mapQ.isFetching}
+              updatedAt={mapQ.dataUpdatedAt}
+              onRefresh={() => mapQ.refetch()}
+            />
+            <View style={{ flex: 1 }} />
             <View style={styles.countChip}>
               <Text style={styles.countText}>
                 <Text style={styles.countStrong}>{households.length}</Text> houses
@@ -1056,7 +1061,6 @@ function makeStyles(t) {
     alignItems: 'center',
   },
   toggleChip: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.card,

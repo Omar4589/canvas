@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
+import LiveStatus from '../../../components/LiveStatus';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -50,10 +52,11 @@ export default function ActivityScreen() {
     lit_dropped: colors.accentPurple,
   };
 
+  const [live, setLive] = useState(true);
   const feedQ = useQuery({
     queryKey: ['super-admin', 'activity-feed', 50],
     queryFn: () => api('/super-admin/activity-feed?limit=50'),
-    refetchInterval: 30_000,
+    refetchInterval: live ? 30_000 : false,
     // Pause the poll (and refresh on return) while a pushed screen covers this one.
     ...useFocusedPoll(),
   });
@@ -70,6 +73,15 @@ export default function ActivityScreen() {
         </Pressable>
         <Text style={styles.headerTitle}>Live activity</Text>
         <View style={{ width: 80 }} />
+      </View>
+      <View style={styles.liveRow}>
+        <LiveStatus
+          live={live}
+          onToggle={() => setLive((v) => !v)}
+          isFetching={feedQ.isFetching}
+          updatedAt={feedQ.dataUpdatedAt}
+          onRefresh={() => feedQ.refetch()}
+        />
       </View>
 
       <ScrollView
@@ -139,6 +151,12 @@ function makeStyles(t) {
   },
   back: { color: colors.brand, fontWeight: '700', fontSize: 14 },
   headerTitle: { ...type.h3 },
+  liveRow: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
 
   empty: {
     backgroundColor: colors.card,

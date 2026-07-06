@@ -22,6 +22,7 @@ import {
   clearBootstrap,
 } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
+import LiveStatus from '../../../components/LiveStatus';
 import NavTileGrid from '../../../components/NavTileGrid';
 import { ThemeIconButton } from '../../../components/ThemeToggle';
 import { radius, spacing } from '../../../lib/theme';
@@ -78,23 +79,27 @@ export default function SuperAdminHome() {
     loadCurrentUser().then((u) => setUser(u));
   }, []);
 
+  const [live, setLive] = useState(true);
+
   // This stack base stays mounted under pushed child screens — pause both
   // polls (and refresh on return) whenever the screen is covered.
   const overviewQ = useQuery({
     queryKey: ['super-admin', 'platform-overview'],
     queryFn: () => api('/super-admin/platform-overview'),
-    refetchInterval: 30_000,
+    refetchInterval: live ? 30_000 : false,
     ...useFocusedPoll(),
   });
 
   const feedQ = useQuery({
     queryKey: ['super-admin', 'activity-feed', 5],
     queryFn: () => api('/super-admin/activity-feed?limit=5'),
-    refetchInterval: 30_000,
+    refetchInterval: live ? 30_000 : false,
     ...useFocusedPoll(),
   });
 
   const { refreshing, onRefresh } = useRefresh([overviewQ.refetch, feedQ.refetch]);
+  // One pill for both polls: freshest of the two, fetching if either is, refresh both.
+  const liveUpdatedAt = Math.max(overviewQ.dataUpdatedAt || 0, feedQ.dataUpdatedAt || 0) || undefined;
 
   async function pickOrg(orgId) {
     qc.clear();
@@ -123,6 +128,18 @@ export default function SuperAdminHome() {
             <Text style={styles.signOut}>Sign out</Text>
           </Pressable>
         </View>
+      </View>
+      <View style={styles.liveRow}>
+        <LiveStatus
+          live={live}
+          onToggle={() => setLive((v) => !v)}
+          isFetching={overviewQ.isFetching || feedQ.isFetching}
+          updatedAt={liveUpdatedAt}
+          onRefresh={() => {
+            overviewQ.refetch();
+            feedQ.refetch();
+          }}
+        />
       </View>
 
       <ScrollView
@@ -309,6 +326,12 @@ function makeStyles(t) {
     justifyContent: 'space-between',
   },
   signOut: { color: colors.brand, fontWeight: '600', fontSize: 14 },
+  liveRow: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
 
   greeting: { ...type.title, marginTop: spacing.xs },
   subtitle: { ...type.caption, marginTop: spacing.xs, marginBottom: spacing.lg },

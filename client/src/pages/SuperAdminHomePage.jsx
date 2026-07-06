@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import CrossOrgActivityFeed from '../components/CrossOrgActivityFeed.jsx';
+import LiveStatus from '../components/LiveStatus.jsx';
 
 function formatRelative(d) {
   if (!d) return 'No activity';
@@ -36,11 +38,12 @@ export default function SuperAdminHomePage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { switchOrg, user } = useAuth();
+  const [live, setLive] = useState(true);
 
   const overviewQ = useQuery({
     queryKey: ['super-admin', 'platform-overview'],
     queryFn: () => api('/super-admin/platform-overview'),
-    refetchInterval: 30_000,
+    refetchInterval: live ? 30_000 : false,
   });
 
   function pickOrg(orgId) {
@@ -56,7 +59,16 @@ export default function SuperAdminHomePage() {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
         <div>
-          <h1 className="text-2xl font-semibold text-fg">Platform control room</h1>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h1 className="text-2xl font-semibold text-fg">Platform control room</h1>
+            <LiveStatus
+              live={live}
+              onToggle={() => setLive((v) => !v)}
+              isFetching={overviewQ.isFetching}
+              updatedAt={overviewQ.dataUpdatedAt}
+              onRefresh={() => overviewQ.refetch()}
+            />
+          </div>
           <p className="text-sm text-fg-muted">
             Hi {user?.firstName} — here&apos;s every org at a glance. Active-now is anyone
             whose last canvass action was in the past 15 min.
@@ -175,7 +187,7 @@ export default function SuperAdminHomePage() {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">
           Live activity
         </h2>
-        <CrossOrgActivityFeed limit={50} />
+        <CrossOrgActivityFeed limit={50} refetchMs={live ? 30_000 : false} />
       </div>
     </div>
   );
