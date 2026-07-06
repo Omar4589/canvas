@@ -62,14 +62,18 @@ export default function TimelinePage() {
   const tz = current?.timeZone || orgTz;
   const tzReady = !campaignsQ.isLoading;
 
-  // The same mounted element serves every /campaigns/:id/timeline — reset the
-  // campaign-scoped filters synchronously when the admin switches campaigns, or a
-  // stale coordinator/effort id from campaign A falsely empties campaign B.
+  // The same mounted element serves every /campaigns/:id/timeline — reset ALL
+  // campaign-scoped view state synchronously when the admin switches campaigns, or
+  // stale filters, the picked range, and the live toggle bleed from A into B (and a
+  // touched range would keep B from reseeding to its own "today").
   const [prevCampaignId, setPrevCampaignId] = useState(campaignId);
   if (prevCampaignId !== campaignId) {
     setPrevCampaignId(campaignId);
     setCoordinatorId('');
     setEffortId('');
+    setLive(true);
+    setDateRange(defaultRange('today', tz));
+    rangeTouchedRef.current = false;
   }
 
   const effortsQ = useQuery({
