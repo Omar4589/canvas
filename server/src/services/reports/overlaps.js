@@ -13,9 +13,11 @@ import { KNOCK_ACTIONS } from './aggregations.js';
 //
 // `match` is a fully-built CanvassActivity filter (org/campaign/effort + date window); this
 // adds the KNOCK_ACTIONS clause itself. Returns one card per household (the shape the route
-// has always returned) plus `householdIds` for callers that need a reconciliation count.
+// has always returned) plus UNCAPPED `total`/`householdIds`/`overlapUserIds` — the card list
+// truncates at `limit` (the worst collisions first), but reconciliation counts and the
+// per-canvasser inOverlap flags must not silently degrade on long date ranges.
 export async function computeOverlaps(match, { organizationId, limit = 200 } = {}) {
-  const collisions = await CanvassActivity.aggregate([
+  const [facets] = await CanvassActivity.aggregate([
     { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },
     {
       $group: {
@@ -28,12 +30,29 @@ export async function computeOverlaps(match, { organizationId, limit = 200 } = {
     },
     { $set: { distinctCount: { $size: '$canvassers' } } },
     { $match: { distinctCount: { $gt: 1 } } },
-    { $sort: { distinctCount: -1 } },
-    { $limit: limit },
+    {
+      $facet: {
+        cards: [{ $sort: { distinctCount: -1 } }, { $limit: limit }],
+        all: [
+          {
+            $group: {
+              _id: null,
+              householdIds: { $addToSet: '$_id.householdId' },
+              userIdSets: { $addToSet: '$canvassers' },
+            },
+          },
+        ],
+      },
+    },
   ]);
 
+  const collisions = facets?.cards || [];
+  const allSummary = facets?.all?.[0] || null;
+  const allHouseholdIds = (allSummary?.householdIds || []).map(String);
+  const overlapUserIds = [...new Set((allSummary?.userIdSets || []).flat().map(String))];
+
   if (!collisions.length) {
-    return { overlaps: [], total: 0, householdIds: [] };
+    return { overlaps: [], total: 0, householdIds: [], overlapUserIds: [] };
   }
 
   const householdIds = [...new Set(collisions.map((c) => String(c._id.householdId)))];
@@ -106,5 +125,12 @@ export async function computeOverlaps(match, { organizationId, limit = 200 } = {
     }))
     .sort((a, b) => b.totalCanvassers - a.totalCanvassers);
 
-  return { overlaps: result, total: result.length, householdIds: [...byHousehold.keys()] };
+  return {
+    overlaps: result,
+    // True (pre-cap) counts: `total` = every overlapping household in the window, even
+    // when only the first `limit` cards are returned.
+    total: allHouseholdIds.length,
+    householdIds: allHouseholdIds,
+    overlapUserIds,
+  };
 }

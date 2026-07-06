@@ -1,7 +1,3 @@
-import { ratePct, rateAccent } from '../lib/rates.js';
-
-const RATE_TEXT = { green: 'text-success', amber: 'text-warning', red: 'text-danger' };
-
 // 9 → "9a", 12 → "12p", 17 → "5p"
 function formatHour(h) {
   const ampm = h < 12 ? 'a' : 'p';
@@ -9,27 +5,56 @@ function formatHour(h) {
   return `${hour12}${ampm}`;
 }
 
-// Heatmap grid: rows = canvassers, columns = the day's active hours, cells = knocks (or surveys).
-// First column is frozen (sticky) so it stays visible while the hour columns scroll horizontally.
-export default function TimelineGrid({ data, metric }) {
-  const hours = data?.hours || [];
-  const canvassers = data?.canvassers || [];
-  const byHourKey = metric === 'surveys' ? 'surveysByHour' : 'knocksByHour';
-  const totalsKey = metric === 'surveys' ? 'surveys' : 'knocks';
-  const hourTotals = data?.hourTotals?.[totalsKey] || {};
+// "2026-07-06" → "7/6" (label) — pure string math, no Date/tz involved.
+function formatDayCol(ymd) {
+  const [, m, d] = ymd.split('-');
+  return `${Number(m)}/${Number(d)}`;
+}
+
+// Heatmap grid: rows = canvassers, columns = the day's active hours (single-day view) or
+// the range's days (multi-day view), cells = knocks (or surveys). First column is frozen
+// (sticky) so it stays visible while the bucket columns scroll horizontally.
+//
+// `rows` is the (possibly coordinator-filtered) canvasser list from TimelinePage — column
+// and grand totals are derived from it, NOT from data.hourTotals/grandKnocks, so the grid
+// always agrees with the filtered table and KPIs above it. Per-row summary columns live in
+// CanvasserSummaryTable now, not here.
+export default function TimelineGrid({ data, rows, metric }) {
+  const isRange = data?.mode === 'range';
+  const columns = isRange
+    ? (data?.days || []).map((d) => ({ key: d, label: formatDayCol(d), title: d }))
+    : (data?.hours || []).map((h) => ({ key: h, label: formatHour(h), title: undefined }));
+  const bucketKey = isRange
+    ? metric === 'surveys'
+      ? 'surveysByDay'
+      : 'knocksByDay'
+    : metric === 'surveys'
+      ? 'surveysByHour'
+      : 'knocksByHour';
+  const canvassers = rows || [];
 
   // Grid-wide max for the active metric → heatmap intensity basis (recomputed when metric flips).
   let maxCell = 0;
   for (const c of canvassers) {
-    for (const h of hours) {
-      const v = c[byHourKey]?.[h] || 0;
+    for (const col of columns) {
+      const v = c[bucketKey]?.[col.key] || 0;
       if (v > maxCell) maxCell = v;
     }
   }
   const cellBg = (v) => (v && maxCell ? `rgba(59,130,246,${(0.12 + 0.88 * (v / maxCell)).toFixed(3)})` : undefined);
 
-  // name + hours + Knocks + Surveys + Conn
-  const gridTemplateColumns = `220px repeat(${hours.length}, minmax(40px, 1fr)) 64px 64px 56px`;
+  // Column totals from the visible rows (respects the coordinator filter).
+  const colTotals = {};
+  let grandTotal = 0;
+  for (const c of canvassers) {
+    for (const col of columns) {
+      const v = c[bucketKey]?.[col.key] || 0;
+      if (v) colTotals[col.key] = (colTotals[col.key] || 0) + v;
+    }
+    grandTotal += metric === 'surveys' ? c.daySurveys || 0 : c.dayKnocks || 0;
+  }
+
+  const gridTemplateColumns = `220px repeat(${columns.length}, minmax(40px, 1fr)) 72px`;
   const FROZEN = 'sticky left-0 z-10';
 
   return (
@@ -39,40 +64,43 @@ export default function TimelineGrid({ data, metric }) {
         <div className={`${FROZEN} border-b border-border bg-card px-3 py-2 text-xs font-semibold uppercase tracking-wide text-fg-muted`}>
           Canvasser
         </div>
-        {hours.map((h) => (
-          <div key={h} className="border-b border-border px-1 py-2 text-center text-xs font-medium tabular-nums text-fg-muted">
-            {formatHour(h)}
+        {columns.map((col) => (
+          <div
+            key={col.key}
+            title={col.title}
+            className="border-b border-border px-1 py-2 text-center text-xs font-medium tabular-nums text-fg-muted"
+          >
+            {col.label}
           </div>
         ))}
-        <div className="border-b border-border px-2 py-2 text-right text-xs font-semibold text-fg-muted">Knocks</div>
-        <div className="border-b border-border px-2 py-2 text-right text-xs font-semibold text-fg-muted">Surveys</div>
-        <div className="border-b border-border px-2 py-2 text-right text-xs font-semibold text-fg-muted">Conn</div>
+        <div className="border-b border-border px-2 py-2 text-right text-xs font-semibold text-fg-muted">
+          {metric === 'surveys' ? 'Surveys' : 'Knocks'}
+        </div>
 
         {/* Rows */}
         {canvassers.map((c) => (
-          <Row key={c.userId} c={c} hours={hours} byHourKey={byHourKey} cellBg={cellBg} frozen={FROZEN} />
+          <Row key={c.userId} c={c} columns={columns} bucketKey={bucketKey} metric={metric} cellBg={cellBg} frozen={FROZEN} />
         ))}
 
         {/* Totals footer */}
         <div className={`${FROZEN} border-t border-border bg-sunken px-3 py-2 text-xs font-semibold text-fg`}>Total</div>
-        {hours.map((h) => (
-          <div key={h} className="border-t border-border bg-sunken px-1 py-2 text-center text-xs font-semibold tabular-nums text-fg">
-            {hourTotals[h] || ''}
+        {columns.map((col) => (
+          <div
+            key={col.key}
+            className="border-t border-border bg-sunken px-1 py-2 text-center text-xs font-semibold tabular-nums text-fg"
+          >
+            {colTotals[col.key] || ''}
           </div>
         ))}
         <div className="border-t border-border bg-sunken px-2 py-2 text-right text-xs font-bold tabular-nums text-fg">
-          {(data?.grandKnocks || 0).toLocaleString()}
+          {grandTotal.toLocaleString()}
         </div>
-        <div className="border-t border-border bg-sunken px-2 py-2 text-right text-xs font-bold tabular-nums text-fg">
-          {(data?.grandSurveys || 0).toLocaleString()}
-        </div>
-        <div className="border-t border-border bg-sunken px-2 py-2 text-right text-xs text-fg-muted">—</div>
       </div>
     </div>
   );
 }
 
-function Row({ c, hours, byHourKey, cellBg, frozen }) {
+function Row({ c, columns, bucketKey, metric, cellBg, frozen }) {
   return (
     <>
       <div className={`${frozen} border-b border-border bg-card px-3 py-2`}>
@@ -81,7 +109,7 @@ function Row({ c, hours, byHourKey, cellBg, frozen }) {
             {c.firstName} {c.lastName}
           </span>
           {c.inOverlap && (
-            <span title="Knocked an overlapping door today" className="text-warning-fg">
+            <span title="Knocked an overlapping door in this range" className="text-warning-fg">
               ⚠
             </span>
           )}
@@ -91,11 +119,11 @@ function Row({ c, hours, byHourKey, cellBg, frozen }) {
         </div>
         <div className="truncate text-xs text-fg-muted">{c.email}</div>
       </div>
-      {hours.map((h) => {
-        const v = c[byHourKey]?.[h] || 0;
+      {columns.map((col) => {
+        const v = c[bucketKey]?.[col.key] || 0;
         return (
           <div
-            key={h}
+            key={col.key}
             className="border-b border-border px-1 py-2 text-center text-xs tabular-nums text-fg"
             style={{ backgroundColor: cellBg(v) }}
           >
@@ -104,13 +132,7 @@ function Row({ c, hours, byHourKey, cellBg, frozen }) {
         );
       })}
       <div className="border-b border-border px-2 py-2 text-right text-xs font-semibold tabular-nums text-fg">
-        {(c.dayKnocks || 0).toLocaleString()}
-      </div>
-      <div className="border-b border-border px-2 py-2 text-right text-xs tabular-nums text-fg">
-        {(c.daySurveys || 0).toLocaleString()}
-      </div>
-      <div className={`border-b border-border px-2 py-2 text-right text-xs font-semibold tabular-nums ${RATE_TEXT[rateAccent(c.connectionRate)] || 'text-fg-muted'}`}>
-        {ratePct(c.connectionRate)}
+        {(metric === 'surveys' ? c.daySurveys || 0 : c.dayKnocks || 0).toLocaleString()}
       </div>
     </>
   );

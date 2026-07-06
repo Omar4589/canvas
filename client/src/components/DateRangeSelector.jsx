@@ -14,7 +14,9 @@ export { RANGE_PRESETS, rangeFor, quickRangeFor, defaultRange, labelForRange };
 // Controlled preset bar. `value` is { preset, from, to }; `tz` is the anchor
 // (campaign/org) timezone so presets resolve to the campaign's days, not the device's.
 // onChange receives the full next object whenever a preset or custom range is chosen.
-export default function DateRangeSelector({ value, onChange, tz }) {
+// `presets` lets a page offer a subset (e.g. the timeline drops 'all' — its endpoint
+// caps the span).
+export default function DateRangeSelector({ value, onChange, tz, presets = RANGE_PRESETS }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const activePreset = value?.preset || 'today';
 
@@ -35,7 +37,7 @@ export default function DateRangeSelector({ value, onChange, tz }) {
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="inline-flex rounded-md border border-border bg-card p-0.5 text-sm shadow-sm">
-        {RANGE_PRESETS.map((p) => {
+        {presets.map((p) => {
           const active = p.id === activePreset;
           return (
             <button

@@ -1075,31 +1075,87 @@ router.get('/overlaps', async (req, res, next) => {
   }
 });
 
-// Per-campaign DAILY TIMELINE: rows = canvassers, columns = hours of ONE day (campaign tz),
-// cells = knocks (+ a survey subset). A single canvasser has <=1 knock activity per
-// (household, pass), so a row total == that canvasser's billable knocks (matches the leaderboard);
-// the only sum-vs-billable gap across canvassers IS the overlap count, surfaced inline as
-// `overlapDoors` (= grandKnocks - billableKnocks). Reuses knocksPipeline + computeOverlaps. Serves
-// both web and mobile admin. See docs/METRICS.md.
+// Per-campaign CANVASSER TIMELINE: rows = canvassers; columns = the hours of ONE day
+// (mode:'day' — the default and the mobile path, via ?date=) or the days of a range
+// (mode:'range' — the web dashboard, via ?from/&to). Cells = knocks (+ a survey subset).
+// A single canvasser has <=1 knock activity per (household, pass), so a row total ==
+// that canvasser's billable knocks (matches the leaderboard); the only sum-vs-billable
+// gap across canvassers IS the overlap count, surfaced inline as `overlapDoors`
+// (= grandKnocks - billableKnocks) — exact in both modes. dayKnocks/daySurveys/dayLit
+// keep their names in both modes (they are the WINDOW totals; mobile only ever requests
+// one day). Reuses knocksPipeline + computeOverlaps. See docs/METRICS.md.
+const TIMELINE_MAX_DAYS = 62;
+
+function addDaysYmd(ymd, n) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+function ymdSpanDays(from, to) {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000) + 1;
+}
+
 router.get('/canvasser-timeline', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
     const tz = tzOf(req);
-    let day = String(req.query.date || '').slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) day = zonedDayStr(new Date(), tz);
-    const dayRange = zonedDayRange(day, day, tz); // full 24h of that campaign-tz day
-    const scoped = { ...baseFilter(req), timestamp: dayRange };
 
-    const [hourAgg, knockAgg, overlapRes] = await Promise.all([
+    const validYmd = (v) => {
+      const s = String(v ?? '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+      // Calendar-valid too: Date.UTC normalizes (2026-02-31 → 2026-03-03), so a
+      // round-trip mismatch means a fictitious day that would desync days[] from
+      // the $dateToString buckets. Invalid values fall back to the defaults.
+      return addDaysYmd(s, 0) === s ? s : null;
+    };
+
+    // Two request shapes. ?date= (or nothing) = single day, the original/mobile shape.
+    // ?from/&to = range. Relative presets send to:null (open-ended through today), so a
+    // missing `to` defaults to today-in-anchor-tz BEFORE the single-day check — otherwise
+    // "Today" (from=today, to=null) would never take the day path.
+    const hasRange = req.query.from !== undefined || req.query.to !== undefined;
+    let from;
+    let to;
+    if (hasRange) {
+      to = validYmd(req.query.to) || zonedDayStr(new Date(), tz);
+      from = validYmd(req.query.from) || to;
+      if (from > to) return res.status(400).json({ error: 'from must be on or before to' });
+      if (ymdSpanDays(from, to) > TIMELINE_MAX_DAYS) {
+        return res.status(400).json({ error: `Date range too large (max ${TIMELINE_MAX_DAYS} days)` });
+      }
+    } else {
+      from = validYmd(req.query.date) || zonedDayStr(new Date(), tz);
+      to = from;
+    }
+    const singleDay = from === to;
+
+    const window = zonedDayRange(from, to, tz);
+    const scoped = { ...baseFilter(req), timestamp: window };
+
+    // One aggregation, mode-keyed bucket: hour-of-day for a single day, calendar day for
+    // a range. Both bucket in the anchor tz ($hour/$dateToString with timezone), so DST
+    // days (23/25h) land in the wall-clock buckets an admin expects.
+    const bucketExpr = singleDay
+      ? { $hour: { date: '$timestamp', timezone: tz } }
+      : dayBucketExpr('timestamp', tz);
+
+    const [bucketAgg, knockAgg, overlapRes] = await Promise.all([
       CanvassActivity.aggregate([
         { $match: { ...scoped, actionType: { $in: KNOCK_ACTIONS } } },
         {
           $group: {
-            _id: { userId: '$userId', hour: { $hour: { date: '$timestamp', timezone: tz } } },
+            _id: { userId: '$userId', bucket: bucketExpr },
             knocks: { $sum: 1 },
             surveys: { $sum: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
             lit: { $sum: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
+            refused: { $sum: { $cond: [{ $eq: ['$actionType', 'refused'] }, 1, 0] } },
+            notHome: { $sum: { $cond: [{ $eq: ['$actionType', 'not_home'] }, 1, 0] } },
+            wrongAddress: { $sum: { $cond: [{ $eq: ['$actionType', 'wrong_address'] }, 1, 0] } },
+            first: { $min: '$timestamp' },
+            last: { $max: '$timestamp' },
           },
         },
       ]),
@@ -1109,35 +1165,76 @@ router.get('/canvasser-timeline', async (req, res, next) => {
 
     const billableKnocks = knockAgg[0]?.knocks || 0;
 
-    // Per-(user, hour) tally → per-canvasser rows.
+    // Per-(user, bucket) tally → per-canvasser rows.
     const byUser = new Map();
-    const activeHours = new Set();
-    for (const r of hourAgg) {
+    const activeHours = new Set(); // single-day only
+    for (const r of bucketAgg) {
       const uid = String(r._id.userId);
-      activeHours.add(r._id.hour);
       if (!byUser.has(uid)) {
-        byUser.set(uid, { knocksByHour: {}, surveysByHour: {}, dayKnocks: 0, daySurveys: 0, dayLit: 0 });
+        byUser.set(uid, {
+          knocksByHour: {},
+          surveysByHour: {},
+          knocksByDay: {},
+          surveysByDay: {},
+          dayKnocks: 0,
+          daySurveys: 0,
+          dayLit: 0,
+          refused: 0,
+          notHome: 0,
+          wrongAddress: 0,
+          first: null,
+          last: null,
+          hoursOnDoors: 0,
+        });
       }
       const row = byUser.get(uid);
-      row.knocksByHour[r._id.hour] = r.knocks;
-      if (r.surveys) row.surveysByHour[r._id.hour] = r.surveys;
+      if (singleDay) {
+        activeHours.add(r._id.bucket);
+        row.knocksByHour[r._id.bucket] = r.knocks;
+        if (r.surveys) row.surveysByHour[r._id.bucket] = r.surveys;
+      } else {
+        row.knocksByDay[r._id.bucket] = r.knocks;
+        if (r.surveys) row.surveysByDay[r._id.bucket] = r.surveys;
+        // Range buckets ARE days, so summing per-bucket (last - first) is exactly the
+        // canvasser-summary endpoint's "sum of per-day active spans" method.
+        row.hoursOnDoors += (r.last - r.first) / 3600000;
+      }
       row.dayKnocks += r.knocks;
       row.daySurveys += r.surveys;
       row.dayLit += r.lit;
+      row.refused += r.refused;
+      row.notHome += r.notHome;
+      row.wrongAddress += r.wrongAddress;
+      if (!row.first || r.first < row.first) row.first = r.first;
+      if (!row.last || r.last > row.last) row.last = r.last;
+    }
+
+    // Single day: buckets are hours, so the active span is (overall last - first) —
+    // summing per-hour spans would drop the gaps between active hours.
+    if (singleDay) {
+      for (const row of byUser.values()) {
+        if (row.first && row.last) row.hoursOnDoors = (row.last - row.first) / 3600000;
+      }
     }
 
     // Contiguous active-hour window (min..max) so the grid has no gaps; [] when no activity.
     const hours = [];
-    if (activeHours.size) {
+    if (singleDay && activeHours.size) {
       const min = Math.min(...activeHours);
       const max = Math.max(...activeHours);
       for (let h = min; h <= max; h++) hours.push(h);
     }
 
-    const overlapUserIds = new Set();
-    for (const card of overlapRes.overlaps) {
-      for (const p of card.passes) for (const c of p.canvassers) overlapUserIds.add(String(c.userId));
+    // Every day of the range, inclusive — pure calendar-string math (the tz-aware
+    // bucketing above already put each knock on its wall-clock day).
+    const days = [];
+    if (!singleDay) {
+      for (let d = from; d <= to; d = addDaysYmd(d, 1)) days.push(d);
     }
+
+    // Uncapped: computeOverlaps' card list truncates at 200 (worst first), but the flag
+    // must cover every colliding canvasser in the window — range mode can exceed the cap.
+    const overlapUserIds = new Set(overlapRes.overlapUserIds || []);
 
     const userIds = [...byUser.keys()];
     const users = userIds.length
@@ -1149,47 +1246,74 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       .map((uid) => {
         const row = byUser.get(uid);
         const u = uMap.get(uid);
+        const rawHours = row.hoursOnDoors;
         return {
           userId: uid,
           firstName: u?.firstName || '',
           lastName: u?.lastName || '',
           email: u?.email || '',
           isActive: u?.isActive ?? false,
-          knocksByHour: row.knocksByHour,
-          surveysByHour: row.surveysByHour,
+          ...(singleDay
+            ? { knocksByHour: row.knocksByHour, surveysByHour: row.surveysByHour }
+            : { knocksByDay: row.knocksByDay, surveysByDay: row.surveysByDay }),
           dayKnocks: row.dayKnocks,
           daySurveys: row.daySurveys,
           dayLit: row.dayLit,
+          refused: row.refused,
+          notHome: row.notHome,
+          wrongAddress: row.wrongAddress,
+          firstActivityAt: row.first,
+          lastActivityAt: row.last,
+          hoursOnDoors: Math.round(rawHours * 100) / 100,
+          // Divide by the RAW hours and round only the quotient (matches the canvasser
+          // summary endpoint). One-knock windows have a zero span: 0, never Infinity.
+          doorsPerHour: rawHours > 0 ? Math.round((row.dayKnocks / rawHours) * 100) / 100 : 0,
           connectionRate: connectionRate({
             knocks: row.dayKnocks,
             surveyedKnocks: row.daySurveys,
             litKnocks: row.dayLit,
+          }),
+          contactRate: contactRate({
+            knocks: row.dayKnocks,
+            surveyedKnocks: row.daySurveys,
+            refusedKnocks: row.refused,
           }),
           inOverlap: overlapUserIds.has(uid),
         };
       })
       .sort((a, b) => b.daySurveys - a.daySurveys || b.dayKnocks - a.dayKnocks);
 
-    const hourTotals = { knocks: {}, surveys: {} };
     let grandKnocks = 0;
     let grandSurveys = 0;
+    const hourTotals = { knocks: {}, surveys: {} };
+    const dayTotals = { knocks: {}, surveys: {} };
     for (const c of canvassers) {
       grandKnocks += c.dayKnocks;
       grandSurveys += c.daySurveys;
-      for (const h of hours) {
-        if (c.knocksByHour[h]) hourTotals.knocks[h] = (hourTotals.knocks[h] || 0) + c.knocksByHour[h];
-        if (c.surveysByHour[h])
-          hourTotals.surveys[h] = (hourTotals.surveys[h] || 0) + c.surveysByHour[h];
+      if (singleDay) {
+        for (const h of hours) {
+          if (c.knocksByHour[h]) hourTotals.knocks[h] = (hourTotals.knocks[h] || 0) + c.knocksByHour[h];
+          if (c.surveysByHour[h])
+            hourTotals.surveys[h] = (hourTotals.surveys[h] || 0) + c.surveysByHour[h];
+        }
+      } else {
+        for (const d of days) {
+          if (c.knocksByDay[d]) dayTotals.knocks[d] = (dayTotals.knocks[d] || 0) + c.knocksByDay[d];
+          if (c.surveysByDay[d])
+            dayTotals.surveys[d] = (dayTotals.surveys[d] || 0) + c.surveysByDay[d];
+        }
       }
     }
 
     res.json({
-      date: day,
+      mode: singleDay ? 'day' : 'range',
+      range: { from, to },
+      // Day mode keeps the original shape (date/hours/hourTotals) byte-compatible for
+      // the mobile admin screen; range mode swaps in days/dayTotals.
+      ...(singleDay ? { date: from, hours, hourTotals } : { days, dayTotals }),
       tz,
       tzAbbrev: tzAbbrev(tz),
-      hours,
       canvassers,
-      hourTotals,
       grandKnocks,
       grandSurveys,
       billableKnocks,
