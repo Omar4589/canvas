@@ -12,6 +12,10 @@ const ITEMS = [
     a: 'Nothing bad. Every knock and survey queues on the phone and syncs automatically the moment coverage returns — flagged as an offline submission so you can audit it later.',
   },
   {
+    q: "How do you catch canvassers who don't actually knock?",
+    a: "Every knock is GPS-stamped, so Doorline flags the ones that don't add up — recorded far from the house, logged too fast to have walked between doors, or all entered from one spot. You review each flag and mark it resolved, so bad data never quietly lands in a client report.",
+  },
+  {
     q: 'What shows up in a shared report?',
     a: 'Only what you publish: a frozen weekly report with coverage, results, and a door-status map. Canvasser identities and voter names are stripped by design. Links are revocable and can be password-protected.',
   },

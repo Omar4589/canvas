@@ -150,7 +150,7 @@ export default function ProductTour() {
           bullets={[
             'Live map with canvasser locations and ping trails',
             'Hour-by-hour knock grid per canvasser, per day',
-            'Per-canvasser quality signals: pace, distance-from-door, offline share',
+            'Flagged entries you review: doors marked far from the house, in rapid succession, or all from one spot',
           ]}
           visual={
             <ConsoleShot
@@ -165,7 +165,9 @@ export default function ProductTour() {
         >
           The live map shows every pin and every canvasser ping as it happens. The daily timeline
           lays out knocks per canvasser, hour by hour — and when two walkers hit the same door,
-          the overlap is caught so your coverage numbers stay honest.
+          the overlap is caught so your coverage numbers stay honest. And Doorline flags the knocks
+          that don't add up — far from the house, logged too fast to have walked, a whole block
+          entered from one spot — for you to clear before the numbers go in a report.
         </TourRow>
       </div>
     </section>

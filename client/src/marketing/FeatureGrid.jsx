@@ -7,6 +7,7 @@ import {
   IconUpload,
   IconBallot,
   IconLayers,
+  IconAlertShield,
 } from '../components/navIcons.jsx';
 import { Reveal } from './useReveal.jsx';
 
@@ -59,7 +60,13 @@ const FEATURES = [
     Icon: IconScissors,
     title: 'Canvasser insights',
     blurb:
-      'Leaderboards, hour-by-hour output, distance-from-door flags, and side-by-side comparisons.',
+      'Leaderboards, hour-by-hour output, and side-by-side comparisons of every canvasser.',
+  },
+  {
+    Icon: IconAlertShield,
+    title: 'Flagged entries',
+    blurb:
+      'Doors marked far from the house, logged too fast to have walked, or all from one spot get flagged for you to review — and clear before you publish.',
   },
 ];
 
