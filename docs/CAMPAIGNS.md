@@ -55,7 +55,7 @@ mirrors the chain. How that drill-in works is below.
 
 The **Campaigns** page is the launchpad. **Click a campaign** to *drill in*: the left sidebar swaps
 from the org-level items to **that campaign's tabs** — Home, Survey, Voter Import, Walk Lists,
-Saved Searches, Turf Cutting, Team, Daily Timeline, Map, Early Voting, Client Reports — with a
+Saved Searches, Turf Cutting, Team, Timeline, Map, Early Voting, Client Reports — with a
 **"‹ Campaigns"** link to exit and a **campaign switcher** dropdown to hop to another campaign
 without leaving the page you're on. (Passes aren't a top-level tab — they live inside each walk
 list; see [PASSES.md](PASSES.md).) The **URL is the active campaign**: `/campaigns/:id` is its Home (dashboard), and each tab is

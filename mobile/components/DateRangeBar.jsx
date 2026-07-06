@@ -10,7 +10,9 @@ import DateRangePickerModal from './DateRangePickerModal';
 // value: { preset, from, to } where preset is one of PRESETS keys.
 // onChange({ preset, from, to }) fires whenever a preset or custom range is
 // chosen. Caller is responsible for re-fetching with the new range.
-export default function DateRangeBar({ value, onChange, tz }) {
+// `presets` lets a screen offer a subset (e.g. the timeline drops 'all' — its
+// endpoint caps the span).
+export default function DateRangeBar({ value, onChange, tz, presets = PRESETS }) {
   const styles = useThemedStyles(makeStyles);
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -38,7 +40,7 @@ export default function DateRangeBar({ value, onChange, tz }) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.row}
       >
-        {PRESETS.map((p) => {
+        {presets.map((p) => {
           const active = p.key === activePreset;
           return (
             <Pressable

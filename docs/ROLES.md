@@ -31,7 +31,7 @@ then hand it off. A lead avoids the all-or-nothing choice of making a campaign r
 
 Inside a campaign they're granted, a lead is **as powerful as an admin**: import the voter file, attach
 a survey, build walk lists, cut turf, create and activate passes (rounds), assign books, build and
-manage the crew (including creating new canvassers), and see all the reporting — map, daily timeline,
+manage the crew (including creating new canvassers), and see all the reporting — map, timeline,
 insights, early voting, and client reports.
 
 ## What a team lead can never do

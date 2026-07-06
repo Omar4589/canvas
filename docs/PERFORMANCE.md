@@ -79,9 +79,10 @@ Spread it alongside the query's own `refetchInterval`:
 `useQuery({ queryKey, queryFn, refetchInterval: 30_000, ...useFocusedPoll() })`. `q.refetch()`
 (pull-to-refresh via `lib/useRefresh.js`) is not blocked by `subscribed`.
 
-Gated queries: admin map `mapQ` (20s), admin Overview rollup (30s), admin timeline (30s when today),
-super-admin overview + both activity feeds (30s), canvasser map `todayQ` (120s) + `changesQ` (30s —
-`sinceRef` persists across the pause, so the first refetch catches up on missed deltas).
+Gated queries: admin map `mapQ` (20s), admin Overview rollup (30s), admin timeline (20s when the
+range includes today, pausable via its `LiveStatus` pill), super-admin overview + both activity
+feeds (30s), canvasser map `todayQ` (120s) + `changesQ` (30s — `sinceRef` persists across the pause,
+so the first refetch catches up on missed deltas).
 
 **Rule for new code:** any `refetchInterval` on a mobile screen needs `...useFocusedPoll()` unless
 the screen provably unmounts when left. Queries without intervals usually don't need it.

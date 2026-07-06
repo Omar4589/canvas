@@ -321,7 +321,7 @@ export default function CampaignDetail() {
           <View style={styles.quickActions}>
             <NavTileGrid
               items={[
-                { label: 'Timeline', subtitle: 'Hourly knock grid', onPress: () => router.push('/(app)/admin/timeline') },
+                { label: 'Timeline', subtitle: 'Live performance dashboard', onPress: () => router.push({ pathname: '/(app)/admin/timeline', params: { campaignId: cId } }) },
                 { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
                 { label: 'Users', subtitle: 'Manage people', onPress: () => router.push('/(app)/admin/users') },
                 { label: 'Assignments', subtitle: 'Books & canvassers', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },
