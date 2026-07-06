@@ -1,4 +1,14 @@
+import { REASON_META } from '../lib/flags.js';
+
 const DEFAULT_STATUSES = ['surveyed', 'refused', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
+
+const REVIEW_STATUS_OPTIONS = [
+  { value: 'open', label: 'Open' },
+  { value: 'reviewed', label: 'Reviewed' },
+  { value: 'dismissed', label: 'Dismissed' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'all', label: 'All' },
+];
 
 function StatusChip({ status, active, count, onClick, color, label }) {
   return (
@@ -45,6 +55,14 @@ export default function MapFilters({
   statusLabels,
   showCanvasserPins = false,
   onShowCanvasserPinsChange,
+  // GPS-audit flags overlay (admin map only).
+  showFlags = false,
+  onShowFlagsChange,
+  flagReasonFilter = [],
+  onFlagReasonToggle,
+  reviewStatus = 'open',
+  onReviewStatusChange,
+  flagCounts = null,
   // The read-only client map has no canvasser identity — hide the Layers toggle + the
   // canvasser dropdown entirely.
   hideCanvassers = false,
@@ -101,6 +119,71 @@ export default function MapFilters({
             Where each survey, not-home, or wrong-address was submitted from, labeled
             with the canvasser&apos;s initials.
           </div>
+        </div>
+      )}
+
+      {!hideCanvassers && (
+        <div>
+          <SectionLabel>GPS audit</SectionLabel>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showFlags}
+              onChange={(e) => onShowFlagsChange?.(e.target.checked)}
+              className="h-4 w-4 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
+            />
+            <span className="text-fg">Show flagged entries</span>
+            {flagCounts?.flaggedActions > 0 && (
+              <span className="ml-auto rounded-full bg-danger-tint px-1.5 text-xs font-medium text-danger">
+                {flagCounts.flaggedActions}
+              </span>
+            )}
+          </label>
+          {showFlags && (
+            <div className="mt-3 space-y-3">
+              <div className="flex flex-wrap gap-1">
+                {REASON_META.map((r) => {
+                  const active = flagReasonFilter.includes(r.key);
+                  const count = flagCounts?.[r.countKey] ?? 0;
+                  return (
+                    <button
+                      key={r.key}
+                      type="button"
+                      onClick={() => onFlagReasonToggle?.(r.key)}
+                      title={r.hint}
+                      className={
+                        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ' +
+                        (active
+                          ? 'border-brand-600 bg-brand-tint text-brand-accent'
+                          : 'border-border bg-card text-fg-muted hover:bg-sunken')
+                      }
+                    >
+                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: r.color }} />
+                      {r.short}
+                      <span className="text-fg-subtle">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-medium text-fg-muted">Review status</div>
+                <select
+                  value={reviewStatus}
+                  onChange={(e) => onReviewStatusChange?.(e.target.value)}
+                  className="w-full rounded border border-border bg-card px-2 py-1.5 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                >
+                  {REVIEW_STATUS_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-fg-subtle">
+                Counts show every flag in range; the status filter narrows what's drawn.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

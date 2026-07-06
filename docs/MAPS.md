@@ -10,7 +10,9 @@ canvasser knocking a door turns into a pin you can see on a screen.
 Related: [IMPORTS.md](IMPORTS.md) (where coordinates come from), [PASSES_AND_TURF.md](PASSES_AND_TURF.md)
 (books/turf the maps are scoped to), [EARLY_VOTING.md](EARLY_VOTING.md) (voted doors dropping off the
 map), [METRICS.md](METRICS.md) (the numbers behind the pins), [DATE_FILTERS.md](DATE_FILTERS.md)
-(the date-range control — on the map a window narrows the pins to interacted-with doors).
+(the date-range control — on the map a window narrows the pins to interacted-with doors; the admin map
+now opens on **Today**), [AUDIT.md](AUDIT.md) (the GPS-audit **flag overlay** + the Audit page that
+reviews it).
 
 ---
 
@@ -84,6 +86,10 @@ An organizer sees the whole campaign at once:
   **"Latest"** ring on their **most recent** one — so you can see where the day began and where they
   are now, and trace the pings in between. A small legend names the two rings. The **mobile admin map
   shows the same** two rings when you audit one canvasser.
+- **GPS-audit flags.** Turn on **"Show flagged entries"** to overlay the doors whose GPS looks off —
+  marked from far away, in rapid succession, all from one spot, or with weak GPS — each a colored dot
+  with a line back to the house, reviewable in place. The overlay opens on **Today** with the rest of
+  the map; the full detection rules and a dedicated Audit page are in [AUDIT.md](AUDIT.md).
 
 The admin map (web and mobile) is for **admins and team leads** — a team lead sees it only for the
 campaigns they manage (see [ROLES.md](ROLES.md)).
@@ -211,6 +217,7 @@ the reconnect listener drains it the moment signal returns, without the canvasse
 | `GET /mobile/changes?since=` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ serverTime, households[], voters[] }` | Delta: households with `updatedAt > since` (+ their voters). Client patches the bootstrap cache so multiple canvassers stay in sync. |
 | `GET /mobile/me/today?since=` | [routes/mobile/me.js](../server/src/routes/mobile/me.js) | Shift stats | Powers the bottom-sheet **Today's Progress** (doors, responses, remaining, pace, distance). Refetched on the 120s poll **and immediately when a knock/survey is confirmed** — the record flow invalidates `['mobile','me']` (see the intervals note below). |
 | `GET /admin/reports/canvassers/:userId/path` | [routes/admin/reports.js](../server/src/routes/admin/reports.js) | One canvasser's pings | Feeds the single-canvasser path map. |
+| `GET /admin/reports/flags` | [routes/admin/reports.js](../server/src/routes/admin/reports.js) | `{ summary, entries[], … }` | The GPS-audit **flag overlay** — a *separate* query MapPage runs only when "Show flagged entries" is on, so toggling flags never refetches households. Live-detected, not stored. Full spec in [AUDIT.md](AUDIT.md). |
 
 `GET /admin/households/map` activity shape: `{ id, householdId, actionType, timestamp,
 location:{lng,lat,accuracy}, distanceFromHouseMeters, canvasser:{id,firstName,lastName} }`.
@@ -243,6 +250,11 @@ location:{lng,lat,accuracy}, distanceFromHouseMeters, canvasser:{id,firstName,la
   `CircleLayer` + `SymbolLayer` from the matching memo in [admin/map.jsx](../mobile/app/(app)/admin/map.jsx).
   The canvasser field map doesn't draw these (it surfaces first/last **door times** as text in the
   Today's-shift sheet instead).
+- **GPS-audit flag layer:** when "Show flagged entries" is on, [MapPage.jsx](../client/src/pages/MapPage.jsx)
+  pushes a `flagged-pings` circle layer + a `flagged-lines` line-to-house layer (registered in
+  [mapRender.js](../client/src/lib/mapRender.js) via `flagsToGeoJSON` / `flagsToLinesGeoJSON`), colored
+  by the entry's worst reason (`primaryReason`) and drawn on top; actioned flags fade back. The
+  detection + review model is in [AUDIT.md](AUDIT.md).
 
 ## F. Live updates & intervals
 
@@ -375,8 +387,8 @@ constants). A small legend labels the two rings when they're shown.
 
 | File | Renders |
 |---|---|
-| [client/src/pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Web admin map: sources/layers, filters, Live toggle, household + ping detail panels, first/last-knock rings (single canvasser). |
-| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) | Shared pin rendering (`drawHouseIcon` / `householdsToGeoJSON` / `registerLayers`) used by both the admin map and the client-report map. |
+| [client/src/pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Web admin map: sources/layers, filters, Live toggle, household + ping detail panels, first/last-knock rings (single canvasser), and the GPS-audit flag overlay + [FlaggedEntryPanel](../client/src/components/FlaggedEntryPanel.jsx) review panel ([AUDIT.md](AUDIT.md)). |
+| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) | Shared pin rendering (`drawHouseIcon` / `householdsToGeoJSON` / `registerLayers`) used by both the admin map and the client-report map; also the flag-overlay layers (`flagsToGeoJSON` / `flagsToLinesGeoJSON`). |
 | [client/src/components/ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx) | Read-only client-report coverage map: frozen snapshot points, client-side status/answer filtering, no canvassers; ResizeObserver-resized (see gotcha §I). |
 | [client/src/components/LiveStatus.jsx](../client/src/components/LiveStatus.jsx) | The "Live · updated Xs ago" toggle/indicator + Refresh. |
 | [mobile/app/(app)/map.jsx](../mobile/app/(app)/map.jsx) | Canvasser map: pins, buildings, bottom sheet, follow mode, offline badge, `changes`/`me/today` polling. |

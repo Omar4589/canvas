@@ -229,6 +229,16 @@ export function IconChevron({ size = 18 }) {
   );
 }
 
+export function IconAlertShield({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <path d="M12 3 5 6v5c0 4 3 6.5 7 8 4-1.5 7-4 7-8V6l-7-3Z" />
+      <path d="M12 9v3.5" />
+      <circle cx="12" cy="15.5" r="0.4" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 // Route path -> icon component. Joined to navItems.js NAV/SUPER_NAV at render time.
 export const NAV_ICONS = {
   '/admin': IconDashboard,
@@ -241,6 +251,7 @@ export const NAV_ICONS = {
   '/efforts': IconLayers,
   '/early-voting': IconBallot,
   '/timeline': IconClock,
+  '/audit': IconAlertShield,
   '/admin/client-reports': IconReport,
   '/users': IconUser,
   '/surveys': IconClipboard,

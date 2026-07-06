@@ -37,6 +37,7 @@ export const CAMPAIGN_NAV = [
   { slug: 'team', label: 'Team', icon: '/users' },
   { slug: 'timeline', label: 'Timeline', icon: '/timeline' },
   { slug: 'map', label: 'Map', icon: '/map' },
+  { slug: 'audit', label: 'Audit', icon: '/audit' },
   { slug: 'early-voting', label: 'Early Voting', icon: '/early-voting' },
   { slug: 'reports', label: 'Client Reports', icon: '/admin/client-reports' },
 ];

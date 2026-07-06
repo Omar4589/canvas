@@ -1,18 +1,8 @@
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
-import { FAR_WARN_M } from '../lib/flags.js';
-
-function formatDateTime(d, tz) {
-  if (!d) return '—';
-  return (
-    formatInTz(
-      d,
-      tz,
-      { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' },
-      true
-    ) || '—'
-  );
-}
+import { FAR_WARN_M, primaryReason, reasonColor } from '../lib/flags.js';
+import FlagReasonBadges from './FlagReasonBadges.jsx';
+import FlagReviewControl from './FlagReviewControl.jsx';
 
 function actionLabel(t) {
   switch (t) {
@@ -33,41 +23,38 @@ function actionLabel(t) {
   }
 }
 
-const ACTION_COLORS = {
-  survey_submitted: '#22c55e',
-  lit_dropped: '#a855f7',
-  not_home: '#3b82f6',
-  wrong_address: '#ef4444',
-  refused: '#f59e0b',
-  note_added: '#9ca3af',
-};
-
-export default function CanvasserPingPanel({ activity, household, onOpenHousehold, onClose, tz }) {
+// The Map's flagged-entry review panel. Mirrors CanvasserPingPanel's layout (action +
+// canvasser + time, house, distance, GPS accuracy) and adds the reason badges + the shared
+// review control. `entry` is a /admin/reports/flags entry.
+export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, onClose, onReviewed, tz }) {
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
-  if (!activity) return null;
-  const dist = activity.distanceFromHouseMeters;
+  if (!entry) return null;
+
+  const dist = entry.distanceFromHouseMeters;
   const distFar = dist != null && dist > FAR_WARN_M;
+  const accentColor = reasonColor(primaryReason(entry)?.type);
+  const h = household || entry.household;
 
   return (
     <div>
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span
-              className="inline-block h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: ACTION_COLORS[activity.actionType] || '#888' }}
-            />
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: accentColor }} />
             <span className="text-xs uppercase tracking-wide text-fg-muted">
-              {actionLabel(activity.actionType)}
+              Flagged · {actionLabel(entry.actionType)}
             </span>
           </div>
-          {activity.canvasser && (
-            <div className="mt-1 truncate font-medium text-fg">
-              {activity.canvasser.firstName} {activity.canvasser.lastName}
-            </div>
-          )}
-          <div className="text-xs text-fg-muted">{formatDateTime(activity.timestamp, zone)}</div>
+          {entry.canvasser?.name && <div className="mt-1 truncate font-medium text-fg">{entry.canvasser.name}</div>}
+          <div className="text-xs text-fg-muted">
+            {formatInTz(
+              entry.timestamp,
+              zone,
+              { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+              true
+            ) || '—'}
+          </div>
         </div>
         <button
           type="button"
@@ -81,12 +68,17 @@ export default function CanvasserPingPanel({ activity, household, onOpenHousehol
         </button>
       </div>
 
-      {household && (
+      <div className="border-b border-border px-4 py-3">
+        <div className="mb-2 text-xs uppercase tracking-wide text-fg-muted">Why it's flagged</div>
+        <FlagReasonBadges reasons={entry.reasons} />
+      </div>
+
+      {h && (
         <div className="border-b border-border px-4 py-3 text-sm">
           <div className="text-xs uppercase tracking-wide text-fg-muted">House</div>
-          <div className="mt-1 text-fg">{household.addressLine1}</div>
+          <div className="mt-1 text-fg">{h.addressLine1}</div>
           <div className="text-xs text-fg-muted">
-            {household.city}, {household.state} {household.zipCode}
+            {h.city}, {h.state} {h.zipCode}
           </div>
         </div>
       )}
@@ -100,18 +92,24 @@ export default function CanvasserPingPanel({ activity, household, onOpenHousehol
             {Math.round(dist)} m from house{distFar ? ' — far' : ''}
           </div>
         )}
-        {activity.location?.accuracy != null && (
-          <div className="text-xs text-fg-muted">
-            GPS accuracy ±{Math.round(activity.location.accuracy)} m
-          </div>
+        {entry.location?.accuracy != null && (
+          <div className="text-xs text-fg-muted">GPS accuracy ±{Math.round(entry.location.accuracy)} m</div>
+        )}
+        {entry.wasOfflineSubmission && (
+          <div className="mt-1 text-xs text-fg-subtle">Synced offline — timestamp is the device's record time.</div>
         )}
       </div>
 
-      {household && onOpenHousehold && (
+      <div className="border-b border-border px-4 py-3">
+        <div className="mb-2 text-xs uppercase tracking-wide text-fg-muted">Review</div>
+        <FlagReviewControl entry={entry} tz={zone} onReviewed={onReviewed} compact />
+      </div>
+
+      {h && onOpenHousehold && (
         <div className="px-4 py-3">
           <button
             type="button"
-            onClick={() => onOpenHousehold(household.id)}
+            onClick={() => onOpenHousehold(h.id)}
             className="w-full rounded border border-border bg-card px-3 py-1.5 text-sm text-brand-accent hover:bg-sunken"
           >
             Open household

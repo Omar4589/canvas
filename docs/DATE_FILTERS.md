@@ -50,7 +50,7 @@ Texas campaign, Eastern for a Florida one), identical for every admin wherever t
 |---|---|---|
 | **Overview** (org-wide) | **Today** | Admins want "what happened today" at a glance. |
 | **Campaign dashboard** | **Today** (active) / **All time** (archived) | Active campaigns lead with recent activity; an **archived** campaign has none today, so it opens on All time to show its full history (until you pick a window). |
-| **Admin map** | **All time** | A date range on the map *hides* every door you didn't touch in that window (see below), so it opens showing the full turf. |
+| **Admin map** | **Today** | The map is an **audit tool** — it opens on **today's** activity. Because a window *hides* doors you didn't touch in it (see below), the map opens showing just today's touched doors; switch to **All time** to see the whole turf. |
 
 You can always change the window; the page just picks a sensible starting point.
 
@@ -70,9 +70,11 @@ The chosen range shows as a small label under the buttons (e.g. *Mar 1 – Mar 1
 On every dashboard, the filter changes the **numbers**. On the **admin map**, a date range also
 changes **which pins appear**: turning on any window (or filtering by canvasser / by survey
 answer) drops the map to **only the houses that were interacted with in that window** — knocked,
-surveyed, or noted. That's deliberate ("show me just what we touched yesterday"), but it's why the
-map starts on **All time** — otherwise it would open looking nearly empty. Switch back to All time
-to see the whole universe of doors again. (Details in [MAPS.md](MAPS.md).)
+surveyed, or noted. The map is an **audit tool**, so it opens on **Today** — you land on what the
+team did today (and, with the flag overlay on, today's flagged entries; see [AUDIT.md](AUDIT.md)).
+The trade-off is that early in the day, or on a campaign with no activity yet, it can open looking
+nearly empty — switch to **All time** to see the whole universe of doors again. (Details in
+[MAPS.md](MAPS.md).)
 
 ---
 
@@ -171,7 +173,8 @@ any of `from` / `to` / `userId` / (`questionKey`+`option`) is set, `filteringInt
 the route first collects the household ids that had a matching survey or activity in the window
 (`interactedHouseholdIds`) and restricts the map to those. With no filters (All time), it returns
 the whole active-household universe. This is the mechanism behind the Part 1 "map exception" — and
-why the map defaults to `all`.
+why the map, now defaulting to **`today`** (an audit-first default), opens showing only today's
+touched doors; pick All time to see every door.
 
 ## E. Timezone
 
@@ -196,7 +199,7 @@ ignores it and uses `req.anchorTz`. The custom pickers emit the picked **calenda
 | [components/DateRangePickerModal.jsx](../client/src/components/DateRangePickerModal.jsx) | Custom From/To picker + quick chips (date-only; takes `tz`). |
 | [pages/OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) | Default **Today** in the **org** tz; range → `/campaign-rollup?scope=active`. |
 | [pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Default **Today** in the **campaign** tz; range → `/campaign-rollup`, `/canvassers`, `/survey-results` (gated on the tz — §C). Coverage stays all-time from `/overview`. An untouched **archived** campaign defaults to All time. |
-| [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Default **All time**; campaign tz from `useCampaignSelection().selected`; range → `/admin/households/map` (narrows pins, see §D). |
+| [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Default **Today** (audit-first; seeded from the org tz, reseeded to the campaign tz once it resolves — a `rangeTouchedRef` guards a manual pick, and a `?from`/`?to` deep-link seeds a custom range); campaign tz from `useCampaignSelection().selected`; range → `/admin/households/map` (narrows pins, see §D). Also feeds `/admin/reports/flags` for the GPS-audit overlay ([AUDIT.md](AUDIT.md)). |
 
 ### Mobile ([mobile](../mobile))
 | File | Role |

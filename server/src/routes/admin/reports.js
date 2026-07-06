@@ -25,9 +25,16 @@ import {
 } from '../../services/reports/aggregations.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps } from '../../services/reports/overlaps.js';
+import { detectFlags } from '../../services/audit/flagDetection.js';
+import { FLAG_THRESHOLDS, SEVERITY_RANK } from '../../services/audit/flagThresholds.js';
+import { FlagReview } from '../../models/FlagReview.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
+
+// Shared "far knock" threshold — the legacy far-counts/flagged feeds and the new GPS audit
+// all key off ONE number (services/audit/flagThresholds.js), so "far" means one thing.
+const FAR_WARN_M = FLAG_THRESHOLDS.FAR_WARN_M;
 
 // Reports are campaign-scoped via ?campaignId. Historically baseFilter trusted any
 // campaignId with no ownership check. Team leads may pull reports ONLY for a campaign
@@ -126,6 +133,18 @@ function baseFilter(req) {
 
 // KNOCK_ACTIONS, knocksPipeline, connectionRate, coverageBucketExpr now live in
 // services/reports/aggregations.js (shared with the client report builder).
+
+// Parse a csv query param into a Set of allowed values, or null when absent/empty (= no filter).
+function csvSet(value, allowed) {
+  if (value == null) return null;
+  const set = new Set(
+    String(value)
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => allowed.includes(s))
+  );
+  return set.size ? set : null;
+}
 
 function parseUserIdParam(req, res) {
   const { userId } = req.params;
@@ -1866,7 +1885,7 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
               avgDistance: { $avg: '$distanceFromHouseMeters' },
               farCount: {
                 $sum: {
-                  $cond: [{ $gt: ['$distanceFromHouseMeters', 50] }, 1, 0],
+                  $cond: [{ $gt: ['$distanceFromHouseMeters', FAR_WARN_M] }, 1, 0],
                 },
               },
               firstActivityAt: { $min: '$timestamp' },
@@ -2151,7 +2170,7 @@ router.get('/canvassers/:userId/activities', async (req, res, next) => {
     if (req.query.flaggedOnly === 'true') {
       filter.$or = [
         { wasOfflineSubmission: true },
-        { distanceFromHouseMeters: { $gt: 50 } },
+        { distanceFromHouseMeters: { $gt: FAR_WARN_M } },
       ];
     }
 
@@ -2555,7 +2574,7 @@ router.get('/canvassers/:userId/quality', async (req, res, next) => {
           ...activityMatch,
           $or: [
             { wasOfflineSubmission: true },
-            { distanceFromHouseMeters: { $gt: 50 } },
+            { distanceFromHouseMeters: { $gt: FAR_WARN_M } },
           ],
         },
         '_id actionType timestamp wasOfflineSubmission distanceFromHouseMeters householdId location'
@@ -2682,6 +2701,131 @@ router.get('/canvassers/:userId/export.csv', async (req, res, next) => {
       `attachment; filename="canvasser-${userId}-${new Date().toISOString().slice(0, 10)}.csv"`
     );
     res.send(toCsv(headers, rows));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GPS canvassing-quality audit. Flags are computed LIVE from the CanvassActivity ledger
+// (services/audit/flagDetection.js); only reviewer decisions are persisted (FlagReview).
+// `summary` is the full picture for the scope (campaign/effort/date/userId in the match);
+// reasonType/reviewStatus/severity narrow the paginated `entries` drill-in list.
+const REASON_TYPES = ['far', 'rapid', 'one_spot', 'weak_gps'];
+
+router.get('/flags', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const tz = tzOf(req);
+
+    // Bound the scan the way the timeline does: an explicit from/to over 62 days is rejected.
+    // (Relative presets send to:null → to defaults to today, so the span is still checked.
+    // A fully open-ended range = campaign-bounded all-time, consistent with other reports.)
+    const fromDay = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    if (fromDay) {
+      const toDay = req.query.to ? String(req.query.to).slice(0, 10) : zonedDayStr(new Date(), tz);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(fromDay) && /^\d{4}-\d{2}-\d{2}$/.test(toDay)) {
+        if (fromDay > toDay) return res.status(400).json({ error: 'from must be on or before to' });
+        if (ymdSpanDays(fromDay, toDay) > TIMELINE_MAX_DAYS) {
+          return res.status(400).json({ error: `Date range too large (max ${TIMELINE_MAX_DAYS} days)` });
+        }
+      }
+    }
+
+    const match = { ...baseFilter(req), ...parseDateRange(req, 'timestamp') };
+    if (req.query.userId && mongoose.isValidObjectId(req.query.userId)) {
+      match.userId = new mongoose.Types.ObjectId(req.query.userId);
+    }
+
+    const { entries, summary } = await detectFlags(match, { organizationId: orgId });
+
+    // Drill-in filters (post-detection; note: 'open' is not a DB status, so review-status
+    // filtering happens here after the live join).
+    const reasonSet = csvSet(req.query.reasonType, REASON_TYPES);
+    const statusSet = csvSet(req.query.reviewStatus, ['open', 'reviewed', 'dismissed', 'confirmed']);
+    const minSev = SEVERITY_RANK[String(req.query.severity || '')] || null;
+
+    let list = entries;
+    if (reasonSet) list = list.filter((e) => e.reasons.some((r) => reasonSet.has(r.type)));
+    if (statusSet) list = list.filter((e) => statusSet.has(e.review?.status || 'open'));
+    if (minSev) list = list.filter((e) => (SEVERITY_RANK[e.maxSeverity] || 0) >= minSev);
+
+    const total = list.length;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+    const page = req.query.view === 'summary' ? [] : list.slice(skip, skip + limit);
+
+    res.json({
+      summary,
+      entries: page,
+      total,
+      limit,
+      skip,
+      timeZone: tz,
+      tzAbbrev: tzAbbrev(tz),
+      thresholds: FLAG_THRESHOLDS,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/flags/review', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const { actionModel, actionId, status, note, reasonsAtReview } = req.body || {};
+
+    if (!['CanvassActivity', 'SurveyResponse'].includes(actionModel)) {
+      return res.status(400).json({ error: 'Invalid actionModel' });
+    }
+    if (!mongoose.isValidObjectId(actionId)) {
+      return res.status(400).json({ error: 'Invalid actionId' });
+    }
+    if (!['open', 'reviewed', 'dismissed', 'confirmed'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    // Load the flagged action to verify org + campaign ownership (defense in depth: a lead
+    // must manage the action's campaign, re-derived from the action itself, not the query).
+    const Model = actionModel === 'CanvassActivity' ? CanvassActivity : SurveyResponse;
+    const action = await Model.findById(actionId, 'organizationId campaignId').lean();
+    if (!action || String(action.organizationId) !== String(orgId)) {
+      return res.status(404).json({ error: 'Flagged action not found' });
+    }
+    if (!isOrgAdmin(req) && !(await canManageCampaign(req, action.campaignId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Reopen = delete the decision (absence of a record IS 'open').
+    if (status === 'open') {
+      await FlagReview.deleteOne({ organizationId: orgId, actionModel, actionId });
+      return res.json({ review: { status: 'open', note: null, reviewedBy: null, reviewedAt: null } });
+    }
+
+    const saved = await FlagReview.findOneAndUpdate(
+      { organizationId: orgId, actionModel, actionId },
+      {
+        $set: {
+          campaignId: action.campaignId,
+          status,
+          note: typeof note === 'string' ? note.slice(0, 2000) : null,
+          reviewedBy: req.user._id,
+          reviewedAt: new Date(),
+          reasonsAtReview: Array.isArray(reasonsAtReview) ? reasonsAtReview.slice(0, 8) : [],
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    res.json({
+      review: {
+        status: saved.status,
+        note: saved.note || null,
+        reviewedBy: String(saved.reviewedBy),
+        reviewedAt: saved.reviewedAt,
+      },
+    });
   } catch (err) {
     next(err);
   }

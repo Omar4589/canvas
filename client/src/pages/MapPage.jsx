@@ -9,6 +9,7 @@ import HouseholdDetailPanel from '../components/HouseholdDetailPanel.jsx';
 import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
 import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
+import FlaggedEntryPanel from '../components/FlaggedEntryPanel.jsx';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import MapStyleControl from '../components/MapStyleControl.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
@@ -19,6 +20,8 @@ import {
   householdsToGeoJSON,
   activitiesToPingsGeoJSON,
   activitiesToLinesGeoJSON,
+  flagsToGeoJSON,
+  flagsToLinesGeoJSON,
   pointToGeoJSON,
   FIRST_KNOCK_COLOR,
   LAST_KNOCK_COLOR,
@@ -56,15 +59,26 @@ export default function MapPage() {
   const [moveSaving, setMoveSaving] = useState(false);
   const [moveErr, setMoveErr] = useState(null);
 
-  const [dateRange, setDateRange] = useState(() => defaultRange('all'));
+  const [searchParams] = useSearchParams();
+
+  const orgTz = useOrgTimeZone();
+  // Default to Today. Seed from the org tz so the first paint (before the campaign loads)
+  // isn't UTC; the effect below reseeds to the campaign's own "today" once its tz resolves.
+  // A "View on map" deep-link from the Audit page can carry a window (?from/&to), a canvasser
+  // (?userId), the flag layer (?flag=1), and one entry to focus (?focusActivityId).
+  const [dateRange, setDateRange] = useState(() => {
+    const f = searchParams.get('from');
+    if (f) return { preset: 'custom', from: f, to: searchParams.get('to') || null };
+    return defaultRange('today', orgTz);
+  });
+  const rangeTouchedRef = useRef(!!searchParams.get('from'));
   const [statusFilter, setStatusFilter] = useState([]);
-  const [canvasserId, setCanvasserId] = useState('');
+  const [canvasserId, setCanvasserId] = useState(searchParams.get('userId') || '');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '', optionId: '' });
   const [showCanvasserPins, setShowCanvasserPins] = useState(false);
   // Live auto-refresh of the map (web admins are at a desk + connected). Gates
   // the poll interval below; pauses automatically when the tab is backgrounded.
   const [live, setLive] = useState(true);
-  const orgTz = useOrgTimeZone();
   // Basemap style picker (Street/Hybrid/Satellite/Outdoors/Dark) — independent of
   // the app theme. styleEpoch bumps after a style swap so the data-push effects
   // re-hydrate the freshly-recreated sources.
@@ -74,15 +88,30 @@ export default function MapPage() {
 
   // Scoped audit: a deep-link from an Effort/Pass (?effortId / ?passId) narrows the
   // map to that scope. Seeded once from the URL; the chip's ✕ clears it.
-  const [searchParams] = useSearchParams();
   const [scopeEffortId, setScopeEffortId] = useState(searchParams.get('effortId') || '');
   const [scopePassId, setScopePassId] = useState(searchParams.get('passId') || '');
   const [scopeImportId, setScopeImportId] = useState(searchParams.get('importId') || '');
 
+  // GPS-audit flag overlay. When deep-linked to a specific entry (?focusActivityId), start on
+  // "all" statuses so that entry is present even if it's already been reviewed.
+  const [showFlags, setShowFlags] = useState(searchParams.get('flag') === '1');
+  const [flagReasonFilter, setFlagReasonFilter] = useState([]); // [] = all reasons
+  const [reviewStatus, setReviewStatus] = useState(searchParams.get('focusActivityId') ? 'all' : 'open');
+  const [selectedFlagId, setSelectedFlagId] = useState(searchParams.get('focusActivityId') || null);
+  const didFocusFlagRef = useRef(false);
+
   const { campaignId } = useParams();
   const { selected: selectedCampaign } = useCampaignSelection(campaignId);
-  // Anchor presets to the selected campaign's tz (default range is all-time, which needs none).
+  // Anchor presets to the selected campaign's tz.
   const tz = selectedCampaign?.timeZone || orgTz;
+
+  // Reseed the default "Today" to the campaign's own day once its tz is known (so it's the
+  // campaign's today for every admin), unless the admin already picked a range.
+  useEffect(() => {
+    if (rangeTouchedRef.current) return;
+    const campTz = selectedCampaign?.timeZone;
+    if (campTz && campTz !== orgTz) setDateRange(defaultRange('today', campTz));
+  }, [selectedCampaign?.timeZone, orgTz]);
 
   // Resolve a friendly name for the scope chip (reuses the cached efforts/passes lists).
   const scopeEffortsQ = useQuery({
@@ -170,6 +199,56 @@ export default function MapPage() {
   const canvassers = householdsQ.data?.canvassers || [];
   const activities = householdsQ.data?.activities || [];
 
+  // GPS-audit flags — a SEPARATE query (only when the layer is on) so toggling flags never
+  // refetches households. Server returns the full per-reason summary (for the chip counts)
+  // plus the entries for the current review status; reason chips filter client-side.
+  const flagsQ = useQuery({
+    queryKey: [
+      'admin',
+      'flags-map',
+      campaignId,
+      dateRange.from,
+      dateRange.to,
+      canvasserId,
+      scopeEffortId,
+      reviewStatus,
+    ],
+    queryFn: () =>
+      api(
+        `/admin/reports/flags${buildQuery({
+          campaignId,
+          from: dateRange.from,
+          to: dateRange.to,
+          userId: canvasserId,
+          effortId: scopeEffortId,
+          reviewStatus: reviewStatus === 'all' ? '' : reviewStatus,
+          view: 'entries',
+          limit: 500,
+        })}`
+      ),
+    enabled: !!campaignId && showFlags,
+    refetchInterval: live ? 20000 : false,
+    refetchIntervalInBackground: false,
+    placeholderData: keepPreviousData,
+  });
+  const flagEntries = flagsQ.data?.entries || [];
+  const flagSummary = flagsQ.data?.summary || null;
+
+  const shownFlags = useMemo(() => {
+    if (!flagReasonFilter.length) return flagEntries;
+    const set = new Set(flagReasonFilter);
+    return flagEntries.filter((e) => e.reasons.some((r) => set.has(r.type)));
+  }, [flagEntries, flagReasonFilter]);
+
+  const selectedFlag = useMemo(
+    () => flagEntries.find((e) => e.actionId === selectedFlagId) || null,
+    [flagEntries, selectedFlagId]
+  );
+
+  function toggleFlagReason(key) {
+    setFlagReasonFilter((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
   // Safety net: if the selected canvasser somehow isn't in the roster (e.g. they
   // were deactivated), reset the filter so the controlled <select> can't wedge.
   useEffect(() => {
@@ -208,6 +287,15 @@ export default function MapPage() {
     });
     map.on('mouseenter', 'canvasser-pings', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'canvasser-pings', () => { map.getCanvas().style.cursor = ''; });
+    map.on('click', 'flagged-pings', (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      setSelectedFlagId(f.properties.actionId);
+      setSelected(null);
+      setSelectedActivityId(null);
+    });
+    map.on('mouseenter', 'flagged-pings', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'flagged-pings', () => { map.getCanvas().style.cursor = ''; });
 
     map.on('load', () => {
       registerLayers(map, darkBase);
@@ -308,6 +396,28 @@ export default function MapPage() {
     firstSrc.setData(pointToGeoJSON(firstLastKnock.first));
     lastSrc.setData(pointToGeoJSON(firstLastKnock.last));
   }, [firstLastKnock, mapReady, styleEpoch]);
+
+  // Push the GPS-audit flag overlay (dots + lines to the house). Empty when the layer is off.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const pingsSrc = mapRef.current.getSource('flagged-pings');
+    const linesSrc = mapRef.current.getSource('flagged-lines');
+    if (!pingsSrc || !linesSrc) return;
+    const list = showFlags ? shownFlags : [];
+    pingsSrc.setData(flagsToGeoJSON(list));
+    linesSrc.setData(flagsToLinesGeoJSON(list));
+  }, [shownFlags, showFlags, mapReady, styleEpoch]);
+
+  // Deep-link focus: when arriving via "View on map" (?focusActivityId), fly to that flag
+  // once its data lands. Runs a single time so it doesn't fight later panning.
+  useEffect(() => {
+    if (didFocusFlagRef.current || !mapReady || !mapRef.current || !selectedFlagId) return;
+    const e = flagEntries.find((x) => x.actionId === selectedFlagId);
+    if (e?.location?.lng != null && e?.location?.lat != null) {
+      mapRef.current.flyTo({ center: [e.location.lng, e.location.lat], zoom: 17, essential: true });
+      didFocusFlagRef.current = true;
+    }
+  }, [mapReady, selectedFlagId, flagEntries]);
 
   const selectedHousehold = useMemo(
     () => households.find((h) => h.id === selected) || null,
@@ -424,11 +534,26 @@ export default function MapPage() {
               updatedAt={householdsQ.dataUpdatedAt}
               onRefresh={() => householdsQ.refetch()}
             />
+            {showFlags && flagSummary?.totals?.flaggedActions > 0 && (
+              <>
+                <span className="text-fg-subtle" aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-danger-tint px-2 py-0.5 font-medium text-danger">
+                  ⚠ {flagSummary.totals.flaggedActions.toLocaleString()} flagged
+                </span>
+              </>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <AddressSearch households={households} onSelect={flyToHousehold} />
-          <DateRangeSelector value={dateRange} onChange={setDateRange} tz={tz} />
+          <DateRangeSelector
+            value={dateRange}
+            onChange={(next) => {
+              rangeTouchedRef.current = true;
+              setDateRange(next);
+            }}
+            tz={tz}
+          />
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -449,6 +574,13 @@ export default function MapPage() {
             statusLabels={STATUS_LABELS}
             showCanvasserPins={showCanvasserPins}
             onShowCanvasserPinsChange={setShowCanvasserPins}
+            showFlags={showFlags}
+            onShowFlagsChange={setShowFlags}
+            flagReasonFilter={flagReasonFilter}
+            onFlagReasonToggle={toggleFlagReason}
+            reviewStatus={reviewStatus}
+            onReviewStatusChange={setReviewStatus}
+            flagCounts={flagSummary?.totals || null}
           />
         </aside>
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
@@ -549,6 +681,33 @@ export default function MapPage() {
                   setSelected(id);
                 }}
                 onClose={() => setSelectedActivityId(null)}
+                tz={tz}
+              />
+            </div>
+          )}
+          {selectedFlag && !selectedHousehold && !selectedActivity && !moveTarget && (
+            <div
+              style={{
+                position: 'absolute',
+                right: 16,
+                top: 16,
+                zIndex: 10,
+                width: 340,
+                maxWidth: 'calc(100% - 32px)',
+                maxHeight: 'calc(100% - 32px)',
+                overflowY: 'auto',
+              }}
+              className="rounded-lg border border-border bg-card shadow-lg"
+            >
+              <FlaggedEntryPanel
+                entry={selectedFlag}
+                household={householdsById.get(selectedFlag.householdId) || selectedFlag.household}
+                onOpenHousehold={(id) => {
+                  setSelectedFlagId(null);
+                  setSelected(id);
+                }}
+                onReviewed={() => flagsQ.refetch()}
+                onClose={() => setSelectedFlagId(null)}
                 tz={tz}
               />
             </div>

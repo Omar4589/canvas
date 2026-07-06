@@ -5,6 +5,7 @@
 // hexes drive the canvas house icons here and the chart/legend colors elsewhere.
 
 import { STATUS_COLORS } from './statusColors.js';
+import { REASON_BY_KEY, primaryReason } from './flags.js';
 
 // Render a modern two-tone house icon — rounded body in the status color, a
 // slightly darker roof, a small white door + window, and a soft drop shadow.
@@ -158,6 +159,53 @@ export function activitiesToLinesGeoJSON(activities, householdsById) {
 }
 
 export const EMPTY_FC = { type: 'FeatureCollection', features: [] };
+
+// Flagged entries → GPS-point features, colored by worst reason. `reviewed` fades actioned
+// flags so open ones pop.
+export function flagsToGeoJSON(entries) {
+  return {
+    type: 'FeatureCollection',
+    features: (entries || [])
+      .filter((e) => e.location?.lng != null && e.location?.lat != null)
+      .map((e) => {
+        const pr = primaryReason(e);
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [e.location.lng, e.location.lat] },
+          properties: {
+            actionId: e.actionId,
+            reason: pr?.type || '',
+            color: REASON_BY_KEY[pr?.type]?.color || '#ef4444',
+            severity: e.maxSeverity || 'med',
+            reviewed: e.review?.status && e.review.status !== 'open' ? 1 : 0,
+          },
+        };
+      }),
+  };
+}
+
+// A dashed line from each flag's GPS point to its house pin (so a "far" flag visibly
+// connects the ping to the door it belongs to).
+export function flagsToLinesGeoJSON(entries) {
+  const features = [];
+  for (const e of entries || []) {
+    if (e.location?.lng == null || e.location?.lat == null) continue;
+    const hp = e.household?.location;
+    if (!hp || hp.lng == null || hp.lat == null) continue;
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [e.location.lng, e.location.lat],
+          [hp.lng, hp.lat],
+        ],
+      },
+      properties: { actionId: e.actionId, color: REASON_BY_KEY[primaryReason(e)?.type]?.color || '#ef4444' },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
 
 // A single-point FeatureCollection for one activity (or empty when null) — powers the
 // first/last-knock highlight markers (the ping where a canvasser started vs their latest).
@@ -344,4 +392,44 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       },
     });
   }
+
+  // GPS-audit flag overlay — colored by the worst reason, rendered ON TOP so flagged
+  // entries stand out during a review. A soft halo + a ringed dot read as an alert (not a
+  // status pin), with a dashed line back to the house. Empty until MapPage pushes flags.
+  map.addSource('flagged-lines', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'flagged-lines',
+    type: 'line',
+    source: 'flagged-lines',
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': 1.5,
+      'line-opacity': 0.7,
+      'line-dasharray': [2, 1.5],
+    },
+  });
+  map.addSource('flagged-pings', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'flagged-halo',
+    type: 'circle',
+    source: 'flagged-pings',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 18, 17, 24],
+      'circle-color': ['get', 'color'],
+      'circle-opacity': 0.18,
+    },
+  });
+  map.addLayer({
+    id: 'flagged-pings',
+    type: 'circle',
+    source: 'flagged-pings',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 13, 7, 16, 9, 18, 11],
+      'circle-color': ['get', 'color'],
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': ['case', ['==', ['get', 'severity'], 'high'], 3, 2],
+      // Actioned flags fade back so still-open ones pop.
+      'circle-opacity': ['case', ['==', ['get', 'reviewed'], 1], 0.45, 1],
+    },
+  });
 }
