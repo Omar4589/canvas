@@ -189,6 +189,10 @@ export const LAST_KNOCK_COLOR = '#db2777'; // pink
 // withCanvassers=false skips the canvasser ping/line/label layers entirely — used by
 // the client report map, which has no canvasser identity to show.
 export function registerLayers(map, dark, { withCanvassers = true } = {}) {
+  // Idempotency backstop: registering twice on one style (e.g. stacked
+  // style.load handlers) would throw mapbox's duplicate-source error.
+  if (map.getSource('households')) return;
+
   for (const status of Object.keys(STATUS_COLORS)) {
     const id = `house-${status}`;
     const color = status === 'unknocked' && dark ? '#d1d5db' : STATUS_COLORS[status];

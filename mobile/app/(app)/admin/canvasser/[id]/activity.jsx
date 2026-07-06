@@ -59,20 +59,30 @@ export default function ActivityFeed() {
     const preset = params?.preset || '7d';
     const r = rangeFor(preset, null, tz);
     setRange({ preset, from: r.from, to: r.to });
+    // This effect is the one range-changing path outside the filter handlers
+    // (campaign tz resolving after the user may have paged); reset skip too so
+    // the refetch doesn't land on a stale mid-list page.
+    setSkip(0);
   }, [tz]);
-  function onRangeChange(next) {
-    rangeTouchedRef.current = true;
-    setRange(next);
-  }
-
   const [actionTab, setActionTab] = useState('all');
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [skip, setSkip] = useState(0);
 
-  // Reset pagination when filters change
-  useEffect(() => {
+  // Pagination resets synchronously with each filter change (not in an effect,
+  // which would first fire a wasted query for [new filter, stale skip]).
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setRange(next);
     setSkip(0);
-  }, [range, actionTab, flaggedOnly]);
+  }
+  function onTabChange(k) {
+    setActionTab(k);
+    setSkip(0);
+  }
+  function onFlaggedChange(v) {
+    setFlaggedOnly(v);
+    setSkip(0);
+  }
 
   const cId = campaign?.id;
   const qs = useMemo(() => {
@@ -92,7 +102,9 @@ export default function ActivityFeed() {
     queryKey: ['admin', 'canvasser', userId, 'activities-feed', qs],
     queryFn: () => api(`/admin/reports/canvassers/${userId}/activities?${qs}`),
     enabled: !!cId && !!userId && !!range,
-    keepPreviousData: true,
+    // No placeholderData: this list has no in-flight indicator, so keeping stale
+    // rows across a page change would hide the fetch (user taps next twice, skips
+    // a page). The isLoading spinner on each page change is the intended cue.
   });
 
   const total = q.data?.total || 0;
@@ -124,12 +136,12 @@ export default function ActivityFeed() {
       </View>
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
-      <TabSwitcher tabs={ACTION_TABS} activeKey={actionTab} onChange={setActionTab} />
+      <TabSwitcher tabs={ACTION_TABS} activeKey={actionTab} onChange={onTabChange} />
 
       <View style={styles.toggleRow}>
         <Switch
           value={flaggedOnly}
-          onValueChange={setFlaggedOnly}
+          onValueChange={onFlaggedChange}
           trackColor={{ true: colors.danger, false: colors.border }}
           thumbColor={colors.card}
         />

@@ -10,6 +10,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
@@ -105,6 +106,7 @@ export default function AdminBookDetail() {
   const [mapReady, setMapReady] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const isFocused = useIsFocused();
 
   const bookQ = useQuery({
     queryKey: ['admin', 'book-households', cId, turfId],
@@ -307,7 +309,9 @@ export default function AdminBookDetail() {
           rotateEnabled
         >
           <Mapbox.Camera ref={cameraRef} />
-          <Mapbox.UserLocation visible />
+          {/* Focus-gated so GPS stops while another screen covers this one
+              (hidden Tabs screens stay mounted for the whole session). */}
+          <Mapbox.UserLocation visible={isFocused} />
           <Mapbox.Images
             images={{
               'house-unknocked': require('../../../../assets/icons/house-unknocked.png'),

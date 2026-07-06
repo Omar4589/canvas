@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -51,12 +51,15 @@ function SharePanel({ campaignId }) {
   });
 
   const urlFor = (token) => `${window.location.origin}/r/${token}`;
+  const copyTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(copyTimerRef.current), []);
   function copy(token) {
     navigator.clipboard
       ?.writeText(urlFor(token))
       .then(() => {
         setCopied(token);
-        setTimeout(() => setCopied(null), 1500);
+        clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = setTimeout(() => setCopied(null), 1500);
       })
       .catch(() => {});
   }

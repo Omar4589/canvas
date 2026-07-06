@@ -43,6 +43,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | [PERSONS.md](PERSONS.md) | The cross-org **Person** layer: how the same real person is deduped across orgs, plus ownership, merge/split, locks, and edit proposals. |
 | [PLATFORM.md](PLATFORM.md) | The **super-admin** platform console: the Control Room (cross-org totals + live activity feed), Organizations, All Users + promote, and the People layer. |
 | [THEMING.md](THEMING.md) | Cross-cutting (not a feature): light/dark mode and the web design tokens — how the theme flips, the full token reference, and the rule that every control must use the semantic tokens (`bg-card`/`text-fg`/…) so nothing renders white in dark mode. |
+| [PERFORMANCE.md](PERFORMANCE.md) | Cross-cutting (not a feature): resource hygiene — focus-gated polling and GPS on covered mobile screens, the single-flight offline queue, AbortSignal/debounce on searches, map lifecycle rules, and the state-reset patterns. |
 
 ### Related references (repo root)
 

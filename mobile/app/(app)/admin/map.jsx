@@ -9,7 +9,9 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../lib/api';
@@ -223,6 +225,7 @@ export default function AdminMap() {
   const [live, setLive] = useState(true);
   const [openMenu, setOpenMenu] = useState(null); // 'date' | 'canvasser' | 'status' | 'answer' | null
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const isFocused = useIsFocused();
 
   const pingDetailQ = useQuery({
     queryKey: ['admin', 'activity', selectedPing?.id],
@@ -260,8 +263,10 @@ export default function AdminMap() {
       return api(`/admin/households/map?${p.toString()}`);
     },
     enabled: !!cId,
-    staleTime: 30 * 1000,
     refetchInterval: live ? 20 * 1000 : false,
+    // Tabs keep this screen mounted forever once visited — pause the live poll
+    // (and refresh on return) whenever another screen covers it.
+    ...useFocusedPoll(),
   });
 
   // Survey (for the answer-filter chips) — same source the web map uses.
@@ -447,8 +452,9 @@ export default function AdminMap() {
           animationMode="flyTo"
           animationDuration={500}
         />
-        {/* Plain location dot (no compass) to avoid continuous magnetometer use. */}
-        <Mapbox.UserLocation visible />
+        {/* Plain location dot (no compass) to avoid continuous magnetometer use.
+            Focus-gated so GPS stops while another screen covers this tab. */}
+        <Mapbox.UserLocation visible={isFocused} />
 
         <Mapbox.Images
           images={{

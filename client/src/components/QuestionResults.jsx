@@ -27,13 +27,9 @@ function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateR
 
   // A tag query is cross-question: it sends `tag` + `surveyTemplateId` instead of
   // questionKey/optionId/option.
+  // Callers key <VoterList> on the identifying props, so a filter change
+  // remounts with fresh skip/accumulated state.
   const byTag = !!tag;
-
-  // Reset when filters change.
-  useEffect(() => {
-    setSkip(0);
-    setAccumulated([]);
-  }, [questionKey, optionId, option, tag, surveyTemplateId, dateRange?.from, dateRange?.to, campaignId]);
 
   const queryString = buildQuery(
     byTag
@@ -277,6 +273,7 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
               {isOpen && (
                 <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">
                   <VoterList
+                    key={`${t.tag}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
                     tag={t.tag}
                     surveyTemplateId={surveyTemplateId}
                     dateRange={dateRange}
@@ -359,6 +356,7 @@ export default function QuestionResults({
                 {isOpen && (
                   <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">
                     <VoterList
+                      key={`${key}|${o.id ?? o.option}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
                       questionKey={key}
                       optionId={o.id}
                       option={o.option}

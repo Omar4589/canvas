@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
@@ -107,6 +107,9 @@ export default function MapScreen() {
     queryKey: ['admin', 'canvasser', userId, 'path', qs],
     queryFn: () => api(`/admin/reports/canvassers/${userId}/path?${qs}`),
     enabled: !!cId && !!userId && !!range,
+    // Keeps isLoading false on filter/range changes so the native MapView
+    // below stays mounted (camera preserved, no tile refetch).
+    placeholderData: keepPreviousData,
   });
 
   const points = q.data?.points || [];
@@ -147,6 +150,12 @@ export default function MapScreen() {
       <TabSwitcher tabs={ACTION_TABS} activeKey={actionFilter} onChange={setActionFilter} />
 
       <View style={{ flex: 1 }}>
+        {q.isFetching && !q.isLoading ? (
+          <ActivityIndicator
+            color={colors.brand}
+            style={{ position: 'absolute', top: 12, alignSelf: 'center', zIndex: 10 }}
+          />
+        ) : null}
         {!range || q.isLoading ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.brand} />

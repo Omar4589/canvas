@@ -33,6 +33,18 @@ export default function AnswerVoters() {
   const [items, setItems] = useState([]);
   const loadedSkips = useRef(new Set());
 
+  // This is a Tabs screen that never unmounts, and expo-router reuses the same
+  // instance when navigated to with different params — reset the accumulator
+  // synchronously during render whenever the identifying params change.
+  const identityKey = `${campaignId}|${questionKey}|${optionId}|${option}|${from}|${to}`;
+  const [prevKey, setPrevKey] = useState(identityKey);
+  if (prevKey !== identityKey) {
+    setPrevKey(identityKey);
+    setSkip(0);
+    setItems([]);
+    loadedSkips.current = new Set();
+  }
+
   const q = useQuery({
     queryKey: ['admin', 'answer-voters', campaignId, questionKey, optionId, option, from, to, skip],
     queryFn: () => {

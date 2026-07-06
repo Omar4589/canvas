@@ -18,6 +18,7 @@ import { timeAgo } from '../../../../../lib/datetime';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
+import { useDebouncedValue } from '../../../../../lib/useDebouncedValue';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import PinIcon from '../../../../../components/PinIcon';
 
@@ -71,6 +72,7 @@ export default function HouseholdsScreen() {
   }
 
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search);
 
   const cId = campaign?.id;
   const qs = useMemo(() => {
@@ -80,13 +82,13 @@ export default function HouseholdsScreen() {
     if (range?.to) p.set('to', range.to);
     p.set('tz', deviceTimezone());
     p.set('limit', '500');
-    if (search) p.set('q', search);
+    if (debouncedSearch) p.set('q', debouncedSearch);
     return p.toString();
-  }, [cId, range?.from, range?.to, search]);
+  }, [cId, range?.from, range?.to, debouncedSearch]);
 
   const q = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'households', qs],
-    queryFn: () => api(`/admin/reports/canvassers/${userId}/households?${qs}`),
+    queryFn: ({ signal }) => api(`/admin/reports/canvassers/${userId}/households?${qs}`, { signal }),
     enabled: !!cId && !!userId && !!range,
   });
 

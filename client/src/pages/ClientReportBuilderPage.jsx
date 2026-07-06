@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -77,9 +77,12 @@ export default function ClientReportBuilderPage() {
     // Status changes (publish/unpublish/save) also refresh the campaign's reports list.
     queryClient.invalidateQueries({ queryKey: ['admin', 'client-reports', campaignId] });
   };
+  const flashTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(flashTimerRef.current), []);
   const flash = (m) => {
     setMsg(m);
-    setTimeout(() => setMsg(null), 2500);
+    clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setMsg(null), 2500);
   };
 
   const saveM = useMutation({

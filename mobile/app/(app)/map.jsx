@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useFocusedPoll } from '../../lib/useFocusedPoll';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
@@ -456,6 +457,8 @@ export default function MapScreen() {
     };
   }, [scopedHouseholds]);
 
+  // The map is the stack's base screen and stays mounted under every pushed
+  // screen (household, survey, stats...) — pause both polls while covered.
   const todayQ = useQuery({
     queryKey: ['mobile', 'me', 'today', activeCampaign?.id],
     queryFn: () => {
@@ -468,11 +471,11 @@ export default function MapScreen() {
       return api(`/mobile/me/today?campaignId=${activeCampaign.id}&since=${since}`);
     },
     enabled: !!activeCampaign?.id,
-    staleTime: 30 * 1000,
     // The record flow invalidates ['mobile','me'] on a confirmed knock/survey (see
     // recordAction.js), so these counts refresh the moment an action lands. This slow
     // background poll is just a backstop — keeps the radio asleep longer between knocks.
     refetchInterval: 120 * 1000,
+    ...useFocusedPoll(),
   });
 
   // Delta polling: every 30s, ask the server for any household/voter changes
@@ -493,6 +496,9 @@ export default function MapScreen() {
     enabled: !!activeCampaign?.id && !!data,
     refetchInterval: 30 * 1000,
     refetchIntervalInBackground: false,
+    // sinceRef persists across the pause, so the first refetch on refocus
+    // catches up on every delta missed while covered.
+    ...useFocusedPoll(),
   });
 
   useEffect(() => {

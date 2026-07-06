@@ -10,6 +10,7 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
+import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
 import { radius, spacing } from '../../../lib/theme';
@@ -53,6 +54,8 @@ export default function ActivityScreen() {
     queryKey: ['super-admin', 'activity-feed', 50],
     queryFn: () => api('/super-admin/activity-feed?limit=50'),
     refetchInterval: 30_000,
+    // Pause the poll (and refresh on return) while a pushed screen covers this one.
+    ...useFocusedPoll(),
   });
 
   const { refreshing, onRefresh } = useRefresh([feedQ.refetch]);

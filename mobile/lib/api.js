@@ -24,7 +24,7 @@ const DEFAULT_TIMEOUT_MS = 20000;
 
 export async function api(
   path,
-  { method = 'GET', body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS } = {}
+  { method = 'GET', body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}
 ) {
   const token = await getToken();
   const orgId = await loadActiveOrgId();
@@ -44,10 +44,26 @@ export async function api(
 
   const controller = new AbortController();
   init.signal = controller.signal;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  // A caller-supplied signal (e.g. react-query's per-fetch signal) aborts the
+  // same internal controller, so superseded requests stop consuming the radio.
+  const onExternalAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onExternalAbort, { once: true });
+  }
 
   try {
     const res = await fetch(`${API_BASE_URL}/api${path}`, init);
+    // Headers are in — stop the timeout timer so a body that finishes streaming
+    // just after the deadline isn't aborted, which would turn a response the
+    // server already persisted into a "timeout" that submitOrQueue re-POSTs. A
+    // caller-supplied signal can still abort the body read (react-query cancel).
+    clearTimeout(timer);
     const text = await res.text();
     let data = null;
     if (text) {
@@ -71,7 +87,10 @@ export async function api(
   } catch (err) {
     // A timeout abort surfaces with no `.status`, so submitOrQueue treats it like
     // any other transport failure and queues the submission for later retry.
-    if (controller.signal.aborted) {
+    // External aborts (caller cancellation) rethrow as-is so react-query treats
+    // them as cancellations, not failures. (timedOut implies the controller
+    // aborted, since the timer callback sets it and then aborts.)
+    if (timedOut) {
       const timeoutErr = new Error('Request timed out');
       timeoutErr.code = 'TIMEOUT';
       throw timeoutErr;
@@ -79,5 +98,6 @@ export async function api(
     throw err;
   } finally {
     clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onExternalAbort);
   }
 }

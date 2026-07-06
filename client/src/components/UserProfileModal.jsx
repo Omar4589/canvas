@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -131,9 +131,12 @@ export default function UserProfileModal({ membership, onClose }) {
     setManagedCampaignIds(membership.managedCampaignIds || []);
   }, [(membership.managedCampaignIds || []).join(',')]);
 
+  const flashTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(flashTimerRef.current), []);
   function flash(type, text) {
     setFeedback({ type, text });
-    setTimeout(() => setFeedback(null), 4000);
+    clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setFeedback(null), 4000);
   }
 
   useEffect(() => {

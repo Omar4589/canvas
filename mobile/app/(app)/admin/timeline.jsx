@@ -3,6 +3,7 @@ import { View, Text, Pressable, ScrollView, ActivityIndicator, StyleSheet } from
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
+import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { todayInTz, shiftDays, deviceTimezone } from '../../../lib/dateRanges';
@@ -78,6 +79,9 @@ export default function AdminTimeline() {
     },
     enabled: !!cId,
     refetchInterval: isToday ? 30000 : false,
+    // Hidden Tabs screen (href:null) stays mounted after leaving — pause the
+    // today-poll (and refresh on return) whenever another screen covers it.
+    ...useFocusedPoll(),
   });
 
   const data = q.data || {};

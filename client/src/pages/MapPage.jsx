@@ -229,11 +229,15 @@ export default function MapPage() {
     if (!map || !mapReady) return;
     if (appliedStyleRef.current === styleURL) return;
     appliedStyleRef.current = styleURL;
-    map.setStyle(styleURL);
-    map.once('style.load', () => {
+    const handler = () => {
       registerLayers(map, darkBase);
       setStyleEpoch((e) => e + 1);
-    });
+    };
+    map.setStyle(styleURL);
+    map.once('style.load', handler);
+    // Remove a still-pending handler if the style changes again before this
+    // one loads — otherwise both fire on the final style and re-register.
+    return () => map.off('style.load', handler);
   }, [styleURL, darkBase, mapReady]);
 
   // Push household features to the map source whenever data changes.

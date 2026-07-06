@@ -145,6 +145,10 @@ function buildingMarkerEl(total, color, dark) {
 // every basemap `setStyle` (which wipes them). `dark` flips the book-label text +
 // halo so labels stay readable on dark/satellite basemaps.
 function registerBookLayers(map, dark) {
+  // Idempotency backstop: registering twice on one style (e.g. stacked
+  // style.load handlers) would throw mapbox's duplicate-source error.
+  if (map.getSource('books')) return;
+
   const empty = { type: 'FeatureCollection', features: [] };
   map.addSource('books', { type: 'geojson', data: empty });
   map.addLayer({ id: 'book-fill', type: 'fill', source: 'books', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['get', 'selected'], 0.3, 0.16] } });
@@ -867,11 +871,15 @@ export default function TurfsPage() {
     if (!map || !mapReady) return;
     if (appliedStyleRef.current === styleURL) return;
     appliedStyleRef.current = styleURL;
-    map.setStyle(styleURL);
-    map.once('style.load', () => {
+    const handler = () => {
       registerBookLayers(map, darkBase);
       setStyleEpoch((e) => e + 1);
-    });
+    };
+    map.setStyle(styleURL);
+    map.once('style.load', handler);
+    // Remove a still-pending handler if the style changes again before this
+    // one loads — otherwise both fire on the final style and re-register.
+    return () => map.off('style.load', handler);
   }, [styleURL, darkBase, mapReady]);
 
   function paint() {

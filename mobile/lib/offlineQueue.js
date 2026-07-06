@@ -17,20 +17,36 @@ async function writeQueue(queue) {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
 }
 
+// Serialize every read-modify-write against the stored queue. enqueue() and a
+// flush's removeItem() are both read-then-write, so without this an enqueue that
+// interleaves a removeItem could resurrect a just-sent item (double-POST) or
+// drop the newly-queued one. All mutations run one-at-a-time through this chain.
+let mutationChain = Promise.resolve();
+function withQueueLock(fn) {
+  const run = mutationChain.then(fn, fn);
+  mutationChain = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
+}
+
 /**
  * Enqueue a submission for offline retry.
  * Submission shape: { id, path, body, enqueuedAt }
  */
-export async function enqueue(path, body) {
-  const queue = await readQueue();
-  queue.push({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    path,
-    body: { ...body, wasOfflineSubmission: true },
-    enqueuedAt: new Date().toISOString(),
+export function enqueue(path, body) {
+  return withQueueLock(async () => {
+    const queue = await readQueue();
+    queue.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      path,
+      body: { ...body, wasOfflineSubmission: true },
+      enqueuedAt: new Date().toISOString(),
+    });
+    await writeQueue(queue);
+    return queue.length;
   });
-  await writeQueue(queue);
-  return queue.length;
 }
 
 export async function getPendingCount() {
@@ -42,22 +58,27 @@ export async function getPending() {
   return readQueue();
 }
 
-/**
- * Try to flush all pending submissions. Stops on the first network error.
- * Returns { sent, remaining, errors }.
- */
-export async function flushQueue() {
-  let queue = await readQueue();
+// Remove a flushed item by id against a fresh read (under the mutation lock), so
+// submissions enqueued while the POST was in flight are never clobbered.
+function removeItem(id) {
+  return withQueueLock(async () => {
+    const fresh = await readQueue();
+    await writeQueue(fresh.filter((it) => it.id !== id));
+  });
+}
+
+async function doFlush() {
   let sent = 0;
   const errors = [];
 
-  while (queue.length > 0) {
+  while (true) {
+    const queue = await readQueue();
+    if (queue.length === 0) break;
     const item = queue[0];
     try {
       await api(item.path, { method: 'POST', body: item.body });
       sent++;
-      queue = queue.slice(1);
-      await writeQueue(queue);
+      await removeItem(item.id);
     } catch (err) {
       // Network error: stop and try again later
       if (!err.status) {
@@ -67,8 +88,7 @@ export async function flushQueue() {
       // 4xx: drop the bad submission so it doesn't block the queue forever
       if (err.status >= 400 && err.status < 500) {
         errors.push({ id: item.id, reason: err.message, dropped: true });
-        queue = queue.slice(1);
-        await writeQueue(queue);
+        await removeItem(item.id);
         continue;
       }
       // 5xx: bail and retry later
@@ -77,7 +97,42 @@ export async function flushQueue() {
     }
   }
 
-  return { sent, remaining: queue.length, errors };
+  return { sent, remaining: (await readQueue()).length, errors };
+}
+
+/**
+ * Try to flush all pending submissions. Stops on the first network error.
+ * Returns { sent, remaining, errors }.
+ *
+ * Concurrent callers share one in-flight flush — the map screen triggers this
+ * from mount, AppState 'active', and NetInfo (which emits immediately on
+ * subscribe), and overlapping flushes would double-POST the queue head.
+ *
+ * A call that arrives while a flush is running sets `flushAgain` so the loop
+ * runs one more pass after the current one finishes. That closes two gaps:
+ * (1) an item enqueued after doFlush's final empty read still gets sent (its
+ * enqueuer's flushQueue call schedules the rerun), and (2) a flush that began
+ * on a dead connection and bailed is retried when NetInfo/AppState fires during
+ * it, instead of leaving the knocks stuck until the next unrelated trigger.
+ */
+let flushing = null;
+let flushAgain = false;
+export function flushQueue() {
+  if (flushing) {
+    flushAgain = true;
+    return flushing;
+  }
+  flushing = (async () => {
+    let result;
+    do {
+      flushAgain = false;
+      result = await doFlush();
+    } while (flushAgain);
+    return result;
+  })().finally(() => {
+    flushing = null;
+  });
+  return flushing;
 }
 
 /**

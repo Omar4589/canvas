@@ -17,6 +17,14 @@ export default function Overlay({ onClose, align = 'center', className = '', chi
   const panelRef = useRef(null);
   const restoreRef = useRef(null);
 
+  // Call sites pass onClose as an inline arrow; reading it through a ref keeps
+  // the setup effect below mount-once (no focus jump / listener churn when the
+  // host page re-renders while the overlay is open).
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     restoreRef.current = document.activeElement;
     const prevOverflow = document.body.style.overflow;
@@ -29,7 +37,7 @@ export default function Overlay({ onClose, align = 'center', className = '', chi
 
     function onKey(e) {
       if (e.key === 'Escape') {
-        onClose?.();
+        onCloseRef.current?.();
         return;
       }
       if (e.key === 'Tab' && panel) {
@@ -55,7 +63,7 @@ export default function Overlay({ onClose, align = 'center', className = '', chi
       document.body.style.overflow = prevOverflow;
       restoreRef.current?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
     <div className={`fixed inset-0 z-50 flex ${ALIGN[align] || ALIGN.center}`}>

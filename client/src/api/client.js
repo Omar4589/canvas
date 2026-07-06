@@ -21,7 +21,7 @@ export function setActiveOrgId(orgId) {
 
 export async function api(
   path,
-  { method = 'GET', body, headers = {}, formData, public: isPublic = false, shareToken } = {}
+  { method = 'GET', body, headers = {}, formData, public: isPublic = false, shareToken, signal } = {}
 ) {
   const finalHeaders = { ...headers };
   // Public (share-link) calls carry no user identity — only the optional share access token.
@@ -34,6 +34,7 @@ export async function api(
   if (shareToken) finalHeaders['X-Share-Token'] = shareToken;
 
   const init = { method, headers: finalHeaders };
+  if (signal) init.signal = signal;
 
   if (formData) {
     init.body = formData;

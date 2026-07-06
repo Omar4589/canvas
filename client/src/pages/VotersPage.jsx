@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { useDebouncedValue } from '../lib/useDebouncedValue.js';
 
 const PAGE_SIZE = 25;
 
@@ -44,7 +45,9 @@ export default function VotersPage() {
   });
   const campaigns = campaignsQ.data?.campaigns || [];
 
-  // Any filter change resets to the first page.
+  // Any filter change resets to the first page. Search is excluded here: it's
+  // debounced, so resetting the page on the raw keystroke would desync offset
+  // from the lagging search term (a wasted fetch, or paging the old results).
   function onFilter(setter) {
     return (v) => {
       setter(v);
@@ -52,10 +55,26 @@ export default function VotersPage() {
     };
   }
 
-  const query = buildQuery({ search, campaignId, party, surveyStatus, voted, limit: PAGE_SIZE, offset });
+  const debouncedSearch = useDebouncedValue(search);
+  // Reset to page 1 when the debounced search actually commits, in the same
+  // render the query key picks up the new term — so offset and search move together.
+  const [prevSearch, setPrevSearch] = useState(debouncedSearch);
+  if (prevSearch !== debouncedSearch) {
+    setPrevSearch(debouncedSearch);
+    setOffset(0);
+  }
+  const query = buildQuery({
+    search: debouncedSearch,
+    campaignId,
+    party,
+    surveyStatus,
+    voted,
+    limit: PAGE_SIZE,
+    offset,
+  });
   const votersQ = useQuery({
-    queryKey: ['admin', 'voters', { search, campaignId, party, surveyStatus, voted, offset }],
-    queryFn: () => api(`/admin/voters${query}`),
+    queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, offset }],
+    queryFn: ({ signal }) => api(`/admin/voters${query}`, { signal }),
     placeholderData: keepPreviousData,
   });
 
@@ -78,7 +97,7 @@ export default function VotersPage() {
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <input
           value={search}
-          onChange={(e) => onFilter(setSearch)(e.target.value)}
+          onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name, Voter ID, or address"
           className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:col-span-2"
         />

@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
 import { signOut } from '../../../lib/authState';
@@ -77,16 +78,20 @@ export default function SuperAdminHome() {
     loadCurrentUser().then((u) => setUser(u));
   }, []);
 
+  // This stack base stays mounted under pushed child screens — pause both
+  // polls (and refresh on return) whenever the screen is covered.
   const overviewQ = useQuery({
     queryKey: ['super-admin', 'platform-overview'],
     queryFn: () => api('/super-admin/platform-overview'),
     refetchInterval: 30_000,
+    ...useFocusedPoll(),
   });
 
   const feedQ = useQuery({
     queryKey: ['super-admin', 'activity-feed', 5],
     queryFn: () => api('/super-admin/activity-feed?limit=5'),
     refetchInterval: 30_000,
+    ...useFocusedPoll(),
   });
 
   const { refreshing, onRefresh } = useRefresh([overviewQ.refetch, feedQ.refetch]);

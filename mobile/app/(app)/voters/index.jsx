@@ -16,6 +16,7 @@ import { loadActiveCampaign } from '../../../lib/cache';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useDebouncedValue } from '../../../lib/useDebouncedValue';
 
 export default function VotersSearch() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export default function VotersSearch() {
   const styles = useThemedStyles(makeStyles);
   const [campaign, setCampaign] = useState(undefined);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search).trim();
   const cId = campaign?.id;
 
   useEffect(() => {
@@ -30,9 +32,11 @@ export default function VotersSearch() {
   }, []);
 
   const votersQ = useQuery({
-    queryKey: ['mobile', 'voters', cId, search],
-    queryFn: () =>
-      api(`/mobile/voters?campaignId=${cId}&search=${encodeURIComponent(search.trim())}`),
+    queryKey: ['mobile', 'voters', cId, debouncedSearch],
+    queryFn: ({ signal }) =>
+      api(`/mobile/voters?campaignId=${cId}&search=${encodeURIComponent(debouncedSearch)}`, {
+        signal,
+      }),
     enabled: !!cId,
   });
   const voters = votersQ.data?.voters || [];

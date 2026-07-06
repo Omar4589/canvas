@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
+import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
 import { loadCurrentUser, loadActiveCampaign } from '../../../lib/cache';
@@ -136,6 +137,9 @@ export default function AdminOverview() {
     },
     enabled: !!range,
     refetchInterval: 30 * 1000,
+    // Tabs keep Overview mounted forever once visited — pause the poll (and
+    // refresh on return) whenever another screen covers it.
+    ...useFocusedPoll(),
   });
   // Archived is reviewed as historical data → always all-time.
   const archivedQ = useQuery({

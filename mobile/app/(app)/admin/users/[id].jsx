@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -136,9 +136,12 @@ export default function AdminUserDetail() {
   const [newPassword, setNewPassword] = useState('');
   const [feedback, setFeedback] = useState(null);
 
+  const flashTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(flashTimerRef.current), []);
   function flash(type, text) {
     setFeedback({ type, text });
-    setTimeout(() => setFeedback(null), 4000);
+    clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setFeedback(null), 4000);
   }
 
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
