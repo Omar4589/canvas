@@ -24,14 +24,14 @@ function TourRow({ id, tag, title, children, bullets, visual, side = 'right', bl
       }`}
     >
       <Reveal className={left ? 'lg:order-2' : ''}>
-        <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-stone-400">{tag}</p>
-        <h3 className="mt-2.5 text-[26px] font-bold tracking-tight text-stone-900 [text-wrap:balance]">
+        <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-stone-400 lg:text-xs">{tag}</p>
+        <h3 className="mt-2.5 text-[26px] font-bold tracking-tight text-stone-900 [text-wrap:balance] lg:text-[30px]">
           {title}
         </h3>
-        <p className="mt-3 max-w-[52ch] text-base text-stone-500">{children}</p>
+        <p className="mt-3 max-w-[52ch] text-base text-stone-500 lg:text-[17px]">{children}</p>
         <ul className="mt-5 grid gap-2.5">
           {bullets.map((b) => (
-            <li key={b} className="flex gap-2.5 text-[14.5px] text-stone-900">
+            <li key={b} className="flex gap-2.5 text-[14.5px] text-stone-900 lg:text-base">
               <span className="mt-[7px] h-[7px] w-[7px] shrink-0 rounded-full bg-brand-600" aria-hidden="true" />
               {b}
             </li>

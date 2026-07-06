@@ -28,8 +28,8 @@ export default function CredibilityStrip() {
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
         <Reveal className="grid grid-cols-1 gap-8 py-9 sm:grid-cols-2 lg:grid-cols-4">
           {TRUTHS.map((t) => (
-            <div key={t.title} className="text-[13.5px] leading-snug text-stone-500">
-              <span className="mb-1 block text-sm font-bold text-stone-900">{t.title}</span>
+            <div key={t.title} className="text-[13.5px] leading-snug text-stone-500 lg:text-[14.5px]">
+              <span className="mb-1 block text-sm font-bold text-stone-900 lg:text-base">{t.title}</span>
               {t.body}
             </div>
           ))}
