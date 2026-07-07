@@ -234,8 +234,9 @@ function registerBookLayers(map, dark) {
       // Grow with zoom so a book's label is readable once you zoom in (was a flat 12).
       'text-size': ['interpolate', ['linear'], ['zoom'], 11, 11, 14, 16, 17, 22],
       'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
-      // Collision-cull by default, but the SELECTED book's label always shows.
-      'text-allow-overlap': ['case', ['boolean', ['get', 'selected'], false], true, false],
+      // Collision-cull (text-allow-overlap can't be data-driven); symbol-sort-key places the
+      // SELECTED book's label first so it wins collisions and always shows.
+      'text-allow-overlap': false,
       'symbol-sort-key': ['case', ['boolean', ['get', 'selected'], false], 0, 1],
     },
     paint: {
@@ -777,7 +778,6 @@ export default function TurfsPage() {
     !bookQuery ||
     String(t.name).toLowerCase().includes(bookQuery) ||
     (assignedByTurf.get(String(t._id)) || []).some((u) => `${u.firstName} ${u.lastName}`.toLowerCase().includes(bookQuery));
-  const shownBooksCount = bookQuery ? turfs.filter(matchBook).length : turfs.length;
   const selectedDoors = selectedTurfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
 
   // Book status (coverage + progress) → the filter chips + the map/list filter.
@@ -808,6 +808,10 @@ export default function TurfsPage() {
     return new Set(turfs.filter(matchesStatus).map((t) => String(t._id)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, turfsQ.data, assignmentsQ.data, progressQ.data]);
+  // A book shows in the list when it passes BOTH the name/canvasser search and the status filter.
+  const bookShown = (t) => matchBook(t) && (!visibleBookIds || visibleBookIds.has(String(t._id)));
+  const shownBooksCount = turfs.filter(bookShown).length;
+  const listFiltered = !!bookQuery || statusFilter.size > 0;
 
   // Single household detail for the click-a-dot popup.
   const householdQ = useQuery({
@@ -1542,7 +1546,7 @@ export default function TurfsPage() {
               </div>
 
               <div className="mb-2 flex items-center gap-3 text-xs">
-                <button onClick={() => setSelectedBooks(new Set(turfs.filter(matchBook).map((t) => String(t._id))))} className="font-medium text-brand-accent hover:underline">Select all{bookQuery ? ' shown' : ''}</button>
+                <button onClick={() => setSelectedBooks(new Set(turfs.filter(bookShown).map((t) => String(t._id))))} className="font-medium text-brand-accent hover:underline">Select all{listFiltered ? ' shown' : ''}</button>
                 {selectedBooks.size > 0 && (
                   <button onClick={() => setSelectedBooks(new Set())} className="font-medium text-fg-muted hover:underline">Clear ({selectedBooks.size})</button>
                 )}
@@ -1564,14 +1568,14 @@ export default function TurfsPage() {
                     placeholder="Search books by name or canvasser…"
                     className="w-full rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none"
                   />
-                  {bookQuery && <div className="mt-1 text-[10px] text-fg-subtle">{shownBooksCount} of {turfs.length} books</div>}
                 </div>
               )}
+              {listFiltered && <div className="mb-2 text-[10px] text-fg-subtle">{shownBooksCount} of {turfs.length} books</div>}
 
               <ul className="max-h-72 space-y-1 overflow-auto text-sm">
                 {turfs.map((t, i) => {
                   const selected = selectedBooks.has(String(t._id));
-                  if (!matchBook(t)) return null;
+                  if (!bookShown(t)) return null;
                   return (
                   <li
                     key={t._id}
@@ -1678,6 +1682,51 @@ export default function TurfsPage() {
           {tokenQ.data?.isReady && (
             <MapStyleControl value={styleId} onChange={setStyle} menuDirection="up" className="absolute bottom-3 left-3 z-10 items-start" />
           )}
+          {tokenQ.data?.isReady && !!turfs.length && (
+            <div className="absolute right-3 top-28 z-10 rounded-lg border border-border bg-card/95 p-2 text-xs shadow-lg backdrop-blur">
+              <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Layers</div>
+              {[['houses', 'Houses'], ['buildings', 'Buildings'], ['fills', 'Book fills'], ['labels', 'Labels']].map(([key, label]) => (
+                <label key={key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-sunken">
+                  <input
+                    type="checkbox"
+                    checked={layerVis[key]}
+                    onChange={(e) => setLayerVis((v) => ({ ...v, [key]: e.target.checked }))}
+                    className="h-3.5 w-3.5 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
+                  />
+                  <span className="text-fg">{label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {tokenQ.data?.isReady && !!turfs.length && (
+            <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+              {crewOpen && crewLoad.length > 0 && (
+                <div className="mb-1 max-h-56 w-72 overflow-auto rounded-lg border border-border bg-card/95 p-2 shadow-xl backdrop-blur">
+                  <ul className="space-y-0.5 text-xs">
+                    {crewLoad.map((c) => (
+                      <li key={c.user.id} className="flex items-center justify-between gap-2">
+                        <span className="truncate text-fg">{c.user.firstName} {c.user.lastName}</span>
+                        <span className="shrink-0 text-fg-muted">{c.books} bk · {c.doors.toLocaleString()} dr</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setCrewOpen((v) => !v)}
+                className="flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs font-medium text-fg shadow-lg backdrop-blur hover:bg-sunken"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Crew load</span>
+                {crewLoad.length > 0 ? (
+                  <span>{crewLoad.length} canvasser{crewLoad.length === 1 ? '' : 's'} · {turfs.length} books</span>
+                ) : (
+                  <span className="text-fg-muted">no one assigned yet</span>
+                )}
+                <span className="text-fg-subtle">{crewOpen ? '▾' : '▴'}</span>
+              </button>
+            </div>
+          )}
           {popupHouseholdId && (
             <HousePopup
               data={householdQ.data}
@@ -1707,7 +1756,6 @@ export default function TurfsPage() {
               passId={passId}
               books={selectedTurfs}
               assignedByTurf={assignedByTurf}
-              crewLoad={crewLoad}
               onClear={() => setSelectedBooks(new Set())}
               onMerge={() => merge.mutate([...selectedBooks])}
               mergePending={merge.isPending}

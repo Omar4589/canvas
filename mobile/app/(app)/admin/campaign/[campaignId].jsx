@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,18 +13,19 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
 import { saveActiveCampaign, clearBootstrap } from '../../../../lib/cache';
 import CoverageBar from '../../../../components/CoverageBar';
-import VoterRow from '../../../../components/VoterRow';
 import SectionHeader from '../../../../components/SectionHeader';
 import NavTileGrid from '../../../../components/NavTileGrid';
 import DateRangeBar from '../../../../components/DateRangeBar';
+import CanvasserCard from '../../../../components/CanvasserCard';
+import InfoHint from '../../../../components/InfoHint';
 import { rangeFor, deviceTimezone } from '../../../../lib/dateRanges';
-import { formatRange } from '../../../../lib/datetime';
 import { rateFromPct, makeRateColors } from '../../../../lib/rates';
+import { metricHelp } from '../../../../lib/metricHelp';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
-function StatTile({ value, label, level }) {
+function StatTile({ value, label, level, info }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const RATE_COLORS = makeRateColors(colors);
@@ -32,7 +33,10 @@ function StatTile({ value, label, level }) {
   return (
     <View style={[styles.statTile, palette && { backgroundColor: palette.bg, borderColor: palette.bg }]}>
       <Text style={[styles.statTileValue, palette && { color: palette.fg }]}>{value ?? '—'}</Text>
-      <Text style={[styles.statTileLabel, palette && { color: palette.fg }]}>{label}</Text>
+      <View style={styles.statTileLabelRow}>
+        <Text style={[styles.statTileLabel, palette && { color: palette.fg }]}>{label}</Text>
+        {info ? <InfoHint title={label} body={info} /> : null}
+      </View>
     </View>
   );
 }
@@ -111,6 +115,12 @@ export default function CampaignDetail() {
     queryFn: () => api(`/admin/reports/canvassers?${rangeParams().toString()}`),
     enabled: !!cId && !!range,
   });
+  // Roster for the coordinator label (shared cache with Books/Timeline).
+  const assignmentsQ = useQuery({
+    queryKey: ['admin', 'campaign-assignments', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/assignments`),
+    enabled: !!cId,
+  });
   const surveyResultsQ = useQuery({
     queryKey: ['admin', 'reports', 'survey-results', cId, range?.from, range?.to],
     queryFn: () => api(`/admin/reports/survey-results?${rangeParams({ voterPreview: '5' }).toString()}`),
@@ -126,14 +136,39 @@ export default function CampaignDetail() {
 
   const totals = overviewQ.data?.totals || {};
   const canvass = overviewQ.data?.canvass || {};
-  const topCanvassers = (canvassersQ.data || []).slice(0, 5);
   const rangeStats = rollupQ.data?.campaigns?.[0] || {};
   const rangeKnocks = rangeStats.knocks || 0;
   const rangePrimary = isLitDrop ? rangeStats.litDropped || 0 : rangeStats.surveysSubmitted || 0;
   const rangeRate = rateFromPct(rangeStats.connectionRate);
 
   const questions = surveyResultsQ.data?.questions || [];
-  const highlightQuestions = questions.filter((q) => q.type === 'multiple_choice' && q.options?.length);
+
+  // Top-5 canvassers normalized to the shared CanvasserCard shape: rename Doors/
+  // Surveys/Lit, compute doors-per-hour from first→last, join the coordinator.
+  const coordByUserId = useMemo(() => {
+    const m = new Map();
+    for (const a of assignmentsQ.data?.assignments || []) {
+      m.set(String(a.userId), a.coordinatorName || null);
+    }
+    return m;
+  }, [assignmentsQ.data]);
+  const topCanvasserRows = useMemo(() => {
+    return (canvassersQ.data || []).slice(0, 5).map((c) => {
+      const dayKnocks = c.knocks ?? c.homesKnocked ?? 0;
+      const first = c.firstActivityAt ? new Date(c.firstActivityAt).getTime() : null;
+      const last = c.lastActivityAt ? new Date(c.lastActivityAt).getTime() : null;
+      const hours = first && last ? (last - first) / 3600000 : 0;
+      return {
+        ...c,
+        dayKnocks,
+        daySurveys: c.surveysSubmitted ?? 0,
+        dayLit: c.litDropped ?? 0,
+        hoursOnDoors: Math.round(hours * 100) / 100,
+        doorsPerHour: hours > 0 ? Math.round((dayKnocks / hours) * 100) / 100 : 0,
+        coordinatorName: coordByUserId.get(String(c.userId)) || null,
+      };
+    });
+  }, [canvassersQ.data, coordByUserId]);
 
   function goVoters(qn, opt) {
     router.push({
@@ -203,18 +238,35 @@ export default function CampaignDetail() {
               <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
             ) : (
               <View style={styles.tileRow}>
-                <StatTile value={rangeKnocks.toLocaleString()} label="Knocks" />
-                <StatTile value={rangePrimary.toLocaleString()} label={isLitDrop ? 'Lit drops' : 'Surveys'} />
+                <StatTile value={rangeKnocks.toLocaleString()} label="Knocks" info={metricHelp.doors} />
+                <StatTile
+                  value={rangePrimary.toLocaleString()}
+                  label={isLitDrop ? 'Lit drops' : 'Surveys'}
+                  info={isLitDrop ? metricHelp.litDrops : metricHelp.surveys}
+                />
                 {!isLitDrop && (
-                  <StatTile value={(rangeStats.surveyedVoters || 0).toLocaleString()} label="Surveyed voters" />
+                  <StatTile
+                    value={(rangeStats.surveyedVoters || 0).toLocaleString()}
+                    label="Surveyed voters"
+                    info={metricHelp.surveyedVoters}
+                  />
                 )}
-                <StatTile value={rangeRate?.value} label={isLitDrop ? 'Lit rate' : 'Connection rate'} level={rangeRate?.level} />
+                <StatTile
+                  value={rangeRate?.value}
+                  label={isLitDrop ? 'Lit rate' : 'Connection rate'}
+                  level={rangeRate?.level}
+                  info={metricHelp.connectionRate}
+                />
               </View>
             )}
           </View>
 
           {/* Coverage (all-time) */}
-          <SectionHeader title="Coverage" subtitle="All-time campaign progress" />
+          <SectionHeader
+            title="Coverage"
+            subtitle="All-time campaign progress"
+            action={<InfoHint title="Coverage" body={metricHelp.households} />}
+          />
           <View style={styles.card}>
             <Text style={styles.coverageSummary}>
               {(totals.households ?? 0).toLocaleString()} households · {(totals.homesKnocked ?? 0).toLocaleString()} knocked
@@ -223,63 +275,53 @@ export default function CampaignDetail() {
           </View>
 
           {/* Top canvassers (range) */}
-          <Pressable
-            onPress={() => router.push('/(app)/admin/canvassers')}
-            style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
-          >
-            <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardTitle}>Top canvassers</Text>
-              <Text style={styles.cardLink}>See all ›</Text>
-            </View>
-            {canvassersQ.isLoading ? (
-              <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-            ) : topCanvassers.length === 0 ? (
+          <SectionHeader
+            title="Top canvassers"
+            onSeeAll={() => router.push('/(app)/admin/canvassers')}
+            action={
+              <InfoHint
+                title="What these mean"
+                items={[
+                  { label: 'Doors', text: metricHelp.doors },
+                  {
+                    label: isLitDrop ? 'Lit drops' : 'Surveys',
+                    text: isLitDrop ? metricHelp.litDrops : metricHelp.surveys,
+                  },
+                  { label: 'Conn %', text: metricHelp.connectionRate },
+                  { label: 'Contact %', text: metricHelp.contactRate },
+                  { label: 'Doors / hr', text: metricHelp.doorsPerHour },
+                  { label: 'Coordinator', text: metricHelp.coordinator },
+                  { label: 'Start / Last door', text: `${metricHelp.start} ${metricHelp.lastDoor}` },
+                ]}
+              />
+            }
+          />
+          {canvassersQ.isLoading ? (
+            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
+          ) : topCanvasserRows.length === 0 ? (
+            <View style={styles.card}>
               <Text style={styles.muted}>No activity in this range.</Text>
-            ) : (
-              topCanvassers.map((c, i) => {
-                const primary = isLitDrop ? c.litDropped || 0 : c.surveysSubmitted || 0;
-                const primaryLabel = isLitDrop ? 'lit drops' : 'surveys';
-                const range2 = formatRange(c.firstActivityAt, c.lastActivityAt, campaign?.timeZone);
-                return (
-                  <View key={c.userId} style={styles.canvasserRow}>
-                    <Text style={styles.canvasserRank}>{i + 1}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.canvasserName}>{c.firstName || c.email} {c.lastName || ''}</Text>
-                      <Text style={styles.muted}>{c.homesKnocked || 0} knocks · {primary} {primaryLabel}</Text>
-                      {range2 ? <Text style={styles.canvasserShift}>🕘 {range2}</Text> : null}
-                    </View>
-                  </View>
-                );
-              })
-            )}
-          </Pressable>
-
-          {/* Voter highlights */}
-          {!isLitDrop && highlightQuestions.length > 0 && (
-            <>
-              <SectionHeader title="Voter highlights" subtitle="Latest voters per option" />
-              {highlightQuestions.map((qn) => (
-                <View key={qn.key} style={styles.card}>
-                  <Text style={styles.qLabel}>{qn.label}</Text>
-                  {qn.options.map((o) => (
-                    <View key={String(o.option)} style={styles.highlightOpt}>
-                      <View style={styles.highlightHead}>
-                        <Text style={styles.highlightOptName} numberOfLines={1}>{String(o.option)}</Text>
-                        <Text style={styles.highlightCount}>{o.count}</Text>
-                      </View>
-                      {(o.voters || []).slice(0, 3).map((v) => (
-                        <VoterRow key={v.responseId} v={v} showCanvasser />
-                      ))}
-                      {o.count > (o.voters?.length || 0) && (
-                        <Pressable onPress={() => goVoters(qn, o)} hitSlop={6}>
-                          <Text style={styles.seeAll}>See all {o.count} ›</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              ))}
-            </>
+            </View>
+          ) : (
+            topCanvasserRows.map((c, i) => (
+              <CanvasserCard
+                key={c.userId}
+                row={c}
+                tz={tz}
+                rank={i + 1}
+                litMode={isLitDrop}
+                onPress={() =>
+                  router.push({
+                    pathname: `/(app)/admin/canvasser/${c.userId}`,
+                    params: {
+                      ...(range?.from ? { from: range.from } : {}),
+                      ...(range?.to ? { to: range.to } : {}),
+                      ...(range?.preset ? { preset: range.preset } : {}),
+                    },
+                  })
+                }
+              />
+            ))
           )}
 
           {/* Survey results */}
@@ -392,7 +434,8 @@ function makeStyles(t) {
     alignItems: 'center',
   },
   statTileValue: { ...type.h2, fontSize: 20, fontVariant: ['tabular-nums'], color: colors.textPrimary },
-  statTileLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', marginTop: 2, textAlign: 'center' },
+  statTileLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  statTileLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textAlign: 'center' },
 
   coverageSummary: { ...type.caption, marginBottom: spacing.sm, color: colors.textPrimary, fontWeight: '600' },
 

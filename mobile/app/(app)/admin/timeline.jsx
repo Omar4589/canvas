@@ -7,8 +7,7 @@ import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, shiftDays, deviceTimezone } from '../../../lib/dateRanges';
-import { formatRange } from '../../../lib/datetime';
-import { rateFromPct, makeRateColors } from '../../../lib/rates';
+import { rateFromPct } from '../../../lib/rates';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -16,6 +15,7 @@ import DateRangeBar from '../../../components/DateRangeBar';
 import KpiGrid from '../../../components/KpiGrid';
 import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
+import CanvasserCard from '../../../components/CanvasserCard';
 
 const ROW_H = 46;
 const CELL_W = 40;
@@ -52,15 +52,6 @@ function fmtDayCol(ymd) {
   const [, m, d] = ymd.split('-');
   return `${Number(m)}/${Number(d)}`;
 }
-function initials(name) {
-  return name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-}
 function actionLabel(t) {
   if (t === 'survey_submitted') return 'Surveyed';
   if (t === 'lit_dropped') return 'Lit dropped';
@@ -78,7 +69,6 @@ export default function AdminTimeline() {
   const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
-  const rc = makeRateColors(colors);
 
   // Campaign: prefer the id the launching screen passed (campaign detail), else the
   // active campaign. Reload the active campaign on focus — this hidden Tabs screen
@@ -486,48 +476,16 @@ export default function AdminTimeline() {
             <>
               {/* Per-canvasser cards */}
               <View style={styles.cardsWrap}>
-                {filteredRows.map((r, i) => {
-                  const name = `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.email;
-                  const lvl = rateFromPct(r.connectionRate)?.level;
-                  const shift = formatRange(r.firstActivityAt, r.lastActivityAt, tz);
-                  return (
-                    <Pressable
-                      key={r.userId}
-                      onPress={() => openCanvasser(r)}
-                      style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
-                    >
-                      <Text style={styles.rank}>{i + 1}</Text>
-                      <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{initials(name) || '?'}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.name}>
-                          {name}
-                          {r.inOverlap ? ' ⚠' : ''}
-                          {!r.isActive && <Text style={styles.inactive}> · inactive</Text>}
-                        </Text>
-                        <Text style={styles.meta}>{r.coordinatorName || '—'}</Text>
-                        <View style={styles.statsLine}>
-                          <Text style={styles.statBold}>{r.dayKnocks || 0}</Text>
-                          <Text style={styles.stat}> doors · </Text>
-                          <Text style={styles.statBold}>{r.daySurveys || 0}</Text>
-                          <Text style={styles.stat}> surveys · </Text>
-                          <Text style={[styles.statBold, { color: lvl ? rc[lvl].fg : colors.textMuted }]}>
-                            {r.connectionRate}%
-                          </Text>
-                          <Text style={styles.stat}> conn</Text>
-                        </View>
-                        {r.doorsPerHour > 0 ? (
-                          <Text style={styles.metaSmall}>
-                            {r.hoursOnDoors}h · {r.doorsPerHour.toFixed(1)}/hr
-                          </Text>
-                        ) : null}
-                        {shift ? <Text style={styles.shift}>🕘 {shift}</Text> : null}
-                      </View>
-                      <Text style={styles.chev}>›</Text>
-                    </Pressable>
-                  );
-                })}
+                {filteredRows.map((r, i) => (
+                  <CanvasserCard
+                    key={r.userId}
+                    row={r}
+                    tz={tz}
+                    rank={i + 1}
+                    litMode={campaignDoc?.type === 'lit_drop'}
+                    onPress={() => openCanvasser(r)}
+                  />
+                ))}
               </View>
 
               {/* Reconciliation — reflects the campaign/walk-list/range selection

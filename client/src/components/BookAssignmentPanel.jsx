@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
+import { IconSpinner } from './ui/icons.jsx';
 
 // Floating panel over the turf map: assign canvassers to the currently-selected
 // book(s) — from either the list or the map. One book → instant per-person
@@ -18,7 +19,6 @@ export default function BookAssignmentPanel({
   passId,
   books,
   assignedByTurf,
-  crewLoad,
   onClear,
   onMerge,
   mergePending,
@@ -78,22 +78,73 @@ export default function BookAssignmentPanel({
     return s.size > 1;
   }, [union, memberById]);
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] });
+  const asgKey = ['turf-pass-assignments', campaignId, passId];
+  const [savedAt, setSavedAt] = useState(0);
+  useEffect(() => {
+    if (!savedAt) return undefined;
+    const t = setTimeout(() => setSavedAt(0), 1800);
+    return () => clearTimeout(t);
+  }, [savedAt]);
+  const flashSaved = () => setSavedAt(Date.now());
+
+  // Refetch the assignment set (+ the modal's) after any write. The team roster is refreshed
+  // only after an ASSIGN (a self-assign can add the admin) — and never blocks the UI, since
+  // the optimistic cache edits below already show the change.
+  const settle = () => {
+    qc.invalidateQueries({ queryKey: asgKey });
     qc.invalidateQueries({ queryKey: ['turf-assignments'] });
-    // Self-assign may have added the admin to the roster — refresh the candidate list.
-    qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
   };
+  const rollback = (_e, _v, ctx) => { if (ctx && 'prev' in ctx) qc.setQueryData(asgKey, ctx.prev); };
+  const userRow = (uid) => {
+    const u = memberById.get(String(uid));
+    return { id: String(uid), firstName: u?.firstName || '', lastName: u?.lastName || '' };
+  };
+  const setRows = (fn) => qc.setQueryData(asgKey, (old) => ({ ...(old || {}), assignments: fn(old?.assignments || []) }));
 
   const assignOne = useMutation({
     mutationFn: (userIds) =>
       api(`/admin/campaigns/${campaignId}/turfs/${turfIds[0]}/assignments`, { method: 'POST', body: { userIds } }),
-    onSuccess: invalidate,
+    onMutate: async (userIds) => {
+      await qc.cancelQueries({ queryKey: asgKey });
+      const prev = qc.getQueryData(asgKey);
+      setRows((rows) => {
+        const have = new Set(rows.filter((r) => String(r.turfId) === turfIds[0]).map((r) => String(r.user.id)));
+        const add = userIds.filter((uid) => !have.has(String(uid))).map((uid) => ({ turfId: turfIds[0], user: userRow(uid) }));
+        return [...rows, ...add];
+      });
+      return { prev };
+    },
+    onError: rollback,
+    onSuccess: () => { flashSaved(); qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] }); },
+    onSettled: settle,
   });
   const unassignFrom = useMutation({
     mutationFn: ({ turfId, userId }) =>
       api(`/admin/campaigns/${campaignId}/turfs/${turfId}/assignments/${userId}`, { method: 'DELETE' }),
-    onSuccess: invalidate,
+    onMutate: async ({ turfId, userId }) => {
+      await qc.cancelQueries({ queryKey: asgKey });
+      const prev = qc.getQueryData(asgKey);
+      setRows((rows) => rows.filter((r) => !(String(r.turfId) === String(turfId) && String(r.user.id) === String(userId))));
+      return { prev };
+    },
+    onError: rollback,
+    onSuccess: flashSaved,
+    onSettled: settle,
+  });
+  // One request to drop a person from MANY books (was N sequential DELETEs).
+  const unassignBulk = useMutation({
+    mutationFn: ({ turfIds: tids, userId }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/unassign-bulk`, { method: 'POST', body: { turfIds: tids, userIds: [userId] } }),
+    onMutate: async ({ turfIds: tids, userId }) => {
+      await qc.cancelQueries({ queryKey: asgKey });
+      const prev = qc.getQueryData(asgKey);
+      const tset = new Set(tids.map(String));
+      setRows((rows) => rows.filter((r) => !(tset.has(String(r.turfId)) && String(r.user.id) === String(userId))));
+      return { prev };
+    },
+    onError: rollback,
+    onSuccess: flashSaved,
+    onSettled: settle,
   });
   const bulk = useMutation({
     mutationFn: () =>
@@ -101,17 +152,23 @@ export default function BookAssignmentPanel({
         method: 'POST',
         body: { turfIds, userIds: [...picked], mode, replace },
       }),
-    onSuccess: () => { setPicked(new Set()); setReplace(false); invalidate(); },
+    onSuccess: () => {
+      setPicked(new Set());
+      setReplace(false);
+      flashSaved();
+      settle();
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
+    },
   });
 
-  const busy = assignOne.isPending || unassignFrom.isPending || bulk.isPending;
+  const busy = assignOne.isPending || unassignFrom.isPending || unassignBulk.isPending || bulk.isPending;
 
   function toggleSingle(userId) {
     if (assignedSet.has(userId)) unassignFrom.mutate({ turfId: turfIds[0], userId });
     else assignOne.mutate([userId]);
   }
   function unassignEverywhere(entry) {
-    for (const tid of entry.inBooks) unassignFrom.mutate({ turfId: tid, userId: entry.user.id });
+    unassignBulk.mutate({ turfIds: [...entry.inBooks], userId: entry.user.id });
   }
   function assignAllShownSingle() {
     const ids = filtered.filter((m) => !assignedSet.has(m.user.id)).map((m) => m.user.id);
@@ -133,7 +190,14 @@ export default function BookAssignmentPanel({
           </div>
           <div className="text-xs text-fg-muted">{totalDoors.toLocaleString()} doors</div>
         </div>
-        <button onClick={onClear} className="rounded p-1 text-fg-subtle hover:bg-sunken hover:text-fg-muted" aria-label="Clear selection">✕</button>
+        <div className="flex items-center gap-2">
+          {savedAt ? (
+            <span className="rounded-full bg-success-tint px-2 py-0.5 text-[10px] font-semibold text-success">Saved ✓</span>
+          ) : busy ? (
+            <IconSpinner size={14} />
+          ) : null}
+          <button onClick={onClear} className="rounded p-1 text-fg-subtle hover:bg-sunken hover:text-fg-muted" aria-label="Clear selection">✕</button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
@@ -318,20 +382,6 @@ export default function BookAssignmentPanel({
             </>
           )}
         </div>
-
-        {crewLoad && crewLoad.length > 0 && (
-          <div className="mt-3 border-t border-border pt-3">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Crew load · this pass</div>
-            <ul className="space-y-0.5 text-xs">
-              {crewLoad.map((c) => (
-                <li key={c.user.id} className="flex items-center justify-between gap-2">
-                  <span className="truncate text-fg">{c.user.firstName} {c.user.lastName}</span>
-                  <span className="shrink-0 text-fg-muted">{c.books} bk · {c.doors.toLocaleString()} dr</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
 
       {books.length >= 2 && (
