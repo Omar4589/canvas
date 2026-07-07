@@ -26,7 +26,7 @@ export default function HowItWorks() {
     <section id="how" className="scroll-mt-16 bg-white">
       <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
         <Reveal className="max-w-2xl">
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">How it works</p>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">How it works</p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-4xl">
             Four steps from file to field report
           </h2>

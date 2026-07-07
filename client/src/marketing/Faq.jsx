@@ -30,7 +30,7 @@ export default function Faq() {
     <section className="bg-white">
       <div className="mx-auto w-full max-w-6xl px-4 pb-20 sm:px-6 sm:pb-24 lg:px-8">
         <Reveal className="max-w-2xl">
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">
             Common questions
           </p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-stone-900 sm:text-4xl">

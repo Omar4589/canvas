@@ -75,16 +75,16 @@ export default function FeatureGrid() {
     <section id="features" className="scroll-mt-16 bg-stone-100">
       <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
         <Reveal className="max-w-2xl">
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">
             And the rest of the operation
           </p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-4xl">
             Built to run many campaigns at once
           </h2>
         </Reveal>
-        <div className="mt-10 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-10 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map(({ Icon, title, blurb }, i) => (
-            <Reveal key={title} delay={(i % 4) * 70}>
+            <Reveal key={title} delay={(i % 3) * 70}>
               <div className="h-full rounded-lg border border-stone-200 bg-white p-5">
                 <div className="mb-3.5 flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
                   <Icon size={20} />

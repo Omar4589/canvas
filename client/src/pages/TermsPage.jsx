@@ -22,7 +22,7 @@ export default function TermsPage() {
             use of the {APP_NAME} platform — the web console at doorline.app,
             the {APP_NAME} mobile app for iOS and Android, and the client
             report portal (together, the &quot;Service&quot;). The Service is
-            operated by {APP_NAME} (&quot;we,&quot; &quot;us&quot;).
+            operated by Doorline LLC (&quot;{APP_NAME},&quot; &quot;we,&quot; &quot;us&quot;).
           </p>
           <p>
             By creating an account, signing in, or using the Service, you

@@ -3,9 +3,14 @@ import Logo from '../components/Logo.jsx';
 import { demoMailto } from './contact.js';
 
 // Public marketing footer — brand mark, an honest one-line description of the
-// product, platform badges, and the small link row. "Contact" routes to the
-// demo mailto. The store badges are unlinked until the public listings exist;
-// swap the <span>s for <a href> when the App Store / Play URLs are live.
+// product, the beta install badges, and the small link row. "Contact" routes to the
+// demo mailto. The badges link to the CLOSED betas (Apple TestFlight + Google Play
+// internal test), so they're framed as "beta" — NOT the official "Download on the App
+// Store" / "Get it on Google Play" badges, which are only for public store listings and
+// would be misleading (and against brand guidelines) for a beta. Swap to the official
+// badges once the apps are publicly listed.
+const IPHONE_BETA_URL = 'https://testflight.apple.com/join/8ZHW2nXH';
+const ANDROID_BETA_URL = 'https://play.google.com/apps/internaltest/4700118043777481693';
 const LINKS = [
   { to: '/privacy', label: 'Privacy' },
   { to: '/terms', label: 'Terms' },
@@ -23,15 +28,25 @@ export default function MarketingFooter() {
               Doorline is the door-to-door canvassing platform for political campaigns and every
               cause that knocks doors — a web operations console plus an offline-first field app.
             </p>
-            <div className="mt-5 flex gap-2.5" aria-label="Available on iOS and Android">
-              <span className="flex flex-col rounded-lg bg-stone-900 px-3.5 py-1.5 leading-tight text-white">
-                <span className="text-[8.5px] uppercase tracking-wide opacity-75">Available for</span>
+            <div className="mt-5 flex flex-wrap gap-2.5" aria-label="Get the Doorline beta on iPhone and Android">
+              <a
+                href={IPHONE_BETA_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-col rounded-lg bg-stone-900 px-3.5 py-1.5 leading-tight text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+              >
+                <span className="text-[8.5px] uppercase tracking-wide opacity-75">iPhone beta · TestFlight</span>
                 <span className="text-[13px] font-bold">iPhone &amp; iPad</span>
-              </span>
-              <span className="flex flex-col rounded-lg bg-stone-900 px-3.5 py-1.5 leading-tight text-white">
-                <span className="text-[8.5px] uppercase tracking-wide opacity-75">Available for</span>
+              </a>
+              <a
+                href={ANDROID_BETA_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-col rounded-lg bg-stone-900 px-3.5 py-1.5 leading-tight text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+              >
+                <span className="text-[8.5px] uppercase tracking-wide opacity-75">Android test · Google Play</span>
                 <span className="text-[13px] font-bold">Android</span>
-              </span>
+              </a>
             </div>
           </div>
 
@@ -59,7 +74,7 @@ export default function MarketingFooter() {
           </nav>
         </div>
 
-        <p className="mt-8 text-xs text-stone-500">© 2026 Doorline</p>
+        <p className="mt-8 text-xs text-stone-500">© 2026 Doorline LLC</p>
       </div>
     </footer>
   );

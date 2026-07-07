@@ -37,7 +37,7 @@ export default function ConsoleShot({ src, alt, url, bleed = 'right', width, hei
         height={height}
         loading="lazy"
         decoding="async"
-        className={`block w-full max-w-full lg:w-[130%] lg:max-w-none ${shiftClass}`}
+        className={`block w-full max-w-full lg:w-[125%] lg:max-w-none ${shiftClass}`}
       />
       <div
         className={`pointer-events-none absolute inset-y-0 hidden w-[28%] from-white to-transparent lg:block ${fadeEdge}`}

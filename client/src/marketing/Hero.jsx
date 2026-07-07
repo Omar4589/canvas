@@ -66,7 +66,7 @@ export default function Hero() {
       <div className="relative mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 items-center gap-12 pb-16 pt-8 sm:py-24 lg:grid-cols-[5fr_7fr] lg:gap-12">
           <Reveal>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">
               Canvassing software for campaigns and causes
             </p>
             <h1 className="mt-4 text-4xl font-extrabold leading-[1.06] tracking-tight text-stone-900 [text-wrap:balance] sm:text-5xl xl:text-[3.4rem]">

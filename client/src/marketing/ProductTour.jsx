@@ -19,7 +19,7 @@ function TourRow({ id, tag, title, children, bullets, visual, side = 'right', bl
   return (
     <div
       id={id}
-      className={`grid scroll-mt-16 grid-cols-1 items-center gap-10 py-14 sm:py-16 lg:gap-16 ${
+      className={`grid scroll-mt-16 grid-cols-1 items-center gap-10 py-14 sm:py-16 lg:gap-20 ${
         left ? 'lg:grid-cols-[7fr_5fr]' : 'lg:grid-cols-[5fr_7fr]'
       }`}
     >
@@ -28,10 +28,10 @@ function TourRow({ id, tag, title, children, bullets, visual, side = 'right', bl
         <h3 className="mt-2.5 text-[26px] font-bold tracking-tight text-stone-900 [text-wrap:balance] lg:text-[30px]">
           {title}
         </h3>
-        <p className="mt-3 max-w-[52ch] text-base text-stone-500 lg:text-[17px]">{children}</p>
+        <p className="mt-3 max-w-[52ch] text-base text-stone-500 lg:text-[17px] text-justify">{children}</p>
         <ul className="mt-5 grid gap-2.5">
           {bullets.map((b) => (
-            <li key={b} className="flex gap-2.5 text-[14.5px] text-stone-900 lg:text-base">
+            <li key={b} className="flex gap-2.5 text-[14.5px] text-stone-900 lg:text-base text-justify">
               <span className="mt-[7px] h-[7px] w-[7px] shrink-0 rounded-full bg-brand-600" aria-hidden="true" />
               {b}
             </li>
@@ -73,12 +73,12 @@ function FieldAppShots() {
       <PhoneShot
         src={shotPhoneBooks}
         alt="The Doorline field app showing a canvasser's assigned book on a live map, with color-coded house pins and today's progress"
-        className="relative z-10 w-[236px] shrink-0 sm:w-[264px]"
+        className="relative z-10 w-[236px] shrink-0 sm:w-[296px]"
       />
       <PhoneShot
         src={shotPhoneSurvey}
         alt="The Doorline survey screen: a door script, the support question with read-aloud text, and conditional follow-up questions"
-        className="-ml-14 mb-10 hidden w-[210px] shrink-0 sm:block sm:w-[232px]"
+        className="-ml-14 mb-10 hidden w-[210px] shrink-0 sm:block sm:w-[260px]"
       />
     </div>
   );
@@ -89,7 +89,7 @@ export default function ProductTour() {
     <section id="turf" className="scroll-mt-16 overflow-x-clip bg-white">
       <div className="mx-auto w-full max-w-6xl px-4 pb-20 sm:px-6 sm:pb-24 lg:px-8">
         <Reveal className="max-w-2xl pt-2">
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600">The product</p>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">The product</p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-4xl">
             From voter file to field day, one pipeline
           </h2>

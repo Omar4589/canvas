@@ -18,7 +18,7 @@ export default function PrivacyPolicyPage() {
 
         <Section title="Overview">
           <p>
-            {APP_NAME} provides door-to-door canvassing software to
+            Doorline LLC (&quot;{APP_NAME},&quot; &quot;we,&quot; &quot;us&quot;) provides door-to-door canvassing software to
             organizations that run field campaigns — including political
             campaigns, advocacy and issue organizations, and the firms that
             run canvassing on their behalf. This Privacy Policy describes how
