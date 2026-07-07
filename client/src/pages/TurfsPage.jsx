@@ -580,7 +580,6 @@ export default function TurfsPage() {
   const editModeRef = useRef(false);
   const moveDoorRef = useRef(() => {});
   const toggleSelectRef = useRef(() => {});
-  const clearSelectionRef = useRef(() => {});
   const fittedSigRef = useRef(null);
   const openPopupRef = useRef(() => {});
   const openBuildingPopupRef = useRef(() => {});
@@ -788,14 +787,13 @@ export default function TurfsPage() {
     if (p && p.total > 0) s.add(p.knocked === 0 ? 'not_started' : p.knocked >= p.total ? 'completed' : 'in_progress');
     return s;
   };
+  // Additive chips: a book shows if it matches ANY selected status (union). Selecting
+  // "Assigned" + "In progress" shows every assigned book AND every in-progress book.
   const matchesStatus = (t) => {
     if (!statusFilter.size) return true;
     const s = bookStatuses(t);
-    const cov = ['assigned', 'unassigned'].filter((k) => statusFilter.has(k));
-    const prog = ['completed', 'in_progress', 'not_started'].filter((k) => statusFilter.has(k));
-    if (cov.length && !cov.some((k) => s.has(k))) return false; // OR within a facet, AND across facets
-    if (prog.length && !prog.some((k) => s.has(k))) return false;
-    return true;
+    for (const k of statusFilter) if (s.has(k)) return true;
+    return false;
   };
   const statusCounts = useMemo(() => {
     const c = { assigned: 0, unassigned: 0, completed: 0, in_progress: 0, not_started: 0 };
@@ -927,7 +925,6 @@ export default function TurfsPage() {
   editModeRef.current = editMode;
   moveDoorRef.current = (householdId, toTurfId) => moveDoor.mutate({ householdId, toTurfId });
   toggleSelectRef.current = toggleBook;
-  clearSelectionRef.current = () => setSelectedBooks(new Set());
   openPopupRef.current = (id) => { setPopupBuildingKey(null); setPopupHouseholdId(id); };
   openBuildingPopupRef.current = (key) => { setPopupHouseholdId(null); setPopupBuildingKey(key); };
 
@@ -975,7 +972,8 @@ export default function TurfsPage() {
       if (bestId != null && bestDist <= DOT_TOL) { openPopupRef.current(bestId); return; }
       const bf = map.queryRenderedFeatures(e.point, { layers: map.getLayer('book-fill') ? ['book-fill'] : [] });
       if (bf.length) { toggleSelectRef.current(bf[0].properties?.id); return; }
-      clearSelectionRef.current();
+      // Clicking empty map does NOT clear the selection — only the ✕ in the assignment
+      // panel deselects. Accidental blank-map clicks used to wipe a built-up selection.
     });
     map.on('mouseenter', 'book-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'book-fill', () => { map.getCanvas().style.cursor = ''; });
