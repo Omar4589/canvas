@@ -28,6 +28,7 @@ import { computeOverlaps } from '../../services/reports/overlaps.js';
 import { detectFlags } from '../../services/audit/flagDetection.js';
 import { FLAG_THRESHOLDS, SEVERITY_RANK } from '../../services/audit/flagThresholds.js';
 import { FlagReview } from '../../models/FlagReview.js';
+import { VoterNote } from '../../models/VoterNote.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
@@ -2825,6 +2826,235 @@ router.post('/flags/review', async (req, res, next) => {
         reviewedBy: String(saved.reviewedBy),
         reviewedAt: saved.reviewedAt,
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Centralized campaign notes — unify the three note sources into one searchable, filterable,
+// VIEW-ONLY list: field door notes (CanvassActivity.note), survey notes (SurveyResponse.note), and
+// admin/profile notes (VoterNote.body). VoterNote is org-level, so it's scoped to the campaign via
+// voter → household. See docs/AUDIT.md sibling patterns; reuses voterProfile.js note shaping.
+const NOTE_SOURCES = ['door', 'survey', 'voter'];
+const NOTES_RESULT_CAP = 500;
+const NOTE_NONEMPTY = { $exists: true, $ne: null, $not: /^\s*$/ };
+
+// Escape user text so a search term can't inject regex metacharacters into a $regex.
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+router.get('/notes', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const tz = tzOf(req);
+
+    // campaignId is REQUIRED — the page is campaign-scoped, and the VoterNote lookup needs it.
+    // (No org-wide fallback: baseFilter would otherwise return every campaign's notes.)
+    const campaignId = req.query.campaignId;
+    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+      return res.status(400).json({ error: 'A campaignId is required.' });
+    }
+    const campaignObjId = new mongoose.Types.ObjectId(campaignId);
+    const orgObjId = new mongoose.Types.ObjectId(orgId);
+
+    const typeSet = csvSet(req.query.type, NOTE_SOURCES); // null = all three
+    const wants = (t) => !typeSet || typeSet.has(t);
+    const userId =
+      req.query.userId && mongoose.isValidObjectId(req.query.userId)
+        ? new mongoose.Types.ObjectId(req.query.userId)
+        : null;
+    const effortActive = !!(req.query.effortId && mongoose.isValidObjectId(req.query.effortId));
+    const includeVoter = !effortActive; // VoterNote has no effort linkage
+
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const rx = q ? new RegExp(escapeRegExp(q), 'i') : null;
+
+    const cFilter = baseFilter(req); // org + campaignId + optional effortId
+    const noteClause = rx ? { ...NOTE_NONEMPTY, $regex: rx } : NOTE_NONEMPTY;
+    const bodyClause = rx ? { $exists: true, $ne: null, $regex: rx } : { $exists: true, $ne: null };
+
+    const doorMatch = {
+      ...cFilter,
+      ...parseDateRange(req, 'timestamp'),
+      actionType: { $ne: 'survey_submitted' }, // dedup: survey notes come from SurveyResponse
+      note: noteClause,
+      ...(userId ? { userId } : {}),
+    };
+    const surveyMatch = {
+      ...cFilter,
+      ...parseDateRange(req, 'submittedAt'),
+      note: noteClause,
+      ...(userId ? { userId } : {}),
+    };
+    // VoterNote → campaign via voter → household (inner $match campaignId). Returns the household
+    // address + voter name in the join, so no second lookup for those.
+    const voterBase = [
+      {
+        $match: {
+          organizationId: orgObjId,
+          ...parseDateRange(req, 'createdAt'),
+          body: bodyClause,
+          ...(userId ? { authorId: userId } : {}),
+        },
+      },
+      {
+        $lookup: {
+          from: 'voters',
+          localField: 'voterId',
+          foreignField: '_id',
+          pipeline: [
+            { $match: { organizationId: orgObjId } },
+            {
+              $lookup: {
+                from: 'households',
+                localField: 'householdId',
+                foreignField: '_id',
+                pipeline: [
+                  { $match: { campaignId: campaignObjId } },
+                  { $project: { addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 } },
+                ],
+                as: 'hh',
+              },
+            },
+            { $unwind: '$hh' },
+            { $project: { fullName: 1, hh: 1 } },
+          ],
+          as: 'v',
+        },
+      },
+      { $unwind: '$v' },
+    ];
+
+    const [doorRows, surveyRows, voterRows, doorCount, surveyCount, voterCountArr] = await Promise.all([
+      wants('door')
+        ? CanvassActivity.find(doorMatch, '_id note timestamp actionType userId householdId voterId')
+            .sort({ timestamp: -1 })
+            .limit(NOTES_RESULT_CAP)
+            .lean()
+        : [],
+      wants('survey')
+        ? SurveyResponse.find(
+            surveyMatch,
+            '_id note submittedAt userId householdId voterId editedBy editedAt'
+          )
+            .sort({ submittedAt: -1 })
+            .limit(NOTES_RESULT_CAP)
+            .lean()
+        : [],
+      wants('voter') && includeVoter
+        ? VoterNote.aggregate([...voterBase, { $sort: { createdAt: -1 } }, { $limit: NOTES_RESULT_CAP }])
+        : [],
+      // Counts ignore `type` so the filter chips stay accurate; they honor every other filter.
+      CanvassActivity.countDocuments(doorMatch),
+      SurveyResponse.countDocuments(surveyMatch),
+      includeVoter ? VoterNote.aggregate([...voterBase, { $count: 'n' }]) : [{ n: 0 }],
+    ]);
+    const voterCount = voterCountArr?.[0]?.n || 0;
+
+    // Resolve author/editor names in one query.
+    const userIdSet = new Set();
+    const addU = (id) => id && userIdSet.add(String(id));
+    for (const r of doorRows) addU(r.userId);
+    for (const r of surveyRows) { addU(r.userId); addU(r.editedBy); }
+    for (const r of voterRows) { addU(r.authorId); addU(r.editedBy); }
+    const users = userIdSet.size
+      ? await User.find({ _id: { $in: [...userIdSet] } }, 'firstName lastName email').lean()
+      : [];
+    const uMap = new Map(users.map((u) => [String(u._id), u]));
+    const who = (id) => {
+      const u = id && uMap.get(String(id));
+      return u ? { id: String(id), name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email } : null;
+    };
+
+    // Batch households + voters for door/survey items (voter notes carry them from the join).
+    const hhIdSet = new Set();
+    const vIdSet = new Set();
+    for (const r of [...doorRows, ...surveyRows]) {
+      if (r.householdId) hhIdSet.add(String(r.householdId));
+      if (r.voterId) vIdSet.add(String(r.voterId));
+    }
+    const [hhDocs, vDocs] = await Promise.all([
+      hhIdSet.size
+        ? Household.find({ _id: { $in: [...hhIdSet] } }, 'addressLine1 addressLine2 city state zipCode').lean()
+        : [],
+      vIdSet.size ? Voter.find({ _id: { $in: [...vIdSet] } }, 'fullName').lean() : [],
+    ]);
+    const hhMap = new Map(hhDocs.map((h) => [String(h._id), h]));
+    const vMap = new Map(vDocs.map((v) => [String(v._id), v]));
+    const hhItem = (id) => {
+      const h = id && hhMap.get(String(id));
+      return h ? { id: String(h._id), address: streetAddress(h) } : null;
+    };
+    const vItem = (id) => {
+      const v = id && vMap.get(String(id));
+      return v ? { id: String(id), name: v.fullName || '' } : null;
+    };
+    const editedItem = (by, at) => (by || at ? { by: who(by), at: at || null } : null);
+
+    const items = [
+      ...doorRows.map((r) => ({
+        id: String(r._id),
+        source: 'door',
+        note: r.note,
+        timestamp: r.timestamp,
+        author: who(r.userId),
+        actionType: r.actionType,
+        household: hhItem(r.householdId),
+        voter: vItem(r.voterId), // may be null (household-scoped)
+        edited: null,
+      })),
+      ...surveyRows.map((r) => ({
+        id: String(r._id),
+        source: 'survey',
+        note: r.note,
+        timestamp: r.submittedAt,
+        author: who(r.userId),
+        actionType: 'survey_submitted',
+        household: hhItem(r.householdId),
+        voter: vItem(r.voterId),
+        edited: editedItem(r.editedBy, r.editedAt),
+      })),
+      ...voterRows.map((r) => ({
+        id: String(r._id),
+        source: 'voter',
+        note: r.body,
+        timestamp: r.createdAt,
+        author: who(r.authorId),
+        actionType: null,
+        household: r.v?.hh
+          ? { id: String(r.v.hh._id), address: streetAddress(r.v.hh) }
+          : null,
+        voter: { id: String(r.voterId), name: r.v?.fullName || '' },
+        edited: editedItem(r.editedBy, r.editedAt),
+      })),
+    ];
+    items.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp) || (a.id < b.id ? 1 : -1));
+
+    const counts = { door: doorCount, survey: surveyCount, voter: voterCount, total: doorCount + surveyCount + voterCount };
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+    const page = Math.max(parseInt(req.query.page, 10) || 0, 0);
+    const total = items.length; // pageable (post-cap merged length)
+    const pageItems = items.slice(page * limit, page * limit + limit);
+    // `capped` = a wanted source hit RESULT_CAP (so you're not seeing everything of the wanted types).
+    const capped =
+      (wants('door') && doorCount > doorRows.length) ||
+      (wants('survey') && surveyCount > surveyRows.length) ||
+      (wants('voter') && includeVoter && voterCount > voterRows.length);
+
+    res.json({
+      notes: pageItems,
+      total,
+      counts,
+      capped,
+      page,
+      limit,
+      resultCap: NOTES_RESULT_CAP,
+      timeZone: tz,
+      tzAbbrev: tzAbbrev(tz),
     });
   } catch (err) {
     next(err);

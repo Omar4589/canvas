@@ -142,6 +142,11 @@ export default function HouseholdDetailPanel({
                     <li key={i} className="text-xs text-fg-muted">
                       {actionLabel(e.actionType)} · {formatDateTime(e.at, zone)}
                       {e.canvasser ? ` · ${e.canvasser}` : ''}
+                      {e.note ? (
+                        <div className="mt-0.5 rounded bg-sunken px-2 py-1 italic text-fg-muted">
+                          “{e.note}”
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

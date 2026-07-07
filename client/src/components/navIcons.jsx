@@ -239,6 +239,16 @@ export function IconAlertShield({ size = 22 }) {
   );
 }
 
+export function IconNote({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2Z" />
+      <path d="M8 9h9" />
+      <path d="M8 13h5" />
+    </svg>
+  );
+}
+
 // Route path -> icon component. Joined to navItems.js NAV/SUPER_NAV at render time.
 export const NAV_ICONS = {
   '/admin': IconDashboard,
@@ -252,6 +262,7 @@ export const NAV_ICONS = {
   '/early-voting': IconBallot,
   '/timeline': IconClock,
   '/audit': IconAlertShield,
+  '/notes': IconNote,
   '/admin/client-reports': IconReport,
   '/users': IconUser,
   '/surveys': IconClipboard,

@@ -46,11 +46,14 @@ function buildQuery(params) {
 }
 
 export default function MapPage() {
+  const [searchParams] = useSearchParams();
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
-  const [selected, setSelected] = useState(null);
+  // A "View on map" deep-link from the Notes hub (?household=<id>) opens that household.
+  const [selected, setSelected] = useState(() => searchParams.get('household') || null);
   const [selectedActivityId, setSelectedActivityId] = useState(null);
+  const didFocusHouseholdRef = useRef(false);
 
   // "Move pin" mode: a draggable marker to correct a household's location.
   const moveMarkerRef = useRef(null);
@@ -59,19 +62,20 @@ export default function MapPage() {
   const [moveSaving, setMoveSaving] = useState(false);
   const [moveErr, setMoveErr] = useState(null);
 
-  const [searchParams] = useSearchParams();
-
   const orgTz = useOrgTimeZone();
   // Default to Today. Seed from the org tz so the first paint (before the campaign loads)
   // isn't UTC; the effect below reseeds to the campaign's own "today" once its tz resolves.
   // A "View on map" deep-link from the Audit page can carry a window (?from/&to), a canvasser
-  // (?userId), the flag layer (?flag=1), and one entry to focus (?focusActivityId).
+  // (?userId), the flag layer (?flag=1), and one entry to focus (?focusActivityId). A Notes-hub
+  // household link (?household=) needs ALL doors loaded (the Today default + interacted-only
+  // filtering would otherwise hide an untouched household), so it opens on all-time.
   const [dateRange, setDateRange] = useState(() => {
     const f = searchParams.get('from');
     if (f) return { preset: 'custom', from: f, to: searchParams.get('to') || null };
+    if (searchParams.get('household')) return defaultRange('all', orgTz);
     return defaultRange('today', orgTz);
   });
-  const rangeTouchedRef = useRef(!!searchParams.get('from'));
+  const rangeTouchedRef = useRef(!!searchParams.get('from') || !!searchParams.get('household'));
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState(searchParams.get('userId') || '');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '', optionId: '' });
@@ -418,6 +422,20 @@ export default function MapPage() {
       didFocusFlagRef.current = true;
     }
   }, [mapReady, selectedFlagId, flagEntries]);
+
+  // Deep-link focus: a Notes-hub household link (?household=<id>) opens on all-time (above), so once
+  // the households load, fly to and open that household. One-shot.
+  useEffect(() => {
+    if (didFocusHouseholdRef.current || !mapReady || !mapRef.current) return;
+    const hid = searchParams.get('household');
+    if (!hid) return;
+    const h = householdsById.get(hid);
+    if (h?.location?.lng != null && h?.location?.lat != null) {
+      mapRef.current.flyTo({ center: [h.location.lng, h.location.lat], zoom: 17, essential: true });
+      setSelected(hid);
+      didFocusHouseholdRef.current = true;
+    }
+  }, [mapReady, householdsById, searchParams]);
 
   const selectedHousehold = useMemo(
     () => households.find((h) => h.id === selected) || null,

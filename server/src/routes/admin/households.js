@@ -419,7 +419,7 @@ router.get('/:householdId/activity', async (req, res, next) => {
     const [acts, surveys] = await Promise.all([
       CanvassActivity.find(
         { householdId: hid, organizationId: orgId, actionType: { $ne: 'note_added' } },
-        'actionType timestamp userId passId'
+        'actionType timestamp userId passId note'
       )
         .populate('userId', 'firstName lastName')
         .lean(),
@@ -433,7 +433,7 @@ router.get('/:householdId/activity', async (req, res, next) => {
     ]);
 
     const entries = [
-      ...acts.map((a) => ({ kind: 'knock', actionType: a.actionType, at: a.timestamp, passId: a.passId ? String(a.passId) : null, canvasser: name(a.userId) })),
+      ...acts.map((a) => ({ kind: 'knock', actionType: a.actionType, at: a.timestamp, passId: a.passId ? String(a.passId) : null, canvasser: name(a.userId), note: a.note && a.note.trim() ? a.note : null })),
       ...surveys.map((s) => ({ kind: 'survey', actionType: 'survey_submitted', at: s.submittedAt, passId: s.passId ? String(s.passId) : null, canvasser: name(s.userId), voter: s.voterId?.fullName || null })),
     ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
