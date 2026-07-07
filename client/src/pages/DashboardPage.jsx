@@ -1,17 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import QuestionResults, { TagResults } from '../components/QuestionResults.jsx';
-import CanvasserTable from '../components/CanvasserTable.jsx';
+import CanvasserSummaryTable from '../components/CanvasserSummaryTable.jsx';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
-import VoterHighlights from '../components/VoterHighlights.jsx';
+import InfoHint from '../components/InfoHint.jsx';
 import SetupProgress from '../components/SetupProgress.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
+import { metricHelp } from '../lib/metricHelp.js';
+import { useCampaignTeam } from '../lib/useCampaignTeam.js';
+import { todayInTz } from '../lib/datePresets.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 
 function buildQuery(params) {
@@ -157,11 +160,6 @@ export default function DashboardPage() {
   const surveyResultsRef = useRef(null);
   const questionResultsRefs = useRef({});
 
-  function scrollToOption(questionKey) {
-    const el = questionResultsRefs.current[questionKey];
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
   const overview = overviewQ.data || {};
   const totals = overview.totals || {};
   // A brand-new campaign (no voters imported) has nothing to report yet — keep the
@@ -171,6 +169,39 @@ export default function DashboardPage() {
   const canvass = overview.canvass || {};
   const rangeStats = rollupQ.data?.cumulative || {};
   const isLitDrop = selectedCampaign?.type === 'lit_drop';
+
+  // Reuse the Timeline's canvasser table. Its rows come from /canvasser-timeline;
+  // here we normalize the /admin/reports/canvassers leaderboard rows into the same
+  // shape — rename Doors/Surveys/Lit, compute doors-per-hour from first→last, and
+  // join the coordinator from the shared campaign-assignments cache (like TimelinePage).
+  const { members } = useCampaignTeam(campaignId);
+  const coordByUserId = useMemo(() => {
+    const m = new Map();
+    for (const member of members) {
+      m.set(String(member.user.id), {
+        coordinatorName: member.user.coordinatorName || null,
+      });
+    }
+    return m;
+  }, [members]);
+  const canvasserRows = useMemo(() => {
+    return (canvassersQ.data || []).map((r) => {
+      const dayKnocks = r.knocks ?? r.homesKnocked ?? 0;
+      const first = r.firstActivityAt ? new Date(r.firstActivityAt).getTime() : null;
+      const last = r.lastActivityAt ? new Date(r.lastActivityAt).getTime() : null;
+      const hours = first && last ? (last - first) / 3600000 : 0;
+      return {
+        ...r,
+        dayKnocks,
+        daySurveys: r.surveysSubmitted ?? 0,
+        dayLit: r.litDropped ?? 0,
+        doorsPerHour: hours > 0 ? Math.round((dayKnocks / hours) * 100) / 100 : 0,
+        coordinatorName: coordByUserId.get(String(r.userId))?.coordinatorName || null,
+      };
+    });
+  }, [canvassersQ.data, coordByUserId]);
+  const rangeTo = dateRange?.to || (tz ? todayInTz(tz) : null);
+  const singleDayRange = !!dateRange && dateRange.from === rangeTo;
 
   const knockedPct = totals.households
     ? Math.round((100 * (totals.homesKnocked || 0)) / totals.households)
@@ -289,6 +320,7 @@ export default function DashboardPage() {
               value={rangeStats.knocks?.toLocaleString()}
               hint="billable · per house-pass"
               accent="brand"
+              help={metricHelp.doors}
             />
             {isLitDrop ? (
               <StatCard
@@ -296,6 +328,7 @@ export default function DashboardPage() {
                 value={rangeStats.litDropped?.toLocaleString()}
                 hint="events"
                 accent="green"
+                help={metricHelp.litDrops}
               />
             ) : (
               <>
@@ -304,11 +337,13 @@ export default function DashboardPage() {
                   value={rangeStats.surveysSubmitted?.toLocaleString()}
                   hint="per voter"
                   accent="green"
+                  help={metricHelp.surveys}
                 />
                 <StatCard
                   label="Surveyed voters"
                   value={rangeStats.surveyedVoters?.toLocaleString()}
                   hint="distinct voters reached"
+                  help={metricHelp.surveyedVoters}
                 />
               </>
             )}
@@ -317,6 +352,7 @@ export default function DashboardPage() {
               value={ratePct(rangeStats.connectionRate)}
               hint={isLitDrop ? 'lit knocks ÷ knocks' : 'surveyed knocks ÷ knocks'}
               accent={rateAccent(rangeStats.connectionRate)}
+              help={metricHelp.connectionRate}
             />
           </div>
         )}
@@ -326,7 +362,12 @@ export default function DashboardPage() {
       <section className="mb-8">
         <SectionHeading
           title="Coverage"
-          right={<span className="text-xs text-fg-muted">All-time</span>}
+          right={
+            <span className="flex items-center gap-1 text-xs text-fg-muted">
+              All-time
+              <InfoHint label="About Coverage">{metricHelp.households}</InfoHint>
+            </span>
+          }
         />
         {overviewQ.isLoading ? (
           <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
@@ -355,24 +396,6 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {surveyResultsQ.data?.surveyTemplate &&
-        surveyResultsQ.data.questions?.some((q) => q.type === 'multiple_choice') && (
-          <section className="mb-8">
-            <SectionHeading
-              title="Voter highlights"
-              right={
-                <span className="text-xs text-fg-muted">
-                  Latest voters per option
-                </span>
-              }
-            />
-            <VoterHighlights
-              surveyResults={surveyResultsQ.data}
-              onSeeAll={scrollToOption}
-              tz={tz}
-            />
-          </section>
-        )}
 
       {selectedCampaign?.type === 'survey' && (
         <section className="mb-8" ref={surveyResultsRef}>
@@ -485,10 +508,12 @@ export default function DashboardPage() {
             Error: {canvassersQ.error.message}
           </div>
         ) : (
-          <CanvasserTable
-            rows={canvassersQ.data || []}
-            onRowClick={setSelectedCanvasser}
+          <CanvasserSummaryTable
+            rows={canvasserRows}
             tz={tz}
+            singleDay={singleDayRange}
+            litMode={isLitDrop}
+            onRowClick={setSelectedCanvasser}
           />
         )}
       </section>

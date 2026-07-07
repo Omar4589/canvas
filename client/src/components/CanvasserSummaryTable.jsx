@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import DataTable from './ui/DataTable.jsx';
 import Badge from './ui/Badge.jsx';
+import InfoHint from './InfoHint.jsx';
 import { ratePct, rateLevel } from '../lib/rates.js';
 import { formatInTz } from '../lib/datetime.js';
+import { metricHelp } from '../lib/metricHelp.js';
 
 // The timeline dashboard's per-canvasser answers table: who knocked, whose crew,
 // doors/surveys/rates/pace, when they started and when their last door was. Rows come
@@ -22,17 +24,23 @@ function rateClass(pct) {
   return RATE_TEXT[rateLevel(pct)] || 'text-fg';
 }
 
-const COLUMNS = [
-  { key: 'name', label: 'Canvasser', numeric: false },
-  { key: 'coordinatorName', label: 'Coordinator', numeric: false },
-  { key: 'dayKnocks', label: 'Doors', numeric: true },
-  { key: 'daySurveys', label: 'Surveys', numeric: true },
-  { key: 'connectionRate', label: 'Conn %', numeric: true },
-  { key: 'contactRate', label: 'Contact %', numeric: true },
-  { key: 'doorsPerHour', label: 'Doors/hr', numeric: true },
-  { key: 'firstActivityAt', label: 'Start', numeric: true },
-  { key: 'lastActivityAt', label: 'Last door', numeric: true },
-];
+// Columns depend on campaign type: the survey column becomes a lit-drop column for
+// lit-drop campaigns (both read the corresponding per-canvasser field).
+function columnsFor(litMode) {
+  return [
+    { key: 'name', label: 'Canvasser', numeric: false },
+    { key: 'coordinatorName', label: 'Coordinator', numeric: false, help: metricHelp.coordinator },
+    { key: 'dayKnocks', label: 'Doors', numeric: true, help: metricHelp.doors },
+    litMode
+      ? { key: 'dayLit', label: 'Lit drops', numeric: true, help: metricHelp.litDrops }
+      : { key: 'daySurveys', label: 'Surveys', numeric: true, help: metricHelp.surveys },
+    { key: 'connectionRate', label: 'Conn %', numeric: true, help: metricHelp.connectionRate },
+    { key: 'contactRate', label: 'Contact %', numeric: true, help: metricHelp.contactRate },
+    { key: 'doorsPerHour', label: 'Doors/hr', numeric: true, help: metricHelp.doorsPerHour },
+    { key: 'firstActivityAt', label: 'Start', numeric: true, help: metricHelp.start },
+    { key: 'lastActivityAt', label: 'Last door', numeric: true, help: metricHelp.lastDoor },
+  ];
+}
 
 function sortValue(row, key) {
   if (key === 'name') return `${row.lastName || ''} ${row.firstName || ''}`.trim().toLowerCase();
@@ -44,7 +52,8 @@ function sortValue(row, key) {
   return row[key] ?? null;
 }
 
-export default function CanvasserSummaryTable({ rows, tz, singleDay }) {
+export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = false, onRowClick }) {
+  const columns = columnsFor(litMode);
   // Numeric columns open desc (biggest first — the leaderboard instinct); text asc.
   const [sort, setSort] = useState({ key: 'dayKnocks', dir: 'desc' });
 
@@ -80,7 +89,7 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay }) {
     <DataTable
       head={
         <>
-          {COLUMNS.map((col) => (
+          {columns.map((col) => (
             <th
               key={col.key}
               aria-sort={
@@ -88,23 +97,30 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay }) {
               }
               className={`px-3 py-2 ${col.numeric ? 'text-right' : ''}`}
             >
-              <button
-                type="button"
-                onClick={() => onSort(col)}
-                className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-fg"
-              >
-                {col.label}
-                <span className={sort.key === col.key ? 'text-fg' : 'invisible'}>
-                  {sort.key === col.key && sort.dir === 'asc' ? '▲' : '▼'}
-                </span>
-              </button>
+              <span className={`inline-flex items-center gap-1 ${col.numeric ? 'justify-end' : ''}`}>
+                <button
+                  type="button"
+                  onClick={() => onSort(col)}
+                  className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-fg"
+                >
+                  {col.label}
+                  <span className={sort.key === col.key ? 'text-fg' : 'invisible'}>
+                    {sort.key === col.key && sort.dir === 'asc' ? '▲' : '▼'}
+                  </span>
+                </button>
+                {col.help ? <InfoHint label={`What "${col.label}" counts`}>{col.help}</InfoHint> : null}
+              </span>
             </th>
           ))}
         </>
       }
     >
       {sorted.map((r) => (
-        <tr key={r.userId} className="hover:bg-sunken/60">
+        <tr
+          key={r.userId}
+          onClick={onRowClick ? () => onRowClick(r) : undefined}
+          className={`hover:bg-sunken/60 ${onRowClick ? 'cursor-pointer' : ''}`}
+        >
           <td className="px-3 py-2">
             <div className="flex items-center gap-1.5 font-medium text-fg">
               {r.firstName} {r.lastName}
@@ -118,8 +134,12 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay }) {
             <div className="text-xs text-fg-muted">{r.email}</div>
           </td>
           <td className="px-3 py-2 text-fg">{r.coordinatorName || '—'}</td>
-          <td className="px-3 py-2 text-right font-medium text-fg">{r.dayKnocks.toLocaleString()}</td>
-          <td className="px-3 py-2 text-right text-fg">{r.daySurveys.toLocaleString()}</td>
+          <td className="px-3 py-2 text-right font-medium text-fg">
+            {(r.dayKnocks || 0).toLocaleString()}
+          </td>
+          <td className="px-3 py-2 text-right text-fg">
+            {((litMode ? r.dayLit : r.daySurveys) || 0).toLocaleString()}
+          </td>
           <td className={`px-3 py-2 text-right font-medium ${rateClass(r.connectionRate)}`}>
             {ratePct(r.connectionRate)}
           </td>

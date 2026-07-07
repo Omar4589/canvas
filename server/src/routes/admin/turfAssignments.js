@@ -64,27 +64,31 @@ router.post('/', async (req, res, next) => {
     if (!allowed.length) {
       return res.status(409).json({ error: 'Add them to the campaign team first.', code: 'not-on-team', notOnTeam });
     }
-    const created = [];
-    for (const uid of allowed) {
-      const a = await TurfAssignment.findOneAndUpdate(
-        { turfId: req.turf._id, userId: uid },
-        {
-          $setOnInsert: {
-            organizationId: orgId,
-            campaignId: req.turf.campaignId,
-            passId: req.turf.passId,
-            assignedBy: req.user._id,
-            assignedAt: new Date(),
+    // One round-trip: upsert every user for this book (unique index → idempotent).
+    const now = new Date();
+    await TurfAssignment.bulkWrite(
+      allowed.map((uid) => ({
+        updateOne: {
+          filter: { turfId: req.turf._id, userId: uid },
+          update: {
+            $setOnInsert: {
+              organizationId: orgId,
+              campaignId: req.turf.campaignId,
+              passId: req.turf.passId,
+              assignedBy: req.user._id,
+              assignedAt: now,
+            },
           },
+          upsert: true,
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-      created.push(a);
-    }
+      })),
+      { ordered: false }
+    );
     // Book given → make sure they're on the campaign roster (gates mobile visibility).
     // (No-op for existing members; covers an admin assigned on the fly, incl. self.)
-    await ensureCampaignAssignments(req.turf.campaignId, created.map((a) => a.userId), orgId, req.user._id);
-    res.status(201).json({ assignments: created, notOnTeam });
+    await ensureCampaignAssignments(req.turf.campaignId, allowed, orgId, req.user._id);
+    // The client only invalidates + refetches assignments; no caller reads the returned docs.
+    res.status(201).json({ ok: true, count: allowed.length, notOnTeam });
   } catch (err) {
     next(err);
   }

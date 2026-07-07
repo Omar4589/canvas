@@ -53,12 +53,20 @@ function booksToFillGeoJSON(turfs, colorByTurf, selected) {
       })),
   };
 }
-function booksToLabelGeoJSON(turfs) {
+function booksToLabelGeoJSON(turfs, selected) {
   return {
     type: 'FeatureCollection',
     features: turfs
       .filter((t) => t.centroid?.coordinates?.length === 2)
-      .map((t) => ({ type: 'Feature', geometry: t.centroid, properties: { id: String(t._id), label: `${t.name} · ${t.eligibleDoorCount ?? t.doorCount}` } })),
+      .map((t) => ({
+        type: 'Feature',
+        geometry: t.centroid,
+        properties: {
+          id: String(t._id),
+          label: `${t.name} · ${t.eligibleDoorCount ?? t.doorCount}`,
+          selected: selected.has(String(t._id)),
+        },
+      })),
   };
 }
 function doorsToGeoJSON(doors, colorByTurf, targetedSet) {
@@ -123,22 +131,80 @@ function groupDoors(doors) {
 function buildingMarkerEl(total, color, dark) {
   const el = document.createElement('div');
   el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;';
+  // A small 2x2-window building glyph (was 28px + 12 windows) — far less clutter at 100+ markers.
   const windows = [];
-  for (let i = 0; i < 12; i++) {
-    const r = Math.floor(i / 3);
-    const c = i % 3;
-    windows.push(`<rect x="${7 + c * 3.6}" y="${5 + r * 3.6}" width="2.2" height="2.2" rx="0.4" fill="#fff" opacity="0.92"/>`);
+  for (let i = 0; i < 4; i++) {
+    const r = Math.floor(i / 2);
+    const c = i % 2;
+    windows.push(`<rect x="${8.5 + c * 4}" y="${7 + r * 4}" width="2.6" height="2.6" rx="0.5" fill="#fff" opacity="0.92"/>`);
   }
-  // The "{n} units" badge inverts on dark/satellite basemaps so it stays legible.
+  // The "{n} units" badge inverts on dark/satellite basemaps so it stays legible. Hidden by
+  // default — the marker effect shows it at zoom ≥ 16 and on hover so it doesn't crowd the map.
   const badgeBg = dark ? '#e5e7eb' : '#111827';
   const badgeFg = dark ? '#111827' : '#fff';
   el.innerHTML =
-    `<svg width="28" height="28" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 1.5px rgba(0,0,0,0.35))">` +
-    `<rect x="5" y="2.5" width="14" height="19" rx="1.4" fill="${color}" stroke="#fff" stroke-width="1.4"/>` +
+    `<svg width="18" height="18" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 1.5px rgba(0,0,0,0.35))">` +
+    `<rect x="6" y="3" width="12" height="18" rx="1.4" fill="${color}" stroke="#fff" stroke-width="1.4"/>` +
     windows.join('') +
     `</svg>` +
-    `<div style="margin-top:-4px;background:${badgeBg};color:${badgeFg};font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${total} units</div>`;
+    `<div class="units-badge" style="display:none;margin-top:-3px;background:${badgeBg};color:${badgeFg};font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${total} units</div>`;
   return el;
+}
+
+// Compact inline stat (one slim strip instead of the tall StatCard grid — the shared
+// StatCard is left untouched for the dashboards). Reclaims header height for the map.
+function StatChip({ label, value, hint, accent }) {
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-[11px] uppercase tracking-wide text-fg-muted">{label}</span>
+      <span className={'text-sm font-semibold tabular-nums ' + (accent ? 'text-brand-accent' : 'text-fg')}>{value}</span>
+      {hint && <span className="text-[11px] text-fg-muted">· {hint}</span>}
+    </div>
+  );
+}
+
+// Book status filter chips (multi-select). Coverage (assigned/unassigned) + progress
+// (completed/in-progress/not-started). Filtering hides non-matching books + their dots.
+const BOOK_STATUS_CHIPS = [
+  { key: 'assigned', label: 'Assigned', color: '#16a34a' },
+  { key: 'unassigned', label: 'Unassigned', color: '#9ca3af' },
+  { key: 'completed', label: 'Completed', color: '#2563eb' },
+  { key: 'in_progress', label: 'In progress', color: '#ca8a04' },
+  { key: 'not_started', label: 'Not started', color: '#dc2626' },
+];
+function BookStatusChips({ value, onChange, counts }) {
+  const toggle = (k) => {
+    const n = new Set(value);
+    n.has(k) ? n.delete(k) : n.add(k);
+    onChange(n);
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {BOOK_STATUS_CHIPS.map((c) => {
+        const active = value.has(c.key);
+        return (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => toggle(c.key)}
+            className={
+              'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors ' +
+              (active ? 'border-brand-600 bg-brand-tint text-brand-accent' : 'border-border bg-card text-fg-muted hover:bg-sunken')
+            }
+          >
+            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: c.color }} />
+            {c.label}
+            <span className="text-fg-subtle">{counts?.[c.key] ?? 0}</span>
+          </button>
+        );
+      })}
+      {value.size > 0 && (
+        <button type="button" onClick={() => onChange(new Set())} className="ml-1 text-[11px] text-brand-accent hover:underline">
+          Clear
+        </button>
+      )}
+    </div>
+  );
 }
 
 // (Re)create the book/door sources + layers. Called on initial `load` and after
@@ -163,8 +229,21 @@ function registerBookLayers(map, dark) {
     id: 'book-labels',
     type: 'symbol',
     source: 'book-labels',
-    layout: { 'text-field': ['get', 'label'], 'text-size': 12, 'text-allow-overlap': false },
-    paint: { 'text-color': dark ? '#e5e7eb' : '#111827', 'text-halo-color': dark ? '#0b0f19' : '#ffffff', 'text-halo-width': 1.5 },
+    layout: {
+      'text-field': ['get', 'label'],
+      // Grow with zoom so a book's label is readable once you zoom in (was a flat 12).
+      'text-size': ['interpolate', ['linear'], ['zoom'], 11, 11, 14, 16, 17, 22],
+      'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+      // Collision-cull by default, but the SELECTED book's label always shows.
+      'text-allow-overlap': ['case', ['boolean', ['get', 'selected'], false], true, false],
+      'symbol-sort-key': ['case', ['boolean', ['get', 'selected'], false], 0, 1],
+    },
+    paint: {
+      'text-color': dark ? '#e5e7eb' : '#111827',
+      'text-halo-color': dark ? '#0b0f19' : '#ffffff',
+      'text-halo-width': 2,
+      'text-halo-blur': 0.5,
+    },
   });
   map.addSource('doors', { type: 'geojson', data: empty });
   map.addLayer({
@@ -180,6 +259,8 @@ function registerBookLayers(map, dark) {
       'circle-stroke-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
     },
   });
+  // Lift the labels above the door dots so the dots don't overprint the text.
+  if (map.getLayer('book-labels')) map.moveLayer('book-labels');
 }
 function bboxOf(turfs) {
   let a = Infinity; let b = Infinity; let c = -Infinity; let d = -Infinity;
@@ -487,6 +568,10 @@ export default function TurfsPage() {
   const [lastSnapshotId, setLastSnapshotId] = useState(null);
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
   const [popupBuildingKey, setPopupBuildingKey] = useState(null);
+  // Map layer visibility toggles + book status filter + crew-load bar open state.
+  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true });
+  const [statusFilter, setStatusFilter] = useState(new Set()); // empty = show all books
+  const [crewOpen, setCrewOpen] = useState(false);
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -645,6 +730,19 @@ export default function TurfsPage() {
     assignedByTurf.set(key, arr);
   }
 
+  // Per-book canvassing progress for the status filter (Completed/In-progress/Not-started).
+  // Reuses the existing /progress endpoint; only meaningful once books are published.
+  const progressQ = useQuery({
+    queryKey: ['turf-progress', campaignId, passId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/progress?passId=${passId}`),
+    enabled: !!campaignId && !!passId && publishedCount > 0,
+  });
+  const progressByTurf = useMemo(() => {
+    const m = new Map();
+    for (const p of progressQ.data?.progress || []) m.set(String(p.turfId), p);
+    return m;
+  }, [progressQ.data]);
+
   // Group-sizes preview for attribute mode (knockable doors per precinct/zip/…).
   const attributePreviewQ = useQuery({
     queryKey: ['turf-attribute-preview', campaignId, passId, attribute],
@@ -681,6 +779,35 @@ export default function TurfsPage() {
     (assignedByTurf.get(String(t._id)) || []).some((u) => `${u.firstName} ${u.lastName}`.toLowerCase().includes(bookQuery));
   const shownBooksCount = bookQuery ? turfs.filter(matchBook).length : turfs.length;
   const selectedDoors = selectedTurfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
+
+  // Book status (coverage + progress) → the filter chips + the map/list filter.
+  const bookStatuses = (t) => {
+    const s = new Set();
+    s.add((assignedByTurf.get(String(t._id)) || []).length ? 'assigned' : 'unassigned');
+    const p = progressByTurf.get(String(t._id));
+    if (p && p.total > 0) s.add(p.knocked === 0 ? 'not_started' : p.knocked >= p.total ? 'completed' : 'in_progress');
+    return s;
+  };
+  const matchesStatus = (t) => {
+    if (!statusFilter.size) return true;
+    const s = bookStatuses(t);
+    const cov = ['assigned', 'unassigned'].filter((k) => statusFilter.has(k));
+    const prog = ['completed', 'in_progress', 'not_started'].filter((k) => statusFilter.has(k));
+    if (cov.length && !cov.some((k) => s.has(k))) return false; // OR within a facet, AND across facets
+    if (prog.length && !prog.some((k) => s.has(k))) return false;
+    return true;
+  };
+  const statusCounts = useMemo(() => {
+    const c = { assigned: 0, unassigned: 0, completed: 0, in_progress: 0, not_started: 0 };
+    for (const t of turfs) for (const k of bookStatuses(t)) c[k] += 1;
+    return c;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turfsQ.data, assignmentsQ.data, progressQ.data]);
+  const visibleBookIds = useMemo(() => {
+    if (!statusFilter.size) return null; // null = show all books
+    return new Set(turfs.filter(matchesStatus).map((t) => String(t._id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, turfsQ.data, assignmentsQ.data, progressQ.data]);
 
   // Single household detail for the click-a-dot popup.
   const householdQ = useQuery({
@@ -824,23 +951,30 @@ export default function TurfsPage() {
 
     // Layer event handlers — bound ONCE; they target layer IDs that registerBookLayers
     // recreates on each style swap, so they keep working across basemap changes.
-    map.on('click', 'book-fill', (e) => {
-      if (map.queryRenderedFeatures(e.point, { layers: ['doors'] }).length) return;
-      const id = e.features?.[0]?.properties?.id;
-      if (id) toggleSelectRef.current(id);
+    // Unified click precedence: the BOOK wins unless the click is within DOT_TOL px of a
+    // house dot (then the house popup opens — keeping the move-a-door flow). A hidden or
+    // status-filtered `doors` layer drops out of queryRenderedFeatures, so it can't steal
+    // a book click. Building HTML markers handle their own click (stopPropagation).
+    const DOT_TOL = 6;
+    map.on('click', (e) => {
+      const near = map.queryRenderedFeatures(
+        [[e.point.x - DOT_TOL, e.point.y - DOT_TOL], [e.point.x + DOT_TOL, e.point.y + DOT_TOL]],
+        { layers: map.getLayer('doors') ? ['doors'] : [] }
+      );
+      let bestId = null;
+      let bestDist = Infinity;
+      for (const f of near) {
+        const p = map.project(f.geometry.coordinates);
+        const d = Math.hypot(p.x - e.point.x, p.y - e.point.y);
+        if (d < bestDist) { bestDist = d; bestId = f.properties?.id; }
+      }
+      if (bestId != null && bestDist <= DOT_TOL) { openPopupRef.current(bestId); return; }
+      const bf = map.queryRenderedFeatures(e.point, { layers: map.getLayer('book-fill') ? ['book-fill'] : [] });
+      if (bf.length) { toggleSelectRef.current(bf[0].properties?.id); return; }
+      clearSelectionRef.current();
     });
     map.on('mouseenter', 'book-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'book-fill', () => { map.getCanvas().style.cursor = ''; });
-    // Click empty map (not a book, not a door) → clear the selection.
-    map.on('click', (e) => {
-      if (map.queryRenderedFeatures(e.point, { layers: ['book-fill', 'doors'] }).length) return;
-      clearSelectionRef.current();
-    });
-    // Click a house → popup with address + members + book + move-to-book.
-    map.on('click', 'doors', (e) => {
-      const id = e.features?.[0]?.properties?.id;
-      if (id) openPopupRef.current(id);
-    });
     map.on('mouseenter', 'doors', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'doors', () => { map.getCanvas().style.cursor = ''; });
 
@@ -886,16 +1020,18 @@ export default function TurfsPage() {
     const map = mapRef.current;
     if (!map || !map.getSource('books')) return;
     map.getSource('books').setData(booksToFillGeoJSON(turfs, colorByTurf, selectedBooks));
-    map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs));
+    map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs, selectedBooks));
     map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf, targetedSet));
 
-    // All books/doors stay visible — selection just thickens the outline + brightens
-    // the fill (the `selected` paint props). Selecting books never hides the rest, so
-    // multi-select on the map stays usable and you keep the full picture.
-    map.setFilter('book-fill', null);
-    map.setFilter('book-outline', null);
-    map.setFilter('book-labels', null);
-    map.setFilter('doors', null);
+    // Status filter (Assigned / Unassigned / Completed / In-progress / Not-started): hide
+    // non-matching books + their dots via cheap Mapbox filter expressions — full GeoJSON
+    // stays in the sources, so a chip toggle never re-serializes. null = show everything
+    // (selection just restyles, never hides). Re-applies on styleEpoch via the paint effect.
+    const ids = visibleBookIds ? [...visibleBookIds] : null;
+    map.setFilter('book-fill', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
+    map.setFilter('book-outline', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
+    map.setFilter('book-labels', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
+    map.setFilter('doors', ids ? ['in', ['get', 'turfId'], ['literal', ids]] : null);
 
     // Fit to the books (or raw house dots before any cut) ONCE per data set — keyed
     // by the book-id signature so selection toggles and assignment refetches never
@@ -907,27 +1043,59 @@ export default function TurfsPage() {
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }
-  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet]);
+  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds]);
 
-  // Building markers (HTML overlays) for stacked apartment units — synced apart
-  // from paint() so book-select toggles don't churn the DOM.
+  // Building markers (HTML overlays) for stacked apartment units — synced apart from paint()
+  // so book-select toggles don't churn the DOM. Hidden when Houses/Buildings is toggled off
+  // or the building's book is filtered out; the "N units" badge shows at zoom ≥ 16 or on hover.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     buildingMarkersRef.current.forEach((m) => m.remove());
     buildingMarkersRef.current = [];
+    if (!(layerVis.houses && layerVis.buildings)) return;
+    const badgesOn = () => map.getZoom() >= 16;
     for (const b of grouped.buildings) {
+      if (visibleBookIds && !visibleBookIds.has(String(b.turfId))) continue;
       const color = colorByTurf.get(String(b.turfId)) || '#9ca3af';
       const el = buildingMarkerEl(b.total, color, darkBase);
       // Live target preview: dim a building unless one of its units is targeted.
       if (targetedSet && !(b.units || []).some((u) => targetedSet.has(String(u.id)))) {
         el.style.opacity = '0.2';
       }
+      const badge = el.querySelector('.units-badge');
+      if (badge) {
+        badge.style.display = badgesOn() ? 'block' : 'none';
+        el.addEventListener('mouseenter', () => { badge.style.display = 'block'; });
+        el.addEventListener('mouseleave', () => { badge.style.display = badgesOn() ? 'block' : 'none'; });
+      }
       el.addEventListener('click', (ev) => { ev.stopPropagation(); openBuildingPopupRef.current(b.key); });
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([b.lng, b.lat]).addTo(map);
       buildingMarkersRef.current.push(marker);
     }
-  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet]);
+    const onZoom = () => {
+      const on = badgesOn();
+      for (const m of buildingMarkersRef.current) {
+        const badge = m.getElement().querySelector('.units-badge');
+        if (badge) badge.style.display = on ? 'block' : 'none';
+      }
+    };
+    map.on('zoomend', onZoom);
+    return () => map.off('zoomend', onZoom);
+  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds]);
+
+  // Layer visibility toggles (Houses/Buildings/Fills/Labels). Flip the Mapbox layers here;
+  // the HTML building markers are handled in the marker effect above. Re-applies on styleEpoch
+  // (a basemap swap recreates the layers via registerBookLayers).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map) return;
+    const set = (id, on) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); };
+    set('book-fill', layerVis.fills);
+    set('book-outline', layerVis.fills);
+    set('book-labels', layerVis.labels);
+    set('doors', layerVis.houses);
+  }, [layerVis, mapReady, styleEpoch]);
 
   // Clear selection + popups when switching pass/campaign (those books are gone).
   useEffect(() => { setSelectedBooks(new Set()); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
@@ -980,25 +1148,30 @@ export default function TurfsPage() {
       )}
 
       {!!turfs.length && (
-        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Books" value={turfs.length.toLocaleString()} hint={draftCount ? `${draftCount} draft` : undefined} />
-          <StatCard
-            label="Houses"
-            value={totalHouses.toLocaleString()}
-            hint={unassignedCount > 0 ? `${unassignedCount.toLocaleString()} not in a book` : undefined}
-          />
-          <StatCard
-            label="Canvassers assigned"
-            value={assignedUserSet.size.toLocaleString()}
-            accent={assignedUserSet.size ? 'brand' : undefined}
-            hint={booksUnassigned > 0 ? `${booksUnassigned} book${booksUnassigned === 1 ? '' : 's'} unassigned` : 'every book covered'}
-          />
-          <StatCard
-            label="Selected"
-            value={selectedBooks.size.toLocaleString()}
-            accent={selectedBooks.size ? 'brand' : undefined}
-            hint={selectedBooks.size ? `${selectedDoors.toLocaleString()} doors` : undefined}
-          />
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+            <StatChip label="Books" value={turfs.length.toLocaleString()} hint={draftCount ? `${draftCount} draft` : undefined} />
+            <StatChip
+              label="Houses"
+              value={totalHouses.toLocaleString()}
+              hint={unassignedCount > 0 ? `${unassignedCount.toLocaleString()} not in a book` : undefined}
+            />
+            <StatChip
+              label="Assigned"
+              value={assignedUserSet.size.toLocaleString()}
+              accent={!!assignedUserSet.size}
+              hint={booksUnassigned > 0 ? `${booksUnassigned} book${booksUnassigned === 1 ? '' : 's'} unassigned` : 'every book covered'}
+            />
+            <StatChip
+              label="Selected"
+              value={selectedBooks.size.toLocaleString()}
+              accent={!!selectedBooks.size}
+              hint={selectedBooks.size ? `${selectedDoors.toLocaleString()} doors` : undefined}
+            />
+          </div>
+          {passId && publishedCount > 0 && (
+            <BookStatusChips value={statusFilter} onChange={setStatusFilter} counts={statusCounts} />
+          )}
         </div>
       )}
       </div>

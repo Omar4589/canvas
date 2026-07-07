@@ -8,13 +8,18 @@ import { User } from '../models/User.js';
 // campaign in the field app. Idempotent upsert keyed on the unique (campaignId,userId).
 export async function ensureCampaignAssignments(campaignId, userIds, orgId, byUserId) {
   const ids = [...new Set((userIds || []).map((u) => String(u)))].filter(Boolean);
-  for (const uid of ids) {
-    await CampaignAssignment.updateOne(
-      { campaignId, userId: uid },
-      { $setOnInsert: { organizationId: orgId, assignedBy: byUserId || null, assignedAt: new Date() } },
-      { upsert: true }
-    );
-  }
+  if (!ids.length) return;
+  const now = new Date();
+  await CampaignAssignment.bulkWrite(
+    ids.map((uid) => ({
+      updateOne: {
+        filter: { campaignId, userId: uid },
+        update: { $setOnInsert: { organizationId: orgId, assignedBy: byUserId || null, assignedAt: now } },
+        upsert: true,
+      },
+    })),
+    { ordered: false }
+  );
 }
 
 // The subset of `ids` that are ACTIVATED members of this org: an active membership whose

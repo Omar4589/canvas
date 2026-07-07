@@ -379,7 +379,12 @@ export default function TimelinePage() {
             </div>
           ) : (
             <>
-              <CanvasserSummaryTable rows={filteredRows} tz={tz} singleDay={isSingleDay} />
+              <CanvasserSummaryTable
+                rows={filteredRows}
+                tz={tz}
+                singleDay={isSingleDay}
+                litMode={current?.type === 'lit_drop'}
+              />
               <TimelineOverlaps
                 data={data}
                 note={coordinatorId ? 'Overlap totals are campaign-wide (not filtered to this crew).' : null}

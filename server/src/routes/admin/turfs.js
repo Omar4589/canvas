@@ -121,18 +121,44 @@ router.post('/assign-bulk', async (req, res, next) => {
       turfs.forEach((t, i) => pairs.push([t, validUsers[i % validUsers.length]]));
     }
 
-    let assignments = 0;
-    for (const [t, uid] of pairs) {
-      await TurfAssignment.findOneAndUpdate(
-        { turfId: t._id, userId: uid },
-        { $setOnInsert: { organizationId: orgId, campaignId: req.campaign._id, passId: t.passId, assignedBy: req.user._id, assignedAt: new Date() } },
-        { upsert: true, setDefaultsOnInsert: true }
+    // One round-trip: upsert every (book, user) pair. The unique (turfId,userId) index
+    // makes re-assignment idempotent; {ordered:false} so a duplicate-key race can't abort
+    // the batch. (Was a sequential findOneAndUpdate per pair — O(books×users) round-trips.)
+    const now = new Date();
+    if (pairs.length) {
+      await TurfAssignment.bulkWrite(
+        pairs.map(([t, uid]) => ({
+          updateOne: {
+            filter: { turfId: t._id, userId: uid },
+            update: { $setOnInsert: { organizationId: orgId, campaignId: req.campaign._id, passId: t.passId, assignedBy: req.user._id, assignedAt: now } },
+            upsert: true,
+          },
+        })),
+        { ordered: false }
       );
-      assignments += 1;
     }
+    const assignments = pairs.length;
     // Books given → make sure those users are on the campaign roster (gates mobile visibility).
     await ensureCampaignAssignments(req.campaign._id, validUsers, orgId, req.user._id);
     res.json({ books: turfs.length, users: validUsers.length, assignments, mode: ['everyone', 'balance'].includes(mode) ? mode : 'distribute', replaced: !!replace, notOnTeam });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Remove many (book, user) assignments in ONE request — collapses the client's old
+// "unassign from every book" loop (N DELETEs) into a single campaign-scoped deleteMany.
+router.post('/unassign-bulk', async (req, res, next) => {
+  try {
+    const { turfIds, userIds } = req.body || {};
+    const tids = (Array.isArray(turfIds) ? turfIds : []).filter((x) => mongoose.isValidObjectId(x));
+    const uids = (Array.isArray(userIds) ? userIds : []).filter((x) => mongoose.isValidObjectId(x));
+    if (!tids.length || !uids.length) return res.status(400).json({ error: 'turfIds and userIds required' });
+    // Scope to THIS campaign's books so a bad id can't delete another campaign's assignments.
+    const scoped = await Turf.find({ _id: { $in: tids }, campaignId: req.campaign._id }, { _id: 1 }).lean();
+    if (!scoped.length) return res.json({ deleted: 0 });
+    const r = await TurfAssignment.deleteMany({ turfId: { $in: scoped.map((t) => t._id) }, userId: { $in: uids } });
+    res.json({ deleted: r.deletedCount });
   } catch (err) {
     next(err);
   }
