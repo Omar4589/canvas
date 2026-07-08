@@ -1,6 +1,6 @@
 import { REASON_META } from '../lib/flags.js';
 
-const DEFAULT_STATUSES = ['surveyed', 'refused', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
+const DEFAULT_STATUSES = ['surveyed', 'refused', 'restricted', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
 
 const REVIEW_STATUS_OPTIONS = [
   { value: 'open', label: 'Open' },

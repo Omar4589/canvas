@@ -550,6 +550,9 @@ export default function TurfsPage() {
   const [attribute, setAttribute] = useState('precinct');
   const [capN, setCapN] = useState('');
   const [maxDoors, setMaxDoors] = useState(65);
+  // Admin-reviewed second-pass removal: default ON, so a re-cut skips inaccessible homes
+  // (only surfaced when the effort actually has restricted-status doors).
+  const [excludeRestricted, setExcludeRestricted] = useState(true);
   const [flex, setFlex] = useState('compact');
   const [jobId, setJobId] = useState(null);
 
@@ -609,6 +612,9 @@ export default function TurfsPage() {
   const grouped = useMemo(() => groupDoors(doorsQ.data?.doors || []), [doorsQ.data]);
   // Doors not yet in any book — e.g. voters imported after this pass was cut.
   const unassignedCount = (doorsQ.data?.doors || []).filter((d) => !d.turfId).length;
+  // Inaccessible homes a canvasser flagged (Household.status === 'restricted'). The admin
+  // can drop them from this cut so nobody is routed back to an unreachable door.
+  const restrictedDoorCount = (doorsQ.data?.doors || []).filter((d) => d.status === 'restricted').length;
   // Dead-end guard: the effort owns no mappable doors. /doors returns the effort's
   // knockable doors (booked or not), so 0 here = nothing to cut. Don't trip while loading.
   const hasNoDoors = !!passId && !!doorsQ.data && (doorsQ.data.doors || []).length === 0;
@@ -846,6 +852,7 @@ export default function TurfsPage() {
       else if (mode === 'attribute') params = { attribute, capN: capN ? Number(capN) : null };
       else params = { maxDoors: Number(maxDoors) || 65, tolerance: (FLEX_OPTIONS.find((o) => o.key === flex) || {}).tolerance };
       if (targetActive) params.targetFilter = targetFilter;
+      if (excludeRestricted && restrictedDoorCount > 0) params.excludeRestricted = true;
       return api(`/admin/campaigns/${campaignId}/turfs/generate`, { method: 'POST', body: { passId, mode, params } });
     },
     onSuccess: (res) => {
@@ -1347,7 +1354,7 @@ export default function TurfsPage() {
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-fg-muted">Status:</span>
-                    {['unknocked', 'not_home', 'surveyed', 'refused', 'lit_dropped', 'wrong_address'].map((s) => (
+                    {['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'lit_dropped', 'wrong_address'].map((s) => (
                       <label key={s} className="flex items-center gap-1 capitalize">
                         <input type="checkbox" checked={targetFilter.priorPassStatuses.includes(s)} onChange={() => toggleTargetStatus(s)} />
                         {s.replace('_', ' ')}
@@ -1432,6 +1439,21 @@ export default function TurfsPage() {
               </p>
             );
           })()}
+
+          {restrictedDoorCount > 0 && publishedCount === 0 && (
+            <label className="mb-2 flex items-start gap-2 text-xs text-fg-muted">
+              <input
+                type="checkbox"
+                checked={excludeRestricted}
+                onChange={(e) => setExcludeRestricted(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                Exclude <strong>{restrictedDoorCount.toLocaleString()}</strong> restricted-access{' '}
+                {restrictedDoorCount === 1 ? 'home' : 'homes'} from this cut
+              </span>
+            </label>
+          )}
 
           <button onClick={() => canGenerate && generate.mutate()} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
             {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}

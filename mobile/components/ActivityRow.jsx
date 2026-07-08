@@ -12,6 +12,7 @@ const ACTION_TO_PIN = {
   wrong_address: 'wrong_address',
   refused: 'refused',
   lit_dropped: 'lit_dropped',
+  restricted: 'restricted',
   note_added: 'unknocked',
 };
 
@@ -21,6 +22,7 @@ const ACTION_LABEL = {
   wrong_address: 'Wrong address',
   refused: 'Refused',
   lit_dropped: 'Lit dropped',
+  restricted: 'Restricted',
   note_added: 'Note added',
 };
 

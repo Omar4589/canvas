@@ -255,7 +255,7 @@ router.post('/accept', async (req, res, next) => {
 // works on an active pass with published books (unlike /generate, which 409s).
 router.post('/add-supplemental', async (req, res, next) => {
   try {
-    const { passId, name, maxDoors } = req.body || {};
+    const { passId, name, maxDoors, excludeRestricted } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
@@ -273,6 +273,7 @@ router.post('/add-supplemental', async (req, res, next) => {
         passId,
         name: (name && String(name).trim()) || 'New voters',
         maxDoors: Number(maxDoors) > 0 ? Number(maxDoors) : 65,
+        excludeRestricted: !!excludeRestricted,
       });
       return res.status(result.added ? 201 : 200).json(result);
     } finally {
@@ -690,7 +691,7 @@ router.get('/doors', async (req, res, next) => {
 
     const households = await Household.find(
       filter,
-      { location: 1, turfId: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 }
+      { location: 1, turfId: 1, status: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 }
     ).lean();
     // Address fields ride along so the client can group stacked apartment units
     // (same geocode) into one building marker and render the unit list without a
@@ -702,6 +703,7 @@ router.get('/doors', async (req, res, next) => {
         lng: h.location.coordinates[0],
         lat: h.location.coordinates[1],
         turfId: h.turfId ? String(h.turfId) : null,
+        status: h.status || 'unknocked', // so the cut UI can flag/count restricted doors
         addressLine1: h.addressLine1 || '',
         addressLine2: h.addressLine2 || '',
         city: h.city || '',

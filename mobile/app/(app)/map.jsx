@@ -117,12 +117,14 @@ const SURVEY_FILTER_OPTIONS = [
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'refused', label: 'Refused' },
+  { key: 'restricted', label: 'Restricted' },
 ];
 
 const LIT_DROP_FILTER_OPTIONS = [
   { key: 'all', label: 'All houses' },
   { key: 'unknocked', label: 'Not yet' },
   { key: 'lit_dropped', label: 'Dropped' },
+  { key: 'restricted', label: 'Restricted' },
 ];
 
 const SORT_OPTIONS = [
@@ -646,7 +648,7 @@ export default function MapScreen() {
   // sorted. Buildings show if any unit matches the filter.
   const listEntries = useMemo(() => {
     if (viewMode !== 'list') return []; // don't compute while on the map
-    const STATUS_ORDER = { unknocked: 0, not_home: 1, wrong_address: 2, refused: 3, lit_dropped: 4, surveyed: 5 };
+    const STATUS_ORDER = { unknocked: 0, not_home: 1, wrong_address: 2, refused: 3, restricted: 4, lit_dropped: 5, surveyed: 6 };
     const matches = (s) => activeFilter === 'all' || (s || 'unknocked') === activeFilter;
     const entries = [];
     for (const h of singles) {
@@ -858,6 +860,7 @@ export default function MapScreen() {
             'house-surveyed': require('../../assets/icons/house-surveyed.png'),
             'house-wrong_address': require('../../assets/icons/house-wrong_address.png'),
             'house-refused': require('../../assets/icons/house-refused.png'),
+            'house-restricted': require('../../assets/icons/house-restricted.png'),
             'house-lit_dropped': require('../../assets/icons/house-surveyed.png'),
             'building-grey': require('../../assets/icons/building-grey.png'),
             'building-yellow': require('../../assets/icons/building-yellow.png'),
@@ -897,6 +900,7 @@ export default function MapScreen() {
                 'surveyed', 'house-surveyed',
                 'wrong_address', 'house-wrong_address',
                 'refused', 'house-refused',
+                'restricted', 'house-restricted',
                 'lit_dropped', 'house-lit_dropped',
                 'house-unknocked',
               ],
@@ -1181,8 +1185,8 @@ function RecenterButton({
   );
 }
 
-const SURVEY_LEGEND = ['unknocked', 'surveyed', 'refused', 'not_home', 'wrong_address'];
-const LIT_DROP_LEGEND = ['unknocked', 'lit_dropped', 'wrong_address'];
+const SURVEY_LEGEND = ['unknocked', 'surveyed', 'refused', 'not_home', 'wrong_address', 'restricted'];
+const LIT_DROP_LEGEND = ['unknocked', 'lit_dropped', 'wrong_address', 'restricted'];
 
 // Connection rate = surveyed homes ÷ knocked homes (DISTINCT homes), so it's bounded ≤100% and
 // matches the admin/report rate — a home with 2 voters surveyed reads 100%, not 200%. Returns null

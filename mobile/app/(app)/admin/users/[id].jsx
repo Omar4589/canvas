@@ -27,6 +27,7 @@ const ACTION_LABEL = {
   not_home: 'Not home',
   wrong_address: 'Wrong address',
   refused: 'Refused',
+  restricted: 'Restricted',
   lit_dropped: 'Lit dropped',
 };
 
@@ -82,6 +83,7 @@ export default function AdminUserDetail() {
     not_home: colors.status.not_home,
     wrong_address: colors.status.wrong_address,
     refused: colors.status.refused,
+    restricted: colors.status.restricted,
     lit_dropped: colors.status.lit_dropped,
   };
   const router = useRouter();

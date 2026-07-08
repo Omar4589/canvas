@@ -116,11 +116,13 @@ Tapping a house opens its detail. The header shows the address, when it was last
 **status pill** (the amber **Refused** pill is new — see below). What you do here depends on the
 campaign type:
 
-- On a **Lit drop** campaign, there's a single **Lit dropped** button.
+- On a **Lit drop** campaign, there's a **Lit dropped** button, plus **Restricted access** (below).
 - On a **Survey** campaign, you get the **voters at this address** (each a tappable card → their
-  survey) plus three door buttons stacked at the bottom: **Not home**, **Wrong address**, and the new
-  **Refused**. Any of them recolors the pin and drops you back on the map the instant you tap — you're
-  never waiting on the network.
+  survey) plus three door buttons stacked at the bottom: **Not home**, **Wrong address**, and
+  **Refused** — then **Restricted access** below them.
+
+Any door button recolors the pin and drops you back on the map the instant you tap — you're never
+waiting on the network.
 
 ### Refused (someone answered, but said no)
 
@@ -129,6 +131,19 @@ home** (nobody answered) and **Wrong address** (the door doesn't belong to your 
 on **survey** campaigns. It counts as a real knock and as having reached a person, just not a completed
 survey, so it gets its own **amber** color everywhere (the pin, the status pill). Like the other door
 buttons, it recolors the pin to amber immediately and syncs in the background.
+
+### Restricted access (you can't get to the door)
+
+**Restricted access** is for a home you **physically can't reach** — a gated community, a locked
+building, no legal access. It's the mirror of Refused: same idea of "record what happened," but the
+counting is **inverted**. It appears on **every** campaign type (survey *and* lit drop), and it recolors
+the pin **slate** (a distinct slate dot on the status pill). Unlike the other door buttons it is **not a
+knock** — the home wasn't reachable, so nothing is billed and it doesn't move your knock count,
+connection rate, or "houses knocked." It's still recorded and shown: it appears as its own **Restricted**
+tally on your stats and as its own slate segment on the coverage bar, and — because you were there —
+your restricted marks still count toward your shift's start/end times. Tapped a door by mistake? Just
+record the real disposition on it and the new one takes over. See [METRICS.md](METRICS.md) for exactly
+how restricted homes are (and aren't) counted.
 
 ### Fix a wrong pin
 
@@ -311,20 +326,29 @@ branch the action area:
 - `lit_drop` → one **Lit dropped** button (`submitAction('lit_dropped')`).
 - `survey` → the **voters at this address** list (each `VoterCard` `guardedPush`es to
   `/(app)/voter/:id/survey`) plus three door buttons: **Not home** (`info`), **Wrong address**
-  (`danger`), and **Refused** (`colors.status.refused`, amber). All route through `submitAction`, which
-  fires `recordHouseholdAction(qc, id, action, …)` and `router.back()`s without awaiting — `firedRef`
-  blocks a double-tap synchronously, `isSubmitting` disables the buttons.
+  (`danger`), and **Refused** (`colors.status.refused`, amber).
+- **Both branches** then render **Restricted access** (`submitAction('restricted')`,
+  `colors.status.restricted`, slate) *outside* the type branch — it's offered on every campaign type.
+
+All route through `submitAction`, which fires `recordHouseholdAction(qc, id, action, …)` and
+`router.back()`s without awaiting — `firedRef` blocks a double-tap synchronously, `isSubmitting`
+disables the buttons.
 
 `StatusPill` recognizes a third visual state for `refused`: amber `warnBg`/`warnBorder`/`warnFg` (done
-statuses stay green `successBg`, everything else neutral). The dot color comes from
-`colors.status[status]`, the label from `colors.statusLabels[status]`.
+statuses stay green `successBg`, everything else — including `restricted` — neutral chrome). The dot
+color always comes from `colors.status[status]`, so a `restricted` pill reads as a **slate dot** on
+neutral chrome; the label from `colors.statusLabels[status]` (`'Restricted'`).
 
-The **Refused** disposition is plumbed through `recordAction.js`: `ACTION_PATHS.refused = 'refused'`
-maps it to `POST /mobile/households/:id/refused`, and it flows through the same `optimisticSubmit`
-pipeline (optimistic patch → pending overlay → GPS-stamped background write → reconcile) as the other
-door actions, so the amber pin recolor is un-clobberable by a racing server fetch. The amber tokens are
-defined in [lib/theme.js](../mobile/lib/theme.js) (`status.refused` / `statusLabels.refused` =
-`'#F59E0B'` / `'Refused'`; the survey screen's callouts reuse `warn`/`warnBg`/`warnFg`).
+The **Refused** and **Restricted** dispositions are plumbed through `recordAction.js`:
+`ACTION_PATHS.refused = 'refused'` and `ACTION_PATHS.restricted = 'restricted'` map them to
+`POST /mobile/households/:id/refused` / `.../restricted`, and both flow through the same
+`optimisticSubmit` pipeline (optimistic patch → pending overlay → GPS-stamped background write →
+reconcile) as the other door actions, so the recolor is un-clobberable by a racing server fetch. The
+tokens are defined in [lib/theme.js](../mobile/lib/theme.js): `status.refused` / `statusLabels.refused`
+= `'#F59E0B'` / `'Refused'` and `status.restricted` / `statusLabels.restricted` = `'#475569'` /
+`'Restricted'` (the survey screen's callouts reuse `warn`/`warnBg`/`warnFg`). Note the server
+`/restricted` route writes a `restricted` `CanvassActivity` + `Household.status='restricted'` but the
+action is **excluded from `KNOCK_ACTIONS`**, so it never bills as a knock (see [METRICS.md](METRICS.md)).
 
 ## The at-door survey
 
@@ -385,8 +409,8 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   `app/(app)/books.jsx`, `app/(app)/map.jsx`, `app/(app)/admin/more.jsx`,
   `app/(app)/stats.jsx` (comprehensive redesign), `app/(app)/stats/[date].jsx` (drop Distance tile),
   `components/EffortPicker.jsx`, `lib/rates.js` (shared `formatPace`),
-  `app/(app)/household/[id].jsx` (Refused door button + amber status pill),
+  `app/(app)/household/[id].jsx` (Refused + Restricted-access door buttons; amber pill + slate `restricted` dot),
   `app/(app)/voter/[id]/survey.jsx` (conditional questions, per-option scripts, Other specify),
-  `lib/recordAction.js` (`refused` action path), `lib/surveyVisibility.js` (shared visibility evaluator),
-  `lib/theme.js` (`status.refused` / `statusLabels.refused` amber tokens),
+  `lib/recordAction.js` (`refused` + `restricted` action paths), `lib/surveyVisibility.js` (shared visibility evaluator),
+  `lib/theme.js` (`status.refused`/`statusLabels.refused` amber + `status.restricted`/`statusLabels.restricted` slate tokens),
   `server/src/routes/mobile/bootstrap.js`, `server/src/routes/auth.js` (self-service `PATCH /auth/me`).

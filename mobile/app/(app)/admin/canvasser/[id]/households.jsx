@@ -27,6 +27,7 @@ const ACTION_LABEL = {
   not_home: 'Not home',
   wrong_address: 'Wrong addr',
   refused: 'Refused',
+  restricted: 'Restricted',
   lit_dropped: 'Lit dropped',
   note_added: 'Note added',
 };
@@ -35,6 +36,7 @@ const ACTION_PIN = {
   not_home: 'not_home',
   wrong_address: 'wrong_address',
   refused: 'refused',
+  restricted: 'restricted',
   lit_dropped: 'lit_dropped',
   note_added: 'unknocked',
 };

@@ -215,7 +215,7 @@ router.get('/overview', async (req, res, next) => {
       memberCountPromise,
       SurveyResponse.countDocuments(cFilter),
       SurveyResponse.distinct('voterId', cFilter),
-      Household.countDocuments({ ...householdMatch, status: { $ne: 'unknocked' } }),
+      Household.countDocuments({ ...householdMatch, status: { $nin: ['unknocked', 'restricted'] } }),
       Household.aggregate([
         { $match: householdMatch },
         { $group: { _id: coverageBucketExpr, count: { $sum: 1 } } },
@@ -241,17 +241,19 @@ router.get('/overview', async (req, res, next) => {
       wrong_address: 0,
       refused: 0,
       lit_dropped: 0,
+      restricted: 0, // inaccessible homes — its own coverage segment, not "knocked"
       voted: 0,
     };
     for (const r of statusAgg) canvass[r._id] = r.count;
 
-    const events = { notHome: 0, wrongAddress: 0, surveySubmitted: 0, litDropped: 0, refused: 0 };
+    const events = { notHome: 0, wrongAddress: 0, surveySubmitted: 0, litDropped: 0, refused: 0, restricted: 0 };
     for (const r of eventAgg) {
       if (r._id === 'not_home') events.notHome = r.count;
       else if (r._id === 'wrong_address') events.wrongAddress = r.count;
       else if (r._id === 'survey_submitted') events.surveySubmitted = r.count;
       else if (r._id === 'lit_dropped') events.litDropped = r.count;
       else if (r._id === 'refused') events.refused = r.count;
+      else if (r._id === 'restricted') events.restricted = r.count;
     }
 
     const k = knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
@@ -438,6 +440,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           wrong_address: 0,
           refused: 0,
           lit_dropped: 0,
+          restricted: 0,
           voted: 0,
         },
         surveysSubmitted: 0,
@@ -457,8 +460,9 @@ router.get('/campaign-rollup', async (req, res, next) => {
       if (!c) continue;
       const bucket = r._id.bucket;
       c.households += r.count;
-      // 'voted' (early-voted, never knocked) and 'unknocked' are not "homes knocked".
-      if (bucket !== 'unknocked' && bucket !== 'voted') c.homesKnocked += r.count;
+      // 'voted' (early-voted, never knocked), 'unknocked', and 'restricted' (inaccessible)
+      // are not "homes knocked". Restricted is its own coverage segment, never billable.
+      if (bucket !== 'unknocked' && bucket !== 'voted' && bucket !== 'restricted') c.homesKnocked += r.count;
       if (bucket in c.coverage) c.coverage[bucket] = r.count;
     }
     for (const r of eventAgg) {
@@ -626,6 +630,7 @@ router.get('/canvassers', async (req, res, next) => {
           wrongAddress: 0,
           refused: 0,
           litDropped: 0,
+          restricted: 0,
           firstActivityAt: null,
           lastActivityAt: null,
         });
@@ -646,6 +651,9 @@ router.get('/canvassers', async (req, res, next) => {
       else if (row._id.actionType === 'wrong_address') u.wrongAddress = row.count;
       else if (row._id.actionType === 'refused') u.refused = row.count;
       else if (row._id.actionType === 'lit_dropped') u.litDropped = row.count;
+      // Restricted (inaccessible home): a visible per-canvasser tally, but NOT a knock —
+      // deliberately left out of the `knocks` sum below so it never becomes billable.
+      else if (row._id.actionType === 'restricted') u.restricted = row.count;
       // survey_submitted activities are deduped to one per (user, household, pass), so this
       // is the canvasser's count of distinct surveyed door-passes (the rate's numerator).
       else if (row._id.actionType === 'survey_submitted') u.surveyKnocks = row.count;
@@ -690,6 +698,7 @@ router.get('/canvassers', async (req, res, next) => {
           wrongAddress: u.wrongAddress,
           refused: u.refused,
           litDropped: u.litDropped,
+          restricted: u.restricted, // inaccessible homes flagged — shown, never in `knocks`/billable
           knocks,
           // homesKnocked kept as an alias of knocks for back-compat with un-updated callers.
           homesKnocked: knocks,
@@ -1164,16 +1173,19 @@ router.get('/canvasser-timeline', async (req, res, next) => {
 
     const [bucketAgg, knockAgg, overlapRes] = await Promise.all([
       CanvassActivity.aggregate([
-        { $match: { ...scoped, actionType: { $in: KNOCK_ACTIONS } } },
+        // Include 'restricted' so it contributes a separate tally + extends the shift
+        // window (first/last), but it is NOT counted in `knocks` (kept billable-only).
+        { $match: { ...scoped, actionType: { $in: [...KNOCK_ACTIONS, 'restricted'] } } },
         {
           $group: {
             _id: { userId: '$userId', bucket: bucketExpr },
-            knocks: { $sum: 1 },
+            knocks: { $sum: { $cond: [{ $eq: ['$actionType', 'restricted'] }, 0, 1] } },
             surveys: { $sum: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
             lit: { $sum: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
             refused: { $sum: { $cond: [{ $eq: ['$actionType', 'refused'] }, 1, 0] } },
             notHome: { $sum: { $cond: [{ $eq: ['$actionType', 'not_home'] }, 1, 0] } },
             wrongAddress: { $sum: { $cond: [{ $eq: ['$actionType', 'wrong_address'] }, 1, 0] } },
+            restricted: { $sum: { $cond: [{ $eq: ['$actionType', 'restricted'] }, 1, 0] } },
             first: { $min: '$timestamp' },
             last: { $max: '$timestamp' },
           },
@@ -1202,21 +1214,27 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           refused: 0,
           notHome: 0,
           wrongAddress: 0,
+          dayRestricted: 0,
           first: null,
           last: null,
           hoursOnDoors: 0,
         });
       }
       const row = byUser.get(uid);
+      // The grid shows knocks only, so a restricted-only bucket (knocks === 0) never
+      // creates an empty knock column — but its timestamps still extend the window below.
       if (singleDay) {
-        activeHours.add(r._id.bucket);
-        row.knocksByHour[r._id.bucket] = r.knocks;
+        if (r.knocks) {
+          activeHours.add(r._id.bucket);
+          row.knocksByHour[r._id.bucket] = r.knocks;
+        }
         if (r.surveys) row.surveysByHour[r._id.bucket] = r.surveys;
       } else {
-        row.knocksByDay[r._id.bucket] = r.knocks;
+        if (r.knocks) row.knocksByDay[r._id.bucket] = r.knocks;
         if (r.surveys) row.surveysByDay[r._id.bucket] = r.surveys;
         // Range buckets ARE days, so summing per-bucket (last - first) is exactly the
-        // canvasser-summary endpoint's "sum of per-day active spans" method.
+        // canvasser-summary endpoint's "sum of per-day active spans" method. Restricted
+        // marks are in the bucket, so their time counts toward shift hours (by design).
         row.hoursOnDoors += (r.last - r.first) / 3600000;
       }
       row.dayKnocks += r.knocks;
@@ -1225,6 +1243,7 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       row.refused += r.refused;
       row.notHome += r.notHome;
       row.wrongAddress += r.wrongAddress;
+      row.dayRestricted += r.restricted;
       if (!row.first || r.first < row.first) row.first = r.first;
       if (!row.last || r.last > row.last) row.last = r.last;
     }
@@ -1282,6 +1301,7 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           refused: row.refused,
           notHome: row.notHome,
           wrongAddress: row.wrongAddress,
+          dayRestricted: row.dayRestricted, // inaccessible homes — a tally, never in dayKnocks
           firstActivityAt: row.first,
           lastActivityAt: row.last,
           hoursOnDoors: Math.round(rawHours * 100) / 100,
@@ -1619,6 +1639,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
           wrongAddress: 0,
           refused: 0,
           litDropped: 0,
+          restricted: 0,
           firstActivityAt: null,
           lastActivityAt: null,
           hoursOnDoors: 0,
@@ -1634,6 +1655,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       else if (r._id.actionType === 'wrong_address') u.wrongAddress = r.count;
       else if (r._id.actionType === 'refused') u.refused = r.count;
       else if (r._id.actionType === 'lit_dropped') u.litDropped = r.count;
+      else if (r._id.actionType === 'restricted') u.restricted = r.count;
       else if (r._id.actionType === 'survey_submitted') u.surveyKnocks = r.count;
       if (!u.firstActivityAt || r.firstAt < u.firstActivityAt) u.firstActivityAt = r.firstAt;
       if (!u.lastActivityAt || r.lastAt > u.lastActivityAt) u.lastActivityAt = r.lastAt;
@@ -1655,7 +1677,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       'Rank', 'First name', 'Last name', 'Email', 'Phone', 'Active',
       'Knocks', 'Surveys', 'Lit drops', 'Not home', 'Wrong address',
       'Connection rate %', 'Hours on doors', 'Days active', 'Knocks/hr', 'Surveys/hr',
-      'First activity', 'Last activity', 'Refused',
+      'First activity', 'Last activity', 'Refused', 'Restricted',
     ];
     const enriched = Array.from(byUser.values())
       .map((u) => {
@@ -1707,6 +1729,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       u.firstActivityAt ? new Date(u.firstActivityAt).toISOString() : '',
       u.lastActivityAt ? new Date(u.lastActivityAt).toISOString() : '',
       u.refused,
+      u.restricted,
     ]);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -1864,11 +1887,13 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
           },
         ]),
         CanvassActivity.aggregate([
-          { $match: knockMatch },
+          // Include 'restricted' so its time extends the per-day shift window (hoursOnDoors),
+          // but keep homesKnocked knock-only (restricted is never a knock).
+          { $match: { ...activityMatch, actionType: { $in: [...KNOCK_ACTIONS, 'restricted'] } } },
           {
             $group: {
               _id: dayBucketExpr('timestamp', tz),
-              homesKnocked: { $sum: 1 },
+              homesKnocked: { $sum: { $cond: [{ $eq: ['$actionType', 'restricted'] }, 0, 1] } },
               first: { $min: '$timestamp' },
               last: { $max: '$timestamp' },
             },
@@ -1909,7 +1934,7 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
 
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const actions = { not_home: 0, wrong_address: 0, survey_submitted: 0, lit_dropped: 0, note_added: 0 };
+    const actions = { not_home: 0, wrong_address: 0, survey_submitted: 0, lit_dropped: 0, note_added: 0, restricted: 0 };
     for (const r of actionAgg) actions[r._id] = r.count;
     const homesKnocked =
       actions.not_home + actions.wrong_address + actions.survey_submitted + actions.lit_dropped;
@@ -2025,6 +2050,7 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
         notHome: actions.not_home,
         wrongAddress: actions.wrong_address,
         notesAdded: actions.note_added,
+        restricted: actions.restricted, // inaccessible-home marks — a tally, never a knock
         connectionRatePct: Math.round(connectionRatePct * 10) / 10,
         hoursOnDoors: Math.round(hoursOnDoors * 100) / 100,
         daysActive,

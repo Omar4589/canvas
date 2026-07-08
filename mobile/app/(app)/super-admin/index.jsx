@@ -34,6 +34,7 @@ const ACTION_LABEL = {
   not_home: 'Not home',
   wrong_address: 'Wrong address',
   refused: 'Refused',
+  restricted: 'Restricted',
   lit_dropped: 'Lit dropped',
 };
 
@@ -71,6 +72,7 @@ export default function SuperAdminHome() {
     not_home: colors.brand,
     wrong_address: colors.danger,
     refused: colors.status.refused,
+    restricted: colors.status.restricted,
     lit_dropped: colors.accentPurple,
   };
   const [user, setUser] = useState(null);

@@ -33,6 +33,7 @@ const ACTION_TABS = [
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'refused', label: 'Refused' },
+  { key: 'restricted', label: 'Restricted' },
   { key: 'lit_dropped', label: 'Lit drop' },
 ];
 
@@ -41,6 +42,7 @@ const ACTION_PIN = {
   not_home: 'not_home',
   wrong_address: 'wrong_address',
   refused: 'refused',
+  restricted: 'restricted',
   lit_dropped: 'lit_dropped',
   note_added: 'unknocked',
 };
@@ -49,6 +51,7 @@ const ACTION_LABEL = {
   not_home: 'Not home',
   wrong_address: 'Wrong address',
   refused: 'Refused',
+  restricted: 'Restricted',
   lit_dropped: 'Lit dropped',
   note_added: 'Note',
 };
@@ -193,6 +196,7 @@ export default function MapScreen() {
                     'not_home', colors.status.not_home,
                     'wrong_address', colors.status.wrong_address,
                     'refused', colors.status.refused,
+                    'restricted', colors.status.restricted,
                     'lit_dropped', colors.status.lit_dropped,
                     colors.textMuted,
                   ],

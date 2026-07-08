@@ -93,7 +93,7 @@ they hit the tag in several questions). Click a tag to see which options feed it
 On the **Saved Searches** page (the walk-list builder), the answer-filter panel now has a **By tag**
 row: pick "Supporter" and the resulting saved search is **every door with someone who matched that tag
 in any question** — a cross-question reach the per-question answer filters can't express. The door
-**status** filter also lists **Refused** alongside the other dispositions. From the Saved Searches
+**status** filter also lists **Refused** and **Restricted** alongside the other dispositions. From the Saved Searches
 list, **Export CSV** downloads that saved search's voters (Voter ID, name, party, age, phone, precinct,
 address) for a re-canvass, phone bank, or mail house. See [WALKLISTS.md](WALKLISTS.md) and
 [SURVEYS.md](SURVEYS.md) §I.
@@ -115,6 +115,15 @@ in its own amber bucket (color `#F59E0B` everywhere). Where it shows up for an a
 > tabs render the coverage bar (so the Refused segment shows there too) but currently surface the rate
 > set as Knocks / Surveys / Surveyed voters / Connection rate — the dedicated "Reached a person" card
 > is not on those tiles today.
+
+### The "Restricted access" disposition in admin numbers
+Available on **all** campaign types (not just survey), a door can be marked **Restricted access** —
+the home is inaccessible (gated, locked, no legal access; color slate `#475569`). It's the **inverse of
+Refused**: recorded and shown, but deliberately **not a billable knock**. For an admin it appears as its
+own slate **Restricted** segment on the coverage bar and as a separate **Restricted** count on the
+leaderboard, the canvassers CSV, and the canvasser timeline — but it enters **no** rate and is **not** in
+"houses knocked." The Turf Cutting page can also **exclude restricted homes** from a later round's books
+(see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)). Full counting model in [METRICS.md](METRICS.md).
 
 ---
 
@@ -174,8 +183,9 @@ map is complete; full server/data depth is in the linked docs, not duplicated.
 |---|---|---|---|
 | Survey builder: conditions, option scripts, "Other (specify)", **tag** combobox + palette | [SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) (`SurveyForm`, `OptionRow`, `ConditionEditor`; `tagPalette` → `tags`; shared `<datalist id="survey-tags">`) | [routes/admin/surveys.js](../server/src/routes/admin/surveys.js) (`canonicalizeTags`, `validateVisibleIfIntegrity`, soft-retire reconcile); `SurveyTemplate.tags` / `option.tag` / `option.script` / `question.visibleIf` / `question.otherOption` | [SURVEYS.md](SURVEYS.md) §B/§D/§I |
 | Survey report **Tags** rollup + voters-by-tag drill | [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) renders `<TagResults>` from `surveyResultsQ.data.tags`; `QuestionResults.jsx` `TagResults` | `GET /admin/reports/survey-results` `tags[]` (distinct voters per tag via `answerTagClause`) + `GET /admin/reports/voters-by-answer?tag=&surveyTemplateId=` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [SURVEYS.md](SURVEYS.md) §I |
-| Saved searches: **By tag** filter + status filter incl. **Refused** + **Export CSV** | [WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) (`AnswerFilters` `answerTagFilters`; `STATUSES` includes `'refused'`; `exportCsv` authenticated blob download) | `filter.answerTagFilters` ([resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js)) + `GET /admin/campaigns/:id/walklists/:id/export.csv` ([routes/admin/walklists.js](../server/src/routes/admin/walklists.js)) | [WALKLISTS.md](WALKLISTS.md), [SURVEYS.md](SURVEYS.md) §I |
+| Saved searches: **By tag** filter + status filter incl. **Refused** / **Restricted** + **Export CSV** | [WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) (`AnswerFilters` `answerTagFilters`; `STATUSES` includes `'refused'`/`'restricted'`; `exportCsv` authenticated blob download) | `filter.answerTagFilters` ([resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js)) + `GET /admin/campaigns/:id/walklists/:id/export.csv` ([routes/admin/walklists.js](../server/src/routes/admin/walklists.js)) | [WALKLISTS.md](WALKLISTS.md), [SURVEYS.md](SURVEYS.md) §I |
 | **Refused** door outcome in admin numbers | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) amber `refused` segment; [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) / [OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) coverage; [reportDerive.js](../client/src/lib/reportDerive.js) `CONTACT_LABELS.refused = 'Declined to participate'` | `refused` (coverage + events), `refusedKnocks`, `contactRate` on `/overview` · `/campaign-rollup` · `/canvassers`; `Refused` column in `/admin/reports/canvassers.csv` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [METRICS.md](METRICS.md) |
+| **Restricted access** door outcome (all campaign types; **not** billable) | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) slate `restricted` segment; [statusColors.js](../client/src/lib/statusColors.js) `restricted: '#475569'`; [CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) `dayRestricted` column | `restricted` (coverage + events + per-canvasser tally), excluded from `KNOCK_ACTIONS`/`homesKnocked`/rates; `Restricted` column in `/admin/reports/canvassers.csv`; `dayRestricted` on `/canvasser-timeline`; `excludeRestricted` cut option ([turfs.js](../server/src/routes/admin/turfs.js) → [generateTurf.js](../server/src/services/turf/generateTurf.js)) | [METRICS.md](METRICS.md), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) |
 
 > Note — what is **not** in the survey builder: there is **no per-question "Refused to answer" option**
 > (`question.refusalOption` is reserved and unwired). "Refused" is a **door-level disposition** on

@@ -265,6 +265,7 @@ export default function StatsScreen() {
   const totalDoors = days.reduce((s, d) => s + (d.doorsKnocked || 0), 0);
   const totalResponses = days.reduce((s, d) => s + (d.responses || 0), 0);
   const totalLit = days.reduce((s, d) => s + (d.litDropped || 0), 0);
+  const totalRestricted = days.reduce((s, d) => s + (d.restricted || 0), 0);
   const totalDistance = days.reduce((s, d) => s + (d.distanceMeters || 0), 0);
   const daysActive = days.filter((d) => (d.doorsKnocked || 0) > 0).length;
   const primaryValue = isLitDrop ? totalLit : totalResponses;
@@ -284,6 +285,7 @@ export default function StatsScreen() {
     bestHasData ? `Best ${best.doorsKnocked.toLocaleString()} (${formatBestDate(best.date)})` : null,
     streak > 0 ? `${streak}-day streak` : null,
     totalDistance > 0 ? `${metersToMiles(totalDistance)} mi` : null,
+    totalRestricted > 0 ? `${totalRestricted} restricted` : null,
   ].filter(Boolean);
 
   return (

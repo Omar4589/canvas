@@ -9,6 +9,7 @@ export const ACTION_TO_STATUS = {
   refused: 'refused', // someone answered but declined — a contact, NOT a completion
   lit_dropped: 'lit_dropped',
   survey_submitted: 'surveyed',
+  restricted: 'restricted', // home is inaccessible — a marker, NOT billable / NOT a knock
   // note_added has no effect on door status
 };
 
@@ -20,6 +21,7 @@ export const STATUS_RANK = {
   refused: 3,
   lit_dropped: 4,
   surveyed: 5,
+  restricted: 6, // non-completion; last-write-wins governs resolveStatus, so rank is cosmetic
 };
 
 const COMPLETION_ACTION = { survey: 'survey_submitted', lit_drop: 'lit_dropped' };

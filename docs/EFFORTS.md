@@ -211,8 +211,10 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
 - Activation ([passes.js](../server/src/routes/admin/passes.js)) archives other active passes **of the
   same walk list only**. `GET /passes?effortId=` filters.
 - Turf cut scope ([generateTurf.js](../server/src/services/turf/generateTurf.js)) = the pass's
-  **walk list's owned doors** (`{campaignId, isActive, effortId, coords}`); `addSupplementalBooks` adds
-  the walk list's owned-but-unbooked doors.
+  **walk list's owned doors** (`{campaignId, isActive, effortId, coords}`, plus
+  `status: { $ne: 'restricted' }` when the cut's `params.excludeRestricted` is set — the opt-in
+  "exclude restricted-access homes" toggle, see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)));
+  `addSupplementalBooks` adds the walk list's owned-but-unbooked doors (same `excludeRestricted` option).
 
 ## D. Attribution & per-walk-list survey (mobile write path)
 

@@ -23,8 +23,9 @@ campaigns, and super-admins), [TIMEZONES.md](TIMEZONES.md) (the campaign-day the
 
 ## What it's for
 
-Every time a canvasser marks a door — Not home, Survey, Refused, Lit drop — the app stamps **where the
-phone was** at that moment. That trail answers the questions you can't ask from knock counts alone:
+Every time a canvasser marks a door — Not home, Survey, Refused, Restricted, Lit drop — the app stamps
+**where the phone was** at that moment (a Restricted-access mark is GPS-stamped and audited like any
+other door action, even though it isn't a billable knock). That trail answers the questions you can't ask from knock counts alone:
 
 - Did they mark a house they never actually walked to?
 - Were they entering everything from **one spot** — sitting in a car, never getting out?

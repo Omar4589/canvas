@@ -188,7 +188,7 @@ export async function buildFrozenMapPoints({ report, campaign, mapAnswerKeys = [
     }
   }
 
-  const coverage = { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, refused: 0, lit_dropped: 0 };
+  const coverage = { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, refused: 0, lit_dropped: 0, restricted: 0 };
   const points = [];
   for (const h of households) {
     const coords = h.location?.coordinates || [];

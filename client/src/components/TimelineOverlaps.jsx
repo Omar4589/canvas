@@ -8,6 +8,7 @@ const ACTION_STATUS = {
   not_home: 'not_home',
   wrong_address: 'wrong_address',
   refused: 'refused',
+  restricted: 'restricted',
   lit_dropped: 'lit_dropped',
 };
 

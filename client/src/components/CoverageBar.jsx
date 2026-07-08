@@ -9,6 +9,7 @@ const SEGMENTS = [
   { key: 'lit_dropped', label: 'Lit dropped', color: 'bg-purple-500' },
   { key: 'not_home', label: 'Not home', color: 'bg-blue-500' },
   { key: 'wrong_address', label: 'Wrong address', color: 'bg-red-500' },
+  { key: 'restricted', label: 'Restricted', color: 'bg-slate-600' },
   { key: 'voted', label: 'Voted', color: 'bg-teal-500' },
   { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-400' },
 ];

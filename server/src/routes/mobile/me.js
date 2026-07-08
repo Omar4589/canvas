@@ -58,7 +58,9 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
       campaignId,
       organizationId: orgId,
       timestamp: timestampQuery,
-      actionType: { $in: DOOR_ACTIONS },
+      // Include 'restricted' so it shows as a tally + counts toward the shift window /
+      // travel, but it is split out of doorsKnocked/knockedHomes below (never a knock).
+      actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
     })
       .sort({ timestamp: 1 })
       .select('timestamp location actionType householdId')
@@ -72,7 +74,8 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
     Campaign.findOne({ _id: campaignId, organizationId: orgId }).select('surveyTemplateId').lean(),
   ]);
 
-  const doorsKnocked = activities.length;
+  let doorsKnocked = 0;
+  let restricted = 0;
   let litDropped = 0;
   let firstDoorAt = null;
   let lastDoorAt = null;
@@ -86,15 +89,11 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
   const surveyedHomeSet = new Set();
   const litHomeSet = new Set();
   const refusedHomeSet = new Set();
+  const restrictedHomeSet = new Set();
   for (const a of activities) {
     const hid = String(a.householdId);
-    knockedHomeSet.add(hid);
-    if (a.actionType === 'lit_dropped') {
-      litDropped += 1;
-      litHomeSet.add(hid);
-    }
-    if (a.actionType === 'survey_submitted') surveyedHomeSet.add(hid);
-    if (a.actionType === 'refused') refusedHomeSet.add(hid);
+    // Shift window + travel distance include every stop, restricted ones too (time spent
+    // reaching an inaccessible home still counts as time worked).
     if (!firstDoorAt) firstDoorAt = a.timestamp;
     lastDoorAt = a.timestamp;
     if (a.location && prev?.location) {
@@ -106,6 +105,20 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
       );
     }
     prev = a;
+    // Restricted is a marker, NOT a knock — kept out of doorsKnocked/knockedHomes/rates.
+    if (a.actionType === 'restricted') {
+      restricted += 1;
+      restrictedHomeSet.add(hid);
+      continue;
+    }
+    doorsKnocked += 1;
+    knockedHomeSet.add(hid);
+    if (a.actionType === 'lit_dropped') {
+      litDropped += 1;
+      litHomeSet.add(hid);
+    }
+    if (a.actionType === 'survey_submitted') surveyedHomeSet.add(hid);
+    if (a.actionType === 'refused') refusedHomeSet.add(hid);
   }
 
   let answerBreakdown = [];
@@ -175,10 +188,12 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
     doorsKnocked,
     responses,
     litDropped,
+    restricted, // inaccessible-home marks — a tally, never counted as a knock
     knockedHomes: knockedHomeSet.size,
     surveyedHomes: surveyedHomeSet.size,
     litHomes: litHomeSet.size,
     refusedHomes: refusedHomeSet.size,
+    restrictedHomes: restrictedHomeSet.size,
     // "Reached a person" = surveyed OR refused homes (distinct). Per-day display value only —
     // never sum across days (a home refused day 1 + surveyed day 2 would double-count).
     reachedHomes: new Set([...surveyedHomeSet, ...refusedHomeSet]).size,
@@ -301,7 +316,7 @@ router.get('/history', async (req, res, next) => {
         userId,
         campaignId: cId,
         organizationId: orgId,
-        actionType: { $in: DOOR_ACTIONS },
+        actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
       })
         .sort({ timestamp: 1 })
         .select('timestamp location actionType householdId')
@@ -336,6 +351,7 @@ router.get('/history', async (req, res, next) => {
           date: d,
           doorsKnocked: 0,
           litDropped: 0,
+          restricted: 0,
           responses: 0,
           firstDoorAt: null,
           lastDoorAt: null,
@@ -346,6 +362,7 @@ router.get('/history', async (req, res, next) => {
           _surveyedHomes: new Set(),
           _litHomes: new Set(),
           _refusedHomes: new Set(),
+          _restrictedHomes: new Set(),
         });
       }
       return dayMap.get(d);
@@ -354,15 +371,8 @@ router.get('/history', async (req, res, next) => {
     for (const a of activities) {
       const d = dayStr(a.timestamp);
       const day = ensureDay(d);
-      day.doorsKnocked++;
       const hid = String(a.householdId);
-      day._knockedHomes.add(hid);
-      if (a.actionType === 'lit_dropped') {
-        day.litDropped++;
-        day._litHomes.add(hid);
-      }
-      if (a.actionType === 'survey_submitted') day._surveyedHomes.add(hid);
-      if (a.actionType === 'refused') day._refusedHomes.add(hid);
+      // Window + travel include every stop (restricted too); knock tallies exclude restricted.
       const ts = a.timestamp.toISOString();
       if (!day.firstDoorAt) day.firstDoorAt = ts;
       day.lastDoorAt = ts;
@@ -375,6 +385,19 @@ router.get('/history', async (req, res, next) => {
         );
       }
       if (a.location) day._prevLocation = a.location;
+      if (a.actionType === 'restricted') {
+        day.restricted++;
+        day._restrictedHomes.add(hid);
+        continue;
+      }
+      day.doorsKnocked++;
+      day._knockedHomes.add(hid);
+      if (a.actionType === 'lit_dropped') {
+        day.litDropped++;
+        day._litHomes.add(hid);
+      }
+      if (a.actionType === 'survey_submitted') day._surveyedHomes.add(hid);
+      if (a.actionType === 'refused') day._refusedHomes.add(hid);
     }
     for (const r of responses) {
       ensureDay(dayStr(r.submittedAt)).responses++;
@@ -385,11 +408,13 @@ router.get('/history', async (req, res, next) => {
         date: d.date,
         doorsKnocked: d.doorsKnocked,
         litDropped: d.litDropped,
+        restricted: d.restricted,
         responses: d.responses,
         knockedHomes: d._knockedHomes.size,
         surveyedHomes: d._surveyedHomes.size,
         litHomes: d._litHomes.size,
         refusedHomes: d._refusedHomes.size,
+        restrictedHomes: d._restrictedHomes.size,
         reachedHomes: new Set([...d._surveyedHomes, ...d._refusedHomes]).size,
         firstDoorAt: d.firstDoorAt,
         lastDoorAt: d.lastDoorAt,

@@ -40,6 +40,7 @@ const STATUS_OPTIONS = [
   { key: 'not_home', label: 'Not home' },
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'refused', label: 'Refused' },
+  { key: 'restricted', label: 'Restricted' },
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'lit_dropped', label: 'Lit dropped' },
 ];
@@ -142,6 +143,7 @@ function actionLabel(t) {
   if (t === 'not_home') return 'Not home';
   if (t === 'wrong_address') return 'Wrong address';
   if (t === 'refused') return 'Refused';
+  if (t === 'restricted') return 'Restricted';
   if (t === 'note_added') return 'Note added';
   return t;
 }
@@ -464,6 +466,7 @@ export default function AdminMap() {
             'house-surveyed': require('../../../assets/icons/house-surveyed.png'),
             'house-wrong_address': require('../../../assets/icons/house-wrong_address.png'),
             'house-refused': require('../../../assets/icons/house-refused.png'),
+            'house-restricted': require('../../../assets/icons/house-restricted.png'),
             'house-lit_dropped': require('../../../assets/icons/house-surveyed.png'),
           }}
         />
@@ -508,6 +511,7 @@ export default function AdminMap() {
                 'surveyed', 'house-surveyed',
                 'wrong_address', 'house-wrong_address',
                 'refused', 'house-refused',
+                'restricted', 'house-restricted',
                 'lit_dropped', 'house-lit_dropped',
                 'house-unknocked',
               ],
@@ -531,6 +535,7 @@ export default function AdminMap() {
                   'not_home', colors.status.not_home,
                   'wrong_address', colors.status.wrong_address,
                   'refused', colors.status.refused,
+                  'restricted', colors.status.restricted,
                   'lit_dropped', colors.status.lit_dropped,
                   colors.textSecondary,
                 ],

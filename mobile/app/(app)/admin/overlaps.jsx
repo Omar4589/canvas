@@ -32,6 +32,7 @@ function actionLabel(t) {
   if (t === 'not_home') return 'Not home';
   if (t === 'wrong_address') return 'Wrong addr';
   if (t === 'refused') return 'Refused';
+  if (t === 'restricted') return 'Restricted';
   return t;
 }
 

@@ -29,6 +29,7 @@ const ACTION_TABS = [
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'refused', label: 'Refused' },
+  { key: 'restricted', label: 'Restricted' },
   { key: 'lit_dropped', label: 'Lit drop' },
   { key: 'note_added', label: 'Notes' },
 ];

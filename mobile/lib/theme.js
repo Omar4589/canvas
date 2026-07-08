@@ -36,6 +36,7 @@ const status = {
   wrong_address: '#EF4444',
   refused: '#F59E0B',
   lit_dropped: '#A855F7',
+  restricted: '#475569', // slate — inaccessible/blocked home; distinct from grey unknocked
   voted: '#14B8A6',
 };
 const statusLabels = {
@@ -45,6 +46,7 @@ const statusLabels = {
   wrong_address: 'Wrong address',
   refused: 'Refused',
   lit_dropped: 'Lit dropped',
+  restricted: 'Restricted',
   voted: 'Voted',
 };
 

@@ -100,11 +100,12 @@ router.get('/platform-overview', async (req, res, next) => {
       if (r._id) campaignsActive += r.count;
     }
 
-    const todayCounts = { doorsKnocked: 0, surveysSubmitted: 0, litDropped: 0 };
+    const todayCounts = { doorsKnocked: 0, surveysSubmitted: 0, litDropped: 0, restricted: 0 };
     for (const r of todayAgg) {
       if (ACTION_DOOR.includes(r._id)) todayCounts.doorsKnocked += r.count;
       if (r._id === 'survey_submitted') todayCounts.surveysSubmitted = r.count;
       if (r._id === 'lit_dropped') todayCounts.litDropped = r.count;
+      if (r._id === 'restricted') todayCounts.restricted = r.count; // marker, not in doorsKnocked
     }
 
     const memberMap = new Map(memberByOrg.map((r) => [String(r._id), r.count]));
@@ -149,7 +150,7 @@ router.get('/platform-overview', async (req, res, next) => {
 router.get('/activity-feed', async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
-    const filter = { actionType: { $in: ACTION_DOOR } };
+    const filter = { actionType: { $in: [...ACTION_DOOR, 'restricted'] } };
     if (req.query.since) {
       const sinceMs = Date.parse(req.query.since);
       if (Number.isFinite(sinceMs)) filter.timestamp = { $gt: new Date(sinceMs) };

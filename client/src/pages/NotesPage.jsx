@@ -30,6 +30,7 @@ const ACTION_LABEL = {
   not_home: 'Not home',
   wrong_address: 'Wrong address',
   refused: 'Refused',
+  restricted: 'Restricted',
   lit_dropped: 'Lit dropped',
   survey_submitted: 'Survey',
   note_added: 'Note',

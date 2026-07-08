@@ -137,7 +137,7 @@ export default function ProductTour() {
           visual={<FieldAppShots />}
         >
           Canvassers open their assigned book and walk. Pins recolor the instant an outcome is
-          recorded — survey, not home, refused, wrong address — and every action carries a GPS
+          recorded — survey, not home, refused, wrong address, restricted access — and every action carries a GPS
           stamp with distance to the door. No signal? Everything queues and syncs itself.
         </TourRow>
 

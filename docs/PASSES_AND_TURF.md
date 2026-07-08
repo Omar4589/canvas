@@ -87,6 +87,18 @@ doors — until you re-include them. Before cutting, the panel shows the **knock
 rough book estimate), so you know what you're cutting (see [EARLY_VOTING.md](EARLY_VOTING.md) for the
 shared exclusion mechanism).
 
+**Excluding restricted-access homes from a later round (admin-reviewed).** When a canvasser marks a home
+**Restricted access** in the field (gated / locked / inaccessible — see [METRICS.md](METRICS.md)), the
+home stays in the campaign, fully counted and visible. But when you cut the **next** round, you usually
+don't want to send someone back to a door nobody could reach. So the Turf Cutting page shows an
+**"Exclude N restricted-access homes"** toggle whenever any exist (**on by default**). Leaving it on
+skips those homes from **that round's books only** — it's **non-destructive** (the homes stay in the
+campaign, still counted and shown on the coverage bar as their own slate segment) and **overridable**
+(re-disposition a door in the field and it re-enters scope on the next cut). This is **opt-in per cut**,
+never automatic: turn it off to include them (e.g. if access has since opened up). It's the second-pass
+counterpart to the field marker — the field records "can't get in," the admin decides per round whether
+to keep trying.
+
 Books are first created as **drafts** — nothing reaches canvassers until you **accept** them (drafts →
 published). Re-cut freely until then; a **Discard** snapshots the layout so it's always recoverable.
 A pass needs accepted (published) books before it can be activated.
@@ -301,7 +313,10 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 
 1. **Load households** ([:36-44](../server/src/services/turf/generateTurf.js#L36-L44)) — base filter
    = `{ campaignId, isActive: true, effortId: pass.effortId, 'location.coordinates': {$exists,$ne:null} }`
-   — a round cuts only its **effort's** owned doors (see [EFFORTS.md](EFFORTS.md)).
+   — a round cuts only its **effort's** owned doors (see [EFFORTS.md](EFFORTS.md)). When
+   `params.excludeRestricted` is set, the base filter also gets **`status: { $ne: 'restricted' }`**, so
+   inaccessible homes are dropped from **that** cut's books (opt-in; non-destructive — the homes are
+   untouched in the DB). `addSupplementalBooks` takes the same `excludeRestricted` option.
 2. **Cut** by mode: `attributeCut` ([attributeCut.js](../server/src/services/turf/attributeCut.js)) —
    group by a denormalized cut column (precinct/county/city/zip/districts), optional `capN`
    geometric subdivision; `geometricCut` ([geometricCut.js](../server/src/services/turf/geometricCut.js))
@@ -368,9 +383,9 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/manual-preview` `{ passId, polygons }` | Per-area preview for manual mode: cuttable houses (`$geoWithin`, same cut base filter) + their `Voter` count inside each drawn polygon → `{ areas: [{ doorCount, voterCount }] }` index-aligned. Manual `generate` takes `params.polygons[]` (one book each) + optional `subCutN` (geometric split of big areas). **Overlap dedup is first-area-wins** in both the preview and the cut (a `claimed` Set across the polygon loop), so a house is never double-assigned/double-counted. |
 | `POST .../turfs/assign-bulk` | Bulk-assign selected books to selected people. `mode`: `distribute` (round-robin, even **books**), `balance` (greedy by eligible door count, even **doors**), `everyone` (all on all); `replace` clears existing first. **409 `not-accepted`** if any selected book is still a draft (per-book `POST /:turfId/assignments` enforces the same). |
 | `POST .../turfs/exclude-apartments` `{ passId, threshold }` | Group the effort's doors by rounded geocode; set `Household.excludedFromTurf:true` on members of clusters ≥ threshold → they skip cutting/map/counts/canvasser everywhere (mirrors `fullyVoted`). `POST .../turfs/include-apartments` clears it. |
-| `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. Skips fully-voted doors. |
+| `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. Skips fully-voted doors. Passes `params` straight through, so **`params.excludeRestricted`** reaches `generateTurf` and skips `status:'restricted'` doors for that cut (the "Exclude restricted-access homes" toggle; default on when any exist). |
 | `POST .../turfs/accept` ([:99](../server/src/routes/admin/turfs.js#L99)) | Draft → published for the pass. |
-| `POST .../turfs/add-supplemental` | **Non-destructive add.** Cut the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirror `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`); serialized by `Pass.recutLock`. New books then use Accept + Assign. Body `{ passId, name?, maxDoors? }` → `{ added, bookCount, bookIds }`. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
+| `POST .../turfs/add-supplemental` | **Non-destructive add.** Cut the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirror `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`); serialized by `Pass.recutLock`. New books then use Accept + Assign. Body `{ passId, name?, maxDoors?, excludeRestricted? }` (`excludeRestricted` adds `status: { $ne: 'restricted' }` to the base filter) → `{ added, bookCount, bookIds }`. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
 | `POST .../turfs/discard` | **409 `active-pass-confirm-required`** (with `knockCount`/`assignmentCount`/`isActive`) when the pass is active **or has recorded knocks** and `confirmActive` isn't set — the client's typed-confirm dialog supplies it. Then: snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` and clear `activePassId`; optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse` (captured in the snapshot). Serialized by `Pass.recutLock`. The turfs `GET /` also returns `knockCount` for the selected pass (drives the dialog's warning). |
 | `POST .../turfs/restore-snapshot` | Re-create books + assignments from a snapshot (blocked if live books exist; does not auto-reactivate the pass). |
 | `POST .../turfs/move-door` `{ householdId, fromTurfId?, toTurfId }` ([:851](../server/src/routes/admin/turfs.js#L851)) | Move one door between books in the same pass. Pulls it from its current book, pushes into `toTurfId`, `recomputeTurf` on both (re-mirrors `Household.turfId`/`walkOrder`) + `recomputePassTerritories`. **409** if the door's `effortId` ≠ the target book's effort (disjointness). Does **not** touch `CanvassActivity`. |

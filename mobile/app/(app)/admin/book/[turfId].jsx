@@ -30,6 +30,7 @@ const STATUS_LABEL = {
   surveyed: 'Surveyed',
   wrong_address: 'Wrong address',
   refused: 'Refused',
+  restricted: 'Restricted',
   lit_dropped: 'Lit dropped',
 };
 
@@ -319,6 +320,7 @@ export default function AdminBookDetail() {
               'house-surveyed': require('../../../../assets/icons/house-surveyed.png'),
               'house-wrong_address': require('../../../../assets/icons/house-wrong_address.png'),
               'house-refused': require('../../../../assets/icons/house-refused.png'),
+              'house-restricted': require('../../../../assets/icons/house-restricted.png'),
               'house-lit_dropped': require('../../../../assets/icons/house-surveyed.png'),
             }}
           />
@@ -352,6 +354,7 @@ export default function AdminBookDetail() {
                   'surveyed', 'house-surveyed',
                   'wrong_address', 'house-wrong_address',
                   'refused', 'house-refused',
+                  'restricted', 'house-restricted',
                   'lit_dropped', 'house-lit_dropped',
                   'house-unknocked',
                 ],

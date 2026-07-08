@@ -64,7 +64,7 @@ function distanceFromHouse(household, location) {
   return Math.round(haversineMeters(hLat, hLng, location.lat, location.lng));
 }
 
-const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
+const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'restricted'];
 
 // Deterministic attribution: a door belongs to its book on one of the campaign's
 // ACTIVE rounds. Efforts are door-disjoint, so a household is in at most one
@@ -255,6 +255,27 @@ router.post('/households/:householdId/lit-drop', async (req, res, next) => {
       status: 'lit_dropped',
       body: req.body,
       requireCampaignType: 'lit_drop',
+    });
+    if (result.error) return res.status(result.error.status).json({ error: result.error.message });
+    res.status(201).json(result);
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Restricted Access: the home is inaccessible (gated/locked/no legal access). Recorded
+// as a first-class disposition + door status, but deliberately NOT a billable knock — it
+// stays out of KNOCK_ACTIONS, so it never enters knocks/rates/coverage-knocked. Available
+// for ALL campaign types (an unreachable home blocks both surveys and lit drops).
+router.post('/households/:householdId/restricted', async (req, res, next) => {
+  try {
+    const result = await recordHouseholdAction({
+      req,
+      householdId: req.params.householdId,
+      actionType: 'restricted',
+      status: 'restricted',
+      body: req.body,
     });
     if (result.error) return res.status(result.error.status).json({ error: result.error.message });
     res.status(201).json(result);

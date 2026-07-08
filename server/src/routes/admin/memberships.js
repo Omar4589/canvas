@@ -451,7 +451,7 @@ router.get('/:userId/stats', async (req, res, next) => {
       CanvassActivity.find({
         userId,
         organizationId: orgId,
-        actionType: { $in: DOOR_ACTIONS },
+        actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
       })
         .sort({ timestamp: 1 })
         .select('timestamp location actionType campaignId')
@@ -459,12 +459,17 @@ router.get('/:userId/stats', async (req, res, next) => {
       SurveyResponse.countDocuments({ userId, organizationId: orgId }),
     ]);
 
+    let doorsKnocked = 0;
+    let restricted = 0;
     let litDropped = 0;
     let lastActivityAt = null;
     const campaignSet = new Set();
     const distanceByDay = new Map();
 
     for (const a of activities) {
+      // Restricted counts toward the campaign set / last-activity / travel, but not doorsKnocked.
+      if (a.actionType === 'restricted') restricted++;
+      else doorsKnocked++;
       if (a.actionType === 'lit_dropped') litDropped++;
       if (a.campaignId) campaignSet.add(String(a.campaignId));
       lastActivityAt = a.timestamp;
@@ -490,7 +495,8 @@ router.get('/:userId/stats', async (req, res, next) => {
     for (const b of distanceByDay.values()) distanceMeters += b.total;
 
     res.json({
-      doorsKnocked: activities.length,
+      doorsKnocked,
+      restricted,
       surveysSubmitted,
       litDropped,
       distanceMeters: Math.round(distanceMeters),
@@ -518,7 +524,7 @@ router.get('/:userId/recent-activity', async (req, res, next) => {
     const activities = await CanvassActivity.find({
       userId,
       organizationId: orgId,
-      actionType: { $in: DOOR_ACTIONS },
+      actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
     })
       .sort({ timestamp: -1 })
       .limit(limit)

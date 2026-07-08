@@ -29,7 +29,7 @@ const canvassActivitySchema = new mongoose.Schema(
 
     actionType: {
       type: String,
-      enum: ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'note_added', 'lit_dropped'],
+      enum: ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'note_added', 'lit_dropped', 'restricted'],
       required: true,
       index: true,
     },

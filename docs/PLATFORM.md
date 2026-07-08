@@ -32,8 +32,8 @@ any org to work inside it, then come back out.
   campaigns), **who's active right now** (canvassers who logged something in the last 15 minutes),
   **today's activity** (doors knocked, surveys, lit drops — across every org), and a table of every
   organization with its members, campaigns, who's live, and when it was last active. Alongside it, a
-  **live activity feed** streams recent door events (Not home / Wrong address / **Refused** / Survey /
-  Lit drop) from across all orgs.
+  **live activity feed** streams recent door events (Not home / Wrong address / **Refused** /
+  **Restricted** / Survey / Lit drop) from across all orgs.
 - **Organizations** — the list of every org; create a new one, and activate/deactivate them. A
   deactivated org's members can't sign into it.
 - **All Users** — every account on the platform (with the orgs each belongs to and their role in each).
@@ -73,10 +73,13 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
   (matching the campaign count). "Today" is a UTC-day window; "active now" is a 15-minute window of
   distinct `userId`s. `today.doorsKnocked` sums the door actions in `ACTION_DOOR` — which **includes
   `refused`** (a first-class billable knock; it was previously omitted and undercounted — see
-  [METRICS.md](METRICS.md)).
-- **`activity-feed`** returns the most recent `CanvassActivity` events whose `actionType ∈ ACTION_DOOR`
-  (so Refused events appear, matching the "Refused" styling both feed UIs already ship), newest first,
-  with org / canvasser / campaign / household populated; supports `?since=` for polling and `?limit=`.
+  [METRICS.md](METRICS.md)) but **excludes `restricted`** (a marker, not a knock). Restricted marks are
+  surfaced as their own separate `today.restricted` tally instead of being folded into `doorsKnocked`,
+  yet they still count a canvasser toward "active now" (they're real `CanvassActivity`).
+- **`activity-feed`** returns the most recent `CanvassActivity` events whose
+  `actionType ∈ [...ACTION_DOOR, 'restricted']` (so **Refused and Restricted** events both appear,
+  matching the styling the feed UIs ship), newest first, with org / canvasser / campaign / household
+  populated; supports `?since=` for polling and `?limit=`.
 - **`promote`** toggles `User.isSuperAdmin`; a super admin **cannot** toggle their own flag (guards
   against self-lockout / accidental self-demotion).
 - **Organizations** `PATCH` flips `isActive` (deactivate hides the org from its members) and edits

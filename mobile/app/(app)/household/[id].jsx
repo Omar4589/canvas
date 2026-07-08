@@ -350,6 +350,19 @@ export default function HouseholdDetail() {
               </Pressable>
             </>
           )}
+
+          {/* Restricted Access — inaccessible home. All campaign types; not a knock. */}
+          <Pressable
+            onPress={() => submitAction('restricted')}
+            disabled={isSubmitting}
+            style={({ pressed }) => [
+              styles.actionButton,
+              styles.actionRestricted,
+              { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+            ]}
+          >
+            <Text style={styles.actionButtonText}>Restricted access</Text>
+          </Pressable>
         </View>
       </ScrollView>
       </KeyboardAvoidingView>
@@ -542,6 +555,7 @@ function makeStyles(t) {
   actionNotHome: { backgroundColor: colors.info },
   actionWrongAddress: { backgroundColor: colors.danger },
   actionRefused: { backgroundColor: colors.status.refused },
+  actionRestricted: { backgroundColor: colors.status.restricted },
   actionButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
   });
 }

@@ -43,6 +43,10 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     fullyVoted: { $ne: true },
     excludedFromTurf: { $ne: true },
     'location.coordinates': { $exists: true, $ne: null },
+    // Admin-reviewed second-pass removal: when set, this cut skips inaccessible homes
+    // (Household.status === 'restricted'). Non-destructive — the homes stay in the
+    // campaign/counts and re-enter scope automatically if re-dispositioned.
+    ...(params.excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
   };
 
   // Targeted follow-up round: restrict the universe to the effort's doors matching
@@ -182,7 +186,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 // through the normal Accept → Assign steps) and the whole pass is re-tessellated
 // so territories stay non-overlapping. Walk-list passes only consider the frozen
 // list, so imports outside that list won't be picked up (documented limitation).
-export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65 }) {
+export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false }) {
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
   const pass = await Pass.findOne({ _id: passId, campaignId }).lean();
@@ -198,6 +202,7 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
     fullyVoted: { $ne: true },
     excludedFromTurf: { $ne: true },
     'location.coordinates': { $exists: true, $ne: null },
+    ...(excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
   };
 
   const households = await Household.find(baseFilter, CUT_COLUMNS).lean();

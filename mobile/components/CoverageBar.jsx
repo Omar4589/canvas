@@ -12,6 +12,7 @@ const SEGMENTS = [
   { key: 'lit_dropped', label: 'Lit dropped' },
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },
+  { key: 'restricted', label: 'Restricted' },
   { key: 'voted', label: 'Voted' },
   { key: 'unknocked', label: 'Unknocked' },
 ];

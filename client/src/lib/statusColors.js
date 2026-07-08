@@ -10,6 +10,7 @@ export const STATUS_COLORS = {
   wrong_address: '#ef4444', // red-500
   refused: '#f59e0b', // amber-500
   lit_dropped: '#a855f7', // purple-500
+  restricted: '#475569', // slate-600 — inaccessible/blocked home
   voted: '#14b8a6', // teal-500
 };
 
@@ -20,6 +21,7 @@ export const STATUS_LABELS = {
   wrong_address: 'Wrong address',
   refused: 'Refused',
   lit_dropped: 'Lit dropped',
+  restricted: 'Restricted',
   voted: 'Voted',
 };
 
