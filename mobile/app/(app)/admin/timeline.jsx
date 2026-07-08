@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
-import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  StyleSheet,
+  TextInput,
+  Switch,
+  Modal,
+  Alert,
+} from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
@@ -8,10 +19,12 @@ import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, shiftDays, deviceTimezone } from '../../../lib/dateRanges';
 import { rateFromPct } from '../../../lib/rates';
+import { downloadCsv } from '../../../lib/csv';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import DateRangeBar from '../../../components/DateRangeBar';
+import CampaignChip from '../../../components/CampaignChip';
 import KpiGrid from '../../../components/KpiGrid';
 import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
@@ -26,6 +39,16 @@ const SUM_W = 48;
 // and validates custom ranges before querying (the server 400s as a backstop).
 const TIMELINE_MAX_DAYS = 62;
 const TIMELINE_PRESETS = PRESETS.filter((p) => p.key !== 'all');
+
+// Sort keys for the canvasser list/grid — mapped to the timeline row fields.
+const SORT_OPTIONS = [
+  { key: 'surveys', label: 'Surveys' },
+  { key: 'knocks', label: 'Knocks' },
+  { key: 'connection', label: 'Connection rate' },
+  { key: 'hours', label: 'Hours on doors' },
+  { key: 'knocksPerHour', label: 'Knocks / hour' },
+  { key: 'surveysPerHour', label: 'Surveys / hour' },
+];
 
 // Inclusive day count between two YYYY-MM-DD strings (UTC calendar math).
 function ymdSpanDays(from, to) {
@@ -68,44 +91,36 @@ export default function AdminTimeline() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const router = useRouter();
-  const params = useLocalSearchParams();
 
-  // Campaign: prefer the id the launching screen passed (campaign detail), else the
-  // active campaign. Reload the active campaign on focus — this hidden Tabs screen
-  // stays mounted forever, so a mount-only load goes stale after a campaign switch.
-  const paramCid = params.campaignId
-    ? String(Array.isArray(params.campaignId) ? params.campaignId[0] : params.campaignId)
-    : null;
-  const [activeCampaign, setActiveCampaign] = useState(undefined);
-  // useFocusEffect fires on the first focus (mount) too, so this is the only load
-  // needed — and it keeps the active campaign fresh after a switch elsewhere, since
-  // this hidden Tabs screen never unmounts.
+  // Campaign scoping via the shared CampaignChip (as used by Insights/Map): it
+  // restores + persists the active campaign and lets the admin switch inline.
+  const [campaign, setCampaign] = useState(undefined);
+  // This is a Tabs screen that never unmounts, so also re-sync the active campaign
+  // on focus — a per-campaign drill-in (campaign home "See all" saves the active
+  // campaign then navigates here) must be reflected even when we were already mounted.
   useFocusEffect(
     useCallback(() => {
       loadActiveCampaign().then((c) =>
-        setActiveCampaign((prev) => (String(c?.id) !== String(prev?.id) ? c || null : prev))
+        setCampaign((prev) => (String(c?.id) !== String(prev?.id) ? c || null : prev))
       );
     }, [])
   );
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-  const cId = paramCid || (activeCampaign ? String(activeCampaign.id) : null);
-  const campaignDoc =
-    (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(cId)) || null;
-  // Only trust activeCampaign's tz/name when it IS the resolved campaign. A param
-  // pointing at a not-yet-loaded campaign must not borrow the (possibly different)
-  // active campaign's tz, or "today" misbuckets near midnight until campaignsQ lands.
-  const activeMatches = activeCampaign && String(activeCampaign.id) === String(cId);
-  const tz = campaignDoc?.timeZone || (activeMatches ? activeCampaign.timeZone : null) || deviceTimezone();
+  const cId = campaign?.id ? String(campaign.id) : null;
+  const tz = campaign?.timeZone || deviceTimezone();
+  const litMode = campaign?.type === 'lit_drop';
 
   const [metric, setMetric] = useState('knocks');
   const [coordinatorId, setCoordinatorId] = useState(''); // '' = all, 'none' = no coordinator
   const [effortId, setEffortId] = useState('');
   const [live, setLive] = useState(true);
+  // Folded-in list tools (from the retired Insights screen).
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('surveys');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [hideInactive, setHideInactive] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
   // Range seeded in device tz so the screen loads immediately; refined to the
   // campaign tz once known, until the admin picks a range (canvassers.jsx pattern).
   const [range, setRange] = useState(() => {
@@ -115,7 +130,7 @@ export default function AdminTimeline() {
   const rangeTouchedRef = useRef(false);
 
   // Reset ALL campaign-scoped view state when the resolved campaign changes — this
-  // screen never unmounts, so the filters, the picked range, and the live toggle
+  // screen never unmounts, so the filters, tools, picked range, and live toggle
   // would otherwise bleed from one campaign into the next.
   const [prevCid, setPrevCid] = useState(cId);
   if (prevCid !== cId) {
@@ -123,6 +138,11 @@ export default function AdminTimeline() {
     setCoordinatorId('');
     setEffortId('');
     setLive(true);
+    setSearch('');
+    setSortKey('surveys');
+    setHideInactive(false);
+    setCompareMode(false);
+    setSelectedIds(new Set());
     const r = rangeFor('today', null, tz);
     setRange({ preset: 'today', from: r.from, to: r.to });
     rangeTouchedRef.current = false;
@@ -231,19 +251,52 @@ export default function AdminTimeline() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [rows, assignments]);
 
-  const filteredRows = useMemo(() => {
+  // Coordinator-scoped set — drives the KPI strip + "Knocking N of M" so those
+  // headline numbers reflect the crew selection but NOT the search box.
+  const coordRows = useMemo(() => {
     if (!coordinatorId) return rows;
     if (coordinatorId === 'none') return rows.filter((r) => !r.coordinatorId);
     return rows.filter((r) => r.coordinatorId === coordinatorId);
   }, [rows, coordinatorId]);
 
-  // KPI totals from the visible rows so the coordinator filter scopes them too.
+  // Displayed set — hide-inactive + name/email search + sort shape the cards AND the
+  // grid (so both agree), while the KPI strip above stays on coordRows.
+  const displayRows = useMemo(() => {
+    let out = coordRows;
+    if (hideInactive) out = out.filter((r) => r.isActive);
+    const s = search.trim().toLowerCase();
+    if (s) {
+      out = out.filter((r) =>
+        `${r.firstName || ''} ${r.lastName || ''} ${r.email || ''}`.toLowerCase().includes(s)
+      );
+    }
+    const surveysPerHour = (r) => (r.hoursOnDoors > 0 ? (r.daySurveys || 0) / r.hoursOnDoors : 0);
+    return [...out].sort((a, b) => {
+      switch (sortKey) {
+        case 'knocks':
+          return (b.dayKnocks || 0) - (a.dayKnocks || 0);
+        case 'connection':
+          return (b.connectionRate || 0) - (a.connectionRate || 0);
+        case 'hours':
+          return (b.hoursOnDoors || 0) - (a.hoursOnDoors || 0);
+        case 'knocksPerHour':
+          return (b.doorsPerHour || 0) - (a.doorsPerHour || 0);
+        case 'surveysPerHour':
+          return surveysPerHour(b) - surveysPerHour(a);
+        case 'surveys':
+        default:
+          return (b.daySurveys || 0) - (a.daySurveys || 0) || (b.dayKnocks || 0) - (a.dayKnocks || 0);
+      }
+    });
+  }, [coordRows, hideInactive, search, sortKey]);
+
+  // KPI totals from the coordinator-scoped rows so the crew filter scopes them.
   const kpis = useMemo(() => {
     let doors = 0;
     let surveys = 0;
     let lit = 0;
     let hours = 0;
-    for (const r of filteredRows) {
+    for (const r of coordRows) {
       doors += r.dayKnocks || 0;
       surveys += r.daySurveys || 0;
       lit += r.dayLit || 0;
@@ -252,7 +305,7 @@ export default function AdminTimeline() {
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
     const doorsPerHour = hours > 0 ? doors / hours : null;
     return { doors, surveys, connPct, doorsPerHour };
-  }, [filteredRows]);
+  }, [coordRows]);
 
   // "Knocking N of M": M = roster canvassers (crew-scoped when filtered), N = the
   // subset with knocks — intersected with the roster so N ⊆ M (admins/off-roster
@@ -267,8 +320,8 @@ export default function AdminTimeline() {
     return new Set(scoped.map((a) => String(a.userId)));
   }, [assignments, coordinatorId]);
   const knockingCount = useMemo(
-    () => filteredRows.filter((r) => rosterIds.has(String(r.userId))).length,
-    [filteredRows, rosterIds]
+    () => coordRows.filter((r) => rosterIds.has(String(r.userId))).length,
+    [coordRows, rosterIds]
   );
 
   // Grid columns: hours for a single day, days for a range. Mode-guarded so
@@ -289,7 +342,7 @@ export default function AdminTimeline() {
       : 'knocksByHour';
 
   let maxCell = 0;
-  for (const c of filteredRows)
+  for (const c of displayRows)
     for (const col of columns) {
       const v = c[bucketKey]?.[col.key] || 0;
       if (v > maxCell) maxCell = v;
@@ -297,10 +350,11 @@ export default function AdminTimeline() {
   const cellBg = (v) =>
     v && maxCell ? `rgba(59,130,246,${(0.12 + 0.88 * (v / maxCell)).toFixed(3)})` : 'transparent';
 
-  // Column + grand totals from the visible rows (respects the coordinator filter).
+  // Column + grand totals from the displayed rows (respects the coordinator filter,
+  // hide-inactive, and search so the grid footer matches what's on screen).
   const colTotals = {};
   let gridGrandTotal = 0;
-  for (const c of filteredRows) {
+  for (const c of displayRows) {
     for (const col of columns) {
       const v = c[bucketKey]?.[col.key] || 0;
       if (v) colTotals[col.key] = (colTotals[col.key] || 0) + v;
@@ -309,7 +363,6 @@ export default function AdminTimeline() {
   }
 
   const rangeLabel = labelForRange(range);
-  const campaignName = campaignDoc?.name || (activeMatches ? activeCampaign.name : '') || '';
 
   const kpiTiles = [
     { label: 'Doors', value: kpis.doors.toLocaleString(), sub: rangeLabel },
@@ -343,16 +396,53 @@ export default function AdminTimeline() {
     });
   }
 
+  function toggleSelected(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 5) next.add(id);
+      else Alert.alert('Limit reached', 'Compare up to 5 canvassers at a time.');
+      return next;
+    });
+  }
+
+  function openCompare() {
+    if (selectedIds.size < 2) {
+      Alert.alert('Pick at least 2', 'Select 2–5 canvassers to compare.');
+      return;
+    }
+    router.push({
+      pathname: '/(app)/admin/canvasser/compare',
+      params: {
+        ids: Array.from(selectedIds).join(','),
+        from: fromDay || '',
+        to: range?.to || '',
+        preset: range?.preset,
+      },
+    });
+  }
+
+  function exportCsv() {
+    if (!cId) return;
+    const params = new URLSearchParams();
+    params.set('campaignId', cId);
+    if (fromDay) params.set('from', fromDay);
+    if (effectiveTo) params.set('to', effectiveTo);
+    params.set('tz', deviceTimezone());
+    const name = `canvassers-${fromDay || 'export'}.csv`;
+    downloadCsv(`/admin/reports/canvassers.csv?${params.toString()}`, name);
+  }
+
+  const activeSortLabel = SORT_OPTIONS.find((s) => s.key === sortKey)?.label || 'Sort';
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Admin</Text>
-        </Pressable>
         <Text style={styles.headerTitle}>Timeline</Text>
-        <View style={{ width: 80 }} />
       </View>
-      {campaignName ? <Text style={styles.campaignName}>{campaignName}</Text> : null}
+      <View style={styles.chipWrap}>
+        <CampaignChip value={campaign} onChange={setCampaign} />
+      </View>
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} />
 
@@ -402,6 +492,59 @@ export default function AdminTimeline() {
         </View>
       </View>
 
+      {/* Name/email search + sort (folded in from Insights) */}
+      <View style={styles.filterRow}>
+        <View style={styles.searchWrap}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            placeholder="Search name or email"
+            placeholderTextColor={colors.textMuted}
+            value={search}
+            onChangeText={setSearch}
+            style={styles.searchInput}
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+          {search ? (
+            <Pressable onPress={() => setSearch('')} hitSlop={8}>
+              <Text style={styles.clear}>✕</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        <Pressable onPress={() => setSortMenuOpen(true)} style={styles.sortBtn}>
+          <Text style={styles.sortBtnText} numberOfLines={1}>
+            {activeSortLabel} ▾
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Hide-inactive + compare + CSV export */}
+      <View style={styles.toggleRow}>
+        <View style={styles.toggleItem}>
+          <Switch
+            value={hideInactive}
+            onValueChange={setHideInactive}
+            trackColor={{ true: colors.brand, false: colors.border }}
+            thumbColor={colors.card}
+          />
+          <Text style={styles.toggleLabel}>Hide inactive</Text>
+        </View>
+        <Pressable
+          onPress={() => {
+            setCompareMode((v) => !v);
+            setSelectedIds(new Set());
+          }}
+          style={[styles.actionBtn, compareMode && styles.actionBtnActive]}
+        >
+          <Text style={[styles.actionBtnText, compareMode && styles.actionBtnTextActive]}>
+            {compareMode ? 'Cancel' : 'Compare'}
+          </Text>
+        </Pressable>
+        <Pressable onPress={exportCsv} style={styles.actionBtn}>
+          <Text style={styles.actionBtnText}>Export CSV</Text>
+        </Pressable>
+      </View>
+
       {rangeInvalid ? (
         <View style={styles.center}>
           <Text style={styles.emptyTitle}>That range won't work</Text>
@@ -426,9 +569,9 @@ export default function AdminTimeline() {
           <ActivityIndicator color={colors.brand} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl + (compareMode ? 72 : 0) }}>
           {/* KPI strip — only when there's activity to summarize. */}
-          {rows.length > 0 ? (
+          {coordRows.length > 0 ? (
             <View style={styles.kpiWrap}>
               <KpiGrid tiles={kpiTiles} columns={2} compact />
             </View>
@@ -467,23 +610,33 @@ export default function AdminTimeline() {
                 another {efforts.length > 1 ? 'walk list or ' : ''}range above.
               </Text>
             </View>
-          ) : filteredRows.length === 0 ? (
+          ) : coordRows.length === 0 ? (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>No activity for this crew</Text>
               <Text style={styles.emptyText}>Nobody on this crew knocked in the selected range.</Text>
             </View>
+          ) : displayRows.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No matches</Text>
+              <Text style={styles.emptyText}>
+                {search ? `No one matches “${search.trim()}”.` : 'No active canvassers in this range.'}
+              </Text>
+            </View>
           ) : (
             <>
-              {/* Per-canvasser cards */}
+              {/* Per-canvasser cards (checkbox selection in compare mode) */}
               <View style={styles.cardsWrap}>
-                {filteredRows.map((r, i) => (
+                {displayRows.map((r, i) => (
                   <CanvasserCard
                     key={r.userId}
                     row={r}
                     tz={tz}
                     rank={i + 1}
-                    litMode={campaignDoc?.type === 'lit_drop'}
+                    litMode={litMode}
                     onPress={() => openCanvasser(r)}
+                    selectable={compareMode}
+                    selected={selectedIds.has(r.userId)}
+                    onToggle={() => toggleSelected(r.userId)}
                   />
                 ))}
               </View>
@@ -516,7 +669,7 @@ export default function AdminTimeline() {
                   <View style={[styles.cellBase, styles.headCell, { width: NAME_W, alignItems: 'flex-start' }]}>
                     <Text style={styles.headText}>Canvasser</Text>
                   </View>
-                  {filteredRows.map((c) => (
+                  {displayRows.map((c) => (
                     <View key={c.userId} style={[styles.cellBase, styles.nameCell, { width: NAME_W }]}>
                       <Text style={styles.nameText} numberOfLines={1}>
                         {c.firstName} {c.lastName}
@@ -543,7 +696,7 @@ export default function AdminTimeline() {
                         <Text style={styles.headText}>{metric === 'surveys' ? 'Sv' : 'Kn'}</Text>
                       </View>
                     </View>
-                    {filteredRows.map((c) => (
+                    {displayRows.map((c) => (
                       <View key={c.userId} style={{ flexDirection: 'row' }}>
                         {columns.map((col) => {
                           const v = c[bucketKey]?.[col.key] || 0;
@@ -618,6 +771,51 @@ export default function AdminTimeline() {
           )}
         </ScrollView>
       )}
+
+      {/* Compare selection bar (folded in from Insights) */}
+      {compareMode ? (
+        <View style={styles.compareBar}>
+          <Text style={styles.compareCount}>{selectedIds.size} selected</Text>
+          <Pressable
+            onPress={openCompare}
+            disabled={selectedIds.size < 2}
+            style={[styles.compareGo, selectedIds.size < 2 && styles.compareGoDisabled]}
+          >
+            <Text style={styles.compareGoText}>Compare {selectedIds.size > 0 ? selectedIds.size : ''} ›</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <Modal
+        visible={sortMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSortMenuOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setSortMenuOpen(false)}>
+          <Pressable style={styles.sortSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.sortSheetTitle}>Sort by</Text>
+            {SORT_OPTIONS.map((opt) => {
+              const active = opt.key === sortKey;
+              return (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => {
+                    setSortKey(opt.key);
+                    setSortMenuOpen(false);
+                  }}
+                  style={[styles.sortOpt, active && styles.sortOptActive]}
+                >
+                  <Text style={[styles.sortOptText, active && styles.sortOptTextActive]}>
+                    {active ? '✓ ' : '  '}
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -633,14 +831,8 @@ function makeStyles(t) {
       alignItems: 'center',
       justifyContent: 'space-between',
     },
-    back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
     headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
-    campaignName: {
-      ...type.caption,
-      color: colors.textSecondary,
-      textAlign: 'center',
-      marginBottom: spacing.sm,
-    },
+    chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
 
     controls: {
       paddingHorizontal: spacing.lg,
@@ -680,6 +872,58 @@ function makeStyles(t) {
     pillText: { color: colors.textPrimary, fontWeight: '600', fontSize: 12 },
     pillTextActive: { color: colors.textInverse },
 
+    filterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      gap: spacing.sm,
+      paddingBottom: spacing.sm,
+    },
+    searchWrap: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.card,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: spacing.sm,
+    },
+    searchIcon: { marginRight: spacing.xs, fontSize: 13 },
+    searchInput: { flex: 1, paddingVertical: 8, color: colors.textPrimary, fontSize: 14 },
+    clear: { color: colors.textMuted, fontSize: 14, paddingHorizontal: spacing.xs },
+    sortBtn: {
+      backgroundColor: colors.card,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      minWidth: 130,
+    },
+    sortBtnText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm,
+      gap: spacing.sm,
+    },
+    toggleItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+    toggleLabel: { ...type.caption, color: colors.textSecondary },
+    actionBtn: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.md,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    actionBtnActive: { backgroundColor: colors.danger, borderColor: colors.danger },
+    actionBtnText: { ...type.caption, color: colors.textPrimary, fontWeight: '700' },
+    actionBtnTextActive: { color: colors.textInverse },
+
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
     emptyTitle: { ...type.h3 },
     emptyText: { ...type.caption, textAlign: 'center' },
@@ -706,37 +950,6 @@ function makeStyles(t) {
     kpiWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
 
     cardsWrap: { paddingHorizontal: spacing.lg },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.card,
-      borderRadius: radius.lg,
-      padding: spacing.md,
-      marginBottom: spacing.sm,
-      borderWidth: 1,
-      borderColor: colors.border,
-      ...shadow.card,
-      gap: spacing.sm,
-    },
-    rank: { width: 22, fontSize: 13, fontWeight: '800', color: colors.brand, textAlign: 'center' },
-    avatar: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.brandTint,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    avatarText: { color: colors.brand, fontWeight: '800', fontSize: 14 },
-    name: { ...type.bodyStrong, fontSize: 14 },
-    inactive: { ...type.caption, color: colors.textMuted, fontWeight: '400' },
-    meta: { ...type.caption, marginTop: 1 },
-    metaSmall: { fontSize: 11, color: colors.textMuted, fontVariant: ['tabular-nums'], marginTop: 2 },
-    statsLine: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.xs },
-    stat: { fontSize: 12, color: colors.textSecondary },
-    statBold: { fontSize: 12, color: colors.textPrimary, fontWeight: '700' },
-    shift: { fontSize: 11, color: colors.textMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
-    chev: { fontSize: 22, color: colors.textMuted, fontWeight: '300' },
 
     reconCard: {
       margin: spacing.lg,
@@ -791,5 +1004,48 @@ function makeStyles(t) {
     actionDot: { width: 8, height: 8, borderRadius: 4 },
     canvasserName: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, flex: 1 },
     canvasserAction: { fontSize: 12, color: colors.textSecondary },
+
+    compareBar: {
+      position: 'absolute',
+      left: spacing.lg,
+      right: spacing.lg,
+      bottom: spacing.lg,
+      backgroundColor: colors.textPrimary,
+      borderRadius: radius.lg,
+      padding: spacing.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      ...shadow.raised,
+    },
+    compareCount: { color: colors.textInverse, fontWeight: '700', flex: 1 },
+    compareGo: {
+      backgroundColor: colors.brand,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+    },
+    compareGoDisabled: { opacity: 0.4 },
+    compareGoText: { color: colors.textInverse, fontWeight: '800' },
+
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: colors.backdrop,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: spacing.lg,
+    },
+    sortSheet: {
+      backgroundColor: colors.card,
+      borderRadius: radius.lg,
+      padding: spacing.lg,
+      width: '100%',
+      maxWidth: 320,
+      ...shadow.raised,
+    },
+    sortSheetTitle: { ...type.h3, marginBottom: spacing.sm },
+    sortOpt: { paddingVertical: spacing.md, paddingHorizontal: spacing.sm, borderRadius: radius.md },
+    sortOptActive: { backgroundColor: colors.brandTint },
+    sortOptText: { ...type.body },
+    sortOptTextActive: { color: colors.brand, fontWeight: '700' },
   });
 }

@@ -194,6 +194,14 @@ export default function CampaignDetail() {
     router.push('/(app)/books');
   }
 
+  // Set this campaign active, then open the Timeline tab (which reads the active
+  // campaign via CampaignChip + a focus re-sync) so "See all" lands on THIS crew.
+  async function goTimeline() {
+    if (!campaign) return;
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
+    router.push('/(app)/admin/timeline');
+  }
+
   if (campaignsQ.data && !campaign) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -277,7 +285,7 @@ export default function CampaignDetail() {
           {/* Top canvassers (range) */}
           <SectionHeader
             title="Top canvassers"
-            onSeeAll={() => router.push('/(app)/admin/canvassers')}
+            onSeeAll={goTimeline}
             action={
               <InfoHint
                 title="What these mean"
@@ -363,7 +371,6 @@ export default function CampaignDetail() {
           <View style={styles.quickActions}>
             <NavTileGrid
               items={[
-                { label: 'Timeline', subtitle: 'Live performance dashboard', onPress: () => router.push({ pathname: '/(app)/admin/timeline', params: { campaignId: cId } }) },
                 { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
                 { label: 'Users', subtitle: 'Manage people', onPress: () => router.push('/(app)/admin/users') },
                 { label: 'Assignments', subtitle: 'Books & canvassers', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },

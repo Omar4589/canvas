@@ -21,7 +21,18 @@ function initials(name) {
     .toUpperCase();
 }
 
-export default function CanvasserCard({ row, tz, rank, litMode = false, onPress }) {
+export default function CanvasserCard({
+  row,
+  tz,
+  rank,
+  litMode = false,
+  onPress,
+  // Compare-mode selection (Timeline): render a checkbox in place of the rank and
+  // treat the whole card as a toggle. Defaults keep the card unchanged elsewhere.
+  selectable = false,
+  selected = false,
+  onToggle,
+}) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const rc = makeRateColors(colors);
@@ -31,13 +42,24 @@ export default function CanvasserCard({ row, tz, rank, litMode = false, onPress 
   const shift = formatRange(row.firstActivityAt, row.lastActivityAt, tz);
   const primaryVal = litMode ? row.dayLit || 0 : row.daySurveys || 0;
   const primaryLabel = litMode ? 'lit' : 'surveys';
+  const handlePress = selectable ? onToggle : onPress;
 
   return (
     <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && onPress && { opacity: 0.7 }]}
+      onPress={handlePress}
+      style={({ pressed }) => [
+        styles.row,
+        selectable && selected && styles.rowChecked,
+        pressed && handlePress && { opacity: 0.7 },
+      ]}
     >
-      {rank != null ? <Text style={styles.rank}>{rank}</Text> : null}
+      {selectable ? (
+        <View style={[styles.check, selected && styles.checkOn]}>
+          {selected ? <Text style={styles.checkMark}>✓</Text> : null}
+        </View>
+      ) : rank != null ? (
+        <Text style={styles.rank}>{rank}</Text>
+      ) : null}
       <View style={styles.avatar}>
         <Text style={styles.avatarText}>{initials(name) || '?'}</Text>
       </View>
@@ -64,7 +86,7 @@ export default function CanvasserCard({ row, tz, rank, litMode = false, onPress 
         </Text>
         {shift ? <Text style={styles.shift}>🕘 {shift}</Text> : null}
       </View>
-      {onPress ? <Text style={styles.chev}>›</Text> : null}
+      {!selectable && onPress ? <Text style={styles.chev}>›</Text> : null}
     </Pressable>
   );
 }
@@ -84,7 +106,19 @@ function makeStyles(t) {
       ...shadow.card,
       gap: spacing.sm,
     },
+    rowChecked: { borderColor: colors.brand, backgroundColor: colors.brandTint },
     rank: { width: 22, fontSize: 13, fontWeight: '800', color: colors.brand, textAlign: 'center' },
+    check: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkOn: { backgroundColor: colors.brand, borderColor: colors.brand },
+    checkMark: { color: colors.textInverse, fontWeight: '800', fontSize: 14 },
     avatar: {
       width: 40,
       height: 40,

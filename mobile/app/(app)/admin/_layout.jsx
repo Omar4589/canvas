@@ -20,12 +20,11 @@ function OverviewIcon({ color, size }) {
   );
 }
 
-function PeopleIcon({ color, size }) {
+function ClockIcon({ color, size }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx="9" cy="8" r="3.2" stroke={color} strokeWidth="2" />
-      <Path d="M3.5 19c0-3 2.6-5 5.5-5s5.5 2 5.5 5" stroke={color} strokeWidth="2" strokeLinecap="round" />
-      <Path d="M16 6.2a3 3 0 0 1 0 5.6M17.5 19c0-2.3-1-4-2.6-4.6" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <Circle cx="12" cy="12" r="9" stroke={color} strokeWidth="2" />
+      <Path d="M12 7v5l3.5 2" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
@@ -125,8 +124,8 @@ export default function AdminLayout() {
         options={{ title: 'Overview', tabBarIcon: ({ color, size }) => <OverviewIcon color={color} size={size} /> }}
       />
       <Tabs.Screen
-        name="canvassers"
-        options={{ title: 'Insights', tabBarIcon: ({ color, size }) => <PeopleIcon color={color} size={size} /> }}
+        name="timeline"
+        options={{ title: 'Timeline', tabBarIcon: ({ color, size }) => <ClockIcon color={color} size={size} /> }}
       />
       <Tabs.Screen
         name="map"
@@ -146,7 +145,6 @@ export default function AdminLayout() {
       <Tabs.Screen name="answer-voters" options={{ href: null }} />
       <Tabs.Screen name="users/[id]" options={{ href: null }} />
       <Tabs.Screen name="overlaps" options={{ href: null }} />
-      <Tabs.Screen name="timeline" options={{ href: null }} />
       <Tabs.Screen name="campaign/[campaignId]" options={{ href: null }} />
       <Tabs.Screen name="book/[turfId]" options={{ href: null }} />
       <Tabs.Screen name="campaign-assignments/[campaignId]" options={{ href: null }} />
