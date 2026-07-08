@@ -127,6 +127,64 @@ the round on the Passes page — canvassers see their books again with all prior
 There is **no "add just the new houses to the existing books"** option. Recutting is all-or-nothing
 for a pass: replace that pass's whole book set.
 
+## Editing books after the cut (move a door, merge, split)
+
+Sometimes you don't need a full recut — you just want to reshape a book or two. These edits live in
+the books editor on the Turf Cutting page and apply to a pass's **published** books.
+
+> **The rule that makes all of this safe: knocks follow the _door_, not the _book_.** A knock is
+> recorded against a household (door) + pass — never against a book — so moving a door to another
+> book, merging books, or splitting a book **never changes coverage or billable counts**, and an
+> already-knocked door keeps its status wherever it lands. And a **billable knock is one distinct
+> (door, pass)**: if two canvassers on the same book knock the same door in the same pass, it bills
+> **once** (a new pass counts again). Overlap can never double-bill.
+
+- **Move a door to another book.** Pulls the house out of its current book and into the target,
+  re-numbering both books' walk order. A door can only move between books **in the same walk list**
+  (walk lists own disjoint doors). You can also move **every unit of one building** at once.
+- **Merge two or more books** (same pass) into one. The first book is kept; the others' doors move
+  into it and the emptied books are removed. **Assignments are folded in:** if the books were assigned
+  to the _same_ person, they stay assigned once; if to _different_ people, **both stay assigned to the
+  merged book** — on purpose (you _can_ put two canvassers on one book, and billing won't double-count
+  if they overlap). Reassign afterward if you want a single owner.
+- **Split a book** — peel a subset of doors out into a **new** book. Heads-up: the new book comes out
+  **unassigned** (a merge can fold assignments; a split can't guess who should get the new book), so
+  **assign it** or its doors drop off the original canvasser's list.
+
+**Two things to know, by design:**
+- **A merge can't be undone** (unlike Discard, it takes no snapshot). Merging already-worked books is
+  safe for the counts, but you can't un-merge — recut the pass if you need the old split back.
+- **Fixing a pin ≠ moving the door's book.** Correcting a mis-placed pin (below) moves the _dot_ only;
+  the door stays in whatever book the cut put it in. If a pin was so wrong it sat in the wrong area,
+  fix the pin **and** use _Move door_ to put it in the right book.
+
+## Fixing a mis-placed pin
+
+A house pin in the wrong spot can be dragged to its correct location — an admin does it on the web map
+(**"Move pin"**), and a **canvasser can do it in the field** (**"Fix pin location,"** including "use my
+current GPS"). Either way it corrects **only the coordinates** (with an audit trail); it does **not**
+change the book, the walk order, the door's status, or any count, and it **needs no recut**. Canvassers
+see the corrected spot on their **next sync (within ~30s** — see below). Full mechanics:
+[MAPS.md → Coordinate provenance & pin correction](MAPS.md). (What you _can't_ do in-app is edit the
+address _text_ or re-run geocoding on a single door — the pin drag is the tool.)
+
+## How field phones get these edits — and when
+
+The field app is **pull-only** (no live push). Two refresh layers decide _when_ a canvasser sees an
+admin change:
+
+| What you changed | When the canvasser sees it |
+|---|---|
+| A **pin move**, a door's **status**, or a door going **excluded/voted** | **Live — within ~30s.** A background delta patches their map in place. |
+| A door's **book** (move / merge / split / supplemental) or **who's assigned** a book | **Next full refresh** — pull-to-refresh, reopening/switching the campaign, a round activating, or a cold app start. |
+
+So a **pin fix is near-live**, but **reshuffling books or reassigning people is not** — the phone keeps
+showing the old books until a full refresh. Nothing is lost or miscounted in the meantime (a door
+briefly visible in two places still bills once per pass), but if you move work between canvassers
+**mid-shift, tell them to pull-to-refresh** so the losing canvasser drops the door and the new one
+picks it up. Plumbing behind both layers is in [MAPS.md](MAPS.md); the field flow is in
+[CANVASSER_APP.md](CANVASSER_APP.md). Technical details in Part 2 §G.
+
 ## Targeted follow-up rounds (cut over only the doors that still need work)
 
 A new round normally cuts the effort's **whole** door universe. For a **follow-up round** you can cut
@@ -208,8 +266,8 @@ Your options:
    want the whole pass re-balanced.
 3. **Create a new pass** for the updated voter universe and cut fresh books there. The old pass and
    its knocks stay exactly as they were. → the "keep them and make a new pass" path.
-4. **Manually** move the new households into existing books one at a time (books editor). Fine for a
-   few; impractical for a bulk import.
+4. **Manually** move the new households into existing books one at a time (see **Editing books after
+   the cut** above). Fine for a few; impractical for a bulk import.
 
 > **Walk-list gotcha.** The above "recut includes new addresses" only holds for an **all-voters**
 > pass. If the pass is bound to a **walk list** (frozen snapshot), a recut uses that frozen list and
@@ -315,7 +373,11 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/add-supplemental` | **Non-destructive add.** Cut the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirror `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`); serialized by `Pass.recutLock`. New books then use Accept + Assign. Body `{ passId, name?, maxDoors? }` → `{ added, bookCount, bookIds }`. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
 | `POST .../turfs/discard` | **409 `active-pass-confirm-required`** (with `knockCount`/`assignmentCount`/`isActive`) when the pass is active **or has recorded knocks** and `confirmActive` isn't set — the client's typed-confirm dialog supplies it. Then: snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` and clear `activePassId`; optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse` (captured in the snapshot). Serialized by `Pass.recutLock`. The turfs `GET /` also returns `knockCount` for the selected pass (drives the dialog's warning). |
 | `POST .../turfs/restore-snapshot` | Re-create books + assignments from a snapshot (blocked if live books exist; does not auto-reactivate the pass). |
-| move/merge/split door endpoints | Manual book edits; re-tessellate via `recomputeTurf` / `recomputePassTerritories`. |
+| `POST .../turfs/move-door` `{ householdId, fromTurfId?, toTurfId }` ([:851](../server/src/routes/admin/turfs.js#L851)) | Move one door between books in the same pass. Pulls it from its current book, pushes into `toTurfId`, `recomputeTurf` on both (re-mirrors `Household.turfId`/`walkOrder`) + `recomputePassTerritories`. **409** if the door's `effortId` ≠ the target book's effort (disjointness). Does **not** touch `CanvassActivity`. |
+| `POST .../turfs/move-doors` `{ householdIds[], toTurfId }` ([:892](../server/src/routes/admin/turfs.js#L892)) | Bulk move (e.g. every unit of a building) — pulls the ids out of every other book in the pass, adds to `toTurfId`, one `recomputeTurf`/`recomputePassTerritories`. Same effort guard. |
+| `POST .../turfs/merge` `{ turfIds[] }` ([:930](../server/src/routes/admin/turfs.js#L930)) | Merge ≥2 books of the **same pass** into `turfs[0]` (survivor). Union the doors onto the survivor; **fold assignments** (`findOneAndUpdate` upsert on `{turfId:survivor, userId}` → same-user dedups, different-users **both survive**); **hard-delete** the absorbed `Turf`s + their `TurfAssignment`s; `recomputeTurf`/`recomputePassTerritories`. **No snapshot → irreversible.** Survivor = DB order of the `$in`, not request order. |
+| `POST .../turfs/:turfId/split` `{ householdIds[], name? }` ([:970](../server/src/routes/admin/turfs.js#L970)) | Peel `householdIds` out of the book into a **new** `Turf` (same pass/mode/params, `status` copied). `recomputeTurf` on both. **Creates no `TurfAssignment`** — the split-off book comes out unassigned. |
+| `POST .../turfs/unassign-bulk` `{ turfIds[], userIds[] }` ([:151](../server/src/routes/admin/turfs.js#L151)) | Campaign-scoped `TurfAssignment.deleteMany` for the given (book, user) pairs — the "unassign everywhere" path. Touches no `Household`. |
 
 ## D. Why new households are unassigned after import
 
@@ -347,3 +409,53 @@ belongs to via the passes' **`activatedAt` half-open windows**
 ([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)), falling back to
 `Campaign.activePassId`. This is why `activatedAt` is preserved across recuts and why archived
 passes still own their historical knocks.
+
+## G. Post-cut book edits & field-app propagation
+
+The move/merge/split routes in §C are **pure book-membership operations**: they rewrite
+`Turf.householdIds` and its `Household.turfId`/`walkOrder` mirror (via `recomputeTurf`,
+[generateTurf.js:245](../server/src/services/turf/generateTurf.js#L245)), then re-tessellate the pass
+(`recomputePassTerritories`, [:270](../server/src/services/turf/generateTurf.js#L270)). **None of them
+writes `CanvassActivity`.** That is what makes them count-safe:
+
+- **Knocks key on `(householdId, passId)`, never on a book** — see `CanvassActivity`
+  ([models/CanvassActivity.js:26,46-58](../server/src/models/CanvassActivity.js#L26)) and its
+  `{passId, householdId}` status indexes. Per-round door status is **derived** from that pair
+  (`getPassStatusMap` / `statusesFromDoorPass`, [passStatus.js](../server/src/services/passes/passStatus.js)),
+  so a moved/merged/split door keeps its status wherever it lands, and book progress recomputes over
+  the new membership.
+- **`CanvassActivity.turfId` is a write-only stamp** — set at knock time, **not** re-written by these
+  edits, so historical rows keep pointing at the book the door was in when knocked. Harmless: nothing
+  in reporting reads it (§E — "`bookId` not used in reporting at all"); book attribution always goes
+  through the _live_ `Turf.householdIds`. **Do not** add a report that groups knocks by
+  `CanvassActivity.turfId` without back-filling these edits first.
+
+**Field-app propagation.** A canvasser's doors are resolved **live** per request from
+`TurfAssignment → Turf.householdIds` (`canvasserBooks` / `canvasserScopeWithPasses`,
+[canvasserScope.js](../server/src/services/canvass/canvasserScope.js)) in `GET /mobile/bootstrap` — there
+is no server-side snapshot, so a full bootstrap always reflects current membership + assignment. But
+the app **does not** refetch bootstrap on remount (`staleTime 30s`, `refetchOnMount:false`,
+[map.jsx:310-337](../mobile/app/(app)/map.jsx#L310)); between full fetches it relies on the **30s delta**
+`GET /mobile/changes` ([map.jsx:489-556](../mobile/app/(app)/map.jsx#L489)), which returns households whose
+`updatedAt > since` **within the caller's current scope** and patches only `status` + `location` (pin) +
+archival on **already-cached** doors. Consequences:
+
+- **Pin moves & status changes propagate in ~30s** (they bump `Household.updatedAt` and stay in scope).
+- **A move/merge/split is _not_ reflected by the delta**: it never adds a door, never changes book
+  membership, and carries no removal signal — so a door that moved _out_ of a canvasser's book lingers
+  on their cached map, and one that moved _in_ doesn't appear, until a full bootstrap.
+- **A reassignment is invisible to the delta entirely** — `TurfAssignment` writes touch no `Household`,
+  so nothing bumps `updatedAt`. The new/losing canvasser updates only on a full bootstrap.
+- **Full-bootstrap triggers:** pull-to-refresh (campaigns/stats screens invalidate `['bootstrap']`),
+  campaign switch (`clearBootstrap`), a round change detected by the delta (`activePassIds` differs →
+  invalidate), or cold start. This is deliberate — a naive refetch-on-mount would revert an optimistic
+  recolor — so liveness is "delta + manual refresh," not auto-refetch.
+
+Bottom line: **membership/assignment edits are eventually-consistent on the client, reconciled at the
+next full bootstrap; billing stays correct throughout** because it dedups per `(household, pass)` (§E).
+
+**Wrong Address** is one of the `KNOCK_ACTIONS` ([aggregations.js:8](../server/src/services/reports/aggregations.js#L8)) —
+a real **billable knock that counts as coverage**, non-sticky in `Household.status` (`resolveStatus`
+makes only survey/lit sticky, [statusPrecedence.js](../server/src/utils/statusPrecedence.js)). A canvasser
+can flag it, drop a note, and fix the pin, but **cannot edit the address string** — that's an admin/data
+change on the web side.

@@ -113,6 +113,10 @@ campaigns they manage (see [ROLES.md](ROLES.md)).
 - **How fresh:** the web map refreshes ~every 20s; the mobile app keeps doors in sync ~every 30s.
   Mobile stays deliberately light on battery (canvassers open and close the app all day), while the
   web map can be more live because admins sit at a connected desk.
+- **What's live vs. what needs a refresh:** pin fixes and status changes sync in ~30s, but **moving a
+  door to another book, merging/splitting books, or reassigning a canvasser only show up after a full
+  refresh** (pull-to-refresh / reopen the campaign). See
+  [PASSES_AND_TURF.md → How field phones get these edits](PASSES_AND_TURF.md).
 
 ## Approximate pins, and fixing them
 

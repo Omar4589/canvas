@@ -59,7 +59,10 @@ actions, so the menu isn't in the way of the job:
 - **Refresh** (↻) — syncs your work and pulls the latest doors. On the **book picker** it's in the
   header next to the logo. On the **houses map** it lives in the bottom-right control stack (above
   the terrain + recenter buttons) where your thumb already is, and it carries the offline-pending
-  badge; tapping it also flushes anything you recorded offline.
+  badge; tapping it also flushes anything you recorded offline. **Tap it if a lead reshuffled your
+  books mid-shift** — a book being moved, merged, or reassigned only lands on your phone after a full
+  refresh (pin fixes and status changes arrive on their own ~30s sync). See
+  [PASSES_AND_TURF.md → How field phones get these edits](PASSES_AND_TURF.md).
 - **Switch campaign** — on the book picker, a one-tap way back to the campaign list (next to the
   menu button).
 
