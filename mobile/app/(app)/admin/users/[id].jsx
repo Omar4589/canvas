@@ -208,6 +208,35 @@ export default function AdminUserDetail() {
     onError: (err) => flash('error', err.message),
   });
 
+  // Campaign roster membership — assign this person to campaigns from their own profile.
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+  });
+  const userCampaignsQ = useQuery({
+    queryKey: ['admin', 'membership-campaigns', userId],
+    queryFn: () => api(`/admin/memberships/${userId}/campaigns`),
+    enabled: !!userId,
+  });
+  const assignCampaign = useMutation({
+    mutationFn: (campaignId) =>
+      api(`/admin/campaigns/${campaignId}/assignments`, { method: 'POST', body: { userIds: [userId] } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'membership-campaigns', userId] });
+      flash('success', 'Added to campaign.');
+    },
+    onError: (err) => flash('error', err.message),
+  });
+  const unassignCampaign = useMutation({
+    mutationFn: (campaignId) =>
+      api(`/admin/campaigns/${campaignId}/assignments/${userId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'membership-campaigns', userId] });
+      flash('success', 'Removed from campaign.');
+    },
+    onError: (err) => flash('error', err.message),
+  });
+
   if (usersQ.isLoading || !currentUser) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -544,6 +573,52 @@ export default function AdminUserDetail() {
             )}
           </View>
 
+          {/* Campaigns — assign this person to campaigns straight from their profile */}
+          <View style={styles.card}>
+            <Text style={styles.sectionLabel}>Campaigns</Text>
+            {campaignsQ.isLoading || userCampaignsQ.isLoading ? (
+              <ActivityIndicator color={colors.brand} style={{ marginVertical: spacing.sm }} />
+            ) : (
+              (() => {
+                const assigned = new Set(userCampaignsQ.data?.campaignIds || []);
+                const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
+                if (campaigns.length === 0) {
+                  return <Text style={styles.campaignEmpty}>No active campaigns.</Text>;
+                }
+                const pendingId = assignCampaign.isPending
+                  ? assignCampaign.variables
+                  : unassignCampaign.isPending
+                    ? unassignCampaign.variables
+                    : null;
+                return campaigns.map((c) => {
+                  const cid = String(c._id);
+                  const on = assigned.has(cid);
+                  const busy = pendingId === cid;
+                  return (
+                    <View key={cid} style={styles.campaignRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.campaignName}>{c.name}</Text>
+                        <Text style={styles.campaignMeta}>
+                          {c.state}
+                          {c.type === 'lit_drop' ? ' · Lit drop' : ' · Survey'}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => (on ? unassignCampaign.mutate(cid) : assignCampaign.mutate(cid))}
+                        disabled={busy}
+                        style={[styles.campaignBtn, on ? styles.campaignBtnOn : styles.campaignBtnOff, busy && { opacity: 0.5 }]}
+                      >
+                        <Text style={[styles.campaignBtnText, on ? styles.campaignBtnTextOn : styles.campaignBtnTextOff]}>
+                          {busy ? '…' : on ? 'Unassign' : 'Assign'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                });
+              })()
+            )}
+          </View>
+
           {/* Lifetime stats */}
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Activity (lifetime)</Text>
@@ -753,6 +828,29 @@ function makeStyles(t) {
     ...type.micro,
     marginBottom: spacing.md,
   },
+  campaignEmpty: { ...type.caption, color: colors.textSecondary },
+  campaignRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  campaignName: { ...type.bodyStrong, fontSize: 14 },
+  campaignMeta: { ...type.caption, marginTop: 1 },
+  campaignBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    minWidth: 88,
+    alignItems: 'center',
+  },
+  campaignBtnOn: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerBg },
+  campaignBtnOff: { borderColor: colors.brand, backgroundColor: colors.brandTint },
+  campaignBtnText: { fontSize: 12, fontWeight: '700' },
+  campaignBtnTextOn: { color: colors.danger },
+  campaignBtnTextOff: { color: colors.brand },
   formLabel: {
     ...type.caption,
     color: colors.textPrimary,

@@ -11,7 +11,7 @@ import {
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../lib/useFocusedPoll';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -196,6 +196,7 @@ function ProgressStat({ pinStatus, value, label }) {
 // house-selected modes (the legend is short, the voter list is long).
 function PullableSheet({ translateY, snapDelta, sheetHeight, children }) {
   const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const startY = useSharedValue(0);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -231,7 +232,9 @@ function PullableSheet({ translateY, snapDelta, sheetHeight, children }) {
           <View style={styles.sheetHandle} />
         </Pressable>
       </GestureDetector>
-      <View style={styles.sheetBody}>{children}</View>
+      <View style={[styles.sheetBody, { paddingBottom: spacing.xl + insets.bottom }]}>
+        {children}
+      </View>
     </Animated.View>
   );
 }
@@ -242,8 +245,15 @@ export default function MapScreen() {
   const { styleId, styleURL, setStyle } = useMapStyle();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // Bottom safe-area inset (Android nav bar / iOS home indicator; 0 when neither).
+  // The sheet is edge-to-edge (bottom:0), so its peek buttons + expanded list need
+  // this much clearance to sit above the nav bar. See the sizing effect below.
+  const insets = useSafeAreaInsets();
   const cameraRef = useRef(null);
   const cameraInitializedRef = useRef(false);
+  // First sheet-size pass sets heights instantly (no animation) so the correct
+  // inset-aware height is there on first paint; later passes animate on selection.
+  const sheetSizedRef = useRef(false);
   const [selected, setSelected] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [following, setFollowing] = useState(false);
@@ -272,7 +282,9 @@ export default function MapScreen() {
   const sheetSnapDelta = useSharedValue(
     PROGRESS_EXPANDED_HEIGHT - PROGRESS_PEEK_HEIGHT
   );
-  const sheetHeight = useSharedValue(PROGRESS_EXPANDED_HEIGHT);
+  const sheetHeight = useSharedValue(
+    PROGRESS_EXPANDED_HEIGHT + (initialWindowMetrics?.insets?.bottom ?? 0)
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -388,13 +400,27 @@ export default function MapScreen() {
   // peek + expanded heights. Progress mode is short (just stats + legend);
   // house mode is taller (peek with buttons + scrollable voter list).
   useEffect(() => {
-    const peek = selected ? HOUSE_PEEK_HEIGHT : PROGRESS_PEEK_HEIGHT;
-    const expanded = selected ? HOUSE_EXPANDED_HEIGHT : PROGRESS_EXPANDED_HEIGHT;
+    // Reserve the bottom inset (nav bar / home indicator) by growing BOTH peek and
+    // expanded by the same amount — snapDelta (expanded - peek) is unchanged, so the
+    // drag/snap feel and the recenter button's edge-tracking stay identical; the whole
+    // sheet just sits `insets.bottom` taller. The peek fillers below the last visible
+    // element (button row / stats row) turn that extra band into clearance.
+    const b = insets.bottom;
+    const peek = (selected ? HOUSE_PEEK_HEIGHT : PROGRESS_PEEK_HEIGHT) + b;
+    const expanded = (selected ? HOUSE_EXPANDED_HEIGHT : PROGRESS_EXPANDED_HEIGHT) + b;
     const nextSnap = expanded - peek;
     sheetSnapDelta.value = nextSnap;
-    sheetHeight.value = withTiming(expanded, SHEET_TIMING);
-    sheetTranslateY.value = withTiming(nextSnap, SHEET_TIMING);
-  }, [selected, sheetSnapDelta, sheetHeight, sheetTranslateY]);
+    if (!sheetSizedRef.current) {
+      // First pass: set instantly so the inset-correct size is there on first paint
+      // (insets can be 0 on the first commit, then resolve) — no mount "settle".
+      sheetSizedRef.current = true;
+      sheetHeight.value = expanded;
+      sheetTranslateY.value = nextSnap;
+    } else {
+      sheetHeight.value = withTiming(expanded, SHEET_TIMING);
+      sheetTranslateY.value = withTiming(nextSnap, SHEET_TIMING);
+    }
+  }, [selected, insets.bottom, sheetSnapDelta, sheetHeight, sheetTranslateY]);
 
   // Smart hybrid initial camera. Try GPS — if the user is roughly inside the
   // campaign's footprint we drop them on themselves at walking zoom. Otherwise
@@ -1215,6 +1241,7 @@ function ShiftStat({ label, value }) {
 function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const RATE_COLORS = makeRateColors(colors);
   const legend = isLitDrop ? LIT_DROP_LEGEND : SURVEY_LEGEND;
   const breakdown = today.answerBreakdown || [];
@@ -1231,7 +1258,7 @@ function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
         <Text style={styles.progressTitle}>Today's Progress</Text>
         <Text style={styles.progressLegendHint}>pull up for more</Text>
       </View>
-      <View style={styles.progressRow}>
+      <View style={[styles.progressRow, { marginBottom: insets.bottom }]}>
         <ProgressStat
           pinStatus="not_home"
           value={today.doorsKnocked?.toLocaleString()}
@@ -1347,6 +1374,7 @@ function SelectedHouseSheetContent({
   onClose,
 }) {
   const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   return (
     <>
       {/* Peek */}
@@ -1394,7 +1422,7 @@ function SelectedHouseSheetContent({
         )}
       </View>
 
-      <View style={styles.sheetButtons}>
+      <View style={[styles.sheetButtons, { marginBottom: spacing.sm + insets.bottom }]}>
         <Pressable
           onPress={onOpen}
           style={[styles.primaryButton, { flex: 1, marginRight: 6 }]}

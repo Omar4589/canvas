@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../../lib/api';
-import { loadActiveCampaign } from '../../../../lib/cache';
+import { loadActiveCampaign, loadCurrentUser } from '../../../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../lib/config';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
@@ -102,6 +102,14 @@ export default function AdminBookDetail() {
     loadActiveCampaign().then((c) => c?.id && setCId(c.id));
   }, [cId]);
 
+  // Current user, so an admin/lead/super can self-assign this book (they're filtered out of
+  // the canvasser roster by role, so we inject them, badged "You").
+  const [self, setSelf] = useState(null);
+  useEffect(() => {
+    loadCurrentUser().then((u) => setSelf(u || null));
+  }, []);
+  const selfId = self?.id ? String(self.id) : null;
+
   const cameraRef = useRef(null);
   const camInit = useRef(false);
   const [mapReady, setMapReady] = useState(false);
@@ -163,6 +171,11 @@ export default function AdminBookDetail() {
         .map((m) => ({ id: String(m.user.id), firstName: m.user.firstName, lastName: m.user.lastName, email: m.user.email })),
     [membersQ.data, rosterUserIds]
   );
+  // Roster + self (self first, badged "You") for the assign picker.
+  const rosterWithSelf = useMemo(() => {
+    if (!selfId || roster.some((r) => r.id === selfId)) return roster;
+    return [{ id: selfId, firstName: self.firstName || 'You', lastName: self.lastName || '', email: self.email, isSelf: true }, ...roster];
+  }, [roster, selfId, self]);
 
   const features = useMemo(
     () => ({
@@ -218,6 +231,7 @@ export default function AdminBookDetail() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['admin', 'book-assign', cId, turfId] });
     qc.invalidateQueries({ queryKey: ['admin', 'turf-assignments'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
     qc.invalidateQueries({ queryKey: ['admin', 'efforts', cId] });
   };
   // Always reconcile to server truth on settle (success OR error) — so a partial /
@@ -228,6 +242,14 @@ export default function AdminBookDetail() {
   const assignMut = useMutation({
     mutationFn: ({ userId }) =>
       api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments`, { method: 'POST', body: { userIds: [userId] } }),
+    ...writeOpts,
+  });
+  // Self-assign: add self to the roster first (leads need it), then assign the book.
+  const selfAssignMut = useMutation({
+    mutationFn: async () => {
+      await api(`/admin/campaigns/${cId}/assignments`, { method: 'POST', body: { userIds: [selfId] } });
+      return api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments`, { method: 'POST', body: { userIds: [selfId] } });
+    },
     ...writeOpts,
   });
   const unassignMut = useMutation({
@@ -255,7 +277,7 @@ export default function AdminBookDetail() {
       }),
     ...writeOpts,
   });
-  const mutating = assignMut.isPending || unassignMut.isPending || assignAllMut.isPending || unassignAllMut.isPending;
+  const mutating = assignMut.isPending || unassignMut.isPending || assignAllMut.isPending || unassignAllMut.isPending || selfAssignMut.isPending;
 
   // House popup detail (address + voters), fetched on tap.
   const houseQ = useQuery({
@@ -413,7 +435,7 @@ export default function AdminBookDetail() {
                 <Text style={styles.sheetCloseX}>✕</Text>
               </Pressable>
             </View>
-            {roster.length === 0 ? (
+            {rosterWithSelf.length === 0 ? (
               <Text style={styles.sheetSub}>
                 No canvassers assigned to this campaign yet.{'\n'}
                 <Text style={styles.link} onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}>
@@ -439,20 +461,29 @@ export default function AdminBookDetail() {
                   </Pressable>
                 </View>
                 <ScrollView style={{ maxHeight: 360 }}>
-                {roster.map((c) => {
+                {rosterWithSelf.map((c) => {
                   const assigned = assignedSet.has(c.id);
                   return (
                     <View key={c.id} style={styles.assignRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.assignName}>
                           {c.firstName} {c.lastName}
+                          {c.isSelf ? <Text style={styles.youTag}>  You</Text> : null}
                         </Text>
-                        <Text style={styles.assignSub} numberOfLines={1}>
-                          {c.email}
-                        </Text>
+                        {c.email ? (
+                          <Text style={styles.assignSub} numberOfLines={1}>
+                            {c.email}
+                          </Text>
+                        ) : null}
                       </View>
                       <Pressable
-                        onPress={() => (assigned ? unassignMut.mutate({ userId: c.id }) : assignMut.mutate({ userId: c.id }))}
+                        onPress={() =>
+                          assigned
+                            ? unassignMut.mutate({ userId: c.id })
+                            : c.isSelf && !rosterUserIds.has(c.id)
+                              ? selfAssignMut.mutate()
+                              : assignMut.mutate({ userId: c.id })
+                        }
                         disabled={mutating}
                         style={[styles.action, assigned ? styles.actionUnassign : styles.actionAssign]}
                       >
@@ -557,6 +588,7 @@ function makeStyles(t) {
       borderBottomColor: colors.border,
     },
     assignName: { ...type.bodyStrong, fontSize: 14 },
+    youTag: { fontSize: 11, fontWeight: '800', color: colors.brand },
     assignSub: { ...type.caption, marginTop: 1 },
     action: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1 },
     actionAssign: { borderColor: colors.brand, backgroundColor: colors.brandTint },

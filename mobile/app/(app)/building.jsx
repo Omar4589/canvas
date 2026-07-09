@@ -1,6 +1,6 @@
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { groupBuildings } from '../../lib/buildings';
 import { recordHouseholdAction } from '../../lib/recordAction';
@@ -14,6 +14,7 @@ export default function BuildingScreen() {
   const qc = useQueryClient();
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets(); // edges={['top']} omits bottom; pad the scroll for the nav bar
 
   // Pure reader (see household/[id].jsx): no auto-refetch on mount, so a stale
   // bootstrap fetch can't revert an optimistic quick-action recolor.
@@ -60,7 +61,7 @@ export default function BuildingScreen() {
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + insets.bottom }}>
         {building.units.map((u) => {
           const voters = (bootstrap?.voters || []).filter((v) => String(v.householdId) === String(u._id));
           const surveyed = voters.filter((v) => v.surveyStatus === 'surveyed').length;

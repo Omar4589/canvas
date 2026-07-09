@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,41 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../lib/api';
+import { loadCurrentUser } from '../../../lib/cache';
+import { useMapStyle } from '../../../lib/mapStyles';
+import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import CampaignChip from '../../../components/CampaignChip';
 import EffortPicker from '../../../components/EffortPicker';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
+if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
+
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+const BOOK_STATUS_CHIPS = [
+  { key: 'assigned', label: 'Assigned' },
+  { key: 'unassigned', label: 'Unassigned' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'in_progress', label: 'In progress' },
+  { key: 'not_started', label: 'Not started' },
+];
+
+// The status keys a book matches — coverage (assigned/unassigned) + progress (from per-book done/total).
+function bookStatusSet(book, usersByBook, progressByTurf) {
+  const s = new Set();
+  s.add((usersByBook.get(book.id)?.length || 0) > 0 ? 'assigned' : 'unassigned');
+  const prog = progressByTurf.get(book.id);
+  const total = prog?.total ?? book.doors;
+  const knocked = prog?.knocked ?? 0;
+  if (total > 0 && knocked >= total) s.add('completed');
+  else if (knocked > 0) s.add('in_progress');
+  else s.add('not_started');
+  return s;
+}
 
 // Admin/super-admin: assign & unassign the active round's BOOKS (turf) to canvassers.
 // By book (tap → map detail; Select mode for multi-assign) / By canvasser (quick toggles).
@@ -29,17 +56,30 @@ export default function AdminBooks() {
   const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const qc = useQueryClient();
+  const { styleURL } = useMapStyle();
+  const cameraRef = useRef(null);
+  const camInit = useRef(false);
 
   const [campaign, setCampaign] = useState(null);
   const cId = campaign?.id || null;
+  // Current user, so admins/leads/super can self-assign (they're filtered out of the
+  // canvasser roster by role, so we inject them explicitly, badged "You").
+  const [self, setSelf] = useState(null);
+  useEffect(() => {
+    loadCurrentUser().then((u) => setSelf(u || null));
+  }, []);
+  const selfId = self?.id ? String(self.id) : null;
   const [effortId, setEffortId] = useState(null);
   const [view, setView] = useState('book'); // 'book' | 'canvasser'
+  const [bookView, setBookView] = useState('list'); // 'list' | 'map' (book view only)
   const [search, setSearch] = useState('');
-  const [unassignedOnly, setUnassignedOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(() => new Set()); // empty = show all
   const [expandedUser, setExpandedUser] = useState(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState(() => new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [mapSheetBookId, setMapSheetBookId] = useState(null); // single-book assign sheet on the map
+  const [mapReady, setMapReady] = useState(false);
 
   // --- data ---
   const effortsQ = useQuery({
@@ -103,6 +143,12 @@ export default function AdminBooks() {
         .map((m) => ({ id: String(m.user.id), firstName: m.user.firstName, lastName: m.user.lastName, email: m.user.email })),
     [membersQ.data, rosterUserIds]
   );
+  // Assignable list = the canvasser roster + the current admin/lead/super (self), so they can
+  // put themselves on a book. Self goes first, badged "You". Skip if self is already listed.
+  const rosterWithSelf = useMemo(() => {
+    if (!selfId || roster.some((r) => r.id === selfId)) return roster;
+    return [{ id: selfId, firstName: self.firstName || 'You', lastName: self.lastName || '', email: self.email, isSelf: true }, ...roster];
+  }, [roster, selfId, self]);
   const usersByBook = useMemo(() => {
     const m = new Map();
     for (const a of assignmentsQ.data?.assignments || []) {
@@ -141,7 +187,13 @@ export default function AdminBooks() {
     () =>
       (turfsQ.data?.turfs || [])
         .filter((t) => t.status === 'published')
-        .map((t) => ({ id: String(t._id), name: t.name, doors: t.eligibleDoorCount ?? t.doorCount ?? 0 }))
+        .map((t) => ({
+          id: String(t._id),
+          name: t.name,
+          doors: t.eligibleDoorCount ?? t.doorCount ?? 0,
+          boundary: t.boundary || null, // GeoJSON Polygon (display-only hull) — drives the map
+          centroid: t.centroid || null, // GeoJSON Point
+        }))
         .sort(byName),
     [turfsQ.data]
   );
@@ -149,17 +201,25 @@ export default function AdminBooks() {
     () => books.filter((b) => !(usersByBook.get(b.id)?.length)).length,
     [books, usersByBook]
   );
+  const statusCounts = useMemo(() => {
+    const c = { assigned: 0, unassigned: 0, completed: 0, in_progress: 0, not_started: 0 };
+    for (const b of books) for (const k of bookStatusSet(b, usersByBook, progressByTurf)) c[k] += 1;
+    return c;
+  }, [books, usersByBook, progressByTurf]);
 
   // Reset transient UI when the scope/view changes.
   useEffect(() => {
     setExpandedUser(null);
     setSelectMode(false);
     setSelectedBooks(new Set());
+    setMapSheetBookId(null);
+    camInit.current = false; // re-fit the map to the new scope
   }, [cId, passId, view]);
 
   // --- mutations ---
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['admin', 'turf-assignments', cId, passId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
     qc.invalidateQueries({ queryKey: ['admin', 'efforts', cId] });
   };
   const assignMut = useMutation({
@@ -172,8 +232,23 @@ export default function AdminBooks() {
       api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments/${userId}`, { method: 'DELETE' }),
     onSuccess: invalidate,
   });
+  // Self-assign a book: a lead must be on the roster first (partitionAssignable gate), so add
+  // self to the campaign then assign the book. Idempotent + harmless for admins/super.
+  const selfAssignMut = useMutation({
+    mutationFn: async (turfId) => {
+      await api(`/admin/campaigns/${cId}/assignments`, { method: 'POST', body: { userIds: [selfId] } });
+      return api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments`, { method: 'POST', body: { userIds: [selfId] } });
+    },
+    onSuccess: invalidate,
+  });
   const bulkMut = useMutation({
-    mutationFn: (body) => api(`/admin/campaigns/${cId}/turfs/assign-bulk`, { method: 'POST', body }),
+    mutationFn: async (body) => {
+      // If self is in the selection and not yet on the roster, add them first.
+      if (selfId && body.userIds.includes(selfId) && !rosterUserIds.has(selfId)) {
+        await api(`/admin/campaigns/${cId}/assignments`, { method: 'POST', body: { userIds: [selfId] } });
+      }
+      return api(`/admin/campaigns/${cId}/turfs/assign-bulk`, { method: 'POST', body });
+    },
     onSuccess: () => {
       invalidate();
       setBulkOpen(false);
@@ -181,10 +256,11 @@ export default function AdminBooks() {
       setSelectedBooks(new Set());
     },
   });
-  const mutating = assignMut.isPending || unassignMut.isPending || bulkMut.isPending;
+  const mutating = assignMut.isPending || unassignMut.isPending || bulkMut.isPending || selfAssignMut.isPending;
 
   function toggleAssign(turfId, userId, isAssigned) {
     if (isAssigned) unassignMut.mutate({ turfId, userId });
+    else if (userId === selfId && !rosterUserIds.has(selfId)) selfAssignMut.mutate(turfId);
     else assignMut.mutate({ turfId, userId });
   }
 
@@ -192,14 +268,84 @@ export default function AdminBooks() {
   const term = search.trim().toLowerCase();
   const visibleBooks = useMemo(() => {
     let list = books;
-    if (unassignedOnly) list = list.filter((b) => !(usersByBook.get(b.id)?.length));
+    if (statusFilter.size) {
+      list = list.filter((b) => {
+        const s = bookStatusSet(b, usersByBook, progressByTurf);
+        for (const k of statusFilter) if (s.has(k)) return true;
+        return false;
+      });
+    }
     if (term) list = list.filter((b) => b.name.toLowerCase().includes(term));
     return list;
-  }, [books, unassignedOnly, term, usersByBook]);
+  }, [books, statusFilter, term, usersByBook, progressByTurf]);
+
+  function toggleStatus(key) {
+    setStatusFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  // Map features: each visible book's boundary polygon, colored by assigned/selected.
+  const bookPolyFeatures = useMemo(() => {
+    const features = [];
+    for (const b of visibleBooks) {
+      if (!b.boundary?.coordinates?.length) continue;
+      features.push({
+        type: 'Feature',
+        id: b.id,
+        properties: {
+          id: b.id,
+          assigned: (usersByBook.get(b.id)?.length || 0) > 0 ? 1 : 0,
+          selected: selectedBooks.has(b.id) ? 1 : 0,
+        },
+        geometry: b.boundary,
+      });
+    }
+    return { type: 'FeatureCollection', features };
+  }, [visibleBooks, usersByBook, selectedBooks]);
+  const bookLabelFeatures = useMemo(() => {
+    const features = [];
+    for (const b of visibleBooks) {
+      const c = b.centroid?.coordinates;
+      if (c?.length === 2) features.push({ type: 'Feature', properties: { name: b.name }, geometry: { type: 'Point', coordinates: c } });
+    }
+    return { type: 'FeatureCollection', features };
+  }, [visibleBooks]);
+
+  // Fit the camera to the round's books once, per scope.
+  useEffect(() => {
+    if (bookView !== 'map' || view !== 'book' || !mapReady || camInit.current || !cameraRef.current) return;
+    const pts = books.map((b) => b.centroid?.coordinates).filter((c) => c?.length === 2);
+    if (!pts.length) return;
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    for (const [lng, lat] of pts) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    if (pts.length === 1 || (minLng === maxLng && minLat === maxLat)) {
+      cameraRef.current.setCamera({ centerCoordinate: pts[0], zoomLevel: 14, animationDuration: 0 });
+    } else {
+      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [60, 40, 60, 40], 0);
+    }
+    camInit.current = true;
+  }, [bookView, view, mapReady, books]);
+
+  function onBookPress(e) {
+    const id = e.features?.[0]?.properties?.id;
+    if (!id) return;
+    if (selectMode) toggleSelect(id);
+    else setMapSheetBookId(id);
+  }
+  const mapSheetBook = mapSheetBookId ? books.find((b) => b.id === mapSheetBookId) : null;
   const visibleCanvassers = useMemo(() => {
-    if (!term) return roster;
-    return roster.filter((c) => `${c.firstName} ${c.lastName} ${c.email}`.toLowerCase().includes(term));
-  }, [roster, term]);
+    if (!term) return rosterWithSelf;
+    return rosterWithSelf.filter((c) => `${c.firstName} ${c.lastName} ${c.email || ''}`.toLowerCase().includes(term));
+  }, [rosterWithSelf, term]);
 
   const loading =
     effortsQ.isLoading || (!!passId && (turfsQ.isLoading || assignmentsQ.isLoading || rosterQ.isLoading || membersQ.isLoading));
@@ -269,15 +415,42 @@ export default function AdminBooks() {
           />
           {view === 'book' && (
             <Pressable
-              onPress={() => setUnassignedOnly((v) => !v)}
-              style={[styles.filterChip, unassignedOnly && styles.filterChipOn]}
+              onPress={() => setBookView((v) => (v === 'list' ? 'map' : 'list'))}
+              style={[styles.filterChip, bookView === 'map' && styles.filterChipOn]}
             >
-              <Text style={[styles.filterChipText, unassignedOnly && styles.filterChipTextOn]}>
-                Unassigned only{unassignedCount ? ` (${unassignedCount})` : ''}
+              <Text style={[styles.filterChipText, bookView === 'map' && styles.filterChipTextOn]}>
+                {bookView === 'list' ? 'Map' : 'List'}
               </Text>
             </Pressable>
           )}
         </View>
+      )}
+
+      {/* Status filter chips (book view) — multi-select; empty = all. */}
+      {!!passId && view === 'book' && books.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsRow}
+          style={{ flexGrow: 0 }}
+        >
+          {BOOK_STATUS_CHIPS.map((chip) => {
+            const on = statusFilter.has(chip.key);
+            const n = statusCounts[chip.key] || 0;
+            return (
+              <Pressable
+                key={chip.key}
+                onPress={() => toggleStatus(chip.key)}
+                style={[styles.filterChip, on && styles.filterChipOn]}
+              >
+                <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
+                  {chip.label}
+                  {n ? ` ${n}` : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       )}
 
       {/* Count + round caption (stacked) with Select beside them — below the search / filter row */}
@@ -312,6 +485,71 @@ export default function AdminBooks() {
         </View>
       )}
 
+      {view === 'book' && bookView === 'map' && !!cId && !!passId && !loading && books.length > 0 && !!MAPBOX_PUBLIC_TOKEN ? (
+        <View style={{ flex: 1 }}>
+          <Mapbox.MapView
+            style={{ flex: 1 }}
+            styleURL={styleURL}
+            onDidFinishLoadingMap={() => setMapReady(true)}
+            zoomEnabled
+            scrollEnabled
+            pitchEnabled={false}
+            rotateEnabled={false}
+          >
+            <Mapbox.Camera ref={cameraRef} />
+            <Mapbox.ShapeSource id="assign-books" shape={bookPolyFeatures} onPress={onBookPress}>
+              <Mapbox.FillLayer
+                id="assign-book-fill"
+                style={{
+                  fillColor: [
+                    'case',
+                    ['==', ['get', 'selected'], 1], colors.brand,
+                    ['==', ['get', 'assigned'], 1], colors.success,
+                    colors.textMuted,
+                  ],
+                  fillOpacity: ['case', ['==', ['get', 'selected'], 1], 0.35, 0.18],
+                }}
+              />
+              <Mapbox.LineLayer
+                id="assign-book-line"
+                style={{
+                  lineColor: [
+                    'case',
+                    ['==', ['get', 'selected'], 1], colors.brand,
+                    ['==', ['get', 'assigned'], 1], colors.success,
+                    colors.textMuted,
+                  ],
+                  lineWidth: ['case', ['==', ['get', 'selected'], 1], 3, 1.5],
+                }}
+              />
+            </Mapbox.ShapeSource>
+            <Mapbox.ShapeSource id="assign-book-labels" shape={bookLabelFeatures}>
+              <Mapbox.SymbolLayer
+                id="assign-book-label"
+                style={{
+                  textField: ['get', 'name'],
+                  textSize: 12,
+                  textColor: colors.textPrimary,
+                  textHaloColor: colors.bg,
+                  textHaloWidth: 1.2,
+                  textAllowOverlap: false,
+                }}
+              />
+            </Mapbox.ShapeSource>
+          </Mapbox.MapView>
+          <View style={styles.mapLegend}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: colors.success }]} />
+              <Text style={styles.legendText}>Assigned</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: colors.textMuted }]} />
+              <Text style={styles.legendText}>Unassigned</Text>
+            </View>
+            <Text style={styles.legendHint}>{selectMode ? 'Tap books to select' : 'Tap a book to assign'}</Text>
+          </View>
+        </View>
+      ) : (
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: selectMode ? 96 : spacing.xxl }}>
         {!cId ? (
           <Empty styles={styles}>Pick a campaign to manage book assignments.</Empty>
@@ -368,7 +606,7 @@ export default function AdminBooks() {
               );
             })
           )
-        ) : roster.length === 0 ? (
+        ) : rosterWithSelf.length === 0 ? (
           <Empty styles={styles}>
             No canvassers are assigned to this campaign yet.{'\n'}
             <Text style={styles.link} onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}>
@@ -387,9 +625,11 @@ export default function AdminBooks() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cardTitle}>
                       {c.firstName} {c.lastName}
+                      {c.isSelf ? <Text style={styles.youTag}>  You</Text> : null}
                     </Text>
                     <Text style={styles.cardMeta} numberOfLines={1}>
-                      {myBooks.size} book{myBooks.size === 1 ? '' : 's'} · {c.email}
+                      {myBooks.size} book{myBooks.size === 1 ? '' : 's'}
+                      {c.email ? ` · ${c.email}` : ''}
                     </Text>
                   </View>
                   <Text style={styles.chevron}>{isOpen ? '▴' : '▾'}</Text>
@@ -417,6 +657,49 @@ export default function AdminBooks() {
           })
         )}
       </ScrollView>
+      )}
+
+      {/* Map single-book assign sheet */}
+      <Modal visible={!!mapSheetBook} transparent animationType="slide" onRequestClose={() => setMapSheetBookId(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>{mapSheetBook?.name || 'Book'}</Text>
+              <Pressable onPress={() => setMapSheetBookId(null)} hitSlop={8}>
+                <Text style={styles.modalClose}>✕</Text>
+              </Pressable>
+            </View>
+            {mapSheetBook ? (
+              <Text style={styles.mapSheetMeta}>
+                {mapSheetBook.doors} doors ·{' '}
+                {(usersByBook.get(mapSheetBook.id) || []).length
+                  ? (usersByBook.get(mapSheetBook.id) || []).map((u) => `${u.firstName} ${(u.lastName || '')[0] || ''}`).join(', ')
+                  : 'Unassigned'}
+              </Text>
+            ) : null}
+            <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingVertical: spacing.xs }}>
+              {rosterWithSelf.length === 0 ? (
+                <Text style={styles.mapSheetMeta}>No canvassers on this campaign yet.</Text>
+              ) : (
+                rosterWithSelf.map((c) => {
+                  const assigned = mapSheetBook ? (bookIdsByUser.get(c.id)?.has(mapSheetBook.id) ?? false) : false;
+                  return (
+                    <AssignRow
+                      key={c.id}
+                      styles={styles}
+                      title={`${c.firstName} ${c.lastName}${c.isSelf ? '  (You)' : ''}`}
+                      sub={c.email}
+                      assigned={assigned}
+                      disabled={mutating}
+                      onToggle={() => mapSheetBook && toggleAssign(mapSheetBook.id, c.id, assigned)}
+                    />
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {selectMode && selectedBooks.size > 0 && (
         <View style={styles.actionBar}>
@@ -434,7 +717,7 @@ export default function AdminBooks() {
         styles={styles}
         colors={colors}
         bookCount={selectedBooks.size}
-        roster={roster}
+        roster={rosterWithSelf}
         pending={bulkMut.isPending}
         onClose={() => setBulkOpen(false)}
         onApply={({ userIds, mode, replace }) =>
@@ -541,6 +824,7 @@ function BulkModal({ visible, styles, colors, bookCount, roster, pending, onClos
                   </View>
                   <Text style={styles.pickName}>
                     {c.firstName} {c.lastName}
+                    {c.isSelf ? <Text style={styles.youTag}>  You</Text> : null}
                   </Text>
                 </Pressable>
               );
@@ -627,6 +911,28 @@ function makeStyles(t) {
     filterChipOn: { backgroundColor: colors.brandTint, borderColor: colors.brand },
     filterChipText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
     filterChipTextOn: { color: colors.brand },
+    chipsRow: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
+
+    mapLegend: {
+      position: 'absolute',
+      bottom: spacing.lg,
+      left: spacing.lg,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      backgroundColor: colors.card,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      ...shadow.card,
+    },
+    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    legendDot: { width: 10, height: 10, borderRadius: 5 },
+    legendText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
+    legendHint: { fontSize: 11, color: colors.textMuted },
+    mapSheetMeta: { ...type.caption, color: colors.textSecondary, marginBottom: spacing.sm },
 
     card: {
       flexDirection: 'row',
@@ -652,6 +958,7 @@ function makeStyles(t) {
     cardHeadRow: { flexDirection: 'row', alignItems: 'center' },
     cardTitle: { ...type.bodyStrong, fontSize: 15 },
     cardMeta: { ...type.caption, marginTop: 1 },
+    youTag: { fontSize: 11, fontWeight: '800', color: colors.brand },
     barTrack: { height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: 'hidden', marginTop: 6, marginBottom: 4 },
     barFill: { height: 4, borderRadius: 2, backgroundColor: colors.success },
     assignees: { ...type.caption, color: colors.textSecondary },

@@ -4,6 +4,7 @@ import Mapbox from '@rnmapbox/maps';
 import { getCurrentLocation } from '../lib/location';
 import { recordLocationCorrection } from '../lib/recordAction';
 import { MAPBOX_PUBLIC_TOKEN } from '../lib/config';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 
@@ -14,6 +15,7 @@ if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
 // shares a pin with other units, asks whether to move just this unit or all of them.
 export default function FixPinModal({ visible, household, qc, siblingCount = 0, onClose }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets(); // clear the Android nav bar / iOS home indicator
   const cur = household?.location?.coordinates; // [lng, lat]
   const [coords, setCoords] = useState(cur ? { lng: cur[0], lat: cur[1] } : null);
   const [accuracy, setAccuracy] = useState(null);
@@ -85,7 +87,7 @@ export default function FixPinModal({ visible, household, qc, siblingCount = 0, 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={[styles.sheet, { backgroundColor: colors.card }]}>
+        <View style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: spacing.lg + insets.bottom }]}>
           <Text style={[styles.title, { color: colors.textPrimary }]}>Fix pin location</Text>
           <Text style={[styles.sub, { color: colors.textSecondary }]}>
             Drag the blue pin to the right spot, or drop it where you're standing.

@@ -419,6 +419,24 @@ router.patch('/:userId/reactivate', async (req, res, next) => {
   }
 });
 
+// Which campaigns this user is on the roster for (drives the mobile profile "Campaigns"
+// section — assign a canvasser to campaigns from their own page). Read-only.
+router.get('/:userId/campaigns', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+    const rows = await CampaignAssignment.find(
+      { userId: req.params.userId, organizationId: activeOrgId(req) },
+      { campaignId: 1 }
+    ).lean();
+    res.json({ campaignIds: rows.map((r) => String(r.campaignId)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:userId/stats', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;

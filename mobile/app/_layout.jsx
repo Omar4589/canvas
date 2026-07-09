@@ -8,7 +8,7 @@ import {
   focusManager,
 } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { clearActiveOrgId, clearActiveCampaign } from '../lib/cache';
 import { ThemeProvider, useTheme } from '../lib/ThemeContext';
@@ -74,7 +74,7 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
             <ThemedStatusBar />

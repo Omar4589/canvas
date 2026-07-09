@@ -1,4 +1,5 @@
 import { FlatList, View, Text, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DoorListRow from './DoorListRow';
 import { spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
@@ -10,6 +11,7 @@ import { useTheme } from '../lib/ThemeContext';
 // entries: [{ kind:'single', key, household, distanceM } | { kind:'building', key, building, distanceM }]
 export default function DoorList({ entries, campaignType, votersByHousehold, onOpen, onQuick, onOpenBuilding }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets(); // last row must clear the Android nav bar
   return (
     <FlatList
       data={entries}
@@ -29,7 +31,7 @@ export default function DoorList({ entries, campaignType, votersByHousehold, onO
       removeClippedSubviews={Platform.OS === 'android'}
       keyboardShouldPersistTaps="handled"
       style={{ flex: 1, backgroundColor: colors.bg }}
-      contentContainerStyle={entries.length ? null : styles.emptyWrap}
+      contentContainerStyle={entries.length ? { paddingBottom: insets.bottom } : styles.emptyWrap}
       ItemSeparatorComponent={() => <View style={[styles.sep, { backgroundColor: colors.border }]} />}
       ListEmptyComponent={<Text style={[styles.empty, { color: colors.textMuted }]}>No doors match this filter.</Text>}
     />

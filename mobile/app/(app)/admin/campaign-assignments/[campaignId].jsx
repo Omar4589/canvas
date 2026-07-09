@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
+import { loadCurrentUser } from '../../../../lib/cache';
 import PasswordInput from '../../../../components/PasswordInput';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
@@ -30,6 +31,12 @@ export default function CampaignAssignmentsScreen() {
   const cId = Array.isArray(campaignId) ? campaignId[0] : campaignId;
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  // Current user, so an admin/lead/super can add themselves to the campaign (they're filtered
+  // out of the canvasser list by role, so we inject them, badged "You").
+  const [self, setSelf] = useState(null);
+  useEffect(() => {
+    loadCurrentUser().then((u) => setSelf(u || null));
+  }, []);
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -81,13 +88,24 @@ export default function CampaignAssignmentsScreen() {
     (c) => String(c._id) === String(cId)
   );
 
-  const canvassers = useMemo(
-    () =>
-      (membersQ.data?.members || []).filter(
-        (m) => m.role === 'canvasser' && m.user.isActive && m.isActive
-      ),
-    [membersQ.data]
-  );
+  const canvassers = useMemo(() => {
+    const list = (membersQ.data?.members || []).filter(
+      (m) => m.role === 'canvasser' && m.user.isActive && m.isActive
+    );
+    const selfId = self?.id ? String(self.id) : null;
+    if (selfId && !list.some((m) => String(m.user.id) === selfId)) {
+      return [
+        {
+          role: 'admin',
+          isActive: true,
+          isSelf: true,
+          user: { id: selfId, firstName: self.firstName || 'You', lastName: self.lastName || '', email: self.email, isActive: true },
+        },
+        ...list,
+      ];
+    }
+    return list;
+  }, [membersQ.data, self]);
 
   const assignedSet = useMemo(
     () => new Set((assignmentsQ.data?.assignments || []).map((a) => a.userId)),
@@ -171,10 +189,13 @@ export default function CampaignAssignmentsScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowName}>
                     {u.firstName} {u.lastName}
+                    {m.isSelf ? <Text style={styles.youTag}>  You</Text> : null}
                   </Text>
-                  <Text style={styles.rowEmail} numberOfLines={1}>
-                    {u.email}
-                  </Text>
+                  {u.email ? (
+                    <Text style={styles.rowEmail} numberOfLines={1}>
+                      {u.email}
+                    </Text>
+                  ) : null}
                 </View>
                 <Pressable
                   onPress={() => toggle(u.id)}
@@ -343,6 +364,7 @@ function makeStyles(t) {
     ...shadow.card,
   },
   rowName: { ...type.bodyStrong, fontSize: 15 },
+  youTag: { fontSize: 11, fontWeight: '800', color: colors.brand },
   rowEmail: { ...type.caption, marginTop: 1 },
   action: {
     paddingHorizontal: spacing.md,
