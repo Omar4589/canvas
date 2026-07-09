@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
@@ -40,6 +40,9 @@ const REVIEW_STATUS = [
   { value: 'all', label: 'All' },
 ];
 
+// Verb shown in the brief post-review confirmation toast.
+const FLAG_FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirmed: 'confirmed as an issue', open: 'reopened' };
+
 // GPS canvassing-quality audit. A per-canvasser flag breakdown (who, how many, why) over the
 // range, plus a reviewable drill-in list. Flags are computed live from the door-action ledger;
 // the summary (KPIs + table) is always the full picture, while the reason chips + status +
@@ -54,6 +57,24 @@ export default function AuditPage() {
   const [reasonFilter, setReasonFilter] = useState([]); // [] = all reasons
   const [reviewStatus, setReviewStatus] = useState('open');
   const [userId, setUserId] = useState(''); // drill-in to one canvasser
+
+  const qc = useQueryClient();
+  // Brief confirmation after a flag review, mirroring the Map surface.
+  const [flagFlash, setFlagFlash] = useState(null);
+  const flagFlashTimer = useRef(null);
+  useEffect(() => () => clearTimeout(flagFlashTimer.current), []);
+  function onFlagReviewed(review) {
+    const status = review?.status || 'updated';
+    setFlagFlash(FLAG_FLASH_LABEL[status] || 'updated');
+    clearTimeout(flagFlashTimer.current);
+    flagFlashTimer.current = setTimeout(() => setFlagFlash(null), 2500);
+    // Refresh this page + mark the Map's flags query stale (cross-surface sync).
+    qc.invalidateQueries({
+      predicate: (q) =>
+        (q.queryKey?.[0] === 'admin' && q.queryKey?.[1] === 'flags-map') ||
+        (q.queryKey?.[0] === 'reports' && q.queryKey?.[1] === 'flags'),
+    });
+  }
 
   const [live, setLive] = useState(true);
 
@@ -249,12 +270,12 @@ export default function AuditPage() {
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            <StatCard label="Flagged" value={(totals?.flaggedActions || 0).toLocaleString()} hint={rangeLabel} />
+            <StatCard label="Open" value={(totals?.open || 0).toLocaleString()} hint="Need review" />
             <StatCard label="Far" value={(totals?.far || 0).toLocaleString()} hint="Far from house" />
             <StatCard label="Rapid" value={(totals?.rapid || 0).toLocaleString()} hint="Too fast apart" />
             <StatCard label="One-spot" value={(totals?.oneSpot || 0).toLocaleString()} hint="From one place" />
             <StatCard label="Weak GPS" value={(totals?.weakGps || 0).toLocaleString()} hint="Unreliable fix" />
-            <StatCard label="Open" value={(totals?.open || 0).toLocaleString()} hint="Not yet reviewed" />
+            <StatCard label="Total" value={(totals?.flaggedActions || 0).toLocaleString()} hint={`All flags · ${rangeLabel}`} />
           </div>
 
           <AuditSummaryTable rows={summary?.byCanvasser || []} selectedUserId={userId} onSelect={setUserId} />
@@ -289,9 +310,14 @@ export default function AuditPage() {
               campaignId={campaignId}
               dateFrom={fromDay}
               dateTo={dateRange.to || undefined}
-              onReviewed={() => flagsQ.refetch()}
+              onReviewed={(review) => onFlagReviewed(review)}
             />
           </div>
+        </div>
+      )}
+      {flagFlash && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-fg px-3 py-1.5 text-xs font-medium text-bg shadow-lg">
+          ✓ Flag {flagFlash}
         </div>
       )}
     </div>

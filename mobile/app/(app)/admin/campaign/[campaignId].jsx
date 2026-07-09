@@ -202,6 +202,13 @@ export default function CampaignDetail() {
     router.push('/(app)/admin/timeline');
   }
 
+  // Set this campaign active, then open the GPS audit screen (it reads the active campaign).
+  async function goAudit() {
+    if (!campaign) return;
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
+    router.push('/(app)/admin/audit');
+  }
+
   if (campaignsQ.data && !campaign) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -372,6 +379,7 @@ export default function CampaignDetail() {
             <NavTileGrid
               items={[
                 { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
+                { label: 'GPS audit', subtitle: 'Review flagged entries', onPress: goAudit },
                 { label: 'Users', subtitle: 'Manage people', onPress: () => router.push('/(app)/admin/users') },
                 { label: 'Assignments', subtitle: 'Books & canvassers', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },
               ]}

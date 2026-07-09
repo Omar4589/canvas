@@ -276,7 +276,7 @@ function emptySummary() {
 
 const REASON_KEY = { far: 'far', rapid: 'rapid', one_spot: 'oneSpot', weak_gps: 'weakGps' };
 
-function summarize(entries, byUser, nameOf) {
+export function summarize(entries, byUser, nameOf) {
   const totals = { flaggedActions: 0, far: 0, rapid: 0, oneSpot: 0, weakGps: 0, open: 0, reviewed: 0, dismissed: 0, confirmed: 0 };
   const perUser = new Map();
   for (const [uid, timeline] of byUser.entries()) {
@@ -295,26 +295,29 @@ function summarize(entries, byUser, nameOf) {
   }
 
   for (const e of entries) {
-    totals.flaggedActions += 1;
+    totals.flaggedActions += 1; // total flags in range, status-independent (secondary reference)
     const status = e.review?.status || 'open';
-    if (status === 'open') totals.open += 1;
-    else {
-      totals.reviewed += 1;
-      if (totals[status] != null) totals[status] += 1;
-    }
+    const isOpen = status === 'open';
+    // Each status counted exactly once (open/reviewed/dismissed/confirmed). `open` is the
+    // actionable "flagged" number the UI headlines; the others form the resolved breakdown.
+    if (totals[status] != null) totals[status] += 1;
     const u = perUser.get(e.userId);
     if (u) {
       u.flaggedActions += 1;
-      if (status === 'open') u.openCount += 1;
+      if (isOpen) u.openCount += 1;
       u.worstSeverity = maxSeverity(u.worstSeverity, e.maxSeverity);
     }
-    const seen = new Set();
-    for (const r of e.reasons) {
-      const key = REASON_KEY[r.type];
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      totals[key] += 1;
-      if (u) u[key] += 1;
+    // Per-reason counts reflect OPEN flags only, so the reason chips/cards stay consistent
+    // with the open-first headline and the map's default open view.
+    if (isOpen) {
+      const seen = new Set();
+      for (const r of e.reasons) {
+        const key = REASON_KEY[r.type];
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        totals[key] += 1;
+        if (u) u[key] += 1;
+      }
     }
   }
 

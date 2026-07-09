@@ -133,9 +133,9 @@ export default function MapFilters({
               className="h-4 w-4 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
             />
             <span className="text-fg">Show flagged entries</span>
-            {flagCounts?.flaggedActions > 0 && (
+            {flagCounts?.open > 0 && (
               <span className="ml-auto rounded-full bg-danger-tint px-1.5 text-xs font-medium text-danger">
-                {flagCounts.flaggedActions}
+                {flagCounts.open}
               </span>
             )}
           </label>
@@ -180,7 +180,8 @@ export default function MapFilters({
                 </select>
               </div>
               <p className="text-xs text-fg-subtle">
-                Counts show every flag in range; the status filter narrows what's drawn.
+                Counts show open (unresolved) flags; use the status filter to view reviewed or
+                dismissed ones.
               </p>
             </div>
           )}

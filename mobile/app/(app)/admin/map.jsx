@@ -21,6 +21,8 @@ import MapStyleControl from '../../../components/MapStyleControl';
 import CampaignChip from '../../../components/CampaignChip';
 import LiveStatus from '../../../components/LiveStatus';
 import DateRangePickerModal from '../../../components/DateRangePickerModal';
+import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
+import { primaryReason, reasonColor } from '../../../lib/flags';
 import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { timeAgo, formatExact } from '../../../lib/datetime';
@@ -33,6 +35,9 @@ if (MAPBOX_PUBLIC_TOKEN) {
 }
 
 const DEFAULT_CENTER = [-84.5, 39.0];
+
+// Verb shown in the brief post-review confirmation.
+const FLAG_FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirmed: 'confirmed as an issue', open: 'reopened' };
 
 // Status filter options (mirror the web MapFilters set).
 const STATUS_OPTIONS = [
@@ -111,6 +116,26 @@ function pingsToFeatures(activities) {
           coordinates: [a.location.lng, a.location.lat],
         },
       })),
+  };
+}
+
+// GPS-audit flags → points, colored by the worst reason, dimmed once reviewed. Mirrors the
+// web flag layer (mapRender.js flagsToGeoJSON).
+function flagsToFeatures(entries) {
+  return {
+    type: 'FeatureCollection',
+    features: (entries || [])
+      .filter((e) => e.location?.lat != null && e.location?.lng != null)
+      .map((e) => {
+        const pr = primaryReason(e);
+        const reviewed = (e.review?.status || 'open') !== 'open';
+        return {
+          type: 'Feature',
+          id: String(e.actionId),
+          properties: { actionId: String(e.actionId), color: reasonColor(pr?.type), reviewed: reviewed ? 1 : 0 },
+          geometry: { type: 'Point', coordinates: [e.location.lng, e.location.lat] },
+        };
+      }),
   };
 }
 
@@ -203,8 +228,12 @@ export default function AdminMap() {
   const mapRef = useRef(null);
   const [campaign, setCampaign] = useState(undefined);
   const [showPings, setShowPings] = useState(false);
+  const [showFlags, setShowFlags] = useState(false);
   const [selected, setSelected] = useState(null);
   const [selectedPing, setSelectedPing] = useState(null);
+  const [selectedFlagId, setSelectedFlagId] = useState(null);
+  const [flagFlash, setFlagFlash] = useState(null);
+  const flagFlashTimer = useRef(null);
   const [moveTarget, setMoveTarget] = useState(null); // household being repositioned
 
   // Deep-link scope (from a walk list / pass / import "view on map" link) — seeded once
@@ -280,9 +309,27 @@ export default function AdminMap() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // GPS-audit flags overlay — OPEN (unresolved) flags for the current scope. Reviewing one
+  // removes it from the layer (it's no longer open), matching the web map + the open-count model.
+  const flagsQ = useQuery({
+    queryKey: ['admin', 'flags-map', cId, range?.from, range?.to, canvasserId],
+    queryFn: () => {
+      const p = new URLSearchParams({ campaignId: String(cId), reviewStatus: 'open', limit: '500' });
+      if (range?.from) p.set('from', range.from);
+      if (range?.to) p.set('to', range.to);
+      if (canvasserId) p.set('userId', canvasserId);
+      return api(`/admin/reports/flags?${p.toString()}`);
+    },
+    enabled: !!cId && showFlags,
+    refetchInterval: live && showFlags ? 20 * 1000 : false,
+    ...useFocusedPoll(),
+  });
+
   const households = mapQ.data?.households || [];
   const activities = mapQ.data?.activities || [];
   const canvassers = mapQ.data?.canvassers || [];
+  const flagEntries = flagsQ.data?.entries || [];
+  const openFlagCount = flagsQ.data?.summary?.totals?.open ?? 0;
 
   const householdFeatures = useMemo(() => householdsToFeatures(households), [households]);
   const pingFeatures = useMemo(
@@ -306,6 +353,17 @@ export default function AdminMap() {
     for (const a of activities) m.set(String(a.id), a);
     return m;
   }, [activities]);
+
+  const flagFeatures = useMemo(
+    () => (showFlags ? flagsToFeatures(flagEntries) : { type: 'FeatureCollection', features: [] }),
+    [showFlags, flagEntries]
+  );
+  const flagsById = useMemo(() => {
+    const m = new Map();
+    for (const e of flagEntries) m.set(String(e.actionId), e);
+    return m;
+  }, [flagEntries]);
+  const selectedFlag = selectedFlagId ? flagsById.get(String(selectedFlagId)) : null;
 
   // First & last knock — only when auditing ONE canvasser with pings on. The endpoint
   // already scopes activities to that userId + date window; first = earliest, last = most recent.
@@ -408,11 +466,38 @@ export default function AdminMap() {
       const a = activitiesById.get(String(f.properties?.id));
       if (a) {
         setSelected(null);
+        setSelectedFlagId(null);
         setSelectedPing(a);
       }
     },
     [activitiesById, moveTarget]
   );
+
+  const onFlagPress = useCallback(
+    (e) => {
+      if (moveTarget) return;
+      const f = e.features?.[0];
+      if (!f) return;
+      setSelected(null);
+      setSelectedPing(null);
+      setSelectedFlagId(String(f.properties?.actionId));
+    },
+    [moveTarget]
+  );
+
+  useEffect(() => () => clearTimeout(flagFlashTimer.current), []);
+  function onFlagReviewed(review) {
+    const status = review?.status || 'updated';
+    setFlagFlash(FLAG_FLASH_LABEL[status] || 'updated');
+    clearTimeout(flagFlashTimer.current);
+    flagFlashTimer.current = setTimeout(() => setFlagFlash(null), 2500);
+    setSelectedFlagId(null); // reviewed → no longer open → leaves the layer
+    qc.invalidateQueries({
+      predicate: (query) =>
+        query.queryKey?.[0] === 'admin' &&
+        (query.queryKey?.[1] === 'flags' || query.queryKey?.[1] === 'flags-map'),
+    });
+  }
 
   if (!MAPBOX_PUBLIC_TOKEN) {
     return (
@@ -558,6 +643,29 @@ export default function AdminMap() {
           </Mapbox.ShapeSource>
         )}
 
+        {showFlags && (
+          <Mapbox.ShapeSource id="admin-flags" shape={flagFeatures} onPress={onFlagPress}>
+            <Mapbox.CircleLayer
+              id="admin-flag-halo"
+              style={{
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 16, 14, 22, 17, 30],
+                circleColor: ['get', 'color'],
+                circleOpacity: 0.18,
+              }}
+            />
+            <Mapbox.CircleLayer
+              id="admin-flag-dots"
+              style={{
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 11, 17, 14],
+                circleColor: ['get', 'color'],
+                circleStrokeColor: '#ffffff',
+                circleStrokeWidth: 2,
+                circleOpacity: ['case', ['==', ['get', 'reviewed'], 1], 0.45, 1],
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
+
         {/* First & last knock — when auditing ONE canvasser, ring their earliest ping
             ("Start") and most-recent ping ("Latest") so you can see where they began and
             where they are now. Rendered ON TOP as a hollow ring + labeled badge. */}
@@ -657,6 +765,15 @@ export default function AdminMap() {
             <View style={styles.toggleChip}>
               <Switch value={showPings} onValueChange={setShowPings} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
               <Text style={styles.toggleLabel}>Pings</Text>
+            </View>
+            <View style={styles.toggleChip}>
+              <Switch value={showFlags} onValueChange={setShowFlags} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
+              <Text style={styles.toggleLabel}>Flags</Text>
+              {showFlags && openFlagCount > 0 ? (
+                <View style={styles.flagBadge}>
+                  <Text style={styles.flagBadgeText}>{openFlagCount}</Text>
+                </View>
+              ) : null}
             </View>
             <LiveStatus
               live={live}
@@ -876,6 +993,31 @@ export default function AdminMap() {
         </SafeAreaView>
       )}
 
+      {selectedFlag && (
+        <SafeAreaView edges={['bottom']} style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.flagSheetHeaderRow}>
+            <Text style={styles.flagSheetTitle}>Flagged entry</Text>
+            <Pressable onPress={() => setSelectedFlagId(null)} hitSlop={8}>
+              <Text style={styles.flagSheetClose}>Close</Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <FlaggedEntryCard entry={selectedFlag} tz={tz} onReviewed={onFlagReviewed} defaultExpanded />
+          </ScrollView>
+        </SafeAreaView>
+      )}
+
+      {flagFlash && (
+        <View style={styles.flagFlash} pointerEvents="none">
+          <Text style={styles.flagFlashText}>✓ Flag {flagFlash}</Text>
+        </View>
+      )}
+
       {selectedPing && (() => {
         const a = selectedPing;
         const household = householdsById.get(String(a.householdId));
@@ -1078,6 +1220,35 @@ function makeStyles(t) {
     gap: spacing.sm,
   },
   toggleLabel: { fontSize: 13, fontWeight: '600', color: colors.textPrimary },
+  flagBadge: {
+    minWidth: 18,
+    paddingHorizontal: 5,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.dangerBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flagBadgeText: { fontSize: 11, fontWeight: '800', color: colors.danger },
+  flagSheetHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  flagSheetTitle: { ...type.h3 },
+  flagSheetClose: { color: colors.brand, fontWeight: '700', fontSize: 14 },
+  flagFlash: {
+    position: 'absolute',
+    bottom: spacing.xl,
+    alignSelf: 'center',
+    backgroundColor: colors.textPrimary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  flagFlashText: { color: colors.textInverse, fontWeight: '700', fontSize: 13 },
   countChip: {
     backgroundColor: colors.card,
     borderRadius: radius.pill,

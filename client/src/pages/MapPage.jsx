@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
@@ -45,11 +45,32 @@ function buildQuery(params) {
   return s ? `?${s}` : '';
 }
 
+// Verb shown in the brief post-review confirmation toast.
+const FLAG_FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirmed: 'confirmed as an issue', open: 'reopened' };
+
 export default function MapPage() {
   const [searchParams] = useSearchParams();
   const containerRef = useRef(null);
   const mapRef = useRef(null);
+  const qc = useQueryClient();
   const [mapReady, setMapReady] = useState(false);
+  // Brief page-level confirmation after a flag review (the panel itself closes on refetch,
+  // so the feedback has to live above it). Auto-dismisses.
+  const [flagFlash, setFlagFlash] = useState(null);
+  const flagFlashTimer = useRef(null);
+  useEffect(() => () => clearTimeout(flagFlashTimer.current), []);
+  function onFlagReviewed(review) {
+    const status = review?.status || 'updated';
+    setFlagFlash(FLAG_FLASH_LABEL[status] || 'updated');
+    clearTimeout(flagFlashTimer.current);
+    flagFlashTimer.current = setTimeout(() => setFlagFlash(null), 2500);
+    // Refresh this surface + mark the Audit page's flags query stale (cross-surface sync).
+    qc.invalidateQueries({
+      predicate: (q) =>
+        (q.queryKey?.[0] === 'admin' && q.queryKey?.[1] === 'flags-map') ||
+        (q.queryKey?.[0] === 'reports' && q.queryKey?.[1] === 'flags'),
+    });
+  }
   // A "View on map" deep-link from the Notes hub (?household=<id>) opens that household.
   const [selected, setSelected] = useState(() => searchParams.get('household') || null);
   const [selectedActivityId, setSelectedActivityId] = useState(null);
@@ -552,11 +573,11 @@ export default function MapPage() {
               updatedAt={householdsQ.dataUpdatedAt}
               onRefresh={() => householdsQ.refetch()}
             />
-            {showFlags && flagSummary?.totals?.flaggedActions > 0 && (
+            {showFlags && flagSummary?.totals?.open > 0 && (
               <>
                 <span className="text-fg-subtle" aria-hidden="true">·</span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-danger-tint px-2 py-0.5 font-medium text-danger">
-                  ⚠ {flagSummary.totals.flaggedActions.toLocaleString()} flagged
+                  ⚠ {flagSummary.totals.open.toLocaleString()} flagged
                 </span>
               </>
             )}
@@ -724,10 +745,18 @@ export default function MapPage() {
                   setSelectedFlagId(null);
                   setSelected(id);
                 }}
-                onReviewed={() => flagsQ.refetch()}
+                onReviewed={(review) => onFlagReviewed(review)}
                 onClose={() => setSelectedFlagId(null)}
                 tz={tz}
               />
+            </div>
+          )}
+          {flagFlash && (
+            <div
+              style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}
+              className="rounded-full bg-fg px-3 py-1.5 text-xs font-medium text-bg shadow-lg"
+            >
+              ✓ Flag {flagFlash}
             </div>
           )}
         </div>
