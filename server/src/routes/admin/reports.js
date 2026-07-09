@@ -552,13 +552,13 @@ router.get('/campaign-rollup', async (req, res, next) => {
         : 0;
     cumulative.connectionRate = connectionRate(cumulative);
     cumulative.contactRate = contactRate(cumulative);
-    cumulative.coverage = rows.reduce(
-      (acc, r) => {
-        for (const k of Object.keys(acc)) acc[k] += r.coverage?.[k] || 0;
-        return acc;
-      },
-      { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, refused: 0, lit_dropped: 0, voted: 0 }
-    );
+    // Sum EVERY key present on each campaign's coverage (they're all seeded with the full
+    // status set), not a hardcoded seed — a hardcoded list silently dropped `restricted`
+    // when that status was added, zeroing it org-wide while the per-campaign cards showed it.
+    cumulative.coverage = rows.reduce((acc, r) => {
+      for (const [k, v] of Object.entries(r.coverage || {})) acc[k] = (acc[k] || 0) + v;
+      return acc;
+    }, {});
 
     // Heads-up flag: are we in the nightly window where a relative preset could read a day
     // off for an off-zone campaign vs its own dashboard? Only meaningful org-wide.
