@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId } from '../api/client.js';
-import { homePathForRole } from '../lib/homePath.js';
+import { resolveHomePath } from '../lib/homePath.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import Logo from '../components/Logo.jsx';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, user, loading, memberships, activeOrgId } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -26,38 +26,39 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const res = await login(email, password);
-      if (res.user.mustChangePassword) {
-        navigate('/change-password', { replace: true });
-        return;
-      }
-      const memberships = res.memberships || [];
-      // Admins AND team leads (campaign-scoped admins) can use the console.
-      const consoleMemberships = memberships.filter((m) => m.role === 'admin' || m.role === 'lead');
-      const canAccessConsole = res.user.isSuperAdmin || consoleMemberships.length > 0;
-
-      // Super admin: straight to the console (or org picker).
-      if (res.user.isSuperAdmin) {
-        const savedOrgId = getActiveOrgId();
-        navigate(savedOrgId ? '/admin' : '/super-admin', { replace: true });
-        return;
-      }
-
-      if (!canAccessConsole) {
+      const dest = resolveHomePath({
+        user: res.user,
+        memberships: res.memberships || [],
+        activeOrgId: getActiveOrgId(),
+      });
+      if (!dest) {
         setError('You need an admin or team-lead role on at least one organization to use the dashboard.');
         return;
       }
-      if (memberships.length > 1) {
-        navigate('/select-org', { replace: true });
-        return;
-      }
-      // A team lead has no org Overview — land them on their campaigns instead.
-      const home = homePathForRole(memberships[0]?.role);
-      navigate(location.state?.from?.pathname || home, { replace: true });
+      // Restore a deep link (stashed by ProtectedRoute) only when landing on the user's
+      // actual home — never skip the change-password / org-picker / super-admin routes.
+      const from = location.state?.from?.pathname;
+      const restore = from && (dest === '/admin' || dest === '/campaigns');
+      navigate(restore ? from : dest, { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Already signed in? Don't show the login form — send them where they belong. A
+  // logged-out visitor has no token, so `loading` is already false and the form shows
+  // immediately; only a token-bearing visitor briefly waits on the /auth/me check.
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center text-fg-muted">Loading…</div>
+    );
+  }
+  if (user) {
+    const dest = resolveHomePath({ user, memberships, activeOrgId });
+    // Canvassers (no console access → null) fall through to the form.
+    if (dest) return <Navigate to={dest} replace />;
   }
 
   return (

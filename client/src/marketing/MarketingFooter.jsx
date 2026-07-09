@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import Logo from '../components/Logo.jsx';
 import { demoMailto } from './contact.js';
+import { useAuthCta } from './useAuthCta.js';
 
 // Public marketing footer — brand mark, an honest one-line description of the
 // product, the beta install badges, and the small link row. "Contact" routes to the
@@ -14,10 +15,13 @@ const ANDROID_BETA_URL = 'https://play.google.com/apps/internaltest/470011804377
 const LINKS = [
   { to: '/privacy', label: 'Privacy' },
   { to: '/terms', label: 'Terms' },
-  { to: '/login', label: 'Sign in' },
 ];
 
 export default function MarketingFooter() {
+  const cta = useAuthCta();
+  // Privacy/Terms are static; the last link is auth-aware — "Dashboard" when signed in,
+  // "Sign in" when not — so the footer never disagrees with the nav.
+  const links = [...LINKS, { to: cta.to, label: cta.authed ? 'Dashboard' : 'Sign in' }];
   return (
     <footer className="border-t border-stone-200 bg-white">
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
@@ -52,7 +56,7 @@ export default function MarketingFooter() {
 
           <nav aria-label="Footer">
             <ul className="flex items-center gap-6">
-              {LINKS.map(({ to, label }) => (
+              {links.map(({ to, label }) => (
                 <li key={to}>
                   <Link
                     to={to}

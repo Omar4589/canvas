@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom';
 import { demoMailto } from './contact.js';
+import { useAuthCta } from './useAuthCta.js';
 import { Reveal } from './useReveal.jsx';
 
 // CtaBand — brand-wash conversion band at the foot of the page.
 export default function CtaBand() {
+  const cta = useAuthCta();
   return (
     <section className="border-t border-brand-100 bg-brand-50">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
@@ -25,10 +27,10 @@ export default function CtaBand() {
               Request a demo
             </a>
             <Link
-              to="/login"
+              to={cta.to}
               className="inline-flex items-center justify-center rounded-lg border border-stone-300 bg-white px-5 py-3 text-[15px] font-semibold text-stone-900 shadow-sm transition-colors hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
             >
-              Sign in
+              {cta.label}
             </Link>
           </div>
         </Reveal>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Logo from '../components/Logo.jsx';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuthCta } from './useAuthCta.js';
 import { demoMailto } from './contact.js';
 
 // Sticky top nav for the public marketing site. Anchor links scroll to the
@@ -17,7 +17,7 @@ const SECTIONS = [
 ];
 
 export default function MarketingNav() {
-  const { user, loading, homePath } = useAuth();
+  const cta = useAuthCta();
   const [open, setOpen] = useState(false);
 
   return (
@@ -50,10 +50,10 @@ export default function MarketingNav() {
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             {/* Auth control. Hidden until auth resolves so logged-in visitors
                 don't see a "Sign in" flash that swaps to "Go to dashboard". */}
-            {!loading &&
-              (user ? (
+            {!cta.loading &&
+              (cta.authed ? (
                 <Link
-                  to={homePath}
+                  to={cta.to}
                   className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4"
                 >
                   <span className="sm:hidden">Dashboard</span>
@@ -61,7 +61,7 @@ export default function MarketingNav() {
                 </Link>
               ) : (
                 <Link
-                  to="/login"
+                  to={cta.to}
                   className="hidden rounded text-sm text-gray-600 transition-colors hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:inline-flex"
                 >
                   Sign in
@@ -125,10 +125,10 @@ export default function MarketingNav() {
                   </a>
                 </li>
               ))}
-              {!user && (
+              {!cta.authed && (
                 <li className="sm:hidden">
                   <Link
-                    to="/login"
+                    to={cta.to}
                     onClick={() => setOpen(false)}
                     className="block rounded-md px-2 py-3 text-sm text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                   >

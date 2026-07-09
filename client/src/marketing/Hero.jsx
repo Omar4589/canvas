@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { demoMailto } from './contact.js';
+import { useAuthCta } from './useAuthCta.js';
 import BrowserFrame from './frames/BrowserFrame.jsx';
 import { Reveal } from './useReveal.jsx';
 import shotMap from '../assets/marketing/shot-map.webp';
@@ -55,6 +56,7 @@ function MiniPhone() {
 }
 
 export default function Hero() {
+  const cta = useAuthCta();
   return (
     <section className="relative overflow-hidden bg-white">
       <div
@@ -86,10 +88,10 @@ export default function Hero() {
                 Request a demo
               </a>
               <Link
-                to="/login"
+                to={cta.to}
                 className="inline-flex items-center justify-center rounded-lg border border-stone-300 bg-white px-5 py-3 text-[15px] font-semibold text-stone-900 shadow-sm transition-colors hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
               >
-                Sign in
+                {cta.label}
               </Link>
             </div>
             <p className="mt-4 text-[13px] text-stone-400">
