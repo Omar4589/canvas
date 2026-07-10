@@ -81,6 +81,11 @@ You can add a note, and the app records **who** decided and **when**. Your decis
 entry, so an open flag never quietly disappears and the team can see what's already been checked. You
 can always **reopen** a flag to set it back to Open.
 
+One deliberate blind spot: **admin bulk-restrict marks** (`via: 'bulk'` — marking a whole book
+restricted) are invisible to flag detection. A hundred same-second marks by one admin would flood
+`rapid` flags while auditing nothing a canvasser actually did, so `detectFlags` excludes them at the
+query ([flagDetection.js](../server/src/services/audit/flagDetection.js)).
+
 ## Who can use it
 
 The audit is for the console — **admins**, **team leads** (only for the campaigns they manage), and

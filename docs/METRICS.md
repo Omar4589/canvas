@@ -138,6 +138,18 @@ when someone logs restricted homes; that's intentional. A restricted mark is **o
 `REPLACEABLE_ACTIONS`, so re-recording any other disposition on the same door/pass supersedes it (fixes
 a mistap).
 
+**Bulk marks are the one exception to the per-canvasser rules above.** An admin can mark a **whole
+book** restricted at once (a gated community — from the web Turf Cutting page or the mobile Books
+screen). Those marks are real activity rows carrying `via: 'bulk'`
+([models/CanvassActivity.js](../server/src/models/CanvassActivity.js)): they drive door status,
+per-round views, coverage, and campaign-scope restricted tallies exactly like field marks — but they
+are **excluded** from every per-canvasser surface (timeline, leaderboards, per-canvasser Restricted
+columns/CSV, shift windows, travel, activity feeds, active-now) and are **invisible to the GPS
+audit** (`NOT_BULK` in [aggregations.js](../server/src/services/reports/aggregations.js)), because a
+hundred same-second marks by one admin audit nothing a canvasser did. Doors already **completed in
+the round** keep their result (skipped), already-restricted doors are skipped (idempotent), and
+**Unmark restricted** removes only the bulk marks — field marks survive.
+
 ### Coverage funnel (the colored bar)
 Each household sits in exactly one bucket — `surveyed`, `lit_dropped`, `refused`, `restricted`,
 `not_home`, `wrong_address`, `voted`, or `unknocked` — so the bar sums to the total number of

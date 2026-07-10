@@ -326,6 +326,70 @@ function PassPicker({ campaignId, passId, onChange }) {
   );
 }
 
+// Typed-confirm for the bulk restricted mark/unmark — a whole gated community in
+// one action. Mirrors DiscardModal's contract; the skip rules are stated so the
+// admin knows completed and already-restricted doors keep their result.
+function RestrictModal({ mode, books, pending, error, onCancel, onConfirm }) {
+  const [confirmText, setConfirmText] = useState('');
+  const marking = mode === 'mark';
+  const totalDoors = books.reduce((s, b) => s + (b.eligibleDoorCount ?? b.doorCount ?? 0), 0);
+  const bulkMarks = books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
+  const typedOk = !marking || confirmText.trim().toLowerCase() === 'restrict';
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-fg">
+          {marking
+            ? `Mark ${books.length === 1 ? `“${books[0].name}”` : `${books.length} books`} restricted?`
+            : 'Remove bulk restricted marks?'}
+        </h3>
+        {marking ? (
+          <p className="mt-2 text-sm text-fg-muted">
+            Every eligible door in {books.length === 1 ? 'this book' : 'these books'} (~
+            {totalDoors.toLocaleString()}) gets a <strong>Restricted Access</strong> mark — canvassers see them
+            slate, they stay out of every rate and billable count, and the next cut can exclude them. Doors already{' '}
+            <strong>completed this round</strong> keep their result; doors already restricted are skipped. Reversible
+            via <strong>Unmark restricted</strong>, and a canvasser can re-disposition any door in the field.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-fg-muted">
+            Removes the {bulkMarks.toLocaleString()} bulk mark{bulkMarks === 1 ? '' : 's'} this action created in the
+            selected book{books.length === 1 ? '' : 's'}. Restricted marks canvassers recorded at the door are kept.
+          </p>
+        )}
+        {marking && (
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-xs font-medium text-fg-muted">
+              Type <strong>restrict</strong> to confirm
+            </span>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="restrict"
+              autoFocus
+              className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-danger focus:outline-none"
+            />
+          </label>
+        )}
+        {error && <p className="mt-2 text-sm text-danger">{error.message}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-md px-3 py-1.5 text-sm font-semibold text-fg-muted hover:bg-sunken">
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={pending || !typedOk}
+            className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {pending ? 'Working…' : marking ? 'Mark restricted' : 'Remove marks'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DiscardModal({ isActive, bookCount, passLabel, knockCount, clearKnocks, setClearKnocks, pending, error, onCancel, onConfirm }) {
   const worked = knockCount > 0;
   const [confirmText, setConfirmText] = useState('');
@@ -568,6 +632,8 @@ export default function TurfsPage() {
   const [manualSplit, setManualSplit] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [showDiscard, setShowDiscard] = useState(false);
+  const [showRestrict, setShowRestrict] = useState(null); // 'mark' | 'unmark' | null
+  const [restrictResult, setRestrictResult] = useState(null);
   const [clearKnocks, setClearKnocks] = useState(false);
   const [lastSnapshotId, setLastSnapshotId] = useState(null);
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
@@ -886,6 +952,33 @@ export default function TurfsPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
     },
   });
+  // Bulk restricted — whole gated communities in one action (docs/PASSES_AND_TURF.md).
+  const restrictBulk = useMutation({
+    mutationFn: (turfIds) =>
+      api(`/admin/campaigns/${campaignId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds } }),
+    onSuccess: (res) => {
+      setShowRestrict(null);
+      const skips = res.skipped || {};
+      const skipNote =
+        (skips.completed || 0) + (skips.alreadyRestricted || 0) > 0
+          ? ` · skipped ${skips.completed || 0} completed, ${skips.alreadyRestricted || 0} already restricted`
+          : '';
+      setRestrictResult(`Marked ${res.marked} door${res.marked === 1 ? '' : 's'} restricted${skipNote}.`);
+      invalidateCut();
+      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+    },
+  });
+  const unrestrictBulk = useMutation({
+    mutationFn: (turfIds) =>
+      api(`/admin/campaigns/${campaignId}/turfs/unrestrict-bulk`, { method: 'POST', body: { turfIds } }),
+    onSuccess: (res) => {
+      setShowRestrict(null);
+      setRestrictResult(`Removed ${res.unmarked} bulk restricted mark${res.unmarked === 1 ? '' : 's'}.`);
+      invalidateCut();
+      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+    },
+  });
+
   const restore = useMutation({
     mutationFn: (snapshotId) =>
       api(`/admin/campaigns/${campaignId}/turfs/restore-snapshot`, { method: 'POST', body: { snapshotId } }),
@@ -1770,6 +1863,14 @@ export default function TurfsPage() {
               onClose={() => setPopupBuildingKey(null)}
             />
           )}
+          {restrictResult && (
+            <div className="absolute bottom-4 left-4 z-10 flex items-center gap-2 rounded-md border border-info/30 bg-info-tint px-3 py-2 text-xs text-info-fg shadow">
+              <span>{restrictResult}</span>
+              <button onClick={() => setRestrictResult(null)} className="font-semibold hover:opacity-70">
+                ✕
+              </button>
+            </div>
+          )}
           {selectedTurfs.length > 0 && (
             <BookAssignmentPanel
               campaignId={campaignId}
@@ -1779,10 +1880,32 @@ export default function TurfsPage() {
               onClear={() => setSelectedBooks(new Set())}
               onMerge={() => merge.mutate([...selectedBooks])}
               mergePending={merge.isPending}
+              onRestrict={() => {
+                setRestrictResult(null);
+                setShowRestrict('mark');
+              }}
+              onUnrestrict={() => {
+                setRestrictResult(null);
+                setShowRestrict('unmark');
+              }}
+              restrictPending={restrictBulk.isPending || unrestrictBulk.isPending}
             />
           )}
         </section>
       </div>
+
+      {showRestrict && (
+        <RestrictModal
+          mode={showRestrict}
+          books={selectedTurfs}
+          pending={restrictBulk.isPending || unrestrictBulk.isPending}
+          error={showRestrict === 'mark' ? restrictBulk.error : unrestrictBulk.error}
+          onCancel={() => setShowRestrict(null)}
+          onConfirm={() =>
+            (showRestrict === 'mark' ? restrictBulk : unrestrictBulk).mutate(selectedTurfs.map((t) => String(t._id)))
+          }
+        />
+      )}
 
       {showDiscard && (
         <DiscardModal

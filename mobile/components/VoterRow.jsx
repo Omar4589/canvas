@@ -1,15 +1,17 @@
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { timeAgo } from '../lib/datetime';
 import { radius, spacing } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
 
 // One survey-response row: voter name + party + address + when, optionally the
 // canvasser. `v` is a response entry from /survey-results or /voters-by-answer
-// ({ responseId, submittedAt, voter, household, canvasser }).
-export default function VoterRow({ v, showCanvasser = false }) {
+// ({ responseId, submittedAt, voter, household, canvasser }). Pass `onPress` to
+// make the row tappable (adds a chevron); without it the row renders exactly as
+// before, so existing usages are untouched.
+export default function VoterRow({ v, showCanvasser = false, onPress = null }) {
   const styles = useThemedStyles(makeStyles);
-  return (
-    <View style={styles.row}>
+  const inner = (
+    <>
       <View style={{ flex: 1 }}>
         <Text style={styles.name} numberOfLines={1}>
           {v.voter?.fullName || 'Unknown voter'}
@@ -28,7 +30,14 @@ export default function VoterRow({ v, showCanvasser = false }) {
             : ''}
         </Text>
       </View>
-    </View>
+      {onPress ? <Text style={styles.chevron}>›</Text> : null}
+    </>
+  );
+  if (!onPress) return <View style={styles.row}>{inner}</View>;
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}>
+      {inner}
+    </Pressable>
   );
 }
 
@@ -41,7 +50,10 @@ function makeStyles(t) {
       borderWidth: 1,
       borderColor: t.colors.border,
       marginBottom: spacing.xs,
+      flexDirection: 'row',
+      alignItems: 'center',
     },
+    chevron: { fontSize: 18, color: t.colors.textMuted, marginLeft: spacing.sm },
     name: { ...t.type.bodyStrong, fontSize: 14 },
     party: { color: t.colors.textSecondary, fontWeight: '400' },
     address: { ...t.type.caption, marginTop: 1 },

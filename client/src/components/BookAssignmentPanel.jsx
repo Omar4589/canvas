@@ -22,6 +22,9 @@ export default function BookAssignmentPanel({
   onClear,
   onMerge,
   mergePending,
+  onRestrict,
+  onUnrestrict,
+  restrictPending,
 }) {
   const qc = useQueryClient();
   const single = books.length === 1;
@@ -393,6 +396,30 @@ export default function BookAssignmentPanel({
           >
             Merge {books.length} books into one
           </button>
+        </div>
+      )}
+
+      {/* Bulk restricted — a whole gated community in one action. Published
+          books only (same gate as assignment). Skip rules live in the confirm
+          dialog TurfsPage opens. */}
+      {!draftSelected && onRestrict && (
+        <div className="space-y-1.5 border-t border-border px-4 py-2">
+          <button
+            onClick={onRestrict}
+            disabled={restrictPending}
+            className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
+          >
+            Mark {single ? 'book' : `${books.length} books`} restricted… ({totalDoors.toLocaleString()} doors)
+          </button>
+          {books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0) > 0 && (
+            <button
+              onClick={onUnrestrict}
+              disabled={restrictPending}
+              className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
+            >
+              Unmark restricted ({books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0)} bulk marks)
+            </button>
+          )}
         </div>
       )}
     </div>

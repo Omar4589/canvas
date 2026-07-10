@@ -470,6 +470,7 @@ router.get('/:userId/stats', async (req, res, next) => {
         userId,
         organizationId: orgId,
         actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
+        via: { $ne: 'bulk' }, // admin bulk marks aren't this user's field work
       })
         .sort({ timestamp: 1 })
         .select('timestamp location actionType campaignId')

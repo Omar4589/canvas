@@ -125,6 +125,14 @@ leaderboard, the canvassers CSV, and the canvasser timeline — but it enters **
 "houses knocked." The Turf Cutting page can also **exclude restricted homes** from a later round's books
 (see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)). Full counting model in [METRICS.md](METRICS.md).
 
+**Marking a whole book restricted (gated communities).** On the mobile **Books** screen, the tapped
+book's sheet has **Mark book restricted…** (and Select mode's bar has **Restrict…** for several books
+at once); the web Turf Cutting page has the same action on the selected-books panel. Every eligible
+door gets a restricted mark in one go — canvassers see the slate doors immediately, doors already
+completed this round keep their result, and **Unmark restricted (N)** reverses it (field-recorded
+marks are never touched). Bulk marks never appear in per-canvasser stats or the GPS audit — see
+[METRICS.md](METRICS.md).
+
 ---
 
 # Part 2 — Technical reference

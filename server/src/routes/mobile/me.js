@@ -61,6 +61,7 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
       // Include 'restricted' so it shows as a tally + counts toward the shift window /
       // travel, but it is split out of doorsKnocked/knockedHomes below (never a knock).
       actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
+      via: { $ne: 'bulk' }, // admin bulk marks aren't this user's field work
     })
       .sort({ timestamp: 1 })
       .select('timestamp location actionType householdId')
@@ -317,6 +318,7 @@ router.get('/history', async (req, res, next) => {
         campaignId: cId,
         organizationId: orgId,
         actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
+      via: { $ne: 'bulk' }, // admin bulk marks aren't this user's field work
       })
         .sort({ timestamp: 1 })
         .select('timestamp location actionType householdId')

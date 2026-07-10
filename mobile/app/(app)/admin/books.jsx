@@ -9,6 +9,7 @@ import {
   Modal,
   StyleSheet,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -219,6 +220,7 @@ export default function AdminBooks() {
           doors: t.eligibleDoorCount ?? t.doorCount ?? 0,
           boundary: t.boundary || null, // GeoJSON Polygon (display-only hull) — drives the map
           centroid: t.centroid || null, // GeoJSON Point
+          bulkRestrictedCount: t.bulkRestrictedCount || 0, // drives Unmark restricted (N)
         }))
         .sort(byName),
     [turfsQ.data]
@@ -291,6 +293,67 @@ export default function AdminBooks() {
     },
     onError: onAssignError,
   });
+  // Bulk restricted — a whole gated community in one action. Real restricted
+  // rows are created server-side (via:'bulk'), so canvassers see slate doors
+  // per-round while audits/leaderboards ignore the batch.
+  const invalidateRestrict = () => {
+    setAssignError(null);
+    qc.invalidateQueries({ queryKey: ['admin', 'turfs', cId, passId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'turf-doors', cId, passId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'turf-progress', cId, passId] });
+    if (mapSheetBookId) qc.invalidateQueries({ queryKey: ['admin', 'book-households', cId, mapSheetBookId] });
+  };
+  const restrictMut = useMutation({
+    mutationFn: (turfIds) =>
+      api(`/admin/campaigns/${cId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds } }),
+    onSuccess: (res) => {
+      invalidateRestrict();
+      setSelectMode(false);
+      setSelectedBooks(new Set());
+      const skips = res.skipped || {};
+      const skipNote =
+        (skips.completed || 0) + (skips.alreadyRestricted || 0) > 0
+          ? `\nSkipped ${skips.completed || 0} completed · ${skips.alreadyRestricted || 0} already restricted.`
+          : '';
+      Alert.alert('Marked restricted', `${res.marked} door${res.marked === 1 ? '' : 's'} marked.${skipNote}`);
+    },
+    onError: onAssignError,
+  });
+  const unrestrictMut = useMutation({
+    mutationFn: (turfIds) =>
+      api(`/admin/campaigns/${cId}/turfs/unrestrict-bulk`, { method: 'POST', body: { turfIds } }),
+    onSuccess: (res) => {
+      invalidateRestrict();
+      Alert.alert('Marks removed', `${res.unmarked} bulk restricted mark${res.unmarked === 1 ? '' : 's'} removed.`);
+    },
+    onError: onAssignError,
+  });
+  const restrictPending = restrictMut.isPending || unrestrictMut.isPending;
+
+  function confirmRestrictBooks(bookList) {
+    const ids = bookList.map((b) => b.id);
+    const totalDoors = bookList.reduce((s, b) => s + (b.doors || 0), 0);
+    const label = bookList.length === 1 ? `“${bookList[0].name}”` : `${bookList.length} books`;
+    Alert.alert(
+      `Mark ${label} restricted?`,
+      `~${totalDoors} doors get a Restricted Access mark — canvassers see them slate and they stay out of every rate and billable count. Doors completed this round keep their result; already-restricted doors are skipped. Reversible.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Mark restricted', style: 'destructive', onPress: () => restrictMut.mutate(ids) },
+      ]
+    );
+  }
+  function confirmUnrestrictBook(book) {
+    Alert.alert(
+      'Remove bulk restricted marks?',
+      `${book.bulkRestrictedCount} bulk mark${book.bulkRestrictedCount === 1 ? '' : 's'} will be removed. Restricted marks canvassers recorded at the door are kept.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', onPress: () => unrestrictMut.mutate([book.id]) },
+      ]
+    );
+  }
+
   const mutating = assignMut.isPending || unassignMut.isPending || bulkMut.isPending || selfAssignMut.isPending;
 
   function toggleAssign(turfId, userId, isAssigned) {
@@ -578,7 +641,10 @@ export default function AdminBooks() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipsRow}
-          style={{ flexGrow: 0 }}
+          // flexShrink 0: in List view the sibling is another ScrollView, and
+          // without it RN compresses this row and clips the chip labels
+          // (empty-looking pills). Map view's plain flexed sibling never did.
+          style={{ flexGrow: 0, flexShrink: 0 }}
         >
           {BOOK_STATUS_CHIPS.map((chip) => {
             const on = statusFilter.has(chip.key);
@@ -809,6 +875,23 @@ export default function AdminBooks() {
                   ))}
                 </View>
               )}
+              <Pressable
+                onPress={() =>
+                  mapSheetBook.bulkRestrictedCount > 0
+                    ? confirmUnrestrictBook(mapSheetBook)
+                    : confirmRestrictBooks([mapSheetBook])
+                }
+                disabled={restrictPending}
+                style={({ pressed }) => [styles.restrictBtn, (pressed || restrictPending) && { opacity: 0.7 }]}
+              >
+                <Text style={styles.restrictBtnText}>
+                  {restrictPending
+                    ? 'Working…'
+                    : mapSheetBook.bulkRestrictedCount > 0
+                      ? `Unmark restricted (${mapSheetBook.bulkRestrictedCount})`
+                      : 'Mark book restricted…'}
+                </Text>
+              </Pressable>
               {assignError ? <Text style={styles.sheetError}>{assignError}</Text> : null}
               <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: spacing.xs }}>
                 {rosterWithSelf.length === 0 ? (
@@ -830,14 +913,6 @@ export default function AdminBooks() {
                   })
                 )}
               </ScrollView>
-              <Pressable
-                onPress={() =>
-                  router.push({ pathname: `/(app)/admin/book/${mapSheetBook.id}`, params: { campaignId: cId } })
-                }
-                style={styles.viewHomesLink}
-              >
-                <Text style={styles.link}>View homes ›</Text>
-              </Pressable>
             </View>
           )}
         </View>
@@ -959,9 +1034,24 @@ export default function AdminBooks() {
           <Text style={styles.actionBarText}>
             {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'} selected
           </Text>
-          <Pressable onPress={() => setBulkOpen(true)} style={styles.actionBarBtn}>
-            <Text style={styles.actionBarBtnText}>Assign to…</Text>
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <Pressable
+              onPress={() => confirmRestrictBooks(books.filter((b) => selectedBooks.has(b.id)))}
+              disabled={restrictPending}
+              style={[styles.actionBarBtn, styles.actionBarBtnRestrict, restrictPending && { opacity: 0.6 }]}
+            >
+              <Text style={styles.actionBarBtnText}>Restrict…</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setAssignError(null);
+                setBulkOpen(true);
+              }}
+              style={styles.actionBarBtn}
+            >
+              <Text style={styles.actionBarBtnText}>Assign to…</Text>
+            </Pressable>
+          </View>
         </View>
       )}
 
@@ -1210,7 +1300,6 @@ function makeStyles(t) {
     tallyItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     tallyText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
     sheetError: { fontSize: 12, fontWeight: '700', color: colors.danger, marginTop: spacing.xs, marginBottom: spacing.xs },
-    viewHomesLink: { paddingTop: spacing.sm, alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.border },
 
     card: {
       flexDirection: 'row',
@@ -1312,7 +1401,19 @@ function makeStyles(t) {
     },
     actionBarText: { ...type.bodyStrong, fontSize: 14 },
     actionBarBtn: { backgroundColor: colors.brand, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2 },
+    actionBarBtnRestrict: { backgroundColor: colors.status.restricted },
     actionBarBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 14 },
+
+    // promoted-sheet bulk-restrict action (slate = the restricted color)
+    restrictBtn: {
+      borderWidth: 1,
+      borderColor: colors.status.restricted,
+      borderRadius: radius.md,
+      paddingVertical: spacing.sm,
+      alignItems: 'center',
+      marginTop: spacing.xs,
+    },
+    restrictBtnText: { color: colors.status.restricted, fontWeight: '700', fontSize: 13 },
 
     // bulk modal
     modalBackdrop: { flex: 1, backgroundColor: colors.backdrop, justifyContent: 'flex-end' },

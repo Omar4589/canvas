@@ -134,6 +134,16 @@ export default function AdminUserDetail() {
     });
   }, [user?.id, user?.firstName, user?.lastName, user?.email, user?.phone, user?.role]);
 
+  // Team-lead campaign grants. Lives in CampaignManager server-side; GET
+  // /admin/memberships back-joins it as managedCampaignIds. Sent with the role
+  // PATCH exactly like the web's UserProfileModal.
+  const managedFromServer = (member?.managedCampaignIds || []).map(String);
+  const [managedIds, setManagedIds] = useState(() => new Set());
+  useEffect(() => {
+    setManagedIds(new Set(managedFromServer));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, managedFromServer.join(',')]);
+
   const [showResetPw, setShowResetPw] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [feedback, setFeedback] = useState(null);
@@ -172,8 +182,13 @@ export default function AdminUserDetail() {
   });
 
   const saveRole = useMutation({
-    mutationFn: (role) =>
-      api(`/admin/memberships/${userId}`, { method: 'PATCH', body: { role } }),
+    // Leads carry their campaign grants with the role; any other role clears
+    // all grants server-side (memberships.js reconciliation).
+    mutationFn: ({ role, managedCampaignIds }) =>
+      api(`/admin/memberships/${userId}`, {
+        method: 'PATCH',
+        body: role === 'lead' ? { role, managedCampaignIds } : { role },
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
       flash('success', 'Role updated.');
@@ -264,7 +279,10 @@ export default function AdminUserDetail() {
     form.lastName !== (user.lastName || '') ||
     (!emailLocked && form.email !== (user.email || '')) ||
     form.phone !== (user.phone || '');
-  const isRoleDirty = form.role !== (user.role || 'canvasser');
+  const managedDirty =
+    form.role === 'lead' &&
+    [...managedIds].sort().join(',') !== [...managedFromServer].sort().join(',');
+  const isRoleDirty = form.role !== (user.role || 'canvasser') || managedDirty;
   const isDirty = isProfileDirty || isRoleDirty;
 
   function onSave() {
@@ -278,7 +296,7 @@ export default function AdminUserDetail() {
       saveProfile.mutate(body);
     }
     if (isRoleDirty) {
-      saveRole.mutate(form.role);
+      saveRole.mutate({ role: form.role, managedCampaignIds: [...managedIds] });
     }
   }
 
@@ -363,7 +381,11 @@ export default function AdminUserDetail() {
               <View
                 style={[
                   styles.pill,
-                  user.role === 'admin' ? styles.pillBrand : styles.pillNeutral,
+                  user.role === 'admin'
+                    ? styles.pillBrand
+                    : user.role === 'lead'
+                      ? styles.pillLead
+                      : styles.pillNeutral,
                 ]}
               >
                 <Text
@@ -371,10 +393,12 @@ export default function AdminUserDetail() {
                     styles.pillText,
                     user.role === 'admin'
                       ? { color: colors.brand }
-                      : { color: colors.textSecondary },
+                      : user.role === 'lead'
+                        ? { color: colors.accentPurple }
+                        : { color: colors.textSecondary },
                   ]}
                 >
-                  {user.role === 'admin' ? 'admin' : 'canvasser'}
+                  {user.role === 'lead' ? 'team lead' : user.role === 'admin' ? 'admin' : 'canvasser'}
                 </Text>
               </View>
               <View
@@ -473,6 +497,7 @@ export default function AdminUserDetail() {
               <View style={styles.roleRow}>
                 {[
                   { v: 'canvasser', l: 'Canvasser' },
+                  { v: 'lead', l: 'Team lead' },
                   { v: 'admin', l: 'Admin' },
                 ].map((opt) => {
                   const active = form.role === opt.v;
@@ -498,6 +523,55 @@ export default function AdminUserDetail() {
                     </Pressable>
                   );
                 })}
+              </View>
+            )}
+
+            {/* Team-lead campaign grants — a lead acts as an admin ONLY inside
+                the campaigns checked here (docs/ROLES.md). Saved with the role. */}
+            {!isSelf && form.role === 'lead' && (
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={styles.formLabel}>Managed campaigns</Text>
+                <Text
+                  style={{
+                    ...type.caption,
+                    color: colors.textMuted,
+                    marginBottom: spacing.xs,
+                  }}
+                >
+                  A team lead can run only the campaigns checked below.
+                </Text>
+                {(campaignsQ.data?.campaigns || [])
+                  .filter((c) => c.isActive)
+                  .map((c) => {
+                    const id = String(c._id);
+                    const on = managedIds.has(id);
+                    return (
+                      <Pressable
+                        key={id}
+                        onPress={() =>
+                          setManagedIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          })
+                        }
+                        style={styles.leadCampaignRow}
+                      >
+                        <View style={[styles.leadCheck, on && styles.leadCheckOn]}>
+                          {on ? <Text style={styles.leadCheckMark}>✓</Text> : null}
+                        </View>
+                        <Text style={styles.leadCampaignName} numberOfLines={1}>
+                          {c.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                {form.role === 'lead' && managedIds.size === 0 && (
+                  <Text style={{ ...type.caption, color: colors.warn, marginTop: spacing.xs }}>
+                    No campaigns checked — this lead won&apos;t be able to manage anything yet.
+                  </Text>
+                )}
               </View>
             )}
 
@@ -992,7 +1066,28 @@ function makeStyles(t) {
     borderWidth: 1,
   },
   pillBrand: { backgroundColor: colors.brandTint, borderColor: colors.brand },
+  pillLead: { backgroundColor: colors.accentPurpleBg, borderColor: colors.accentPurple },
   pillNeutral: { backgroundColor: colors.bg, borderColor: colors.border },
+  leadCampaignRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  leadCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  leadCheckOn: { backgroundColor: colors.brand, borderColor: colors.brand },
+  leadCheckMark: { color: colors.textInverse, fontSize: 12, fontWeight: '800' },
+  leadCampaignName: { ...type.body, fontSize: 14, flex: 1 },
   pillSuccess: {
     backgroundColor: colors.successBg,
     borderColor: colors.successBorder,

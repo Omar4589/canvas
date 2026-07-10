@@ -476,9 +476,24 @@ router.get('/', async (req, res, next) => {
           ).map((h) => String(h._id))
         : []
     );
+    // Bulk-restricted marks per book — drives the "Unmark restricted (N)" affordance.
+    const bulkAgg = turfs.length
+      ? await CanvassActivity.aggregate([
+          {
+            $match: {
+              turfId: { $in: turfs.map((t) => t._id) },
+              actionType: 'restricted',
+              via: 'bulk',
+            },
+          },
+          { $group: { _id: '$turfId', n: { $sum: 1 } } },
+        ])
+      : [];
+    const bulkByTurf = new Map(bulkAgg.map((r) => [String(r._id), r.n]));
     const withCounts = turfs.map((t) => ({
       ...t,
       eligibleDoorCount: (t.householdIds || []).filter((id) => eligible.has(String(id))).length,
+      bulkRestrictedCount: bulkByTurf.get(String(t._id)) || 0,
     }));
     // Already-voted owned doors for this pass's effort — skipped by the cut. Surfaced
     // on the page as "N door(s) already voted — skipped" so a smaller book total makes sense.
@@ -660,6 +675,136 @@ router.get('/attribute-preview', async (req, res, next) => {
     }
     if (unassigned) groups.push({ name: 'Unassigned', doorCount: unassigned });
     res.json({ groups });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Bulk "the whole book is inaccessible" (gated community): create REAL
+// restricted CanvassActivity rows for every eligible, not-yet-done door in the
+// selected book(s), tagged via:'bulk'. Real rows keep the per-round view right
+// (canvassers see slate doors, not fresh ones); the via tag keeps them OUT of
+// the GPS audit and every per-canvasser surface (NOT_BULK in reports). Field
+// rows are never deleted — latest-wins status recompute flips the door, and a
+// later field re-disposition flips it right back. Idempotent: already-
+// restricted and round-completed doors are skipped. docs/PASSES_AND_TURF.md.
+router.post('/restrict-bulk', async (req, res, next) => {
+  try {
+    const tids = (req.body?.turfIds || []).filter((id) => mongoose.isValidObjectId(id));
+    if (!tids.length) return res.status(400).json({ error: 'turfIds required' });
+    const turfs = await Turf.find(
+      { _id: { $in: tids }, campaignId: req.campaign._id },
+      { passId: 1, householdIds: 1, status: 1, name: 1 }
+    ).lean();
+    if (!turfs.length) return res.status(404).json({ error: 'Books not found' });
+    if (turfs.some((t) => t.status !== 'published')) {
+      return res.status(409).json({
+        error: 'Draft books can’t be bulk-restricted — accept the cut first.',
+        code: 'not-accepted',
+      });
+    }
+
+    const now = new Date();
+    let marked = 0;
+    const skipped = { completed: 0, alreadyRestricted: 0, ineligible: 0 };
+    const perTurf = [];
+    const touched = [];
+    const rows = [];
+    for (const turf of turfs) {
+      const hhIds = turf.householdIds || [];
+      // Same eligibility clause as /:turfId/households, so the marked set equals
+      // what the canvasser actually sees (coords are required by the model anyway).
+      const eligibleDoors = await Household.find(
+        {
+          _id: { $in: hhIds },
+          isActive: true,
+          fullyVoted: { $ne: true },
+          excludedFromTurf: { $ne: true },
+          'location.coordinates': { $exists: true, $ne: null },
+        },
+        { location: 1, effortId: 1, organizationId: 1, campaignId: 1 }
+      ).lean();
+      skipped.ineligible += hhIds.length - eligibleDoors.length;
+      const statusMap = await getPassStatusMap(
+        turf.passId,
+        eligibleDoors.map((h) => h._id),
+        req.campaign.type
+      );
+      let turfMarked = 0;
+      for (const hh of eligibleDoors) {
+        const s = statusMap.get(String(hh._id))?.status || 'unknocked';
+        if (s === 'surveyed' || s === 'lit_dropped') {
+          skipped.completed += 1; // a done door keeps its result
+          continue;
+        }
+        if (s === 'restricted') {
+          skipped.alreadyRestricted += 1; // idempotent re-runs
+          continue;
+        }
+        const [lng, lat] = hh.location.coordinates;
+        rows.push({
+          organizationId: hh.organizationId,
+          campaignId: hh.campaignId,
+          householdId: hh._id,
+          voterId: null,
+          userId: req.user._id,
+          actionType: 'restricted',
+          via: 'bulk',
+          note: null,
+          location: { lat, lng, accuracy: null }, // the house's own pin
+          distanceFromHouseMeters: 0,
+          timestamp: now,
+          wasOfflineSubmission: false,
+          passId: turf.passId,
+          turfId: turf._id,
+          effortId: hh.effortId || null,
+        });
+        touched.push(hh._id);
+        turfMarked += 1;
+      }
+      marked += turfMarked;
+      perTurf.push({ turfId: String(turf._id), name: turf.name, marked: turfMarked });
+    }
+
+    if (rows.length) {
+      await CanvassActivity.insertMany(rows);
+      await recomputeHouseholdStatusesByIds(touched, req.campaign.type);
+      // save() no-ops when the recomputed status is unchanged (e.g. a door
+      // restricted in a PRIOR pass), so bump the docs explicitly — the mobile
+      // delta poll (/changes filters updatedAt > since) must deliver every
+      // touched door. lastActionAt matches the single-door path; lastActionBy
+      // is deliberately NOT set (don't attribute a whole community to the admin).
+      await Household.updateMany({ _id: { $in: touched } }, { $set: { lastActionAt: now } });
+    }
+    res.json({ marked, skipped, perTurf });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Undo — removes ONLY the rows bulk-restrict created (any admin's; it's a
+// book-level action). A canvasser's own field-recorded restricted marks survive
+// and stay reversible per-door in the field, like today.
+router.post('/unrestrict-bulk', async (req, res, next) => {
+  try {
+    const tids = (req.body?.turfIds || []).filter((id) => mongoose.isValidObjectId(id));
+    if (!tids.length) return res.status(400).json({ error: 'turfIds required' });
+    const filter = {
+      campaignId: req.campaign._id,
+      turfId: { $in: tids.map((id) => new mongoose.Types.ObjectId(id)) },
+      actionType: 'restricted',
+      via: 'bulk',
+    };
+    const touched = await CanvassActivity.distinct('householdId', filter);
+    const r = await CanvassActivity.deleteMany(filter);
+    if (touched.length) {
+      await recomputeHouseholdStatusesByIds(touched, req.campaign.type);
+      // Same stale-delta edge in reverse (a prior-pass-restricted door recomputes
+      // to the same status → no save → no updatedAt bump). Nothing "happened to"
+      // the door, so bump updatedAt without touching lastActionAt.
+      await Household.updateMany({ _id: { $in: touched } }, { $currentDate: { updatedAt: true } });
+    }
+    res.json({ unmarked: r.deletedCount, households: touched.length });
   } catch (err) {
     next(err);
   }

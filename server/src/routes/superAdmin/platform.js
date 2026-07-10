@@ -61,6 +61,7 @@ router.get('/platform-overview', async (req, res, next) => {
       CanvassActivity.distinct('userId', {
         timestamp: { $gte: since },
         campaignId: { $in: activeCampaignIds },
+        via: { $ne: 'bulk' }, // an admin's bulk mark isn't field activity
       }),
       Campaign.aggregate([
         { $group: { _id: '$isActive', count: { $sum: 1 } } },
@@ -79,12 +80,15 @@ router.get('/platform-overview', async (req, res, next) => {
         { $group: { _id: '$organizationId', count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
-        { $match: { timestamp: { $gte: since }, campaignId: { $in: activeCampaignIds } } },
+        // via ≠ bulk on active-now/last-activity: admin bulk marks aren't field
+        // pulse. todayCounts above deliberately stays inclusive — "N doors
+        // restricted today" is a truthful org-scope tally either way.
+        { $match: { timestamp: { $gte: since }, campaignId: { $in: activeCampaignIds }, via: { $ne: 'bulk' } } },
         { $group: { _id: { org: '$organizationId', user: '$userId' } } },
         { $group: { _id: '$_id.org', count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
-        { $match: { campaignId: { $in: activeCampaignIds } } },
+        { $match: { campaignId: { $in: activeCampaignIds }, via: { $ne: 'bulk' } } },
         { $group: { _id: '$organizationId', last: { $max: '$timestamp' } } },
       ]),
     ]);
@@ -180,7 +184,10 @@ router.post('/demo/refresh-day', async (req, res, next) => {
 router.get('/activity-feed', async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
-    const filter = { actionType: { $in: [...ACTION_DOOR, 'restricted'] } };
+    const filter = {
+      actionType: { $in: [...ACTION_DOOR, 'restricted'] },
+      via: { $ne: 'bulk' }, // a 100-door bulk mark would flood the live feed
+    };
     if (req.query.since) {
       const sinceMs = Date.parse(req.query.since);
       if (Number.isFinite(sinceMs)) filter.timestamp = { $gt: new Date(sinceMs) };

@@ -60,7 +60,17 @@ function makeStyles(t) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    dotText: { fontSize: 10, fontWeight: '800', color: t.colors.textMuted, lineHeight: 12 },
+    // lineHeight matches the circle's inner box (16 − 2×1 border) and
+    // includeFontPadding kills Android's extra ascent, so the glyph sits
+    // dead-center in the ring instead of riding high.
+    dotText: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: t.colors.textMuted,
+      lineHeight: 14,
+      textAlign: 'center',
+      includeFontPadding: false,
+    },
     backdrop: {
       flex: 1,
       backgroundColor: t.colors.backdrop,

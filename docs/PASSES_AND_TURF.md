@@ -99,6 +99,18 @@ never automatic: turn it off to include them (e.g. if access has since opened up
 counterpart to the field marker — the field records "can't get in," the admin decides per round whether
 to keep trying.
 
+**Marking a whole book restricted (bulk).** When an entire book is inaccessible (a gated community),
+select it on the Turf Cutting page (or open it on the mobile Books map) and **Mark restricted…** —
+`POST .../turfs/restrict-bulk { turfIds[] }` creates a real restricted activity row per eligible door
+(`via: 'bulk'`, the acting admin's user, the house's own coordinates, the book's round), so canvassers
+see the slate doors **immediately** in their round view and the excludeRestricted toggle above catches
+the whole community on the next cut. Doors **completed this round** are skipped (they keep their
+result), already-restricted doors are skipped (idempotent), and field rows are never deleted — a
+canvasser can still re-disposition any door, which supersedes the bulk mark. **Unmark restricted (N)**
+(`POST .../turfs/unrestrict-bulk`) deletes only the bulk-created rows and recomputes statuses; field
+marks survive. Bulk rows are excluded from per-canvasser stats and the GPS audit — see
+[METRICS.md](METRICS.md).
+
 Books are first created as **drafts** — nothing reaches canvassers until you **accept** them (drafts →
 published). Re-cut freely until then; a **Discard** snapshots the layout so it's always recoverable.
 A pass needs accepted (published) books before it can be activated.

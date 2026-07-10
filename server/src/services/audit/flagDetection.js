@@ -18,8 +18,11 @@ import { FLAG_THRESHOLDS, maxSeverity } from './flagThresholds.js';
 // Four flag types: far (distance − accuracy), weak_gps, rapid (impossibly short door-to-door
 // gap), one_spot (stationary: many distinct doors from one GPS spot whose pins are spread).
 export async function detectFlags(match, { organizationId, thresholds = FLAG_THRESHOLDS } = {}) {
+  // Admin BULK-authored rows (via:'bulk', e.g. book-level bulk-restrict) are
+  // invisible to detection by design: a batch shares one timestamp across many
+  // doors and would flood 'rapid' HIGH flags that audit nothing a canvasser did.
   const rows = await CanvassActivity.find(
-    match,
+    { ...match, via: { $ne: 'bulk' } },
     '_id userId householdId campaignId effortId passId actionType timestamp location distanceFromHouseMeters wasOfflineSubmission'
   )
     .sort({ userId: 1, timestamp: 1 })

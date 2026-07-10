@@ -88,7 +88,17 @@ export default function AnswerVoters() {
         </Text>
 
         {items.map((v) => (
-          <VoterRow key={v.responseId} v={v} showCanvasser />
+          <VoterRow
+            key={v.responseId}
+            v={v}
+            showCanvasser
+            onPress={() =>
+              router.push({
+                pathname: '/(app)/admin/response-details',
+                params: { responseId: v.responseId, campaignId },
+              })
+            }
+          />
         ))}
 
         {q.isLoading && items.length === 0 ? (

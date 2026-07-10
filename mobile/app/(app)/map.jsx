@@ -258,7 +258,9 @@ export default function MapScreen() {
   const [selected, setSelected] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [following, setFollowing] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('all');
+  // House-status filter — MULTI-select (e.g. Not home + Surveyed + Restricted
+  // together). Empty set = all houses.
+  const [activeFilters, setActiveFilters] = useState(() => new Set());
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [activeCampaign, setActiveCampaign] = useState(undefined);
   // Last selected book(s) restored from storage. undefined = not resolved yet,
@@ -312,14 +314,29 @@ export default function MapScreen() {
 
   const filterOptions =
     activeCampaign?.type === 'lit_drop' ? LIT_DROP_FILTER_OPTIONS : SURVEY_FILTER_OPTIONS;
-  const activeOption = filterOptions.find((o) => o.key === activeFilter) || filterOptions[0];
+  // Campaign-type switch can strand keys the other type doesn't offer — prune.
+  useEffect(() => {
+    setActiveFilters((prev) => {
+      const valid = new Set(filterOptions.map((o) => o.key));
+      const next = new Set([...prev].filter((k) => valid.has(k)));
+      return next.size === prev.size ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCampaign?.type]);
+  const filterCount = activeFilters.size;
+  const filterLabel =
+    filterCount === 0
+      ? filterOptions[0].label // 'All houses'
+      : filterCount === 1
+        ? filterOptions.find((o) => activeFilters.has(o.key))?.label || '1 status'
+        : `${filterCount} statuses`;
 
   const layerFilter = useMemo(
     () =>
-      activeFilter === 'all'
+      activeFilters.size === 0
         ? ['has', 'status']
-        : ['==', ['get', 'status'], activeFilter],
-    [activeFilter]
+        : ['in', ['get', 'status'], ['literal', [...activeFilters]]],
+    [activeFilters]
   );
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
@@ -676,7 +693,7 @@ export default function MapScreen() {
   const listEntries = useMemo(() => {
     if (viewMode !== 'list') return []; // don't compute while on the map
     const STATUS_ORDER = { unknocked: 0, not_home: 1, wrong_address: 2, refused: 3, restricted: 4, lit_dropped: 5, surveyed: 6 };
-    const matches = (s) => activeFilter === 'all' || (s || 'unknocked') === activeFilter;
+    const matches = (s) => activeFilters.size === 0 || activeFilters.has(s || 'unknocked');
     const entries = [];
     for (const h of singles) {
       if (!matches(h.status)) continue;
@@ -690,7 +707,7 @@ export default function MapScreen() {
       });
     }
     for (const b of buildings) {
-      if (activeFilter !== 'all' && !b.units.some((u) => (u.status || 'unknocked') === activeFilter)) continue;
+      if (activeFilters.size !== 0 && !b.units.some((u) => activeFilters.has(u.status || 'unknocked'))) continue;
       entries.push({
         kind: 'building',
         key: String(b.key),
@@ -709,7 +726,7 @@ export default function MapScreen() {
       return a._walk - b._walk; // 'walk' (and 'nearest' fallback when no GPS fix)
     });
     return entries;
-  }, [viewMode, singles, buildings, activeFilter, userCoords, sortMode]);
+  }, [viewMode, singles, buildings, activeFilters, userCoords, sortMode]);
 
   const householdsById = useMemo(() => {
     const m = new Map();
@@ -1040,18 +1057,18 @@ export default function MapScreen() {
               onPress={() => { setFilterMenuOpen((v) => !v); setSortMenuOpen(false); }}
               style={[
                 styles.filterChip,
-                activeFilter !== 'all' && styles.filterChipActive,
+                filterCount !== 0 && styles.filterChipActive,
               ]}
             >
               <Text style={styles.filterIcon}>⌕</Text>
               <Text
                 style={[
                   styles.filterChipText,
-                  activeFilter !== 'all' && styles.filterChipTextActive,
+                  filterCount !== 0 && styles.filterChipTextActive,
                 ]}
                 numberOfLines={1}
               >
-                {activeOption.label}
+                {filterLabel}
               </Text>
               <Text style={styles.filterChevron}>{filterMenuOpen ? '▴' : '▾'}</Text>
             </Pressable>
@@ -1091,15 +1108,27 @@ export default function MapScreen() {
 
         {filterMenuOpen && (
           <View style={styles.filterMenu}>
-            <Text style={styles.filterMenuLabel}>Show on map</Text>
+            <Text style={styles.filterMenuLabel}>Show on map — pick any</Text>
             {filterOptions.map((opt) => {
-              const isActive = opt.key === activeFilter;
+              const isActive = opt.key === 'all' ? filterCount === 0 : activeFilters.has(opt.key);
               return (
                 <Pressable
                   key={opt.key}
                   onPress={() => {
-                    setActiveFilter(opt.key);
-                    setFilterMenuOpen(false);
+                    if (opt.key === 'all') {
+                      // 'All houses' clears the picks and closes.
+                      setActiveFilters(new Set());
+                      setFilterMenuOpen(false);
+                      return;
+                    }
+                    // Statuses TOGGLE and the menu stays open, so several can
+                    // be combined (Not home + Surveyed + Restricted, etc.).
+                    setActiveFilters((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(opt.key)) next.delete(opt.key);
+                      else next.add(opt.key);
+                      return next;
+                    });
                   }}
                   style={[
                     styles.filterMenuItem,
@@ -1124,9 +1153,18 @@ export default function MapScreen() {
                   >
                     {opt.label}
                   </Text>
+                  {isActive && opt.key !== 'all' ? (
+                    <Text style={[styles.filterMenuItemText, styles.filterMenuItemTextActive]}>✓</Text>
+                  ) : null}
                 </Pressable>
               );
             })}
+            <Pressable
+              onPress={() => setFilterMenuOpen(false)}
+              style={[styles.filterMenuItem, { justifyContent: 'center' }]}
+            >
+              <Text style={[styles.filterMenuItemText, { color: colors.brand, fontWeight: '700' }]}>Done</Text>
+            </Pressable>
           </View>
         )}
       </SafeAreaView>

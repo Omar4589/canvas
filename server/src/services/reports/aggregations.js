@@ -7,6 +7,14 @@
 // because it can be left without an actual visit decision.
 export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 
+// Excludes admin BULK-authored rows (via:'bulk', today only bulk-restrict) from
+// per-CANVASSER surfaces: timelines, leaderboards, shift windows, travel, the
+// GPS audit, activity feeds, active-now. Bulk rows still drive door status,
+// per-round views, coverage, and campaign-scope tallies. Spread into a $match:
+// `{ ...match, ...NOT_BULK }`. `$ne` matches docs without the field, so legacy
+// rows need no backfill.
+export const NOT_BULK = { via: { $ne: 'bulk' } };
+
 // Billable "knock" = one distinct (household, pass). Re-knocking a house within the SAME
 // pass (a correction, or a second/overlapping canvasser) counts once; going back in a NEW
 // pass counts again. passId:null collapses to a single legacy bucket per household (pre-turf

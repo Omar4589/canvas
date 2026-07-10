@@ -18,6 +18,7 @@ import { Organization } from '../../models/Organization.js';
 import { zonedDayRange, tzAbbrev, zonedDayStr } from '../../utils/timezone.js';
 import {
   KNOCK_ACTIONS,
+  NOT_BULK,
   knocksPipeline,
   connectionRate,
   contactRate,
@@ -410,7 +411,10 @@ router.get('/campaign-rollup', async (req, res, next) => {
           },
         ]),
         CanvassActivity.aggregate([
-          { $match: activityMatch },
+          // NOT_BULK: an admin's bulk restrict must not count them as an
+          // "active canvasser" on the campaign card. The event tallies above
+          // deliberately stay inclusive (campaign-scope counts are truthful).
+          { $match: { ...activityMatch, ...NOT_BULK } },
           {
             $group: {
               _id: '$campaignId',
@@ -420,7 +424,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           },
           { $project: { activeCanvassers: { $size: '$users' }, last: 1 } },
         ]),
-        CanvassActivity.distinct('userId', activityMatch),
+        CanvassActivity.distinct('userId', { ...activityMatch, ...NOT_BULK }),
       ]);
 
     // Per-campaign setup progress + management flags (campaign-wide; independent of
@@ -583,7 +587,7 @@ router.get('/canvassers', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     const cFilter = baseFilter(req);
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter };
-    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter };
+    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, ...NOT_BULK };
 
     const [surveyAgg, activityAgg, rangeAgg] = await Promise.all([
       SurveyResponse.aggregate([
@@ -1088,6 +1092,79 @@ router.get('/voters-by-answer', async (req, res, next) => {
   }
 });
 
+// One survey response in full — powers the mobile answer-drill detail screen
+// (tap a row in voters-by-answer). Returns everything the detail page shows:
+// answers, note, GPS + distance, voter, household (with coordinates for the
+// map dot), canvasser, and the round it was recorded in. Leads pass the router
+// gate via ?campaignId; the response's own campaign is re-checked here (same
+// defense-in-depth as /flags/review).
+router.get('/responses/:responseId', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const { responseId } = req.params;
+    if (!mongoose.isValidObjectId(responseId)) {
+      return res.status(400).json({ error: 'Invalid responseId' });
+    }
+    const r = await SurveyResponse.findOne({ _id: responseId, organizationId: orgId })
+      .populate('voterId', 'fullName party gender precinct')
+      .populate('householdId', 'addressLine1 addressLine2 city state zipCode location')
+      .populate('userId', 'firstName lastName email')
+      .populate('passId', 'roundNumber name')
+      .lean();
+    if (!r) return res.status(404).json({ error: 'Response not found' });
+    if (!isOrgAdmin(req) && !(await canManageCampaign(req, r.campaignId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const coords = r.householdId?.location?.coordinates;
+    res.json({
+      response: {
+        id: String(r._id),
+        submittedAt: r.submittedAt,
+        answers: r.answers || [],
+        note: r.note || null,
+        wasOfflineSubmission: !!r.wasOfflineSubmission,
+        distanceFromHouseMeters: r.distanceFromHouseMeters ?? null,
+        surveyTemplateVersion: r.surveyTemplateVersion || 1,
+      },
+      voter: r.voterId
+        ? {
+            id: String(r.voterId._id),
+            fullName: r.voterId.fullName,
+            party: r.voterId.party || null,
+            gender: r.voterId.gender || null,
+            precinct: r.voterId.precinct || null,
+          }
+        : null,
+      household: r.householdId
+        ? {
+            id: String(r.householdId._id),
+            addressLine1: r.householdId.addressLine1,
+            addressLine2: r.householdId.addressLine2 || null,
+            city: r.householdId.city,
+            state: r.householdId.state,
+            zipCode: r.householdId.zipCode,
+            lng: coords?.length === 2 ? coords[0] : null,
+            lat: coords?.length === 2 ? coords[1] : null,
+          }
+        : null,
+      canvasser: r.userId
+        ? {
+            id: String(r.userId._id),
+            firstName: r.userId.firstName,
+            lastName: r.userId.lastName,
+            email: r.userId.email || null,
+          }
+        : null,
+      round: r.passId
+        ? { id: String(r.passId._id), roundNumber: r.passId.roundNumber, name: r.passId.name || null }
+        : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // A house is an "overlap" only when 2+ DISTINCT canvassers knocked it within the SAME pass.
 // Once a house is knocked in a pass nobody should return until the next pass, so a single
 // canvasser revisiting — or different canvassers across DIFFERENT passes (a legitimate 2nd-pass
@@ -1175,7 +1252,9 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       CanvassActivity.aggregate([
         // Include 'restricted' so it contributes a separate tally + extends the shift
         // window (first/last), but it is NOT counted in `knocks` (kept billable-only).
-        { $match: { ...scoped, actionType: { $in: [...KNOCK_ACTIONS, 'restricted'] } } },
+        // Bulk marks excluded: the timeline is a per-CANVASSER grid — an admin's
+        // book-level bulk restrict must not appear as a phantom shift.
+        { $match: { ...scoped, ...NOT_BULK, actionType: { $in: [...KNOCK_ACTIONS, 'restricted'] } } },
         {
           $group: {
             _id: { userId: '$userId', bucket: bucketExpr },
@@ -1588,7 +1667,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
     const cFilter = baseFilter(req);
     const tz = tzOf(req);
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter };
-    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter };
+    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, ...NOT_BULK };
 
     const [surveyAgg, activityAgg, hoursAgg] = await Promise.all([
       SurveyResponse.aggregate([
@@ -1751,7 +1830,7 @@ router.get('/team-averages', async (req, res, next) => {
     const cFilter = baseFilter(req);
     const tz = tzOf(req);
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter };
-    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter };
+    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, ...NOT_BULK };
 
     const [perUserActivity, perUserSurveys, perUserHours] = await Promise.all([
       CanvassActivity.aggregate([
@@ -1856,7 +1935,7 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
     const cFilter = baseFilter(req);
     const tz = tzOf(req);
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter, userId };
-    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId };
+    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId, ...NOT_BULK };
 
     const knockMatch = { ...activityMatch, actionType: { $in: KNOCK_ACTIONS } };
 
@@ -2094,7 +2173,7 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
     const cFilter = baseFilter(req);
     const tz = tzOf(req);
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter, userId };
-    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId };
+    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId, ...NOT_BULK };
 
     const [activityDaily, surveyDaily] = await Promise.all([
       CanvassActivity.aggregate([
@@ -2188,7 +2267,7 @@ router.get('/canvassers/:userId/activities', async (req, res, next) => {
     if (!userId) return;
     const cFilter = baseFilter(req);
     const dateRange = parseDateRange(req, 'timestamp');
-    const filter = { ...dateRange, ...cFilter, userId };
+    const filter = { ...dateRange, ...cFilter, userId, ...NOT_BULK };
 
     if (req.query.actionType) {
       const types = String(req.query.actionType).split(',');
@@ -2260,7 +2339,7 @@ router.get('/canvassers/:userId/households', async (req, res, next) => {
     if (!userId) return;
     const cFilter = baseFilter(req);
     const dateRange = parseDateRange(req, 'timestamp');
-    const match = { ...dateRange, ...cFilter, userId };
+    const match = { ...dateRange, ...cFilter, userId, ...NOT_BULK };
 
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
@@ -2339,7 +2418,7 @@ router.get('/canvassers/:userId/voters', async (req, res, next) => {
     if (!userId) return;
     const cFilter = baseFilter(req);
     const dateRange = parseDateRange(req, 'submittedAt');
-    const filter = { ...dateRange, ...cFilter, userId };
+    const filter = { ...dateRange, ...cFilter, userId, ...NOT_BULK };
 
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
@@ -2494,7 +2573,7 @@ router.get('/canvassers/:userId/path', async (req, res, next) => {
     if (!userId) return;
     const cFilter = baseFilter(req);
     const dateRange = parseDateRange(req, 'timestamp');
-    const filter = { ...dateRange, ...cFilter, userId };
+    const filter = { ...dateRange, ...cFilter, userId, ...NOT_BULK };
 
     if (req.query.actionType) {
       filter.actionType = { $in: String(req.query.actionType).split(',') };
@@ -2548,7 +2627,7 @@ router.get('/canvassers/:userId/quality', async (req, res, next) => {
     const userId = parseUserIdParam(req, res);
     if (!userId) return;
     const cFilter = baseFilter(req);
-    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId };
+    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId, ...NOT_BULK };
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter, userId };
 
     const [distAgg, offlineAgg, syncAgg, flaggedList, lastSync] = await Promise.all([
@@ -2683,7 +2762,7 @@ router.get('/canvassers/:userId/export.csv', async (req, res, next) => {
     const userId = parseUserIdParam(req, res);
     if (!userId) return;
     const cFilter = baseFilter(req);
-    const filter = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId };
+    const filter = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId, ...NOT_BULK };
 
     const activities = await CanvassActivity.find(filter, {
       timestamp: 1,

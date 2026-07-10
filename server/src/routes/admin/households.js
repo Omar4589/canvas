@@ -68,7 +68,7 @@ async function loadCanvasserRoster(orgId, campaignId = null) {
   }
 
   const [activityIds, surveyIds, rosterIds] = await Promise.all([
-    CanvassActivity.distinct('userId', { organizationId: orgId, campaignId }),
+    CanvassActivity.distinct('userId', { organizationId: orgId, campaignId, via: { $ne: 'bulk' } }),
     SurveyResponse.distinct('userId', { organizationId: orgId, campaignId }),
     CampaignAssignment.distinct('userId', { organizationId: orgId, campaignId }),
   ]);
@@ -279,7 +279,10 @@ router.get('/map', async (req, res, next) => {
       ]),
       includeActivities
         ? CanvassActivity.find(
-            { ...activityMatch, householdId: { $in: householdIds } },
+            // Ping trail only — bulk marks would draw N same-second pings at
+            // house coords. The date-narrowing above stays inclusive, so a
+            // Today-filtered map still surfaces just-bulk-marked doors.
+            { ...activityMatch, householdId: { $in: householdIds }, via: { $ne: 'bulk' } },
             'householdId userId actionType timestamp location distanceFromHouseMeters'
           )
             .populate('userId', 'firstName lastName')
