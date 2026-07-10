@@ -249,6 +249,16 @@ export function IconNote({ size = 22 }) {
   );
 }
 
+export function IconBilling({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 10h18" />
+      <path d="M7 15h4" />
+    </svg>
+  );
+}
+
 // Route path -> icon component. Joined to navItems.js NAV/SUPER_NAV at render time.
 export const NAV_ICONS = {
   '/admin': IconDashboard,
@@ -269,6 +279,7 @@ export const NAV_ICONS = {
   '/tags': IconTag,
   '/voters': IconVoters,
   '/admin/duplicate-surveys': IconDuplicate,
+  '/billing': IconBilling,
   '/super-admin': IconGauge,
   '/super-admin/users': IconUsers,
   '/super-admin/people': IconUsers,
