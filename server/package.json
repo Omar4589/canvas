@@ -26,7 +26,8 @@
     "migrate:survey-option-ids": "node src/migrations/migrateSurveyOptionIds.js",
     "migrate:org-tags": "node src/migrations/migrateOrgTags.js",
     "migrate:cleanup-client-role": "node src/migrations/cleanupClientRole.js",
-    "migrate:persons": "node src/migrations/migratePersons.js"
+    "migrate:persons": "node src/migrations/migratePersons.js",
+    "migrate:billing": "node src/migrations/migrateBilling.js"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",
@@ -34,6 +35,7 @@
     "@turf/turf": "^7.3.5",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.77.6",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",

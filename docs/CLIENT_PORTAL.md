@@ -15,7 +15,7 @@ published, a report never changes, and next week's report just appears at the sa
 
 Related: [METRICS.md](METRICS.md) (the numbers a report freezes), [SURVEYS.md](SURVEYS.md) (where the
 support/survey breakdowns come from + the per-question percentage rule), [MAPS.md](MAPS.md) (the shared
-map rendering), [USERS.md](USERS.md) (admin/canvasser roles), [TIMEZONES.md](TIMEZONES.md) and
+map rendering), [USERS.md](USERS.md) (admin/lead/canvasser roles), [TIMEZONES.md](TIMEZONES.md) and
 [DATE_FILTERS.md](DATE_FILTERS.md) (how the report week is anchored).
 
 ---
@@ -276,7 +276,8 @@ active `ReportShareLink` (404 otherwise):
 There are no client login accounts anymore. [cleanupClientRole.js](../server/src/migrations/cleanupClientRole.js)
 (`npm run migrate:cleanup-client-role -- --apply`, idempotent) deletes the old `role:'client'`
 memberships and unsets any leftover `clientCampaignIds` (the `Membership.role` enum is now
-`admin | canvasser`). Run it with the deploy. No new env vars — `MAPBOX_PUBLIC_TOKEN` and `JWT_SECRET`
+`admin | lead | canvasser` — the `lead` role arrived after this migration; see [ROLES.md](ROLES.md)).
+Run it with the deploy. No new env vars — `MAPBOX_PUBLIC_TOKEN` and `JWT_SECRET`
 already exist. Mobile is unaffected.
 
 The PDF export adds one client dependency, **`jspdf`** (lazy-loaded into its own chunk) — `npm --prefix

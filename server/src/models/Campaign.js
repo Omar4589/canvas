@@ -32,6 +32,11 @@ const campaignSchema = new mongoose.Schema(
     // banner. Set once (for all admins of the campaign); null = never dismissed. Only
     // silences the go-live confirmation — incomplete-setup guidance still shows.
     setupLiveDismissedAt: { type: Date, default: null },
+    // Set when an admin archives (isActive → false), cleared on reactivate.
+    // Billing: a campaign bills through its archive month and not beyond
+    // (services/billing/statement.js). Legacy archived campaigns have null —
+    // migrate:billing backfills updatedAt.
+    archivedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

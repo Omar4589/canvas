@@ -12,6 +12,7 @@ import IconButton from './ui/IconButton.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import BottomNav from './BottomNav.jsx';
 import AddedToOrgBanner from './AddedToOrgBanner.jsx';
+import BillingBanner from './BillingBanner.jsx';
 
 function navClass(collapsed) {
   return ({ isActive }) =>
@@ -243,6 +244,7 @@ export default function Layout() {
         </div>
         <main className={isFullBleed ? 'flex-1 overflow-hidden' : 'flex-1 overflow-auto p-6 pb-20 md:pb-6'}>
           {!isFullBleed && <AddedToOrgBanner />}
+          {!isFullBleed && <BillingBanner />}
           <Outlet />
         </main>
       </div>

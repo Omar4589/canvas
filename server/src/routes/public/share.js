@@ -9,6 +9,7 @@ import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { signShareToken, verifyToken } from '../../services/auth/tokens.js';
+import { shareLinksBlocked } from '../../services/billing/entitlement.js';
 import {
   shapeReportForClient,
   shapeReportListRow,
@@ -26,6 +27,11 @@ async function loadShare(req, res, next) {
   try {
     const share = await ReportShareLink.findOne({ token: req.params.token, isActive: true });
     if (!share) return res.status(404).json({ error: 'This report link is not available.' });
+    // Billing: share links survive past_due but die with the org's access
+    // (suspended/canceled) — the published report is the leverage.
+    if (await shareLinksBlocked(share.organizationId)) {
+      return res.status(410).json({ error: 'This report is no longer available.' });
+    }
     req.share = share;
     // Best-effort access stamp — never block the read on it.
     ReportShareLink.updateOne({ _id: share._id }, { $set: { lastAccessedAt: new Date() } }).catch(() => {});

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
@@ -42,6 +43,10 @@ export function createApp() {
       credentials: false,
     })
   );
+  // Gzip every response — the API's JSON (admin map + reports especially)
+  // compresses ~85-90%, and neither Express nor Heroku's router does this
+  // for us (see docs/PERFORMANCE.md → Payload scaling).
+  app.use(compression());
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan(isProd ? 'combined' : 'dev'));

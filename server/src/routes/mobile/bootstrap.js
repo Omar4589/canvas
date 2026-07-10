@@ -162,6 +162,9 @@ router.get('/campaigns', async (req, res, next) => {
     res.json({
       user: req.user.toSafeJSON(),
       campaigns: campaignsOut,
+      // Billing entitlement (attached by requireEntitlement; null for super
+      // admins) — the picker shows trial/paused notices from this.
+      entitlement: req.entitlement || null,
     });
   } catch (err) {
     next(err);
@@ -282,6 +285,9 @@ router.get('/bootstrap', async (req, res, next) => {
       books,
       efforts,
       activePassIds: activePasses,
+      // Billing entitlement — the field app gates new dispositions on
+      // canCanvass and shows the banner state (null for super admins).
+      entitlement: req.entitlement || null,
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {

@@ -197,7 +197,12 @@ router.patch('/:campaignId', async (req, res, next) => {
     if (data.name !== undefined) campaign.name = data.name;
     if (data.state !== undefined) campaign.state = data.state;
     if (data.timeZone !== undefined) campaign.timeZone = data.timeZone;
-    if (data.isActive !== undefined) campaign.isActive = data.isActive;
+    if (data.isActive !== undefined && data.isActive !== campaign.isActive) {
+      campaign.isActive = data.isActive;
+      // Billing reads this: a campaign bills through its ARCHIVE month, not
+      // beyond (services/billing/statement.js). Reactivating clears it.
+      campaign.archivedAt = data.isActive ? null : new Date();
+    }
     if (data.type !== undefined) campaign.type = data.type;
     if (data.surveyTemplateId !== undefined) {
       if (data.surveyTemplateId) {

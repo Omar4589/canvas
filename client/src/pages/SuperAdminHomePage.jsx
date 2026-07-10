@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import CrossOrgActivityFeed from '../components/CrossOrgActivityFeed.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
+import { BillingPill } from '../lib/billingStatus.jsx';
 
 function formatRelative(d) {
   if (!d) return 'No activity';
@@ -100,6 +101,37 @@ export default function SuperAdminHomePage() {
           />
         </div>
 
+        {orgs.some(
+          (o) =>
+            ['past_due', 'suspended'].includes(o.billing?.effective) ||
+            (o.billing?.effective === 'trial' && o.billing?.trialDaysLeft != null && o.billing.trialDaysLeft <= 2)
+        ) && (
+          <div className="rounded-md border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
+            <span className="font-semibold">Billing needs attention: </span>
+            {orgs
+              .filter(
+                (o) =>
+                  ['past_due', 'suspended'].includes(o.billing?.effective) ||
+                  (o.billing?.effective === 'trial' && o.billing?.trialDaysLeft != null && o.billing.trialDaysLeft <= 2)
+              )
+              .map(
+                (o) =>
+                  `${o.name} (${
+                    o.billing.effective === 'trial'
+                      ? `trial ends in ${o.billing.trialDaysLeft}d`
+                      : o.billing.effective.replace('_', ' ')
+                  })`
+              )
+              .join(' · ')}{' '}
+            <button
+              onClick={() => navigate('/organizations')}
+              className="font-semibold underline underline-offset-2 hover:opacity-80"
+            >
+              Manage →
+            </button>
+          </div>
+        )}
+
         <div>
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">
@@ -145,6 +177,9 @@ export default function SuperAdminHomePage() {
                         <span className="rounded-full bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
                           inactive
                         </span>
+                      )}
+                      {o.billing?.effective && o.billing.effective !== 'active' && (
+                        <BillingPill effective={o.billing.effective} />
                       )}
                       {o.activeNowCount > 0 && (
                         <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">

@@ -134,6 +134,49 @@ debounce input via `useDebouncedValue` (`client/src/lib/` and `mobile/lib/`, 300
 - **`keepPreviousData: true` is a dead option in react-query v5** — it's silently ignored. The v5
   form is `placeholderData: keepPreviousData` (import from `@tanstack/react-query`).
 
+## Payload scaling (bootstrap + admin map)
+
+Investigated July 2026 with the 16,503-household FL campaign as the stress case.
+
+**The field bootstrap is book-scoped — the old "~5MB payload" brief note is history.**
+`/mobile/bootstrap` filters households through `canvasserScopeWithPasses()`
+([services/canvass/canvasserScope.js](../server/src/services/canvass/canvasserScope.js)): the union
+of the user's **assigned books on active rounds**, admins included; unassigned ⇒ zero doors. A
+typical canvasser (a few books × ~100 doors) downloads tens of KB regardless of universe size.
+Voters ship only for survey campaigns, scoped to those doors
+([routes/mobile/bootstrap.js:222-238](../server/src/routes/mobile/bootstrap.js#L222-L238)). The old
+~5MB figure was the pre-turf whole-universe payload (5,840 doors + 8,668 voters ≈ ~350 bytes/row).
+
+**The whole-universe surfaces are the admin map and full self-assignment:**
+
+- `/admin/households/map` ([routes/admin/households.js:97](../server/src/routes/admin/households.js#L97))
+  returns every matching door, all their voters (4-field projection), **all** matching
+  `SurveyResponse` docs (full `answers[]`, no projection, two populates), and a last-activity row
+  per door — unpaginated, by design (it's a map). The **date window is the guard**: with from/to
+  set, doors narrow to interaction-touched ones
+  ([:211-230](../server/src/routes/admin/households.js#L211-L230)), and both the web and mobile
+  admin maps default to **Today**. The heavy pull only happens when a user clears/widens the dates:
+  on FL that's ~6MB of households + ~4MB of voters + surveys/last-activity on top — **~12MB+ of
+  uncompressed JSON**, refetched every **20s** while the web map's Live toggle is on
+  ([MapPage.jsx:218](../client/src/pages/MapPage.jsx#L218); the mobile admin map is focus-gated,
+  `staleTime` 60s, no interval).
+- Bulk-assigning **all books to one user** (assign-bulk `everyone` mode) makes that user's
+  bootstrap the whole universe (~10–15MB on FL). `saveBootstrap` writes it as ONE AsyncStorage row
+  ([mobile/lib/cache.js:16-18](../mobile/lib/cache.js#L16-L18)); Android's SQLite-backed
+  AsyncStorage can't read rows past ~2MB (CursorWindow) and defaults to a ~6MB total DB — the
+  offline cache would silently stop restoring on Android. iOS is file-based and unaffected.
+
+**No compression middleware is installed** ([server/src/app.js](../server/src/app.js) has no
+`compression`; Express does not gzip by default and the Heroku router doesn't add it). Every JSON
+response ships uncompressed. Payloads like these compress ~85–90%, so `app.use(compression())` is
+the single cheapest app-wide win (~12MB → ~1.5MB on the FL all-time map pull).
+
+**If universes keep growing, the levers in order:** (1) add `compression`; (2) project
+`SurveyResponse.answers` out of the map payload — but first verify what the household panel and
+answer-filter chips actually read from it; (3) a size guard or chunked storage in `saveBootstrap`
+for the everyone-assignment case; (4) viewport-bounded or paginated map fetches only if a campaign
+far outgrows FL.
+
 ## State-reset patterns (no reset-in-effect)
 
 Resetting pagination/accumulators in a `useEffect` fires one wasted render+query with

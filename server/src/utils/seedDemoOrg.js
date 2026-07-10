@@ -58,6 +58,7 @@ import { CanvassActivity } from '../models/CanvassActivity.js';
 import { ImportJob } from '../models/ImportJob.js';
 import { VotedUpload } from '../models/VotedUpload.js';
 import { VotedVoter } from '../models/VotedVoter.js';
+import { Subscription } from '../models/Subscription.js';
 import { VotedPendingId } from '../models/VotedPendingId.js';
 import { ClientReport } from '../models/ClientReport.js';
 import { ClientReportMapPoint } from '../models/ClientReportMapPoint.js';
@@ -695,6 +696,12 @@ async function main() {
   const org =
     existingOrg ||
     (await Organization.create({ name: DEMO_ORG_NAME, slug: DEMO_ORG_SLUG, timeZone: CAMPAIGN_TZ }));
+  // Demo orgs are `internal` — permanently free, never gated, off the books.
+  await Subscription.updateOne(
+    { organizationId: org._id },
+    { $set: { status: 'internal', statusChangedAt: new Date() } },
+    { upsert: true }
+  );
   const { user: admin } = await ensureUser({
     email: ADMIN_EMAIL, password: ADMIN_PASSWORD, firstName: 'Dana', lastName: 'Whitfield', syncPassword: true,
   });

@@ -1,12 +1,23 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import OrgBillingPanel from '../components/OrgBillingPanel.jsx';
+import { BillingPill } from '../lib/billingStatus.jsx';
+
+// Which orgs the account manager should look at first: paused/past-due states
+// and trials inside their last 2 days.
+function needsAttention(o) {
+  const b = o.billing || {};
+  if (['past_due', 'suspended'].includes(b.effective)) return true;
+  return b.effective === 'trial' && b.trialDaysLeft != null && b.trialDaysLeft <= 2;
+}
 
 export default function OrganizationsPage() {
   const qc = useQueryClient();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [error, setError] = useState(null);
+  const [billingOrg, setBillingOrg] = useState(null); // { id, name } — panel target
 
   const orgsQ = useQuery({
     queryKey: ['super-admin', 'organizations'],
@@ -85,6 +96,26 @@ export default function OrganizationsPage() {
         )}
       </form>
 
+      {(orgsQ.data?.organizations || []).some(needsAttention) && (
+        <div className="rounded-md border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
+          <span className="font-semibold">Needs attention: </span>
+          {(orgsQ.data?.organizations || []).filter(needsAttention).map((o, i, arr) => (
+            <span key={o.id}>
+              <button
+                onClick={() => setBillingOrg({ id: o.id, name: o.name })}
+                className="font-semibold underline underline-offset-2 hover:opacity-80"
+              >
+                {o.name}
+              </button>
+              {' ('}
+              {o.billing.effective === 'trial' ? `trial ends in ${o.billing.trialDaysLeft}d` : o.billing.effective.replace('_', ' ')}
+              {')'}
+              {i < arr.length - 1 ? ' · ' : ''}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <table className="min-w-full divide-y divide-border text-sm">
           <thead className="bg-sunken text-left text-xs font-semibold uppercase tracking-wide text-fg-muted">
@@ -94,13 +125,14 @@ export default function OrganizationsPage() {
               <th className="px-4 py-3">Members</th>
               <th className="px-4 py-3">Campaigns</th>
               <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Billing</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {orgsQ.isLoading && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-fg-muted">
+                <td colSpan={7} className="px-4 py-6 text-center text-fg-muted">
                   Loading…
                 </td>
               </tr>
@@ -122,6 +154,16 @@ export default function OrganizationsPage() {
                     {o.isActive ? 'Active' : 'Inactive'}
                   </span>
                 </td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => setBillingOrg({ id: o.id, name: o.name })}
+                    className="inline-flex items-center gap-1.5"
+                    title="Manage billing"
+                  >
+                    <BillingPill effective={o.billing?.effective} />
+                    <span className="text-xs font-semibold text-brand-accent hover:opacity-80">Manage</span>
+                  </button>
+                </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() =>
@@ -136,7 +178,7 @@ export default function OrganizationsPage() {
             ))}
             {orgsQ.data?.organizations?.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-fg-muted">
+                <td colSpan={7} className="px-4 py-6 text-center text-fg-muted">
                   No organizations yet.
                 </td>
               </tr>
@@ -144,6 +186,10 @@ export default function OrganizationsPage() {
           </tbody>
         </table>
       </div>
+
+      {billingOrg && (
+        <OrgBillingPanel orgId={billingOrg.id} orgName={billingOrg.name} onClose={() => setBillingOrg(null)} />
+      )}
     </div>
   );
 }

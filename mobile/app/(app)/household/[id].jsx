@@ -146,6 +146,10 @@ export default function HouseholdDetail() {
   // the optimistic recolor (the blue→grey→blue flicker).
   const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'], refetchOnMount: false });
   const campaignType = bootstrap?.campaign?.type || 'survey';
+  // Billing entitlement: when the org is paused, new dispositions are disabled
+  // (the server 402s them anyway — this is the courteous version). Missing
+  // entitlement (older cache / super admin) fails open.
+  const canCanvass = bootstrap?.entitlement ? bootstrap.entitlement.canCanvass !== false : true;
   const { household, voters } = findHouseholdAndVoters(bootstrap, id);
 
   const [note, setNote] = useState('');
@@ -178,6 +182,7 @@ export default function HouseholdDetail() {
   // stamp + network write happen in the background (recordHouseholdAction). We do
   // NOT await it — awaiting is exactly what made the pin lag behind the tap.
   function submitAction(action) {
+    if (!canCanvass) return; // org paused — buttons are disabled, belt & braces
     if (firedRef.current) return; // double-tap: an action is already recording
     firedRef.current = true;
     setIsSubmitting(true);
@@ -292,11 +297,18 @@ export default function HouseholdDetail() {
           style={styles.noteInput}
         />
 
+        {!canCanvass && (
+          <Text style={{ marginTop: spacing.lg, color: '#991B1B', fontSize: 13, fontWeight: '600' }}>
+            Canvassing is paused for your organization — recording is disabled. Work you already
+            recorded is safe.
+          </Text>
+        )}
+
         <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
           {campaignType === 'lit_drop' ? (
             <Pressable
               onPress={() => submitAction('lit_dropped')}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !canCanvass}
               style={({ pressed }) => [
                 styles.primaryButton,
                 {
@@ -315,7 +327,7 @@ export default function HouseholdDetail() {
             <>
               <Pressable
                 onPress={() => submitAction('not_home')}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !canCanvass}
                 style={({ pressed }) => [
                   styles.actionButton,
                   styles.actionNotHome,
@@ -327,7 +339,7 @@ export default function HouseholdDetail() {
 
               <Pressable
                 onPress={() => submitAction('wrong_address')}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !canCanvass}
                 style={({ pressed }) => [
                   styles.actionButton,
                   styles.actionWrongAddress,
@@ -339,7 +351,7 @@ export default function HouseholdDetail() {
 
               <Pressable
                 onPress={() => submitAction('refused')}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !canCanvass}
                 style={({ pressed }) => [
                   styles.actionButton,
                   styles.actionRefused,
@@ -354,7 +366,7 @@ export default function HouseholdDetail() {
           {/* Restricted Access — inaccessible home. All campaign types; not a knock. */}
           <Pressable
             onPress={() => submitAction('restricted')}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !canCanvass}
             style={({ pressed }) => [
               styles.actionButton,
               styles.actionRestricted,

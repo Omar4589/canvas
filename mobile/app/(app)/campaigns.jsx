@@ -21,6 +21,7 @@ import {
   saveCurrentEffort,
 } from '../../lib/cache';
 import CanvasserHeader from '../../components/CanvasserHeader';
+import EntitlementBanner from '../../components/EntitlementBanner';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -81,6 +82,8 @@ export default function CampaignsScreen() {
           Choose the campaign you'll be canvassing for. You can switch later.
         </Text>
       </View>
+
+      <EntitlementBanner entitlement={data?.entitlement} />
 
       {isLoading && (
         <View style={styles.center}>

@@ -45,6 +45,7 @@ import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import MapContextCard from '../../components/MapContextCard';
+import EntitlementBanner from '../../components/EntitlementBanner';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { useMapStyle } from '../../lib/mapStyles';
@@ -1019,6 +1020,9 @@ export default function MapScreen() {
             onBooks={() => router.replace('/(app)/books')}
           />
         )}
+
+        {/* Billing entitlement notice (trial ending / paused) — map + list mode. */}
+        <EntitlementBanner entitlement={data?.entitlement} />
 
         {/* Map/List toggle (left) shares one row with the houses filter + sort (right). */}
         <View style={styles.controlRow}>

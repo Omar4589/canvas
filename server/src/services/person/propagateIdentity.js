@@ -2,7 +2,7 @@ import { Person } from '../../models/Person.js';
 import { Voter } from '../../models/Voter.js';
 import { followMerged } from './resolvePerson.js';
 
-// The 10 shared identity fields + fullName. This allowlist is the ONLY thing
+// The 10 shared identity fields (fullName is one of them). This allowlist is the ONLY thing
 // propagation ever writes — NEVER a match key (uid/uidSource/stateVoterId/
 // registeredState), personId, surveyStatus, householdId, or a district field.
 const IDENTITY_FIELDS = [

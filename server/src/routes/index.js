@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { blockIfMustChangePassword } from '../middleware/passwordGate.js';
+import { requireEntitlement } from '../middleware/entitlement.js';
 import authRouter from './auth.js';
 import adminMembershipsRouter from './admin/memberships.js';
 import adminAssignmentsRouter from './admin/assignments.js';
@@ -24,6 +25,8 @@ import adminSetupStatusRouter from './admin/setupStatus.js';
 import adminTurfAssignmentsRouter from './admin/turfAssignments.js';
 import adminLeadCrewRouter from './admin/leadCrew.js';
 import superAdminOrganizationsRouter from './superAdmin/organizations.js';
+import superAdminBillingRouter from './superAdmin/billing.js';
+import adminBillingRouter from './admin/billing.js';
 import superAdminUsersRouter from './superAdmin/users.js';
 import superAdminPersonsRouter from './superAdmin/persons.js';
 import superAdminPlatformRouter from './superAdmin/platform.js';
@@ -49,12 +52,17 @@ router.use('/share', shareRouter);
 // the sub-routers (which re-run requireAuth harmlessly). /auth is excluded above
 // so change-password / me / logout stay reachable while the flag is set.
 router.use(['/super-admin', '/admin', '/mobile'], requireAuth, blockIfMustChangePassword);
+// Billing entitlement gate: reads always pass (suspended = read-only), writes
+// need an entitled org; super-admin surfaces are exempt (account managers).
+router.use(['/admin', '/mobile'], requireEntitlement);
 
+router.use('/super-admin/organizations/:orgId/billing', superAdminBillingRouter);
 router.use('/super-admin/organizations', superAdminOrganizationsRouter);
 router.use('/super-admin/users', superAdminUsersRouter);
 router.use('/super-admin/persons', superAdminPersonsRouter);
 router.use('/super-admin', superAdminPlatformRouter);
 
+router.use('/admin/billing', adminBillingRouter);
 router.use('/admin/memberships', adminMembershipsRouter);
 router.use('/admin/imports', adminImportsRouter);
 router.use('/admin/reports', adminReportsRouter);

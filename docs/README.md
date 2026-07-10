@@ -43,8 +43,11 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | [ROLES.md](ROLES.md) | The org roles (admin / team lead / canvasser) and the **team lead** (a campaign-scoped admin): the grant store, the per-surface authorization contract, and web/mobile scoping. |
 | [PERSONS.md](PERSONS.md) | The cross-org **Person** layer: how the same real person is deduped across orgs, plus ownership, merge/split, locks, and edit proposals. |
 | [PLATFORM.md](PLATFORM.md) | The **super-admin** platform console: the Control Room (cross-org totals + live activity feed), Organizations, All Users + promote, and the People layer. |
+| [BILLING.md](BILLING.md) | Charging orgs for Doorline: the $300/campaign/month model, trials, the account state machine (read-only suspension, offline grace), the super-admin Billing panel + monthly statement, and the entitlement gate. |
 | [THEMING.md](THEMING.md) | Cross-cutting (not a feature): light/dark mode and the web design tokens — how the theme flips, the full token reference, and the rule that every control must use the semantic tokens (`bg-card`/`text-fg`/…) so nothing renders white in dark mode. |
 | [PERFORMANCE.md](PERFORMANCE.md) | Cross-cutting (not a feature): resource hygiene — focus-gated polling and GPS on covered mobile screens, the single-flight offline queue, AbortSignal/debounce on searches, map lifecycle rules, and the state-reset patterns. |
+| [REPORTING_BACKLOG.md](REPORTING_BACKLOG.md) | Not a feature doc: deferred reporting/dashboard enhancements — per-round breakdowns and the billing export first — plus a status note on what's already correct. |
+| [PROPOSAL_PARALLEL_EFFORTS.md](PROPOSAL_PARALLEL_EFFORTS.md) | Historical design proposal for the Efforts model — superseded by [EFFORTS.md](EFFORTS.md); kept for the rationale. |
 
 ### Related references (repo root)
 

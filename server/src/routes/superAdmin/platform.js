@@ -4,6 +4,8 @@ import { Membership } from '../../models/Membership.js';
 import { User } from '../../models/User.js';
 import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { Subscription } from '../../models/Subscription.js';
+import { entitlementFor } from '../../services/billing/entitlement.js';
 import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
 
 const router = Router();
@@ -115,6 +117,10 @@ router.get('/platform-overview', async (req, res, next) => {
 
     const usersTotals = usersAgg[0] || { total: 0, active: 0, superAdmins: 0 };
 
+    // Billing pill + "needs attention" data for the Control Room org cards.
+    const subs = await Subscription.find({}, null).lean();
+    const subMap = new Map(subs.map((s) => [String(s.organizationId), s]));
+
     res.json({
       totals: {
         orgs: {
@@ -131,16 +137,26 @@ router.get('/platform-overview', async (req, res, next) => {
         campaigns: { total: campaignsTotal, active: campaignsActive },
         today: todayCounts,
       },
-      organizations: orgs.map((o) => ({
-        id: String(o._id),
-        name: o.name,
-        slug: o.slug,
-        isActive: o.isActive,
-        memberCount: memberMap.get(String(o._id)) || 0,
-        campaignCount: campaignMap.get(String(o._id)) || 0,
-        activeNowCount: activeNowMap.get(String(o._id)) || 0,
-        lastActivityAt: lastMap.get(String(o._id)) || null,
-      })),
+      organizations: orgs.map((o) => {
+        const sub = subMap.get(String(o._id)) || null;
+        const ent = entitlementFor(sub);
+        return {
+          id: String(o._id),
+          name: o.name,
+          slug: o.slug,
+          isActive: o.isActive,
+          memberCount: memberMap.get(String(o._id)) || 0,
+          campaignCount: campaignMap.get(String(o._id)) || 0,
+          activeNowCount: activeNowMap.get(String(o._id)) || 0,
+          lastActivityAt: lastMap.get(String(o._id)) || null,
+          billing: {
+            status: sub?.status ?? null,
+            effective: ent.effective,
+            trialEndsAt: sub?.trialEndsAt ?? null,
+            trialDaysLeft: ent.trialDaysLeft,
+          },
+        };
+      }),
     });
   } catch (err) {
     next(err);

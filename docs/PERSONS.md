@@ -150,7 +150,8 @@ cache. `propagateIdentity(personId, identity, { orgId, source, userId, session }
 
 1. **Optimistic concurrency** on `identityVersion` (`findOneAndUpdate` gated on the version,
    `$inc` on success, 3 retries on drift), writing dotted `fieldProvenance.<field>`.
-2. **Allowlist `$set`** of the 10 identity fields + `fullName` only — never a match key,
+2. **Allowlist `$set`** of the 10 identity fields only (`fullName` is one of the 10, re-derived
+   from the name parts when absent) — never a match key,
    `personId`, `surveyStatus`, `householdId`, or a district field.
 3. **Per-Voter fan-out** across all orgs, honoring each Voter's `locallyEditedFields` (a
    door-confirmed phone survives an owner import) and snapshotting `identityBackup` once before

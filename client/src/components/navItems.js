@@ -25,6 +25,7 @@ export const ORG_NAV = [
   { to: '/voters', label: 'Voters' },
   { to: '/users', label: 'Users' },
   { to: '/admin/duplicate-surveys', label: 'Duplicate Surveys' },
+  { to: '/billing', label: 'Billing' },
 ];
 
 export const CAMPAIGN_NAV = [

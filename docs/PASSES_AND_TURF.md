@@ -299,7 +299,7 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 
 | Model | File | Fields that matter |
 |---|---|---|
-| `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `roundNumber` (unique per campaign, never reused), `name`, `walkListId` (null = all voters), `status` (`draft`/`active`/`archived`), `activatedAt` (set on activation; knock attribution is now door→book→walk-list, not this timestamp — see the banner), `archivedAt`, `recutLock{lockedAt,lockedBy}`. Unique index `{campaignId, roundNumber}`. |
+| `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `effortId` (the walk list whose owned doors are the round's universe), `roundNumber` (unique **per walk list**, never reused), `name`, `targetFilter` (optional walk-list-shaped filter for a targeted follow-up round), `walkListId` (**deprecated** — null on new rounds; the door-set comes from the effort), `status` (`draft`/`active`/`archived`), `activatedAt` (set on activation; knock attribution is now door→book→walk-list, not this timestamp — see the banner), `archivedAt`, `recutLock{lockedAt,lockedBy}`. Unique index `{effortId, roundNumber}` ([Pass.js:58](../server/src/models/Pass.js#L58)). |
 | `Turf` (= "book") | [models/Turf.js](../server/src/models/Turf.js) | `passId` (required), `campaignId`, `name`, `mode` (`attribute`/`geometric`/`manual`), `params`, `householdIds[]` (**ordered** = walk sequence), `doorCount`, `boundary`/`centroid` (GeoJSON, **display-only**, not geo-indexed), `status` (`draft`/`published`/`archived`), `generationJobId`, `generatedBy`. |
 | Active passes (derived) | [services/passes/activePasses.js](../server/src/services/passes/activePasses.js) | `activePassIds(campaignId)` derives the live passes from `Pass.status==='active'` — **one per active walk list** (a campaign can have several at once). There is **no** `Campaign.activePassId` field. |
 | `Household.turfId` / `walkOrder` | [models/Household.js](../server/src/models/Household.js) | Denormalized mirror of "which book + position" for the household; `null` until assigned by a cut. |
@@ -369,8 +369,8 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | Route | Behavior |
 |---|---|
 | `POST /campaigns/:campaignId/passes` | Create (auto-increments `roundNumber`, optional `walkListId`); starts `draft`. |
-| `POST /passes/:id/activate` ([:104](../server/src/routes/admin/passes.js#L104)) | 409 if archived ([:108](../server/src/routes/admin/passes.js#L108)); 400 if no published books ([:111](../server/src/routes/admin/passes.js#L111)); **archives all other active passes** ([:115-118](../server/src/routes/admin/passes.js#L115-L118)); sets `Campaign.activePassId` ([:122](../server/src/routes/admin/passes.js#L122)). |
-| `POST /passes/:id/archive` | **409 `archive-confirm-required`** `{ knockCount, isActive }` when the round is active **or** has knocks and `confirmArchive` isn't set (one-way + canvassers lose it — knocks kept). Else archive; clears `activePassId` if it was this pass. |
+| `POST /passes/:id/activate` ([:111](../server/src/routes/admin/passes.js#L111)) | 409 if archived ([:115-116](../server/src/routes/admin/passes.js#L115-L116)); 400 if no published books; **archives other active rounds of the same walk list only** ([:127-132](../server/src/routes/admin/passes.js#L127-L132)) — other walk lists keep their active rounds; sets `activatedAt` once ([:134](../server/src/routes/admin/passes.js#L134)). No campaign-level pointer is written — active rounds are **derived** (see the data-model table). |
+| `POST /passes/:id/archive` | **409 `archive-confirm-required`** `{ knockCount, isActive }` when the round is active **or** has knocks and `confirmArchive` isn't set (one-way + canvassers lose it — knocks kept). Else archive (`status:'archived'` + `archivedAt`, [:163-164](../server/src/routes/admin/passes.js#L163-L164)). |
 | `GET /campaigns/:campaignId/passes` | Each pass row carries `turfCount` **and `knockCount`** (distinct `(household, pass)` over `KNOCK_ACTIONS`) for the Passes page. |
 | `GET /admin/households/:householdId/activity` | A door's `CanvassActivity` + `SurveyResponse` across all rounds, grouped by round (`{ rounds: [{ passId, roundNumber, name, entries }] }`) — powers the door-detail "History by round". |
 | `DELETE /passes/:id` ([:145](../server/src/routes/admin/passes.js#L145)) | Draft-only. |
@@ -386,7 +386,7 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. Skips fully-voted doors. Passes `params` straight through, so **`params.excludeRestricted`** reaches `generateTurf` and skips `status:'restricted'` doors for that cut (the "Exclude restricted-access homes" toggle; default on when any exist). |
 | `POST .../turfs/accept` ([:99](../server/src/routes/admin/turfs.js#L99)) | Draft → published for the pass. |
 | `POST .../turfs/add-supplemental` | **Non-destructive add.** Cut the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirror `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`); serialized by `Pass.recutLock`. New books then use Accept + Assign. Body `{ passId, name?, maxDoors?, excludeRestricted? }` (`excludeRestricted` adds `status: { $ne: 'restricted' }` to the base filter) → `{ added, bookCount, bookIds }`. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
-| `POST .../turfs/discard` | **409 `active-pass-confirm-required`** (with `knockCount`/`assignmentCount`/`isActive`) when the pass is active **or has recorded knocks** and `confirmActive` isn't set — the client's typed-confirm dialog supplies it. Then: snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` and clear `activePassId`; optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse` (captured in the snapshot). Serialized by `Pass.recutLock`. The turfs `GET /` also returns `knockCount` for the selected pass (drives the dialog's warning). |
+| `POST .../turfs/discard` | **409 `active-pass-confirm-required`** (with `knockCount`/`assignmentCount`/`isActive`) when the pass is active **or has recorded knocks** and `confirmActive` isn't set — the client's typed-confirm dialog supplies it. Then: snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` ([turfs.js:366-372](../server/src/routes/admin/turfs.js#L366-L372)); optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse` (captured in the snapshot). Serialized by `Pass.recutLock`. The turfs `GET /` also returns `knockCount` for the selected pass (drives the dialog's warning). |
 | `POST .../turfs/restore-snapshot` | Re-create books + assignments from a snapshot (blocked if live books exist; does not auto-reactivate the pass). |
 | `POST .../turfs/move-door` `{ householdId, fromTurfId?, toTurfId }` ([:851](../server/src/routes/admin/turfs.js#L851)) | Move one door between books in the same pass. Pulls it from its current book, pushes into `toTurfId`, `recomputeTurf` on both (re-mirrors `Household.turfId`/`walkOrder`) + `recomputePassTerritories`. **409** if the door's `effortId` ≠ the target book's effort (disjointness). Does **not** touch `CanvassActivity`. |
 | `POST .../turfs/move-doors` `{ householdIds[], toTurfId }` ([:892](../server/src/routes/admin/turfs.js#L892)) | Bulk move (e.g. every unit of a building) — pulls the ids out of every other book in the pass, adds to `toTurfId`, one `recomputeTurf`/`recomputePassTerritories`. Same effort guard. |
@@ -419,11 +419,14 @@ So recutting or running another pass **adds knocks** (new `(house, pass)` bucket
 
 ## F. Offline pass attribution
 
-A knock submitted offline carries its original timestamp. The submission path resolves which pass it
-belongs to via the passes' **`activatedAt` half-open windows**
-([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)), falling back to
-`Campaign.activePassId`. This is why `activatedAt` is preserved across recuts and why archived
-passes still own their historical knocks.
+A knock submitted offline carries its original timestamp, but pass attribution is no longer
+time-based. At submission the server resolves attribution **from the door**: `resolveAttribution`
+([routes/mobile/canvass.js:72-82](../server/src/routes/mobile/canvass.js#L72-L82)) finds the
+**published book containing the household** among the campaign's currently-active rounds and stamps
+that book's `passId`/`turfId` (plus the door owner's `effortId`) on the activity row. `activatedAt`
+is still kept monotonic and preserved across recuts (per-round reporting depends on its half-open
+windows — [Pass.js:45](../server/src/models/Pass.js#L45)), and archived passes still own their
+historical knocks because activity rows keep their original `passId`.
 
 ## G. Post-cut book edits & field-app propagation
 
