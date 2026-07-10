@@ -8,10 +8,11 @@ import {
   TextInput,
   Modal,
   StyleSheet,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../lib/api';
 import { loadCurrentUser } from '../../../lib/cache';
@@ -22,6 +23,7 @@ import EffortPicker from '../../../components/EffortPicker';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { outlineRing, doorsPerAcre } from '../../../lib/bookDensity';
 
 if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
 
@@ -80,6 +82,10 @@ export default function AdminBooks() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [mapSheetBookId, setMapSheetBookId] = useState(null); // single-book assign sheet on the map
   const [mapReady, setMapReady] = useState(false);
+  // Inline assign-failure message (the entitlement gate 402s writes on a paused
+  // org — without this the row just silently un-toggles). Shown in the sheet
+  // and the bulk modal.
+  const [assignError, setAssignError] = useState(null);
 
   // --- data ---
   const effortsQ = useQuery({
@@ -129,6 +135,26 @@ export default function AdminBooks() {
     queryKey: ['admin', 'turf-progress', cId, passId],
     queryFn: () => api(`/admin/campaigns/${cId}/turfs/progress?passId=${passId}`),
     enabled: !!cId && !!passId,
+  });
+  // Round-wide door dots — density is the whole point, so this is always on in
+  // map view. One fetch per (campaign, pass); assignment never moves doors, so
+  // no polling. slim=1 drops the address fields this screen never reads (a
+  // JSON.parse/heap saving at 16k+ doors; wire bytes are already gzipped).
+  // keepPreviousData so a round/effort switch never blanks the map.
+  const doorsQ = useQuery({
+    queryKey: ['admin', 'turf-doors', cId, passId],
+    queryFn: () => api(`/admin/campaigns/${cId}/turfs/doors?passId=${passId}&slim=1`),
+    enabled: !!cId && !!passId && view === 'book' && bookView === 'map',
+    placeholderData: keepPreviousData,
+  });
+  // Promoted (tapped) book only — the SOLE per-round-status source (the server
+  // runs getPassStatusMap). The round-wide /doors feed carries the global
+  // Household.status, which is wrong on a second/targeted round, so it must
+  // never color dots.
+  const promotedQ = useQuery({
+    queryKey: ['admin', 'book-households', cId, mapSheetBookId],
+    queryFn: () => api(`/admin/campaigns/${cId}/turfs/${mapSheetBookId}/households`),
+    enabled: !!cId && !!mapSheetBookId,
   });
 
   // --- derived ---
@@ -213,24 +239,31 @@ export default function AdminBooks() {
     setSelectMode(false);
     setSelectedBooks(new Set());
     setMapSheetBookId(null);
+    setAssignError(null);
     camInit.current = false; // re-fit the map to the new scope
   }, [cId, passId, view]);
 
   // --- mutations ---
   const invalidate = () => {
+    setAssignError(null);
     qc.invalidateQueries({ queryKey: ['admin', 'turf-assignments', cId, passId] });
     qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
     qc.invalidateQueries({ queryKey: ['admin', 'efforts', cId] });
   };
+  // Surface the server's own message (a paused org's writes 402 with friendly
+  // copy; api() exposes it as err.message) instead of silently reverting.
+  const onAssignError = (err) => setAssignError(err?.message || 'Could not update the assignment.');
   const assignMut = useMutation({
     mutationFn: ({ turfId, userId }) =>
       api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments`, { method: 'POST', body: { userIds: [userId] } }),
     onSuccess: invalidate,
+    onError: onAssignError,
   });
   const unassignMut = useMutation({
     mutationFn: ({ turfId, userId }) =>
       api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments/${userId}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+    onError: onAssignError,
   });
   // Self-assign a book: a lead must be on the roster first (partitionAssignable gate), so add
   // self to the campaign then assign the book. Idempotent + harmless for admins/super.
@@ -240,6 +273,7 @@ export default function AdminBooks() {
       return api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments`, { method: 'POST', body: { userIds: [selfId] } });
     },
     onSuccess: invalidate,
+    onError: onAssignError,
   });
   const bulkMut = useMutation({
     mutationFn: async (body) => {
@@ -255,6 +289,7 @@ export default function AdminBooks() {
       setSelectMode(false);
       setSelectedBooks(new Set());
     },
+    onError: onAssignError,
   });
   const mutating = assignMut.isPending || unassignMut.isPending || bulkMut.isPending || selfAssignMut.isPending;
 
@@ -289,6 +324,9 @@ export default function AdminBooks() {
   }
 
   // Map features: each visible book's boundary polygon, colored by assigned/selected.
+  // `promoted`/`dim` drive the tapped-book emphasis (fill fades, promoted outline
+  // thickens); fill COLOR keeps its existing assigned/unassigned meaning.
+  const promotedId = !selectMode && mapSheetBookId ? mapSheetBookId : null;
   const bookPolyFeatures = useMemo(() => {
     const features = [];
     for (const b of visibleBooks) {
@@ -300,20 +338,99 @@ export default function AdminBooks() {
           id: b.id,
           assigned: (usersByBook.get(b.id)?.length || 0) > 0 ? 1 : 0,
           selected: selectedBooks.has(b.id) ? 1 : 0,
+          promoted: promotedId === b.id ? 1 : 0,
+          dim: promotedId && promotedId !== b.id ? 1 : 0,
         },
         geometry: b.boundary,
       });
     }
     return { type: 'FeatureCollection', features };
-  }, [visibleBooks, usersByBook, selectedBooks]);
+  }, [visibleBooks, usersByBook, selectedBooks, promotedId]);
   const bookLabelFeatures = useMemo(() => {
     const features = [];
     for (const b of visibleBooks) {
       const c = b.centroid?.coordinates;
-      if (c?.length === 2) features.push({ type: 'Feature', properties: { name: b.name }, geometry: { type: 'Point', coordinates: c } });
+      if (c?.length !== 2) continue;
+      const prog = progressByTurf.get(b.id);
+      features.push({
+        type: 'Feature',
+        properties: {
+          name: b.name,
+          doors: b.doors,
+          knocked: prog?.knocked ?? 0,
+          total: prog?.total ?? b.doors,
+          dim: promotedId && promotedId !== b.id ? 1 : 0,
+        },
+        geometry: { type: 'Point', coordinates: c },
+      });
     }
     return { type: 'FeatureCollection', features };
-  }, [visibleBooks]);
+  }, [visibleBooks, progressByTurf, promotedId]);
+
+  // Round-wide density dots. Memoized on the doors payload ALONE — tapping or
+  // selecting books must never re-serialize ~16k features across the RN bridge;
+  // promotion/scoping happen in the LAYER filter below. Uncut doors (turfId
+  // null) are hidden by design: this screen is about book workloads; never-
+  // booked doors live on the web Turf Cutting page.
+  const doorDotFeatures = useMemo(
+    () => ({
+      type: 'FeatureCollection',
+      features: (doorsQ.data?.doors || [])
+        .filter((d) => d.turfId)
+        .map((d) => ({
+          type: 'Feature',
+          properties: { turfId: d.turfId },
+          geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
+        })),
+    }),
+    [doorsQ.data]
+  );
+  const visibleBookIds = useMemo(() => visibleBooks.map((b) => b.id), [visibleBooks]);
+  const doorDotFilter = useMemo(() => {
+    const inVisible = ['in', ['get', 'turfId'], ['literal', visibleBookIds]];
+    // The promoted book's doors come from the status-colored layer instead.
+    return promotedId ? ['all', inVisible, ['!=', ['get', 'turfId'], promotedId]] : inVisible;
+  }, [visibleBookIds, promotedId]);
+
+  // Promoted book's homes — the only status-colored dots on this map.
+  const promotedFeatures = useMemo(
+    () => ({
+      type: 'FeatureCollection',
+      features: (promotedQ.data?.households || [])
+        .filter((h) => h.lng != null && h.lat != null)
+        .map((h) => ({
+          type: 'Feature',
+          properties: { status: h.status || 'unknocked' },
+          geometry: { type: 'Point', coordinates: [h.lng, h.lat] },
+        })),
+    }),
+    [promotedQ.data]
+  );
+  const promotedStatusColor = useMemo(() => {
+    const expr = ['match', ['get', 'status']];
+    for (const [k, v] of Object.entries(colors.status)) {
+      if (k !== 'unknocked') expr.push(k, v);
+    }
+    expr.push(colors.status.unknocked);
+    return expr;
+  }, [colors]);
+  const promotedTally = useMemo(() => {
+    const counts = new Map();
+    for (const h of promotedQ.data?.households || []) {
+      const k = h.status || 'unknocked';
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [promotedQ.data]);
+  // Density chip, from the book's own loaded door coordinates (not the stored
+  // display hull, which lags newly-added homes).
+  const promotedDensity = useMemo(() => {
+    if (!promotedId) return null;
+    const pts = (doorsQ.data?.doors || []).filter((d) => d.turfId === promotedId).map((d) => [d.lng, d.lat]);
+    if (pts.length < 3) return null;
+    const dpa = doorsPerAcre(pts.length, outlineRing(pts));
+    return dpa ? Math.round(dpa * 10) / 10 : null;
+  }, [doorsQ.data, promotedId]);
 
   // Fit the camera to the round's books once, per scope.
   useEffect(() => {
@@ -335,11 +452,40 @@ export default function AdminBooks() {
     camInit.current = true;
   }, [bookView, view, mapReady, books]);
 
+  // Promotion: ease the camera to the tapped book's doors, padded at the bottom
+  // so the book lands in the half of the map the sheet leaves visible.
+  useEffect(() => {
+    if (!promotedId || !cameraRef.current) return;
+    const pts = (doorsQ.data?.doors || []).filter((d) => d.turfId === promotedId).map((d) => [d.lng, d.lat]);
+    if (!pts.length) return;
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    for (const [lng, lat] of pts) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    const bottomPad = Math.round(Dimensions.get('window').height * 0.55);
+    if (pts.length === 1 || (minLng === maxLng && minLat === maxLat)) {
+      cameraRef.current.setCamera({
+        centerCoordinate: pts[0],
+        zoomLevel: 15.5,
+        animationDuration: 600,
+        padding: { paddingTop: 40, paddingRight: 40, paddingBottom: bottomPad, paddingLeft: 40 },
+      });
+    } else {
+      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [40, 40, bottomPad, 40], 600);
+    }
+  }, [promotedId, doorsQ.data]);
+
   function onBookPress(e) {
     const id = e.features?.[0]?.properties?.id;
     if (!id) return;
     if (selectMode) toggleSelect(id);
-    else setMapSheetBookId(id);
+    else {
+      setAssignError(null);
+      setMapSheetBookId(id);
+    }
   }
   const mapSheetBook = mapSheetBookId ? books.find((b) => b.id === mapSheetBookId) : null;
   const visibleCanvassers = useMemo(() => {
@@ -485,7 +631,10 @@ export default function AdminBooks() {
         </View>
       )}
 
-      {view === 'book' && bookView === 'map' && !!cId && !!passId && !loading && books.length > 0 && !!MAPBOX_PUBLIC_TOKEN ? (
+      {view === 'book' && bookView === 'map' && !!cId && !!passId && !!MAPBOX_PUBLIC_TOKEN && (books.length > 0 || loading) ? (
+        // Note the gate: the MapView stays mounted through refetches and scope
+        // switches (a loading overlay rides on top) — unmounting it re-downloads
+        // tiles and drops the camera.
         <View style={{ flex: 1 }}>
           <Mapbox.MapView
             style={{ flex: 1 }}
@@ -501,13 +650,20 @@ export default function AdminBooks() {
               <Mapbox.FillLayer
                 id="assign-book-fill"
                 style={{
+                  // Fill COLOR keeps its meaning (assigned/unassigned/selected);
+                  // density is carried by the dots, promotion by opacity.
                   fillColor: [
                     'case',
                     ['==', ['get', 'selected'], 1], colors.brand,
                     ['==', ['get', 'assigned'], 1], colors.success,
                     colors.textMuted,
                   ],
-                  fillOpacity: ['case', ['==', ['get', 'selected'], 1], 0.35, 0.18],
+                  fillOpacity: [
+                    'case',
+                    ['==', ['get', 'dim'], 1], 0.05,
+                    ['==', ['get', 'selected'], 1], 0.35,
+                    0.18,
+                  ],
                 }}
               />
               <Mapbox.LineLayer
@@ -515,11 +671,46 @@ export default function AdminBooks() {
                 style={{
                   lineColor: [
                     'case',
+                    ['==', ['get', 'promoted'], 1], colors.brand,
                     ['==', ['get', 'selected'], 1], colors.brand,
                     ['==', ['get', 'assigned'], 1], colors.success,
                     colors.textMuted,
                   ],
-                  lineWidth: ['case', ['==', ['get', 'selected'], 1], 3, 1.5],
+                  lineWidth: [
+                    'case',
+                    ['==', ['get', 'promoted'], 1], 3.5,
+                    ['==', ['get', 'selected'], 1], 3,
+                    1.5,
+                  ],
+                  lineOpacity: ['case', ['==', ['get', 'dim'], 1], 0.3, 1],
+                }}
+              />
+            </Mapbox.ShapeSource>
+            {/* Always-on density dots — neutral gray, NEVER status-colored (the
+                round-wide feed carries global status; see promotedQ). Dots merge
+                into an honest mass zoomed out and separate when zoomed in. */}
+            <Mapbox.ShapeSource id="door-dots" shape={doorDotFeatures}>
+              <Mapbox.CircleLayer
+                id="door-dot"
+                filter={doorDotFilter}
+                style={{
+                  circleColor: colors.doorDot,
+                  circleRadius: ['interpolate', ['linear'], ['zoom'], 11, 1.6, 14, 2.6, 17, 4],
+                  circleOpacity: promotedId ? 0.22 : 0.85,
+                  circleStrokeColor: colors.bg,
+                  circleStrokeWidth: ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 0.6, 17, 1],
+                }}
+              />
+            </Mapbox.ShapeSource>
+            {/* The promoted book's homes — per-round status colors, larger. */}
+            <Mapbox.ShapeSource id="promoted-homes" shape={promotedFeatures}>
+              <Mapbox.CircleLayer
+                id="promoted-home-dot"
+                style={{
+                  circleColor: promotedStatusColor,
+                  circleRadius: ['interpolate', ['linear'], ['zoom'], 11, 3.2, 14, 5, 17, 7.5],
+                  circleStrokeColor: '#FFFFFF',
+                  circleStrokeWidth: 1.5,
                 }}
               />
             </Mapbox.ShapeSource>
@@ -527,27 +718,128 @@ export default function AdminBooks() {
               <Mapbox.SymbolLayer
                 id="assign-book-label"
                 style={{
-                  textField: ['get', 'name'],
-                  textSize: 12,
+                  textField: [
+                    'concat',
+                    ['get', 'name'],
+                    '\n',
+                    ['to-string', ['get', 'doors']],
+                    ' doors · ',
+                    ['to-string', ['get', 'knocked']],
+                    '/',
+                    ['to-string', ['get', 'total']],
+                  ],
+                  textSize: 11,
                   textColor: colors.textPrimary,
                   textHaloColor: colors.bg,
                   textHaloWidth: 1.2,
                   textAllowOverlap: false,
+                  textOpacity: ['case', ['==', ['get', 'dim'], 1], 0.35, 1],
                 }}
               />
             </Mapbox.ShapeSource>
           </Mapbox.MapView>
-          <View style={styles.mapLegend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: colors.success }]} />
-              <Text style={styles.legendText}>Assigned</Text>
+          {loading && (
+            <View style={styles.mapLoading} pointerEvents="none">
+              <ActivityIndicator color={colors.brand} />
             </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: colors.textMuted }]} />
-              <Text style={styles.legendText}>Unassigned</Text>
+          )}
+          {!mapSheetBook && (
+            <View style={styles.mapLegend}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.success }]} />
+                <Text style={styles.legendText}>Assigned</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.textMuted }]} />
+                <Text style={styles.legendText}>Unassigned</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.doorDot, width: 7, height: 7 }]} />
+                <Text style={styles.legendText}>Doors</Text>
+              </View>
+              <Text style={styles.legendHint}>{selectMode ? 'Tap books to select' : 'Tap a book to assign'}</Text>
             </View>
-            <Text style={styles.legendHint}>{selectMode ? 'Tap books to select' : 'Tap a book to assign'}</Text>
-          </View>
+          )}
+          {/* Promoted-book sheet: a HALF-HEIGHT panel, not a scrim modal — the
+              map stays visible and interactive above it. */}
+          {mapSheetBook && !selectMode && (
+            <View style={styles.mapSheet}>
+              <View style={styles.modalHead}>
+                <View style={{ flex: 1, paddingRight: spacing.sm }}>
+                  <Text style={styles.modalTitle} numberOfLines={1}>
+                    {mapSheetBook.name}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    setMapSheetBookId(null);
+                    setAssignError(null);
+                  }}
+                  hitSlop={8}
+                >
+                  <Text style={styles.modalClose}>✕</Text>
+                </Pressable>
+              </View>
+              {(() => {
+                const prog = progressByTurf.get(mapSheetBook.id);
+                const total = prog?.total ?? mapSheetBook.doors;
+                const knocked = prog?.knocked ?? 0;
+                const pct = total ? Math.round((knocked / total) * 100) : 0;
+                return (
+                  <>
+                    <Text style={styles.mapSheetMeta}>
+                      {mapSheetBook.doors} doors · {knocked}/{total} done
+                      {promotedDensity ? ` · ${promotedDensity} doors/acre` : ''}
+                    </Text>
+                    <View style={styles.barTrack}>
+                      <View style={[styles.barFill, { width: `${pct}%` }]} />
+                    </View>
+                  </>
+                );
+              })()}
+              {promotedTally.length > 0 && (
+                <View style={styles.tallyRow}>
+                  {promotedTally.map(([k, n]) => (
+                    <View key={k} style={styles.tallyItem}>
+                      <View style={[styles.legendDot, { backgroundColor: colors.status[k] || colors.status.unknocked }]} />
+                      <Text style={styles.tallyText}>
+                        {colors.statusLabels?.[k] || k} {n}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {assignError ? <Text style={styles.sheetError}>{assignError}</Text> : null}
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: spacing.xs }}>
+                {rosterWithSelf.length === 0 ? (
+                  <Text style={styles.mapSheetMeta}>No canvassers on this campaign yet.</Text>
+                ) : (
+                  rosterWithSelf.map((c) => {
+                    const assigned = bookIdsByUser.get(c.id)?.has(mapSheetBook.id) ?? false;
+                    return (
+                      <AssignRow
+                        key={c.id}
+                        styles={styles}
+                        title={`${c.firstName} ${c.lastName}${c.isSelf ? '  (You)' : ''}`}
+                        sub={c.email}
+                        assigned={assigned}
+                        disabled={mutating}
+                        onToggle={() => toggleAssign(mapSheetBook.id, c.id, assigned)}
+                      />
+                    );
+                  })
+                )}
+              </ScrollView>
+              <Pressable
+                onPress={() =>
+                  router.push({ pathname: `/(app)/admin/book/${mapSheetBook.id}`, params: { campaignId: cId } })
+                }
+                style={styles.viewHomesLink}
+              >
+                <Text style={styles.link}>View homes ›</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       ) : (
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: selectMode ? 96 : spacing.xxl }}>
@@ -659,47 +951,8 @@ export default function AdminBooks() {
       </ScrollView>
       )}
 
-      {/* Map single-book assign sheet */}
-      <Modal visible={!!mapSheetBook} transparent animationType="slide" onRequestClose={() => setMapSheetBookId(null)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHead}>
-              <Text style={styles.modalTitle}>{mapSheetBook?.name || 'Book'}</Text>
-              <Pressable onPress={() => setMapSheetBookId(null)} hitSlop={8}>
-                <Text style={styles.modalClose}>✕</Text>
-              </Pressable>
-            </View>
-            {mapSheetBook ? (
-              <Text style={styles.mapSheetMeta}>
-                {mapSheetBook.doors} doors ·{' '}
-                {(usersByBook.get(mapSheetBook.id) || []).length
-                  ? (usersByBook.get(mapSheetBook.id) || []).map((u) => `${u.firstName} ${(u.lastName || '')[0] || ''}`).join(', ')
-                  : 'Unassigned'}
-              </Text>
-            ) : null}
-            <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingVertical: spacing.xs }}>
-              {rosterWithSelf.length === 0 ? (
-                <Text style={styles.mapSheetMeta}>No canvassers on this campaign yet.</Text>
-              ) : (
-                rosterWithSelf.map((c) => {
-                  const assigned = mapSheetBook ? (bookIdsByUser.get(c.id)?.has(mapSheetBook.id) ?? false) : false;
-                  return (
-                    <AssignRow
-                      key={c.id}
-                      styles={styles}
-                      title={`${c.firstName} ${c.lastName}${c.isSelf ? '  (You)' : ''}`}
-                      sub={c.email}
-                      assigned={assigned}
-                      disabled={mutating}
-                      onToggle={() => mapSheetBook && toggleAssign(mapSheetBook.id, c.id, assigned)}
-                    />
-                  );
-                })
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      {/* (The single-book assign sheet now renders INSIDE the map container as a
+          half-height panel — the old scrim Modal occluded the map it revealed.) */}
 
       {selectMode && selectedBooks.size > 0 && (
         <View style={styles.actionBar}>
@@ -719,6 +972,7 @@ export default function AdminBooks() {
         bookCount={selectedBooks.size}
         roster={rosterWithSelf}
         pending={bulkMut.isPending}
+        errorText={assignError}
         onClose={() => setBulkOpen(false)}
         onApply={({ userIds, mode, replace }) =>
           bulkMut.mutate({ turfIds: [...selectedBooks], userIds, mode, replace })
@@ -760,7 +1014,7 @@ function AssignRow({ title, sub, assigned, disabled, onToggle, styles }) {
   );
 }
 
-function BulkModal({ visible, styles, colors, bookCount, roster, pending, onClose, onApply }) {
+function BulkModal({ visible, styles, colors, bookCount, roster, pending, errorText, onClose, onApply }) {
   const [selected, setSelected] = useState(() => new Set());
   const [mode, setMode] = useState('distribute');
   const [replace, setReplace] = useState(false);
@@ -839,6 +1093,7 @@ function BulkModal({ visible, styles, colors, bookCount, roster, pending, onClos
           </Pressable>
 
           <Text style={styles.preview}>{preview}</Text>
+          {errorText ? <Text style={styles.sheetError}>{errorText}</Text> : null}
 
           <Pressable
             onPress={() => onApply({ userIds: [...selected], mode, replace })}
@@ -933,6 +1188,29 @@ function makeStyles(t) {
     legendText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
     legendHint: { fontSize: 11, color: colors.textMuted },
     mapSheetMeta: { ...type.caption, color: colors.textSecondary, marginBottom: spacing.sm },
+    mapLoading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+
+    // promoted-book sheet (half-height, map visible + interactive above it)
+    mapSheet: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: '52%',
+      backgroundColor: colors.bg,
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.lg,
+      paddingBottom: spacing.xl,
+      ...shadow.raised,
+    },
+    tallyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.xs },
+    tallyItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    tallyText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+    sheetError: { fontSize: 12, fontWeight: '700', color: colors.danger, marginTop: spacing.xs, marginBottom: spacing.xs },
+    viewHomesLink: { paddingTop: spacing.sm, alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.border },
 
     card: {
       flexDirection: 'row',

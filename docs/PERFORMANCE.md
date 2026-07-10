@@ -166,15 +166,18 @@ Voters ship only for survey campaigns, scoped to those doors
   AsyncStorage can't read rows past ~2MB (CursorWindow) and defaults to a ~6MB total DB — the
   offline cache would silently stop restoring on Android. iOS is file-based and unaffected.
 
-**No compression middleware is installed** ([server/src/app.js](../server/src/app.js) has no
-`compression`; Express does not gzip by default and the Heroku router doesn't add it). Every JSON
-response ships uncompressed. Payloads like these compress ~85–90%, so `app.use(compression())` is
-the single cheapest app-wide win (~12MB → ~1.5MB on the FL all-time map pull).
+**Compression was missing until July 2026** — Express does not gzip by default and the Heroku
+router doesn't add it, so every JSON response used to ship uncompressed. Fixed in the billing
+commit: `app.use(compression())` ([app.js:49](../server/src/app.js#L49)); payloads like these
+compress ~85–90% (~12MB → ~1.5MB on the FL all-time map pull). Note gzip helps the WIRE only —
+JSON.parse cost and retained JS heap on mobile are unchanged, which is why the mobile assign map
+requests `/turfs/doors?slim=1` (address fields dropped server-side;
+[turfs.js](../server/src/routes/admin/turfs.js) `GET /doors`).
 
-**If universes keep growing, the levers in order:** (1) add `compression`; (2) project
+**If universes keep growing, the remaining levers in order:** (1) project
 `SurveyResponse.answers` out of the map payload — but first verify what the household panel and
-answer-filter chips actually read from it; (3) a size guard or chunked storage in `saveBootstrap`
-for the everyone-assignment case; (4) viewport-bounded or paginated map fetches only if a campaign
+answer-filter chips actually read from it; (2) a size guard or chunked storage in `saveBootstrap`
+for the everyone-assignment case; (3) viewport-bounded or paginated map fetches only if a campaign
 far outgrows FL.
 
 ## State-reset patterns (no reset-in-effect)

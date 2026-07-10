@@ -689,27 +689,40 @@ router.get('/doors', async (req, res, next) => {
       if (wl?.householdIds?.length) filter._id = { $in: wl.householdIds };
     }
 
+    // slim=1 (the mobile assign map): drop the address fields — that screen reads
+    // only coordinates/turfId, and at 16k+ doors the JSON.parse cost + retained
+    // strings matter on-device. Wire bytes are already gzipped, so this is a
+    // parse/heap optimization, not a bandwidth one. Additive: without the param
+    // the payload is unchanged (the web cut UI needs the addresses).
+    const slim = req.query.slim === '1';
     const households = await Household.find(
       filter,
-      { location: 1, turfId: 1, status: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 }
+      slim
+        ? { location: 1, turfId: 1, status: 1 }
+        : { location: 1, turfId: 1, status: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 }
     ).lean();
-    // Address fields ride along so the client can group stacked apartment units
-    // (same geocode) into one building marker and render the unit list without a
-    // per-unit fetch.
+    // Address fields ride along (non-slim) so the client can group stacked
+    // apartment units (same geocode) into one building marker and render the
+    // unit list without a per-unit fetch.
     const doors = households
       .filter((h) => h.location?.coordinates?.length === 2)
-      .map((h) => ({
-        id: String(h._id),
-        lng: h.location.coordinates[0],
-        lat: h.location.coordinates[1],
-        turfId: h.turfId ? String(h.turfId) : null,
-        status: h.status || 'unknocked', // so the cut UI can flag/count restricted doors
-        addressLine1: h.addressLine1 || '',
-        addressLine2: h.addressLine2 || '',
-        city: h.city || '',
-        state: h.state || '',
-        zipCode: h.zipCode || '',
-      }));
+      .map((h) => {
+        const d = {
+          id: String(h._id),
+          lng: h.location.coordinates[0],
+          lat: h.location.coordinates[1],
+          turfId: h.turfId ? String(h.turfId) : null,
+          status: h.status || 'unknocked', // so the cut UI can flag/count restricted doors
+        };
+        if (!slim) {
+          d.addressLine1 = h.addressLine1 || '';
+          d.addressLine2 = h.addressLine2 || '';
+          d.city = h.city || '';
+          d.state = h.state || '';
+          d.zipCode = h.zipCode || '';
+        }
+        return d;
+      });
     res.json({ doors });
   } catch (err) {
     next(err);

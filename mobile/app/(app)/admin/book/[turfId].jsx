@@ -21,6 +21,7 @@ import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../lib/mapStyles';
+import { outlineRing } from '../../../../lib/bookDensity';
 
 if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
 
@@ -34,56 +35,8 @@ const STATUS_LABEL = {
   lit_dropped: 'Lit dropped',
 };
 
-// Outline of the book's homes, computed from the ACTUAL coordinates so it encloses
-// every house — unlike the server's stored boundary, which can miss homes added
-// after it was computed. Uses a convex hull when the homes span an area; falls back
-// to a small bounding box for degenerate books (<3 distinct or all-collinear homes,
-// e.g. a stacked apartment) so a book with homes always shows an enclosing outline.
-// Returns a closed [lng,lat] ring, or null only when there are no homes.
-function outlineRing(points) {
-  return convexHull(points) || bboxRing(points);
-}
-
-// Convex hull (Andrew's monotone chain). Returns a closed ring, or null for <3
-// distinct, non-collinear points (no polygon possible).
-function convexHull(points) {
-  const pts = points.map((p) => [p[0], p[1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  if (pts.length < 3) return null;
-  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const lower = [];
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper = [];
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  lower.pop();
-  upper.pop();
-  const ring = lower.concat(upper);
-  if (ring.length < 3) return null;
-  ring.push(ring[0]);
-  return ring;
-}
-
-// Bounding box around the points, padded to a small minimum (~80m) so it's never a
-// degenerate line/point. Always encloses the points. null only when there are none.
-function bboxRing(points, pad = 0.0008) {
-  if (!points.length) return null;
-  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-  for (const [lng, lat] of points) {
-    if (lng < minLng) minLng = lng;
-    if (lng > maxLng) maxLng = lng;
-    if (lat < minLat) minLat = lat;
-    if (lat > maxLat) maxLat = lat;
-  }
-  if (maxLng - minLng < pad) { const c = (minLng + maxLng) / 2; minLng = c - pad / 2; maxLng = c + pad / 2; }
-  if (maxLat - minLat < pad) { const c = (minLat + maxLat) / 2; minLat = c - pad / 2; maxLat = c + pad / 2; }
-  return [[minLng, minLat], [maxLng, minLat], [maxLng, maxLat], [minLng, maxLat], [minLng, minLat]];
-}
+// outlineRing/convexHull/bboxRing moved to lib/bookDensity.js so the assign map
+// (admin/books.jsx) shares the same enclosing-outline + density math.
 
 export default function AdminBookDetail() {
   const { colors } = useTheme();

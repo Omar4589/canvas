@@ -124,6 +124,7 @@ export const lightColors = {
   chromeBar: 'rgba(255,255,255,0.95)',   // translucent map top bars
   mapLabel: '#111827',                   // Mapbox symbol label text
   mapLabelHalo: '#FFFFFF',               // Mapbox symbol label halo
+  doorDot: '#6B7280',                    // assign-map density dots — neutral gray, never status-colored
 
   status,
   statusLabels,
@@ -181,6 +182,7 @@ export const darkColors = {
   chromeBar: 'rgba(17,24,39,0.95)',
   mapLabel: '#E5E7EB',
   mapLabelHalo: '#0B0F19',
+  doorDot: '#9CA3AF',                    // assign-map density dots — neutral gray, never status-colored
 
   status,
   statusLabels,
