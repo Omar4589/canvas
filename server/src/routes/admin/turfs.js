@@ -923,7 +923,11 @@ router.get('/:turfId/households', async (req, res, next) => {
           { location: 1, addressLine1: 1, city: 1, state: 1 }
         ).lean()
       : [];
-    const statusMap = await getPassStatusMap(turf.passId, ids, req.campaign.type);
+    const [statusMap, bulkRestrictedCount] = await Promise.all([
+      getPassStatusMap(turf.passId, ids, req.campaign.type),
+      // Drives the detail screen's "Unmark restricted (N)" menu item.
+      CanvassActivity.countDocuments({ turfId: turf._id, actionType: 'restricted', via: 'bulk' }),
+    ]);
     const out = households
       .filter((h) => h.location?.coordinates?.length === 2)
       .map((h) => ({
@@ -942,6 +946,7 @@ router.get('/:turfId/households', async (req, res, next) => {
         boundary: turf.boundary || null,
         centroid: turf.centroid || null,
         passId: String(turf.passId),
+        bulkRestrictedCount,
       },
       households: out,
     });

@@ -246,11 +246,17 @@ export default function AdminMap() {
   });
   const { effortId, passId, importId } = scope;
 
-  // Audit filters — mirror the web admin map. Default to All time so every door shows.
+  // Audit filters — mirror the web admin map. Default to TODAY (like the web):
+  // the map opens on today's activity; "All time" is one tap away in the preset
+  // menu. Seeded from the device tz for first paint, re-anchored to the
+  // campaign's tz below once it resolves.
   const [range, setRange] = useState(() => {
-    const r = rangeFor('all', null, deviceTimezone());
-    return { preset: 'all', from: r.from, to: r.to };
+    const r = rangeFor('today', null, deviceTimezone());
+    return { preset: 'today', from: r.from, to: r.to };
   });
+  // True once the user picks a date themselves — the tz reseed must never
+  // stomp a manual choice.
+  const dateTouchedRef = useRef(false);
   const [statusFilter, setStatusFilter] = useState([]); // [] = all statuses
   const [canvasserId, setCanvasserId] = useState('');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', label: '' });
@@ -272,6 +278,15 @@ export default function AdminMap() {
 
   const cId = campaign?.id;
   const tz = campaign?.timeZone || deviceTimezone();
+
+  // Re-anchor the untouched "Today" default to the CAMPAIGN's day once its tz
+  // resolves (and when switching campaigns) — a viewer in another timezone must
+  // see the campaign's today, not their own. Mirrors the web MapPage reseed.
+  useEffect(() => {
+    if (dateTouchedRef.current) return;
+    const r = rangeFor('today', null, tz);
+    setRange((prev) => (prev.preset === 'today' && prev.from === r.from ? prev : { preset: 'today', from: r.from, to: r.to }));
+  }, [tz]);
 
   const mapQ = useQuery({
     queryKey: [
@@ -806,6 +821,7 @@ export default function AdminMap() {
                     return;
                   }
                   const r = rangeFor(p.key, null, tz);
+                  dateTouchedRef.current = true;
                   setRange({ preset: p.key, from: r.from, to: r.to });
                 }}
               />
@@ -865,6 +881,7 @@ export default function AdminMap() {
         tz={tz}
         onClose={() => setDatePickerOpen(false)}
         onApply={({ from, to }) => {
+          dateTouchedRef.current = true;
           setRange({ preset: 'custom', from, to });
           setDatePickerOpen(false);
         }}

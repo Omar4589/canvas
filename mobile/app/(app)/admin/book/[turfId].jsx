@@ -232,6 +232,64 @@ export default function AdminBookDetail() {
   });
   const mutating = assignMut.isPending || unassignMut.isPending || assignAllMut.isPending || unassignAllMut.isPending || selfAssignMut.isPending;
 
+  // Bulk restricted for THIS book — the ⋯ header menu is the List-view home for
+  // the action (the map view's sheet has the same menu). Same endpoints + Alert
+  // confirms as the Books screen; invalidates the Books screens too so pins,
+  // tallies, and counts recolor after back-navigation.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const invalidateRestrict = () => {
+    invalidate();
+    qc.invalidateQueries({ queryKey: ['admin', 'book-households'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'turfs'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'turf-doors'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'turf-progress'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'book-detail', cId, turfId] });
+  };
+  const restrictMut = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${cId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds: [turfId] } }),
+    onSuccess: (res) => {
+      const skips = res.skipped || {};
+      const skipNote =
+        (skips.completed || 0) + (skips.alreadyRestricted || 0) > 0
+          ? `\nSkipped ${skips.completed || 0} completed · ${skips.alreadyRestricted || 0} already restricted.`
+          : '';
+      Alert.alert('Marked restricted', `${res.marked} door${res.marked === 1 ? '' : 's'} marked.${skipNote}`);
+    },
+    onError: (e) => Alert.alert('Could not mark restricted', e?.message || 'Please try again.'),
+    onSettled: invalidateRestrict,
+  });
+  const unrestrictMut = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${cId}/turfs/unrestrict-bulk`, { method: 'POST', body: { turfIds: [turfId] } }),
+    onSuccess: (res) =>
+      Alert.alert('Marks removed', `${res.unmarked} bulk restricted mark${res.unmarked === 1 ? '' : 's'} removed.`),
+    onError: (e) => Alert.alert('Could not remove marks', e?.message || 'Please try again.'),
+    onSettled: invalidateRestrict,
+  });
+  function onRestrictAction() {
+    setMenuOpen(false);
+    if ((turf?.bulkRestrictedCount || 0) > 0) {
+      Alert.alert(
+        'Remove bulk restricted marks?',
+        `${turf.bulkRestrictedCount} bulk mark${turf.bulkRestrictedCount === 1 ? '' : 's'} will be removed. Restricted marks canvassers recorded at the door are kept.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', onPress: () => unrestrictMut.mutate() },
+        ]
+      );
+    } else {
+      Alert.alert(
+        `Mark “${turf?.name || 'this book'}” restricted?`,
+        `~${total} doors get a Restricted Access mark — canvassers see them slate and they stay out of every rate and billable count. Doors completed this round keep their result; already-restricted doors are skipped. Reversible.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Mark restricted', style: 'destructive', onPress: () => restrictMut.mutate() },
+        ]
+      );
+    }
+  }
+
   // House popup detail (address + voters), fetched on tap.
   const houseQ = useQuery({
     queryKey: ['admin', 'turf-household', cId, selectedId],
@@ -257,7 +315,33 @@ export default function AdminBookDetail() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <Header onBack={() => router.back()} title={turf?.name || 'Book'} styles={styles} />
+      <Header
+        onBack={() => router.back()}
+        title={turf?.name || 'Book'}
+        styles={styles}
+        right={
+          turf ? (
+            <Pressable onPress={() => setMenuOpen((v) => !v)} hitSlop={8}>
+              <Text style={styles.menuDots}>⋯</Text>
+            </Pressable>
+          ) : null
+        }
+      />
+      {menuOpen && (
+        <View style={styles.bookMenu}>
+          <Pressable
+            disabled={restrictMut.isPending || unrestrictMut.isPending}
+            onPress={onRestrictAction}
+            style={({ pressed }) => [styles.bookMenuItem, pressed && { opacity: 0.7 }]}
+          >
+            <Text style={styles.bookMenuItemText}>
+              {(turf?.bulkRestrictedCount || 0) > 0
+                ? `Unmark restricted (${turf.bulkRestrictedCount})`
+                : `Mark book restricted… (${total} doors)`}
+            </Text>
+          </Pressable>
+        </View>
+      )}
       <View style={styles.topBar}>
         <View style={{ flex: 1 }}>
           <Text style={styles.topBarCount}>
@@ -457,7 +541,7 @@ export default function AdminBookDetail() {
   );
 }
 
-function Header({ onBack, title, styles }) {
+function Header({ onBack, title, styles, right = null }) {
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} hitSlop={8} style={styles.headerSide}>
@@ -466,7 +550,7 @@ function Header({ onBack, title, styles }) {
       <Text style={styles.headerTitle} numberOfLines={1}>
         {title}
       </Text>
-      <View style={styles.headerSide} />
+      <View style={[styles.headerSide, { alignItems: 'flex-end' }]}>{right}</View>
     </View>
   );
 }
@@ -485,6 +569,26 @@ function makeStyles(t) {
     },
     headerSide: { width: 64 },
     back: { color: colors.brand, fontWeight: '700', fontSize: 16 },
+    // ⋯ book-actions menu (bulk restrict), anchored under the header's right side.
+    menuDots: { color: colors.textSecondary, fontWeight: '800', fontSize: 22, paddingHorizontal: spacing.sm },
+    bookMenu: {
+      position: 'absolute',
+      top: 52,
+      right: spacing.lg,
+      zIndex: 20,
+      backgroundColor: colors.card,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingVertical: spacing.xs,
+      shadowColor: '#000',
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
+    },
+    bookMenuItem: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2 },
+    bookMenuItemText: { fontSize: 13, fontWeight: '700', color: colors.status.restricted },
     headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
     mapLoading: { position: 'absolute', top: spacing.lg, alignSelf: 'center' },
 

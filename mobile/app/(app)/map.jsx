@@ -16,9 +16,8 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-  Easing,
 } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import PullableSheet, { SHEET_TIMING } from '../../components/PullableSheet';
 import * as Location from 'expo-location';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../lib/api';
@@ -76,7 +75,7 @@ const HOUSE_PEEK_HEIGHT = 220;
 const HOUSE_EXPANDED_HEIGHT = 460;
 // Smooth ease, no bounce — the spring overshoot felt too playful for what is
 // essentially a stats panel.
-const SHEET_TIMING = { duration: 240, easing: Easing.out(Easing.cubic) };
+// SHEET_TIMING now comes from components/PullableSheet.jsx.
 
 // Best-effort user location lookup for the smart-hybrid initial camera. Returns
 // [lng, lat] or null. Times out after 4s so we don't hold the camera hostage
@@ -188,57 +187,9 @@ function ProgressStat({ pinStatus, value, label }) {
   );
 }
 
-// Bottom sheet with two snap points. The pan gesture is attached only to the
-// handle area at the top so it doesn't fight with the map's own pan/pinch
-// gestures. Tap the handle as a fallback for users who don't drag.
-//
-// snapDelta and sheetHeight are shared values rather than constants because
-// peek + expanded heights both differ between the no-selection and
-// house-selected modes (the legend is short, the voter list is long).
-function PullableSheet({ translateY, snapDelta, sheetHeight, children }) {
-  const styles = useThemedStyles(makeStyles);
-  const insets = useSafeAreaInsets();
-  const startY = useSharedValue(0);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    height: sheetHeight.value,
-    transform: [{ translateY: translateY.value }],
-  }));
-
-  const pan = Gesture.Pan()
-    .onStart(() => {
-      startY.value = translateY.value;
-    })
-    .onUpdate((e) => {
-      const next = startY.value + e.translationY;
-      translateY.value = Math.max(0, Math.min(snapDelta.value, next));
-    })
-    .onEnd((e) => {
-      let target;
-      if (e.velocityY < -500) target = 0;
-      else if (e.velocityY > 500) target = snapDelta.value;
-      else target = translateY.value < snapDelta.value / 2 ? 0 : snapDelta.value;
-      translateY.value = withTiming(target, SHEET_TIMING);
-    });
-
-  function toggle() {
-    const target = translateY.value > snapDelta.value / 2 ? 0 : snapDelta.value;
-    translateY.value = withTiming(target, SHEET_TIMING);
-  }
-
-  return (
-    <Animated.View style={[styles.sheetContainer, animatedStyle]}>
-      <GestureDetector gesture={pan}>
-        <Pressable onPress={toggle} style={styles.sheetHandleArea}>
-          <View style={styles.sheetHandle} />
-        </Pressable>
-      </GestureDetector>
-      <View style={[styles.sheetBody, { paddingBottom: spacing.xl + insets.bottom }]}>
-        {children}
-      </View>
-    </Animated.View>
-  );
-}
+// The pullable bottom sheet now lives in components/PullableSheet.jsx (shared
+// with the admin Books map). Same two-snap-point behavior; SHEET_TIMING is
+// re-exported from there for the sizing effect below.
 
 export default function MapScreen() {
   const router = useRouter();
@@ -1638,36 +1589,7 @@ function makeStyles(t) {
     alignItems: 'flex-end',
   },
 
-  // Pullable sheet container. Height is set via the animated style (varies by
-  // mode: progress is short, house view is taller). translateY pushes it down
-  // so only the peek height is visible at rest.
-  sheetContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    overflow: 'hidden',
-    ...shadow.raised,
-  },
-  sheetHandleArea: {
-    alignItems: 'center',
-    paddingTop: spacing.md,
-    paddingBottom: spacing.md,
-  },
-  sheetHandle: {
-    width: 44,
-    height: 5,
-    backgroundColor: colors.borderStrong,
-    borderRadius: 3,
-  },
-  sheetBody: {
-    flex: 1,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
+  // (sheetContainer/handle/body styles moved into components/PullableSheet.jsx)
 
   sheetHeader: {
     flexDirection: 'row',

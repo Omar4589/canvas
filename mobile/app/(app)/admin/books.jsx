@@ -12,9 +12,11 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useSharedValue, withTiming } from 'react-native-reanimated';
 import Mapbox from '@rnmapbox/maps';
+import PullableSheet, { SHEET_TIMING } from '../../../components/PullableSheet';
 import { api } from '../../../lib/api';
 import { loadCurrentUser } from '../../../lib/cache';
 import { useMapStyle } from '../../../lib/mapStyles';
@@ -29,6 +31,10 @@ import { outlineRing, doorsPerAcre } from '../../../lib/bookDensity';
 if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
 
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+// Promoted-book sheet snap points: peek shows handle + header + counts + tally
+// (the map owns the screen); expanded gives the roster real room.
+const BOOK_SHEET_PEEK = 220;
 
 const BOOK_STATUS_CHIPS = [
   { key: 'assigned', label: 'Assigned' },
@@ -82,7 +88,15 @@ export default function AdminBooks() {
   const [selectedBooks, setSelectedBooks] = useState(() => new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [mapSheetBookId, setMapSheetBookId] = useState(null); // single-book assign sheet on the map
+  const [sheetMenuOpen, setSheetMenuOpen] = useState(false); // the sheet's ⋯ menu
   const [mapReady, setMapReady] = useState(false);
+  // Pullable-sheet shared values (see components/PullableSheet.jsx): opens at
+  // PEEK so the promoted book stays visible; pull up for the full roster.
+  const insets = useSafeAreaInsets();
+  const sheetTranslateY = useSharedValue(0);
+  const sheetSnapDelta = useSharedValue(1);
+  const bookSheetHeight = useSharedValue(0);
+  const sheetSizedRef = useRef(false);
   // Inline assign-failure message (the entitlement gate 402s writes on a paused
   // org — without this the row just silently un-toggles). Shown in the sheet
   // and the bulk modal.
@@ -515,8 +529,32 @@ export default function AdminBooks() {
     camInit.current = true;
   }, [bookView, view, mapReady, books]);
 
+  // Size the pullable sheet when a book is promoted; reset when it closes so
+  // the next promote opens at PEEK again. Switching promoted books keeps the
+  // sheet where the user left it (no yank).
+  useEffect(() => {
+    setSheetMenuOpen(false);
+    if (!mapSheetBookId) {
+      sheetSizedRef.current = false;
+      return;
+    }
+    const peek = BOOK_SHEET_PEEK + insets.bottom;
+    const expanded = Math.round(Dimensions.get('window').height * 0.8);
+    const nextSnap = Math.max(0, expanded - peek);
+    sheetSnapDelta.value = nextSnap;
+    if (!sheetSizedRef.current) {
+      sheetSizedRef.current = true;
+      bookSheetHeight.value = expanded;
+      sheetTranslateY.value = nextSnap; // start at peek
+    } else {
+      bookSheetHeight.value = withTiming(expanded, SHEET_TIMING);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapSheetBookId, insets.bottom]);
+
   // Promotion: ease the camera to the tapped book's doors, padded at the bottom
-  // so the book lands in the half of the map the sheet leaves visible.
+  // so the book lands above the sheet's PEEK height (pulling the sheet up
+  // afterwards doesn't move the camera).
   useEffect(() => {
     if (!promotedId || !cameraRef.current) return;
     const pts = (doorsQ.data?.doors || []).filter((d) => d.turfId === promotedId).map((d) => [d.lng, d.lat]);
@@ -528,7 +566,7 @@ export default function AdminBooks() {
       if (lat < minLat) minLat = lat;
       if (lat > maxLat) maxLat = lat;
     }
-    const bottomPad = Math.round(Dimensions.get('window').height * 0.55);
+    const bottomPad = BOOK_SHEET_PEEK + insets.bottom + 40;
     if (pts.length === 1 || (minLng === maxLng && minLat === maxLat)) {
       cameraRef.current.setCamera({
         centerCoordinate: pts[0],
@@ -826,26 +864,56 @@ export default function AdminBooks() {
               <Text style={styles.legendHint}>{selectMode ? 'Tap books to select' : 'Tap a book to assign'}</Text>
             </View>
           )}
-          {/* Promoted-book sheet: a HALF-HEIGHT panel, not a scrim modal — the
-              map stays visible and interactive above it. */}
+          {/* Promoted-book sheet: PULLABLE — opens at peek so the map owns the
+              screen; pull up for the full roster. The pan gesture lives on the
+              handle only, so the map (and the roster's own scroll) stay live. */}
           {mapSheetBook && !selectMode && (
-            <View style={styles.mapSheet}>
+            <PullableSheet translateY={sheetTranslateY} snapDelta={sheetSnapDelta} sheetHeight={bookSheetHeight}>
               <View style={styles.modalHead}>
                 <View style={{ flex: 1, paddingRight: spacing.sm }}>
                   <Text style={styles.modalTitle} numberOfLines={1}>
                     {mapSheetBook.name}
                   </Text>
                 </View>
+                {/* ⋯ = book actions (bulk restrict) — off the roster's scroll
+                    path so it can't be fat-fingered; Alert confirms remain. */}
+                <Pressable
+                  onPress={() => setSheetMenuOpen((v) => !v)}
+                  hitSlop={8}
+                  style={{ paddingRight: spacing.lg }}
+                >
+                  <Text style={styles.modalClose}>⋯</Text>
+                </Pressable>
                 <Pressable
                   onPress={() => {
                     setMapSheetBookId(null);
                     setAssignError(null);
+                    setSheetMenuOpen(false);
                   }}
                   hitSlop={8}
                 >
                   <Text style={styles.modalClose}>✕</Text>
                 </Pressable>
               </View>
+              {sheetMenuOpen && (
+                <View style={styles.sheetMenu}>
+                  <Pressable
+                    disabled={restrictPending}
+                    onPress={() => {
+                      setSheetMenuOpen(false);
+                      if (mapSheetBook.bulkRestrictedCount > 0) confirmUnrestrictBook(mapSheetBook);
+                      else confirmRestrictBooks([mapSheetBook]);
+                    }}
+                    style={({ pressed }) => [styles.sheetMenuItem, (pressed || restrictPending) && { opacity: 0.7 }]}
+                  >
+                    <Text style={styles.sheetMenuItemText}>
+                      {mapSheetBook.bulkRestrictedCount > 0
+                        ? `Unmark restricted (${mapSheetBook.bulkRestrictedCount})`
+                        : `Mark book restricted… (${mapSheetBook.doors} doors)`}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
               {(() => {
                 const prog = progressByTurf.get(mapSheetBook.id);
                 const total = prog?.total ?? mapSheetBook.doors;
@@ -875,23 +943,6 @@ export default function AdminBooks() {
                   ))}
                 </View>
               )}
-              <Pressable
-                onPress={() =>
-                  mapSheetBook.bulkRestrictedCount > 0
-                    ? confirmUnrestrictBook(mapSheetBook)
-                    : confirmRestrictBooks([mapSheetBook])
-                }
-                disabled={restrictPending}
-                style={({ pressed }) => [styles.restrictBtn, (pressed || restrictPending) && { opacity: 0.7 }]}
-              >
-                <Text style={styles.restrictBtnText}>
-                  {restrictPending
-                    ? 'Working…'
-                    : mapSheetBook.bulkRestrictedCount > 0
-                      ? `Unmark restricted (${mapSheetBook.bulkRestrictedCount})`
-                      : 'Mark book restricted…'}
-                </Text>
-              </Pressable>
               {assignError ? <Text style={styles.sheetError}>{assignError}</Text> : null}
               <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: spacing.xs }}>
                 {rosterWithSelf.length === 0 ? (
@@ -913,7 +964,7 @@ export default function AdminBooks() {
                   })
                 )}
               </ScrollView>
-            </View>
+            </PullableSheet>
           )}
         </View>
       ) : (
@@ -1280,22 +1331,22 @@ function makeStyles(t) {
     mapSheetMeta: { ...type.caption, color: colors.textSecondary, marginBottom: spacing.sm },
     mapLoading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
 
-    // promoted-book sheet (half-height, map visible + interactive above it)
-    mapSheet: {
+    // promoted-book sheet chrome now comes from components/PullableSheet.jsx;
+    // the ⋯ actions menu anchors under the header row.
+    sheetMenu: {
       position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      height: '52%',
-      backgroundColor: colors.bg,
-      borderTopLeftRadius: radius.lg,
-      borderTopRightRadius: radius.lg,
+      top: 34,
+      right: spacing.lg,
+      zIndex: 10,
+      backgroundColor: colors.card,
+      borderRadius: radius.md,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: spacing.lg,
-      paddingBottom: spacing.xl,
+      paddingVertical: spacing.xs,
       ...shadow.raised,
     },
+    sheetMenuItem: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2 },
+    sheetMenuItemText: { fontSize: 13, fontWeight: '700', color: colors.status.restricted },
     tallyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.xs },
     tallyItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     tallyText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
@@ -1404,16 +1455,6 @@ function makeStyles(t) {
     actionBarBtnRestrict: { backgroundColor: colors.status.restricted },
     actionBarBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 14 },
 
-    // promoted-sheet bulk-restrict action (slate = the restricted color)
-    restrictBtn: {
-      borderWidth: 1,
-      borderColor: colors.status.restricted,
-      borderRadius: radius.md,
-      paddingVertical: spacing.sm,
-      alignItems: 'center',
-      marginTop: spacing.xs,
-    },
-    restrictBtnText: { color: colors.status.restricted, fontWeight: '700', fontSize: 13 },
 
     // bulk modal
     modalBackdrop: { flex: 1, backgroundColor: colors.backdrop, justifyContent: 'flex-end' },
