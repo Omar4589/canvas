@@ -37,8 +37,9 @@ import { VoterNote } from '../../models/VoterNote.js';
 // Every collection that carries organizationId. Voter is deleted LAST in this
 // list's order-independent sweep but its personIds are collected FIRST — the
 // cross-org Person hygiene below depends on knowing which canonical people this
-// org's voters pointed at before the rows vanish.
-const ORG_SCOPED = [
+// org's voters pointed at before the rows vanish. Exported so the integration
+// test can seed a stub row in every one and prove the sweep is exhaustive.
+export const ORG_SCOPED = [
   Campaign, CampaignAssignment, CampaignManager, CanvassActivity, ClientReport,
   ClientReportMapPoint, Effort, EffortMember, FlagReview, Household,
   HouseholdLocationChange, ImportJob, ImportProfile, Membership, Pass,

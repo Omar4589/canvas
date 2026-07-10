@@ -22,6 +22,8 @@ const { Voter } = await import('../src/models/Voter.js');
 const { Person } = await import('../src/models/Person.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Subscription } = await import('../src/models/Subscription.js');
+const { PersonEditProposal } = await import('../src/models/PersonEditProposal.js');
+const { ORG_SCOPED } = await import('../src/services/platform/deleteOrganization.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -181,6 +183,38 @@ test('cascade delete: org-scoped rows die, users/survivor org/shared person live
   // The survivor org is untouched.
   assert.strictEqual(await Voter.countDocuments({ organizationId: ctx.survivor._id }), 1);
   assert.ok(await Organization.findById(ctx.survivor._id));
+});
+
+// The confirm card enumerates "campaigns, doors, voters, canvass history,
+// surveys, books, imports, reports, and share links" — prove the cascade is
+// EXHAUSTIVE, not just those: seed a stub row in every org-scoped collection
+// (raw inserts bypass validation), delete the org, then sweep EVERY collection
+// in the database for anything still referencing it. This also catches a future
+// model that gains organizationId without being added to ORG_SCOPED — the stub
+// would survive and this test would fail.
+test('exhaustive sweep: every org-scoped collection empties; no reference survives anywhere', { skip }, async () => {
+  const org2 = await Organization.create({ name: 'Sweep Org', slug: 'sweep-org', isActive: true });
+  for (const M of ORG_SCOPED) {
+    await M.collection.insertOne({ organizationId: org2._id, sweepStub: true });
+  }
+  await PersonEditProposal.collection.insertOne({ orgId: org2._id, sweepStub: true });
+
+  const r = await call('DELETE', `/super-admin/organizations/${org2._id}`, {
+    token: ctx.superTok,
+    body: { confirmSlug: 'sweep-org' },
+  });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(Object.keys(r.json.counts).length >= ORG_SCOPED.length, true, 'every seeded collection must report a deletion');
+
+  const db = mongoose.connection.db;
+  const collections = await db.listCollections().toArray();
+  for (const c of collections) {
+    const leftovers = await db
+      .collection(c.name)
+      .countDocuments({ $or: [{ organizationId: org2._id }, { orgId: org2._id }] });
+    assert.strictEqual(leftovers, 0, `collection '${c.name}' still references the deleted org`);
+  }
+  assert.strictEqual(await Organization.countDocuments({ _id: org2._id }), 0);
 });
 
 test('org admins cannot delete orgs', { skip }, async () => {
