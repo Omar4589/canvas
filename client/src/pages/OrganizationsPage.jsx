@@ -18,6 +18,9 @@ export default function OrganizationsPage() {
   const [slug, setSlug] = useState('');
   const [error, setError] = useState(null);
   const [billingOrg, setBillingOrg] = useState(null); // { id, name } — panel target
+  const [deleteOrg, setDeleteOrg] = useState(null); // { id, name, slug } — confirm target
+  const [confirmSlug, setConfirmSlug] = useState('');
+  const [deleteMsg, setDeleteMsg] = useState(null);
 
   const orgsQ = useQuery({
     queryKey: ['super-admin', 'organizations'],
@@ -40,6 +43,23 @@ export default function OrganizationsPage() {
       api(`/super-admin/organizations/${id}`, { method: 'PATCH', body: { isActive } }),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] }),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: ({ id, slug }) =>
+      api(`/super-admin/organizations/${id}`, { method: 'DELETE', body: { confirmSlug: slug } }),
+    onSuccess: (r) => {
+      setDeleteMsg(
+        `Deleted '${r.organization.name}' — ${Object.entries(r.counts)
+          .map(([k, v]) => `${v} ${k}`)
+          .join(', ') || 'no content'}${r.personsPurged ? ` · ${r.personsPurged} orphaned people purged` : ''}.`
+      );
+      setDeleteOrg(null);
+      setConfirmSlug('');
+      qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] });
+      qc.invalidateQueries({ queryKey: ['super-admin', 'platform-overview'] });
+    },
+    onError: (err) => setDeleteMsg(err.message),
   });
 
   function onCreate(e) {
@@ -165,14 +185,26 @@ export default function OrganizationsPage() {
                   </button>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() =>
-                      toggleActiveMut.mutate({ id: o.id, isActive: !o.isActive })
-                    }
-                    className="text-xs font-semibold text-brand-accent hover:text-brand-accent"
-                  >
-                    {o.isActive ? 'Deactivate' : 'Reactivate'}
-                  </button>
+                  <div className="flex flex-col items-end gap-1">
+                    <button
+                      onClick={() =>
+                        toggleActiveMut.mutate({ id: o.id, isActive: !o.isActive })
+                      }
+                      className="text-xs font-semibold text-brand-accent hover:text-brand-accent"
+                    >
+                      {o.isActive ? 'Deactivate' : 'Reactivate'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDeleteMsg(null);
+                        setConfirmSlug('');
+                        setDeleteOrg({ id: o.id, name: o.name, slug: o.slug });
+                      }}
+                      className="text-xs font-semibold text-danger hover:opacity-80"
+                    >
+                      Delete…
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -189,6 +221,46 @@ export default function OrganizationsPage() {
 
       {billingOrg && (
         <OrgBillingPanel orgId={billingOrg.id} orgName={billingOrg.name} onClose={() => setBillingOrg(null)} />
+      )}
+
+      {deleteMsg && (
+        <div className="rounded-md border border-info/30 bg-info-tint px-4 py-2 text-sm text-info-fg">{deleteMsg}</div>
+      )}
+
+      {deleteOrg && (
+        <div className="rounded-xl border border-danger/30 bg-danger-tint p-4">
+          <h2 className="text-sm font-semibold text-danger">Permanently delete {deleteOrg.name}?</h2>
+          <p className="mt-1 text-sm text-danger">
+            This hard-deletes the org and <strong>everything in it</strong> — campaigns, doors, voters,
+            canvass history, surveys, books, imports, reports, and share links. It cannot be undone.
+            User accounts survive (people in other orgs keep that access; this org&apos;s memberships are
+            removed). Type the slug <span className="font-mono font-semibold">{deleteOrg.slug}</span> to confirm.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              value={confirmSlug}
+              onChange={(e) => setConfirmSlug(e.target.value)}
+              placeholder={deleteOrg.slug}
+              className="rounded-md border border-danger/40 bg-card px-3 py-2 font-mono text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+            />
+            <button
+              onClick={() => deleteMut.mutate({ id: deleteOrg.id, slug: confirmSlug.trim().toLowerCase() })}
+              disabled={confirmSlug.trim().toLowerCase() !== deleteOrg.slug || deleteMut.isPending}
+              className="rounded-md bg-danger px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50"
+            >
+              {deleteMut.isPending ? 'Deleting…' : 'Delete forever'}
+            </button>
+            <button
+              onClick={() => {
+                setDeleteOrg(null);
+                setConfirmSlug('');
+              }}
+              className="text-sm font-semibold text-fg-muted hover:text-fg"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

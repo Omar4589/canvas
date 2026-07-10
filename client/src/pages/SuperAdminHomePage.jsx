@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import CrossOrgActivityFeed from '../components/CrossOrgActivityFeed.jsx';
@@ -40,6 +40,20 @@ export default function SuperAdminHomePage() {
   const qc = useQueryClient();
   const { switchOrg, user } = useAuth();
   const [live, setLive] = useState(true);
+  const [refreshMsg, setRefreshMsg] = useState(null);
+
+  // Re-stage the demo org's recent canvassing (4 evenings + a morning-to-now
+  // "today") right before a pitch. Server-side it's locked to the demo org.
+  const refreshDemoMut = useMutation({
+    mutationFn: () => api('/super-admin/demo/refresh-day', { method: 'POST' }),
+    onSuccess: (r) => {
+      setRefreshMsg(
+        `Demo refreshed: ${r.staged.todayKnocks} knocks today · ${r.staged.activities} total · ${r.staged.surveys} surveys.`
+      );
+      qc.invalidateQueries({ queryKey: ['super-admin', 'platform-overview'] });
+    },
+    onError: (err) => setRefreshMsg(err.message),
+  });
 
   const overviewQ = useQuery({
     queryKey: ['super-admin', 'platform-overview'],
@@ -137,13 +151,28 @@ export default function SuperAdminHomePage() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">
               All organizations
             </h2>
-            <button
-              onClick={() => navigate('/organizations')}
-              className="text-xs font-semibold text-brand-accent hover:underline"
-            >
-              Manage →
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => refreshDemoMut.mutate()}
+                disabled={refreshDemoMut.isPending}
+                title="Wipe & re-stage the demo org's recent canvassing so Today looks live"
+                className="text-xs font-semibold text-brand-accent hover:underline disabled:opacity-60"
+              >
+                {refreshDemoMut.isPending ? 'Refreshing demo…' : 'Refresh demo day'}
+              </button>
+              <button
+                onClick={() => navigate('/organizations')}
+                className="text-xs font-semibold text-brand-accent hover:underline"
+              >
+                Manage →
+              </button>
+            </div>
           </div>
+          {refreshMsg && (
+            <div className="mb-2 rounded-md border border-info/30 bg-info-tint px-3 py-1.5 text-xs text-info-fg">
+              {refreshMsg}
+            </div>
+          )}
 
           {overviewQ.isLoading ? (
             <div className="rounded-md border border-border bg-card p-4 text-sm text-fg-muted">

@@ -6,6 +6,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Subscription } from '../../models/Subscription.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
+import { refreshDemoDay } from '../../services/platform/refreshDemoDay.js';
 import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
 
 const router = Router();
@@ -159,6 +160,19 @@ router.get('/platform-overview', async (req, res, next) => {
       }),
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+// Re-stage the demo org's recent canvassing relative to now (4 evenings + a
+// morning-to-now "today") so the dashboard looks live before a pitch. Locked to
+// the demo org by slug inside the service — it can never touch a real org.
+router.post('/demo/refresh-day', async (req, res, next) => {
+  try {
+    const summary = await refreshDemoDay();
+    res.json(summary);
+  } catch (err) {
+    if (err?.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });

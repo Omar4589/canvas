@@ -34,8 +34,18 @@ any org to work inside it, then come back out.
   organization with its members, campaigns, who's live, and when it was last active. Alongside it, a
   **live activity feed** streams recent door events (Not home / Wrong address / **Refused** /
   **Restricted** / Survey / Lit drop) from across all orgs.
-- **Organizations** — the list of every org; create a new one, and activate/deactivate them. A
-  deactivated org's members can't sign into it.
+- **Organizations** — the list of every org; create a new one, activate/deactivate them (a
+  deactivated org's members can't sign into it), manage each org's **billing** (status pill + Manage
+  → the Billing panel; see [BILLING.md](BILLING.md)), and **permanently delete** an org. Delete is a
+  hard, irreversible cascade — campaigns, doors, voters, history, reports, share links, memberships —
+  guarded by typing the org's slug back. User accounts always survive (someone in another org keeps
+  that access); canonical People shared with other orgs survive too, with ownership released.
+- **Refresh demo day** (Control Room) — one click re-stages the demo org's recent canvassing
+  relative to *now*: the four prior evenings plus a "today" whose knocks run from mid-morning up to
+  the minute you pressed it. Press it right before a pitch so the dashboard, map, and timeline look
+  live. It only ever touches the demo org, the App-Review canvasser's book always stays unwalked,
+  and the voted layer + published client report survive. Also runnable from the Heroku Run console:
+  `npm --prefix server run demo:refresh`.
 - **All Users** — every account on the platform (with the orgs each belongs to and their role in each).
   This is where you **promote or demote a super admin**. You can't change your own super-admin flag.
 - **People** — the cross-org **Person** layer: the same real person appearing in several orgs, deduped;
@@ -62,7 +72,8 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 | Screen | Client page | Endpoint(s) |
 |---|---|---|
 | Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` ([platform.js](../server/src/routes/superAdmin/platform.js)) |
-| Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) | `GET/POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId` ([organizations.js](../server/src/routes/superAdmin/organizations.js)) |
+| Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) | `GET/POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId`, `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js), tested by [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
+| Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; console runner `npm run demo:refresh`) |
 | All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) | `GET /super-admin/users`, `POST /super-admin/users/:userId/promote` ([users.js](../server/src/routes/superAdmin/users.js)) |
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
 | Jobs | queues page | Bull Board at `/admin/queues` (`requireBullBoardAuth`, mounted in [app.js](../server/src/app.js)) |

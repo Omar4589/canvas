@@ -9,6 +9,7 @@ import { slugSchema } from '../../utils/validators.js';
 import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
+import { deleteOrganization } from '../../services/platform/deleteOrganization.js';
 
 const router = Router();
 router.use(requireAuth, requireSuperAdmin);
@@ -118,6 +119,36 @@ router.patch('/:orgId', async (req, res, next) => {
   } catch (err) {
     if (err.code === 11000) return res.status(409).json({ error: 'Slug already exists' });
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// HARD delete — irreversible cascade across every org-scoped collection (plus
+// cross-org Person hygiene; see services/platform/deleteOrganization.js). The
+// caller must type the org's slug back: a mismatched confirmSlug is a 400, so
+// no single stray click can destroy an org.
+router.delete('/:orgId', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.orgId)) {
+      return res.status(400).json({ error: 'Invalid orgId' });
+    }
+    const org = await Organization.findById(req.params.orgId, { slug: 1, name: 1 }).lean();
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+    const confirmSlug = String(req.body?.confirmSlug || '').trim().toLowerCase();
+    if (confirmSlug !== org.slug) {
+      return res.status(400).json({
+        error: `Type the org's slug (${org.slug}) to confirm deletion.`,
+        code: 'confirm-slug-mismatch',
+      });
+    }
+    const summary = await deleteOrganization(org._id);
+    console.warn(
+      `[org-delete] ${req.user.email || req.user._id} deleted org '${summary.organization.name}' (${summary.organization.slug})`,
+      summary.counts
+    );
+    res.json(summary);
+  } catch (err) {
+    if (err?.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });
