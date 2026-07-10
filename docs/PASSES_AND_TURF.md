@@ -100,7 +100,8 @@ counterpart to the field marker — the field records "can't get in," the admin 
 to keep trying.
 
 **Marking a whole book restricted (bulk).** When an entire book is inaccessible (a gated community),
-select it on the Turf Cutting page (or open it on the mobile Books map) and **Mark restricted…** —
+select it on the Turf Cutting page, or on mobile open its **⋯** menu (the Books map's promoted-book
+sheet, or the book detail screen reached from List view) — **Mark restricted…** —
 `POST .../turfs/restrict-bulk { turfIds[] }` creates a real restricted activity row per eligible door
 (`via: 'bulk'`, the acting admin's user, the house's own coordinates, the book's round), so canvassers
 see the slate doors **immediately** in their round view and the excludeRestricted toggle above catches
