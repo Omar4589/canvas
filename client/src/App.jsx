@@ -137,6 +137,11 @@ export default function App() {
           <Route path="/campaigns/:campaignId/import" element={<ImportPage />} />
           <Route path="/campaigns/:campaignId/map" element={<MapPage />} />
           <Route path="/campaigns/:campaignId/survey" element={<CampaignSurveyPage />} />
+          {/* The in-campaign survey builder is reachable by campaign managers (leads too);
+              the server (canManageSurvey) enforces per-survey scope. The org /surveys
+              library stays admin-only in the group below. */}
+          <Route path="/campaigns/:campaignId/survey/new" element={<CampaignSurveyBuilderPage mode="new" />} />
+          <Route path="/campaigns/:campaignId/survey/edit" element={<CampaignSurveyBuilderPage mode="edit" />} />
           <Route path="/campaigns/:campaignId/team" element={<CampaignTeamPage />} />
           <Route path="/campaigns/:campaignId/timeline" element={<TimelinePage />} />
           <Route path="/campaigns/:campaignId/audit" element={<AuditPage />} />
@@ -165,11 +170,6 @@ export default function App() {
           }
         >
           <Route path="/admin" element={<OverviewPage />} />
-          {/* The survey-TEMPLATE builder edits the org library, so it stays admin-only —
-              even though its URL sits under a campaign. Route ranking keeps these ahead
-              of the console group's /campaigns/:campaignId/survey. */}
-          <Route path="/campaigns/:campaignId/survey/new" element={<CampaignSurveyBuilderPage mode="new" />} />
-          <Route path="/campaigns/:campaignId/survey/edit" element={<CampaignSurveyBuilderPage mode="edit" />} />
           {/* Org-level screens */}
           <Route path="/queues" element={<QueuesPage />} />
           <Route path="/users" element={<UsersPage />} />

@@ -209,6 +209,13 @@ export default function CampaignDetail() {
     router.push('/(app)/admin/audit');
   }
 
+  // Set this campaign active, then open the Notes hub (it reads the active campaign).
+  async function goNotes() {
+    if (!campaign) return;
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
+    router.push('/(app)/admin/notes');
+  }
+
   if (campaignsQ.data && !campaign) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -380,6 +387,7 @@ export default function CampaignDetail() {
               items={[
                 { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
                 { label: 'GPS audit', subtitle: 'Review flagged entries', onPress: goAudit },
+                { label: 'Notes', subtitle: 'Door, survey & admin notes', onPress: goNotes },
                 { label: 'Users', subtitle: 'Manage people', onPress: () => router.push('/(app)/admin/users') },
                 { label: 'Assignments', subtitle: 'Books & canvassers', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },
               ]}

@@ -226,6 +226,7 @@ export default function AdminMap() {
   const qc = useQueryClient();
   const cameraRef = useRef(null);
   const mapRef = useRef(null);
+  const focusedHouseholdRef = useRef(null); // last door focused from a ?household= link
   const [campaign, setCampaign] = useState(undefined);
   const [showPings, setShowPings] = useState(false);
   const [showFlags, setShowFlags] = useState(false);
@@ -246,17 +247,26 @@ export default function AdminMap() {
   });
   const { effortId, passId, importId } = scope;
 
+  // A single door to focus, from a Notes "view on map" link. NOT a server filter
+  // (unlike scope) — it only widens the range + flies the camera (see the effect
+  // below). Read live (not once-seeded) so re-navigating to another door on this
+  // always-mounted Tabs screen re-focuses.
+  const householdFocus = one(params.household);
+
   // Audit filters — mirror the web admin map. Default to TODAY (like the web):
   // the map opens on today's activity; "All time" is one tap away in the preset
   // menu. Seeded from the device tz for first paint, re-anchored to the
-  // campaign's tz below once it resolves.
+  // campaign's tz below once it resolves. EXCEPT when arriving via a household
+  // deep-link: the door's note may be old, so open ALL-TIME so it's in the set.
   const [range, setRange] = useState(() => {
+    if (householdFocus) return { preset: 'all', from: null, to: null };
     const r = rangeFor('today', null, deviceTimezone());
     return { preset: 'today', from: r.from, to: r.to };
   });
   // True once the user picks a date themselves — the tz reseed must never
-  // stomp a manual choice.
-  const dateTouchedRef = useRef(false);
+  // stomp a manual choice. A household deep-link also counts as "touched" so the
+  // reseed can't pull the range back to today before we focus the door.
+  const dateTouchedRef = useRef(!!householdFocus);
   const [statusFilter, setStatusFilter] = useState([]); // [] = all statuses
   const [canvasserId, setCanvasserId] = useState('');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', label: '' });
@@ -357,6 +367,35 @@ export default function AdminMap() {
     for (const h of households) m.set(String(h.id), h);
     return m;
   }, [households]);
+
+  // Focus a door arriving from a Notes "view on map" link (?household=). The range
+  // is already all-time (seeded above), so once the widened result set loads the
+  // door is present: fly to it and open its sheet. Keyed on the LIVE param + the
+  // loaded set, and guarded by a ref so it fires once per door (not on every poll)
+  // yet re-focuses when the link points at a different door on this mounted screen.
+  useEffect(() => {
+    if (!householdFocus) return;
+    if (focusedHouseholdRef.current === householdFocus) return;
+    // The initializer opens all-time when the param is present on mount, but a
+    // second push onto the already-mounted screen may still be on today — widen it.
+    if (range.preset !== 'all') {
+      dateTouchedRef.current = true;
+      setRange({ preset: 'all', from: null, to: null });
+      return; // wait for the widened result set, then focus on the next run
+    }
+    const h = householdsById.get(String(householdFocus));
+    if (h?.location?.lat != null && h?.location?.lng != null) {
+      setSelectedPing(null);
+      setSelectedFlagId(null);
+      setSelected(h);
+      cameraRef.current?.setCamera({
+        centerCoordinate: [h.location.lng, h.location.lat],
+        zoomLevel: 17,
+        animationDuration: 600,
+      });
+      focusedHouseholdRef.current = householdFocus;
+    }
+  }, [householdFocus, householdsById, range.preset]);
 
   const lineFeatures = useMemo(
     () => (showPings ? linesToFeatures(activities, householdsById) : { type: 'FeatureCollection', features: [] }),

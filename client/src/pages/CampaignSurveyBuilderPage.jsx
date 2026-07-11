@@ -1,6 +1,7 @@
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { Button } from '../components/ui';
 import SurveyForm from '../components/SurveyBuilder.jsx';
 
@@ -20,6 +21,9 @@ export default function CampaignSurveyBuilderPage({ mode }) {
   const { campaignId } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  // Leads can author within their campaign; only org admins can create org-level tags,
+  // so the builder's "Create tag" affordance is gated on isOrgAdmin (leads pick existing).
+  const { isOrgAdmin } = useAuth();
   const back = () => navigate(`/campaigns/${campaignId}/survey`);
 
   const campaignsQ = useQuery({
@@ -42,21 +46,30 @@ export default function CampaignSurveyBuilderPage({ mode }) {
     return res.tag.name;
   }
 
-  // Create the template, attach it to this campaign, return to the Survey tab.
+  // Create the template. Attach as the campaign's MAIN survey only when it has none yet
+  // (Option A — a new survey never silently replaces the main). If a main already exists,
+  // it's created for the library and the Survey tab prompts you to assign it to a walk
+  // list. Either way we return with ?created=<id> so the tab can confirm/guide.
   const create = useMutation({
     mutationFn: (body) => api('/admin/surveys', { method: 'POST', body }),
     onSuccess: async (res) => {
       qc.invalidateQueries({ queryKey: ['surveys'] });
-      try {
-        await api(`/admin/campaigns/${campaignId}`, {
-          method: 'PATCH',
-          body: { surveyTemplateId: res.survey._id },
-        });
-        qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
-      } catch {
-        /* survey created; if the attach fails the Survey tab still lets them pick it */
+      const camp = (qc.getQueryData(['admin', 'campaigns'])?.campaigns || []).find(
+        (c) => String(c._id) === String(campaignId)
+      );
+      const hasMain = !!(camp?.surveyTemplateId?._id || camp?.surveyTemplateId);
+      if (!hasMain) {
+        try {
+          await api(`/admin/campaigns/${campaignId}`, {
+            method: 'PATCH',
+            body: { surveyTemplateId: res.survey._id },
+          });
+          qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+        } catch {
+          /* survey created; if the attach fails the Survey tab still lets them pick it */
+        }
       }
-      back();
+      navigate(`/campaigns/${campaignId}/survey?created=${res.survey._id}`);
     },
   });
 
@@ -107,6 +120,8 @@ export default function CampaignSurveyBuilderPage({ mode }) {
 
   const editing = mode === 'edit';
   const others = editing ? usedByOthers(attachedSurvey, campaignId) : 0;
+  // On create, whether this campaign already has a main survey decides the copy + attach.
+  const hasMain = !!attachedId;
 
   return (
     <div>
@@ -119,7 +134,10 @@ export default function CampaignSurveyBuilderPage({ mode }) {
       <p className="mb-5 max-w-prose text-sm text-fg-muted">
         {editing ? 'Editing' : 'Creating'} the survey for{' '}
         <span className="font-medium text-fg">{campaign.name}</span>.
-        {!editing && ' It will be attached to this campaign automatically when you save.'}
+        {!editing &&
+          (hasMain
+            ? ' It will be added to your library — assign it to a walk list to use it here.'
+            : " It will become this campaign's default survey when you save.")}
       </p>
 
       {editing && others > 0 && (
@@ -147,7 +165,7 @@ export default function CampaignSurveyBuilderPage({ mode }) {
         onCancel={back}
         saving={editing ? update.isPending : create.isPending}
         orgTags={orgTags}
-        onCreateTag={createTag}
+        onCreateTag={isOrgAdmin ? createTag : undefined}
       />
 
       {(create.error || update.error) && (

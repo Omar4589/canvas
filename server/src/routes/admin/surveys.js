@@ -9,6 +9,7 @@ import { Effort } from '../../models/Effort.js';
 import { classifyQuestionEdits } from '../../services/surveys/diffQuestions.js';
 import { canonicalizeTags } from '../../services/surveys/tags.js';
 import { ensureTags } from '../../services/surveys/tagOps.js';
+import { canManageSurvey } from '../../services/authz/campaignManagement.js';
 
 const router = Router();
 // Team leads may READ the template library (to attach a survey to their campaign and
@@ -280,7 +281,10 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', requireOrgRole('admin'), async (req, res, next) => {
+// Create is open to leads too: a new template is org-level but reached only via the
+// lead's campaign, createdBy is stamped below, and attaching it (campaign/effort PATCH)
+// is separately campaign-manager-scoped. So no per-survey scope check here.
+router.post('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const data = upsertSchema.parse(req.body);
@@ -304,7 +308,7 @@ router.post('/', requireOrgRole('admin'), async (req, res, next) => {
   }
 });
 
-router.patch('/:surveyId', requireOrgRole('admin'), async (req, res, next) => {
+router.patch('/:surveyId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const data = upsertSchema.partial().parse(req.body);
@@ -313,6 +317,8 @@ router.patch('/:surveyId', requireOrgRole('admin'), async (req, res, next) => {
       organizationId: activeOrgId(req),
     });
     if (!existing) return res.status(404).json({ error: 'Survey not found' });
+    // Leads may edit only a survey they authored or one attached to a campaign they manage.
+    if (!(await canManageSurvey(req, existing))) return res.status(403).json({ error: 'Forbidden' });
 
     // Question edits are now reconciled, not blocked: removed questions/options
     // are soft-retired (kept with their stable ids) so existing reports keep
@@ -357,7 +363,7 @@ router.patch('/:surveyId', requireOrgRole('admin'), async (req, res, next) => {
 // Clone a survey into a fresh, fully-editable template (version reset, inactive,
 // no campaign link). Used as the escape hatch when an in-use survey needs
 // structural changes — the original stays intact so its reports keep working.
-router.post('/:surveyId/duplicate', requireOrgRole('admin'), async (req, res, next) => {
+router.post('/:surveyId/duplicate', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
@@ -366,6 +372,9 @@ router.post('/:surveyId/duplicate', requireOrgRole('admin'), async (req, res, ne
       organizationId: orgId,
     }).lean();
     if (!original) return res.status(404).json({ error: 'Survey not found' });
+    // Same scope as edit — the answer-type-change escape hatch must work for leads
+    // on their own campaign's surveys.
+    if (!(await canManageSurvey(req, original))) return res.status(403).json({ error: 'Forbidden' });
 
     const copy = await SurveyTemplate.create({
       organizationId: orgId,

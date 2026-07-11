@@ -41,7 +41,8 @@ export default function TagPicker({ value, onChange, tags = [], onCreate }) {
     .filter((t) => (t.name || '').toLowerCase().includes(lower))
     .slice(0, 50);
   const exactMatch = tags.some((t) => (t.name || '').toLowerCase() === lower);
-  const showCreate = !!q && !exactMatch;
+  // Creating a tag requires `onCreate` (org-admin only); leads pick from existing tags.
+  const showCreate = !!q && !exactMatch && typeof onCreate === 'function';
 
   async function create() {
     if (!q || creating) return;
@@ -64,7 +65,7 @@ export default function TagPicker({ value, onChange, tags = [], onCreate }) {
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
-        placeholder="Pick a tag or create one…"
+        placeholder={typeof onCreate === 'function' ? 'Pick a tag or create one…' : 'Pick a tag…'}
         className="w-44 rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       />
       {open && (
@@ -93,7 +94,9 @@ export default function TagPicker({ value, onChange, tags = [], onCreate }) {
             </li>
           )}
           {filtered.length === 0 && !showCreate && (
-            <li className="px-2 py-1 text-fg-subtle">No tags yet — type to create your first.</li>
+            <li className="px-2 py-1 text-fg-subtle">
+              {typeof onCreate === 'function' ? 'No tags yet — type to create your first.' : 'No matching tags.'}
+            </li>
           )}
         </ul>
       )}

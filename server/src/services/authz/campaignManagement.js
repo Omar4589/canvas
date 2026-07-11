@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { CampaignManager } from '../../models/CampaignManager.js';
+import { Campaign } from '../../models/Campaign.js';
+import { Effort } from '../../models/Effort.js';
 
 // ── Authorization helpers for the team-lead (campaign-scoped admin) role ──
 //
@@ -48,4 +50,28 @@ export async function canManageCampaign(req, campaignId) {
     campaignId,
   });
   return Boolean(grant);
+}
+
+// Can the requester CREATE/EDIT/DUPLICATE this survey template? Surveys are org-level
+// templates, so admins manage any; a LEAD may only touch one they authored (createdBy)
+// or one attached to a campaign they manage — as that campaign's default
+// (Campaign.surveyTemplateId) OR any walk-list override (Effort.surveyTemplateId).
+// Default-deny. `survey` is a SurveyTemplate doc/lean object (needs _id, createdBy).
+export async function canManageSurvey(req, survey) {
+  if (isOrgAdmin(req)) return true;
+  if (req.activeMembership?.role !== 'lead') return false;
+  if (!survey) return false;
+  // createdBy FIRST — a lead can edit a survey they just created but haven't
+  // attached to anything yet (the create-then-edit-before-attach case).
+  if (survey.createdBy && req.user?._id && String(survey.createdBy) === String(req.user._id)) {
+    return true;
+  }
+  const managed = await managedCampaignIds(req);
+  if (!managed.length) return false;
+  const orgId = req.activeOrg?._id;
+  const [asDefault, asOverride] = await Promise.all([
+    Campaign.exists({ organizationId: orgId, _id: { $in: managed }, surveyTemplateId: survey._id }),
+    Effort.exists({ organizationId: orgId, campaignId: { $in: managed }, surveyTemplateId: survey._id }),
+  ]);
+  return Boolean(asDefault || asOverride);
 }

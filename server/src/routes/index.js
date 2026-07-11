@@ -36,6 +36,7 @@ import mobileMeRouter from './mobile/me.js';
 import mobileVotersRouter from './mobile/voters.js';
 import adminClientReportsRouter from './admin/clientReports.js';
 import shareRouter from './public/share.js';
+import helpRouter from './help.js';
 
 const router = Router();
 
@@ -47,6 +48,10 @@ router.use('/auth', authRouter);
 
 // Public report sharing (no login) — capability token in the URL. Mounted BEFORE the auth gate.
 router.use('/share', shareRouter);
+
+// Help Center content — self-gated (any logged-in member) and intentionally outside the
+// password/entitlement gates below, so help is always readable (incl. suspended orgs).
+router.use('/help', helpRouter);
 
 // Gate every protected surface for users who owe a password change. Runs before
 // the sub-routers (which re-run requireAuth harmlessly). /auth is excluded above

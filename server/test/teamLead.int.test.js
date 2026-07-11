@@ -20,6 +20,8 @@ const { Campaign } = await import('../src/models/Campaign.js');
 const { CampaignManager } = await import('../src/models/CampaignManager.js');
 const { Household } = await import('../src/models/Household.js');
 const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
+const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
+const { Effort } = await import('../src/models/Effort.js');
 const bcrypt = (await import('bcryptjs')).default;
 
 const URI = process.env.MONGODB_URI_TEST;
@@ -32,7 +34,7 @@ const ctx = {}; // { org, A, B, adminTok, leadTok }
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CampaignManager, Household, ReportShareLink]) await M.deleteMany({});
+  for (const M of [Organization, User, Membership, Campaign, CampaignManager, Household, ReportShareLink, SurveyTemplate, Effort]) await M.deleteMany({});
 
   const org = await Organization.create({ name: 'Test Org', slug: 'test-org-lead', isActive: true });
   const admin = await User.create({ firstName: 'Ada', lastName: 'Admin', email: 'admin@t.co', passwordHash: 'x', isActive: true });
@@ -42,6 +44,18 @@ before(async () => {
   const A = await Campaign.create({ organizationId: org._id, name: 'Campaign A', type: 'survey', state: 'KY', isActive: true });
   const B = await Campaign.create({ organizationId: org._id, name: 'Campaign B', type: 'survey', state: 'KY', isActive: true });
   await CampaignManager.create({ campaignId: A._id, userId: lead._id, organizationId: org._id, grantedBy: admin._id });
+
+  // Survey authoring scope fixtures:
+  //  - survOverrideA: attached to MANAGED campaign A via a walk-list override (not A's
+  //    default, which a later test nulls out) → lead may edit/duplicate.
+  //  - survDefaultB: attached only to UNMANAGED campaign B's default → lead may NOT.
+  //  - survLeadDraft: authored by the lead, unattached → lead may edit (createdBy branch).
+  const survOverrideA = await SurveyTemplate.create({ organizationId: org._id, name: 'Override A', createdBy: admin._id, version: 1 });
+  await Effort.create({ organizationId: org._id, campaignId: A._id, name: 'WL-A', surveyTemplateId: survOverrideA._id });
+  const survDefaultB = await SurveyTemplate.create({ organizationId: org._id, name: 'Default B', createdBy: admin._id, version: 1 });
+  B.surveyTemplateId = survDefaultB._id;
+  await B.save();
+  const survLeadDraft = await SurveyTemplate.create({ organizationId: org._id, name: 'Lead Draft', createdBy: lead._id, version: 1 });
 
   // A household in each campaign, for the /:householdId/activity scoping test. Raw insert
   // (bypass schema requireds) — the handler only needs _id + organizationId + campaignId.
@@ -64,6 +78,7 @@ before(async () => {
 
   Object.assign(ctx, {
     org, A, B, hhA, hhB, shareToken,
+    survOverrideA, survDefaultB, survLeadDraft,
     adminTok: signUserToken(admin),
     leadTok: signUserToken(lead),
   });
@@ -161,16 +176,41 @@ test('libraries: lead reads surveys/tags but cannot mutate them, and cannot reac
   const opt = { token: leadTok, orgId: org._id };
   assert.strictEqual((await call('GET', '/api/admin/surveys', opt)).status, 200, 'GET surveys');
   assert.strictEqual((await call('GET', '/api/admin/tags', opt)).status, 200, 'GET tags');
-  assert.strictEqual((await call('POST', '/api/admin/surveys', { ...opt, body: { name: 'X' } })).status, 403, 'POST surveys');
+  // Leads CAN author survey templates now (from their campaign) — createdBy is stamped
+  // as the lead, and attaching is separately campaign-scoped.
+  assert.strictEqual((await call('POST', '/api/admin/surveys', { ...opt, body: { name: 'X' } })).status, 201, 'POST surveys (lead can author)');
   assert.strictEqual((await call('POST', '/api/admin/tags', { ...opt, body: { name: 'x' } })).status, 403, 'POST tags');
-  // Survey lifecycle mutations (archive / unarchive / delete) are admin-only too;
-  // the guard fires before any lookup, so a random id suffices.
+  // Survey lifecycle mutations (archive / unarchive / delete) stay admin-only; the guard
+  // fires before any lookup, so a random id suffices.
   const sid = new mongoose.Types.ObjectId();
   assert.strictEqual((await call('POST', `/api/admin/surveys/${sid}/archive`, opt)).status, 403, 'archive survey');
   assert.strictEqual((await call('POST', `/api/admin/surveys/${sid}/unarchive`, opt)).status, 403, 'unarchive survey');
   assert.strictEqual((await call('DELETE', `/api/admin/surveys/${sid}`, opt)).status, 403, 'delete survey');
   assert.strictEqual((await call('GET', '/api/admin/memberships', opt)).status, 403, 'org Users admin');
   assert.strictEqual((await call('GET', '/api/admin/voters', opt)).status, 403, 'org voters');
+});
+
+test('lead survey edit/duplicate is scoped: own or managed-attached yes, unmanaged no', { skip }, async () => {
+  const { leadTok, org, survOverrideA, survDefaultB, survLeadDraft } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  // Attached to a MANAGED campaign (via a walk-list override) → 200.
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/surveys/${survOverrideA._id}`, { ...opt, body: { name: 'Override A v2' } })).status,
+    200, 'PATCH managed-attached'
+  );
+  // Authored by the lead, unattached → 200 (createdBy branch).
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/surveys/${survLeadDraft._id}`, { ...opt, body: { name: 'Draft v2' } })).status,
+    200, 'PATCH own unattached'
+  );
+  // Attached only to an UNMANAGED campaign → 403.
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/surveys/${survDefaultB._id}`, { ...opt, body: { name: 'nope' } })).status,
+    403, 'PATCH unmanaged-attached'
+  );
+  // Duplicate follows the same scope.
+  assert.strictEqual((await call('POST', `/api/admin/surveys/${survOverrideA._id}/duplicate`, opt)).status, 201, 'duplicate managed');
+  assert.strictEqual((await call('POST', `/api/admin/surveys/${survDefaultB._id}/duplicate`, opt)).status, 403, 'duplicate unmanaged');
 });
 
 test('lead can create a canvasser onto a managed campaign via /crew, not onto B', { skip }, async () => {

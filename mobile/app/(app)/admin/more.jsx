@@ -127,6 +127,7 @@ export default function AdminMore() {
         <View style={styles.group}>
           {!isLead && <Row icon="👥" label="Users" onPress={() => router.push('/(app)/admin/users')} />}
           <Row icon="🚩" label="GPS audit" sub="Review flagged entries" onPress={() => router.push('/(app)/admin/audit')} />
+          <Row icon="📝" label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
           <Row icon="🔍" label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
           <Row icon="🚪" label="Switch to canvass mode" onPress={onCanvassMode} />
         </View>

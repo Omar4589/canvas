@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, useNavigate, Navigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Navigate, Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -78,10 +78,14 @@ export default function CampaignSurveyPage() {
   const { campaignId } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  // Leads can ATTACH a template (campaign PATCH) and set walk-list overrides
-  // (effort PATCH); authoring templates stays org-admin only.
-  const { isOrgAdmin } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Campaign managers (admins + leads granted this campaign) can author/attach; the
+  // server enforces the real per-survey scope (canManageSurvey).
+  const { isOrgAdmin, managedCampaignIds } = useAuth();
+  const canManage =
+    isOrgAdmin || managedCampaignIds.some((id) => String(id) === String(campaignId));
   const [changing, setChanging] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -133,6 +137,12 @@ export default function CampaignSurveyPage() {
   const others = attachedSurvey ? usedByOthers(attachedSurvey, campaignId) : 0;
   const isLitDrop = campaign.type === 'lit_drop';
 
+  // A survey just created here (?created=<id>) that ISN'T the main → prompt to assign it.
+  const createdId = searchParams.get('created');
+  const createdSurvey = createdId ? surveyById.get(String(createdId)) : null;
+  const showCreatedHint = createdSurvey && String(createdId) !== String(attachedId);
+  const dismissCreated = () => setSearchParams({}, { replace: true });
+
   const efforts = effortsQ.data?.efforts || [];
   const intakeResponseCount = effortsQ.data?.intakeResponseCount || 0;
   const overrideEfforts = efforts.filter((e) => e.surveyTemplateId);
@@ -144,12 +154,30 @@ export default function CampaignSurveyPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight text-fg">Survey</h1>
-      <p className="mb-5 text-sm text-fg-muted">
-        The survey canvassers fill out for <span className="font-medium text-fg">{campaign.name}</span>. Surveys are
-        reusable templates — manage the questions in the Surveys library. Walk lists can override the default to run
-        a different survey on their doors.
-      </p>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-fg">Survey</h1>
+          <p className="mt-1 max-w-prose text-sm text-fg-muted">
+            The survey canvassers fill out for <span className="font-medium text-fg">{campaign.name}</span>. Walk
+            lists can run a different survey on their doors.
+          </p>
+        </div>
+        {!isLitDrop && canManage && (
+          <Button onClick={() => navigate(`/campaigns/${campaignId}/survey/new`)}>+ New survey</Button>
+        )}
+      </div>
+
+      {showCreatedHint && (
+        <div className="mb-4 flex items-start justify-between gap-3 rounded border border-info/30 bg-info-tint px-4 py-3 text-sm text-info-fg">
+          <span>
+            <strong className="font-medium">{createdSurvey.name}</strong> was created and added to your library.
+            Assign it to a walk list below to run it on those doors.
+          </span>
+          <button onClick={dismissCreated} className="shrink-0 text-info-fg hover:opacity-70" aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
 
       {isLitDrop ? (
         // State C — surveys don't apply to lit-drop campaigns (checked first, so a stale
@@ -190,8 +218,11 @@ export default function CampaignSurveyPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setShowPreview((v) => !v)}>
+                    {showPreview ? 'Hide preview' : 'Preview'}
+                  </Button>
                   <Button size="sm" variant="secondary" onClick={() => setChanging(true)}>Change survey</Button>
-                  {isOrgAdmin && (
+                  {canManage && (
                     <Link
                       to={`/campaigns/${campaignId}/survey/edit`}
                       className="rounded-md border border-border-strong bg-card px-3 py-1.5 text-sm font-medium text-fg-muted hover:bg-sunken"
@@ -202,21 +233,21 @@ export default function CampaignSurveyPage() {
                 </div>
               </div>
 
-              {attachedSurvey.responseCount > 0 && (
-                <div className="border-b border-border bg-sunken px-5 py-3 text-xs text-fg-muted">
-                  This survey has {attachedSurvey.responseCount.toLocaleString()} response
-                  {attachedSurvey.responseCount === 1 ? '' : 's'} across all campaigns. You can still reword
-                  questions and answers, add or retire questions and options, reorder, and edit the read-aloud
-                  logic — your past answers keep reporting. The only change that needs a fresh copy (
-                  <strong className="font-medium text-fg">Duplicate</strong> on the Surveys page) is changing a
-                  question&apos;s <strong className="font-medium text-fg">answer type</strong>. You can also swap this
-                  campaign to a different survey anytime — new answers report under the new one.
-                </div>
+              {showPreview && (
+                <>
+                  {attachedSurvey.responseCount > 0 && (
+                    <div className="border-b border-border bg-sunken px-5 py-2 text-xs text-fg-muted">
+                      {attachedSurvey.responseCount.toLocaleString()} response
+                      {attachedSurvey.responseCount === 1 ? '' : 's'} across all campaigns — editing keeps past
+                      answers; only changing a question&apos;s <strong className="font-medium text-fg">answer
+                      type</strong> needs Duplicate.
+                    </div>
+                  )}
+                  <div className="px-5 py-4">
+                    <SurveyPreview survey={attachedSurvey} />
+                  </div>
+                </>
               )}
-
-              <div className="px-5 py-4">
-                <SurveyPreview survey={attachedSurvey} />
-              </div>
             </Card>
           ) : (
             // State B — survey campaign with no default attached yet.
@@ -236,7 +267,7 @@ export default function CampaignSurveyPage() {
               )}
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button onClick={() => setChanging(true)}>Pick a survey</Button>
-                {isOrgAdmin && (
+                {canManage && (
                   <Button variant="secondary" onClick={() => navigate(`/campaigns/${campaignId}/survey/new`)}>
                     Create new survey
                   </Button>
@@ -308,15 +339,6 @@ export default function CampaignSurveyPage() {
                         )}
                         {e.surveyTemplateId && override?.archivedAt && (
                           <Badge variant="neutral" dot>Archived</Badge>
-                        )}
-                        {isOrgAdmin && (
-                          <Link
-                            to={`/surveys/new?assignEffort=${e._id}&campaignId=${campaignId}`}
-                            className="text-xs font-medium text-brand-accent hover:underline"
-                            title="Create a new survey and assign it to this walk list"
-                          >
-                            New…
-                          </Link>
                         )}
                       </div>
                     </td>
