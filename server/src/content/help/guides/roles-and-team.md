@@ -17,7 +17,7 @@ Everyone on your organization has one of three roles, and there's a platform-wid
 - **Team lead** — a campaign-scoped admin. Runs only the specific campaigns you grant them, and nothing outside them.
 - **Canvasser** — walks doors in the mobile app for the campaigns they're on. No console access.
 
-A **super admin** is Canvass support, sitting above every organization for oversight and help.
+A **super admin** sits above every organization for oversight and help — that's the platform's support team, not someone in your org.
 
 ## What a team lead can do
 

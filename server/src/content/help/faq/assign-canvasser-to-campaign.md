@@ -12,8 +12,8 @@ tags: canvasser, assign, team, book
 Two steps, and the second is the one that actually puts doors on their phone:
 
 1. **Add them to the campaign.** On the campaign's **Team** tab, add the canvasser to the roster. (No account yet? See [How do I create a canvasser account?](add-a-canvasser-account).)
-2. **Assign them a book.** On **Turf Cutting**, assign one or more books to them. Assigning a book is what puts them on the walk list's crew and shows them their doors in the field.
+2. **Assign them a book.** On **Turf Cutting**, assign one or more books to them. This is the step that shows them their doors in the field.
 
-Just being on the roster isn't enough on its own — a canvasser sees doors only once they're assigned to a book on an active pass.
+Just being on the team isn't enough on its own — a canvasser sees doors only once they're assigned a book.
 
 More in [Assigning canvassers](assigning-canvassers).

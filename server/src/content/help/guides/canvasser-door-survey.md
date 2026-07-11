@@ -19,4 +19,4 @@ Work through the questions and tap your answers. Some questions only appear **ba
 
 When you're done, submit. That records the response for that voter and marks the door as reached. If there's more than one voter at the house, you can survey each of them.
 
-> Tip: Each voter can be surveyed once per round. If you come back in a later round, you'll survey them fresh — that's expected.
+> Tip: Each voter can be surveyed once per pass. If you come back in a later pass, you'll survey them fresh — that's expected.

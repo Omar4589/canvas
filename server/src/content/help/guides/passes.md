@@ -1,12 +1,12 @@
 ---
 slug: passes
-title: Passes (rounds)
+title: Passes
 audience: lead
 kind: guide
 order: 15
 sourceDoc: PASSES.md
 summary: A pass is one billable sweep through a walk list's doors — how they're numbered, created, and closed.
-tags: passes, rounds, walk lists, billing, activate, archive
+tags: passes, walk lists, billing, activate, archive, follow-up
 ---
 
 ## What a pass is

@@ -135,7 +135,10 @@ export default function HelpIndex() {
         />
       </View>
 
-      {tabs.length > 1 ? (
+      {/* Only offer the role picker when there's more than one specific-audience track
+          (All + 2+). A canvasser has only canvasser + general content, so they get no
+          redundant toggle; leads/admins/supers can still preview the tracks below them. */}
+      {tabs.length > 2 ? (
         <TabSwitcher tabs={tabs} activeKey={activeAudience} onChange={setAudience} />
       ) : null}
 

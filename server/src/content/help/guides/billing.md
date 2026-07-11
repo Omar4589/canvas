@@ -13,18 +13,23 @@ Billing is simple and predictable, and it never gets in the way of work you've a
 
 ## What you pay
 
-Pricing is **$300 per campaign, per month**. A campaign bills for the months it's active — archiving a campaign stops its billing at the end of that month.
+Pricing is **$300 per campaign, per month**. A campaign starts billing in the month it records its **first knock** — setup months, where you've created the campaign, imported voters, and cut turf but nobody's knocked yet, are free. Billing then runs through the month you [archive the campaign](archive-vs-delete-campaign), so archiving is what stops it.
 
 ## Your free trial
 
-New organizations get a **one-week free trial** so you can set everything up and see it in action before anything is owed.
+Every new organization gets a **7-day free trial** with full access, so you can set everything up and see it in action before anything is owed. You'll see a countdown in the last few days, and an account manager can extend the trial if you need more time.
 
 ## How payment works
 
-Payment is handled **outside the app** — one of our account managers takes care of invoicing you directly, so there's no card to enter or checkout to complete in the console. Your job is just running campaigns; the billing side is looked after for you.
+Payment is handled **outside the app** — one of our account managers invoices you directly, so there's no card to enter or checkout to complete. Your job is just running campaigns; the billing side is looked after for you.
 
-## If an account is past due
+## If a payment is late
 
-If an account lapses, it moves to **read-only**: you keep all your data and can still view everything, but changes are paused until it's resolved. Canvassers already in the field get a short grace window so a day's work is never interrupted. As soon as billing is squared away, everything switches back on — nothing is lost.
+Nothing you've done is ever lost, and access winds down gently:
+
+- **Past due.** You keep full access. You'll just see a reminder banner while an invoice is outstanding — a nudge, not a lockout.
+- **Read-only.** If an account stays unresolved, it can switch to read-only: you and your team can still view everything you've built, but recording knocks, importing voters, and cutting turf pause until it's sorted. Canvassers already in the field get a short grace window, so a day's work is never interrupted.
+
+As soon as billing is squared away, everything switches back on — nothing is deleted.
 
 > Tip: Demo and internal organizations are always free — trials and suspension don't apply to them.

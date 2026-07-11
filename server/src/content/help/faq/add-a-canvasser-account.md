@@ -9,7 +9,7 @@ summary: Create the person on Users (or inline from a campaign roster); they set
 tags: canvasser, account, user, password
 ---
 
-On the **Users** page, add the person with their name and email. They're created with a **temporary password** — when they first sign in, they're prompted to set their own.
+On the **Users** page, add the person with their name and email, and set an initial password. That password is **temporary** — the first time they sign in, they're prompted to choose their own.
 
 You can also create a canvasser **inline from a campaign's roster**, which adds the account and drops them onto that campaign in one step — handy when you're staffing up.
 

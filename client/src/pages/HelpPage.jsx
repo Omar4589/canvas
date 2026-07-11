@@ -220,12 +220,14 @@ export default function HelpPage() {
     .sort(byOrder);
   const doneCount = getStartedPath.filter((a) => done.has(a.slug)).length;
 
+  // The role picker lets higher roles preview the tracks below them. Show it only when the
+  // caller actually has more than one specific-audience track — so a team lead sees only
+  // canvasser+lead options (never admin), and a canvasser (canvasser + general content only)
+  // gets no redundant picker at all.
   const audiencesInData = new Set(allItems.map((a) => a.audience));
-  const segOptions = [
-    { value: 'all', label: 'All' },
-    ...AUDIENCE_SEGMENTS.filter((s) => audiencesInData.has(s.value)),
-  ];
-  const showSegments = segOptions.length > 1;
+  const specificSegments = AUDIENCE_SEGMENTS.filter((s) => audiencesInData.has(s.value));
+  const segOptions = [{ value: 'all', label: 'All' }, ...specificSegments];
+  const showSegments = specificSegments.length > 1;
 
   const noMatches = !loading && !error && visible.length === 0;
 

@@ -13,7 +13,7 @@ A **team lead** is a campaign-scoped admin. On the campaigns they've been grante
 
 What stays with an **org admin**:
 
-- Creating, editing, and deleting campaigns
+- Creating, archiving, or deleting campaigns
 - Managing user accounts and roles
 - Billing and account settings
 - Building or changing surveys and tags

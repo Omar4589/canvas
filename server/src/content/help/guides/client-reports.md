@@ -36,4 +36,4 @@ On the **Client Reports** tab, use the **Share link** panel:
 
 You can keep more than one link per campaign — say a password-protected one for the candidate and an open one for internal staff — each revocable on its own. Share a link once and every new report you publish appears there automatically.
 
-For where these numbers come from, see [metrics](metrics) and [surveys](surveys). For a quick tour of the page, see [page-client-reports](page-client-reports).
+For where these numbers come from, see [metrics](metrics) and [surveys](surveys). For a quick tour of the page, see [the Client Reports page](page-client-reports).

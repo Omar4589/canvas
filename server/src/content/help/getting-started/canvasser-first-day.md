@@ -14,16 +14,16 @@ Welcome! Here's the whole flow on your first day in the field.
 ## Getting to your doors
 
 1. **Sign in** with the email and password your admin gave you. If it's a temporary password, you'll be asked to set your own.
-2. **Pick your campaign** on the "Pick a campaign" screen. If you're on more than one walk list, you'll choose which one first.
+2. **Pick your campaign** on the "Pick a campaign" screen. If a campaign is split into several walk lists, it expands so you can pick the one you're working — then you land on your books.
 3. **Open a book** — your assigned books are waiting. Each book is an ordered list of houses for you to walk.
 4. **Knock a door** — tap a house to see who lives there and record what happened.
 
 ## Recording a door
 
-At each house you can mark the outcome: **Not home**, **Wrong address**, **Refused**, or complete the **survey** if it's a survey campaign. Your pin recolors instantly so you always know what's done.
+At each house you record what happened. On a **survey** campaign that's **Not home**, **Wrong address**, **Refused**, or the survey itself; on a **lit-drop** campaign you tap **Lit dropped**. Either way, if you can't reach the door at all — a locked gate or building — mark **Restricted access**. Your pin recolors instantly so you always know what's done. For what each outcome means, see [Marking a door](canvasser-dispositions).
 
-> Tip: The map and your book stay in sync. If a pin looks like it's in the wrong spot, you can fix its location right from the field — including "use my current GPS."
+> Tip: The map and your book stay in sync. If a pin looks like it's in the wrong spot, you can fix its location right from the field — including "Use my current location."
 
 ## Working offline
 
-No signal? Keep knocking. The app records everything and sends it up when you're back online, so you never lose work in a dead zone.
+No signal? Keep knocking. The app records everything and sends it up when you're back online, so you never lose work in a dead zone. More in [Canvassing offline](canvasser-offline).

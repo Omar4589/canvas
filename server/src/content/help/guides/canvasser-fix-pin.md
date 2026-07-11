@@ -11,7 +11,7 @@ tags: canvasser, pin, map, location, gps
 
 Sometimes a house's pin sits in the wrong place — a few doors off, or on the wrong side of the street. You can fix it right from the field.
 
-Open the house, choose **Fix pin location**, and drag the pin to where the house actually is. You can also tap **use my current GPS** to drop it exactly where you're standing.
+Open the house, choose **Fix pin location**, and drag the pin to where the house actually is. You can also tap **Use my current location** to drop it exactly where you're standing.
 
 Fixing a pin changes **only the dot's position** — it doesn't change the door's status, your book, or any count, and it needs no action from an admin. Your correction is saved with an audit trail, and other people see the corrected spot on their next sync.
 

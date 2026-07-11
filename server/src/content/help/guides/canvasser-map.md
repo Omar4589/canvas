@@ -15,4 +15,4 @@ The map stays in sync with your book automatically. Small changes an admin makes
 
 > Tip: If your supervisor tells you they moved some houses to you, pull-to-refresh so your map picks them up.
 
-An approximate-looking pin (a faint ring) just means the address was placed by geocoding rather than an exact coordinate — you can [fix its location](canvasser-fix-pin) if it's off.
+If a house's detail reads **Approximate location**, its spot was placed by looking up the address rather than from an exact coordinate, so it can sit a little off. When it's in the wrong place, you can [fix its location](canvasser-fix-pin).

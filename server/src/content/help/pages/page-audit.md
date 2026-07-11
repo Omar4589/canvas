@@ -9,6 +9,6 @@ summary: Review GPS-flagged entries to check canvassing quality.
 tags: audit, gps, quality, page
 ---
 
-The **Audit** page surfaces entries the system flagged for a quality check — knocks recorded far from the door, suspiciously fast sequences, many from one spot, or weak GPS. You review each flag and either dismiss it or take note. It's how you keep field data honest without watching every knock.
+The **Audit** page surfaces doors the app flagged for a quality check — a mark recorded far from the house, suspiciously fast sequences, many logged from one spot, or weak GPS. You mark each flag **Reviewed**, **Dismissed**, or **Confirmed**, and the app records who decided and when — so you keep field data honest without watching every knock.
 
 For the full walkthrough, see [The GPS audit](audit).
