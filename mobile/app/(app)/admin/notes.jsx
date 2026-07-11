@@ -194,7 +194,8 @@ export default function AdminNotes() {
         timeZone: campaign.timeZone,
       });
     }
-    router.push(`/(app)/admin/map?household=${id}`);
+    // focusAt nonce so re-tapping the same door still re-focuses the mounted map.
+    router.push(`/(app)/admin/map?household=${id}&focusAt=${Date.now()}`);
   }
 
   const sourcesWithCounts = SOURCES.map((s) => ({ ...s, count: counts[s.key] ?? 0 }));
@@ -281,7 +282,9 @@ export default function AdminNotes() {
         ) : notes.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No notes</Text>
-            <Text style={styles.emptyText}>Nothing matches these filters in {labelForRange(range)}.</Text>
+            <Text style={styles.emptyText}>
+              Nothing matches these filters{range.preset !== 'all' ? ` in ${labelForRange(range)}` : ''}.
+            </Text>
           </View>
         ) : (
           <View style={styles.listWrap}>

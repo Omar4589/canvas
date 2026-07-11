@@ -259,6 +259,16 @@ export function IconBilling({ size = 22 }) {
   );
 }
 
+export function IconHelp({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.7" />
+      <circle cx="12" cy="17" r="0.4" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 // Route path -> icon component. Joined to navItems.js NAV/SUPER_NAV at render time.
 export const NAV_ICONS = {
   '/admin': IconDashboard,

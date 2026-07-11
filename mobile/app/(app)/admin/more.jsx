@@ -139,6 +139,11 @@ export default function AdminMore() {
           <Row icon="✂️" label="Turf cutting" sub="Drawing is web-only" onPress={() => setWebNote(WEB_NOTES.turf)} />
         </View>
 
+        <Text style={styles.sectionLabel}>Support</Text>
+        <View style={styles.group}>
+          <Row icon="❓" label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
+        </View>
+
         <Text style={styles.sectionLabel}>Appearance</Text>
         <View style={styles.appearanceGroup}>
           <ThemeToggle />

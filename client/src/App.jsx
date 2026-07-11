@@ -21,6 +21,8 @@ const PublicReportLayout = lazy(() => import('./components/PublicReportLayout.js
 const PublicReportListPage = lazy(() => import('./pages/PublicReportListPage.jsx'));
 const PublicReportDetailPage = lazy(() => import('./pages/PublicReportDetailPage.jsx'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
+const HelpPage = lazy(() => import('./pages/HelpPage.jsx'));
+const HelpArticlePage = lazy(() => import('./pages/HelpArticlePage.jsx'));
 const DuplicateSurveysPage = lazy(() => import('./pages/DuplicateSurveysPage.jsx'));
 const BillingPage = lazy(() => import('./pages/BillingPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
@@ -190,6 +192,10 @@ export default function App() {
           }
         >
           <Route path="/profile" element={<ProfilePage />} />
+          {/* Help Center — open to any console user, org-agnostic (the /help API sits
+              outside the billing gate and self-scopes to the caller's role). */}
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="/help/:slug" element={<HelpArticlePage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

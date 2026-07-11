@@ -1,0 +1,12 @@
+---
+slug: page-notes
+title: The Notes page
+audience: lead
+kind: page
+order: 110
+sourceDoc: CAMPAIGNS.md
+summary: A read-only hub of every note left across the campaign.
+tags: notes, page
+---
+
+The **Notes** page gathers every note left across the campaign into one read-only place, from three sources: notes canvassers leave at a door, notes attached to a survey response, and notes admins add. It's a fast way to skim what the field is telling you without hunting through individual houses.

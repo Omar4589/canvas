@@ -1,0 +1,44 @@
+---
+slug: lead-getting-started
+title: Get started as a team lead
+audience: lead
+kind: getting-started
+order: 2
+sourceDoc: ROLES.md
+summary: What a team lead can do, what stays with admins, and how to run your granted campaigns day to day.
+tags: team lead, getting started, campaign, permissions, roles
+---
+
+## What a team lead is
+
+A team lead is a **campaign-scoped admin**. Inside the campaigns an admin has handed you, you have full run of the place. Outside them, you see nothing at all.
+
+Admins usually create and set up a campaign, then hand it off to you to run end-to-end. You report to them, and they keep the org-wide controls. If you're weighing what falls to you versus an admin, see [team lead vs admin](team-lead-vs-admin).
+
+## What you can do
+
+On any campaign you've been granted, you're as powerful as an admin:
+
+- Import the voter file and add later files ([voter imports](voter-imports))
+- Attach a survey and build your [walk lists](walk-lists)
+- Cut [turf and assign books](turf-and-books), and [assign canvassers](assigning-canvassers)
+- Create and activate [passes](passes)
+- Build your crew, including [creating new canvasser accounts](add-a-canvasser-account)
+- See all the reporting: map, timeline, insights, early voting, and client reports
+
+## What stays with admins
+
+- Creating, archiving, or deleting a campaign
+- Billing and org settings
+- The org Users list and the org voter directory
+- The survey template and tag libraries (you can *use* them, not edit them)
+- Granting the team-lead role
+
+## Your day to day
+
+1. Sign in to the console. You'll land on **Campaigns**, showing only the campaigns you manage.
+2. Pick your campaign to open its tabs.
+3. Keep books assigned so canvassers always have doors ([assigning canvassers](assigning-canvassers)).
+4. Watch the dashboard and [metrics](metrics) to see coverage and knocks.
+
+> Tip: If you also walk doors yourself, an admin adds you to a campaign's walker roster like any canvasser, and you use the mobile canvassing flow for your own books.

@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../lib/useTheme.js';
 import Logo, { LogoMark } from './Logo.jsx';
 import { ORG_NAV, CAMPAIGN_NAV, SUPER_NAV } from './navItems.js';
-import { navIcon, IconSignOut, IconChevron } from './navIcons.jsx';
+import { navIcon, IconSignOut, IconChevron, IconHelp } from './navIcons.jsx';
 import { IconSun, IconMoon } from './ui/icons.jsx';
 import IconButton from './ui/IconButton.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
@@ -208,6 +208,14 @@ export default function Layout() {
             collapsed ? 'flex flex-col items-center gap-1' : '',
           ].join(' ')}
         >
+          <NavLink
+            to="/help"
+            title={collapsed ? 'Help' : undefined}
+            className={navClass(collapsed)}
+          >
+            <IconHelp size={20} />
+            {!collapsed && <span>Help</span>}
+          </NavLink>
           <ThemeToggle collapsed={collapsed} dark={dark} toggle={toggleTheme} />
           {collapsed ? (
             <IconButton label="Sign out" onClick={logout} className="text-brand-accent hover:bg-brand-tint hover:text-brand-hover">

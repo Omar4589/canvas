@@ -39,6 +39,7 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | [ADMIN_APP.md](ADMIN_APP.md) | The mobile admin app: the bottom-tab nav (Overview · Insights · Map · Books · More), the "More" hub, and the Books screen for assigning turf/books to canvassers (by book / by canvasser, bulk). Super admins share these screens in-org. |
 | [MAPS.md](MAPS.md) | Every map (mobile field app + web admin): reading the pins, where coordinates come from, how a knock becomes a "ping," rendering, and the live-refresh intervals. |
 | [AUDIT.md](AUDIT.md) | The GPS **canvassing-quality audit**: flags for doors marked far from the house, in rapid succession, all from one spot, or with weak GPS — live-detected from the ping trail, reviewed on a dedicated Audit page or as a map overlay, with a persisted decision (open/reviewed/dismissed/confirmed) per entry. |
+| [NOTES.md](NOTES.md) | The **Notes hub**: every door, survey, and admin/profile note for a campaign in one read-only, searchable feed (web + mobile), with type/author/walk-list/date filters and tap-through to the voter profile or the map focused on the door. |
 | [USERS.md](USERS.md) | Accounts vs memberships, the roles, adding/linking people, coordinators (crews), passwords/lockouts, and what's shared vs isolated across orgs. |
 | [ROLES.md](ROLES.md) | The org roles (admin / team lead / canvasser) and the **team lead** (a campaign-scoped admin): the grant store, the per-surface authorization contract, and web/mobile scoping. |
 | [PERSONS.md](PERSONS.md) | The cross-org **Person** layer: how the same real person is deduped across orgs, plus ownership, merge/split, locks, and edit proposals. |
@@ -64,6 +65,12 @@ When we investigate how something works, the routine is:
 2. If yes, **update it**; if no, **create one** in `docs/` using the Part 1 / Part 2 house style
    above.
 3. Cross-link it from related docs and add a row to the table above.
+4. **Cascade to the Help Center** — whenever you touch a doc's **Part 1 (For everyone)**, update the
+   matching content in [`server/src/content/help/`](../server/src/content/help/): the curated,
+   plain-English articles + FAQ that end users read in the web console and the mobile app. Part 1 is
+   the *source* for that help copy; **Part 2 (Technical) is never exposed to users**. If the change
+   surfaces a new recurring question, drop it in
+   [`faq/_INBOX.md`](../server/src/content/help/faq/_INBOX.md) to triage into a real FAQ entry.
 
 Over time this index becomes the map of the whole app. Docs can drift from the code after big
 changes — when in doubt, trust the code and fix the doc.

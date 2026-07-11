@@ -190,17 +190,14 @@ export default function CanvasserDrawer() {
                 <Text style={styles.accountChevron}>›</Text>
               </Pressable>
 
-              {activeCampaign && (
-                <>
-                  <Text style={styles.sectionLabel}>Navigate</Text>
-                  <View style={styles.group}>
-                    {/* Voter lookup intentionally omitted for canvassers — they work
-                        the doors assigned to them and see each household's voters at
-                        the door. Voter search remains an admin-only tool. */}
-                    <Row icon="📊" label="My stats" onPress={() => go('/(app)/stats')} last />
-                  </View>
-                </>
-              )}
+              <Text style={styles.sectionLabel}>Navigate</Text>
+              <View style={styles.group}>
+                {/* Voter lookup intentionally omitted for canvassers — they work
+                    the doors assigned to them and see each household's voters at
+                    the door. Voter search remains an admin-only tool. */}
+                {activeCampaign && <Row icon="📊" label="My stats" onPress={() => go('/(app)/stats')} />}
+                <Row icon="❓" label="Help center" sub="Guides, FAQ & tips" onPress={() => go('/(app)/help')} last />
+              </View>
 
               <Text style={styles.sectionLabel}>Appearance</Text>
               <View style={styles.appearanceGroup}>

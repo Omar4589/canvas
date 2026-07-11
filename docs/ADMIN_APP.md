@@ -50,8 +50,9 @@ them) — if someone's missing, there's a link to Campaign assignments. Canvasse
 next sync.
 
 ### The More hub
-- **Manage:** Users; Switch to canvass mode. (More management screens — Campaigns, Efforts, Walk
-  lists, Voters, Surveys — are coming.)
+- **Manage:** Users; **GPS audit** ([AUDIT.md](AUDIT.md)); **Notes** — the campaign Notes hub, door/
+  survey/admin notes in one feed ([NOTES.md](NOTES.md)); Voter search; Switch to canvass mode. (More
+  management screens — Campaigns, Efforts, Walk lists, Surveys — are coming.)
 - **On the web:** CSV import, Early voting, Turf cutting — these open a short note (managed on the web
   dashboard; file uploads / turf drawing aren't mobile-friendly).
 - **Appearance**, and **Account** (Platform view for super admins, Switch organization, Sign out).

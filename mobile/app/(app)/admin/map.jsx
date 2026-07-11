@@ -8,7 +8,7 @@ import {
   Switch,
   ScrollView,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
@@ -252,6 +252,11 @@ export default function AdminMap() {
   // below). Read live (not once-seeded) so re-navigating to another door on this
   // always-mounted Tabs screen re-focuses.
   const householdFocus = one(params.household);
+  // A per-tap nonce so re-tapping "view on map" for the SAME door still re-focuses
+  // (the id alone wouldn't change, and this screen stays mounted); background polls
+  // leave it unchanged, so they never steal focus.
+  const focusNonce = one(params.focusAt);
+  const focusToken = householdFocus ? `${householdFocus}:${focusNonce}` : '';
 
   // Audit filters — mirror the web admin map. Default to TODAY (like the web):
   // the map opens on today's activity; "All time" is one tap away in the preset
@@ -263,10 +268,11 @@ export default function AdminMap() {
     const r = rangeFor('today', null, deviceTimezone());
     return { preset: 'today', from: r.from, to: r.to };
   });
-  // True once the user picks a date themselves — the tz reseed must never
-  // stomp a manual choice. A household deep-link also counts as "touched" so the
-  // reseed can't pull the range back to today before we focus the door.
-  const dateTouchedRef = useRef(!!householdFocus);
+  // True once the user picks a date themselves — the tz reseed must never stomp a
+  // manual choice. NOT set for a deep-link: the reseed instead bails while
+  // ?household= is present (below), so the widen self-heals back to today once the
+  // param clears (e.g. the user taps the Map tab plainly).
+  const dateTouchedRef = useRef(false);
   const [statusFilter, setStatusFilter] = useState([]); // [] = all statuses
   const [canvasserId, setCanvasserId] = useState('');
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', label: '' });
@@ -282,21 +288,46 @@ export default function AdminMap() {
     staleTime: 60 * 1000,
   });
 
-  useEffect(() => {
-    loadActiveCampaign().then((c) => setCampaign(c || null));
-  }, []);
+  // Re-sync the active campaign every time the map regains focus — a per-campaign
+  // drill-in or a Notes "view on map" deep-link may have changed it while this
+  // always-mounted Tabs screen stayed put. A mount-only read would strand it on a
+  // stale campaign. The prev-id guard keeps object identity (no needless refetch)
+  // when unchanged. Mirrors audit.jsx / notes.jsx.
+  useFocusEffect(
+    useCallback(() => {
+      loadActiveCampaign().then((c) =>
+        setCampaign((prev) => (String(c?.id) !== String(prev?.id) ? c || null : prev))
+      );
+    }, [])
+  );
 
   const cId = campaign?.id;
   const tz = campaign?.timeZone || deviceTimezone();
 
+  // When the campaign changes underneath this mounted screen, drop any door
+  // selection, the deep-link focus guard, and the "date touched" flag so a new
+  // campaign's ?household= link focuses fresh, a stale door sheet from the old
+  // campaign doesn't linger, and the range re-anchors to the new campaign's today
+  // (clearing any all-time widen a prior deep-link left behind).
+  useEffect(() => {
+    focusedHouseholdRef.current = null;
+    dateTouchedRef.current = false;
+    setSelected(null);
+    setSelectedPing(null);
+    setSelectedFlagId(null);
+  }, [cId]);
+
   // Re-anchor the untouched "Today" default to the CAMPAIGN's day once its tz
   // resolves (and when switching campaigns) — a viewer in another timezone must
-  // see the campaign's today, not their own. Mirrors the web MapPage reseed.
+  // see the campaign's today, not their own. Mirrors the web MapPage reseed. Bails
+  // while a ?household= deep-link is active so it can't pull the range off all-time
+  // before the door is focused. `cId` is a dep so a same-tz campaign switch also
+  // reseeds.
   useEffect(() => {
-    if (dateTouchedRef.current) return;
+    if (dateTouchedRef.current || householdFocus) return;
     const r = rangeFor('today', null, tz);
     setRange((prev) => (prev.preset === 'today' && prev.from === r.from ? prev : { preset: 'today', from: r.from, to: r.to }));
-  }, [tz]);
+  }, [tz, householdFocus, cId]);
 
   const mapQ = useQuery({
     queryKey: [
@@ -368,21 +399,37 @@ export default function AdminMap() {
     return m;
   }, [households]);
 
-  // Focus a door arriving from a Notes "view on map" link (?household=). The range
-  // is already all-time (seeded above), so once the widened result set loads the
-  // door is present: fly to it and open its sheet. Keyed on the LIVE param + the
-  // loaded set, and guarded by a ref so it fires once per door (not on every poll)
-  // yet re-focuses when the link points at a different door on this mounted screen.
+  // Focus a door arriving from a Notes "view on map" link (?household=). The door's
+  // note may fall outside the current view — an old date, or a status/canvasser/
+  // answer filter or effort scope left on this mounted map — so first clear EVERY
+  // server-side filter (mirroring the web map's fresh-mount defaults) so the door is
+  // guaranteed to load, then fly to it + open its sheet on the next run. Keyed on a
+  // per-tap token so it fires once per tap (not on every 20s poll) yet re-focuses on
+  // a repeat or different-door link; the campaign-change effect clears the guard.
   useEffect(() => {
     if (!householdFocus) return;
-    if (focusedHouseholdRef.current === householdFocus) return;
-    // The initializer opens all-time when the param is present on mount, but a
-    // second push onto the already-mounted screen may still be on today — widen it.
-    if (range.preset !== 'all') {
-      dateTouchedRef.current = true;
+    if (focusedHouseholdRef.current === focusToken) return;
+    const filtered =
+      range.preset !== 'all' ||
+      statusFilter.length ||
+      canvasserId ||
+      answerFilter.questionKey ||
+      effortId ||
+      passId ||
+      importId;
+    if (filtered) {
       setRange({ preset: 'all', from: null, to: null });
-      return; // wait for the widened result set, then focus on the next run
+      setStatusFilter([]);
+      setCanvasserId('');
+      setAnswerFilter({ questionKey: '', optionId: '', label: '' });
+      setScope({ effortId: '', passId: '', importId: '' });
+      return; // wait for the unfiltered set, then focus on the next run
     }
+    // Door not yet in the loaded set? Do nothing — this re-runs when householdsById
+    // next changes (the widened/new-campaign data arriving), and focuses then. We
+    // deliberately DON'T "give up" on a miss: during a cross-campaign switch the old
+    // campaign's set is settled but lacks this (other-campaign) door, and giving up
+    // there would clear the param before the right campaign loads.
     const h = householdsById.get(String(householdFocus));
     if (h?.location?.lat != null && h?.location?.lng != null) {
       setSelectedPing(null);
@@ -393,9 +440,27 @@ export default function AdminMap() {
         zoomLevel: 17,
         animationDuration: 600,
       });
-      focusedHouseholdRef.current = householdFocus;
+      focusedHouseholdRef.current = focusToken;
+      // Hold the all-time widen (so the focused pin stays put), then strip the
+      // consumed param — a tab press re-applies existing route params, so leaving
+      // it would pin the map to all-time forever. Marking the range touched here
+      // stops the reseed from snapping to today (which would drop the old door's
+      // pin) the instant the param clears; a campaign switch resets both.
+      dateTouchedRef.current = true;
+      router.setParams({ household: '', focusAt: '' });
     }
-  }, [householdFocus, householdsById, range.preset]);
+  }, [
+    focusToken,
+    householdFocus,
+    householdsById,
+    range.preset,
+    statusFilter,
+    canvasserId,
+    answerFilter.questionKey,
+    effortId,
+    passId,
+    importId,
+  ]);
 
   const lineFeatures = useMemo(
     () => (showPings ? linesToFeatures(activities, householdsById) : { type: 'FeatureCollection', features: [] }),

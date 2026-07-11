@@ -51,6 +51,7 @@ Texas campaign, Eastern for a Florida one), identical for every admin wherever t
 | **Overview** (org-wide) | **Today** | Admins want "what happened today" at a glance. |
 | **Campaign dashboard** | **Today** (active) / **All time** (archived) | Active campaigns lead with recent activity; an **archived** campaign has none today, so it opens on All time to show its full history (until you pick a window). |
 | **Admin map** | **Today** | The map is an **audit tool** — it opens on **today's** activity. Because a window *hides* doors you didn't touch in it (see below), the map opens showing just today's touched doors; switch to **All time** to see the whole turf. |
+| **Notes hub** ([NOTES.md](NOTES.md)) | **Today** | Opens on today's notes; **All time** turns it into a full archive. (When you arrive via a note's "view on map" link, that map opens on **All time** so an old door still shows.) |
 
 You can always change the window; the page just picks a sensible starting point.
 
@@ -200,6 +201,7 @@ ignores it and uses `req.anchorTz`. The custom pickers emit the picked **calenda
 | [pages/OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) | Default **Today** in the **org** tz; range → `/campaign-rollup?scope=active`. |
 | [pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Default **Today** in the **campaign** tz; range → `/campaign-rollup`, `/canvassers`, `/survey-results` (gated on the tz — §C). Coverage stays all-time from `/overview`. An untouched **archived** campaign defaults to All time. |
 | [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Default **Today** (audit-first; seeded from the org tz, reseeded to the campaign tz once it resolves — a `rangeTouchedRef` guards a manual pick, and a `?from`/`?to` deep-link seeds a custom range); campaign tz from `useCampaignSelection().selected`; range → `/admin/households/map` (narrows pins, see §D). Also feeds `/admin/reports/flags` for the GPS-audit overlay ([AUDIT.md](AUDIT.md)). |
+| [pages/NotesPage.jsx](../client/src/pages/NotesPage.jsx) | Default **Today** in the campaign tz (`rangeTouchedRef` + tz-reseed, same as Audit); full presets incl. **All time** (it's a notes archive); range → `/admin/reports/notes` ([NOTES.md](NOTES.md)). The mobile port ([admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx)) mirrors this. |
 
 ### Mobile ([mobile](../mobile))
 | File | Role |
