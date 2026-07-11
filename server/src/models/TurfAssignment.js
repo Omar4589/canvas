@@ -34,5 +34,8 @@ const turfAssignmentSchema = new mongoose.Schema(
 turfAssignmentSchema.index({ turfId: 1, userId: 1 }, { unique: true });
 turfAssignmentSchema.index({ userId: 1, passId: 1 }); // hot bootstrap path
 turfAssignmentSchema.index({ campaignId: 1, passId: 1 });
+// Efforts crew rollup ($match passId:{$in} → $group userId) on every Walk Lists screen load.
+// Nothing else leads with passId, so this was a full (all-orgs) scan; {passId,userId} covers it.
+turfAssignmentSchema.index({ passId: 1, userId: 1 });
 
 export const TurfAssignment = mongoose.model('TurfAssignment', turfAssignmentSchema);

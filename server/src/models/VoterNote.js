@@ -16,5 +16,8 @@ const voterNoteSchema = new mongoose.Schema(
 );
 
 voterNoteSchema.index({ voterId: 1, createdAt: -1 });
+// Notes hub aggregate: org-scoped, date-ranged, createdAt-sorted (the {voterId,createdAt}
+// index above can't serve an organizationId-led match).
+voterNoteSchema.index({ organizationId: 1, createdAt: -1 });
 
 export const VoterNote = mongoose.model('VoterNote', voterNoteSchema);

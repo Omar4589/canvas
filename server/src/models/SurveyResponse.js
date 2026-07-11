@@ -74,5 +74,8 @@ const surveyResponseSchema = new mongoose.Schema(
 // pre-existing DB must be deduped before this can build — see migrations/migrateSurveyDedup.js.
 surveyResponseSchema.index({ voterId: 1, passId: 1 }, { unique: true });
 surveyResponseSchema.index({ householdId: 1, passId: 1 }); // per-pass survey existence
+// Reports/dashboards: campaign-scoped, date-ranged, submittedAt-sorted (voters-by-answer,
+// campaign-rollup, canvassers, notes, survey-results). Twin of CanvassActivity {campaignId,timestamp}.
+surveyResponseSchema.index({ campaignId: 1, submittedAt: -1 });
 
 export const SurveyResponse = mongoose.model('SurveyResponse', surveyResponseSchema);
