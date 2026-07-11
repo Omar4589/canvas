@@ -22,6 +22,11 @@ function monthLabel(ym) {
   return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
+// A short 'Jul 8' date for the per-campaign breakdown.
+function fmtShort(d) {
+  return d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+}
+
 // The org-admin view of the subscription: status, the plan summary, and the
 // billing contact. Rates and status changes live on the super-admin side —
 // this page is deliberately read-mostly.
@@ -104,6 +109,29 @@ export default function BillingPage() {
                   A running estimate for {monthLabel(data.usage.month)}. Campaigns still in setup are
                   free until their first knock, so this can rise as more start canvassing.
                 </p>
+
+                {data.usage.billing?.length > 0 && (
+                  <ul className="mt-2 space-y-1 border-t border-border pt-2 text-xs">
+                    {data.usage.billing.map((c) => (
+                      <li key={c.campaignId} className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-fg">
+                          {c.name}
+                          <span className="text-fg-subtle">
+                            {c.isActive ? ' · active' : ` · archived ${fmtShort(c.archivedAt)}`}
+                            {c.firstKnockAt && ` · first knock ${fmtShort(c.firstKnockAt)}`}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-medium text-fg">{fmtUsd(c.amountCents)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {data.usage.setupCount > 0 && (
+                  <p className="mt-1.5 text-xs text-fg-subtle">
+                    {data.usage.setupCount} more campaign{data.usage.setupCount === 1 ? '' : 's'} in
+                    setup — free until the first knock.
+                  </p>
+                )}
               </div>
             )}
             <a

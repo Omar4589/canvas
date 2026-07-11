@@ -61,7 +61,8 @@ needs an existing admin).
 **Not every admin sees billing.** Billing is gated per-admin by a **billing-access** flag — only
 the people who actually pay the bill. The seated first admin gets it; other admins don't until a
 billing admin grants it (on the Users page). Org admins with access see their side on the
-**Billing** page (status, the plan summary, a **live "this month" expected cost**, their billing
+**Billing** page (status, the plan summary, a **live "this month" cost with a per-campaign
+breakdown** — which campaigns are billing, since when, and how many are still in free setup — their billing
 contact) plus the banner states above. Rates and status changes are deliberately not theirs to touch.
 
 # Part 2 — Technical reference
@@ -143,7 +144,9 @@ not archived before M began (`archivedAt || updatedAt` for legacy rows). `knocks
   now taking `mustChangePassword` + `billingAccess`) to seat the first admin atomically with the
   org + trial. Closes the chicken-and-egg gap (`POST /admin/memberships` needs an existing admin).
 - **Usage meter** — `currentUsage(orgId)` ([services/billing/statement.js](../server/src/services/billing/statement.js))
-  summarizes the current month via `monthlyStatement` → `{ billableCampaigns, totalCents, rateCents }`.
+  summarizes the current month via `monthlyStatement` → `{ billableCampaigns, totalCents, rateCents,
+  billing[], setupCount }`. `billing[]` is the per-campaign breakdown (name, first-knock date,
+  archived tag, amount) the org Billing page renders; `setupCount` = active campaigns not yet billing.
   Metered, not capped: campaign creation is never blocked, but any *canvassed* campaign auto-appears
   on the meter/statement — transparency, not a paywall.
 

@@ -85,14 +85,30 @@ export function currentMonth(now = new Date()) {
 }
 
 // A light "this month so far" usage summary for the live meter shown to the super admin
-// and (gated) the org's bill-payer admins — billable campaign count + running total.
+// and (gated) the org's bill-payer admins — billable campaign count + running total, plus
+// the per-campaign `billing` breakdown (which campaigns make up the total, and since when)
+// and a `setupCount` of campaigns that are free because they haven't been canvassed yet.
 export async function currentUsage(organizationId, now = new Date()) {
   const month = currentMonth(now);
   const stmt = await monthlyStatement(organizationId, month);
+  const billing = stmt.lines
+    .filter((l) => l.billable)
+    .map((l) => ({
+      campaignId: l.campaignId,
+      name: l.name,
+      isActive: l.isActive,
+      archivedAt: l.archivedAt,
+      firstKnockAt: l.firstKnockAt,
+      amountCents: l.amountCents,
+      knocksThisMonth: l.knocksThisMonth,
+    }));
   return {
     month,
     rateCents: stmt.rateCents,
-    billableCampaigns: stmt.lines.filter((l) => l.billable).length,
+    billableCampaigns: billing.length,
     totalCents: stmt.totalCents,
+    billing,
+    // Active campaigns not yet billing (no first knock) — "free until the first knock".
+    setupCount: stmt.lines.filter((l) => !l.billable && l.isActive && !l.firstKnockAt).length,
   };
 }

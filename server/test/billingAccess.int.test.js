@@ -97,9 +97,11 @@ test('usage meter counts only first-knock-started campaigns at the org rate', { 
   assert.strictEqual(before.json.usage.totalCents, 0);
 
   const camp = await Campaign.create({ organizationId: ctx.org._id, name: 'Fall', type: 'lit_drop', state: 'FL' });
-  // Creating the campaign alone does NOT bill…
+  // Creating the campaign alone does NOT bill — it's in free setup.
   const afterCreate = await call('GET', '/admin/billing', ctx.billing);
   assert.strictEqual(afterCreate.json.usage.billableCampaigns, 0, 'creating a campaign is free');
+  assert.strictEqual(afterCreate.json.usage.billing.length, 0);
+  assert.strictEqual(afterCreate.json.usage.setupCount, 1, 'the un-canvassed campaign shows as free setup');
 
   // …a real knock this month starts billing.
   await CanvassActivity.create({
@@ -114,6 +116,21 @@ test('usage meter counts only first-knock-started campaigns at the org rate', { 
   const afterKnock = await call('GET', '/admin/billing', ctx.billing);
   assert.strictEqual(afterKnock.json.usage.billableCampaigns, 1);
   assert.strictEqual(afterKnock.json.usage.totalCents, 30000);
+
+  // The breakdown names WHICH campaign is billing and since when.
+  const u = afterKnock.json.usage;
+  assert.strictEqual(u.billing.length, 1);
+  assert.strictEqual(u.billableCampaigns, u.billing.length, 'count matches the breakdown');
+  assert.strictEqual(u.billing[0].name, 'Fall');
+  assert.ok(u.billing[0].firstKnockAt, 'the billing line carries its first-knock date');
+  assert.strictEqual(u.billing[0].amountCents, 30000);
+  assert.strictEqual(u.setupCount, 0, 'Fall is now billing, not setup');
+
+  // A second un-canvassed campaign shows in setup, never on the bill.
+  await Campaign.create({ organizationId: ctx.org._id, name: 'Winter', type: 'lit_drop', state: 'FL' });
+  const withSetup = await call('GET', '/admin/billing', ctx.billing);
+  assert.strictEqual(withSetup.json.usage.billing.length, 1, 'still just Fall billing');
+  assert.strictEqual(withSetup.json.usage.setupCount, 1, 'Winter is in free setup');
 });
 
 test('only a bill-payer admin can grant billing access', { skip }, async () => {
