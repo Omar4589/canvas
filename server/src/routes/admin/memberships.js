@@ -38,6 +38,9 @@ const updateMembershipSchema = z.object({
   isActive: z.boolean().optional(),
   coordinatorId: z.string().nullable().optional(),
   managedCampaignIds: z.array(z.string()).optional(),
+  // Grant/revoke the Billing surface. Only meaningful for admins; only a caller who
+  // already has billing access (or a super admin) may change it (guarded in the handler).
+  billingAccess: z.boolean().optional(),
 });
 
 const updateUserSchema = z.object({
@@ -128,6 +131,7 @@ router.get('/', async (req, res, next) => {
         isActive: m.isActive,
         addedAt: m.createdAt,
         coordinatorId: m.coordinatorId ? String(m.coordinatorId) : null,
+        billingAccess: !!m.billingAccess,
         managedCampaignIds: managedByUser.get(String(m.userId._id)) || [],
         user: {
           id: String(m.userId._id),
@@ -227,6 +231,12 @@ router.patch('/:userId', async (req, res, next) => {
       return res.status(400).json({
         error: "You can't change your own role. Ask another admin.",
       });
+    }
+
+    // Only a bill-payer admin (or super admin) can hand out billing access — otherwise a
+    // non-billing admin could grant themselves the surface they're meant to be kept out of.
+    if (data.billingAccess !== undefined && !req.user.isSuperAdmin && !req.activeMembership?.billingAccess) {
+      return res.status(403).json({ error: 'Only a billing admin can change billing access.' });
     }
 
     const membership = await Membership.findOne({

@@ -28,6 +28,7 @@
     "migrate:cleanup-client-role": "node src/migrations/cleanupClientRole.js",
     "migrate:persons": "node src/migrations/migratePersons.js",
     "migrate:billing": "node src/migrations/migrateBilling.js",
+    "migrate:billing-access": "node src/migrations/migrateBillingAccess.js",
     "demo:refresh": "node src/utils/refreshDemoDay.js"
   },
   "dependencies": {

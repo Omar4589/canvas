@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import { useAuth } from './auth/AuthContext.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
@@ -55,6 +56,17 @@ function PageFallback() {
   return (
     <div className="p-6 text-sm text-gray-500">Loading…</div>
   );
+}
+
+// The /billing route sits in the org-admin group, but billing is further gated to super
+// admins + org admins granted billing access. Match ProtectedRoute's Forbidden state for
+// an admin who reaches the URL directly without that grant.
+function BillingRoute() {
+  const { canViewBilling } = useAuth();
+  if (!canViewBilling) {
+    return <div className="p-8 text-danger">Forbidden — billing access required for this org.</div>;
+  }
+  return <BillingPage />;
 }
 
 // Back-compat: old /dashboard/:campaignId → the campaign home at /campaigns/:campaignId.
@@ -182,7 +194,7 @@ export default function App() {
           <Route path="/surveys/:surveyId/edit" element={<SurveyEditorPage mode="edit" />} />
           <Route path="/tags" element={<TagsPage />} />
           <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />
-          <Route path="/billing" element={<BillingPage />} />
+          <Route path="/billing" element={<BillingRoute />} />
         </Route>
         <Route
           element={

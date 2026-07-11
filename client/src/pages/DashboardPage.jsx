@@ -207,6 +207,13 @@ export default function DashboardPage() {
   const rangeStats = rollupQ.data?.cumulative || {};
   const isLitDrop = selectedCampaign?.type === 'lit_drop';
 
+  // Billing hint for the header: setup is free until the first knock. Derived from
+  // metrics already loaded — the campaign-level "ever canvassed" flag, backstopped by
+  // the all-time homes-knocked count from /overview (no extra fetch). An effort filter
+  // can zero out the totals, so the campaign flag keeps this accurate campaign-wide.
+  const hasBeenCanvassed =
+    selectedCampaign?.hasCanvassed === true || (totals.homesKnocked || 0) > 0;
+
   // Reuse the Timeline's canvasser table. Its rows come from /canvasser-timeline;
   // here we normalize the /admin/reports/canvassers leaderboard rows into the same
   // shape — rename Doors/Surveys/Lit, compute doors-per-hour from first→last, and
@@ -275,6 +282,12 @@ export default function DashboardPage() {
             <div className="mt-1 text-sm text-fg-muted">
               {selectedCampaign.type === 'survey' ? 'Survey' : 'Lit drop'}{' '}
               <span className="text-fg-subtle">·</span> {selectedCampaign.state}
+            </div>
+          )}
+          {/* Setup-is-free hint — only until the first knock, then it quietly drops. */}
+          {selectedCampaign && !hasBeenCanvassed && (
+            <div className="mt-1 text-xs text-fg-subtle">
+              Not billing yet — setup is free until the first knock
             </div>
           )}
           {/* Key dates — rendered only when the campaign payload carries them (fields ship with the server update). */}

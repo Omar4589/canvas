@@ -68,16 +68,19 @@ const savedSearchSchema = new mongoose.Schema(
     householdCount: { type: Number, default: 0 },
     voterCount: { type: Number, default: 0 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    // How this list was built: 'filter' (the demographic/geo builder) or 'csv' (an
-    // uploaded Voter-ID list matched by stateVoterId). The frozen householdIds/voterIds
-    // are the source of truth either way; sourceMeta is provenance for the UI/audit only.
-    source: { type: String, enum: ['filter', 'csv'], default: 'filter' },
+    // How this list was built: 'filter' (the demographic/geo builder), 'csv' (an
+    // uploaded Voter-ID list matched by stateVoterId), or 'import' (auto-generated when
+    // a voter import added new targets to already-worked homes — the revisit list). The
+    // frozen householdIds/voterIds are the source of truth either way; sourceMeta is
+    // provenance for the UI/audit only.
+    source: { type: String, enum: ['filter', 'csv', 'import'], default: 'filter' },
     sourceMeta: {
       fileName: { type: String, default: null },
       idColumn: { type: String, default: null },
       idsInFile: { type: Number, default: 0 },
       matchedVoters: { type: Number, default: 0 },
       notFound: { type: Number, default: 0 },
+      importJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'ImportJob', default: null },
     },
   },
   { timestamps: true }

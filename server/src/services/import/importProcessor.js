@@ -13,6 +13,7 @@ import { Voter } from '../../models/Voter.js';
 import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
 import { reapplyVotedLists } from '../voted/reapplyVotedLists.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
+import { collectRevisitHomes } from './collectRevisitHomes.js';
 
 // Chunk a large $in lookup so a 25k-element query document never balloons memory.
 // Returns the same lean docs as the inline query it replaces, just fetched in pages.
@@ -235,6 +236,16 @@ export async function processImportJob(job) {
     const touchedHhIds = [...new Set([...sourceHhIds, ...destHouseholds.map((h) => String(h._id))])];
     const { deactivated: deactivatedDoors } = await recomputeHouseholdActive(campaign._id, touchedHhIds);
 
+    // Opt-in: collect already-worked homes that gained a new target voter into a saved
+    // search so the admin can cut a fresh (billable) revisit round. Non-fatal — a hiccup
+    // here must never fail an otherwise-successful import.
+    let revisit = null;
+    try {
+      revisit = await collectRevisitHomes(importJob, campaign, counts);
+    } catch (err) {
+      console.error('[import] revisit-list creation failed (non-fatal):', err?.message);
+    }
+
     await ImportJob.updateOne(
       { _id: importJobId },
       {
@@ -253,6 +264,7 @@ export async function processImportJob(job) {
           progress: 100,
           completedAt: new Date(),
           ...(geoStats || {}),
+          ...(revisit ? { revisitSavedSearchId: revisit.savedSearchId, revisitHouseholdCount: revisit.householdCount } : {}),
         },
         // A retry recomputes these as 0 (voters already moved) — $max keeps the real
         // first-attempt counts so the audit trail never regresses.

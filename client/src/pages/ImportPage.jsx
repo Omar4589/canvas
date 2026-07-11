@@ -244,6 +244,7 @@ export default function ImportPage() {
   const [explode, setExplode] = useState(true); // smart import: explode multi-voter-per-row files
   const [geocodeCheckJobId, setGeocodeCheckJobId] = useState(null); // opt-in "See exact placement" job
   const [uidSource, setUidSource] = useState(''); // per-vendor namespace for cross-org uid matching
+  const [revisitNewVoters, setRevisitNewVoters] = useState(false); // collect already-worked homes that gain a new voter into a revisit walk list
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -374,6 +375,7 @@ export default function ImportPage() {
       fd.append('mapping', JSON.stringify(mapping));
       fd.append('uidSource', uidSource || '');
       fd.append('explode', String(explode !== false));
+      fd.append('revisitNewVoters', String(revisitNewVoters));
       return api('/admin/imports/csv', { method: 'POST', formData: fd });
     },
     onSuccess: (_data, variables) => {
@@ -410,6 +412,7 @@ export default function ImportPage() {
     setExplode(true);
     setGeocodeCheckJobId(null);
     setUidSource('');
+    setRevisitNewVoters(false);
     previewDiff.reset();
     enqueuePreview.reset();
   }
@@ -641,6 +644,25 @@ export default function ImportPage() {
         )}
         {step === 'review' && diff && <ReviewPanel diff={diff} />}
 
+        {step === 'review' && diff && (
+          <label className="flex items-start gap-2 rounded border border-border bg-card p-3 text-sm">
+            <input
+              type="checkbox"
+              checked={revisitNewVoters}
+              onChange={(e) => setRevisitNewVoters(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-medium text-fg">Revisit already-worked homes that gain a new voter</span>
+              <span className="mt-0.5 block text-xs text-fg-muted">
+                If this file adds a new target voter to a home you&apos;ve already knocked or surveyed, collect those
+                homes into a walk list so you can cut a fresh round and go back — it counts as a new knock. New
+                addresses go to Intake as usual.
+              </span>
+            </span>
+          </label>
+        )}
+
         {step === 'review' && diff ? (
           <div className="flex items-center gap-2">
             <button
@@ -753,6 +775,22 @@ export default function ImportPage() {
                         geocoded {fmt((j.geocodedNew || 0) + (j.geocodedCached || 0))}
                         {j.geocodeUnmatched > 0 ? ` · ${fmt(j.geocodeUnmatched)} unplaced` : ''}
                         {j.geocodeFailed > 0 ? ` · ${fmt(j.geocodeFailed)} retry` : ''}
+                      </div>
+                    )}
+                    {j.revisitHouseholdCount > 0 && !j.undone && (
+                      <div className="mt-0.5 text-xs text-fg-muted">
+                        {fmt(j.revisitHouseholdCount)} already-worked home{j.revisitHouseholdCount === 1 ? '' : 's'} gained a new voter
+                        {j.campaignId?._id && j.revisitSavedSearchId && (
+                          <>
+                            {' · '}
+                            <button
+                              onClick={() => navigate(`/campaigns/${j.campaignId._id}/efforts?seed=${j.revisitSavedSearchId}`)}
+                              className="font-medium text-brand-accent hover:underline"
+                            >
+                              Create revisit walk list →
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </td>

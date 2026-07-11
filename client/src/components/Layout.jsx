@@ -61,11 +61,13 @@ function ThemeToggle({ collapsed, dark, toggle }) {
 }
 
 export default function Layout() {
-  const { user, logout, isSuperAdmin, isLead } = useAuth();
+  const { user, logout, isSuperAdmin, isLead, canViewBilling } = useAuth();
   // A team lead is a campaign-scoped admin: the top-level nav collapses to the items
   // they can use (Campaigns). The campaign drill-in nav stays full — inside a granted
   // campaign a lead does everything an admin does.
-  const orgNav = isLead ? ORG_NAV.filter((n) => n.leadVisible) : ORG_NAV;
+  const orgNav = (isLead ? ORG_NAV.filter((n) => n.leadVisible) : ORG_NAV)
+    // Billing is visible only to super admins + org admins granted billing access.
+    .filter((n) => n.to !== '/billing' || canViewBilling);
   const { dark, toggle: toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();

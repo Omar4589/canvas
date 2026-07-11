@@ -35,8 +35,18 @@ export const memberIdentityShape = {
 
 // Find/link/create the user and create their membership in `orgId` with `role`.
 // Throws MemberError on the same conditions the memberships route enforces.
-// Returns { user, membership }.
-export async function createOrgMember({ orgId, addedBy, data, role, coordinatorId = null }) {
+// `mustChangePassword` forces a temp-password reset on first login (client provisioning);
+// `billingAccess` seats a bill-payer admin. Both default off, so existing callers are
+// unaffected. Returns { user, membership }.
+export async function createOrgMember({
+  orgId,
+  addedBy,
+  data,
+  role,
+  coordinatorId = null,
+  mustChangePassword = false,
+  billingAccess = false,
+}) {
   const email = data.email.toLowerCase().trim();
   let user = await User.findOne({ email });
 
@@ -66,6 +76,7 @@ export async function createOrgMember({ orgId, addedBy, data, role, coordinatorI
       phone: data.phone || null,
       passwordHash,
       isActive: true,
+      ...(mustChangePassword ? { mustChangePassword: true, tempPasswordSetAt: new Date() } : {}),
     });
   }
 
@@ -79,6 +90,7 @@ export async function createOrgMember({ orgId, addedBy, data, role, coordinatorI
     isActive: true,
     addedBy,
     coordinatorId: coordinatorId || null,
+    billingAccess: !!billingAccess,
   });
   return { user, membership };
 }

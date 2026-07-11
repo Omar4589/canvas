@@ -3,6 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import OrgBillingPanel from '../components/OrgBillingPanel.jsx';
 import { BillingPill } from '../lib/billingStatus.jsx';
+import { isValidEmail } from '../lib/validators.js';
+
+const fieldCls =
+  'mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
 
 // Which orgs the account manager should look at first: paused/past-due states
 // and trials inside their last 2 days.
@@ -16,7 +20,15 @@ export default function OrganizationsPage() {
   const qc = useQueryClient();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
+  const [trialDays, setTrialDays] = useState('7');
+  // Optional first-admin fields — filled together (all-or-nothing per createSchema).
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
   const [error, setError] = useState(null);
+  // One-time credentials to hand over, set from the create response's tempPassword.
+  const [createdCreds, setCreatedCreds] = useState(null); // { orgName, email, tempPassword }
+  const [copied, setCopied] = useState(false);
   const [billingOrg, setBillingOrg] = useState(null); // { id, name } — panel target
   const [deleteOrg, setDeleteOrg] = useState(null); // { id, name, slug } — confirm target
   const [confirmSlug, setConfirmSlug] = useState('');
@@ -29,10 +41,23 @@ export default function OrganizationsPage() {
 
   const createMut = useMutation({
     mutationFn: (data) => api('/super-admin/organizations', { method: 'POST', body: data }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       setName('');
       setSlug('');
+      setTrialDays('7');
+      setFirstName('');
+      setLastName('');
+      setAdminEmail('');
       setError(null);
+      // Surface the temp password ONCE — the only time it's ever shown.
+      if (res?.tempPassword && res?.admin) {
+        setCopied(false);
+        setCreatedCreds({
+          orgName: res.organization?.name || '',
+          email: res.admin.email,
+          tempPassword: res.tempPassword,
+        });
+      }
       qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] });
     },
     onError: (err) => setError(err.message),
@@ -65,7 +90,35 @@ export default function OrganizationsPage() {
   function onCreate(e) {
     e.preventDefault();
     setError(null);
-    createMut.mutate({ name: name.trim(), slug: slug.trim() || undefined });
+    const wantsAdmin = adminEmail.trim() !== '';
+    if (wantsAdmin) {
+      if (!firstName.trim() || !lastName.trim()) {
+        setError('Enter the admin’s first and last name (or clear the email to skip the admin).');
+        return;
+      }
+      if (!isValidEmail(adminEmail)) {
+        setError('Enter a valid admin email.');
+        return;
+      }
+    }
+    const days = Math.max(1, Math.min(90, parseInt(trialDays, 10) || 7));
+    const body = { name: name.trim(), slug: slug.trim() || undefined, trialDays: days };
+    if (wantsAdmin) {
+      body.admin = { firstName: firstName.trim(), lastName: lastName.trim(), email: adminEmail.trim() };
+    }
+    createMut.mutate(body);
+  }
+
+  async function copyCreds() {
+    if (!createdCreds) return;
+    const text = `Email: ${createdCreds.email}\nTemporary password: ${createdCreds.tempPassword}\nYou'll be asked to reset it on first login.`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Could not copy — select the credentials manually.');
+    }
   }
 
   return (
@@ -77,44 +130,143 @@ export default function OrganizationsPage() {
 
       <form
         onSubmit={onCreate}
-        className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-card p-4 shadow-sm md:grid-cols-3"
+        className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm"
       >
         <div>
-          <label className="block text-xs font-semibold text-fg-muted">Name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Acme Campaigns LLC"
-            required
-            className="mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          />
+          <h2 className="text-sm font-semibold text-fg">New client</h2>
+          <p className="text-xs text-fg-muted">
+            Create the org, start its trial clock, and optionally seat the first admin in one step.
+          </p>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-fg-muted">
-            Slug (optional)
-          </label>
-          <input
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            placeholder="acme-campaigns"
-            className="mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          />
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div>
+            <label className="block text-xs font-semibold text-fg-muted">Name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Acme Campaigns LLC"
+              required
+              className={fieldCls}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-fg-muted">Slug (optional)</label>
+            <input
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+              placeholder="acme-campaigns"
+              className={fieldCls}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-fg-muted">Trial length (days)</label>
+            <input
+              type="number"
+              min="1"
+              max="90"
+              value={trialDays}
+              onChange={(e) => setTrialDays(e.target.value)}
+              placeholder="7"
+              className={fieldCls}
+            />
+          </div>
         </div>
-        <div className="flex items-end">
+
+        {/* Optional first admin — filled all-or-nothing; email presence triggers seating. */}
+        <div className="rounded-lg border border-border bg-surface p-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+            First admin (optional)
+          </h3>
+          <p className="mt-0.5 text-xs text-fg-muted">
+            Leave blank to add admins later from the Users page. When filled, we mint a one-time temp
+            password to hand over — they’ll reset it on first login and get billing access.
+          </p>
+          <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted">First name</label>
+              <input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Ada"
+                className={fieldCls}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted">Last name</label>
+              <input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Lovelace"
+                className={fieldCls}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted">Email</label>
+              <input
+                type="email"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                placeholder="ada@acme-campaigns.com"
+                className={fieldCls}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
           <button
             type="submit"
             disabled={createMut.isPending || !name.trim()}
-            className="w-full rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
           >
-            {createMut.isPending ? 'Creating…' : 'Create org'}
+            {createMut.isPending ? 'Creating…' : adminEmail.trim() ? 'Create client & admin' : 'Create org'}
+          </button>
+          {error && (
+            <div className="flex-1 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+              {error}
+            </div>
+          )}
+        </div>
+      </form>
+
+      {createdCreds && (
+        <div className="rounded-xl border border-success/30 bg-success-tint p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-success-fg">
+                Admin created{createdCreds.orgName ? ` — ${createdCreds.orgName}` : ''}
+              </h2>
+              <p className="mt-1 text-xs text-success-fg/90">
+                Hand these to the client — they’ll reset the password on first login. This is the only
+                time the temp password is shown.
+              </p>
+            </div>
+            <button
+              onClick={() => setCreatedCreds(null)}
+              className="text-xs font-semibold text-fg-muted hover:text-fg"
+            >
+              Dismiss ✕
+            </button>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Email</div>
+              <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.email}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Temp password</div>
+              <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.tempPassword}</div>
+            </div>
+          </div>
+          <button
+            onClick={copyCreds}
+            className="mt-3 rounded-md border border-success/40 bg-card px-3 py-2 text-sm font-semibold text-success-fg shadow-sm hover:bg-success-tint"
+          >
+            {copied ? 'Copied ✓' : 'Copy credentials'}
           </button>
         </div>
-        {error && (
-          <div className="md:col-span-3 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-            {error}
-          </div>
-        )}
-      </form>
+      )}
 
       {(orgsQ.data?.organizations || []).some(needsAttention) && (
         <div className="rounded-md border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">

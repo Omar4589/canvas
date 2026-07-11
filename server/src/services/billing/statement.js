@@ -76,3 +76,23 @@ export async function monthlyStatement(organizationId, month) {
     totalCents: lines.reduce((sum, l) => sum + l.amountCents, 0),
   };
 }
+
+// The current calendar month as 'YYYY-MM' (UTC). "This month" is inherently tz-fuzzy at
+// the boundary, but monthlyStatement still evaluates each campaign in its own timezone —
+// this only picks which month to summarize, which is fine for a live usage indicator.
+export function currentMonth(now = new Date()) {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+// A light "this month so far" usage summary for the live meter shown to the super admin
+// and (gated) the org's bill-payer admins — billable campaign count + running total.
+export async function currentUsage(organizationId, now = new Date()) {
+  const month = currentMonth(now);
+  const stmt = await monthlyStatement(organizationId, month);
+  return {
+    month,
+    rateCents: stmt.rateCents,
+    billableCampaigns: stmt.lines.filter((l) => l.billable).length,
+    totalCents: stmt.totalCents,
+  };
+}

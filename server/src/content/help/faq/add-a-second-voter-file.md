@@ -16,4 +16,7 @@ You don't need a new walk list or a new pass — you can add the new doors to yo
 
 > Heads up: Claiming alone doesn't put doors in front of canvassers — a door is only visible in the field once it's cut into a book and assigned. That's why step 2 matters.
 
-New voters at addresses your walk list **already owns** ride along automatically — no steps needed.
+**New voters at addresses your walk list already owns:**
+
+- If that door **hasn't been knocked yet**, the new voter rides along automatically — the canvasser sees them when they reach the door. No steps needed.
+- If that door was **already knocked or surveyed**, it reads "done," so nobody is sent back — the new voter would be missed. To catch this, tick **"Revisit already-worked homes that gain a new voter"** on the import review screen. The app then bundles those homes into a walk list ("New voters — <file>"), and the import summary shows **Create revisit walk list →**. Click it, make a new walk list (choose **Move them here** when it asks), cut books, and go back — because it's a fresh round, the revisit **counts as a new knock**, and the first knock's history is kept.

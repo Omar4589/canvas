@@ -101,6 +101,9 @@ export function AuthProvider({ children }) {
 
   const isSuperAdmin = !!user?.isSuperAdmin;
   const isOrgAdmin = isSuperAdmin || activeMembership?.role === 'admin';
+  // Billing surfaces (the /billing nav item + route + in-app meter) are visible to super
+  // admins and to org admins explicitly granted billing access on their membership.
+  const canViewBilling = isSuperAdmin || (isOrgAdmin && !!activeMembership?.billingAccess);
   // A team lead is a campaign-scoped admin: they reach the console, but only for the
   // campaigns granted to them (managedCampaignIds). isConsoleUser = anyone who may see
   // the admin console at all (super/admin/lead).
@@ -129,6 +132,7 @@ export function AuthProvider({ children }) {
         orgTimeZone,
         isSuperAdmin,
         isOrgAdmin,
+        canViewBilling,
         isLead,
         isConsoleUser,
         managedCampaignIds,

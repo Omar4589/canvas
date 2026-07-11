@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
 import UserProfileModal from '../components/UserProfileModal.jsx';
 import {
@@ -58,8 +59,36 @@ function compareDate(a, b, key) {
   return bv - av;
 }
 
+// A small on/off switch for an admin's billing access. Stops row-click so
+// flipping the switch doesn't also open the member's profile modal.
+function BillingToggle({ on, pending, onToggle, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={`Billing access for ${label}`}
+      disabled={pending}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50 ${
+        on ? 'bg-brand-600' : 'bg-border-strong'
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+          on ? 'translate-x-[18px]' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  );
+}
+
 export default function UsersPage() {
   const qc = useQueryClient();
+  const { canViewBilling } = useAuth();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('return'); // set when arriving from a campaign's setup flow
   const { data, isLoading } = useQuery({
@@ -93,6 +122,15 @@ export default function UsersPage() {
       // The email already exists globally — nudge the admin toward the link path.
       if (err.data?.code === 'EMAIL_EXISTS_USE_LINK') setEmailLookup(true);
     },
+  });
+
+  // Grant/revoke an admin's access to the org's Billing page. Server enforces that
+  // the caller is themselves a billing admin (or super); we only surface the control
+  // when the current user can view billing.
+  const saveBilling = useMutation({
+    mutationFn: ({ userId, billingAccess }) =>
+      api(`/admin/memberships/${userId}`, { method: 'PATCH', body: { billingAccess } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['memberships'] }),
   });
 
   const members = data?.members || [];
@@ -175,6 +213,8 @@ export default function UsersPage() {
   }
 
   const labelCls = 'block text-xs font-medium text-fg';
+  // Table column count — the optional Billing-access column shifts the empty-state colSpans.
+  const colCount = canViewBilling ? 6 : 5;
 
   return (
     <div>
@@ -381,6 +421,7 @@ export default function UsersPage() {
               <th className="px-4 py-2.5">Role</th>
               <th className="px-4 py-2.5">Coordinator</th>
               <th className="px-4 py-2.5">Status</th>
+              {canViewBilling && <th className="px-4 py-2.5">Billing access</th>}
               <th className="w-8 px-4 py-2.5"></th>
             </>
           }
@@ -432,6 +473,20 @@ export default function UsersPage() {
                     {active ? 'Active' : 'Inactive'}
                   </Badge>
                 </td>
+                {canViewBilling && (
+                  <td className="px-4 py-3">
+                    {m.role === 'admin' ? (
+                      <BillingToggle
+                        on={!!m.billingAccess}
+                        pending={saveBilling.isPending && saveBilling.variables?.userId === u.id}
+                        onToggle={() => saveBilling.mutate({ userId: u.id, billingAccess: !m.billingAccess })}
+                        label={`${u.firstName} ${u.lastName}`}
+                      />
+                    ) : (
+                      <span className="text-fg-subtle">—</span>
+                    )}
+                  </td>
+                )}
                 <td className="px-4 py-3 text-right text-fg-subtle transition-colors group-hover:text-fg-muted">
                   <IconChevronRight className="ml-auto" />
                 </td>
@@ -440,7 +495,7 @@ export default function UsersPage() {
           })}
           {!members.length && (
             <tr>
-              <td colSpan="5">
+              <td colSpan={colCount}>
                 <EmptyState
                   icon={<IconUsers size={22} />}
                   title="No members yet"
@@ -451,7 +506,7 @@ export default function UsersPage() {
           )}
           {members.length > 0 && !visibleMembers.length && (
             <tr>
-              <td colSpan="5" className="px-4 py-14 text-center text-sm text-fg-muted">
+              <td colSpan={colCount} className="px-4 py-14 text-center text-sm text-fg-muted">
                 No members match your filters.
               </td>
             </tr>

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
@@ -254,6 +254,11 @@ export default function EffortsPage() {
   const [surveyTemplateId, setSurveyTemplateId] = useState('');
   // Door source for the new walk list: '__intake__' (all remaining) | a saved-search id | '' (none).
   const [doorSource, setDoorSource] = useState('__intake__');
+  // Deep-link from the import summary: ?seed=<savedSearchId> preselects that walk list as
+  // the door source once it has loaded (applied once so the admin can still change it).
+  const [searchParams] = useSearchParams();
+  const seedParam = searchParams.get('seed');
+  const seedAppliedRef = useRef(false);
 
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
@@ -277,6 +282,16 @@ export default function EffortsPage() {
   const intakeCount = effortsQ.data?.intakeCount || 0;
   const walkLists = walkListsQ.data?.walkLists || [];
   const surveys = surveysQ.data?.surveys || [];
+
+  // Once the walk lists load, honor a ?seed= deep-link (from the import "Create revisit
+  // walk list" link) by preselecting that saved search as the new list's door source.
+  useEffect(() => {
+    if (seedAppliedRef.current || !seedParam) return;
+    if (walkLists.some((w) => String(w._id) === String(seedParam))) {
+      seedAppliedRef.current = true;
+      setDoorSource(seedParam);
+    }
+  }, [seedParam, walkLists]);
 
   // userId → "First Last", to render an effort's crewUserIds as a hover list.
   const nameByUserId = useMemo(

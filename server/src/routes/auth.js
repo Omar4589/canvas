@@ -58,6 +58,8 @@ async function loadMembershipsForUser(userId) {
     organizationSlug: m.organizationId.slug,
     organizationTimeZone: m.organizationId.timeZone || 'America/New_York',
     role: m.role,
+    // Only admins with billingAccess see the Billing surface (the bill-payers).
+    billingAccess: !!m.billingAccess,
     // Only leads carry a managed-campaign scope; admins/canvassers omit it.
     ...(m.role === 'lead'
       ? { managedCampaignIds: grantsByOrg.get(String(m.organizationId._id)) || [] }

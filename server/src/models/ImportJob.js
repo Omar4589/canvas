@@ -71,6 +71,12 @@ const importJobSchema = new mongoose.Schema(
     explode: { type: Boolean, default: true },
     // Vendor namespace for this import's uid column (shared voter DB matching).
     uidSource: { type: String, default: null },
+    // Opt-in: when a new target voter lands in a home already WORKED this campaign,
+    // collect those homes into a saved search so the admin can cut a fresh (billable)
+    // revisit round. `revisitSavedSearchId` is set once (idempotency guard + UI link).
+    revisitNewVoters: { type: Boolean, default: false },
+    revisitSavedSearchId: { type: mongoose.Schema.Types.ObjectId, ref: 'SavedSearch', default: null },
+    revisitHouseholdCount: { type: Number, default: 0 },
     // 'apply' = the real import (default; old docs read as apply). 'preview' = a
     // read-only diff run on the worker for large files (stores `diff`, no writes).
     kind: { type: String, enum: ['preview', 'apply', 'geocode_check'], default: 'apply', index: true },

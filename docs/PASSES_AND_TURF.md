@@ -299,6 +299,28 @@ Your options:
 > will **not** pick up the new addresses — re-imports never modify a saved walk list. To include
 > them you'd make a new walk list (or a new all-voters pass).
 
+### New voters at homes you've **already worked**
+
+A different, rarer case: an import drops a **new target voter into a home you've already knocked or
+surveyed**. The new voter is attached to the existing home (no duplicate door), but the door's status
+is **per-household** and already reads "done," and the home is **not** in Intake — it's still owned by
+whatever book worked it. So by default nothing surfaces the new voter for a revisit.
+
+We deliberately do **not** reopen the door in place: a re-knock in the *same* pass dedupes to one knock
+per house×pass, so it wouldn't **bill** the revisit, and rewriting a completed door's status back to
+"unknocked" would muddle the first knock's history.
+
+Instead, the **voter import has an opt-in checkbox — "Revisit already-worked homes that gain a new
+voter."** When it's on and the import lands new target voters in already-worked homes, those homes are
+collected into an auto-generated **saved search** ("New voters — <file>", `source: 'import'`). From
+the import summary, **Create revisit walk list →** deep-links to the Walk Lists page with that saved
+search preselected: create a new walk list from it (its homes are already owned, so the claim offers
+**"Move them here"**), cut books, and walk. Because it's a **new pass**, the revisit **bills as its own
+knock**, and the first knock stays intact in its original pass. Brand-new addresses from the same
+import still go to **Intake** as usual; to walk both together, claim Intake + this list into the one
+walk list. "Already worked" = the home's sticky status is a completion (`surveyed` for survey
+campaigns, `lit_dropped` for lit-drop), so it holds even if the completing round is archived.
+
 ---
 
 # Part 2 — Technical reference

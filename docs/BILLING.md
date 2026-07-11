@@ -21,10 +21,12 @@ conversation and, if agreed, a per-org rate — nothing in the app blocks them.
 
 ## Trials, and what each account state means
 
-Every new organization starts a **7-day free trial** with full access. The trial clock starts when
-the org is created, and an account manager can extend it in one click. When a trial ends without
-conversion the org automatically becomes **read-only** — nothing is deleted, nobody is locked out
-of *seeing* their work, but recording, importing, and cutting stop until the account is activated.
+Every new organization starts a **free trial** with full access — **7 days by default, but you can
+set any length** (e.g. 14 days) when you create the client, and extend it later to any number of
+days or an explicit end date. The trial clock starts when the org is created. When a trial ends
+without conversion the org automatically becomes **read-only** — nothing is deleted, nobody is
+locked out of *seeing* their work, but recording, importing, and cutting stop until the account is
+activated.
 
 | State | What the org experiences |
 |---|---|
@@ -45,12 +47,21 @@ Account managers are **super admins**. The Organizations page gets a Billing col
 Manage) and a "Needs attention" strip (trials ending within 48 hours, past-due, suspended); the
 Control Room shows the same pills on its org cards. Clicking Manage opens the org's **Billing
 panel**: change status (suspend/cancel require a written reason — every change is kept in a
-history), extend the trial, set the org's rate, billing contact and internal notes, and read the
-**monthly statement** — one line per campaign with households, first knock, the month's knocks,
-and the amount — exportable as CSV for invoicing. Payment itself happens outside the app (send an
-invoice — Stripe Invoicing works well); the app tracks *entitlement*, not money.
+history), set a **custom trial length**, set the org's rate, billing contact and internal notes,
+see a **"this month" usage meter** (billable campaigns × rate), and read the **monthly statement**
+— one line per campaign with households, first knock, the month's knocks, and the amount —
+exportable as CSV for invoicing. Payment itself happens outside the app (send an invoice — Stripe
+Invoicing works well); the app tracks *entitlement*, not money.
 
-Org admins see their side on the **Billing** page (status, the plan summary, their billing
+**Onboarding a new client is one step:** creating the org also seats its **first admin** (name +
+email → a temp password to hand over; they reset it on first login) and starts the trial at your
+chosen length. Without this the org would have no admin and no way to seat one (adding members
+needs an existing admin).
+
+**Not every admin sees billing.** Billing is gated per-admin by a **billing-access** flag — only
+the people who actually pay the bill. The seated first admin gets it; other admins don't until a
+billing admin grants it (on the Users page). Org admins with access see their side on the
+**Billing** page (status, the plan summary, a **live "this month" expected cost**, their billing
 contact) plus the banner states above. Rates and status changes are deliberately not theirs to touch.
 
 # Part 2 — Technical reference
@@ -115,8 +126,26 @@ not archived before M began (`archivedAt || updatedAt` for legacy rows). `knocks
 | `POST …/billing/status` `{to, reason}` | The status chokepoint: any → any, reason **required** for `suspended`/`canceled`, sets `statusChangedAt`, reclaims `source:'manual'`, logs the event. 400 on a no-op. |
 | `POST …/billing/extend-trial` `{days?\|until?}` | Trial-status only. `+days` from max(now, current end) — extending an *expired* trial un-suspends with no separate step. |
 | `GET …/billing/statement?month=YYYY-MM` | The monthly statement JSON (CSV is built client-side from it). |
-| `GET /admin/billing` | Org-admin view: status, entitlement, trial end, rate, billing contact. **No** notes/source/Stripe ids. `requireOrgRole('admin')`. |
-| `PATCH /admin/billing/contact` | Org admin updates the billing contact (upserts the subscription if somehow missing; logged). |
+| `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, rate, billing contact, and **`usage`** (this month's billable-campaign count + `totalCents` via `currentUsage`). **No** notes/source/Stripe ids. |
+| `PATCH /admin/billing/contact` | Org admin (billing-access) updates the billing contact (upserts the subscription if somehow missing; logged). |
+| `POST /super-admin/organizations` | Create a client: org + trial (`trialDays`, default 7) + optional **first admin** (`admin{firstName,lastName,email}` → mints a temp password, `mustChangePassword`, `billingAccess:true`; returns `tempPassword` once). A taken admin email 409s **before** the org is created. |
+| `PATCH /admin/memberships/:userId` `{billingAccess}` | Grant/revoke the Billing surface for an admin — only a caller who already has `billingAccess` (or a super admin) may change it (else 403). |
+
+## Onboarding & per-admin billing access
+
+- **`Membership.billingAccess`** (Boolean, default `false`) gates the whole org billing surface —
+  the `/billing` nav item + route, the page, and the client cost view — plus the
+  `/admin/billing` endpoints. Client-side, `useAuth()` exposes
+  `canViewBilling = isSuperAdmin || (isOrgAdmin && activeMembership.billingAccess)`; the flag rides
+  the login/me membership payload and the `GET /admin/memberships` list.
+- **Provisioning** ([routes/superAdmin/organizations.js](../server/src/routes/superAdmin/organizations.js))
+  reuses `createOrgMember` ([services/memberships/createMember.js](../server/src/services/memberships/createMember.js),
+  now taking `mustChangePassword` + `billingAccess`) to seat the first admin atomically with the
+  org + trial. Closes the chicken-and-egg gap (`POST /admin/memberships` needs an existing admin).
+- **Usage meter** — `currentUsage(orgId)` ([services/billing/statement.js](../server/src/services/billing/statement.js))
+  summarizes the current month via `monthlyStatement` → `{ billableCampaigns, totalCents, rateCents }`.
+  Metered, not capped: campaign creation is never blocked, but any *canvassed* campaign auto-appears
+  on the meter/statement — transparency, not a paywall.
 
 ## Client surfaces
 
@@ -148,6 +177,12 @@ simply never render the banners. New orgs self-provision (`trial`, +7 days) in t
 `seed:demo` upserts its org to `internal`. Tests:
 [test/billing.int.test.js](../server/test/billing.int.test.js) (status × method matrix, trial
 expiry, grace, super-admin bypass, statement windows) — run with `MONGODB_URI_TEST`.
+
+**Per-admin billing access (later addition)** ships **server → `npm run migrate:billing-access --apply`
+→ web** (no mobile). The migration grandfathers `billingAccess:true` onto every existing
+`role:'admin'` membership so no current admin loses the page; new admins default off. Covered by
+[test/billingAccess.int.test.js](../server/test/billingAccess.int.test.js) (gating, usage math,
+provisioning, grandfather).
 
 ## The Stripe phase (designed, not built)
 

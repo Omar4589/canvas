@@ -30,6 +30,10 @@ const membershipSchema = new mongoose.Schema(
     // a timestamp = they dismissed it. Existing rows are backfilled to createdAt
     // (see migrateAckMemberships.js) so we don't banner-spam current members.
     acknowledgedAt: { type: Date, default: null },
+    // Only admins with this see the Billing surface (page, nav, cost view) — the
+    // bill-payers, not every admin. Default false; the first admin seated at
+    // provisioning gets true, and migrateBillingAccess grandfathers existing admins.
+    billingAccess: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

@@ -23,7 +23,11 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
   const [rateDollars, setRateDollars] = useState('');
   const [contact, setContact] = useState({ name: '', email: '' });
   const [notes, setNotes] = useState('');
-  const [month, setMonth] = useState(currentMonthStr());
+  const thisMonth = currentMonthStr();
+  const [month, setMonth] = useState(thisMonth);
+  // Custom trial control: extend BY N days, or set an explicit end date.
+  const [extendDays, setExtendDays] = useState('7');
+  const [trialUntil, setTrialUntil] = useState('');
   const [error, setError] = useState(null);
 
   const key = ['super-admin', 'billing', orgId];
@@ -35,6 +39,13 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
     queryKey: [...key, 'statement', month],
     queryFn: () => api(`/super-admin/organizations/${orgId}/billing/statement?month=${month}`),
     enabled: Boolean(month),
+  });
+  // The current-month meter for the "This month" headline — pinned to thisMonth so
+  // it stays accurate even when the account manager browses an older statement.
+  // Shares statementQ's cache (identical key) when month === thisMonth: no extra fetch.
+  const thisMonthQ = useQuery({
+    queryKey: [...key, 'statement', thisMonth],
+    queryFn: () => api(`/super-admin/organizations/${orgId}/billing/statement?month=${thisMonth}`),
   });
 
   const sub = billingQ.data?.subscription;
@@ -82,6 +93,8 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
   const ent = billingQ.data?.entitlement;
   const needsReason = ['suspended', 'canceled'].includes(statusTo);
   const stmt = statementQ.data;
+  const thisStmt = thisMonthQ.data;
+  const thisBillable = thisStmt ? thisStmt.lines.filter((l) => l.billable).length : null;
 
   function downloadCsv() {
     if (!stmt) return;
@@ -165,11 +178,54 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
               className={inputCls}
             />
             {sub.status === 'trial' && (
-              <div className="mt-3 flex items-center gap-2">
-                <button onClick={() => extendMut.mutate({ days: 7 })} disabled={extendMut.isPending} className={btnCls}>
-                  Extend trial +7 days
-                </button>
-                <span className="text-xs text-fg-muted">ends {fmtDate(sub.trialEndsAt)}</span>
+              <div className="mt-3 rounded-md border border-border bg-card p-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Trial</span>
+                  <span className="text-xs text-fg-muted">ends {fmtDate(sub.trialEndsAt)}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-fg-muted">Extend by</label>
+                    <div className="mt-1 flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        max="90"
+                        value={extendDays}
+                        onChange={(e) => setExtendDays(e.target.value)}
+                        className="w-16 rounded-md border border-border-strong bg-card px-2 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                      />
+                      <span className="text-xs text-fg-muted">days</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() =>
+                      extendMut.mutate({ days: Math.max(1, Math.min(90, parseInt(extendDays, 10) || 7)) })
+                    }
+                    disabled={extendMut.isPending || extendDays === ''}
+                    className={btnCls}
+                  >
+                    Extend
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-fg-muted">or set end date</label>
+                    <input
+                      type="date"
+                      value={trialUntil}
+                      onChange={(e) => setTrialUntil(e.target.value)}
+                      className={inputCls}
+                    />
+                  </div>
+                  <button
+                    onClick={() => extendMut.mutate({ until: new Date(`${trialUntil}T00:00:00`).toISOString() })}
+                    disabled={extendMut.isPending || !trialUntil}
+                    className={btnCls}
+                  >
+                    Set
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -231,6 +287,16 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
 
       {/* Statement */}
       <div className="mt-4 rounded-lg border border-border bg-surface p-3">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 rounded-md border border-brand-accent/20 bg-brand-tint px-3 py-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-brand-accent">This month</span>
+          <span className="text-sm font-semibold text-fg">
+            {thisStmt
+              ? `${thisBillable} campaign${thisBillable === 1 ? '' : 's'} billing · ${fmtUsd(thisStmt.totalCents)}`
+              : thisMonthQ.isLoading
+                ? 'Computing…'
+                : '—'}
+          </span>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Monthly statement</h3>
           <div className="flex items-center gap-2">

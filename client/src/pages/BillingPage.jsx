@@ -14,6 +14,14 @@ const STATUS_COPY = {
   canceled: 'This subscription has ended. Your data is retained.',
 };
 
+// 'YYYY-MM' → a friendly month label (e.g. 'July 2026') for the live usage line.
+function monthLabel(ym) {
+  if (!ym) return 'this month';
+  const [y, m] = String(ym).split('-').map(Number);
+  if (!y || !m) return 'this month';
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
 // The org-admin view of the subscription: status, the plan summary, and the
 // billing contact. Rates and status changes live on the super-admin side —
 // this page is deliberately read-mostly.
@@ -81,6 +89,23 @@ export default function BillingPage() {
               . A campaign starts billing the month it records its first knock and stops after the
               month it’s archived.
             </p>
+            {data.usage && (
+              <div className="mt-3 rounded-lg border border-border bg-sunken px-3 py-2.5">
+                <p className="text-sm text-fg">
+                  This month:{' '}
+                  <span className="font-semibold">
+                    {data.usage.billableCampaigns}{' '}
+                    {data.usage.billableCampaigns === 1 ? 'campaign' : 'campaigns'}
+                  </span>{' '}
+                  canvassing · about{' '}
+                  <span className="font-semibold">{fmtUsd(data.usage.totalCents)}</span> expected.
+                </p>
+                <p className="mt-1 text-xs text-fg-muted">
+                  A running estimate for {monthLabel(data.usage.month)}. Campaigns still in setup are
+                  free until their first knock, so this can rise as more start canvassing.
+                </p>
+              </div>
+            )}
             <a
               href={CONTACT}
               className="mt-3 inline-block text-sm font-semibold text-brand-accent underline underline-offset-2 hover:opacity-80"

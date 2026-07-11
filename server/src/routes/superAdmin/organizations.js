@@ -1,14 +1,17 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { Organization } from '../../models/Organization.js';
 import { Membership } from '../../models/Membership.js';
+import { User } from '../../models/User.js';
 import { Campaign } from '../../models/Campaign.js';
 import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
-import { slugSchema } from '../../utils/validators.js';
+import { slugSchema, emailSchema, nameSchema } from '../../utils/validators.js';
 import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
+import { createOrgMember, MemberError } from '../../services/memberships/createMember.js';
 import { deleteOrganization } from '../../services/platform/deleteOrganization.js';
 
 const router = Router();
@@ -18,6 +21,14 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
   slug: slugSchema.optional(),
   isActive: z.boolean().optional(),
+  // Trial length in days (default 7). The clock runs from creation.
+  trialDays: z.number().int().min(1).max(90).optional(),
+  // Optional: seat the client's first admin in the same step. When present, we mint a
+  // temp password (returned ONCE for the super admin to hand over) and force a reset on
+  // first login. This admin gets billingAccess (they're the bill-payer).
+  admin: z
+    .object({ firstName: nameSchema, lastName: nameSchema, email: emailSchema })
+    .optional(),
 });
 
 const updateSchema = z.object({
@@ -75,28 +86,60 @@ router.post('/', async (req, res, next) => {
     const data = createSchema.parse(req.body);
     const slug = (data.slug || Organization.toSlug(data.name)).toLowerCase();
     if (!slug) return res.status(400).json({ error: 'Could not derive slug from name' });
+    // Pre-check the admin email so a conflict fails BEFORE we create the org — no
+    // partial "org with a trial but no admin" state on the common failure.
+    if (data.admin) {
+      const taken = await User.findOne({ email: data.admin.email.toLowerCase().trim() }, { _id: 1 }).lean();
+      if (taken) {
+        return res.status(409).json({
+          error: 'An account with that admin email already exists — add them from the Users page after creating the org.',
+          code: 'EMAIL_EXISTS_USE_LINK',
+        });
+      }
+    }
     const org = await Organization.create({
       name: data.name.trim(),
       slug,
       isActive: data.isActive !== false,
       createdBy: req.user._id,
     });
-    // Every new org starts a 7-day trial (user decision, Jul 2026). The trial
+    // Every new org starts a trial (default 7 days; user decision, Jul 2026). The
     // clock runs from creation — create the org right after the demo call.
+    const trialDays = data.trialDays ?? 7;
     await Subscription.create({
       organizationId: org._id,
       status: 'trial',
-      trialEndsAt: new Date(Date.now() + 7 * 86400000),
+      trialEndsAt: new Date(Date.now() + trialDays * 86400000),
       statusChangedAt: new Date(),
     });
     await SubscriptionEvent.create({
       organizationId: org._id,
       byUserId: req.user._id,
       toStatus: 'trial',
-      reason: 'Organization created — 7-day trial started',
+      reason: `Organization created — ${trialDays}-day trial started`,
     });
-    res.status(201).json({ organization: org });
+
+    // Optionally seat the first admin in the same step (closes the chicken-and-egg
+    // gap: POST /admin/memberships needs an existing org admin). Temp password is
+    // returned once for out-of-band hand-off; the admin resets it on first login.
+    let admin = null;
+    let tempPassword = null;
+    if (data.admin) {
+      tempPassword = randomBytes(9).toString('base64url'); // ~12 chars, satisfies passwordSchema
+      const { user } = await createOrgMember({
+        orgId: org._id,
+        addedBy: req.user._id,
+        data: { ...data.admin, password: tempPassword },
+        role: 'admin',
+        mustChangePassword: true,
+        billingAccess: true,
+      });
+      admin = { id: String(user._id), email: user.email, firstName: user.firstName, lastName: user.lastName };
+    }
+
+    res.status(201).json({ organization: org, admin, tempPassword });
   } catch (err) {
+    if (err instanceof MemberError) return res.status(err.status).json({ error: err.message, code: err.code });
     if (err.code === 11000) return res.status(409).json({ error: 'Slug already exists' });
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);

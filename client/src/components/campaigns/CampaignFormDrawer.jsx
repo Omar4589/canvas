@@ -238,6 +238,13 @@ export default function CampaignFormDrawer({ initial, surveys, onSave, onCancel,
           Active (visible to canvassers)
         </label>
 
+        {/* Reassurance on create only — no dollars, non-blocking. */}
+        {!isEdit && (
+          <p className="rounded-md border border-info/30 bg-info-tint px-3 py-2 text-xs text-info-fg">
+            Setup is free — a campaign only starts billing the month it&apos;s first canvassed.
+          </p>
+        )}
+
         {error && (
           <div className="rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
             {error.message}
