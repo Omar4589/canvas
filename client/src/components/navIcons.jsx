@@ -293,6 +293,7 @@ export const NAV_ICONS = {
   '/super-admin': IconGauge,
   '/super-admin/users': IconUsers,
   '/super-admin/people': IconUsers,
+  '/super-admin/imports': IconUpload,
   '/organizations': IconBuilding,
   '/queues': IconLayers,
 };

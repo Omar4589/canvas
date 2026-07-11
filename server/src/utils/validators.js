@@ -58,8 +58,20 @@ export const emailSchema = z.string().trim().email().max(254);
 
 // An admin-set TEMPORARY password (create user / admin reset / create canvasser). Min 8, no
 // complexity rule — it's short-lived and the user replaces it at first login, so complexity
-// would only add friction. User-CHOSEN passwords use the stronger rules below.
-export const passwordSchema = z.string().min(8).max(200);
+// would only add friction (a simple temp like "victory26" is fine). User-CHOSEN passwords use
+// the stronger rules below. We still enforce basic hygiene so a temp password can't be set to
+// something that silently breaks the login it's meant to enable: no control characters / null
+// bytes, and no leading/trailing whitespace (a copy-paste footgun that locks people out).
+export const passwordSchema = z
+  .string()
+  .min(8)
+  .max(200)
+  .refine((p) => !/[\u0000-\u001f\u007f]/.test(p), {
+    message: 'Password can’t contain control characters.',
+  })
+  .refine((p) => p === p.trim(), {
+    message: 'Password can’t start or end with a space.',
+  });
 
 // Strength rules for USER-CHOSEN passwords (self-service change, incl. the forced change after
 // a temp password). Mirrored verbatim in client/src/lib/validators.js and mobile/lib/validators.js

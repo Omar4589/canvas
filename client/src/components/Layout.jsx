@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -41,6 +41,21 @@ function NavItem({ n, collapsed }) {
 }
 
 const GROUP_HEADER = 'mt-3 px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle';
+
+// Lazy pages suspend on first visit while their JS chunk loads. This fallback lives INSIDE the
+// sidebar shell (below), so only the content area shows it — the sidebar stays put instead of the
+// whole app blanking to the top-level route fallback.
+function ContentFallback() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <div
+        className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-brand-600"
+        role="status"
+        aria-label="Loading"
+      />
+    </div>
+  );
+}
 
 function ThemeToggle({ collapsed, dark, toggle }) {
   return (
@@ -255,7 +270,9 @@ export default function Layout() {
         <main className={isFullBleed ? 'flex-1 overflow-hidden' : 'flex-1 overflow-auto p-6 pb-20 md:pb-6'}>
           {!isFullBleed && <AddedToOrgBanner />}
           {!isFullBleed && <BillingBanner />}
-          <Outlet />
+          <Suspense fallback={<ContentFallback />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 

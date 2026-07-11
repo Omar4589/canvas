@@ -47,7 +47,8 @@ Account managers are **super admins**. The Organizations page gets a Billing col
 Manage) and a "Needs attention" strip (trials ending within 48 hours, past-due, suspended); the
 Control Room shows the same pills on its org cards. Clicking Manage opens the org's **Billing
 panel**: change status (suspend/cancel require a written reason — every change is kept in a
-history), set a **custom trial length**, set the org's rate, billing contact and internal notes,
+history), set a **custom trial length**, set the org's rate, and keep an internal billing contact +
+notes (both **super-admin-only** now — org admins no longer see or edit the billing contact),
 see a **"this month" usage meter** (billable campaigns × rate), and read the **monthly statement**
 — one line per campaign with households, first knock, the month's knocks, and the amount —
 exportable as CSV for invoicing. Payment itself happens outside the app (send an invoice — Stripe
@@ -127,8 +128,7 @@ not archived before M began (`archivedAt || updatedAt` for legacy rows). `knocks
 | `POST …/billing/status` `{to, reason}` | The status chokepoint: any → any, reason **required** for `suspended`/`canceled`, sets `statusChangedAt`, reclaims `source:'manual'`, logs the event. 400 on a no-op. |
 | `POST …/billing/extend-trial` `{days?\|until?}` | Trial-status only. `+days` from max(now, current end) — extending an *expired* trial un-suspends with no separate step. |
 | `GET …/billing/statement?month=YYYY-MM` | The monthly statement JSON (CSV is built client-side from it). |
-| `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, rate, billing contact, and **`usage`** (this month's billable-campaign count + `totalCents` via `currentUsage`). **No** notes/source/Stripe ids. |
-| `PATCH /admin/billing/contact` | Org admin (billing-access) updates the billing contact (upserts the subscription if somehow missing; logged). |
+| `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, rate, and **`usage`** (this month's billable-campaign count + `totalCents` via `currentUsage`). **No** billing contact / notes / source / Stripe ids. |
 | `POST /super-admin/organizations` | Create a client: org + trial (`trialDays`, default 7) + optional **first admin** (`admin{firstName,lastName,email}` → mints a temp password, `mustChangePassword`, `billingAccess:true`; returns `tempPassword` once). A taken admin email 409s **before** the org is created. |
 | `PATCH /admin/memberships/:userId` `{billingAccess}` | Grant/revoke the Billing surface for an admin — only a caller who already has `billingAccess` (or a super admin) may change it (else 403). |
 

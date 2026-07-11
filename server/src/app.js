@@ -3,12 +3,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import routes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
+import { loginIpLimiter, loginEmailLimiter } from './middleware/loginRateLimit.js';
 import { requireBullBoardAuth, createBullBoardRouter } from './queues/bullBoard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -65,28 +65,9 @@ export function createApp() {
     });
   }
 
-  // Login throttles. Both count only FAILED attempts (skipSuccessfulRequests), so a
-  // canvass-day crowd logging in from one shared-wifi IP can't lock itself out.
-  // Per-IP catches one machine guessing many accounts; per-email catches many
-  // machines (rotating IPs) guessing one account. The email key relies on
-  // express.json() being mounted above; a body with no email falls back to IP.
-  const loginIpLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 50,
-    standardHeaders: true,
-    legacyHeaders: false,
-    skipSuccessfulRequests: true,
-    message: { error: 'Too many login attempts. Try again in a few minutes.', code: 'rate-limited' },
-  });
-  const loginEmailLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    skipSuccessfulRequests: true,
-    keyGenerator: (req) => String(req.body?.email || '').trim().toLowerCase() || req.ip,
-    message: { error: 'Too many login attempts for this account. Try again in a few minutes.', code: 'rate-limited' },
-  });
+  // Login throttles (see middleware/loginRateLimit.js): per-IP + per-email, failed-attempts only,
+  // with an env allowlist (LOGIN_RATELIMIT_ALLOWLIST) that bypasses both so an allowlisted
+  // super-admin can never lock themselves out. The email key relies on express.json() above.
   app.use('/api/auth/login', loginIpLimiter, loginEmailLimiter);
 
   app.use('/api', routes);

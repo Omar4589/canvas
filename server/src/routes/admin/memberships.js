@@ -178,6 +178,10 @@ router.post('/', async (req, res, next) => {
         data,
         role: data.role,
         coordinatorId: coordRes.value || null,
+        // Every newly created account gets a temp password + forced change on first login.
+        // Harmless when linking an existing account: createOrgMember only applies the flag on
+        // the create-new branch, so a linked account keeps its own password untouched.
+        mustChangePassword: true,
       }));
     } catch (err) {
       if (err instanceof MemberError) {

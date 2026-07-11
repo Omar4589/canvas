@@ -46,11 +46,11 @@ universal person ID (a "uid") are matched across orgs (see *Shared voter databas
 If a file has **no latitude/longitude**, geocoding (when enabled) turns each address into a pin
 so the file can still import — just **leave the Latitude/Longitude columns unmapped** (they're
 optional; the mapping step no longer requires a coordinate column). The preview shows a **free
-forecast** (how many addresses need
-geocoding, how many are already cached, and an estimated cost), plus an opt-in **"See exact
-placement"** button that runs the real geocode (cost shown first) and reports exactly what can
-and can't be placed. On import, unplaceable addresses are dropped (and listed) so every imported
-door keeps a walkable pin.
+forecast** (how many addresses need geocoding and how many are already cached), plus an opt-in
+**"See exact placement"** button that runs the real geocode and reports exactly what can and can't
+be placed. On import, unplaceable addresses are dropped (and listed) so every imported door keeps a
+walkable pin. *(Geocoding has an internal per-lookup cost, but that's Doorline's cost — it's never
+shown to admins or clients. Only the platform owner sees it, on the super-admin Imports page.)*
 
 ## Shared voter database
 
@@ -265,6 +265,18 @@ today's `bad_coords` behavior byte-for-byte. `GeocodeCache` indexes build at wor
 `coordSource`/`coordConfidence` are no longer import-only bookkeeping: the maps now **surface** them
 (an amber "approximate" ring on `interpolated` pins) and a pin can be **corrected** — which sets
 `coordSource='corrected'`. See [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
+
+**Cost review (owner-only).** Every completed apply import persists its real lookup counts
+(`geocodedNew` = billable Geocodio hits, `geocodedCached`, `geocodeUnmatched`) plus
+`householdsWithFileCoords` (homes that arrived with coords, counted *before* geocoding fills the
+rest — an exact "arrived with coords" figure). The dollar cost is **never persisted or sent to a
+client**: it's derived on read as `geocodedNew / 1000 × GEOCODE_COST_PER_1000_CENTS` (the single
+rate constant in `geocodeService.js`, ~$1/1k). The super-admin **Imports** page
+(`GET /super-admin/imports`, [server/src/routes/superAdmin/imports.js](../server/src/routes/superAdmin/imports.js))
+aggregates this across every org — totals + a per-import table (with-coords vs. needed-geocoding,
+new/cached, cost) — so the platform owner can review costs. Legacy rows with no
+`householdsWithFileCoords` fall back to `uniqueHouseholds − geocodedNew − geocodedCached` (flagged
+approximate). Nothing in the admin import UI shows any cost.
 
 **Batching:** 1000 addresses/request with a 180s timeout by default (`GEOCODE_BATCH_SIZE` /
 `GEOCODE_BATCH_TIMEOUT_MS`) — Geocodio's hard cap is 10000, but smaller batches stay within the

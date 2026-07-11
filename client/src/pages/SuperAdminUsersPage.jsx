@@ -41,6 +41,18 @@ export default function SuperAdminUsersPage() {
       qc.invalidateQueries({ queryKey: ['super-admin', 'users'] }),
   });
 
+  // Recovery for a user stuck behind the login lockout (too many wrong passwords). Doesn't touch
+  // the users list, so no invalidation — just a brief per-row "Cleared" confirmation.
+  const [clearedId, setClearedId] = useState(null);
+  const clearLockoutMut = useMutation({
+    mutationFn: (userId) =>
+      api(`/super-admin/users/${userId}/clear-lockout`, { method: 'POST' }),
+    onSuccess: (_data, userId) => {
+      setClearedId(userId);
+      setTimeout(() => setClearedId((id) => (id === userId ? null : id)), 2500);
+    },
+  });
+
   const users = usersQ.data?.users || [];
 
   const visible = useMemo(() => {
@@ -62,8 +74,8 @@ export default function SuperAdminUsersPage() {
       <div className="mb-4">
         <h1 className="text-2xl font-semibold text-fg">All users</h1>
         <p className="text-sm text-fg-muted">
-          Every user across every organization. Click a row to see their org memberships;
-          toggle the super-admin flag with the button on the right.
+          Every user across every organization. Use the buttons on the right to clear a stuck
+          login lockout or toggle the super-admin flag.
         </p>
       </div>
 
@@ -161,18 +173,28 @@ export default function SuperAdminUsersPage() {
                     {formatRelative(u.lastLoginAt)}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => promoteMut.mutate(u.id)}
-                      disabled={isSelf || promoteMut.isPending}
-                      className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50 ${
-                        u.isSuperAdmin
-                          ? 'border-warning/30 bg-warning-tint text-warning-fg hover:bg-warning-tint'
-                          : 'border-border bg-card text-fg-muted hover:bg-sunken'
-                      }`}
-                      title={isSelf ? "You can't change your own super-admin flag" : ''}
-                    >
-                      {u.isSuperAdmin ? 'Remove super' : 'Make super'}
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => clearLockoutMut.mutate(u.id)}
+                        disabled={clearLockoutMut.isPending}
+                        className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-semibold text-fg-muted transition-colors hover:bg-sunken disabled:opacity-50"
+                        title="Clear this user's login lockout (failed-password limit) so they can retry now"
+                      >
+                        {clearedId === u.id ? 'Cleared ✓' : 'Clear lockout'}
+                      </button>
+                      <button
+                        onClick={() => promoteMut.mutate(u.id)}
+                        disabled={isSelf || promoteMut.isPending}
+                        className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50 ${
+                          u.isSuperAdmin
+                            ? 'border-warning/30 bg-warning-tint text-warning-fg hover:bg-warning-tint'
+                            : 'border-border bg-card text-fg-muted hover:bg-sunken'
+                        }`}
+                        title={isSelf ? "You can't change your own super-admin flag" : ''}
+                      >
+                        {u.isSuperAdmin ? 'Remove super' : 'Make super'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

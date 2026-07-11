@@ -13,13 +13,15 @@ const ACCENT = {
 
 // A KPI card. The default look (label / 2xl value / muted hint) is unchanged and shared by the admin
 // dashboards. The client report opts into a richer treatment via `prominent` (3xl value + a colored
-// left rail) and `delta`/`deltaTone` (a "+N this week" pill instead of the plain hint). All extra
+// left rail) and `delta`/`deltaTone` (a "+N this week" pill instead of the plain hint). `compact`
+// shortens the card (tighter padding + xl value) for dense KPI rows like the Overview. All extra
 // props are additive — omitting them renders exactly as before. `help` adds an "(i)" tooltip next
 // to the label explaining what the number counts (used by the client report).
-export default function StatCard({ label, value, hint, accent, delta, deltaTone, prominent = false, help }) {
+export default function StatCard({ label, value, hint, accent, delta, deltaTone, prominent = false, compact = false, help }) {
   const a = ACCENT[accent] || {};
+  const valueSize = prominent ? 'text-3xl' : compact ? 'text-xl' : 'text-2xl';
   return (
-    <Card className={`relative overflow-hidden p-4${prominent ? ' pl-5' : ''}`}>
+    <Card className={`relative overflow-hidden ${compact ? 'p-3' : 'p-4'}${prominent ? ' pl-5' : ''}`}>
       {prominent && (
         <span className={`absolute inset-y-0 left-0 w-1 ${a.rail || 'bg-border'}`} aria-hidden="true" />
       )}
@@ -28,7 +30,7 @@ export default function StatCard({ label, value, hint, accent, delta, deltaTone,
         {help && <InfoHint label={`What "${label}" counts`}>{help}</InfoHint>}
       </div>
       <div
-        className={`mt-1 ${prominent ? 'text-3xl' : 'text-2xl'} font-semibold tabular-nums ${a.text || 'text-fg'}`}
+        className={`mt-1 ${valueSize} font-semibold tabular-nums ${a.text || 'text-fg'}`}
       >
         {value ?? '—'}
       </div>

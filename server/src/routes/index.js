@@ -29,6 +29,7 @@ import superAdminBillingRouter from './superAdmin/billing.js';
 import adminBillingRouter from './admin/billing.js';
 import superAdminUsersRouter from './superAdmin/users.js';
 import superAdminPersonsRouter from './superAdmin/persons.js';
+import superAdminImportsRouter from './superAdmin/imports.js';
 import superAdminPlatformRouter from './superAdmin/platform.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
@@ -65,6 +66,7 @@ router.use('/super-admin/organizations/:orgId/billing', superAdminBillingRouter)
 router.use('/super-admin/organizations', superAdminOrganizationsRouter);
 router.use('/super-admin/users', superAdminUsersRouter);
 router.use('/super-admin/persons', superAdminPersonsRouter);
+router.use('/super-admin/imports', superAdminImportsRouter);
 router.use('/super-admin', superAdminPlatformRouter);
 
 router.use('/admin/billing', adminBillingRouter);

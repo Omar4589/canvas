@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import NextStepBanner from './NextStepBanner.jsx';
-import { Card, Badge, Button, IconButton, IconX, SkeletonRows } from './ui/index.js';
+import { Card, Badge, Button, IconButton, IconX } from './ui/index.js';
 
 // Per-campaign cold-start checklist. NON-BLOCKING: it signposts the ordered
 // chain (survey → campaign → voters → doors → round → books → assign → live) and
@@ -54,14 +54,10 @@ export default function SetupProgress({ campaignId }) {
     navigate(scopedRoute(route));
   }
 
-  if (isLoading || !data) {
-    return (
-      <Card className="overflow-hidden">
-        <div className="border-b border-border px-4 py-3 text-sm font-semibold text-fg">Setup progress</div>
-        <SkeletonRows rows={4} />
-      </Card>
-    );
-  }
+  // Render nothing while the status loads. An already-live campaign resolves this to `null`
+  // below, so showing a titled "Setup progress" card mid-load would flash setup UI that then
+  // vanishes. The hub is supplementary — a brief blank is better than a misleading flash.
+  if (isLoading || !data) return null;
 
   const { steps, stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute, hasCanvassed, effortsNeedingSetup, liveDismissed } = data;
 

@@ -146,6 +146,16 @@ super-admin isn't around. How it works:
 This means an admin can always rescue someone, but the admin never ends up holding a working password
 to the user's *other* orgs.
 
+**Too many wrong passwords.** Separately, repeated failed logins are throttled: about **10 wrong
+tries for one account (or 50 from one device) within 15 minutes** returns "Too many login attempts —
+try again in a few minutes." That counter lives in server memory (it also clears on any redeploy) and
+resets on its own once the window passes. Two safety valves for account managers:
+
+- **You can't lock yourself out.** Add the owner/super-admin email(s) to the
+  `LOGIN_RATELIMIT_ALLOWLIST` env var and those accounts skip the throttle entirely.
+- **Unstick anyone.** A super-admin can clear a stuck user's lockout from **Super-admin ▸ All Users ▸
+  Clear lockout**, so they retry immediately instead of waiting out the window.
+
 ## What's shared vs isolated across orgs
 
 Because the account is shared, some things are global and some are per-org:
@@ -203,6 +213,13 @@ their login email** (that would change how they sign into the *other* orgs). The
   a choke point in [server/src/routes/index.js](../server/src/routes/index.js):
   `router.use(['/super-admin','/admin','/mobile'], requireAuth, blockIfMustChangePassword)`. `/auth` is
   deliberately excluded so `change-password`, `me`, `logout` stay reachable.
+- **Login throttle & lockout** — [server/src/middleware/loginRateLimit.js](../server/src/middleware/loginRateLimit.js)
+  exports two `express-rate-limit` limiters (per-IP `max:50`, per-email `max:10`, 15-min window,
+  `skipSuccessfulRequests`) mounted on `/api/auth/login`. Both `skip` emails in
+  `LOGIN_RATELIMIT_ALLOWLIST` (comma-separated, lower-cased) so an allowlisted super-admin is never
+  throttled. State is the default in-process `MemoryStore` (per-dyno; cleared on redeploy).
+  `clearLoginLockout(email)` calls `loginEmailLimiter.resetKey(email)`, exposed to super admins via
+  `POST /super-admin/users/:userId/clear-lockout`.
 - **Self-service change** — `POST /auth/change-password` (`requireAuth` only, no org context). Verifies
   `currentPassword`, **enforces strength on `newPassword` via `strongPasswordSchema`** (8+ with an
   uppercase, a lowercase, a number, and a special character), rejects reuse, sets

@@ -7,7 +7,7 @@ import { Membership } from '../../models/Membership.js';
 import { User } from '../../models/User.js';
 import { Campaign } from '../../models/Campaign.js';
 import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
-import { slugSchema, emailSchema, nameSchema } from '../../utils/validators.js';
+import { slugSchema, emailSchema, nameSchema, passwordSchema } from '../../utils/validators.js';
 import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
@@ -23,11 +23,17 @@ const createSchema = z.object({
   isActive: z.boolean().optional(),
   // Trial length in days (default 7). The clock runs from creation.
   trialDays: z.number().int().min(1).max(90).optional(),
-  // Optional: seat the client's first admin in the same step. When present, we mint a
-  // temp password (returned ONCE for the super admin to hand over) and force a reset on
-  // first login. This admin gets billingAccess (they're the bill-payer).
+  // Optional: seat the client's first admin in the same step. When present, the super admin
+  // may TYPE a temp password (a simple one is fine) or leave it blank to auto-generate; either
+  // way it's returned ONCE for out-of-band hand-off and the admin is forced to choose a strong
+  // password on first login. This admin gets billingAccess (they're the bill-payer).
   admin: z
-    .object({ firstName: nameSchema, lastName: nameSchema, email: emailSchema })
+    .object({
+      firstName: nameSchema,
+      lastName: nameSchema,
+      email: emailSchema,
+      password: passwordSchema.optional(),
+    })
     .optional(),
 });
 
@@ -125,7 +131,9 @@ router.post('/', async (req, res, next) => {
     let admin = null;
     let tempPassword = null;
     if (data.admin) {
-      tempPassword = randomBytes(9).toString('base64url'); // ~12 chars, satisfies passwordSchema
+      // Use the typed temp password if the super admin set one; otherwise auto-generate a
+      // ~12-char one (base64url satisfies passwordSchema — no whitespace/control chars).
+      tempPassword = data.admin.password || randomBytes(9).toString('base64url');
       const { user } = await createOrgMember({
         orgId: org._id,
         addedBy: req.user._id,

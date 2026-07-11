@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api, getActiveOrgId } from '../api/client.js';
 import { BillingPill, fmtUsd } from '../lib/billingStatus.jsx';
 
@@ -27,14 +26,10 @@ function fmtShort(d) {
   return d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
 }
 
-// The org-admin view of the subscription: status, the plan summary, and the
-// billing contact. Rates and status changes live on the super-admin side —
-// this page is deliberately read-mostly.
+// The org-admin view of the subscription: status and the plan summary. Rates, status changes,
+// and the billing contact all live on the super-admin side — this page is deliberately read-only.
 export default function BillingPage() {
-  const qc = useQueryClient();
   const orgId = getActiveOrgId();
-  const [contact, setContact] = useState({ name: '', email: '' });
-  const [saved, setSaved] = useState(false);
 
   const billingQ = useQuery({
     queryKey: ['admin', 'billing', orgId],
@@ -42,23 +37,8 @@ export default function BillingPage() {
     enabled: Boolean(orgId),
   });
 
-  useEffect(() => {
-    if (billingQ.data?.billingContact) setContact(billingQ.data.billingContact);
-  }, [billingQ.data]);
-
-  const contactMut = useMutation({
-    mutationFn: (body) => api('/admin/billing/contact', { method: 'PATCH', body }),
-    onSuccess: () => {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-      qc.invalidateQueries({ queryKey: ['admin', 'billing'] });
-    },
-  });
-
   const data = billingQ.data;
   const ent = data?.entitlement;
-  const inputCls =
-    'mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -142,46 +122,6 @@ export default function BillingPage() {
             </a>
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              contactMut.mutate({ name: contact.name.trim(), email: contact.email.trim() });
-            }}
-            className="rounded-xl border border-border bg-card p-4 shadow-sm"
-          >
-            <h2 className="text-sm font-semibold text-fg">Billing contact</h2>
-            <p className="text-xs text-fg-muted">Who invoices and renewal notices should reach.</p>
-            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div>
-                <label className="block text-xs font-semibold text-fg-muted">Name</label>
-                <input
-                  value={contact.name}
-                  onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-fg-muted">Email</label>
-                <input
-                  type="email"
-                  value={contact.email}
-                  onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))}
-                  className={inputCls}
-                />
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={contactMut.isPending || !ent?.canWrite}
-                className="rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
-              >
-                {contactMut.isPending ? 'Saving…' : 'Save contact'}
-              </button>
-              {saved && <span className="text-sm text-success-fg">Saved.</span>}
-              {contactMut.error && <span className="text-sm text-danger">{contactMut.error.message}</span>}
-            </div>
-          </form>
         </>
       )}
     </div>

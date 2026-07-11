@@ -1,7 +1,8 @@
 # The platform console (super admin)
 
 What a **super admin** is, and the platform-wide console they use to oversee every organization on the
-instance — the Control Room, Organizations, All Users, People, and background Jobs.
+instance — the Control Room, Organizations, All Users, Imports (with geocoding costs), People, and
+background Jobs.
 
 - **Part 1 — For everyone** is plain language: who a super admin is and what each screen does.
 - **Part 2 — Technical reference** is for developers (and Claude): the gate, the endpoints, and where
@@ -47,7 +48,12 @@ any org to work inside it, then come back out.
   and the voted layer + published client report survive. Also runnable from the Heroku Run console:
   `npm --prefix server run demo:refresh`.
 - **All Users** — every account on the platform (with the orgs each belongs to and their role in each).
-  This is where you **promote or demote a super admin**. You can't change your own super-admin flag.
+  This is where you **promote or demote a super admin** (you can't change your own flag) and **clear a
+  user's login lockout** if they've been throttled by too many wrong passwords (see [USERS.md](USERS.md)).
+- **Imports** — every voter-file import across every org and the **geocoding cost** each incurred:
+  totals + a per-import table (homes that arrived with coordinates = free, vs. those that needed a
+  lookup; new vs. cached; and the internal dollar cost). This cost is owner-only — it's never shown to
+  admins or clients. Filter by month; see [IMPORTS.md](IMPORTS.md) § "Cost review (owner-only)".
 - **People** — the cross-org **Person** layer: the same real person appearing in several orgs, deduped;
   review merge/split candidates, approve edit proposals, and set ownership/locks. Fully documented in
   [PERSONS.md](PERSONS.md).
@@ -74,7 +80,8 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 | Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` ([platform.js](../server/src/routes/superAdmin/platform.js)) |
 | Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) | `GET/POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId`, `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js), tested by [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
 | Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; console runner `npm run demo:refresh`) |
-| All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) | `GET /super-admin/users`, `POST /super-admin/users/:userId/promote` ([users.js](../server/src/routes/superAdmin/users.js)) |
+| All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) | `GET /super-admin/users`, `POST /super-admin/users/:userId/promote`, `POST /super-admin/users/:userId/clear-lockout` (clears the per-email login throttle via `clearLoginLockout`, see [loginRateLimit.js](../server/src/middleware/loginRateLimit.js)) ([users.js](../server/src/routes/superAdmin/users.js)) |
+| Imports | [SuperAdminImportsPage.jsx](../client/src/pages/SuperAdminImportsPage.jsx) | `GET /super-admin/imports` — cross-org import + geocoding-cost aggregation (real persisted lookup counts; cost derived from `GEOCODE_COST_PER_1000_CENTS`, never sent to clients) ([imports.js](../server/src/routes/superAdmin/imports.js)) |
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
 | Jobs | queues page | Bull Board at `/admin/queues` (`requireBullBoardAuth`, mounted in [app.js](../server/src/app.js)) |
 

@@ -176,7 +176,7 @@ function DetectionPanel({ detection, explode, onToggleExplode, busy }) {
 
 function GeocodingPanel({ geocoding, result, onCheck, checking }) {
   if (!geocoding || !geocoding.uniqueNeedingGeocode) return null;
-  const { uniqueNeedingGeocode, cachedMatched, newToGeocode, estCostUsd, badZip } = geocoding;
+  const { uniqueNeedingGeocode, cachedMatched, newToGeocode, badZip } = geocoding;
   return (
     <div className="mb-4 rounded border border-border bg-card p-4">
       <h3 className="mb-2 text-sm font-medium">Geocoding</h3>
@@ -186,8 +186,8 @@ function GeocodingPanel({ geocoding, result, onCheck, checking }) {
             <strong>{fmt(uniqueNeedingGeocode)}</strong> address{uniqueNeedingGeocode === 1 ? '' : 'es'} need coordinates.{' '}
             {cachedMatched > 0 && <>{fmt(cachedMatched)} already cached · </>}
             {newToGeocode > 0 ? (
-              <><strong>{fmt(newToGeocode)}</strong> new lookup{newToGeocode === 1 ? '' : 's'} ≈ <strong>${estCostUsd.toFixed(2)}</strong></>
-            ) : 'all cached — free'}.
+              <><strong>{fmt(newToGeocode)}</strong> new lookup{newToGeocode === 1 ? '' : 's'}</>
+            ) : 'all cached'}.
             {badZip > 0 && <> {fmt(badZip)} have no valid ZIP and can’t be geocoded.</>}
           </p>
           <p className="mt-1 text-xs text-fg-subtle">
@@ -199,7 +199,7 @@ function GeocodingPanel({ geocoding, result, onCheck, checking }) {
               disabled={checking}
               className="mt-2 rounded border border-border-strong px-3 py-1 text-xs font-medium hover:bg-sunken disabled:opacity-60"
             >
-              {checking ? 'Geocoding…' : `See exact placement (≈$${estCostUsd.toFixed(2)})`}
+              {checking ? 'Geocoding…' : 'See exact placement'}
             </button>
           )}
         </>
@@ -211,7 +211,7 @@ function GeocodingPanel({ geocoding, result, onCheck, checking }) {
             {result.failed > 0 && <> {fmt(result.failed)} hit a temporary error (re-import retries).</>}
           </p>
           <p className="mt-1 text-xs text-fg-muted">
-            Geocoded {fmt(result.geocodedNew)} new (≈${(result.estCostUsd || 0).toFixed(2)}) + {fmt(result.geocodedCached)} cached. The import is now free (cached).
+            Geocoded {fmt(result.geocodedNew)} new + {fmt(result.geocodedCached)} cached. The import is now free (cached).
           </p>
           {result.sample?.length > 0 && (
             <details className="mt-2 rounded border border-border bg-sunken">

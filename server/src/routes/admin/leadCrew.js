@@ -9,15 +9,16 @@ import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import {
   createOrgMember,
   MemberError,
+  memberIdentityShape,
   resolveCoordinatorId,
 } from '../../services/memberships/createMember.js';
-import { phoneSchema, nameSchema, emailSchema, passwordSchema } from '../../utils/validators.js';
 
 // A team lead's crew surface, scoped to ONE campaign they manage (requireCampaignManager
 // gates the mount). It gives a lead the crew-building an org admin does on the Users
 // page — WITHOUT the org-wide Users administration: list org members to add, create a
-// brand-new canvasser onto this campaign, and set a crew member's coordinator. Adding/
-// removing existing members and reading the roster still go through .../assignments.
+// brand-new canvasser (or link a returning one by email) onto this campaign, and set a
+// crew member's coordinator. Adding/removing existing members and reading the roster
+// still go through .../assignments.
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
 
@@ -33,15 +34,13 @@ async function loadOwnedCampaign(req) {
   return campaign || null;
 }
 
-// A lead creates NET-NEW canvassers only. Linking an existing global account (by email)
-// pulls someone across orgs — that stays an org-admin act on the Users page — so we
-// require the new-account fields and never take a linkExisting flag here.
+// A lead builds their crew the same way an org admin adds a member on the Users page:
+// create a brand-new canvasser, OR link an EXISTING global account by email (a lead owns
+// onboarding, and a returning canvasser may already have a Door Line login from another
+// org). memberIdentityShape carries the same email-link / new-account rules and privacy
+// guards the admin path uses; createOrgMember enforces name+password on the create-new path.
 const createSchema = z.object({
-  email: emailSchema,
-  firstName: nameSchema,
-  lastName: nameSchema,
-  phone: phoneSchema,
-  password: passwordSchema,
+  ...memberIdentityShape,
   coordinatorId: z.string().nullable().optional(),
 });
 
@@ -92,9 +91,12 @@ router.post('/', async (req, res, next) => {
       ({ user } = await createOrgMember({
         orgId,
         addedBy: req.user._id,
-        data, // no linkExisting → create-new path; existing email → EMAIL_EXISTS_USE_LINK
-        role: 'canvasser', // a lead can only create canvassers for their crew
+        data, // linkExisting:true links an existing account; false → create-new (existing email → EMAIL_EXISTS_USE_LINK)
+        role: 'canvasser', // a lead can only create/link canvassers for their crew
         coordinatorId: coordRes.value || null,
+        // New accounts get a temp password + forced change on first login. A linked existing
+        // account keeps its own password (the flag only applies on the create-new branch).
+        mustChangePassword: true,
       }));
     } catch (err) {
       if (err instanceof MemberError) return res.status(err.status).json({ error: err.message, code: err.code });

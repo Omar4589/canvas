@@ -37,6 +37,9 @@ const importJobSchema = new mongoose.Schema(
     geocodedCached: { type: Number, default: 0 },
     geocodeUnmatched: { type: Number, default: 0 },
     geocodeFailed: { type: Number, default: 0 },
+    // Homes that arrived WITH lat/long in the file (no paid lookup needed). Only geocodedNew is
+    // billable; this + geocodedCached are free. Powers the super-admin Imports cost review.
+    householdsWithFileCoords: { type: Number, default: 0 },
     // Households the incoming voters lived at BEFORE this import (captured pre-apply).
     // Persisted so a BullMQ retry — which would re-read post-move state — still knows
     // which doors to re-check for emptiness. Source of retry-safe orphan deactivation.

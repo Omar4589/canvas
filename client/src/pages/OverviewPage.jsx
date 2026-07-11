@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
+import Skeleton from '../components/ui/Skeleton.jsx';
 import { EmptyState, Button } from '../components/ui/index.js';
 import { rateAccent, ratePct } from '../lib/rates.js';
 import { formatInTz } from '../lib/datetime.js';
@@ -111,6 +112,26 @@ function ChevronIcon({ open }) {
   );
 }
 
+// Shown while the rollup loads. Mirrors the "All active campaigns" section (coverage bar + the
+// compact KPI grid) so the layout doesn't jump — and, crucially, so the empty/setup state never
+// flashes before the data resolves.
+function OverviewSkeleton() {
+  return (
+    <section className="mb-8">
+      <Skeleton className="mb-3 h-6 w-48" />
+      <Skeleton className="mb-4 h-3 w-full rounded-full" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="rounded-lg border border-border bg-card p-3">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="mt-2 h-6 w-14" />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function OverviewPage() {
   const navigate = useNavigate();
   // Org-wide rollup → anchor presets to the org tz (available at login; campaigns may span
@@ -179,9 +200,7 @@ export default function OverviewPage() {
       )}
 
       {activeQ.isLoading ? (
-        <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
-          Loading…
-        </div>
+        <OverviewSkeleton />
       ) : activeQ.error ? (
         <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
           Error loading overview: {activeQ.error.message}
@@ -195,44 +214,52 @@ export default function OverviewPage() {
             <div className="mb-4">
               <CoverageBar canvass={cumulative.coverage} />
             </div>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               <StatCard
+                compact
                 label="Households"
                 value={cumulative.households?.toLocaleString()}
               />
               <StatCard
+                compact
                 label="Houses knocked"
                 value={cumulative.homesKnocked?.toLocaleString()}
                 hint={`${cumulative.knockedPct ?? 0}% of households`}
                 accent="brand"
               />
               <StatCard
+                compact
                 label="Knocks"
                 value={cumulative.knocks?.toLocaleString()}
                 hint="billable · per house-pass"
               />
               <StatCard
+                compact
                 label="Surveys"
                 value={cumulative.surveysSubmitted?.toLocaleString()}
                 hint="per voter"
                 accent="green"
               />
               <StatCard
+                compact
                 label="Surveyed voters"
                 value={cumulative.surveyedVoters?.toLocaleString()}
                 hint="distinct voters reached"
               />
               <StatCard
+                compact
                 label="Connection rate"
                 value={ratePct(cumulative.connectionRate)}
                 hint="surveyed knocks ÷ knocks"
                 accent={rateAccent(cumulative.connectionRate)}
               />
               <StatCard
+                compact
                 label="Lit drops"
                 value={cumulative.litDropped?.toLocaleString()}
               />
               <StatCard
+                compact
                 label="Active canvassers"
                 value={cumulative.activeCanvassers?.toLocaleString()}
               />

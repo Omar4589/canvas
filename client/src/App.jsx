@@ -50,6 +50,7 @@ const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage.jsx'));
 const SuperAdminHomePage = lazy(() => import('./pages/SuperAdminHomePage.jsx'));
 const SuperAdminUsersPage = lazy(() => import('./pages/SuperAdminUsersPage.jsx'));
 const SuperAdminPeoplePage = lazy(() => import('./pages/SuperAdminPeoplePage.jsx'));
+const SuperAdminImportsPage = lazy(() => import('./pages/SuperAdminImportsPage.jsx'));
 const PersonDetailPage = lazy(() => import('./pages/PersonDetailPage.jsx'));
 
 function PageFallback() {
@@ -129,6 +130,7 @@ export default function App() {
           <Route path="/super-admin/users" element={<SuperAdminUsersPage />} />
           <Route path="/super-admin/people" element={<SuperAdminPeoplePage />} />
           <Route path="/super-admin/people/:personId" element={<PersonDetailPage />} />
+          <Route path="/super-admin/imports" element={<SuperAdminImportsPage />} />
           <Route path="/organizations" element={<OrganizationsPage />} />
         </Route>
         {/* Campaign console — team leads (campaign-scoped admins) reach these too; the

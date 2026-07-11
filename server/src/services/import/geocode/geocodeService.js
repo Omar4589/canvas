@@ -34,6 +34,14 @@ export function geocodeUnitlessKey(h) {
   if (!h.addressLine2 || !UNIT_RE.test(String(h.addressLine2).trim())) return null;
   return looseAddressKey({ ...h, addressLine2: null });
 }
+// Internal geocoding cost assumption (~$1 per 1,000 new Geocodio lookups). Single source of truth
+// for the owner-only cost review — addresses that arrive with coords or hit the cache are free, so
+// only NEW lookups cost. The client never sees this; it surfaces on the super-admin Imports page.
+export const GEOCODE_COST_PER_1000_CENTS = 100;
+export function geocodeCostCents(newLookups) {
+  return Math.round(((Number(newLookups) || 0) / 1000) * GEOCODE_COST_PER_1000_CENTS);
+}
+
 export function needsGeocode(h) {
   return h.latitude == null || h.longitude == null;
 }
@@ -263,6 +271,7 @@ export async function forecast(householdMap) {
       else newToGeocode += 1;
     }
   }
-  const estCostUsd = Math.round((newToGeocode / 1000) * 100) / 100; // ~$1 / 1k
-  return { enabled, uniqueNeedingGeocode, badZip, cachedMatched, cachedUnmatched, newToGeocode, estCostUsd };
+  // No dollar figure here — geocoding cost is owner-only (super-admin Imports page), never sent to
+  // the client. Only the placement counts (cached vs. new) surface in the admin import preview.
+  return { enabled, uniqueNeedingGeocode, badZip, cachedMatched, cachedUnmatched, newToGeocode };
 }

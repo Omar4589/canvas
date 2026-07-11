@@ -3,7 +3,7 @@ import { ImportJob } from '../../models/ImportJob.js';
 import { Campaign } from '../../models/Campaign.js';
 import { loadRawImport, deleteRawImport } from './rawImportStore.js';
 import { buildImportRows, applyImport } from './csvImporter.js';
-import { resolve as geocodeResolve } from './geocode/geocodeService.js';
+import { resolve as geocodeResolve, needsGeocode } from './geocode/geocodeService.js';
 import { reconcileIdentityFromImport } from '../person/reconcileIdentityFromImport.js';
 import { normalizeAddress } from '../../utils/normalizeAddress.js';
 import { computeImportDiff } from './computeImportDiff.js';
@@ -85,7 +85,6 @@ export async function processImportJob(job) {
         failed: stats.geocodeFailed,
         geocodedNew: stats.geocodedNew,
         geocodedCached: stats.geocodedCached,
-        estCostUsd: Math.round((stats.geocodedNew / 1000) * 100) / 100,
         sample,
       };
       await ImportJob.updateOne(
@@ -116,6 +115,11 @@ export async function processImportJob(job) {
       await deleteRawImport(importJobId);
       return { ok: true, kind: 'preview', importJobId: String(importJobId) };
     }
+
+    // Homes that arrived WITH lat/long in the file — never needed a paid lookup. Counted BEFORE
+    // geocoding fills the rest, so it's an exact "arrived with coords" figure for the owner-only
+    // import cost review (super-admin Imports page).
+    const householdsWithFileCoords = [...householdMap.values()].filter((h) => !needsGeocode(h)).length;
 
     // ── Geocode missing-coordinate households (if enabled) ─────────────────────
     // Fills matched households' coords from the cache + Geocodio, and DROPS households
@@ -263,6 +267,7 @@ export async function processImportJob(job) {
           processedRows: totalRows,
           progress: 100,
           completedAt: new Date(),
+          householdsWithFileCoords,
           ...(geoStats || {}),
           ...(revisit ? { revisitSavedSearchId: revisit.savedSearchId, revisitHouseholdCount: revisit.householdCount } : {}),
         },
