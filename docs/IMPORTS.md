@@ -100,6 +100,15 @@ Where a voter ends up depends on the door:
   canvassed** until you assign it to an effort (Efforts page → open an effort → *Claim*). This is the
   deliberate control point for new doors.
 
+**Claiming isn't the last step.** Claiming sets *ownership* (which walk list a door belongs to), but a
+canvasser only ever sees doors that are **cut into a book and assigned** — so a freshly-claimed door is
+owned yet still invisible in the field until you book it. After you Claim, go to **Turf Cutting** for that
+walk list's active pass → **Add new doors** (a supplemental book) → **Accept** → **Assign**: no recut and no
+new pass, the new doors join the running round and appear on the canvassers' next full refresh. The full
+walkthrough — including when to use **Claim all Intake** vs. a saved search — is in
+[EFFORTS.md](EFFORTS.md) → *"Assign new voters (Intake)"* and [PASSES_AND_TURF.md](PASSES_AND_TURF.md) →
+*"Adding new voters after a pass exists."*
+
 ## Things to watch (today's behavior)
 
 - **Voters that change doors are now surfaced.** If the same Voter ID is uploaded with a different

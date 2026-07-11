@@ -58,6 +58,11 @@ On the **Saved Searches** page, the "Build a saved search" panel has two modes:
 Both produce the same thing: a frozen saved search you can seed/claim into a walk list. A saved search shows a
 **"from CSV"** badge when it was built by upload.
 
+**You can build one the moment your first import finishes** — saved searches are campaign-scoped and need no
+walk list to exist yet, so your *very first* walk list can be targeted rather than "everyone." Upload the file,
+build the filter (say, **Party = DEM**, or a single precinct), save it, then create the walk list seeded from
+that saved search. (Only geocoded doors are included — see *Things to know* below.)
+
 ## The multi-voter-door rule
 
 A saved search is a set of **doors**. When you upload a Voter-ID CSV, a door joins the saved search if **any** of

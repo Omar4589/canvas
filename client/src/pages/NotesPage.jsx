@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -54,8 +54,10 @@ export default function NotesPage() {
   const campaigns = campaignsQ.data?.campaigns || [];
   const current = campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
   const tz = current?.timeZone || orgTz;
+  const tzReady = !campaignsQ.isLoading;
 
-  const [dateRange, setDateRange] = useState(() => defaultRange('all'));
+  const [dateRange, setDateRange] = useState(() => defaultRange('today', orgTz));
+  const rangeTouchedRef = useRef(false);
   const [types, setTypes] = useState([]); // [] = all sources
   const [authorId, setAuthorId] = useState('');
   const [effortId, setEffortId] = useState('');
@@ -67,7 +69,8 @@ export default function NotesPage() {
   const [prevCampaignId, setPrevCampaignId] = useState(campaignId);
   if (prevCampaignId !== campaignId) {
     setPrevCampaignId(campaignId);
-    setDateRange(defaultRange('all'));
+    setDateRange(defaultRange('today', tz));
+    rangeTouchedRef.current = false;
     setTypes([]);
     setAuthorId('');
     setEffortId('');
@@ -75,6 +78,13 @@ export default function NotesPage() {
     setQ('');
     setPage(0);
   }
+
+  // Default the range to the campaign's "today" once its tz is known (so it's the
+  // campaign's day for every admin). Skips if the admin already picked a range.
+  useEffect(() => {
+    if (rangeTouchedRef.current || !tzReady) return;
+    setDateRange(defaultRange('today', tz));
+  }, [tzReady, tz]);
 
   // Debounce the search box.
   useEffect(() => {
@@ -133,6 +143,11 @@ export default function NotesPage() {
     setTypes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   }
 
+  function onRangeChange(next) {
+    rangeTouchedRef.current = true;
+    setDateRange(next);
+  }
+
   if (!campaignId || (!campaignsQ.isLoading && !current)) {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
@@ -154,7 +169,7 @@ export default function NotesPage() {
           <h1 className="text-2xl font-semibold text-fg">{current?.name || 'Campaign'}</h1>
           <div className="mt-1 text-sm text-fg-muted">Notes — everything the field and admins left</div>
         </div>
-        <DateRangeSelector value={dateRange} onChange={setDateRange} tz={tz} presets={RANGE_PRESETS} />
+        <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} presets={RANGE_PRESETS} />
       </div>
 
       <div className="mb-4 space-y-3">
