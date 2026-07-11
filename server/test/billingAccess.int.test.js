@@ -164,12 +164,22 @@ test('provisioning creates org + custom trial + first admin (temp pw, billing ac
   assert.strictEqual(await Organization.countDocuments({ name: 'Dup Co' }), 0, 'no org created on the conflict');
 });
 
-test('migration grandfathers existing admins', { skip }, async () => {
+test('migration grandfathers existing admins but skips super admins', { skip }, async () => {
   const org2 = await Organization.create({ name: 'Legacy', slug: 'legacy', isActive: true });
   const legacyAdmin = await makeUser('Len');
+  const superMember = await makeUser('Sam', { isSuperAdmin: true }); // super admin who also has an org membership
   await Membership.create({ userId: legacyAdmin._id, organizationId: org2._id, role: 'admin', isActive: true, billingAccess: false });
-  // The migration's core operation:
-  await Membership.updateMany({ role: 'admin', billingAccess: { $ne: true } }, { $set: { billingAccess: true } });
-  const m = await Membership.findOne({ userId: legacyAdmin._id, organizationId: org2._id }).lean();
-  assert.strictEqual(m.billingAccess, true, 'existing admins keep billing access after the migration');
+  await Membership.create({ userId: superMember._id, organizationId: org2._id, role: 'admin', isActive: true, billingAccess: false });
+
+  // The migration's operation: grandfather non-super admins only.
+  const superIds = (await User.find({ isSuperAdmin: true }, { _id: 1 }).lean()).map((u) => u._id);
+  await Membership.updateMany(
+    { role: 'admin', billingAccess: { $ne: true }, userId: { $nin: superIds } },
+    { $set: { billingAccess: true } }
+  );
+
+  const legacy = await Membership.findOne({ userId: legacyAdmin._id, organizationId: org2._id }).lean();
+  assert.strictEqual(legacy.billingAccess, true, 'a real admin keeps billing access after the migration');
+  const sup = await Membership.findOne({ userId: superMember._id, organizationId: org2._id }).lean();
+  assert.strictEqual(sup.billingAccess, false, 'a super admin is skipped — they bypass the billing gate anyway');
 });

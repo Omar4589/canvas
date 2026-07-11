@@ -10,7 +10,10 @@ import { Organization } from '../models/Organization.js'; // registered for popu
 // We grant it to every existing role:'admin' membership — nobody loses access — while new
 // admins added afterward default to false until a bill-payer admin grants them.
 //
-// Idempotent: matches only admins that don't already have billingAccess: true.
+// Super admins are SKIPPED: they bypass the billing gate entirely (they see every org's
+// billing regardless of this flag), so the flag on their org membership would be redundant.
+//
+// Idempotent: matches only non-super admins that don't already have billingAccess: true.
 //
 // Usage: node src/migrations/migrateBillingAccess.js [--apply]
 const APPLY = process.argv.includes('--apply');
@@ -18,7 +21,10 @@ const APPLY = process.argv.includes('--apply');
 async function main() {
   await connectDb(process.env.MONGODB_URI);
 
-  const filter = { role: 'admin', billingAccess: { $ne: true } };
+  // Super admins bypass the billing gate, so exclude them — the grandfather is only for
+  // real org admins who'd otherwise lose the page.
+  const superIds = (await User.find({ isSuperAdmin: true }, { _id: 1 }).lean()).map((u) => u._id);
+  const filter = { role: 'admin', billingAccess: { $ne: true }, userId: { $nin: superIds } };
   const pending = await Membership.find(filter)
     .populate('userId', 'firstName lastName email')
     .populate('organizationId', 'name slug')

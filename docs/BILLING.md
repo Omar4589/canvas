@@ -180,7 +180,8 @@ expiry, grace, super-admin bypass, statement windows) — run with `MONGODB_URI_
 
 **Per-admin billing access (later addition)** ships **server → `npm run migrate:billing-access --apply`
 → web** (no mobile). The migration grandfathers `billingAccess:true` onto every existing
-`role:'admin'` membership so no current admin loses the page; new admins default off. Covered by
+**non-super-admin** `role:'admin'` membership so no current admin loses the page (super admins
+are skipped — they bypass the gate anyway); new admins default off. Covered by
 [test/billingAccess.int.test.js](../server/test/billingAccess.int.test.js) (gating, usage math,
 provisioning, grandfather).
 
