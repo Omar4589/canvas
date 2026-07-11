@@ -162,8 +162,13 @@ strip), pills + strip on the Control Room ([SuperAdminHomePage.jsx](../client/sr
 shared meta in [lib/billingStatus.jsx](../client/src/lib/billingStatus.jsx).
 
 Mobile: `entitlement` rides the bootstrap; [EntitlementBanner.jsx](../mobile/components/EntitlementBanner.jsx)
-renders on the map (under the context card) and the campaign picker; the household screen disables
-disposition buttons on `canCanvass === false` with a notice ([household/[id].jsx](../mobile/app/(app)/household/[id].jsx)).
+renders on the map (under the context card) and the campaign picker. It is **role-aware** (reads the
+cached role via `loadRoleContext`): only **admins** see the billing warnings (trial countdown, past-due
+invoice); **canvassers and team leads** see only a plain "This account is paused — canvassing is disabled.
+Your recorded work is safe." for the read-only states (`trial_expired`/`suspended`/`canceled`), and nothing
+during `trial`/`past_due` — they don't handle the bill, so no trial/money wording reaches them. The
+household screen likewise disables disposition buttons on `canCanvass === false` with a billing-neutral
+"Canvassing is paused…" notice ([household/[id].jsx](../mobile/app/(app)/household/[id].jsx)).
 Older installed builds are safe: the server 402 is the backstop and `api.js` already surfaces
 `err.message`; a fresh (post-suspension) submission hard-rejects with the friendly copy, while
 queued pre-suspension work flushes under the grace rule.
