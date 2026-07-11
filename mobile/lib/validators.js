@@ -44,3 +44,19 @@ export const passwordProblem = (pw) => {
   const miss = PASSWORD_RULES.filter((r) => !r.test(String(pw ?? '')));
   return miss.length ? `Password needs: ${miss.map((r) => r.label.toLowerCase()).join(', ')}.` : null;
 };
+
+// An ADMIN-SET TEMPORARY password (create user / admin reset / create canvasser). No complexity
+// rule — a simple temp like "victory26" is fine; the person sets a strong one at first login.
+// Mirrors the server's passwordSchema (the real guard): min 8, max 200, no control characters,
+// no leading/trailing whitespace (a copy-paste footgun). Returns a problem string, or null.
+export const tempPasswordProblem = (pw) => {
+  const s = String(pw ?? '');
+  if (s.length < PASSWORD_MIN) return `Temporary password must be at least ${PASSWORD_MIN} characters.`;
+  if (s.length > 200) return 'Temporary password is too long.';
+  if ([...s].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f))
+    return 'Temporary password can’t contain control characters.';
+  if (s !== s.trim()) return 'Temporary password can’t start or end with a space.';
+  return null;
+};
+
+export const isValidTempPassword = (pw) => tempPasswordProblem(pw) === null;

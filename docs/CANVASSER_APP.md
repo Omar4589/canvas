@@ -35,6 +35,9 @@ If you only have one organization, you skip that screen. If a campaign has a sin
 common case), picking it drops you straight on the book picker. The app also remembers the last book
 you were working, so a cold start reopens it instead of making you pick again.
 
+**Your very first sign-in** uses the temporary password your admin or team lead gave you; the app
+immediately asks you to choose your own strong password before you can start knocking.
+
 ## The menu (the hamburger)
 
 Every canvasser screen has a **menu button (☰) in the top-right**. Tapping it slides a panel in from

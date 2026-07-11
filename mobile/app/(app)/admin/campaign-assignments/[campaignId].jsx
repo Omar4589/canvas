@@ -20,7 +20,7 @@ import PasswordInput from '../../../../components/PasswordInput';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
-import { formatUsPhoneInput } from '../../../../lib/validators';
+import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../../lib/validators';
 
 export default function CampaignAssignmentsScreen() {
   const { colors } = useTheme();
@@ -224,6 +224,7 @@ export default function CampaignAssignmentsScreen() {
         <CreateCanvasserModal
           onClose={() => setShowCreate(false)}
           onCreate={(body) => createMut.mutate(body)}
+          onFoundExisting={(em) => { setSearch(em); setShowCreate(false); }}
           submitting={createMut.isPending}
           error={createMut.error}
           colors={colors}
@@ -234,23 +235,40 @@ export default function CampaignAssignmentsScreen() {
   );
 }
 
-function CreateCanvasserModal({ onClose, onCreate, submitting, error, colors, styles }) {
+function CreateCanvasserModal({ onClose, onCreate, onFoundExisting, submitting, error, colors, styles }) {
+  const [linkExisting, setLinkExisting] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const valid = firstName.trim() && lastName.trim() && email.trim() && password.length >= 8;
+
+  // The email already has a Door Line account — flip to the link path so a returning
+  // canvasser can still be added (a lead owns onboarding). They keep their own password.
+  useEffect(() => {
+    if (error?.data?.code === 'EMAIL_EXISTS_USE_LINK') setLinkExisting(true);
+  }, [error]);
+
+  const valid = linkExisting
+    ? !!email.trim()
+    : firstName.trim() && lastName.trim() && email.trim() && isValidTempPassword(password);
+  const pwProblem = !linkExisting && password.length > 0 ? tempPasswordProblem(password) : null;
 
   function submit() {
     if (!valid || submitting) return;
-    onCreate({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email.trim().toLowerCase(),
-      phone: phone.trim() || undefined,
-      password,
-    });
+    const em = email.trim().toLowerCase();
+    onCreate(
+      linkExisting
+        ? { email: em, linkExisting: true }
+        : {
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            email: em,
+            phone: phone.trim() || undefined,
+            password,
+            linkExisting: false,
+          }
+    );
   }
 
   return (
@@ -261,35 +279,84 @@ function CreateCanvasserModal({ onClose, onCreate, submitting, error, colors, st
       >
         <Pressable style={styles.modalBackdrop} onPress={onClose} />
         <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>New canvasser</Text>
+          <Text style={styles.modalTitle}>Add a canvasser</Text>
           <Text style={styles.modalSub}>
-            Creates a canvasser and adds them to this campaign. They set their own password at first sign-in.
+            {linkExisting
+              ? 'Links an existing Door Line account to this org and campaign. They keep their current password.'
+              : 'Creates a canvasser and adds them to this campaign. Set a temporary password — they choose their own strong one at first sign-in.'}
           </Text>
           <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>
-            <View style={styles.formRow2}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.formLabel}>First name</Text>
-                <TextInput value={firstName} onChangeText={setFirstName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+            <Pressable
+              onPress={() => setLinkExisting((v) => !v)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}
+            >
+              <View
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 4,
+                  borderWidth: 1,
+                  borderColor: linkExisting ? colors.brand : colors.border,
+                  backgroundColor: linkExisting ? colors.brand : 'transparent',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {linkExisting && (
+                  <Text style={{ color: colors.textInverse, fontWeight: '700', fontSize: 12 }}>✓</Text>
+                )}
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.formLabel}>Last name</Text>
-                <TextInput value={lastName} onChangeText={setLastName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+              <Text style={{ color: colors.textPrimary, fontSize: 13, flex: 1 }}>
+                Existing user (by email — link them to this org)
+              </Text>
+            </Pressable>
+            {!linkExisting && (
+              <View style={styles.formRow2}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formLabel}>First name</Text>
+                  <TextInput value={firstName} onChangeText={setFirstName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formLabel}>Last name</Text>
+                  <TextInput value={lastName} onChangeText={setLastName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+                </View>
               </View>
-            </View>
+            )}
             <Text style={styles.formLabel}>Email</Text>
             <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" placeholder="jane@example.com" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
-            <Text style={styles.formLabel}>Phone (optional)</Text>
-            <TextInput value={phone} onChangeText={(t) => setPhone(formatUsPhoneInput(t))} keyboardType="phone-pad" placeholder="(555) 123-4567" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
-            <Text style={styles.formLabel}>Temporary password (min 8)</Text>
-            <PasswordInput value={password} onChangeText={setPassword} autoComplete="new-password" placeholder="At least 8 characters" />
-            {error ? <Text style={styles.modalError}>{error.message}</Text> : null}
+            {!linkExisting && (
+              <>
+                <Text style={styles.formLabel}>Phone (optional)</Text>
+                <TextInput value={phone} onChangeText={(t) => setPhone(formatUsPhoneInput(t))} keyboardType="phone-pad" placeholder="(555) 123-4567" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
+                <Text style={styles.formLabel}>Temporary password (min 8)</Text>
+                <PasswordInput value={password} onChangeText={setPassword} autoComplete="new-password" placeholder="At least 8 characters" />
+                {pwProblem ? <Text style={styles.modalError}>{pwProblem}</Text> : null}
+              </>
+            )}
+            {error && error.data?.code === 'ALREADY_MEMBER' ? (
+              <Text style={[styles.modalSub, { marginTop: spacing.sm }]}>
+                That person is already in your organization — close this and add them from the list above.
+                {onFoundExisting ? ' ' : ''}
+                {onFoundExisting ? (
+                  <Text style={{ color: colors.brand, fontWeight: '700' }} onPress={() => onFoundExisting(email.trim().toLowerCase())}>
+                    Search for “{email.trim().toLowerCase()}” →
+                  </Text>
+                ) : null}
+              </Text>
+            ) : error && error.data?.code === 'EMAIL_EXISTS_USE_LINK' ? (
+              <Text style={[styles.modalSub, { marginTop: spacing.sm }]}>
+                This email already has a Door Line account — we switched on “Existing user” above. Tap Link user to add them.
+              </Text>
+            ) : error ? (
+              <Text style={styles.modalError}>{error.message}</Text>
+            ) : null}
           </ScrollView>
           <View style={styles.modalActions}>
             <Pressable onPress={onClose} style={styles.modalCancel}>
               <Text style={styles.modalCancelText}>Cancel</Text>
             </Pressable>
             <Pressable onPress={submit} disabled={!valid || submitting} style={[styles.modalCreate, (!valid || submitting) && { opacity: 0.5 }]}>
-              <Text style={styles.modalCreateText}>{submitting ? 'Creating…' : 'Create & add'}</Text>
+              <Text style={styles.modalCreateText}>{submitting ? 'Saving…' : linkExisting ? 'Link user' : 'Create & add'}</Text>
             </Pressable>
           </View>
         </View>

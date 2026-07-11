@@ -6,6 +6,7 @@ import PasswordInput from './PasswordInput.jsx';
 import PhoneInput from './ui/PhoneInput.jsx';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { tempPasswordProblem, isValidTempPassword } from '../lib/validators.js';
 
 const ACTION_LABEL = {
   survey_submitted: 'Surveyed',
@@ -289,7 +290,11 @@ export default function UserProfileModal({ membership, onClose }) {
 
   function onResetPw(e) {
     e.preventDefault();
-    if (newPassword.length < 8) return;
+    const problem = tempPasswordProblem(newPassword);
+    if (problem) {
+      flash('error', problem);
+      return;
+    }
     resetPw.mutate(newPassword);
   }
 
@@ -722,7 +727,7 @@ export default function UserProfileModal({ membership, onClose }) {
                 </div>
                 <button
                   type="submit"
-                  disabled={resetPw.isPending || newPassword.length < 8}
+                  disabled={resetPw.isPending || !isValidTempPassword(newPassword)}
                   className="rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50"
                 >
                   {resetPw.isPending ? 'Saving…' : 'Set password'}

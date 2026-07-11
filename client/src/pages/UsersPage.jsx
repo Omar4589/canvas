@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
 import UserProfileModal from '../components/UserProfileModal.jsx';
+import { tempPasswordProblem } from '../lib/validators.js';
 import {
   Card,
   Button,
@@ -102,6 +103,7 @@ export default function UsersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [emailLookup, setEmailLookup] = useState(false);
+  const [formError, setFormError] = useState('');
   const [selectedUserId, setSelectedUserId] = useState(null);
 
   const [search, setSearch] = useState('');
@@ -195,11 +197,18 @@ export default function UsersPage() {
     };
     if (form.role === 'lead') body.managedCampaignIds = form.managedCampaignIds;
     if (!emailLookup) {
+      // A new account: check the relaxed temp-password rule before the round-trip.
+      const problem = tempPasswordProblem(form.password);
+      if (problem) {
+        setFormError(problem);
+        return;
+      }
       body.firstName = form.firstName;
       body.lastName = form.lastName;
       body.phone = form.phone;
       body.password = form.password;
     }
+    setFormError('');
     addMember.mutate(body);
   }
 
@@ -240,7 +249,14 @@ export default function UsersPage() {
         <Card as="form" onSubmit={onSubmit} className="mb-6 grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
           <div className="md:col-span-3 flex items-center gap-2 text-xs">
             <label className="inline-flex cursor-pointer items-center gap-1.5">
-              <input type="checkbox" checked={emailLookup} onChange={(e) => setEmailLookup(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={emailLookup}
+                onChange={(e) => {
+                  setEmailLookup(e.target.checked);
+                  setFormError('');
+                }}
+              />
               <span className="text-fg-muted">Existing user (by email — link them to this org)</span>
             </label>
           </div>
@@ -345,7 +361,7 @@ export default function UsersPage() {
                 />
               </div>
               <div className="md:col-span-3">
-                <label className={labelCls}>Initial password <span className="text-fg-subtle">(min 8 characters)</span></label>
+                <label className={labelCls}>Temporary password <span className="text-fg-subtle">(min 8 characters — they set their own at first sign-in)</span></label>
                 <div className="mt-1">
                   <PasswordInput
                     value={form.password}
@@ -362,7 +378,9 @@ export default function UsersPage() {
             <Button type="submit" loading={addMember.isPending}>
               {emailLookup ? 'Link existing user' : 'Create + add'}
             </Button>
-            {addMember.error && <span className="ml-3 text-sm text-danger">{addMember.error.message}</span>}
+            {(formError || addMember.error) && (
+              <span className="ml-3 text-sm text-danger">{formError || addMember.error.message}</span>
+            )}
           </div>
         </Card>
       )}

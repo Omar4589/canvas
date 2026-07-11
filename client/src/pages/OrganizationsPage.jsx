@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import OrgBillingPanel from '../components/OrgBillingPanel.jsx';
 import { BillingPill } from '../lib/billingStatus.jsx';
-import { isValidEmail } from '../lib/validators.js';
+import { isValidEmail, tempPasswordProblem } from '../lib/validators.js';
 
 const fieldCls =
   'mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
@@ -25,6 +25,8 @@ export default function OrganizationsPage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
+  // Optional typed temp password for the first admin; blank = auto-generate one server-side.
+  const [adminPassword, setAdminPassword] = useState('');
   const [error, setError] = useState(null);
   // One-time credentials to hand over, set from the create response's tempPassword.
   const [createdCreds, setCreatedCreds] = useState(null); // { orgName, email, tempPassword }
@@ -48,6 +50,7 @@ export default function OrganizationsPage() {
       setFirstName('');
       setLastName('');
       setAdminEmail('');
+      setAdminPassword('');
       setError(null);
       // Surface the temp password ONCE — the only time it's ever shown.
       if (res?.tempPassword && res?.admin) {
@@ -100,11 +103,20 @@ export default function OrganizationsPage() {
         setError('Enter a valid admin email.');
         return;
       }
+      if (adminPassword !== '') {
+        const problem = tempPasswordProblem(adminPassword);
+        if (problem) {
+          setError(problem);
+          return;
+        }
+      }
     }
     const days = Math.max(1, Math.min(90, parseInt(trialDays, 10) || 7));
     const body = { name: name.trim(), slug: slug.trim() || undefined, trialDays: days };
     if (wantsAdmin) {
       body.admin = { firstName: firstName.trim(), lastName: lastName.trim(), email: adminEmail.trim() };
+      // Only send a password when the super admin typed one; otherwise the server auto-generates.
+      if (adminPassword !== '') body.admin.password = adminPassword;
     }
     createMut.mutate(body);
   }
@@ -179,8 +191,9 @@ export default function OrganizationsPage() {
             First admin (optional)
           </h3>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Leave blank to add admins later from the Users page. When filled, we mint a one-time temp
-            password to hand over — they’ll reset it on first login and get billing access.
+            Leave blank to add admins later from the Users page. When filled, set a temp password to
+            hand over (or leave it blank to auto-generate one) — either way it’s shown once, they reset
+            it on first login, and they get billing access.
           </p>
           <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
@@ -211,6 +224,23 @@ export default function OrganizationsPage() {
                 className={fieldCls}
               />
             </div>
+          </div>
+          <div className="mt-3">
+            <label className="block text-xs font-semibold text-fg-muted">
+              Temporary password{' '}
+              <span className="font-normal text-fg-subtle">(optional — leave blank to auto-generate)</span>
+            </label>
+            <input
+              type="text"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              placeholder="Leave blank to auto-generate a secure one"
+              autoComplete="off"
+              className={fieldCls}
+            />
+            <p className="mt-1 text-xs text-fg-subtle">
+              A simple one is fine — they choose a strong password on first login.
+            </p>
           </div>
         </div>
 

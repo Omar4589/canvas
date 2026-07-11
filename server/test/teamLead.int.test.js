@@ -228,6 +228,47 @@ test('lead can create a canvasser onto a managed campaign via /crew, not onto B'
   assert.strictEqual(no.status, 403, 'crew create on B');
 });
 
+test('crew create issues a temp password + forced change; a lead can link an existing account (keeps its own password)', { skip }, async () => {
+  const { leadTok, org, A } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+
+  // 1) A brand-new canvasser created via /crew is forced to change on first login (with the
+  //    72h temp-password clock started). A simple temp like "victory26" is accepted.
+  const created = await call('POST', `/api/admin/campaigns/${A._id}/crew`, {
+    ...opt,
+    body: { firstName: 'Temp', lastName: 'Hire', email: 'temp.hire@t.co', password: 'victory26' },
+  });
+  assert.strictEqual(created.status, 201, 'crew create new');
+  const newUser = await User.findOne({ email: 'temp.hire@t.co' });
+  assert.strictEqual(newUser.mustChangePassword, true, 'new hire must change password');
+  assert.ok(newUser.tempPasswordSetAt, 'new hire has tempPasswordSetAt (72h clock)');
+
+  // 2) An EXISTING global account (as if from another org), created out-of-band.
+  const existing = await User.create({
+    firstName: 'Rey', lastName: 'Returner', email: 'returner@t.co',
+    passwordHash: 'existing-hash', isActive: true,
+  });
+
+  // Trying to CREATE (not link) with that email is refused and nudges toward linking.
+  const dup = await call('POST', `/api/admin/campaigns/${A._id}/crew`, {
+    ...opt,
+    body: { firstName: 'Rey', lastName: 'Returner', email: 'returner@t.co', password: 'password123' },
+  });
+  assert.strictEqual(dup.status, 409, 'existing email create → 409');
+  assert.strictEqual(dup.json.code, 'EMAIL_EXISTS_USE_LINK', 'nudged to link');
+
+  // 3) The lead LINKS the existing account onto their campaign — now allowed — and it keeps
+  //    its own password (no temp password, no forced change).
+  const linked = await call('POST', `/api/admin/campaigns/${A._id}/crew`, {
+    ...opt,
+    body: { email: 'returner@t.co', linkExisting: true },
+  });
+  assert.strictEqual(linked.status, 201, 'lead links existing account');
+  const afterLink = await User.findById(existing._id);
+  assert.strictEqual(afterLink.passwordHash, 'existing-hash', 'linked account keeps its password');
+  assert.ok(!afterLink.mustChangePassword, 'linked account is NOT forced to change');
+});
+
 test('lead can load the campaign map for A, not B, and never org-wide', { skip }, async () => {
   const { leadTok, org, A, B } = ctx;
   const opt = { token: leadTok, orgId: org._id };

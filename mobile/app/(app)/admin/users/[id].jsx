@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
 import { loadCurrentUser } from '../../../../lib/cache';
-import { formatUsPhoneInput } from '../../../../lib/validators';
+import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../../lib/validators';
 import PasswordInput from '../../../../components/PasswordInput';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
@@ -301,7 +301,11 @@ export default function AdminUserDetail() {
   }
 
   function onResetPw() {
-    if (newPassword.length < 8) return;
+    const problem = tempPasswordProblem(newPassword);
+    if (problem) {
+      flash('error', problem);
+      return;
+    }
     resetPw.mutate(newPassword);
   }
 
@@ -627,13 +631,13 @@ export default function AdminUserDetail() {
                 />
                 <Pressable
                   onPress={onResetPw}
-                  disabled={newPassword.length < 8 || resetPw.isPending}
+                  disabled={!isValidTempPassword(newPassword) || resetPw.isPending}
                   style={[
                     styles.saveBtn,
                     {
                       marginTop: spacing.md,
                       opacity:
-                        newPassword.length >= 8 && !resetPw.isPending ? 1 : 0.5,
+                        isValidTempPassword(newPassword) && !resetPw.isPending ? 1 : 0.5,
                     },
                   ]}
                 >

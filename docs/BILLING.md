@@ -55,9 +55,9 @@ exportable as CSV for invoicing. Payment itself happens outside the app (send an
 Invoicing works well); the app tracks *entitlement*, not money.
 
 **Onboarding a new client is one step:** creating the org also seats its **first admin** (name +
-email → a temp password to hand over; they reset it on first login) and starts the trial at your
-chosen length. Without this the org would have no admin and no way to seat one (adding members
-needs an existing admin).
+email → a temp password to hand over — type a simple one or leave it blank to auto-generate; either
+way it's shown once and they reset it on first login) and starts the trial at your chosen length.
+Without this the org would have no admin and no way to seat one (adding members needs an existing admin).
 
 **Not every admin sees billing.** Billing is gated per-admin by a **billing-access** flag — only
 the people who actually pay the bill. The seated first admin gets it; other admins don't until a
@@ -129,7 +129,7 @@ not archived before M began (`archivedAt || updatedAt` for legacy rows). `knocks
 | `POST …/billing/extend-trial` `{days?\|until?}` | Trial-status only. `+days` from max(now, current end) — extending an *expired* trial un-suspends with no separate step. |
 | `GET …/billing/statement?month=YYYY-MM` | The monthly statement JSON (CSV is built client-side from it). |
 | `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, rate, and **`usage`** (this month's billable-campaign count + `totalCents` via `currentUsage`). **No** billing contact / notes / source / Stripe ids. |
-| `POST /super-admin/organizations` | Create a client: org + trial (`trialDays`, default 7) + optional **first admin** (`admin{firstName,lastName,email}` → mints a temp password, `mustChangePassword`, `billingAccess:true`; returns `tempPassword` once). A taken admin email 409s **before** the org is created. |
+| `POST /super-admin/organizations` | Create a client: org + trial (`trialDays`, default 7) + optional **first admin** (`admin{firstName,lastName,email,password?}` → uses the typed `password` or auto-generates a temp one, `mustChangePassword`, `billingAccess:true`; returns `tempPassword` once). A taken admin email 409s **before** the org is created. |
 | `PATCH /admin/memberships/:userId` `{billingAccess}` | Grant/revoke the Billing surface for an admin — only a caller who already has `billingAccess` (or a super admin) may change it (else 403). |
 
 ## Onboarding & per-admin billing access

@@ -13,7 +13,7 @@ Welcome! Here's the whole flow on your first day in the field.
 
 ## Getting to your doors
 
-1. **Sign in** with the email and password your admin gave you. If it's a temporary password, you'll be asked to set your own.
+1. **Sign in** with the email and temporary password your admin or team lead gave you. On that first sign-in you'll be asked to set your own strong password.
 2. **Pick your campaign** on the "Pick a campaign" screen. If a campaign is split into several walk lists, it expands so you can pick the one you're working — then you land on your books.
 3. **Open a book** — your assigned books are waiting. Each book is an ordered list of houses for you to walk.
 4. **Knock a door** — tap a house to see who lives there and record what happened.

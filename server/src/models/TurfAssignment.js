@@ -27,6 +27,10 @@ const turfAssignmentSchema = new mongoose.Schema(
     passId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', required: true },
     assignedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     assignedAt: { type: Date, default: () => new Date() },
+    // Demo only: marks the book reserved for the App Store / Google Play review
+    // account so it's kept unwalked (fresh doors for reviewers). The demo refresh
+    // excludes marked books; nothing else reads this. Defaults false — no migration.
+    isReviewerBook: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

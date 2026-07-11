@@ -133,10 +133,11 @@ a lead sees the map + ping/household detail only for campaigns they manage.
 
 **The lead's crew surface** — `leadCrew` ([leadCrew.js](../server/src/routes/admin/leadCrew.js)) at
 `/admin/campaigns/:campaignId/crew`, behind `requireCampaignManager`: `GET /` (org members for the
-add-picker), `POST /` (create a **net-new canvasser** — role hard-coded — and put them on this campaign;
-linking an existing cross-org account stays an admin act), `PATCH /:userId/coordinator` (scoped to this
-campaign's roster). This is how a lead builds a crew without the org Users admin. Adding/removing
-*existing* members and reading the roster still go through `.../assignments`.
+add-picker), `POST /` (create a **canvasser** — or **link an existing account by email** (`linkExisting`)
+— role hard-coded, and put them on this campaign; a lead owns onboarding, so linking a returning
+cross-org canvasser is allowed here too, with the same privacy guards as the admin path), `PATCH
+/:userId/coordinator` (scoped to this campaign's roster). This is how a lead builds a crew without the
+org Users admin. Adding/removing *existing* members and reading the roster still go through `.../assignments`.
 
 Member creation + validation is shared in
 [services/memberships/createMember.js](../server/src/services/memberships/createMember.js)

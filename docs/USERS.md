@@ -38,17 +38,19 @@ You can't create two separate accounts on the same email.
 
 On the Users page, "Add member" has two modes:
 
-- **New user** (default) — you provide their name, email, optional phone, an initial password, and a
-  role. This creates a brand-new account.
+- **New user** (default) — you provide their name, email, optional phone, a **temporary password**, and
+  a role. This creates a brand-new account. The temporary password can be simple — the person is
+  **required to choose their own strong password the first time they sign in** (on web or mobile).
 - **Existing user (by email — link them to this org)** — check the box and enter just an email + role.
   This finds a person who *already has an account* (e.g. they canvass for another campaign) and adds
   a membership to your org, without creating a duplicate.
 
-You can also add a **new canvasser inline from a campaign's Team page** (the **+ New canvasser** button)
-— it creates the account and puts them on that campaign in one step, on **both** the web console and the
-mobile admin app. (That inline form only makes canvassers; use the Users page for admins/leads or to link
-an existing account.) The **phone** field is optional and **auto-formats to `(555) 123-4567`** as you
-type — it won't accept letters.
+You can also add a **canvasser inline from a campaign's Team page** (the **+ New canvasser** button) —
+it creates (or links) the account and puts them on that campaign in one step, on **both** the web console
+and the mobile admin app. This inline form is available to **team leads** too (a lead owns onboarding), and
+it offers the same **Existing user** link toggle, so a returning canvasser who already has an account can
+be added without a duplicate. (It only makes/links *canvassers*; use the Users page for admins/leads.) The
+**phone** field is optional and **auto-formats to `(555) 123-4567`** as you type — it won't accept letters.
 
 If you try to create a **new** user with an email that already exists anywhere, you'll get a clear
 error telling you to use the "Existing user" box instead (and the box auto-checks for you).
@@ -131,17 +133,23 @@ book without a separate step. Everyone appears in these lists, including you —
 
 ## Passwords & lockouts
 
-A locked-out user can't reach *any* org, so password recovery has to work even when the only
-super-admin isn't around. How it works:
+**Every account starts with a temporary password.** Whoever creates the account — a super admin
+provisioning a client's first admin, an org admin adding a member, or a team lead adding a canvasser —
+sets a temporary password, and the same flow covers password *recovery* when someone's locked out (a
+locked-out user can't reach *any* org, so recovery has to work even when the only super-admin isn't
+around). How it works:
 
-- An admin clicks **"Set temporary password"** on the user's profile and gives them a temporary one.
+- The account is given a **temporary password** — set when it's created, or later when an admin clicks
+  **"Set temporary password"** on the user's profile to rescue someone.
 - The next time that person signs in, they're **required to choose a new password** before they can
-  do anything. The temporary one stops working the moment they set their own.
-- A temporary password is only good for **72 hours** — after that an admin has to set a new one.
+  do anything (on web or mobile). The temporary one stops working the moment they set their own.
+- A temporary password is only good for **72 hours** — after that an admin has to set a new one. This
+  applies to a freshly created account too, so have new people sign in promptly.
 - When the person sets **their own** password, it has to be reasonably strong: at least 8 characters
   with an uppercase letter, a lowercase letter, a number, and a special character. A live checklist
-  ticks each rule off as they type. (The admin's *temporary* password isn't held to this — it's
-  short-lived and replaced immediately anyway.)
+  ticks each rule off as they type. (A *temporary* password isn't held to this — it only needs to be at
+  least 8 characters with no stray spaces or control characters, since it's short-lived and replaced
+  immediately anyway.)
 
 This means an admin can always rescue someone, but the admin never ends up holding a working password
 to the user's *other* orgs.
@@ -183,9 +191,11 @@ their login email** (that would change how they sign into the *other* orgs). The
 
 - **`User`** ([server/src/models/User.js](../server/src/models/User.js)) — global account. `email` is
   **globally unique** (lowercased). No `organizationId`. Roles are *not* here. New fields:
-  - `mustChangePassword: Boolean` — set when an admin issues a temp password; forces a change at next
-    login. Surfaced in `toSafeJSON()`.
-  - `tempPasswordSetAt: Date` — when the temp password was set; used to expire it (72h).
+  - `mustChangePassword: Boolean` — set whenever a new account is created (all three create paths pass
+    it) **or** an admin issues a temp reset; forces a change at next login. Surfaced in `toSafeJSON()`.
+  - `tempPasswordSetAt: Date` — when the temp password was set; used to expire it (72h). Written
+    alongside `mustChangePassword` on created accounts too, so a brand-new hire's temp password also
+    expires after 72h.
   - `isSuperAdmin: Boolean` — platform-wide; bypasses org-role checks.
 - **`Membership`** ([server/src/models/Membership.js](../server/src/models/Membership.js)) — join table
   `{ userId, organizationId, role: 'admin'|'lead'|'canvasser', isActive, addedBy }`, unique on
@@ -229,6 +239,12 @@ their login email** (that would change how they sign into the *other* orgs). The
 - **Admin reset** — `PATCH /admin/memberships/:userId/password` now sets a **temporary** password:
   `{ passwordHash, mustChangePassword: true, tempPasswordSetAt: now }`. Still gated by membership in the
   caller's active org, so any of a multi-org user's admins can issue one.
+- **Set on create** — every account-creation path issues a temporary password + forces a first-login
+  change: super-admin provisioning (`POST /super-admin/organizations`, first admin — the super admin can
+  type the temp password or leave it blank to auto-generate), admin add-member (`POST /admin/memberships`),
+  and the team-lead crew endpoint (`POST /admin/campaigns/:id/crew`). All route through
+  `createOrgMember({ ..., mustChangePassword: true })`, which writes `{ mustChangePassword, tempPasswordSetAt }`
+  **only on the create-new branch** — so linking an existing account never touches its password or flag.
 
 **Residual risk (by design):** the resetting admin also knows the temp password. The gate means a temp
 password can only reach `change-password`/`me`/`logout` — it cannot read or act in any org. Using it to
@@ -245,10 +261,17 @@ mitigation envelope.
   orgs) so the UI can disable the email field with an explanation. Enforced in both
   [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx) and the mobile
   [users/[id].jsx](../mobile/app/(app)/admin/users/[id].jsx).
-- **Link vs create intent** — `POST /admin/memberships` takes `linkExisting`. `false` + existing email →
-  `409 EMAIL_EXISTS_USE_LINK`; `true` + no account → `404 EMAIL_NOT_FOUND`. Both web
-  ([UsersPage.jsx](../client/src/pages/UsersPage.jsx)) and mobile
-  ([admin/users.jsx](../mobile/app/(app)/admin/users.jsx)) send it and offer the link toggle.
+- **Link vs create intent** — `POST /admin/memberships` **and** the team-lead crew endpoint
+  `POST /admin/campaigns/:id/crew` both take `linkExisting` (shared `memberIdentityShape`). `false` +
+  existing email → `409 EMAIL_EXISTS_USE_LINK`; `true` + no account → `404 EMAIL_NOT_FOUND`; `true` +
+  already in this org → `409 ALREADY_MEMBER`. All four surfaces send it and offer the link toggle — web
+  ([UsersPage.jsx](../client/src/pages/UsersPage.jsx), [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx))
+  and mobile ([admin/users.jsx](../mobile/app/(app)/admin/users.jsx),
+  [campaign-assignments/[campaignId].jsx](../mobile/app/(app)/admin/campaign-assignments/[campaignId].jsx))
+  — and each **auto-switches the toggle on** when the server returns `EMAIL_EXISTS_USE_LINK`. Letting a
+  **team lead** link (not just create) is deliberate: a lead owns onboarding and a returning canvasser may
+  already have an account from another org; the same privacy guards apply (name revealed only on linking,
+  `isMultiOrg` boolean only, added-to-org banner on next login).
 
 ## Coordinators
 
@@ -329,15 +352,18 @@ schemas in [server/src/utils/validators.js](../server/src/utils/validators.js):
 - `usStateSchema` — 2-letter, uppercased, checked against the **real** state set (the exported `STATE_TZ`
   keys in [usStateTimeZone.js](../server/src/utils/usStateTimeZone.js)) — so `"XX"` is rejected.
 - `nameSchema` (trim, 1–80), `emailSchema` (`.email()` + max), `slugSchema` (kebab-case, orgs).
-- **Two password schemas, by who sets it.** `passwordSchema` (min 8, **no** complexity) gates
-  admin-set **temporary** passwords (create-user, admin reset, create-canvasser) — the user replaces
-  them at first login, so complexity would only add friction. `strongPasswordSchema` (8+ with an
-  uppercase, a lowercase, a number, and a special character, via a shared `passwordProblem` message)
-  gates the passwords a user **chooses for themselves** (`POST /auth/change-password`). The same rule
-  set is mirrored in [client/src/lib/validators.js](../client/src/lib/validators.js) and
-  [mobile/lib/validators.js](../mobile/lib/validators.js) (`PASSWORD_RULES` / `passwordChecklist` /
-  `isStrongPassword`) so the live requirements checklist under the new-password field agrees with the
-  server. The two masked-with-toggle password inputs live at `components/PasswordInput.jsx` on each
+- **Two password schemas, by who sets it.** `passwordSchema` (min 8, max 200, **no** complexity, but
+  basic hygiene — **no control characters/null bytes and no leading/trailing whitespace**, a copy-paste
+  footgun) gates admin-set **temporary** passwords (create-user, admin reset, create-canvasser, super-admin
+  provisioning) — the user replaces them at first login, so complexity would only add friction (a simple
+  `victory26` passes; `" victory26"` and control chars don't). `strongPasswordSchema` (8+ with an uppercase,
+  a lowercase, a number, and a special character, via a shared `passwordProblem` message) gates the
+  passwords a user **chooses for themselves** (`POST /auth/change-password`). Both are mirrored in
+  [client/src/lib/validators.js](../client/src/lib/validators.js) and
+  [mobile/lib/validators.js](../mobile/lib/validators.js): `PASSWORD_RULES` / `passwordChecklist` /
+  `isStrongPassword` drive the strong live checklist, and `tempPasswordProblem` / `isValidTempPassword`
+  pre-validate the relaxed create/reset fields — so both agree with the server (which stays the real
+  guard). The two masked-with-toggle password inputs live at `components/PasswordInput.jsx` on each
   client; every password field uses it (a couple of create-canvasser fields that once rendered the
   password in cleartext were switched over).
 

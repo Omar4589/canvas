@@ -76,12 +76,10 @@ import { recomputeCutAttributesForCampaign } from '../services/turf/computeCutAt
 import { createNextPass } from '../services/passes/createPass.js';
 import { generateTurf } from '../services/turf/generateTurf.js';
 import { ensureCampaignAssignments } from '../services/campaignRoster.js';
-import { recomputeHouseholdStatusesByIds } from '../services/canvass/status.js';
 import { recomputeFullyVoted } from '../services/voted/recomputeFullyVoted.js';
-import { normalizeAndFilterAnswers } from '../services/surveys/normalizeAnswers.js';
 import { computeWindowStats, buildFrozenMapPoints } from '../services/reports/computeReport.js';
 import { zonedDayRange } from '../utils/timezone.js';
-import { haversineMeters } from '../utils/normalizeAddress.js';
+import { stageDemoActivity, persistDemoActivity } from '../services/platform/demoActivity.js';
 import { inStateBounds } from '../utils/stateBounds.js';
 import {
   makeRng,
@@ -132,21 +130,6 @@ const BOOK_MAX_DOORS = 55;
 const CAMPAIGN_TZ = 'America/Chicago';
 const CAMPAIGN_STATE = 'IA';
 const SVID_PREFIX = 'DEMO-IA-';
-// Per-book completion fractions, cycled in book order; the reviewer's book is forced to 0.
-const BOOK_FRACTIONS = [0.9, 0.75, 0.6, 0.45, 0.3, 0.15];
-const OUTCOME_WEIGHTS = [
-  ['survey', 58],
-  ['not_home', 27],
-  ['refused', 9],
-  ['wrong_address', 6],
-];
-const SUPPORT_WEIGHTS = [
-  ['strong_support', 38],
-  ['lean_support', 22],
-  ['undecided', 25],
-  ['opposed', 15],
-];
-
 const ADMIN_EMAIL = (process.env.SEED_DEMO_ADMIN_EMAIL || 'demo-admin@doorline.app').toLowerCase().trim();
 const ADMIN_PASSWORD = process.env.SEED_DEMO_ADMIN_PASSWORD || 'admin1234!';
 const CANVASSER_EMAIL = (process.env.SEED_DEMO_CANVASSER_EMAIL || 'demo-canvasser@doorline.app').toLowerCase().trim();
@@ -253,36 +236,6 @@ function localTime(offsetDays, minutesAfterMidnight) {
   return new Date(midnightUtc.getTime() + minutesAfterMidnight * 60000);
 }
 
-function jitterLocation(rng, hh) {
-  const [lng, lat] = hh.location.coordinates;
-  const meters = 4 + rng.next() * 12;
-  const angle = rng.next() * Math.PI * 2;
-  const dLat = (meters * Math.sin(angle)) / 111320;
-  const dLng = (meters * Math.cos(angle)) / (111320 * Math.cos((lat * Math.PI) / 180));
-  return { lat: lat + dLat, lng: lng + dLng, accuracy: rng.int(5, 20) };
-}
-
-function activityDoc({ hh, userId, actionType, ts, rng, passId, turfId, voterId = null, wasOffline = false }) {
-  const loc = jitterLocation(rng, hh);
-  const [hLng, hLat] = hh.location.coordinates;
-  return {
-    organizationId: hh.organizationId,
-    campaignId: hh.campaignId,
-    householdId: hh._id,
-    voterId,
-    userId,
-    actionType,
-    passId,
-    turfId,
-    effortId: hh.effortId,
-    note: null,
-    location: loc,
-    distanceFromHouseMeters: Math.round(haversineMeters(hLat, hLng, loc.lat, loc.lng)),
-    timestamp: ts,
-    wasOfflineSubmission: wasOffline,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Build steps
 // ---------------------------------------------------------------------------
@@ -317,175 +270,70 @@ async function ensureMembership(userId, organizationId, role) {
   );
 }
 
+// Modeled on a real door-to-door canvass survey: a support ask, a multi-select
+// top-issue question, and an action-style yard-sign question shown only to
+// supporters. Option `id`s are stable (reports/tags join on them); the support
+// ids stay strong_support/lean_support but DISPLAY as "Support"/"Likely Support".
 function surveyQuestions() {
   return [
     {
       key: 'candidate_support',
-      label: `If the election were held today, would you support ${DEMO_CANDIDATE} for State House?`,
+      label: `Can we count on your support for ${DEMO_CANDIDATE} for State House?`,
       type: 'single_choice',
       required: true,
       order: 0,
       options: [
-        { id: 'strong_support', text: 'Strongly support', tag: 'Supporter', script: `That's great to hear — ${DEMO_CANDIDATE} appreciates your support!`, order: 0 },
-        { id: 'lean_support', text: 'Lean support', tag: 'Supporter', order: 1 },
+        { id: 'strong_support', text: 'Support', tag: 'Supporter', script: `That's great to hear — ${DEMO_CANDIDATE} appreciates your support!`, order: 0 },
+        { id: 'lean_support', text: 'Likely Support', tag: 'Supporter', order: 1 },
         { id: 'undecided', text: 'Undecided', order: 2 },
         { id: 'opposed', text: 'Opposed', order: 3 },
       ],
     },
     {
       key: 'top_issue',
-      label: 'Which issues matter most to you this year?',
+      label: 'What is your top issue?',
       type: 'multiple_choice',
       order: 1,
       options: [
-        { id: 'public_schools', text: 'Public schools', order: 0 },
-        { id: 'cost_of_living', text: 'Cost of living', order: 1 },
-        { id: 'public_safety', text: 'Public safety', order: 2 },
-        { id: 'healthcare', text: 'Healthcare', order: 3 },
-        { id: 'roads_infrastructure', text: 'Roads & infrastructure', order: 4 },
+        { id: 'healthcare', text: 'Healthcare costs', order: 0 },
+        { id: 'public_schools', text: 'Public schools & education', order: 1 },
+        { id: 'cost_of_living', text: 'Cost of living', order: 2 },
+        { id: 'public_safety', text: 'Public safety & law enforcement', order: 3 },
+        { id: 'water_environment', text: 'Water quality & environment', order: 4 },
+        { id: 'property_taxes', text: 'Property taxes', order: 5 },
+        { id: 'roads_infrastructure', text: 'Roads & infrastructure', order: 6 },
       ],
     },
     {
       key: 'yard_sign',
-      label: 'Would you like a yard sign?',
-      type: 'single_choice',
+      label: 'Could you help us by taking a yard sign?',
+      type: 'multiple_choice',
       order: 2,
       visibleIf: {
         logic: 'any',
         rules: [{ questionKey: 'candidate_support', op: 'any_of', optionIds: ['strong_support', 'lean_support'] }],
       },
       options: [
-        { id: 'yes', text: 'Yes', order: 0 },
-        { id: 'no', text: 'No', order: 1 },
+        { id: 'yard_sign_delivered', text: 'Yard Sign Delivered', order: 0 },
+        { id: 'candidate_follow_up', text: 'Candidate Follow-Up', order: 1 },
+        { id: 'volunteer_request', text: 'Volunteer Request', order: 2 },
       ],
     },
   ];
 }
 
-async function stageCanvassHistory({ rng, campaign, template, pass, turfs, assignmentsByTurf, reviewerTurfId, votersByHousehold }) {
-  const activities = [];
-  const surveys = [];
-  const overlapCandidates = [];
+// Thin wrapper over the shared demo-activity generator (services/platform/demoActivity)
+// — the SAME code the "Refresh demo day" button uses, so the seeded dashboard and a
+// refreshed one look identical (per-canvasser scheduling, ~22% connection rate,
+// realistic answers). The reviewer's book is excluded structurally by turf id.
+async function stageCanvassHistory({ rng, campaign, template, turfs, assignmentsByTurf, reviewerTurfId, votersByHousehold }) {
   const stagedBooks = turfs.filter((t) => String(t._id) !== String(reviewerTurfId));
-
-  for (let b = 0; b < stagedBooks.length; b += 1) {
-    const turf = stagedBooks[b];
-    const canvasserId = assignmentsByTurf.get(String(turf._id));
-    const fraction = BOOK_FRACTIONS[b % BOOK_FRACTIONS.length];
-    const doorIds = turf.householdIds.map(String);
-    const visitedCount = Math.round(doorIds.length * fraction);
-    if (!visitedCount) continue;
-
-    // Longer walks concentrated in the last 4 evenings — crews walk together on the
-    // same days, so the daily timeline shows a full canvasser × hours grid.
-    const sessionCount = visitedCount > 30 ? 2 : 1;
-    const perSession = Math.ceil(visitedCount / sessionCount);
-    for (let s = 0; s < sessionCount; s += 1) {
-      const dayOffset = -4 + ((b + s) % 4);
-      let minutes = 16 * 60 + 30 + rng.int(0, 40); // ~4:30pm local start
-      const doors = doorIds.slice(s * perSession, (s + 1) * perSession);
-      for (const hhId of doors) {
-        const hh = votersByHousehold.docs.get(hhId);
-        if (!hh) continue;
-        const ts = localTime(dayOffset, minutes);
-        minutes += rng.int(2, 5);
-        const outcome = rng.weighted(OUTCOME_WEIGHTS);
-        const wasOffline = rng.chance(0.1);
-        if (outcome === 'survey') {
-          const voters = votersByHousehold.byId.get(hhId) || [];
-          if (!voters.length) continue;
-          const voter = voters[0];
-          const support = rng.weighted(SUPPORT_WEIGHTS);
-          const issues = [rng.pick(['public_schools', 'cost_of_living', 'public_safety', 'healthcare', 'roads_infrastructure'])];
-          if (rng.chance(0.4)) issues.push(rng.pick(['cost_of_living', 'public_schools', 'healthcare']));
-          const raw = [
-            { questionKey: 'candidate_support', optionIds: [support] },
-            { questionKey: 'top_issue', optionIds: [...new Set(issues)] },
-            { questionKey: 'yard_sign', optionIds: [rng.chance(0.4) ? 'yes' : 'no'] },
-          ];
-          const answers = normalizeAndFilterAnswers(template, raw); // drops yard_sign when hidden
-          const loc = jitterLocation(rng, hh);
-          const [hLng, hLat] = hh.location.coordinates;
-          surveys.push({
-            filter: { voterId: voter._id, passId: pass._id },
-            fields: {
-              organizationId: hh.organizationId,
-              campaignId: campaign._id,
-              voterId: voter._id,
-              householdId: hh._id,
-              userId: canvasserId,
-              surveyTemplateId: template._id,
-              surveyTemplateVersion: template.version || 1,
-              answers,
-              note: null,
-              location: loc,
-              distanceFromHouseMeters: Math.round(haversineMeters(hLat, hLng, loc.lat, loc.lng)),
-              submittedAt: ts,
-              passId: pass._id,
-              turfId: turf._id,
-              effortId: hh.effortId,
-              wasOfflineSubmission: wasOffline,
-              editedBy: null,
-              editedAt: null,
-            },
-          });
-          activities.push(activityDoc({
-            hh, userId: canvasserId, actionType: 'survey_submitted', ts, rng,
-            passId: pass._id, turfId: turf._id, voterId: voter._id, wasOffline,
-          }));
-        } else {
-          activities.push(activityDoc({
-            hh, userId: canvasserId, actionType: outcome, ts, rng,
-            passId: pass._id, turfId: turf._id, wasOffline,
-          }));
-          if (outcome === 'not_home' && overlapCandidates.length < 3 && b >= 1) {
-            overlapCandidates.push({ hh, turf, ts, canvasserId });
-          }
-        }
-      }
-    }
-  }
-
-  // Overlaps: a second canvasser re-knocks 2–3 already-visited doors in the same
-  // round (different userId, so the within-pass replace doesn't apply) — feeds the
-  // overlaps view and the timeline's billing reconciliation line.
-  for (const o of overlapCandidates) {
-    const others = [...assignmentsByTurf.values()].filter((id) => String(id) !== String(o.canvasserId));
-    if (!others.length) break;
-    activities.push(activityDoc({
-      hh: o.hh, userId: rng.pick(others), actionType: 'not_home',
-      ts: new Date(o.ts.getTime() + rng.int(30, 90) * 60000), rng,
-      passId: pass._id, turfId: o.turf._id,
-    }));
-  }
-
-  await CanvassActivity.insertMany(activities);
-  for (const s of surveys) {
-    // Mirrors the mobile submit: atomic upsert on the unique (voterId, passId) key.
-    await SurveyResponse.findOneAndUpdate(s.filter, { $set: s.fields }, { upsert: true, new: true, setDefaultsOnInsert: true });
-  }
-
-  // Recompute door state exactly the way the app maintains it.
-  const touched = [...new Set(activities.map((a) => String(a.householdId)))];
-  await recomputeHouseholdStatusesByIds(touched, campaign.type);
-
-  const lastByDoor = new Map();
-  for (const a of activities) {
-    const prev = lastByDoor.get(String(a.householdId));
-    if (!prev || a.timestamp > prev.timestamp) lastByDoor.set(String(a.householdId), a);
-  }
-  await Household.bulkWrite(
-    [...lastByDoor.values()].map((a) => ({
-      updateOne: {
-        filter: { _id: a.householdId },
-        update: { $set: { lastActionAt: a.timestamp, lastActionBy: a.userId } },
-      },
-    }))
-  );
-  const surveyedVoterIds = surveys.map((s) => s.filter.voterId);
-  await Voter.updateMany({ _id: { $in: surveyedVoterIds } }, { $set: { surveyStatus: 'surveyed' } });
-
-  return { activities: activities.length, surveys: surveys.length, overlaps: overlapCandidates.length };
+  const { activities, surveys, overlaps, todayKnocks } = stageDemoActivity({
+    rng, campaign, template, tz: CAMPAIGN_TZ, stagedBooks, assignmentsByTurf,
+    hhById: votersByHousehold.docs, votersByHousehold: votersByHousehold.byId,
+  });
+  await persistDemoActivity({ campaign, activities, surveys });
+  return { activities: activities.length, surveys: surveys.length, overlaps, todayKnocks };
 }
 
 async function stageEarlyVoting({ campaign, adminId, votersByHousehold, turfs, reviewerTurfId }) {
@@ -727,18 +575,37 @@ async function main() {
       organizationId: org._id, name: DEMO_CAMPAIGN_NAME, type: 'survey',
       state: CAMPAIGN_STATE, timeZone: CAMPAIGN_TZ, createdBy: admin._id,
     }));
+  const desiredQuestions = surveyQuestions();
+  const desiredIntro = `Hi, my name is {{canvasser}} — I'm a volunteer with ${DEMO_CANDIDATE}'s campaign for State House. Do you have a quick minute?`;
+  const desiredClosing = 'Thanks so much for your time — have a great evening!';
+  // Compare only the fields that matter for reports/generation (subdoc _id/order noise excluded).
+  const questionSig = (qs) => JSON.stringify((qs || []).map((q) => ({
+    key: q.key, type: q.type, label: q.label,
+    options: (q.options || []).map((o) => ({ id: o.id, text: o.text, tag: o.tag || null })),
+  })));
   let template = await SurveyTemplate.findOne({ organizationId: org._id, name: 'Voter ID & persuasion' });
   if (!template) {
     template = await SurveyTemplate.create({
       organizationId: org._id,
       name: 'Voter ID & persuasion',
       isActive: true,
-      intro: `Hi, my name is {{canvasser}} — I'm a volunteer with ${DEMO_CANDIDATE}'s campaign for State House. Do you have a quick minute?`,
-      closing: 'Thanks so much for your time — have a great evening!',
-      questions: surveyQuestions(),
+      intro: desiredIntro,
+      closing: desiredClosing,
+      questions: desiredQuestions,
       tags: ['Supporter'],
       createdBy: admin._id,
     });
+  } else {
+    // Repair: bring an existing demo template up to the current (reshaped) survey,
+    // bumping version only when the questions actually changed.
+    const changed = questionSig(template.questions) !== questionSig(desiredQuestions);
+    template.intro = desiredIntro;
+    template.closing = desiredClosing;
+    template.questions = desiredQuestions;
+    template.tags = ['Supporter'];
+    if (changed) template.version = (template.version || 1) + 1;
+    await template.save();
+    if (changed) console.log(`3. survey template reshaped → v${template.version}`);
   }
   if (!campaign.surveyTemplateId) {
     campaign.surveyTemplateId = template._id; // must be set before a round can activate
@@ -818,20 +685,25 @@ async function main() {
     console.log(`6. books: skipped (${published} already published)`);
   }
 
-  // 7. Assign books (reviewer gets the last book, kept clean for app review) --
+  // 7. Assign books — CLEAN reassignment so a drifted org (e.g. every book stuck on
+  // one account) self-heals: wipe the pass's assignments, then give the reviewer ONE
+  // marked book (kept clean for app review) and distribute the rest across the field
+  // canvassers. isReviewerBook is the durable anchor the refresh button excludes by.
   const turfs = await Turf.find({ passId: pass._id, status: 'published' }).sort({ name: 1 });
   const reviewerTurf = turfs[turfs.length - 1];
+  await TurfAssignment.deleteMany({ campaignId: campaign._id, passId: pass._id });
   const assignmentsByTurf = new Map();
-  for (let i = 0; i < turfs.length; i += 1) {
-    const turf = turfs[i];
-    const user = String(turf._id) === String(reviewerTurf._id) ? reviewer : background[i % background.length];
+  const assignmentDocs = turfs.map((turf, i) => {
+    const isReviewer = String(turf._id) === String(reviewerTurf._id);
+    const user = isReviewer ? reviewer : background[i % background.length];
     assignmentsByTurf.set(String(turf._id), user._id);
-    await TurfAssignment.findOneAndUpdate(
-      { turfId: turf._id, userId: user._id },
-      { $setOnInsert: { organizationId: org._id, campaignId: campaign._id, passId: turf.passId, assignedBy: admin._id, assignedAt: new Date() } },
-      { upsert: true, setDefaultsOnInsert: true }
-    );
-  }
+    return {
+      turfId: turf._id, userId: user._id,
+      organizationId: org._id, campaignId: campaign._id, passId: turf.passId,
+      assignedBy: admin._id, assignedAt: new Date(), isReviewerBook: isReviewer,
+    };
+  });
+  await TurfAssignment.insertMany(assignmentDocs);
   const crewIds = [reviewer._id, ...background.map((u) => u._id)];
   await ensureCampaignAssignments(campaign._id, crewIds, org._id, admin._id); // positional args
   for (const userId of crewIds) {
@@ -841,7 +713,7 @@ async function main() {
       { upsert: true, setDefaultsOnInsert: true }
     );
   }
-  console.log(`7. assigned ${turfs.length} books · reviewer book '${reviewerTurf.name}' → ${reviewer.email}`);
+  console.log(`7. assigned ${turfs.length} books across ${background.length} field canvassers · reviewer book '${reviewerTurf.name}' → ${reviewer.email} (marked, kept clean)`);
 
   // Activate the round (mirrors routes/admin/passes.js invariants).
   if (pass.status !== 'active') {
@@ -870,7 +742,7 @@ async function main() {
       votersByHousehold.byId.get(k).push(v);
     }
     const staged = await stageCanvassHistory({
-      rng: makeRng(RNG_SEED + 1), campaign, template, pass, turfs,
+      rng: makeRng(RNG_SEED + 1), campaign, template, turfs,
       assignmentsByTurf, reviewerTurfId: reviewerTurf._id, votersByHousehold,
     });
     console.log(`8. staged ${staged.activities} activities · ${staged.surveys} surveys · ${staged.overlaps} overlap doors`);

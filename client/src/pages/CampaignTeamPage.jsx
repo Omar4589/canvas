@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, Navigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -6,6 +6,7 @@ import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { Card, Button, Modal, PhoneInput } from '../components/ui';
 import PasswordInput from '../components/PasswordInput.jsx';
+import { tempPasswordProblem } from '../lib/validators.js';
 
 // In-campaign roster (/campaigns/:campaignId/team). Surfaces CampaignAssignment — the
 // per-campaign roster that GATES mobile visibility AND who can be assigned books — so
@@ -46,23 +47,46 @@ function TeamMemberRow({ a, isSelf, onOpen }) {
   );
 }
 
-// Inline "create a canvasser and put them on this campaign" form — the crew equivalent
-// of the org Users admin's add-member flow, scoped to one campaign. Used by admins AND
-// team leads (both may POST to the campaign's crew endpoint).
+// Inline "add a canvasser to this campaign" form — the crew equivalent of the org Users
+// admin's add-member flow, scoped to one campaign. Used by admins AND team leads (both may
+// POST to the campaign's crew endpoint). It can CREATE a brand-new canvasser or LINK an
+// existing Door Line account by email — a returning canvasser may already have a login from
+// another org, and a lead owns onboarding, so we mirror the admin link flow here.
 function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, error }) {
+  const [emailLookup, setEmailLookup] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [localError, setLocalError] = useState('');
+
+  // The email already has a Door Line account — flip to the link path so the person can
+  // still be added (they keep their existing password; no new temp password is issued).
+  useEffect(() => {
+    if (error?.data?.code === 'EMAIL_EXISTS_USE_LINK') setEmailLookup(true);
+  }, [error]);
+
   function submit(e) {
     e?.preventDefault();
+    const em = email.trim().toLowerCase();
+    if (emailLookup) {
+      onCreate({ email: em, linkExisting: true });
+      return;
+    }
+    const problem = tempPasswordProblem(password);
+    if (problem) {
+      setLocalError(problem);
+      return;
+    }
+    setLocalError('');
     onCreate({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      email: email.trim().toLowerCase(),
+      email: em,
       phone: phone.trim() || undefined,
       password,
+      linkExisting: false,
     });
   }
   const inputClass =
@@ -71,57 +95,74 @@ function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, err
     <Modal
       size="md"
       onClose={onClose}
-      title="Create a canvasser"
+      title="Add a canvasser"
       footer={
         <>
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" loading={saving} onClick={submit}>Create &amp; add</Button>
+          <Button size="sm" loading={saving} onClick={submit}>
+            {emailLookup ? 'Link existing user' : 'Create & add'}
+          </Button>
         </>
       }
     >
       <form onSubmit={submit} className="space-y-3">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={emailLookup}
+            onChange={(e) => { setEmailLookup(e.target.checked); setLocalError(''); }}
+          />
+          <span className="text-fg-muted">Existing user (by email — link them to this org)</span>
+        </label>
         <p className="text-sm text-fg-muted">
-          Adds a brand-new canvasser to your organization and puts them on this campaign. They&apos;ll
-          set their own password at first sign-in.
+          {emailLookup
+            ? 'Links an existing Door Line account to your organization and puts them on this campaign. They keep their current password.'
+            : 'Adds a brand-new canvasser to your organization and puts them on this campaign. Set a temporary password — they choose their own strong one at first sign-in.'}
         </p>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-fg-muted">First name</label>
-            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} required className={inputClass} />
+        {!emailLookup && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">First name</label>
+              <input value={firstName} onChange={(e) => setFirstName(e.target.value)} required className={inputClass} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">Last name</label>
+              <input value={lastName} onChange={(e) => setLastName(e.target.value)} required className={inputClass} />
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-fg-muted">Last name</label>
-            <input value={lastName} onChange={(e) => setLastName(e.target.value)} required className={inputClass} />
-          </div>
-        </div>
+        )}
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-muted">Email</label>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className={inputClass} />
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-muted">
-            Phone <span className="text-fg-subtle">(optional)</span>
-          </label>
-          <PhoneInput value={phone} onChange={(e) => setPhone(e.target.value)} />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password <span className="text-fg-subtle">(min 8 characters)</span></label>
-          <PasswordInput
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="new-password"
-            placeholder="At least 8 characters"
-          />
-        </div>
+        {!emailLookup && (
+          <>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                Phone <span className="text-fg-subtle">(optional)</span>
+              </label>
+              <PhoneInput value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password <span className="text-fg-subtle">(min 8 characters)</span></label>
+              <PasswordInput
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="new-password"
+                placeholder="At least 8 characters"
+              />
+            </div>
+          </>
+        )}
+        {localError && <p className="text-sm text-danger">{localError}</p>}
         {error && (
-          error.data?.code === 'EMAIL_EXISTS_USE_LINK' ? (
-            // The person already has an account — creating is a dead end here (this quick
-            // form only makes brand-new canvassers). Point them at the add-existing flow.
+          error.data?.code === 'ALREADY_MEMBER' ? (
+            // They already belong to this org — linking is a dead end; they just need to be
+            // added to the campaign roster. Point at the "Add to the campaign" search.
             <div className="rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
-              Someone with that email already has an account. If they&apos;re already in your organization,
-              find them under <strong>Add to the campaign</strong> and click Add. Otherwise an org admin can
-              add them from the Users page.
+              That person is already in your organization. Add them to this campaign from{' '}
+              <strong>Add to the campaign</strong> on the left.
               <div className="mt-2">
                 <button
                   type="button"
@@ -131,6 +172,11 @@ function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, err
                   Search my members for “{email.trim().toLowerCase()}” →
                 </button>
               </div>
+            </div>
+          ) : error.data?.code === 'EMAIL_EXISTS_USE_LINK' ? (
+            <div className="rounded-md border border-border bg-sunken px-3 py-2 text-xs text-fg-muted">
+              This email already has a Door Line account — we switched on <strong>Existing user</strong> above.
+              Click <strong>Link existing user</strong> to add them (they keep their current password).
             </div>
           ) : (
             <p className="text-sm text-danger">{error.message}</p>
@@ -280,8 +326,9 @@ export default function CampaignTeamPage() {
     mutationFn: (userId) => api(`/admin/campaigns/${campaignId}/assignments/${userId}`, { method: 'DELETE' }),
     onSuccess: invalidate,
   });
-  // Create a net-new canvasser straight onto this campaign, in one step. Available to
-  // admins AND leads (the crew endpoint accepts both); the new canvasser is auto-assigned.
+  // Create a net-new canvasser (or link a returning one by email) straight onto this
+  // campaign, in one step. Available to admins AND leads (the crew endpoint accepts both);
+  // the canvasser is auto-assigned.
   const createMemberMut = useMutation({
     mutationFn: (body) => api(`/admin/campaigns/${campaignId}/crew`, { method: 'POST', body }),
     onSuccess: () => {

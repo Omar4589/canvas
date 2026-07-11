@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import PasswordInput from '../../../components/PasswordInput';
-import { formatUsPhoneInput } from '../../../lib/validators';
+import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../lib/validators';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -401,9 +401,15 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
   const [role, setRole] = useState('canvasser');
   const [linkExisting, setLinkExisting] = useState(false);
 
+  // The email already has a global account — flip to the link path so the admin can add
+  // them without a duplicate (matches the web console's auto-check on this error).
+  useEffect(() => {
+    if (error?.data?.code === 'EMAIL_EXISTS_USE_LINK') setLinkExisting(true);
+  }, [error]);
+
   const valid = linkExisting
     ? !!email.trim()
-    : firstName.trim() && lastName.trim() && email.trim() && password.length >= 8;
+    : firstName.trim() && lastName.trim() && email.trim() && isValidTempPassword(password);
 
   return (
     <ScrollView
@@ -496,13 +502,21 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
             style={styles.textInput}
           />
 
-          <Text style={styles.formLabel}>Password (min 8 chars)</Text>
+          <Text style={styles.formLabel}>Temporary password (min 8 chars)</Text>
           <PasswordInput
             value={password}
             onChangeText={setPassword}
             autoComplete="new-password"
             placeholder="••••••••"
           />
+          {password.length > 0 && tempPasswordProblem(password) && (
+            <Text style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>
+              {tempPasswordProblem(password)}
+            </Text>
+          )}
+          <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.xs }}>
+            They choose their own strong password at first sign-in.
+          </Text>
         </>
       )}
 

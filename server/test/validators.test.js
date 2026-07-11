@@ -69,9 +69,20 @@ test('strongPasswordSchema rejects a password missing ANY required class', () =>
   }
 });
 
-test('admin temp passwordSchema stays lax (min 8, no complexity) — password123 ok', () => {
+test('admin temp passwordSchema stays lax (min 8, no complexity) — victory26 / password123 ok', () => {
   // Admin-set temporary passwords are replaced at first login; complexity is intentionally
   // NOT required here (keeps existing create/reset flows + fixtures working).
   assert.strictEqual(passwordSchema.parse('password123'), 'password123');
+  assert.strictEqual(passwordSchema.parse('victory26'), 'victory26'); // a simple temp is fine
+  assert.strictEqual(passwordSchema.parse('victory 26'), 'victory 26'); // an internal space is fine
   assert.throws(() => passwordSchema.parse('short')); // still enforces min 8
+});
+
+test('admin temp passwordSchema enforces basic hygiene (no whitespace edges / control chars)', () => {
+  // A temp password can't be set to something that silently breaks the login it enables.
+  assert.throws(() => passwordSchema.parse('        ')); // whitespace-only (8 spaces)
+  assert.throws(() => passwordSchema.parse(' victory26')); // leading space
+  assert.throws(() => passwordSchema.parse('victory26 ')); // trailing space
+  assert.throws(() => passwordSchema.parse(`victory26${String.fromCharCode(9)}`)); // tab (control)
+  assert.throws(() => passwordSchema.parse(`vic${String.fromCharCode(0)}tory26`)); // null byte
 });
