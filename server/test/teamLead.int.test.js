@@ -163,6 +163,12 @@ test('libraries: lead reads surveys/tags but cannot mutate them, and cannot reac
   assert.strictEqual((await call('GET', '/api/admin/tags', opt)).status, 200, 'GET tags');
   assert.strictEqual((await call('POST', '/api/admin/surveys', { ...opt, body: { name: 'X' } })).status, 403, 'POST surveys');
   assert.strictEqual((await call('POST', '/api/admin/tags', { ...opt, body: { name: 'x' } })).status, 403, 'POST tags');
+  // Survey lifecycle mutations (archive / unarchive / delete) are admin-only too;
+  // the guard fires before any lookup, so a random id suffices.
+  const sid = new mongoose.Types.ObjectId();
+  assert.strictEqual((await call('POST', `/api/admin/surveys/${sid}/archive`, opt)).status, 403, 'archive survey');
+  assert.strictEqual((await call('POST', `/api/admin/surveys/${sid}/unarchive`, opt)).status, 403, 'unarchive survey');
+  assert.strictEqual((await call('DELETE', `/api/admin/surveys/${sid}`, opt)).status, 403, 'delete survey');
   assert.strictEqual((await call('GET', '/api/admin/memberships', opt)).status, 403, 'org Users admin');
   assert.strictEqual((await call('GET', '/api/admin/voters', opt)).status, 403, 'org voters');
 });

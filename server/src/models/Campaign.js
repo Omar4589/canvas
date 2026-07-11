@@ -28,6 +28,13 @@ const campaignSchema = new mongoose.Schema(
     // rounds (one per active effort). Derive them via activePassIds() from
     // Pass.status === 'active' (services/passes/activePasses.js).
     timeZone: { type: String, default: 'America/New_York' },
+    // Key dates — 'YYYY-MM-DD' civil-date strings interpreted in the campaign's own
+    // timeZone (strings on purpose: a Date here would shift a day across UTC midnight).
+    electionDay: { type: String, default: null },
+    earlyVotingStart: { type: String, default: null },
+    earlyVotingEnd: { type: String, default: null },
+    // Free-form admin note shown beside the dates (e.g. polling-place quirks).
+    datesNote: { type: String, default: '', trim: true, maxlength: 280 },
     // When an admin dismisses the "Setup complete — this campaign is live" dashboard
     // banner. Set once (for all admins of the campaign); null = never dismissed. Only
     // silences the go-live confirmation — incomplete-setup guidance still shows.

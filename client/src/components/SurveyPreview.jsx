@@ -11,8 +11,10 @@ const TYPE_HINT = {
 
 export default function SurveyPreview({ survey }) {
   if (!survey) return null;
+  // Retired questions are hidden in the field, so the preview hides them too
+  // (mirrors the retired-option filter below).
   const questions = (survey.questions || [])
-    .slice()
+    .filter((q) => !q.retired)
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return (

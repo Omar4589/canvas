@@ -1,215 +1,274 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import SurveyForm from '../components/SurveyBuilder.jsx';
+import StatCard from '../components/StatCard.jsx';
+import RowMenu from '../components/RowMenu.jsx';
+import SurveyQuickView from '../components/SurveyQuickView.jsx';
+import {
+  Card,
+  Button,
+  Badge,
+  DataTable,
+  EmptyState,
+  SkeletonRows,
+  Input,
+  Segmented,
+  IconSearch,
+  IconChevronRight,
+  IconClipboard,
+} from '../components/ui';
+
+// Org survey library: a scannable list + quick-view drawer. Authoring lives on the
+// dedicated /surveys/new and /surveys/:id/edit routes (SurveyEditorPage).
+
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'archived', label: 'Archived' },
+  { value: 'all', label: 'All' },
+];
+
+function usedInLabel(s) {
+  const parts = [
+    ...(s.usedByCampaigns || []).map((c) => c.name),
+    ...(s.usedByWalkLists || []).map((w) => `${w.campaignName} · ${w.effortName}`),
+  ];
+  return parts;
+}
 
 export default function SurveysPage() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('active');
+  const [selectedId, setSelectedId] = useState(null);
+
+  const { data, isLoading, error: loadError } = useQuery({
     queryKey: ['surveys'],
     queryFn: () => api('/admin/surveys'),
   });
-  const { data: tagsData } = useQuery({
-    queryKey: ['admin', 'tags'],
-    queryFn: () => api('/admin/tags'),
-  });
-  const orgTags = tagsData?.tags || [];
-
-  // Explicit "Create <tag>" action from a TagPicker: upsert in the org library
-  // (case-insensitive on the server), refresh the picklist, return the canonical
-  // name so the option stores exactly what the library holds.
-  async function createTag(name) {
-    const res = await api('/admin/tags', { method: 'POST', body: { name } });
-    qc.invalidateQueries({ queryKey: ['admin', 'tags'] });
-    return res.tag.name;
-  }
-
-  const [selectedId, setSelectedId] = useState(null);
-  const [creating, setCreating] = useState(false);
-
-  // Auto-attach loop: the in-campaign Survey screen sends "Create new" here with
-  // ?attachTo=<campaignId>; we open the create form, then on save attach the new
-  // template to that campaign and return there (cancel/back returns too).
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const attachTo = searchParams.get('attachTo');
-  useEffect(() => {
-    if (attachTo) {
-      setSelectedId(null);
-      setCreating(true);
-    }
-  }, [attachTo]);
-
   const surveys = data?.surveys || [];
-  const selected = surveys.find((s) => s._id === selectedId) || null;
 
-  const create = useMutation({
-    mutationFn: (body) => api('/admin/surveys', { method: 'POST', body }),
-    onSuccess: async (res) => {
-      qc.invalidateQueries({ queryKey: ['surveys'] });
-      if (attachTo) {
-        try {
-          await api(`/admin/campaigns/${attachTo}`, { method: 'PATCH', body: { surveyTemplateId: res.survey._id } });
-          qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
-        } catch {
-          /* survey is created; if the attach fails the campaign screen still lets them pick it */
-        }
-        navigate(`/campaigns/${attachTo}/survey`);
-        return;
-      }
-      setCreating(false);
-      setSelectedId(res.survey._id);
-    },
-  });
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return surveys.filter((s) => {
+      if (statusFilter === 'active' && s.archivedAt) return false;
+      if (statusFilter === 'archived' && !s.archivedAt) return false;
+      if (term && !s.name.toLowerCase().includes(term)) return false;
+      return true;
+    });
+  }, [surveys, search, statusFilter]);
 
-  const update = useMutation({
-    mutationFn: ({ id, body }) => api(`/admin/surveys/${id}`, { method: 'PATCH', body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['surveys'] }),
-  });
+  const stats = useMemo(() => {
+    const live = surveys.filter((s) => !s.archivedAt);
+    const used = (s) => (s.usedByCampaigns?.length || 0) + (s.usedByWalkLists?.length || 0) > 0;
+    return {
+      total: surveys.length,
+      responses: surveys.reduce((n, s) => n + (s.responseCount || 0), 0),
+      inUse: live.filter(used).length,
+      drafts: live.filter((s) => !used(s)).length,
+    };
+  }, [surveys]);
 
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['surveys'] });
   const duplicate = useMutation({
     mutationFn: (id) => api(`/admin/surveys/${id}/duplicate`, { method: 'POST' }),
     onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['surveys'] });
-      setCreating(false);
-      setSelectedId(res.survey._id);
+      invalidate();
+      setSelectedId(res.survey._id); // land in the copy's quick view
+    },
+  });
+  const archive = useMutation({
+    mutationFn: (id) => api(`/admin/surveys/${id}/archive`, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+  const unarchive = useMutation({
+    mutationFn: (id) => api(`/admin/surveys/${id}/unarchive`, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+  const del = useMutation({
+    mutationFn: (id) => api(`/admin/surveys/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      invalidate();
+      setSelectedId(null);
     },
   });
 
-  const isEditing = creating || !!selected;
+  // Back-compat: the old inline-builder flow accepted /surveys?attachTo=<campaignId>.
+  const attachTo = searchParams.get('attachTo');
+  if (attachTo) return <Navigate to={`/surveys/new?attachTo=${attachTo}`} replace />;
 
-  function closeEditor() {
-    if (attachTo) {
-      navigate(`/campaigns/${attachTo}/survey`);
-      return;
-    }
-    setCreating(false);
-    setSelectedId(null);
-  }
+  const selected = surveys.find((s) => s._id === selectedId) || null;
+  const busy = duplicate.isPending || archive.isPending || unarchive.isPending || del.isPending;
+
+  const rowActions = (s) => {
+    const inUse = (s.usedByCampaigns?.length || 0) + (s.usedByWalkLists?.length || 0) > 0;
+    const deletable = s.responseCount === 0 && !inUse;
+    return [
+      { label: 'Edit', onClick: () => navigate(`/surveys/${s._id}/edit`) },
+      { label: 'Duplicate', onClick: () => duplicate.mutate(s._id), disabled: busy },
+      s.archivedAt
+        ? { label: 'Unarchive', onClick: () => unarchive.mutate(s._id), disabled: busy }
+        : deletable
+          ? {
+              label: 'Delete',
+              danger: true,
+              disabled: busy,
+              onClick: () => {
+                if (window.confirm(`Delete survey "${s.name}"? This can’t be undone.`)) del.mutate(s._id);
+              },
+            }
+          : { label: 'Archive', onClick: () => archive.mutate(s._id), disabled: busy },
+    ];
+  };
 
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Surveys</h1>
-        {!isEditing && (
-          <button
-            onClick={() => {
-              setSelectedId(null);
-              setCreating(true);
-            }}
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-          >
-            + New survey
-          </button>
-        )}
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-fg">Surveys</h1>
+          <p className="text-sm text-fg-muted">
+            Reusable question sets — attach one to a campaign (or a walk list) to put it in the field.
+          </p>
+        </div>
+        <Button onClick={() => navigate('/surveys/new')}>+ New survey</Button>
       </div>
 
-      {isLoading ? (
-        <div className="text-sm text-fg-muted">Loading…</div>
-      ) : !isEditing ? (
-        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
-              <tr>
-                <th className="px-4 py-3 text-left">Name</th>
-                <th className="px-4 py-3 text-left">Used by campaigns</th>
-                <th className="px-4 py-3 text-right">Questions</th>
-                <th className="px-4 py-3 text-right">Responses</th>
-                <th className="px-4 py-3 text-right">Version</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {surveys.map((s) => (
-                <tr key={s._id} className="border-t border-border hover:bg-sunken">
-                  <td className="px-4 py-3 font-medium text-fg">{s.name}</td>
-                  <td className="px-4 py-3 text-fg-muted">
-                    {s.usedByCampaigns?.length
-                      ? s.usedByCampaigns.map((c) => c.name).join(', ')
-                      : <span className="text-fg-subtle">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-right">{s.questions?.length || 0}</td>
-                  <td className="px-4 py-3 text-right text-fg-muted">
-                    {s.responseCount > 0 ? (
-                      <span title="Editing question structure is locked while responses exist">
-                        {s.responseCount.toLocaleString()}
-                      </span>
-                    ) : (
-                      <span className="text-fg-subtle">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right text-fg-muted">v{s.version || 1}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-3">
-                      <button
-                        onClick={() => setSelectedId(s._id)}
-                        className="text-xs font-medium text-brand-accent hover:underline"
-                      >
-                        {s.responseCount > 0 ? 'View / edit' : 'Edit'}
-                      </button>
-                      <button
-                        onClick={() => duplicate.mutate(s._id)}
-                        disabled={duplicate.isPending}
-                        className="text-xs font-medium text-fg-muted hover:underline disabled:opacity-50"
-                      >
-                        Duplicate
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!surveys.length && (
-                <tr>
-                  <td colSpan="6" className="px-4 py-10 text-center text-fg-muted">
-                    No surveys yet. Click <strong>New survey</strong> to get started.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div>
-          <button
-            onClick={closeEditor}
-            className="mb-4 text-sm text-brand-accent hover:underline"
-          >
-            ← Back to list
-          </button>
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="Surveys" value={stats.total.toLocaleString()} />
+        <StatCard label="Total responses" value={stats.responses.toLocaleString()} />
+        <StatCard label="In use" value={stats.inUse.toLocaleString()} hint="Attached to a campaign or walk list" />
+        <StatCard label="Drafts" value={stats.drafts.toLocaleString()} hint="Not attached anywhere yet" />
+      </div>
 
-          {creating ? (
-            <SurveyForm
-              initial={{ name: '', intro: '', closing: '', questions: [] }}
-              onSave={(body) => create.mutate(body)}
-              onCancel={closeEditor}
-              saving={create.isPending}
-              orgTags={orgTags}
-              onCreateTag={createTag}
-            />
-          ) : (
-            <SurveyForm
-              initial={selected}
-              onSave={(body) => update.mutate({ id: selected._id, body })}
-              onCancel={closeEditor}
-              saving={update.isPending}
-              orgTags={orgTags}
-              onCreateTag={createTag}
-            />
-          )}
-          {(create.error || update.error) && (
-            <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-              <p>{(create.error || update.error).message}</p>
-              {(update.error?.data?.reasons?.length > 0) && (
-                <ul className="mt-1 list-inside list-disc text-danger">
-                  {update.error.data.reasons.map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
+      <Card className="mb-4 flex flex-wrap items-center gap-2.5 p-2.5">
+        <div className="min-w-[220px] flex-1">
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search surveys…"
+            leadingIcon={<IconSearch size={16} />}
+          />
         </div>
+        <Segmented options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} size="sm" />
+        <span className="ml-auto rounded-full bg-sunken px-2.5 py-1 text-xs font-medium tabular-nums text-fg-muted">
+          {visible.length} of {surveys.length}
+        </span>
+      </Card>
+
+      {isLoading ? (
+        <Card className="overflow-hidden">
+          <SkeletonRows />
+        </Card>
+      ) : loadError ? (
+        <Card className="p-6 text-sm text-danger">Couldn't load surveys: {loadError.message}</Card>
+      ) : surveys.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={<IconClipboard size={22} />}
+            title="No surveys yet"
+            hint="Create your first survey — the questions canvassers ask at the door."
+            action={<Button onClick={() => navigate('/surveys/new')}>New survey</Button>}
+          />
+        </Card>
+      ) : (
+        <DataTable
+          head={
+            <>
+              <th className="px-4 py-2.5">Survey</th>
+              <th className="px-4 py-2.5">Used in</th>
+              <th className="px-4 py-2.5 text-right">Questions</th>
+              <th className="px-4 py-2.5 text-right">Responses</th>
+              <th className="px-4 py-2.5">Status</th>
+              <th className="w-20 px-4 py-2.5"></th>
+            </>
+          }
+        >
+          {visible.map((s) => {
+            const usedIn = usedInLabel(s);
+            return (
+              <tr
+                key={s._id}
+                onClick={() => {
+                  del.reset(); // a previous survey's delete error must not haunt this drawer
+                  setSelectedId(s._id);
+                }}
+                className="group cursor-pointer transition-colors hover:bg-sunken/60"
+              >
+                <td className="max-w-[280px] px-4 py-3">
+                  <div className="truncate font-medium text-fg">{s.name}</div>
+                  <div className="text-xs text-fg-muted">
+                    Created{' '}
+                    {new Date(s.createdAt).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </div>
+                </td>
+                <td className="max-w-[280px] px-4 py-3 text-fg-muted">
+                  {usedIn.length ? (
+                    <span className="line-clamp-2" title={usedIn.join(', ')}>
+                      {usedIn.join(', ')}
+                    </span>
+                  ) : (
+                    <span className="text-fg-subtle">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-fg">
+                  {/* what canvassers actually see — retired questions excluded */}
+                  {(s.questions || []).filter((q) => !q.retired).length}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-fg-muted">
+                  {s.responseCount > 0 ? s.responseCount.toLocaleString() : <span className="text-fg-subtle">—</span>}
+                </td>
+                <td className="px-4 py-3">
+                  {s.archivedAt ? (
+                    <Badge variant="neutral" dot>Archived</Badge>
+                  ) : (
+                    <Badge variant="neutral">v{s.version || 1}</Badge>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <RowMenu items={rowActions(s)} />
+                    </div>
+                    <IconChevronRight className="text-fg-subtle group-hover:text-fg-muted" />
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+          {!visible.length && (
+            <tr>
+              <td colSpan="6" className="px-4 py-8 text-center text-sm text-fg-muted">
+                No surveys match your filters.
+              </td>
+            </tr>
+          )}
+        </DataTable>
+      )}
+
+      {(archive.error || unarchive.error || duplicate.error) && (
+        <p className="mt-2 text-sm text-danger">
+          {(archive.error || unarchive.error || duplicate.error).message}
+        </p>
+      )}
+
+      {selected && (
+        <SurveyQuickView
+          survey={selected}
+          onClose={() => setSelectedId(null)}
+          onDuplicate={(id) => duplicate.mutate(id)}
+          onArchive={(id) => archive.mutate(id)}
+          onUnarchive={(id) => unarchive.mutate(id)}
+          onDelete={(id) => del.mutate(id)}
+          busy={busy}
+          deleteError={del.error}
+        />
       )}
     </div>
   );

@@ -22,6 +22,7 @@ import {
 } from '../../lib/cache';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import EntitlementBanner from '../../components/EntitlementBanner';
+import { daysUntil, earlyVotingState } from '../../lib/electionDates';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -120,6 +121,9 @@ export default function CampaignsScreen() {
           const expandable = efforts.length > 1;
           const expanded = expandedId === c.id;
           const busy = picking === c.id;
+          const edDays = daysUntil(c.electionDay, c.timeZone);
+          const ev = earlyVotingState(c.earlyVotingStart, c.earlyVotingEnd, c.timeZone);
+          const hasKeyDates = edDays !== null || ev !== null || !!c.datesNote;
           return (
             <View key={c.id} style={styles.card}>
               <Pressable
@@ -151,6 +155,32 @@ export default function CampaignsScreen() {
                     {c.state}
                     {expandable ? ` · ${efforts.length} walk lists` : ''}
                   </Text>
+                  {hasKeyDates && (
+                    <View style={styles.keyDates}>
+                      {edDays !== null &&
+                        (edDays < 0 ? (
+                          <Text style={styles.keyDateMuted}>Election Day passed</Text>
+                        ) : (
+                          <View style={styles.electionChip}>
+                            <Text style={styles.electionChipText}>
+                              {edDays === 0
+                                ? '🗳 Election Day today'
+                                : `🗳 ${edDays} day${edDays === 1 ? '' : 's'} to Election Day`}
+                            </Text>
+                          </View>
+                        ))}
+                      {ev && (
+                        <Text style={ev.state === 'closed' ? styles.keyDateMuted : styles.keyDateLine}>
+                          {ev.label}
+                        </Text>
+                      )}
+                      {!!c.datesNote && (
+                        <Text style={styles.keyDateMuted} numberOfLines={2}>
+                          {c.datesNote}
+                        </Text>
+                      )}
+                    </View>
+                  )}
                 </View>
                 {busy && !expanded ? (
                   <ActivityIndicator color={colors.brand} />
@@ -264,6 +294,18 @@ function makeStyles(t) {
   typePillText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
   cardTitle: { ...type.h3 },
   cardMeta: { ...type.caption, marginTop: 2 },
+  // Compact key-dates block under the campaign meta line.
+  keyDates: { marginTop: spacing.sm },
+  electionChip: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.brandTint,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  electionChipText: { fontSize: 12, fontWeight: '600', color: colors.brand },
+  keyDateLine: { ...type.caption, fontSize: 12, marginTop: 2 },
+  keyDateMuted: { ...type.caption, fontSize: 12, color: colors.textMuted, marginTop: 2 },
   chevron: {
     fontSize: 28,
     color: colors.textMuted,

@@ -1,211 +1,94 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { US_STATES } from '../lib/validators.js';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
-import RowMenu from '../components/RowMenu.jsx';
-import { Modal, Button } from '../components/ui/index.js';
+import StatCard from '../components/StatCard.jsx';
+import CampaignFormDrawer from '../components/campaigns/CampaignFormDrawer.jsx';
+import CampaignCard from '../components/campaigns/CampaignCard.jsx';
+import CampaignsTable from '../components/campaigns/CampaignsTable.jsx';
+import {
+  Modal,
+  Button,
+  Input,
+  Select,
+  Segmented,
+  Card,
+  Skeleton,
+  EmptyState,
+  IconSearch,
+} from '../components/ui/index.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
 }
 
-const US_TIMEZONES = [
-  { value: 'America/New_York', label: 'Eastern (New York)' },
-  { value: 'America/Chicago', label: 'Central (Chicago)' },
-  { value: 'America/Denver', label: 'Mountain (Denver)' },
-  { value: 'America/Phoenix', label: 'Mountain — no DST (Phoenix)' },
-  { value: 'America/Los_Angeles', label: 'Pacific (Los Angeles)' },
-  { value: 'America/Anchorage', label: 'Alaska (Anchorage)' },
-  { value: 'Pacific/Honolulu', label: 'Hawaii (Honolulu)' },
+function ChevronIcon({ open }) {
+  return (
+    <svg
+      className={`h-4 w-4 text-fg-muted transition-transform ${open ? 'rotate-90' : ''}`}
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path
+        fillRule="evenodd"
+        d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+const SORT_OPTIONS = [
+  { value: 'recent', label: 'Recent' },
+  { value: 'name', label: 'Name A–Z' },
+  { value: 'households', label: 'Households' },
+  { value: 'knockedPct', label: 'Knocked %' },
+  { value: 'setup', label: 'Setup progress' },
 ];
 
-function CampaignForm({ initial, surveys, onSave, onCancel, saving, error }) {
-  const isEdit = !!initial?._id;
-  // Once canvassing has started, the type flip is locked (server-enforced) and a
-  // timezone change re-buckets historical stats — surfaced as a warning.
-  const hasCanvassed = isEdit && initial?.hasCanvassed === true;
-  const [name, setName] = useState(initial?.name || '');
-  const [type, setType] = useState(initial?.type || 'survey');
-  const [state, setState] = useState(initial?.state || '');
-  const [surveyTemplateId, setSurveyTemplateId] = useState(
-    initial?.surveyTemplateId?._id || initial?.surveyTemplateId || ''
-  );
-  const [isActive, setIsActive] = useState(initial?.isActive ?? true);
-  const [timeZone, setTimeZone] = useState(initial?.timeZone || '');
+function knockedRatio(c) {
+  const households = c.counts?.households || 0;
+  return households ? (c.counts?.knocked || 0) / households : 0;
+}
 
-  function submit(e) {
-    e.preventDefault();
-    onSave({
-      name: name.trim(),
-      type,
-      state: state.trim().toUpperCase(),
-      surveyTemplateId: type === 'survey' ? (surveyTemplateId || null) : null,
-      isActive,
-      timeZone: timeZone || undefined, // empty → server defaults from state
-    });
-  }
+function sortCampaigns(list, sort) {
+  const arr = [...list];
+  const byRecent = (a, b) => new Date(b.createdAt) - new Date(a.createdAt);
+  if (sort === 'name') arr.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  else if (sort === 'households')
+    arr.sort((a, b) => (b.counts?.households || 0) - (a.counts?.households || 0));
+  else if (sort === 'knockedPct') arr.sort((a, b) => knockedRatio(b) - knockedRatio(a));
+  else if (sort === 'setup') {
+    // Incomplete setups first, newest first within each group.
+    const rank = (c) => (c.stepsTotal != null && !c.setupComplete ? 0 : 1);
+    arr.sort((a, b) => rank(a) - rank(b) || byRecent(a, b));
+  } else arr.sort(byRecent);
+  return arr;
+}
 
+function SkeletonCards() {
   return (
-    <form onSubmit={submit} className="space-y-5 rounded-lg border border-border bg-card p-5 shadow-sm">
-      <div>
-        <label className="mb-1 block text-xs font-medium text-fg-muted">
-          Campaign name
-        </label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-          maxLength={120}
-          placeholder="Kentucky 2026"
-          className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-        />
+    <>
+      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-24" />
+        ))}
       </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-muted">Type</label>
-          <div className="flex gap-2">
-            {[
-              { value: 'survey', label: 'Survey' },
-              { value: 'lit_drop', label: 'Lit drop' },
-            ].map((t) => (
-              <label
-                key={t.value}
-                className={`flex flex-1 items-center justify-center rounded border px-3 py-2 text-sm ${
-                  type === t.value
-                    ? 'border-brand-600 bg-brand-tint text-brand-accent'
-                    : 'border-border-strong text-fg-muted hover:bg-sunken'
-                } ${hasCanvassed ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-              >
-                <input
-                  type="radio"
-                  name="type"
-                  value={t.value}
-                  checked={type === t.value}
-                  onChange={() => setType(t.value)}
-                  disabled={hasCanvassed}
-                  className="sr-only"
-                />
-                {t.label}
-              </label>
-            ))}
-          </div>
-          {hasCanvassed && (
-            <p className="mt-1 text-xs text-warning-fg">
-              Type is locked once canvassing has started — create a new campaign to change it.
-            </p>
-          )}
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-muted">
-            State
-          </label>
-          <select
-            value={state}
-            onChange={(e) => setState(e.target.value)}
-            required
-            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          >
-            <option value="">Select a state…</option>
-            {US_STATES.map((s) => (
-              <option key={s.value} value={s.value}>{s.value} — {s.label}</option>
-            ))}
-          </select>
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Card key={i} className="space-y-3 p-4">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-24 opacity-60" />
+            <Skeleton className="h-3 w-full opacity-60" />
+            <Skeleton className="h-3 w-full opacity-60" />
+            <Skeleton className="h-8 w-full opacity-60" />
+          </Card>
+        ))}
       </div>
-
-      <div>
-        <label className="mb-1 block text-xs font-medium text-fg-muted">Timezone</label>
-        <select
-          value={timeZone}
-          onChange={(e) => setTimeZone(e.target.value)}
-          className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-        >
-          <option value="">Auto (from state)</option>
-          {US_TIMEZONES.map((t) => (
-            <option key={t.value} value={t.value}>{t.label}</option>
-          ))}
-        </select>
-        <p className="mt-1 text-xs text-fg-muted">
-          Anchors every date &amp; time for this campaign — all admins see the same numbers and clock times,
-          regardless of their own timezone.
-        </p>
-        {hasCanvassed && (
-          <p className="mt-1 text-xs text-warning-fg">
-            Changing the timezone re-buckets all past daily stats for this campaign.
-          </p>
-        )}
-      </div>
-
-      {type === 'survey' && (
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-muted">
-            Survey template <span className="font-normal text-fg-subtle">(optional)</span>
-          </label>
-          <select
-            value={surveyTemplateId}
-            onChange={(e) => setSurveyTemplateId(e.target.value)}
-            className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          >
-            <option value="">— None yet (add later on the Surveys page) —</option>
-            {(surveys || []).map((s) => (
-              <option key={s._id} value={s._id}>
-                {s.name} (v{s.version || 1})
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-fg-muted">
-            Optional now — attach a survey here or later. You just can&apos;t activate a pass on a
-            survey campaign without one.
-          </p>
-          {(() => {
-            const chosen = (surveys || []).find((s) => s._id === surveyTemplateId);
-            return chosen?.responseCount > 0 ? (
-              <p className="mt-1 text-xs text-warning-fg">
-                Heads up: this survey already has {chosen.responseCount.toLocaleString()} response
-                {chosen.responseCount === 1 ? '' : 's'}. New answers will report under it alongside the
-                existing ones. To run different questions, duplicate it on the Surveys page and pick the copy.
-              </p>
-            ) : null;
-          })()}
-        </div>
-      )}
-
-      <label className="flex cursor-pointer items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={isActive}
-          onChange={(e) => setIsActive(e.target.checked)}
-        />
-        Active (visible to canvassers)
-      </label>
-
-      {error && (
-        <div className="rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-          {error.message}
-        </div>
-      )}
-
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-sunken"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
-        >
-          {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create campaign'}
-        </button>
-      </div>
-    </form>
+    </>
   );
 }
 
@@ -219,6 +102,24 @@ export default function CampaignsPage() {
   const [creating, setCreating] = useState(false);
   const [assigningCampaign, setAssigningCampaign] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('recent');
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const [view, setView] = useState(() => {
+    try {
+      return localStorage.getItem('campaignsView') === 'table' ? 'table' : 'cards';
+    } catch {
+      return 'cards';
+    }
+  });
+  function changeView(v) {
+    setView(v);
+    try {
+      localStorage.setItem('campaignsView', v);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -226,7 +127,7 @@ export default function CampaignsPage() {
   });
 
   const surveysQ = useQuery({
-    queryKey: ['admin', 'surveys'],
+    queryKey: ['surveys'],
     queryFn: () => api('/admin/surveys'),
   });
 
@@ -266,146 +167,205 @@ export default function CampaignsPage() {
   const campaigns = campaignsQ.data?.campaigns || [];
   const surveys = surveysQ.data?.surveys || [];
 
+  // KPIs — exact sums over ACTIVE campaigns; only the percent hint is rounded.
+  const activeCampaigns = campaigns.filter((c) => c.isActive);
+  const activeHouseholds = activeCampaigns.reduce((s, c) => s + (c.counts?.households || 0), 0);
+  const activeKnocked = activeCampaigns.reduce((s, c) => s + (c.counts?.knocked || 0), 0);
+  const activeKnockedPct = activeHouseholds
+    ? Math.round((100 * activeKnocked) / activeHouseholds)
+    : 0;
+
+  const q = search.trim().toLowerCase();
+  const matches = (c) =>
+    !q ||
+    (c.name || '').toLowerCase().includes(q) ||
+    (c.state || '').toLowerCase().includes(q);
+  const filteredActive = sortCampaigns(activeCampaigns.filter(matches), sort);
+  const filteredArchived = sortCampaigns(
+    campaigns.filter((c) => !c.isActive && matches(c)),
+    sort
+  );
+  const noMatches = !!q && !filteredActive.length && !filteredArchived.length;
+
+  // Same actions for both card and table renderings.
+  const menuItems = (c) => [
+    { label: 'View dashboard', onClick: () => navigate(`/campaigns/${c._id}`) },
+    { label: 'Assignments', onClick: () => setAssigningCampaign(c) },
+    // Edit / Archive / Delete are org-admin acts — a lead runs the
+    // campaign but doesn't reshape or remove it.
+    ...(isOrgAdmin
+      ? [
+          { label: 'Edit', onClick: () => { setCreating(false); setEditing(c); } },
+          {
+            label: c.isActive ? 'Archive' : 'Reactivate',
+            onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }),
+          },
+          c.deletable === true
+            ? { label: 'Delete', danger: true, onClick: () => setDeleting(c) }
+            : { label: 'Delete', disabled: true, title: 'Archive instead — this campaign has canvassing data' },
+        ]
+      : []),
+  ];
+
+  function renderList(list) {
+    if (view === 'table') return <CampaignsTable campaigns={list} menuItems={menuItems} />;
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {list.map((c) => (
+          <CampaignCard
+            key={c._id}
+            campaign={c}
+            menuItems={menuItems}
+            onAssign={setAssigningCampaign}
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Campaigns</h1>
-        {isOrgAdmin && !creating && !editing && (
-          <button
-            onClick={() => setCreating(true)}
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+        {isOrgAdmin && (
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setCreating(true);
+            }}
           >
             + New campaign
-          </button>
+          </Button>
         )}
       </div>
 
-      {creating && (
-        <div className="mb-6">
-          <CampaignForm
-            initial={null}
-            surveys={surveys}
-            onSave={(body) => create.mutate(body)}
-            onCancel={() => setCreating(false)}
-            saving={create.isPending}
-            error={create.error}
-          />
-        </div>
-      )}
-
-      {editing && (
-        <div className="mb-6">
-          <CampaignForm
-            initial={editing}
-            surveys={surveys}
-            onSave={(body) => update.mutate({ id: editing._id, body })}
-            onCancel={() => setEditing(null)}
-            saving={update.isPending}
-            error={update.error}
-          />
-        </div>
+      {(creating || editing) && (
+        <CampaignFormDrawer
+          initial={editing}
+          surveys={surveys}
+          onSave={(body) =>
+            editing ? update.mutate({ id: editing._id, body }) : create.mutate(body)
+          }
+          onCancel={() => {
+            setCreating(false);
+            setEditing(null);
+          }}
+          saving={editing ? update.isPending : create.isPending}
+          error={editing ? update.error : create.error}
+        />
       )}
 
       {campaignsQ.isLoading ? (
-        <div className="text-sm text-fg-muted">Loading…</div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
-              <tr>
-                <th className="px-4 py-3 text-left">Name</th>
-                <th className="px-4 py-3 text-left">Type</th>
-                <th className="px-4 py-3 text-left">State</th>
-                <th className="px-4 py-3 text-left">Survey</th>
-                <th className="px-4 py-3 text-right">Households</th>
-                <th className="px-4 py-3 text-right">Knocked</th>
-                <th className="px-4 py-3 text-right">Surveys</th>
-                <th className="px-4 py-3 text-right">Lit drops</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {campaigns.map((c) => (
-                <tr key={c._id} className="border-t border-border hover:bg-sunken">
-                  <td className="px-4 py-3 font-medium text-fg">
-                    <Link to={`/campaigns/${c._id}`} className="text-fg hover:text-brand-accent hover:underline">{c.name}</Link>
-                    {c.stepsTotal != null && !c.setupComplete && (
-                      <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 text-[10px] font-medium text-brand-tint-fg">
-                        <span className="h-1 w-1 rounded-full bg-brand-accent" />
-                        Setup {c.stepsDone}/{c.stepsTotal}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={
-                        c.type === 'survey'
-                          ? 'rounded-full bg-info-tint px-2 py-0.5 text-xs font-medium text-info-fg'
-                          : 'rounded-full bg-purple-500/15 px-2 py-0.5 text-xs font-medium text-purple-500'
-                      }
-                    >
-                      {c.type === 'survey' ? 'Survey' : 'Lit drop'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">{c.state}</td>
-                  <td className="px-4 py-3 text-fg-muted">
-                    {c.surveyTemplateId?.name || (c.type === 'lit_drop' ? '—' : '⚠️ none')}
-                  </td>
-                  <td className="px-4 py-3 text-right">{fmt(c.counts?.households)}</td>
-                  <td className="px-4 py-3 text-right">{fmt(c.counts?.knocked)}</td>
-                  <td className="px-4 py-3 text-right">
-                    {c.type === 'survey' ? fmt(c.counts?.surveysSubmitted) : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {c.type === 'lit_drop' ? fmt(c.counts?.litDropped) : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={
-                        c.isActive
-                          ? 'rounded-full bg-success-tint px-2.5 py-0.5 text-xs font-medium text-success'
-                          : 'rounded-full bg-sunken px-2.5 py-0.5 text-xs font-medium text-fg-muted'
-                      }
-                    >
-                      {c.isActive ? 'Active' : 'Archived'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <RowMenu
-                      items={[
-                        { label: 'View dashboard', onClick: () => navigate(`/campaigns/${c._id}`) },
-                        { label: 'Assignments', onClick: () => setAssigningCampaign(c) },
-                        // Edit / Archive / Delete are org-admin acts — a lead runs the
-                        // campaign but doesn't reshape or remove it.
-                        ...(isOrgAdmin
-                          ? [
-                              { label: 'Edit', onClick: () => setEditing(c) },
-                              { label: c.isActive ? 'Archive' : 'Reactivate', onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }) },
-                              c.deletable === true
-                                ? { label: 'Delete', danger: true, onClick: () => setDeleting(c) }
-                                : { label: 'Delete', disabled: true, title: 'Archive instead — this campaign has canvassing data' },
-                            ]
-                          : []),
-                      ]}
-                    />
-                  </td>
-                </tr>
-              ))}
-              {!campaigns.length && (
-                <tr>
-                  <td colSpan="10" className="px-4 py-10 text-center text-fg-muted">
-                    {isOrgAdmin ? (
-                      <>No campaigns yet. Click <strong>New campaign</strong> to create one.</>
-                    ) : (
-                      <>No campaigns assigned to you yet. Ask an org admin to grant you one.</>
-                    )}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <SkeletonCards />
+      ) : campaignsQ.error ? (
+        <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
+          Error loading campaigns: {campaignsQ.error.message}
         </div>
+      ) : campaigns.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-sunken">
+          {isOrgAdmin ? (
+            <EmptyState
+              title="No campaigns yet"
+              hint="Create a campaign, import voters, cut books, and go live — its dashboard walks you through every step."
+              action={
+                <Button
+                  onClick={() => {
+                    setEditing(null);
+                    setCreating(true);
+                  }}
+                >
+                  New campaign
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              title="No campaigns assigned to you yet"
+              hint="Ask an org admin to grant you one."
+            />
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatCard
+              label="Campaigns"
+              value={campaigns.length.toLocaleString()}
+              hint={`${activeCampaigns.length} active`}
+            />
+            <StatCard label="Active campaigns" value={activeCampaigns.length.toLocaleString()} />
+            <StatCard
+              label="Households"
+              value={activeHouseholds.toLocaleString()}
+              hint="across active campaigns"
+            />
+            <StatCard
+              label="Houses knocked"
+              value={activeKnocked.toLocaleString()}
+              hint={`${activeKnockedPct}% of active households`}
+              accent="brand"
+            />
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="w-full max-w-xs">
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name or state…"
+                aria-label="Search campaigns"
+                leadingIcon={<IconSearch size={16} />}
+              />
+            </div>
+            <Select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort campaigns">
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </Select>
+            <Segmented
+              className="ml-auto"
+              value={view}
+              onChange={changeView}
+              options={[
+                { value: 'cards', label: 'Cards' },
+                { value: 'table', label: 'Table' },
+              ]}
+            />
+          </div>
+
+          {noMatches ? (
+            <div className="rounded-lg border border-dashed border-border bg-sunken p-6 text-center text-sm text-fg-muted">
+              No campaigns match your search.
+            </div>
+          ) : (
+            <>
+              <section className="mb-8">
+                {filteredActive.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border bg-sunken p-6 text-center text-sm text-fg-muted">
+                    {q ? 'No active campaigns match your search.' : 'No active campaigns.'}
+                  </div>
+                ) : (
+                  renderList(filteredActive)
+                )}
+              </section>
+
+              {filteredArchived.length > 0 && (
+                <section className="mb-8">
+                  <button
+                    type="button"
+                    onClick={() => setArchivedExpanded((v) => !v)}
+                    className="flex w-full items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm font-semibold text-fg shadow-sm transition-colors hover:bg-sunken"
+                    aria-expanded={archivedExpanded}
+                  >
+                    <ChevronIcon open={archivedExpanded} />
+                    Archived campaigns ({filteredArchived.length})
+                  </button>
+                  {archivedExpanded && <div className="mt-3">{renderList(filteredArchived)}</div>}
+                </section>
+              )}
+            </>
+          )}
+        </>
       )}
 
       {assigningCampaign && (

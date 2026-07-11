@@ -315,7 +315,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
       }
     }
 
-    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1 }).lean();
+    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1, electionDay: 1, earlyVotingStart: 1, earlyVotingEnd: 1, datesNote: 1 }).lean();
     const ids = campaigns.map((c) => c._id);
 
     if (ids.length === 0) {
@@ -505,6 +505,10 @@ router.get('/campaign-rollup', async (req, res, next) => {
           name: campaign.name,
           type: campaign.type,
           isActive: campaign.isActive,
+          electionDay: campaign.electionDay ?? null,
+          earlyVotingStart: campaign.earlyVotingStart ?? null,
+          earlyVotingEnd: campaign.earlyVotingEnd ?? null,
+          datesNote: campaign.datesNote ?? '',
           setupComplete: setup.setupComplete,
           stepsDone: setup.stepsDone,
           stepsTotal: setup.stepsTotal,

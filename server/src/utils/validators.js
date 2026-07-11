@@ -45,6 +45,11 @@ export const usStateSchema = z
   .transform((v) => v.toUpperCase())
   .refine((v) => US_STATES.has(v), { message: 'Enter a valid 2-letter US state.' });
 
+// A civil date as a 'YYYY-MM-DD' string — compared lexicographically, never Date-parsed.
+export const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Use YYYY-MM-DD.' });
+
 // A person's name (given or family). Trimmed, non-empty, bounded.
 export const nameSchema = z.string().trim().min(1).max(80);
 

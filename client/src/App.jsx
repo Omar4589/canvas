@@ -29,6 +29,7 @@ const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
 const VotersPage = lazy(() => import('./pages/VotersPage.jsx'));
 const VoterDetailPage = lazy(() => import('./pages/VoterDetailPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
+const SurveyEditorPage = lazy(() => import('./pages/SurveyEditorPage.jsx'));
 const TagsPage = lazy(() => import('./pages/TagsPage.jsx'));
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage.jsx'));
 const CampaignSurveyPage = lazy(() => import('./pages/CampaignSurveyPage.jsx'));
@@ -175,6 +176,8 @@ export default function App() {
           <Route path="/voters" element={<VotersPage />} />
           <Route path="/voters/:voterId" element={<VoterDetailPage />} />
           <Route path="/surveys" element={<SurveysPage />} />
+          <Route path="/surveys/new" element={<SurveyEditorPage mode="new" />} />
+          <Route path="/surveys/:surveyId/edit" element={<SurveyEditorPage mode="edit" />} />
           <Route path="/tags" element={<TagsPage />} />
           <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />
           <Route path="/billing" element={<BillingPage />} />

@@ -10,7 +10,7 @@ import { Household } from '../../models/Household.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
-import { usStateSchema } from '../../utils/validators.js';
+import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { deleteCampaignCascade } from '../../services/campaigns/deleteCampaign.js';
 
@@ -27,6 +27,12 @@ const createSchema = z.object({
   surveyTemplateId: z.string().nullable().optional(),
   isActive: z.boolean().optional().default(true),
   timeZone: z.string().optional(),
+  // 'YYYY-MM-DD' civil-date strings (campaign timeZone); window ordering is checked
+  // in the handlers so PATCH can validate against the stored other bound.
+  electionDay: isoDateSchema.nullable().optional(),
+  earlyVotingStart: isoDateSchema.nullable().optional(),
+  earlyVotingEnd: isoDateSchema.nullable().optional(),
+  datesNote: z.string().trim().max(280).optional(),
 });
 
 const updateSchema = createSchema.partial();
@@ -145,6 +151,10 @@ router.post('/', async (req, res, next) => {
       const tmpl = await SurveyTemplate.findOne({ _id: data.surveyTemplateId, organizationId: orgId });
       if (!tmpl) return res.status(400).json({ error: 'Survey template not found in this org.' });
     }
+    // Lexicographic comparison is chronological for 'YYYY-MM-DD' strings.
+    if (data.earlyVotingStart && data.earlyVotingEnd && data.earlyVotingEnd < data.earlyVotingStart) {
+      return res.status(400).json({ error: 'Early voting end date cannot be before the start date.' });
+    }
     const campaign = await Campaign.create({
       organizationId: orgId,
       name: data.name,
@@ -154,6 +164,10 @@ router.post('/', async (req, res, next) => {
       isActive: data.isActive,
       // Default the timezone from the state's dominant zone (overridable in the UI).
       timeZone: data.timeZone || defaultZoneForState(data.state),
+      electionDay: data.electionDay ?? null,
+      earlyVotingStart: data.earlyVotingStart ?? null,
+      earlyVotingEnd: data.earlyVotingEnd ?? null,
+      datesNote: data.datesNote ?? '',
       createdBy: req.user._id,
     });
     res.status(201).json({ campaign });
@@ -173,10 +187,10 @@ router.patch('/:campaignId', async (req, res, next) => {
     }
     const data = updateSchema.parse(req.body);
     // A lead is a campaign-scoped admin: they can edit their campaign's name,
-    // survey, and timezone — but archiving (isActive), the type, and the state
-    // stay with org admins.
+    // survey, and timezone — but archiving (isActive), the type, the state, and
+    // the key dates stay with org admins.
     if (!isOrgAdmin(req)) {
-      for (const field of ['isActive', 'type', 'state']) {
+      for (const field of ['isActive', 'type', 'state', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd', 'datesNote']) {
         if (data[field] !== undefined) {
           return res.status(403).json({ error: `Only an org admin can change a campaign's ${field}.` });
         }
@@ -194,9 +208,22 @@ router.patch('/:campaignId', async (req, res, next) => {
       });
     }
 
+    // Validate the early-voting window against the MERGED values — a PATCH that
+    // sets only one bound must still respect the stored other bound.
+    const evStart = data.earlyVotingStart !== undefined ? data.earlyVotingStart : campaign.earlyVotingStart;
+    const evEnd = data.earlyVotingEnd !== undefined ? data.earlyVotingEnd : campaign.earlyVotingEnd;
+    if (evStart && evEnd && evEnd < evStart) {
+      return res.status(400).json({ error: 'Early voting end date cannot be before the start date.' });
+    }
+
     if (data.name !== undefined) campaign.name = data.name;
     if (data.state !== undefined) campaign.state = data.state;
     if (data.timeZone !== undefined) campaign.timeZone = data.timeZone;
+    // Explicit null clears a date.
+    if (data.electionDay !== undefined) campaign.electionDay = data.electionDay;
+    if (data.earlyVotingStart !== undefined) campaign.earlyVotingStart = data.earlyVotingStart;
+    if (data.earlyVotingEnd !== undefined) campaign.earlyVotingEnd = data.earlyVotingEnd;
+    if (data.datesNote !== undefined) campaign.datesNote = data.datesNote;
     if (data.isActive !== undefined && data.isActive !== campaign.isActive) {
       campaign.isActive = data.isActive;
       // Billing reads this: a campaign bills through its ARCHIVE month, not

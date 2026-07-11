@@ -29,8 +29,10 @@ A campaign goes from "created" to "canvassers in the field" through one ordered 
 progress** card on the campaign's dashboard walks you through it — it's a live checklist with a
 "next step" button, so you never have to remember the order. At a glance:
 
-1. **Create the campaign** — **Campaigns → New campaign**: name, type (survey / lit drop), state (a
-   dropdown of real US states), timezone (auto-fills from the state). A survey is **not** required at creation.
+1. **Create the campaign** — **Campaigns → New campaign** (a slide-in drawer): name, type (survey /
+   lit drop), state (a dropdown of real US states), timezone (auto-fills from the state), and the
+   optional **key dates** (Election Day, the early-voting window, a short note — see "Key dates"
+   below). A survey is **not** required at creation.
 2. **Import voters** — **Voter Import**: upload a voter file (geocoded for you if it has no lat/lng).
    New addresses land in **Intake** (owned by no walk list yet). See [IMPORTS.md](IMPORTS.md).
 3. **Attach a survey** *(survey campaigns only)* — on the campaign's **Survey** tab, pick or build
@@ -51,9 +53,40 @@ For the full click-by-click version of each step, see [GETTING_STARTED.md](GETTI
 Inside a campaign the left sidebar lists that campaign's tabs in roughly this order, so the nav
 mirrors the chain. How that drill-in works is below.
 
+## The Campaigns page (the launchpad)
+
+**Campaigns** opens on a summary strip — how many campaigns you have, how many are active, and the
+total households / houses-knocked across the active ones — above the campaign list itself. The list
+renders two ways (a **Cards | Table** toggle, remembered per browser): **cards** show each
+campaign's identity, status, setup chip, key dates, and core counts with a visible **Assignments**
+button and an **Open dashboard →** link; **table** is the dense many-campaigns view with the same
+info and actions. A **search box** (name or state) and a **sort** menu (recent, name, households,
+knocked %, setup progress) sit above the list, and **archived campaigns collapse into their own
+section** at the bottom so finished work doesn't crowd the live view. Each card/row's **⋮ menu**
+holds View dashboard, Assignments, and — for org admins — Edit, Archive/Reactivate, and Delete.
+
+## Key dates (Election Day, early voting, a note)
+
+Every campaign can carry three optional dates plus a note, set in the create/edit drawer (org
+admins only — leads see them but can't change them):
+
+- **Election Day** — shown with a live countdown chip ("12 days", "Today", then a muted "Passed")
+  on the campaign card, the table's Election Day column, and the campaign dashboard header.
+- **Early voting start / end** — shown as a state, not raw dates: *"Opens Oct 20"* before the
+  window, a green *"Open now · Oct 20 – Nov 1"* while it's open, *"Closed"* after. Either bound can
+  be left empty (open-ended on that side); the end can't be before the start (enforced on save).
+- **Key dates note** — up to 280 characters of free text (polling hours, clerk's-office address…),
+  shown beside the dates everywhere they appear.
+
+**Canvassers see them too**: the mobile "Pick a campaign" screen shows the countdown chip
+("🗳 12 days to Election Day"), the early-voting state, and the note under each campaign — so the
+field team knows the stakes without asking. All countdown math runs in the **campaign's timezone**
+(dates are stored as plain `YYYY-MM-DD` civil dates), so every admin and canvasser sees the same
+day regardless of where they are.
+
 ## Navigating a campaign (the drill-in)
 
-The **Campaigns** page is the launchpad. **Click a campaign** to *drill in*: the left sidebar swaps
+**Click a campaign** (its name, or Open dashboard) to *drill in*: the left sidebar swaps
 from the org-level items to **that campaign's tabs** — Home, Survey, Voter Import, Walk Lists,
 Saved Searches, Turf Cutting, Team, Timeline, Map, Early Voting, Client Reports — with a
 **"‹ Campaigns"** link to exit and a **campaign switcher** dropdown to hop to another campaign
@@ -84,10 +117,12 @@ pass with **0 canvassers assigned**.
 
 ## Manage a campaign — what you can change, and when
 
-Open **Campaigns** and use a row's **Edit / Archive / Delete** actions. The rules protect your data
-once canvassing has started:
+Open **Campaigns** and use a card/row's **⋮ menu** (Edit / Archive / Delete — the edit form opens
+in the drawer). The rules protect your data once canvassing has started:
 
 - **Name, state** — always editable.
+- **Key dates + note** — always editable, **org admins only** (a lead can edit the campaign's name,
+  survey, and timezone, but not its dates).
 - **Timezone** — editable, but once you have activity you'll see a warning: changing it **re-buckets
   every past daily stat** (a knock near midnight can move to a different calendar day). Nothing is
   lost and all-time totals are unchanged, but day-by-day numbers shift. See [TIMEZONES.md](TIMEZONES.md).
@@ -155,9 +190,13 @@ masked by the campaign already reading "complete."
 [Campaign.js](../server/src/models/Campaign.js): `organizationId`, `name`, `type` (`survey` |
 `lit_drop`), `state` (2-char, uppercased — validated against the real US-state list via `usStateSchema`
 in [validators.js](../server/src/utils/validators.js)), `surveyTemplateId` (nullable), `isActive` (the
-archive flag), `timeZone`. A `pre('validate')` invariant enforces that a `survey` campaign has a
-`surveyTemplateId` and a `lit_drop` campaign never does (it nulls it on save). There is no `draft`
-state — `isActive` is the only lifecycle flag (active ⇄ archived).
+archive flag), `timeZone`, and the key dates: `electionDay` / `earlyVotingStart` / `earlyVotingEnd`
+(**`'YYYY-MM-DD'` strings, default null** — civil dates interpreted in the campaign's `timeZone`;
+strings on purpose, a `Date` at UTC midnight would render a day early in US zones) plus `datesNote`
+(trimmed string, max 280). ISO date strings order chronologically as plain strings, so all window
+checks are lexicographic — no `Date` parsing. A `pre('validate')` invariant enforces that a `survey`
+campaign has a `surveyTemplateId` and a `lit_drop` campaign never does (it nulls it on save). There
+is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archived).
 
 ## Endpoints — [routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js)
 
@@ -166,9 +205,20 @@ state — `isActive` is the only lifecycle flag (active ⇄ archived).
   the management flags `{ setupComplete, stepsDone, stepsTotal, nextStepKey, hasCanvassed, deletable,
   canEditType }`.
 - **POST `/admin/campaigns`** — create; survey type requires a valid in-org `surveyTemplateId`.
+  Key-date fields validate as `isoDateSchema` (shared, in `validators.js`); an inverted early-voting
+  window (`earlyVotingEnd < earlyVotingStart`, lexicographic) is a `400`.
 - **PATCH `/admin/campaigns/:id`** — update. **Type-lock guard:** if `type` changes and
   `campaignHasCanvassed(id)` (any `CanvassActivity` or `SurveyResponse`), returns `400
-  { code: 'type-locked' }`. Archive/reactivate is just `{ isActive }`.
+  { code: 'type-locked' }`. Archive/reactivate is just `{ isActive }`. The key-date fields join
+  `isActive`/`type`/`state` in the **org-admin-only** list (a lead's PATCH of them is a `403`);
+  explicit `null` clears a date; the window check runs against the **merged** values (incoming ??
+  stored), so PATCHing one bound still validates against the other.
+- **Where the fields surface:** GET `/admin/campaigns` (lean-doc spread — automatic), the
+  per-campaign rows of GET `/admin/reports/campaign-rollup` (added to its projection + row object in
+  [reports.js](../server/src/routes/admin/reports.js) — it picks fields, nothing flows automatically),
+  and GET `/mobile/campaigns` ([bootstrap.js](../server/src/routes/mobile/bootstrap.js), additive so
+  older clients ignore them). Covered end-to-end by
+  [campaignDates.int.test.js](../server/test/campaignDates.int.test.js).
 - **DELETE `/admin/campaigns/:id`** — **only when `!hasCanvassed`** (else `400 { code: 'has-activity' }`).
   Cascades via [deleteCampaign.js](../server/src/services/campaigns/deleteCampaign.js):
   `deleteCampaignCascade()` removes the voters housed in the campaign's households, then
@@ -211,8 +261,19 @@ The cold-start readiness chain is a pure derivation in
   switcher) and [BottomNav.jsx](../client/src/components/BottomNav.jsx).
 - Hub + hand-offs: [SetupProgress.jsx](../client/src/components/SetupProgress.jsx),
   [NextStepBanner.jsx](../client/src/components/NextStepBanner.jsx) (the reusable next-step signpost).
-- Management UI: [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) — the `CampaignForm`
-  type-lock + timezone warning, the list's "Setup x/N" chip, Archive/Reactivate, and the Delete
-  confirm modal.
+- Management UI: [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) — the KPI `StatCard`
+  strip (client-side sums over active campaigns), search/sort, the Cards | Table `Segmented` toggle
+  (persisted to localStorage `campaignsView`), the collapsible archived section, skeleton loading,
+  and the Delete confirm modal. The pieces live in
+  [components/campaigns/](../client/src/components/campaigns/): `CampaignFormDrawer.jsx` (the old
+  inline form in the shared `Drawer` + the key-date inputs; date fields submit `null`, never `''`),
+  `CampaignCard.jsx` (also exports `TypePill`/`StatusBadge`/`CountdownChip`), and
+  `CampaignsTable.jsx` (shared `DataTable`). Both views take the same `menuItems(c)` from the page.
+- Key-date helpers: [lib/electionDates.js](../client/src/lib/electionDates.js) (web) and
+  [mobile/lib/electionDates.js](../mobile/lib/electionDates.js) (mirror) — `daysUntil` /
+  `earlyVotingState` compute against **today in the campaign's tz** (`Intl` en-CA), and display
+  formatting goes through UTC-anchored parts so a `'YYYY-MM-DD'` never shifts a day. The campaign
+  dashboard header ([DashboardPage.jsx](../client/src/pages/DashboardPage.jsx)) and the mobile
+  campaign picker ([campaigns.jsx](../mobile/app/(app)/campaigns.jsx)) render from the same helpers.
 - Extend-a-campaign guards: [EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) — the ClaimPanel
   "Claim all Intake" count + note + confirm modal, and the per-effort readiness chip on each row.

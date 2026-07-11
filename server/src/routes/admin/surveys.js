@@ -5,6 +5,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Campaign } from '../../models/Campaign.js';
+import { Effort } from '../../models/Effort.js';
 import { classifyQuestionEdits } from '../../services/surveys/diffQuestions.js';
 import { canonicalizeTags } from '../../services/surveys/tags.js';
 import { ensureTags } from '../../services/surveys/tagOps.js';
@@ -202,31 +203,75 @@ router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
-    const [surveys, campaigns, responseCounts] = await Promise.all([
+    // All org campaigns (not just default-attached) — the id→name map also labels
+    // walk-list overrides and per-campaign response counts below.
+    const [surveys, campaigns, efforts, responseCounts, responseByCampaign] = await Promise.all([
       SurveyTemplate.find({ organizationId: orgId }).sort({ createdAt: -1 }).lean(),
-      Campaign.find({ organizationId: orgId, surveyTemplateId: { $ne: null } })
-        .select('name surveyTemplateId isActive')
+      Campaign.find({ organizationId: orgId }).select('name surveyTemplateId isActive').lean(),
+      Effort.find({ organizationId: orgId, surveyTemplateId: { $ne: null } })
+        .select('name surveyTemplateId campaignId')
         .lean(),
       SurveyResponse.aggregate([
         { $match: { organizationId: orgId } },
         { $group: { _id: '$surveyTemplateId', count: { $sum: 1 } } },
       ]),
+      SurveyResponse.aggregate([
+        { $match: { organizationId: orgId } },
+        { $group: { _id: { s: '$surveyTemplateId', c: '$campaignId' }, count: { $sum: 1 } } },
+      ]),
     ]);
+    const campaignNameById = new Map(campaigns.map((c) => [String(c._id), c.name]));
+
+    // Campaign DEFAULT attachments (unchanged shape).
     const usedBy = new Map();
     for (const c of campaigns) {
+      if (!c.surveyTemplateId) continue;
       const k = String(c.surveyTemplateId);
       if (!usedBy.has(k)) usedBy.set(k, []);
       usedBy.get(k).push({ id: String(c._id), name: c.name, isActive: c.isActive });
     }
+
+    // Walk-list (Effort) OVERRIDES — a survey used only as an override previously
+    // showed no usage at all.
+    const usedByWalk = new Map();
+    for (const e of efforts) {
+      const k = String(e.surveyTemplateId);
+      if (!usedByWalk.has(k)) usedByWalk.set(k, []);
+      usedByWalk.get(k).push({
+        campaignId: String(e.campaignId),
+        campaignName: campaignNameById.get(String(e.campaignId)) || 'Unknown campaign',
+        effortId: String(e._id),
+        effortName: e.name,
+      });
+    }
+
     const counts = new Map(responseCounts.map((r) => [String(r._id), r.count]));
+
+    // Per-survey → per-campaign response split (drawer detail; null campaignId =
+    // legacy rows without one).
+    const byCampaign = new Map();
+    for (const r of responseByCampaign) {
+      const sid = String(r._id.s);
+      const cid = r._id.c ? String(r._id.c) : null;
+      if (!byCampaign.has(sid)) byCampaign.set(sid, []);
+      byCampaign.get(sid).push({
+        campaignId: cid,
+        campaignName: cid ? campaignNameById.get(cid) || 'Unknown campaign' : 'No campaign',
+        count: r.count,
+      });
+    }
+
     res.json({
       surveys: surveys.map((s) => {
-        const responseCount = counts.get(String(s._id)) || 0;
+        const id = String(s._id);
+        const responseCount = counts.get(id) || 0;
         return {
           ...s,
-          usedByCampaigns: usedBy.get(String(s._id)) || [],
+          usedByCampaigns: usedBy.get(id) || [],
+          usedByWalkLists: usedByWalk.get(id) || [],
           responseCount,
           hasResponses: responseCount > 0,
+          responseCountByCampaign: byCampaign.get(id) || [],
         };
       }),
     });
@@ -333,6 +378,78 @@ router.post('/:surveyId/duplicate', requireOrgRole('admin'), async (req, res, ne
       createdBy: req.user._id,
     });
     res.status(201).json({ survey: copy });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Soft-archive: hide from the default library list and from pickers (unless currently
+// selected) without touching responses or attachments. Idempotent. Separate POSTs
+// (not a PATCH flag) so the upsert/version-bump path never sees archive state.
+router.post('/:surveyId/archive', requireOrgRole('admin'), async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const survey = await SurveyTemplate.findOne({
+      _id: req.params.surveyId,
+      organizationId: activeOrgId(req),
+    });
+    if (!survey) return res.status(404).json({ error: 'Survey not found' });
+    if (!survey.archivedAt) {
+      survey.archivedAt = new Date();
+      await survey.save();
+    }
+    res.json({ survey });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:surveyId/unarchive', requireOrgRole('admin'), async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const survey = await SurveyTemplate.findOne({
+      _id: req.params.surveyId,
+      organizationId: activeOrgId(req),
+    });
+    if (!survey) return res.status(404).json({ error: 'Survey not found' });
+    if (survey.archivedAt) {
+      survey.archivedAt = null;
+      await survey.save();
+    }
+    res.json({ survey });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Hard-delete, only when truly unused: no responses, not any campaign's default,
+// not any walk list's override. Anything in use gets a 409 pointing at Archive.
+router.delete('/:surveyId', requireOrgRole('admin'), async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const survey = await SurveyTemplate.findOne({ _id: req.params.surveyId, organizationId: orgId });
+    if (!survey) return res.status(404).json({ error: 'Survey not found' });
+
+    const [hasResponses, campaignRef, effortRef] = await Promise.all([
+      SurveyResponse.exists({ surveyTemplateId: survey._id, organizationId: orgId }),
+      Campaign.exists({ organizationId: orgId, surveyTemplateId: survey._id }),
+      Effort.exists({ organizationId: orgId, surveyTemplateId: survey._id }),
+    ]);
+    if (hasResponses || campaignRef || effortRef) {
+      const reasons = [];
+      if (hasResponses) reasons.push('It has survey responses.');
+      if (campaignRef) reasons.push('It is attached to a campaign.');
+      if (effortRef) reasons.push('It is a walk-list survey override.');
+      return res.status(409).json({
+        error: 'This survey can’t be deleted because it is in use. Archive it instead.',
+        code: 'survey-in-use',
+        reasons,
+      });
+    }
+
+    await SurveyTemplate.deleteOne({ _id: survey._id, organizationId: orgId });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

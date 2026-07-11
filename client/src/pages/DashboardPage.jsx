@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
@@ -11,7 +11,9 @@ import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector
 import InfoHint from '../components/InfoHint.jsx';
 import SetupProgress from '../components/SetupProgress.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
+import { CountdownChip } from '../components/campaigns/CampaignCard.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
+import { daysUntil, earlyVotingState, formatDateLabel } from '../lib/electionDates.js';
 import { metricHelp } from '../lib/metricHelp.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { todayInTz } from '../lib/datePresets.js';
@@ -50,9 +52,27 @@ export default function DashboardPage() {
     rangeTouchedRef.current = true;
     setDateRange(next);
   }
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  // Deep-link from the Surveys library: ?survey=<templateId> preselects that
+  // survey's results and scrolls to them once the switcher list is known.
+  const [searchParams] = useSearchParams();
+  const surveyParam = searchParams.get('survey');
+  const [selectedTemplateId, setSelectedTemplateId] = useState(surveyParam || '');
+  const deepLinkedRef = useRef(false);
   const [selectedCanvasser, setSelectedCanvasser] = useState(null);
   const [effortId, setEffortId] = useState('');
+
+  // The sidebar campaign switcher re-renders this SAME mounted page with a new
+  // :campaignId — reset per-campaign selections so campaign A's template/effort
+  // ids never leak into campaign B's queries (which would report empty results).
+  const prevCampaignRef = useRef(campaignId);
+  useEffect(() => {
+    if (prevCampaignRef.current === campaignId) return;
+    prevCampaignRef.current = campaignId;
+    setSelectedTemplateId(surveyParam || '');
+    setEffortId('');
+    setSelectedCanvasser(null);
+    deepLinkedRef.current = false;
+  }, [campaignId, surveyParam]);
 
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
@@ -160,6 +180,23 @@ export default function DashboardPage() {
   const surveyResultsRef = useRef(null);
   const questionResultsRefs = useRef({});
 
+  // Resolve the ?survey= deep-link: the CURRENT survey's id normalizes to '' (the
+  // switcher's canonical "current" value), then scroll the results into view once.
+  // Waits for BOTH the switcher list and the campaign (the results section only
+  // renders for survey campaigns), so the scroll can't race an unrendered section.
+  useEffect(() => {
+    if (!surveyParam || deepLinkedRef.current) return;
+    const list = surveysQ.data;
+    if (!list || selectedCampaign?.type !== 'survey') return;
+    deepLinkedRef.current = true;
+    const current = list.find((s) => s.current);
+    if (current && String(current.id) === String(surveyParam)) setSelectedTemplateId('');
+    // Next frame so the survey-results section has rendered.
+    requestAnimationFrame(() => {
+      surveyResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [surveyParam, surveysQ.data, selectedCampaign]);
+
   const overview = overviewQ.data || {};
   const totals = overview.totals || {};
   // A brand-new campaign (no voters imported) has nothing to report yet — keep the
@@ -240,6 +277,44 @@ export default function DashboardPage() {
               <span className="text-fg-subtle">·</span> {selectedCampaign.state}
             </div>
           )}
+          {/* Key dates — rendered only when the campaign payload carries them (fields ship with the server update). */}
+          {selectedCampaign &&
+            (selectedCampaign.electionDay ||
+              selectedCampaign.earlyVotingStart ||
+              selectedCampaign.earlyVotingEnd ||
+              selectedCampaign.datesNote) && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                {selectedCampaign.electionDay && (
+                  <span className="flex items-center gap-1.5 text-fg-muted">
+                    Election Day{' '}
+                    <span className="font-medium text-fg">
+                      {formatDateLabel(selectedCampaign.electionDay)}
+                    </span>
+                    <CountdownChip
+                      days={daysUntil(selectedCampaign.electionDay, selectedCampaign.timeZone)}
+                    />
+                  </span>
+                )}
+                {(() => {
+                  const ev = earlyVotingState(
+                    selectedCampaign.earlyVotingStart,
+                    selectedCampaign.earlyVotingEnd,
+                    selectedCampaign.timeZone
+                  );
+                  if (!ev) return null;
+                  return ev.state === 'open' ? (
+                    <span className="rounded-full bg-success-tint px-2 py-0.5 font-medium text-success-fg">
+                      Early voting · {ev.label}
+                    </span>
+                  ) : (
+                    <span className="text-fg-muted">Early voting · {ev.label}</span>
+                  );
+                })()}
+                {selectedCampaign.datesNote && (
+                  <span className="text-fg-muted">{selectedCampaign.datesNote}</span>
+                )}
+              </div>
+            )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {efforts.length > 1 && (

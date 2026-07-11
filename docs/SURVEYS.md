@@ -39,15 +39,42 @@ Each question can be marked **required** and has an **order** (where it appears 
 Survey campaigns use a survey; **lit-drop campaigns** don't — they just record that literature was
 dropped. (See [METRICS.md](METRICS.md) for how the two campaign types count.)
 
-## Building a survey (web admin)
+## The Surveys library page (web admin)
 
-On the **Surveys** page you create a template: give it a name, write the intro/closing, then add
-questions — set each one's wording, type, options, and whether it's required. You can reorder
-questions, add and remove them, and rename anything. When you attach the survey to a campaign,
-canvassers on that campaign start seeing it.
+The org **Surveys** page is a proper library now — built to answer "what surveys do we have and how
+are they doing?" at a glance, with authoring split out onto its own pages:
 
-The Surveys list also shows, for each survey, **which campaigns use it** and a **response count** —
-so you can see at a glance whether a survey is live before you touch it.
+- **Stat cards** up top: total surveys, total responses, how many are **in use** (attached to a
+  campaign or walk list), and how many are **drafts** (not attached anywhere).
+- A **search box** and an **Active / Archived / All** filter over the list.
+- One **row per survey**: name + created date, **everywhere it's used** — campaigns *and* walk-list
+  overrides (a survey used only on a walk list used to show as unused; it doesn't anymore) — question
+  count (what canvassers actually see; retired questions don't inflate it), response count, and a
+  version badge.
+- **Click a row** to open the **quick view** — a side panel with the survey's dates, everywhere it's
+  used (each linking straight to that campaign's results), response totals **per campaign**, and a
+  read-only preview of every question. It's the fast way to *see* a survey without opening the
+  builder; **View full results →** jumps to the campaign dashboard's Survey-results section.
+- **Actions** live on each row (⋮ menu) and in the quick view: **Edit**, **Duplicate**, and
+  **Archive** or **Delete** (see below).
+
+**Creating and editing** happen on dedicated pages — **+ New survey** opens `/surveys/new` and
+**Edit** opens `/surveys/<id>/edit`, both hosting the full builder; save or cancel returns you to
+the library. In the builder you give the survey a name, write the intro/closing, then add questions —
+wording, type, options, required. When you attach the survey to a campaign, canvassers on that
+campaign start seeing it.
+
+### Archiving and deleting
+
+- **Archive** hides a survey from the Active list and from every survey picker (campaign form,
+  Change-survey dialog, walk-list override dropdowns) — **without touching anything**: campaigns
+  still using it keep working, responses keep reporting, and wherever it's currently selected it
+  stays visible (labeled "archived") so nothing silently resets. **Unarchive** brings it back.
+  Archive is for retiring old questionnaires you're done with but whose data you keep.
+- **Delete** is only offered for a survey that is truly unused — **zero responses, not any
+  campaign's survey, not any walk list's override**. Anything in use shows Archive instead, and the
+  server refuses an in-use delete with the specific reasons. Delete is permanent; it exists so an
+  abandoned draft doesn't live forever.
 
 Beyond plain questions and options, the builder supports three extras:
 
@@ -139,18 +166,27 @@ Once options are tagged, tags show up in two places:
   **Export CSV** to download those voters (name, party, age, phone, precinct, address) for a re-
   canvass, a phone bank, or a mail house.
 
-## The campaign's "Survey" tab (which survey this campaign uses)
+## The campaign's "Survey" tab (every survey this campaign uses)
 
-Each campaign has its own **Survey** tab (open a campaign, then **Survey** in the sidebar). It shows
-**which survey the campaign uses** and a **read-only preview** of it — the intro, the questions and
-their options, and the closing — so you can confirm the right questionnaire is attached without
-opening the builder. Surveys stay reusable **org-level templates**, but you no longer get bounced to the org-wide Surveys
-list to work on one: **creating and editing a campaign's survey now happens right here in the
-drill-in** — the builder opens in place and returns you to this tab on save. The org **Surveys
-library** is still there as the deliberate place to **see, duplicate, and reuse** templates across
-campaigns.
+Each campaign has its own **Survey** tab (open a campaign, then **Survey** in the sidebar). It's a
+**coverage view**: not just the default survey, but **which survey every set of doors actually
+gets** — so a campaign running two surveys at once (see the next section) is fully visible and
+manageable from one screen.
 
-From here you can:
+- **The default survey card** — the campaign's default template with a read-only preview (intro,
+  questions, closing) and its **response count for this campaign** (Intake doors + every walk list
+  that doesn't override). Surveys stay reusable **org-level templates**, but you don't get bounced
+  to the org-wide list to work on one: **creating and editing happen right here in the drill-in** —
+  the builder opens in place and returns you to this tab on save.
+- **The "Walk list coverage" table** — one row per walk list: its doors, **which survey it runs**
+  (a dropdown that reads "Campaign default → *name*" until you override it), and its **response
+  count**. Change a walk list's survey right here — this is the same override the Walk Lists page
+  edits, shown from the survey's point of view. If responses came in from doors not yet assigned to
+  any walk list, an **Intake** row shows them under the default.
+- **Team leads** who manage the campaign can change the default and set walk-list overrides here;
+  **authoring** (Edit / Create new) stays admin-only.
+
+From the default card you can:
 
 - **Change survey** — pick a different template from your library for this campaign.
 - **Edit survey** — open the builder **right here in the campaign** to edit the attached survey's
@@ -160,12 +196,16 @@ From here you can:
 - **Create new survey** — open the builder **in the campaign**, write your questions, and on save the
   new survey is **automatically attached** here and you land back on this tab.
 
+And per walk-list row (admins): **New…** creates a survey and **assigns it to that walk list** on
+save — the one-flow way to add a second survey to the campaign.
+
 A few rules this tab enforces:
 
 - A **lit-drop campaign** shows a short "surveys aren't used for this campaign" note instead —
   lit-drops record drops, not responses.
 - A **survey campaign can't activate a round until a survey is attached** — until then canvassers
-  have nothing to fill out.
+  have nothing to fill out. If walk lists have overrides but **no default is attached**, the tab
+  warns you: override lists keep working, but Intake doors and non-override lists have no survey.
 - **Swapping mid-canvass is allowed.** If you change to a different survey after answers have come
   in, the old responses keep reporting under the old survey and new answers report under the new one
   — nothing is lost or mixed. If the survey you pick **already has responses**, the tab warns you
@@ -181,9 +221,10 @@ survey with its own**.
 
 - The campaign's **Survey** tab sets the **default** — the survey every door uses unless its walk
   list says otherwise.
-- On the **Walk Lists** page, each walk list has a **Survey override** dropdown (defaults to
-  "Campaign default"). Point one walk list at "GOTV" and leave another on the default, and each group
-  gets its own questionnaire.
+- The override can be set in **either place**: the Survey tab's **Walk list coverage** table (the
+  survey-centric view, with per-walk-list response counts) or the **Walk Lists** page's **Survey
+  override** dropdown (defaults to "Campaign default"). They edit the same setting. Point one walk
+  list at "GOTV" and leave another on the default, and each group gets its own questionnaire.
 - In the field the app resolves the survey **per door** (household → its book → its walk list's
   override, else the campaign default), so a canvasser working doors from two walk lists sees a
   walk-list switcher and always gets the right questions for the door in front of them. The server
@@ -276,7 +317,7 @@ normalization, dual-read aggregation, edit classification), and the `survey-resu
 
 | Model | File | Fields that matter |
 |---|---|---|
-| `SurveyTemplate` | [models/SurveyTemplate.js](../server/src/models/SurveyTemplate.js) | `organizationId`, `name`, `isActive`, `version` (default 1), `intro`, `closing`, `questions[]`, **`tags: [String]`** (a per-survey **palette** — the distinct display casings of the tags its options use; **derived/kept-in-sync on save**, no longer the source of truth — the org-level **`Tag`** library is, see §I), `createdBy`. Org-scoped, **not** campaign-scoped (a campaign points at a template via `Campaign.surveyTemplateId`). |
+| `SurveyTemplate` | [models/SurveyTemplate.js](../server/src/models/SurveyTemplate.js) | `organizationId`, `name`, `isActive`, `version` (default 1), `intro`, `closing`, `questions[]`, **`tags: [String]`** (a per-survey **palette** — the distinct display casings of the tags its options use; **derived/kept-in-sync on save**, no longer the source of truth — the org-level **`Tag`** library is, see §I), **`archivedAt`** (`Date \| null`, indexed — soft-archive; hides the template from the Active list + all pickers unless currently selected, touches nothing else; no migration needed, existing docs default `null`), `createdBy`. Org-scoped, **not** campaign-scoped (a campaign points at a template via `Campaign.surveyTemplateId`). |
 | `Tag` | [models/Tag.js](../server/src/models/Tag.js) | The **org-level managed tag library** (Phase 3.1): `organizationId`, `name` (canonical display), **`normalizedName`** (trim+lowercase dedupe key), `color` (reserved for a future colored-chip UI, default `null`), `createdBy`, timestamps. **Unique index `{ organizationId, normalizedName }`** makes duplicate tags structurally impossible. Survey options still reference a tag by its display `name` **as a string** (`option.tag`); this collection is the picklist + the target of rename/merge/delete (see §I). |
 | `SurveyTemplate.questions[]` | same (`questionSchema`, `{ _id: false }`) | `key` (stable per-survey slug, **the join handle** — never reused once retired), `label`, `type` (`single_choice`/`multiple_choice`/`text`), `options[]`, `required`, `order`, **`retired`** (soft-retire a whole question), **`visibleIf`** (conditional display, default `null`), **`otherOption`** (boolean — adds an "Other: ___" choice), **`refusalOption`** (boolean — reserved for a future door-outcome feature; **no UI, not wired**). |
 | `SurveyTemplate…options[]` | same (`optionSchema`, `{ _id: false }`) | **`id`** (stable per-question id — reports/conditions join on this, so `text` is freely editable), `text`, **`tag`** (cross-question group label, default `null`; canonicalized to the palette's casing on save — see §I), **`script`** (per-option read-aloud line), **`retired`** (soft-hide from the field, keep in reports), `order`. |
@@ -290,14 +331,27 @@ minted once and held immutable so conditions and stored answers keep pointing at
 
 ## B. Endpoints (authoring)
 
-All under `/admin/surveys`, guarded by `requireAuth, orgContext, requireOrgRole('admin')`.
+All under `/admin/surveys`. The router mounts `requireAuth, orgContext, requireOrgRole('admin','lead')`
+(leads may **read** the library, e.g. to attach a template to their campaign); every write route adds
+`requireOrgRole('admin')`.
 
 | Method · path | Purpose |
 |---|---|
-| `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` plus **`responseCount`** / **`hasResponses`** (one `SurveyResponse.aggregate` count per template). |
+| `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` (campaign **defaults**), **`usedByWalkLists: [{campaignId, campaignName, effortId, effortName}]`** (every `Effort` whose `surveyTemplateId` points here — a survey used *only* as a walk-list override previously showed no usage at all), **`responseCount`** / **`hasResponses`** (org-wide `SurveyResponse.aggregate`), and **`responseCountByCampaign: [{campaignId, campaignName, count}]`** (a second aggregate grouped by `{surveyTemplateId, campaignId}`; a legacy null-`campaignId` bucket is labeled "No campaign"). `archivedAt` flows through — **archived templates are still returned**; Active/Archived filtering is client-side so one `['surveys']` cache serves the list and every picker. |
 | `POST /admin/surveys` | Create (Zod `upsertSchema`, which accepts an optional `tags: [String]` palette); `assignOptionIds` mints ids for any id-less option, `validateVisibleIfIntegrity` checks the rule graph, then `canonicalizeTags(withIds, data.tags)` collapses the palette + every `option.tag` to one case-insensitive casing (see §I), and sets `version: 1`, `createdBy`. **Then `ensureTags(orgId, tags, userId)`** auto-upserts org `Tag` docs for the survey's tags so the library stays complete even for API/legacy writes (see §I). |
 | `PATCH /admin/surveys/:surveyId` | Update. When `questions` are present: if the survey **has responses**, `classifyQuestionEdits` blocks **only a question type change** → `409 { code: 'survey-has-responses', reasons }`. Otherwise `reconcileQuestions` (soft-retire absent items, mint ids for new options), `validateVisibleIfIntegrity`, then `canonicalizeTags(reconciled, data.tags ?? existing.tags)` (writes back both `existing.tags` and the canonicalized option tags), apply, and bump `version`. After save, **`ensureTags(orgId, existing.tags, userId)`** auto-upserts the library (see §I). |
 | `POST /admin/surveys/:surveyId/duplicate` | Clone into a fresh template (`name: "<name> (Copy)"`, `version: 1`, `isActive: false`, no campaign link, questions copied verbatim). |
+| `POST /admin/surveys/:surveyId/archive` · `POST /admin/surveys/:surveyId/unarchive` | Set/clear `archivedAt`. **Idempotent** (re-archiving keeps the original timestamp). Deliberately separate POSTs — not a PATCH flag — so the upsert/reconcile/version-bump path never sees archive state. Attaching an archived survey is only blocked in the UI (pickers hide it); the API still allows it, keeping unarchive-then-attach trivial. |
+| `DELETE /admin/surveys/:surveyId` | Hard-delete, **only when truly unused**. Guard = `SurveyResponse.exists` ∨ `Campaign.exists({surveyTemplateId})` ∨ `Effort.exists({surveyTemplateId})` → `409 { code: 'survey-in-use', reasons: [...] }` naming each reference; otherwise `200 { ok: true }`. Wrong-org / missing id → `404`. |
+
+> **Per-walk-list response counts** live on the efforts endpoint, not here:
+> `GET /admin/campaigns/:campaignId/efforts` ([routes/admin/efforts.js](../server/src/routes/admin/efforts.js))
+> now returns `responseCount` per effort plus a top-level **`intakeResponseCount`** (responses whose
+> `effortId` is null — Intake / pre-walk-list doors). The campaign Survey tab computes the **default
+> survey's coverage count** as `intakeResponseCount + Σ responseCount` of efforts **without** an
+> override — exact even when the default template is also some walk list's override (a per-survey
+> total would double-count there). Guard is `requireCampaignManager`, so leads who run the campaign
+> can read counts and set overrides (`PATCH …/efforts/:id { surveyTemplateId }`).
 
 > **Soft-retire reconcile (replaces the old "blocked destructive edits" model).** The PATCH route no
 > longer deletes anything structural. `reconcileQuestions(existingQuestions, incomingQuestions)`
@@ -447,16 +501,19 @@ visibility evaluator (just another id).
 
 | File | Renders |
 |---|---|
-| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | The org **Surveys library** (list, reuse, **Duplicate**). Hosts the shared survey builder, now extracted to [components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) (`SurveyForm` + `QuestionCard`/`OptionRow`/`ConditionEditor` + helpers) and imported by both this page and the in-campaign builder. Derives question `key` (`deriveKey`) and option `id` (`optionId`) by slugify-with-collision-suffix, both minted once and held immutable. Per-option **read-aloud script** field (`OptionRow`), **Other (specify)** toggle, and a **Show only if…** condition editor (`ConditionEditor`) that only lets a rule reference **earlier** questions and restricts text questions to `answered`/`not_answered` (`opsForType`); live `ruleError` validation mirrors the server. On a survey with responses it does **not** lock everything — only the **type** control is disabled (and removals soft-retire with a **Restore** affordance); it surfaces the PATCH `409 reasons`. Shows `usedByCampaigns` + `responseCount`; per-row **Duplicate**. Per option, a **+ tag** affordance reveals a **`TagPicker`** combobox ([components/TagPicker.jsx](../client/src/components/TagPicker.jsx)) backed by the **org Tag library** (`SurveysPage` loads it via `useQuery(['admin','tags'])` → `GET /admin/tags`, passed down as `orgTags`/`tags`): you filter and pick an existing org tag, or take an explicit **"Create '…'"** action — `onCreate` (`createTag`) `POST`s `/admin/tags`, invalidates the `['admin','tags']` query, and returns the canonical name. The old per-survey free-text `<datalist>` is gone (no silent typo-fork). On submit, `SurveyForm` still derives the survey's `tags` palette as the case-insensitive distinct set of every option's `tag` (first casing wins) and submits it — but the server's `ensureTags` upsert and the library are now the source of truth, not this palette. **Auto-attach return loop** (now a fallback — in-campaign create/edit happens in the drill-in, see `CampaignSurveyBuilderPage`): `?attachTo=<campaignId>` opens the create form, then on save `PATCH /admin/campaigns/:attachTo { surveyTemplateId }` and `navigate('/campaigns/:attachTo/survey')` (cancel/back also returns there). No `refusalOption` UI. |
+| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | The org **Surveys library** — a pure **list + quick-view** page (authoring lives on `SurveyEditorPage`). `StatCard` row (surveys / total responses / in use / drafts), search + `Segmented` **Active/Archived/All** filter (client-side over `archivedAt`), and a `DataTable` with one row per template: name + created date, **Used in** (campaign names *and* `"{campaign} · {walk list}"` override labels from `usedByWalkLists`), **question count excluding retired questions**, `responseCount`, version/Archived badge, and a `RowMenu` (⋮) with **Edit / Duplicate / Archive-or-Delete** (Delete only when `responseCount === 0` and unused — the server re-checks). Row click opens the **`SurveyQuickView`** drawer. Owns the `duplicate`/`archive`/`unarchive`/`delete` mutations, all invalidating **`['surveys']`** — the one cache key every survey consumer now shares (EffortsPage/CampaignsPage previously used a divergent `['admin','surveys']`; TagsPage's post-delete invalidation had been silently pointing at that dead key). Back-compat: `/surveys?attachTo=<id>` redirects to `/surveys/new?attachTo=<id>`. |
+| [client/src/components/SurveyQuickView.jsx](../client/src/components/SurveyQuickView.jsx) | The row-click **quick view**, built on the design-system `ui/Drawer` (right-side slide-over). Sections: version + In use/Draft/Archived badges; created/updated dates + active question count; **Used in** — campaign defaults and walk-list overrides, each linking to `/campaigns/:id?survey=<templateId>` (the dashboard deep-link); **Responses** — org-wide total + the per-campaign split from `responseCountByCampaign` (null-campaign bucket labeled, never linked); a `SurveyPreview` of the questions; and a sticky action bar — **Edit survey** (→ `/surveys/:id/edit`), **Duplicate**, and **Delete** (confirm; only when unused) or **Archive/Unarchive**. Surfaces a delete `409`'s `reasons[]` if one races through the client-side gate. **View full results →** renders one link per campaign in the union of current attachments and campaigns with responses. |
+| [client/src/pages/SurveyEditorPage.jsx](../client/src/pages/SurveyEditorPage.jsx) | The **dedicated org builder host** — routes `/surveys/new` and `/surveys/:surveyId/edit` (both in the `requireOrgAdmin` group). Renders the shared `SurveyForm` from [components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) (`QuestionCard`/`OptionRow`/`ConditionEditor`; derives question `key` via `deriveKey` and option `id` by slugify-with-collision-suffix, minted once and held immutable; per-option **read-aloud script**, **Other (specify)**, **Show only if…** with live `ruleError` validation mirroring the server; on a survey with responses only the **type** control locks and removals soft-retire with **Restore**; surfaces the PATCH `409 reasons`). Loads the org tag library (`['admin','tags']`) for the `TagPicker`, same as the in-campaign builder. Edit mode finds its survey in the cached `['surveys']` list (no single-survey GET; load errors render instead of silently bouncing). Two hand-off flows on the create route: **`?attachTo=<campaignId>`** — create → `PATCH /admin/campaigns/:id { surveyTemplateId }` (campaign default) → back to that Survey tab; **`?assignEffort=<effortId>&campaignId=<id>`** — create → `PATCH /admin/campaigns/:id/efforts/:effortId { surveyTemplateId }` (walk-list override) → back to that Survey tab. Plain visits return to `/surveys`. No `refusalOption` UI. |
+| [client/src/components/WalkListSurveySelect.jsx](../client/src/components/WalkListSurveySelect.jsx) | The **one** walk-list survey-override picker, shared by `CampaignSurveyPage` and `EffortsPage` so the archived-hiding rule lives in a single place: first option **"Campaign default"** (`''` → `onChange(null)`), then `surveys.filter(s => !s.archivedAt \|\| String(s._id) === current)` — an effort already pinned to a now-archived survey keeps its option (labeled `· archived`) instead of silently reading "Campaign default". A stale/unknown id renders an "Unknown survey" option rather than crashing. |
 | [client/src/components/TagPicker.jsx](../client/src/components/TagPicker.jsx) | The per-option **pick-or-create** tag combobox used by `SurveysPage`'s `OptionRow`. Filters the org `tags` prop case-insensitively; selecting an existing tag is the default, and a new one is an **explicit "Create '…'" action** that only appears when nothing matches (calls `onCreate`). Renders a selected tag as a clearable chip. |
-| [client/src/pages/TagsPage.jsx](../client/src/pages/TagsPage.jsx) | The **org-level Tags management page** (route `/tags`, an `ORG_NAV` entry — [navItems.js](../client/src/components/navItems.js)). Lists every org `Tag` from `GET /admin/tags` with a `usageSummary` ("on M options, across N surveys, K saved searches"), plus search. **Create** (`POST /admin/tags`), inline **Rename** (`PATCH /admin/tags/:id`; a `409 { code: 'tag-exists' }` surfaces a **"merge into it"** button targeting the clashing `tagId`), **Merge** (`POST /admin/tags/:id/merge { targetId }` via a target picker), and **Delete** (`DELETE /admin/tags/:id` behind a usage-aware `confirm`). Delete also invalidates `['admin','surveys']` since the builder reads tagged options. |
-| [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`). **Association** UI (preview + attach); authoring is handed off to the drill-in builder. States: **attached** (header + `SurveyPreview` + **Change survey** / **Edit survey** → `/campaigns/:id/survey/edit`), **no survey yet** (Pick / **Create new survey** → `/campaigns/:id/survey/new`), **lit-drop** (surveys-not-used note). Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }`; warns when the chosen template has responses. No standalone unlink. |
+| [client/src/pages/TagsPage.jsx](../client/src/pages/TagsPage.jsx) | The **org-level Tags management page** (route `/tags`, an `ORG_NAV` entry — [navItems.js](../client/src/components/navItems.js)). Lists every org `Tag` from `GET /admin/tags` with a `usageSummary` ("on M options, across N surveys, K saved searches"), plus search. **Create** (`POST /admin/tags`), inline **Rename** (`PATCH /admin/tags/:id`; a `409 { code: 'tag-exists' }` surfaces a **"merge into it"** button targeting the clashing `tagId`), **Merge** (`POST /admin/tags/:id/merge { targetId }` via a target picker), and **Delete** (`DELETE /admin/tags/:id` behind a usage-aware `confirm`). Delete also invalidates `['surveys']` since the builder reads tagged options. |
+| [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`) — the **coverage view**. Section 1: the **default survey card** (badge `Default`, `SurveyPreview`, **Change survey** / admin-only **Edit survey** → `/campaigns/:id/survey/edit`) whose response count is the **coverage count** (`intakeResponseCount + Σ responseCount` of no-override efforts — see §B), not the template's org-wide total. Section 2: the **Walk list coverage** `DataTable` — per effort: status badge, doors, a `WalkListSurveySelect` wired to `PATCH …/efforts/:id { surveyTemplateId }` (invalidates `['admin','efforts',campaignId]`, the same key `EffortsPage` reads, so both pages stay in sync), its `responseCount`, and an admin-only **New…** link → `/surveys/new?assignEffort=…&campaignId=…`; an **Intake** row appears when null-`effortId` responses exist. States: no default + overrides → warning (non-override doors have no survey); no walk lists → pointer to the Walk Lists page; **lit-drop** unchanged. Leads (via `requireCampaignManager`) can attach the default and set overrides; authoring affordances gate on `isOrgAdmin`. Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }`; the Change-survey picker hides archived templates unless currently attached and warns when the chosen template has responses. No standalone unlink. |
 | [client/src/pages/CampaignSurveyBuilderPage.jsx](../client/src/pages/CampaignSurveyBuilderPage.jsx) | **In-drill-in survey builder** (`/campaigns/:campaignId/survey/new` and `/survey/edit`). Renders the shared `SurveyForm` from [components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) inside the campaign so authoring never bounces to the org list. **New**: `POST /admin/surveys` → `PATCH /admin/campaigns/:id { surveyTemplateId }` (attach) → back to the Survey tab. **Edit**: loads the campaign's attached template → `PATCH /admin/surveys/:id`. When the template is **shared by other campaigns** (`usedByCampaigns`) it warns and offers **Duplicate** (copy → attach the copy → re-enter edit on the now-unshared copy). Loads the org tag library (`['admin','tags']`) for the `TagPicker`, same as the org page. |
-| [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options as radio/checkbox glyphs, text as a placeholder. |
+| [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options as radio/checkbox glyphs, text as a placeholder. **Filters out retired questions and retired options** — the preview shows what canvassers actually see in the field. |
 | [client/src/lib/surveyVisibility.js](../client/src/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded) — powers the builder's live condition validity and any preview gating. |
-| [client/src/pages/CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) | Survey-template dropdown shows a heads-up when the chosen survey already has responses (repointing reports new answers separately). |
+| [client/src/pages/CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) | Survey-template dropdown (in `components/campaigns/CampaignFormDrawer.jsx`) shows a heads-up when the chosen survey already has responses (repointing reports new answers separately). Hides **archived** templates unless attached — anchored to the survey attached **when the drawer opened**, so deselecting an archived one mid-edit doesn't make it vanish from the options. |
 | [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results` (retired/legacy buckets included). Exports **`TagResults`** — the report's **"Tags"** panel: one `TagRow` per `tags[]` entry (bar scaled to the most-reached tag, **distinct** `voterCount`), expandable to its contributing options and an inline `VoterList` that drills via `voters-by-answer?tag=<tag>&surveyTemplateId=<id>` (see §I). |
-| [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Renders the **Survey results** section. A **survey switcher** appears in the section header when the campaign has answers under a survey other than the one currently attached: `GET /admin/reports/surveys?campaignId=` now returns **every** survey with responses for the campaign (each row flagged **`current`**, current-first), and picking a past one re-queries `survey-results` with that `surveyTemplateId` and shows a "no longer attached" note — so a swapped campaign's old answers are one click away, never hidden. Renders `<TagResults>` below the per-question charts when `surveyResultsQ.data.tags` is non-empty, passing `surveyTemplateId` for the tag drill. |
+| [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Renders the **Survey results** section. A **survey switcher** appears in the section header when the campaign has answers under a survey other than the one currently attached: `GET /admin/reports/surveys?campaignId=` now returns **every** survey with responses for the campaign (each row flagged **`current`**, current-first), and picking a past one re-queries `survey-results` with that `surveyTemplateId` and shows a "no longer attached" note — so a swapped campaign's old answers are one click away, never hidden. Accepts a **`?survey=<templateId>` deep-link** (the Surveys quick-view's results links): seeds the switcher (the *current* survey's id normalizes to `''`) and scrolls the section into view once both the switcher list and the campaign are known; per-campaign selections (template/effort/canvasser) **reset when `:campaignId` changes**, since the sidebar campaign switcher re-renders the same mounted page. Renders `<TagResults>` below the per-question charts when `surveyResultsQ.data.tags` is non-empty, passing `surveyTemplateId` for the tag drill. |
 | [client/src/components/AnswerFilters.jsx](../client/src/components/AnswerFilters.jsx) | The saved-search / targeted-round answer-filter chips. Beyond per-question `answerFilters`, it renders a **"By tag"** chip row from the `tags` palette prop (falling back to the case-insensitive union of option tags) and emits selected tags to the parent via `onTagChange` as **`answerTagFilters: [{ tag }]`** (case-insensitive, display-cased). |
 | [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | Saved-search builder. Wires `AnswerFilters` with `tags={surveyTags}` (from `survey-results` `tags[]`) + `answerTagFilters` into the filter (sent to `resolveWalkList`). Per saved search, **Export CSV** (`exportCsv`) does an **authenticated blob download**: `fetch` the export endpoint with `Authorization: Bearer` + `X-Org-Id` headers, read `res.blob()`, then click a synthetic `<a download>` (filename from `Content-Disposition`). |
 | [client/src/components/CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx) | A canvasser's individual responses (shows template `version`). |

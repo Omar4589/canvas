@@ -144,7 +144,7 @@ router.get('/campaigns', async (req, res, next) => {
     }
     const campaigns = await Campaign.find(campaignFilter)
       .sort({ createdAt: -1 })
-      .select('name type state surveyTemplateId timeZone')
+      .select('name type state surveyTemplateId timeZone electionDay earlyVotingStart earlyVotingEnd datesNote')
       .lean();
     // `efforts` is additive — older clients ignore it; the picker uses it to let a
     // multi-effort canvasser pick their effort up front and jump straight into the
@@ -156,6 +156,11 @@ router.get('/campaigns', async (req, res, next) => {
         type: c.type,
         state: c.state,
         timeZone: c.timeZone || 'America/New_York',
+        // Key dates — additive; older clients ignore them.
+        electionDay: c.electionDay ?? null,
+        earlyVotingStart: c.earlyVotingStart ?? null,
+        earlyVotingEnd: c.earlyVotingEnd ?? null,
+        datesNote: c.datesNote ?? '',
         efforts: await canvasserEffortsForCampaign(req, c),
       }))
     );

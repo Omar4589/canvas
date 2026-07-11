@@ -70,6 +70,9 @@ const surveyTemplateSchema = new mongoose.Schema(
     closing: { type: String, default: '' },
     questions: { type: [questionSchema], default: [] },
     tags: { type: [String], default: [] }, // Phase 3 tag palette (display casing; matching is case-insensitive)
+    // Soft-archive: hidden from the default library list & from pickers (unless
+    // currently selected). Null = active. Existing docs default to null — no migration.
+    archivedAt: { type: Date, default: null, index: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }

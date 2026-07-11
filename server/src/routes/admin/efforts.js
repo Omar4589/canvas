@@ -10,6 +10,7 @@ import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Household } from '../../models/Household.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
+import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { recomputeTurf } from '../../services/turf/generateTurf.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
 import { createNextPass } from '../../services/passes/createPass.js';
@@ -77,7 +78,7 @@ router.get('/', async (req, res, next) => {
     // "Crew" is DERIVED: manual roster members ∪ canvassers assigned to the
     // effort's active round's books. So it always reflects who's actually working
     // and self-corrects on unassign / re-carve (no stored sync needed).
-    const [doorCounts, memberSets, assignSets, intakeCount, pubTurfAgg, assignAgg] = await Promise.all([
+    const [doorCounts, memberSets, assignSets, intakeCount, pubTurfAgg, assignAgg, respAgg] = await Promise.all([
       Household.aggregate([
         { $match: { campaignId: cId, isActive: true, effortId: { $ne: null } } },
         { $group: { _id: '$effortId', n: { $sum: 1 } } },
@@ -103,9 +104,21 @@ router.get('/', async (req, res, next) => {
         { $match: { campaignId: cId } },
         { $group: { _id: '$passId', n: { $sum: 1 } } },
       ]),
+      // Survey responses per walk list (effortId indexed). The null bucket = responses
+      // on Intake / pre-effort doors — those always use the campaign's default survey.
+      SurveyResponse.aggregate([
+        { $match: { campaignId: cId } },
+        { $group: { _id: '$effortId', n: { $sum: 1 } } },
+      ]),
     ]);
 
     const doorMap = new Map(doorCounts.map((d) => [String(d._id), d.n]));
+    const respMap = new Map();
+    let intakeResponseCount = 0;
+    for (const r of respAgg) {
+      if (r._id == null) intakeResponseCount = r.n;
+      else respMap.set(String(r._id), r.n);
+    }
     const activeMap = new Map(activeRounds.map((p) => [String(p.effortId), p]));
     const rollUp = (agg) => {
       const m = new Map();
@@ -135,6 +148,7 @@ router.get('/', async (req, res, next) => {
           doorCount: doorMap.get(k) || 0,
           crewCount: crewByEffort.get(k)?.size || 0,
           crewUserIds: [...(crewByEffort.get(k) || [])],
+          responseCount: respMap.get(k) || 0,
           activeRound: activeMap.get(k) || null,
           setup: deriveEffortSetup({
             doorCount: doorMap.get(k) || 0,
@@ -146,6 +160,7 @@ router.get('/', async (req, res, next) => {
         };
       }),
       intakeCount,
+      intakeResponseCount,
     });
   } catch (err) {
     next(err);

@@ -102,7 +102,7 @@ export default function TagsPage() {
     onSuccess: () => {
       invalidateTags();
       // The survey builder reads tagged options — refresh it too.
-      qc.invalidateQueries({ queryKey: ['admin', 'surveys'] });
+      qc.invalidateQueries({ queryKey: ['surveys'] });
     },
   });
 

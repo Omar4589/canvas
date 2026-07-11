@@ -8,6 +8,7 @@ import NextStepBanner from '../components/NextStepBanner.jsx';
 import PassManager from '../components/PassManager.jsx';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
+import WalkListSurveySelect from '../components/WalkListSurveySelect.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
@@ -216,14 +217,12 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
                 className={COMPACT}
               />
               {isSurveyType && (
-                <select
-                  defaultValue={effort.surveyTemplateId || ''}
-                  onChange={(e) => onUpdate(effort, { surveyTemplateId: e.target.value || null })}
+                <WalkListSurveySelect
+                  value={effort.surveyTemplateId || ''}
+                  surveys={surveys}
+                  onChange={(id) => onUpdate(effort, { surveyTemplateId: id })}
                   className={COMPACT}
-                >
-                  <option value="">Survey: campaign default</option>
-                  {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
-                </select>
+                />
               )}
               {effort.activeRound && (
                 <a href={`/campaigns/${campaignId}/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-accent hover:underline">Cut / assign books →</a>
@@ -266,7 +265,9 @@ export default function EffortsPage() {
     queryFn: () => api(`/admin/campaigns/${campaignId}/walklists`),
     enabled: !!campaignId,
   });
-  const surveysQ = useQuery({ queryKey: ['admin', 'surveys'], queryFn: () => api('/admin/surveys'), enabled: isSurveyType });
+  // Same ['surveys'] cache the Surveys page + campaign Survey page use, so archive/
+  // duplicate/delete there refresh this picker too.
+  const surveysQ = useQuery({ queryKey: ['surveys'], queryFn: () => api('/admin/surveys'), enabled: isSurveyType });
 
   const orgQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
   const orgTz = useOrgTimeZone();
@@ -356,10 +357,11 @@ export default function EffortsPage() {
           {isSurveyType && (
             <label className="text-sm">
               <span className={fieldLabel}>Survey override</span>
-              <Select value={surveyTemplateId} onChange={(e) => setSurveyTemplateId(e.target.value)}>
-                <option value="">Campaign default</option>
-                {surveys.map((s) => <option key={s._id} value={s._id}>{s.name} (v{s.version || 1})</option>)}
-              </Select>
+              <WalkListSurveySelect
+                value={surveyTemplateId}
+                surveys={surveys}
+                onChange={(id) => setSurveyTemplateId(id || '')}
+              />
             </label>
           )}
           <Button onClick={() => name && create.mutate()} disabled={!name} loading={create.isPending}>
