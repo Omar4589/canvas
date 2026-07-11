@@ -44,9 +44,19 @@ any org to work inside it, then come back out.
 - **Refresh demo day** (Control Room) — one click re-stages the demo org's recent canvassing
   relative to *now*: the four prior evenings plus a "today" whose knocks run from mid-morning up to
   the minute you pressed it. Press it right before a pitch so the dashboard, map, and timeline look
-  live. It only ever touches the demo org, the App-Review canvasser's book always stays unwalked,
-  and the voted layer + published client report survive. Also runnable from the Heroku Run console:
-  `npm --prefix server run demo:refresh`.
+  live. The staged day reads like a real field operation — the work is spread across the demo's
+  several canvassers, each knocking a believable ~15-20 doors an hour (never hundreds), a realistic
+  connection rate of about 1 in 5 doors, and survey answers that mirror a real canvass. It only ever
+  touches the demo org; each app-review account's book (you can have one per platform — Apple, Google)
+  always stays unwalked so those doors stay fresh for reviewers, and the voted layer + published client
+  report survive. Also runnable from the Heroku Run console: `npm --prefix server run demo:refresh`.
+
+  One-time setup / repair: the button leans on the demo org being set up correctly — a roster of
+  field canvassers with the books shared out among them, and each app-review account's book marked as
+  off-limits. If the demo org has drifted (e.g. every book ended up on one account), or if the button
+  ever refuses to run because it can't find a marked reviewer book, re-run the demo **seed** once to
+  rebuild that structure (see Part 2). The seed reshapes the survey, rebuilds the roster, shares the
+  books out, and marks each reviewer's book; after that, the button just works.
 - **All Users** — every account on the platform (with the orgs each belongs to and their role in each).
   This is where you **promote or demote a super admin** (you can't change your own flag) and **clear a
   user's login lockout** if they've been throttled by too many wrong passwords (see [USERS.md](USERS.md)).
@@ -79,7 +89,7 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 |---|---|---|
 | Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` ([platform.js](../server/src/routes/superAdmin/platform.js)) |
 | Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) | `GET/POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId`, `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js), tested by [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
-| Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; console runner `npm run demo:refresh`) |
+| Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; console runner `npm run demo:refresh`). Generation + batched persistence are shared with the seed via [services/platform/demoActivity.js](../server/src/services/platform/demoActivity.js) so both look identical. |
 | All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) | `GET /super-admin/users`, `POST /super-admin/users/:userId/promote`, `POST /super-admin/users/:userId/clear-lockout` (clears the per-email login throttle via `clearLoginLockout`, see [loginRateLimit.js](../server/src/middleware/loginRateLimit.js)) ([users.js](../server/src/routes/superAdmin/users.js)) |
 | Imports | [SuperAdminImportsPage.jsx](../client/src/pages/SuperAdminImportsPage.jsx) | `GET /super-admin/imports` — cross-org import + geocoding-cost aggregation (real persisted lookup counts; cost derived from `GEOCODE_COST_PER_1000_CENTS`, never sent to clients) ([imports.js](../server/src/routes/superAdmin/imports.js)) |
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
@@ -102,3 +112,31 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
   against self-lockout / accidental self-demotion).
 - **Organizations** `PATCH` flips `isActive` (deactivate hides the org from its members) and edits
   name/slug (slug validated kebab-case — see [validators.js](../server/src/utils/validators.js)).
+- **Refresh demo day internals** ([demoActivity.js](../server/src/services/platform/demoActivity.js),
+  [refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js)):
+  - **Realism is per-canvasser, not per-book.** `stageDemoActivity` groups each canvasser's books,
+    spreads them ~one-per-day across `[today, -1, -2, -3, -4]`, and walks each day on a single running
+    clock (2-5 min/door, capped). So the single-day `doorsPerHour = knocks / (last-first span)` (see
+    [reports.js](../server/src/routes/admin/reports.js), [METRICS.md](METRICS.md)) lands ~15-20/hr
+    instead of collapsing a canvasser's whole inventory into one window (the old per-book scheduler
+    produced ~150-200/hr). `OUTCOME_WEIGHTS` tune the connection rate (surveys ÷ knocks) to ~22%.
+  - **Batched writes, no H12.** `persistDemoActivity` computes door status **in memory** via
+    `resolveStatus` and writes with a single `Household.bulkWrite` (plus `insertMany` for activity and
+    deduped surveys) — replacing per-household/per-survey loops that blew Heroku's 30s request limit.
+    The endpoint stays synchronous; the whole op is a handful of bulk writes.
+  - **Reviewer books are marked, not email-matched.** Each book reserved for an app-review account is
+    flagged `isReviewerBook: true` on its [TurfAssignment](../server/src/models/TurfAssignment.js) (set
+    by the seed). The refresh excludes **all** marked books and **throws (500) if none is marked** rather
+    than silently walking a reviewer's doors — the old runtime `SEED_DEMO_CANVASSER_EMAIL` lookup could
+    drift and no-op, letting every book land on the review account.
+  - **Multiple reviewers (Apple + Google, …).** `SEED_DEMO_CANVASSER_EMAIL` accepts a **comma-separated
+    list** — e.g. `apple@review.com,android@review.com`. The seed creates one canvasser account per
+    email (all sharing `SEED_DEMO_CANVASSER_PASSWORD`) and reserves one clean, marked book for each; the
+    refresh keeps every one of them unwalked. No button changes are needed to add a platform.
+  - **One-time repair = re-run the seed.** `node src/utils/seedDemoOrg.js --reset --apply` reshapes the
+    survey template, ensures the field-canvasser roster, **cleanly redistributes** book assignments
+    (wipe + reassign: reviewer keeps one marked book, the rest round-robin across field canvassers),
+    and restages a fresh day — without touching doors/voters/report/share-link. Set
+    `SEED_DEMO_CANVASSER_EMAIL` to the demo org's actual review-account email(s) first — comma-separate
+    for multiple platforms (`apple@review.com,android@review.com`) — so the seed resolves and marks the
+    right reviewer book(s).

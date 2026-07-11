@@ -22,7 +22,10 @@
 //   demo-canvasser@doorline.app / Victory26! — override any of them via
 //   SEED_DEMO_ADMIN_EMAIL / SEED_DEMO_ADMIN_PASSWORD / SEED_DEMO_CANVASSER_EMAIL /
 //   SEED_DEMO_CANVASSER_PASSWORD (re-running --apply syncs a changed password onto the
-//   existing account). Optional SEED_DEMO_SHARE_TOKEN pins the /r/<token> URL.
+//   existing account). SEED_DEMO_CANVASSER_EMAIL may be a COMMA-SEPARATED list — one
+//   app-review canvasser account per platform (e.g. apple@review.com,android@review.com),
+//   each reserved a clean unwalked book (all share SEED_DEMO_CANVASSER_PASSWORD).
+//   Optional SEED_DEMO_SHARE_TOKEN pins the /r/<token> URL.
 //
 // Identity safety: every stateVoterId is 'DEMO-IA-......' (real Iowa ids are numeric,
 // so no collision with real data) and no vendor uid column is used, so the shared
@@ -134,6 +137,20 @@ const ADMIN_EMAIL = (process.env.SEED_DEMO_ADMIN_EMAIL || 'demo-admin@doorline.a
 const ADMIN_PASSWORD = process.env.SEED_DEMO_ADMIN_PASSWORD || 'admin1234!';
 const CANVASSER_EMAIL = (process.env.SEED_DEMO_CANVASSER_EMAIL || 'demo-canvasser@doorline.app').toLowerCase().trim();
 const CANVASSER_PASSWORD = process.env.SEED_DEMO_CANVASSER_PASSWORD || 'Victory26!';
+// One app-review canvasser account PER platform (Apple, Google, …). Comma-separate
+// SEED_DEMO_CANVASSER_EMAIL — e.g. `apple@review.com,android@review.com` — to reserve
+// one clean, unwalked book per reviewer. A single value keeps the old behavior.
+const REVIEWER_EMAILS = [...new Set(
+  CANVASSER_EMAIL.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+)];
+
+// A friendly display name for a NEW reviewer account, derived from its email
+// (apple@review.com → "Apple Review"). Existing accounts keep their current name.
+function reviewerName(email) {
+  const local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
+  const first = local ? local.charAt(0).toUpperCase() + local.slice(1) : 'App';
+  return { firstName: first, lastName: 'Review' };
+}
 
 // ---------------------------------------------------------------------------
 // Household generation — REAL addresses (real rooftops on real streets, from the
@@ -326,8 +343,8 @@ function surveyQuestions() {
 // — the SAME code the "Refresh demo day" button uses, so the seeded dashboard and a
 // refreshed one look identical (per-canvasser scheduling, ~22% connection rate,
 // realistic answers). The reviewer's book is excluded structurally by turf id.
-async function stageCanvassHistory({ rng, campaign, template, turfs, assignmentsByTurf, reviewerTurfId, votersByHousehold }) {
-  const stagedBooks = turfs.filter((t) => String(t._id) !== String(reviewerTurfId));
+async function stageCanvassHistory({ rng, campaign, template, turfs, assignmentsByTurf, reviewerTurfIds, votersByHousehold }) {
+  const stagedBooks = turfs.filter((t) => !reviewerTurfIds.has(String(t._id)));
   const { activities, surveys, overlaps, todayKnocks } = stageDemoActivity({
     rng, campaign, template, tz: CAMPAIGN_TZ, stagedBooks, assignmentsByTurf,
     hhById: votersByHousehold.docs, votersByHousehold: votersByHousehold.byId,
@@ -336,11 +353,11 @@ async function stageCanvassHistory({ rng, campaign, template, turfs, assignments
   return { activities: activities.length, surveys: surveys.length, overlaps, todayKnocks };
 }
 
-async function stageEarlyVoting({ campaign, adminId, votersByHousehold, turfs, reviewerTurfId }) {
+async function stageEarlyVoting({ campaign, adminId, votersByHousehold, turfs, reviewerTurfIds }) {
   // Pick 3 untouched doors from staged books so the "voted doors drop off" story shows.
   const candidates = [];
   for (const turf of turfs) {
-    if (String(turf._id) === String(reviewerTurfId)) continue;
+    if (reviewerTurfIds.has(String(turf._id))) continue;
     for (const hhId of turf.householdIds.map(String)) {
       const hh = votersByHousehold.docs.get(hhId);
       if (hh && hh.status === 'unknocked' && (votersByHousehold.byId.get(hhId) || []).length) {
@@ -506,7 +523,7 @@ async function main() {
   const plannedVoters = generateVoters(rng, plannedHouseholds);
   console.log(`\nplan: org '${DEMO_ORG_NAME}' (${DEMO_ORG_SLUG}) · campaign '${DEMO_CAMPAIGN_NAME}'`);
   console.log(`  ${plannedHouseholds.length} households · ${plannedVoters.length} voters on ${new Set(plannedHouseholds.map((h) => h.precinct)).size} precincts of real Des Moines addresses`);
-  console.log(`  accounts: admin ${ADMIN_EMAIL} · canvasser ${CANVASSER_EMAIL} · ${DEMO_CANVASSERS.length} background canvassers`);
+  console.log(`  accounts: admin ${ADMIN_EMAIL} · reviewer(s) ${REVIEWER_EMAILS.join(', ')} · ${DEMO_CANVASSERS.length} field canvassers`);
 
   await connectDb(process.env.MONGODB_URI);
 
@@ -553,9 +570,12 @@ async function main() {
   const { user: admin } = await ensureUser({
     email: ADMIN_EMAIL, password: ADMIN_PASSWORD, firstName: 'Dana', lastName: 'Whitfield', syncPassword: true,
   });
-  const { user: reviewer } = await ensureUser({
-    email: CANVASSER_EMAIL, password: CANVASSER_PASSWORD, firstName: 'Sam', lastName: 'Reyes', syncPassword: true,
-  });
+  // One app-review canvasser account per platform (each gets a clean reserved book).
+  const reviewers = [];
+  for (const email of REVIEWER_EMAILS) {
+    const { user } = await ensureUser({ email, password: CANVASSER_PASSWORD, ...reviewerName(email), syncPassword: true });
+    reviewers.push(user);
+  }
   const background = [];
   for (const c of DEMO_CANVASSERS) {
     const email = `${c.firstName.toLowerCase()}.${c.lastName.toLowerCase()}@demo.doorline.app`;
@@ -565,8 +585,8 @@ async function main() {
     background.push(user);
   }
   await ensureMembership(admin._id, org._id, 'admin');
-  for (const u of [reviewer, ...background]) await ensureMembership(u._id, org._id, 'canvasser');
-  console.log(`\n1. org ${org._id} · admin ${admin.email} · ${1 + background.length} canvassers`);
+  for (const u of [...reviewers, ...background]) await ensureMembership(u._id, org._id, 'canvasser');
+  console.log(`\n1. org ${org._id} · admin ${admin.email} · ${reviewers.length} reviewer + ${background.length} field canvassers`);
 
   // 2. Campaign + 3. survey template ----------------------------------------
   let campaign =
@@ -686,25 +706,34 @@ async function main() {
   }
 
   // 7. Assign books — CLEAN reassignment so a drifted org (e.g. every book stuck on
-  // one account) self-heals: wipe the pass's assignments, then give the reviewer ONE
-  // marked book (kept clean for app review) and distribute the rest across the field
-  // canvassers. isReviewerBook is the durable anchor the refresh button excludes by.
+  // one account) self-heals: wipe the pass's assignments, then reserve ONE marked
+  // book per reviewer (kept clean for app review — Apple, Google, …) and distribute
+  // the rest across the field canvassers. isReviewerBook is the durable anchor the
+  // refresh button excludes by.
   const turfs = await Turf.find({ passId: pass._id, status: 'published' }).sort({ name: 1 });
-  const reviewerTurf = turfs[turfs.length - 1];
+  if (turfs.length <= reviewers.length) {
+    console.error(`only ${turfs.length} books but ${reviewers.length} reviewer(s) — need at least one field book left over`);
+    process.exit(1);
+  }
+  // The last N books (by name) become the reviewers' reserved books, one each.
+  const reviewerTurfs = turfs.slice(turfs.length - reviewers.length);
+  const reviewerByTurfId = new Map(reviewerTurfs.map((t, k) => [String(t._id), reviewers[k]]));
   await TurfAssignment.deleteMany({ campaignId: campaign._id, passId: pass._id });
   const assignmentsByTurf = new Map();
-  const assignmentDocs = turfs.map((turf, i) => {
-    const isReviewer = String(turf._id) === String(reviewerTurf._id);
-    const user = isReviewer ? reviewer : background[i % background.length];
+  let bgIdx = 0;
+  const assignmentDocs = turfs.map((turf) => {
+    const reviewerUser = reviewerByTurfId.get(String(turf._id));
+    const user = reviewerUser || background[bgIdx++ % background.length];
     assignmentsByTurf.set(String(turf._id), user._id);
     return {
       turfId: turf._id, userId: user._id,
       organizationId: org._id, campaignId: campaign._id, passId: turf.passId,
-      assignedBy: admin._id, assignedAt: new Date(), isReviewerBook: isReviewer,
+      assignedBy: admin._id, assignedAt: new Date(), isReviewerBook: !!reviewerUser,
     };
   });
   await TurfAssignment.insertMany(assignmentDocs);
-  const crewIds = [reviewer._id, ...background.map((u) => u._id)];
+  const reviewerTurfIds = new Set(reviewerByTurfId.keys());
+  const crewIds = [...reviewers.map((u) => u._id), ...background.map((u) => u._id)];
   await ensureCampaignAssignments(campaign._id, crewIds, org._id, admin._id); // positional args
   for (const userId of crewIds) {
     await EffortMember.findOneAndUpdate(
@@ -713,7 +742,8 @@ async function main() {
       { upsert: true, setDefaultsOnInsert: true }
     );
   }
-  console.log(`7. assigned ${turfs.length} books across ${background.length} field canvassers · reviewer book '${reviewerTurf.name}' → ${reviewer.email} (marked, kept clean)`);
+  const reviewerBookNote = reviewerTurfs.map((t, k) => `'${t.name}' → ${reviewers[k].email}`).join(', ');
+  console.log(`7. assigned ${turfs.length} books across ${background.length} field canvassers · ${reviewers.length} reviewer book(s) kept clean: ${reviewerBookNote}`);
 
   // Activate the round (mirrors routes/admin/passes.js invariants).
   if (pass.status !== 'active') {
@@ -743,7 +773,7 @@ async function main() {
     }
     const staged = await stageCanvassHistory({
       rng: makeRng(RNG_SEED + 1), campaign, template, turfs,
-      assignmentsByTurf, reviewerTurfId: reviewerTurf._id, votersByHousehold,
+      assignmentsByTurf, reviewerTurfIds, votersByHousehold,
     });
     console.log(`8. staged ${staged.activities} activities · ${staged.surveys} surveys · ${staged.overlaps} overlap doors`);
 
@@ -752,7 +782,7 @@ async function main() {
       votersByHousehold.docs.get(String(h._id)).status = h.status; // refresh post-recompute
     }
     const voted = await stageEarlyVoting({
-      campaign, adminId: admin._id, votersByHousehold, turfs, reviewerTurfId: reviewerTurf._id,
+      campaign, adminId: admin._id, votersByHousehold, turfs, reviewerTurfIds,
     });
     console.log(`9. early voting: ${voted.voters} voters marked · ${voted.doorsDropped} doors dropped`);
 
@@ -775,7 +805,9 @@ async function main() {
   console.log(`  campaignId: ${campaign._id}`);
   console.log(`  ${hh} doors · ${vv} voters · ${tt} books · ${aa} activities · ${ss} surveys`);
   console.log(`  admin login:     ${admin.email} / ${ADMIN_PASSWORD}`);
-  console.log(`  canvasser login: ${reviewer.email} / ${CANVASSER_PASSWORD} — book '${reviewerTurf.name}' is clean for reviewers`);
+  reviewers.forEach((rev, k) => {
+    console.log(`  reviewer login:  ${rev.email} / ${CANVASSER_PASSWORD} — book '${reviewerTurfs[k].name}' is clean for reviewers`);
+  });
   console.log(`  client portal:   /r/${share.token}`);
   console.log(`  restage after reviewers knock: node src/utils/seedDemoOrg.js --reset --apply`);
   console.log(`  full teardown:   npm run cleanup:test-campaigns -- --ids=${campaign._id} --mock=${campaign._id} --apply`);
