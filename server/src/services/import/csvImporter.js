@@ -381,12 +381,18 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
     }
   }
 
-  // 2. Resolve normalizedAddress -> _id (within this campaign).
-  const houses = await Household.find(
-    { campaignId, normalizedAddress: { $in: householdValues.map((h) => h.normalizedAddress) } },
-    { normalizedAddress: 1 }
-  );
-  const addressToId = new Map(houses.map((h) => [h.normalizedAddress, h._id]));
+  // 2. Resolve normalizedAddress -> _id (within this campaign). Chunk the $in and use .lean() so a
+  // very large import (tens/hundreds of thousands of unique addresses) never builds one giant query
+  // document or hydrates every household — matching the batched discipline used everywhere else here.
+  const addressToId = new Map();
+  const addrValues = householdValues.map((h) => h.normalizedAddress);
+  for (let i = 0; i < addrValues.length; i += batchSize) {
+    const houses = await Household.find(
+      { campaignId, normalizedAddress: { $in: addrValues.slice(i, i + batchSize) } },
+      { normalizedAddress: 1 }
+    ).lean();
+    for (const h of houses) addressToId.set(h.normalizedAddress, h._id);
+  }
 
   // 3. Voters (org-scoped upsert).
   const voterOps = validRows.map((row) => {

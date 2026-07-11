@@ -7,6 +7,7 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "test": "node --test",
+    "test:int": "bash scripts/test-int.sh",
     "seed:admin": "node src/utils/seedAdmin.js",
     "seed:demo": "node src/utils/seedDemoOrg.js",
     "reconcile:counts": "node src/utils/reconcileCounts.js",
@@ -29,6 +30,8 @@
     "migrate:persons": "node src/migrations/migratePersons.js",
     "migrate:billing": "node src/migrations/migrateBilling.js",
     "migrate:billing-access": "node src/migrations/migrateBillingAccess.js",
+    "migrate:build-indexes": "node src/migrations/buildIndexes.js",
+    "migrate:strip-geocode-raw": "node src/migrations/stripGeocodeRaw.js",
     "demo:refresh": "node src/utils/refreshDemoDay.js"
   },
   "dependencies": {

@@ -267,6 +267,11 @@ export default function AuditPage() {
         <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
           Error: {flagsQ.error.message}
         </div>
+      ) : data.truncated ? (
+        <div className="rounded-lg border border-warning/30 bg-warning-tint p-4 text-sm text-warning-fg">
+          This range has <strong>{(data.windowActionCount || 0).toLocaleString()}</strong> events — too many to
+          audit at once. Narrow the date range (or filter by canvasser) and try again.
+        </div>
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">

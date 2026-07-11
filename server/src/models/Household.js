@@ -93,5 +93,8 @@ householdSchema.index({ campaignId: 1, countyValue: 1 });
 householdSchema.index({ campaignId: 1, cityValue: 1 });
 householdSchema.index({ turfId: 1, walkOrder: 1 });
 householdSchema.index({ campaignId: 1, effortId: 1 }); // per-effort ownership / coverage / intake
+// Admin map + campaignSummaries filter on campaignId + isActive (isActive was unindexed, so the
+// map's active-household filter rode the campaignId index alone and residual-scanned isActive).
+householdSchema.index({ campaignId: 1, isActive: 1 });
 
 export const Household = mongoose.model('Household', householdSchema);

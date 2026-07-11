@@ -217,7 +217,7 @@ export async function resolve(householdMap, opts = {}) {
         cacheOps.push(cacheOp(cacheKey, g.unitlessKey, {
           status: 'matched', location: { type: 'Point', coordinates: d.location },
           accuracyType: d.accuracyType, accuracy: d.accuracy, confidence: d.confidence,
-          matchedAddress: d.matchedAddress, raw: r?.raw ?? null,
+          matchedAddress: d.matchedAddress,
         }));
         for (const t of g.members) {
           t.h.longitude = d.location[0]; t.h.latitude = d.location[1];
@@ -227,7 +227,7 @@ export async function resolve(householdMap, opts = {}) {
       } else {
         cacheOps.push(cacheOp(cacheKey, g.unitlessKey, {
           status: 'unmatched', location: null, accuracyType: r?.accuracyType ?? null,
-          accuracy: r?.accuracy ?? null, confidence: 'none', matchedAddress: r?.matchedAddress ?? null, raw: r?.raw ?? null,
+          accuracy: r?.accuracy ?? null, confidence: 'none', matchedAddress: r?.matchedAddress ?? null,
         }));
         for (const t of g.members) { unmatched.set(t.normAddr, { code: d.code, detail: d.detail }); stats.geocodeUnmatched += 1; }
       }

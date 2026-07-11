@@ -152,7 +152,9 @@ Voters ship only for survey campaigns, scoped to those doors
 - `/admin/households/map` ([routes/admin/households.js:97](../server/src/routes/admin/households.js#L97))
   returns every matching door, all their voters (4-field projection), **all** matching
   `SurveyResponse` docs (full `answers[]`, no projection, two populates), and a last-activity row
-  per door — unpaginated, by design (it's a map). The **date window is the guard**: with from/to
+  per door. It is now **capped at 50,000 households** (`MAP_HOUSEHOLD_CAP`, July 2026), returning
+  `truncated`+`total` past that so a runaway org-/campaign-wide open can't OOM the dyno; the fetch
+  is backed by the `{campaignId,isActive}` index. The **date window is the guard**: with from/to
   set, doors narrow to interaction-touched ones
   ([:211-230](../server/src/routes/admin/households.js#L211-L230)), and both the web and mobile
   admin maps default to **Today**. The heavy pull only happens when a user clears/widens the dates:
@@ -177,8 +179,51 @@ requests `/turfs/doors?slim=1` (address fields dropped server-side;
 **If universes keep growing, the remaining levers in order:** (1) project
 `SurveyResponse.answers` out of the map payload — but first verify what the household panel and
 answer-filter chips actually read from it; (2) a size guard or chunked storage in `saveBootstrap`
-for the everyone-assignment case; (3) viewport-bounded or paginated map fetches only if a campaign
-far outgrows FL.
+for the everyone-assignment case; (3) **viewport-bounded** map fetches (bbox → `$geoWithin:{$box}`,
+which finally uses the dormant `2dsphere` index) — the planned Phase-2 replacement for the 50k cap.
+
+## Database scaling (connection pool, indexes, storage)
+
+Investigated July 2026 when the app went commercial off the Atlas M0 free tier. The
+concurrency-critical path (many canvassers recording knocks at once — knock write, survey submit,
+`getPassStatusMap`, mobile bootstrap) is tightly indexed and was **not** the risk; the risks were
+the infra tier plus a few heavy/unbounded read paths. What changed:
+
+- **Connection pooling** — [config/db.js](../server/src/config/db.js) `connectDb(uri, overrides)`
+  now sets `maxPoolSize` (env `MONGO_MAX_POOL_SIZE`, default 20; the worker passes 10 via
+  `WORKER_MONGO_MAX_POOL_SIZE`), `minPoolSize`, `serverSelectionTimeoutMS` 10s, `socketTimeoutMS`
+  120s, `retryWrites/Reads`, and optional `MONGO_COMPRESSORS`. Before, `mongoose.connect(uri)` ran
+  with no options → the driver default **100/process**, multiplying per dyno with no ceiling and no
+  socket timeout (a hung query held a connection forever). Pool size is per process, so total Atlas
+  connections = sum over web + worker dynos; the tuned defaults keep it well under a dedicated tier.
+- **Indexes** — new org-wide + map indexes: `CanvassActivity {organizationId,timestamp}`,
+  `SurveyResponse {organizationId,submittedAt}`, `Household {campaignId,isActive}`, `ImportJob
+  {organizationId,campaignId,createdAt}` + `{createdAt}`. `autoIndex` is **off in production**, so
+  build them after deploy: `npm run migrate:build-indexes -- --apply` (idempotent + additive;
+  [buildIndexes.js](../server/src/migrations/buildIndexes.js)).
+- **Bounded the heavy reads** — the `/flags` GPS audit
+  ([flagDetection.js](../server/src/services/audit/flagDetection.js)) loaded the whole matched
+  `CanvassActivity` set into memory; it now clamps the window to `TIMELINE_MAX_DAYS` even with no
+  `from` and count-guards at `AUDIT_ROW_CAP` (250k), returning `truncated` so the UI says "narrow the
+  range". `campaignSummaries` ([campaignSummaries.js](../server/src/services/reports/campaignSummaries.js))
+  stopped **counting** the two largest collections all-time just to test `hasCanvassed>0` — now an
+  indexed `distinct('campaignId', …)` (DISTINCT_SCAN).
+- **Import memory** — the one un-chunked `$in` in
+  [csvImporter.js](../server/src/services/import/csvImporter.js) (normalizedAddress→\_id resolution)
+  is now chunked + `.lean()`, matching the rest of the batched pipeline. Proven by
+  [importStress.int.test.js](../server/test/importStress.int.test.js) (big messy CSV → completes,
+  counts right, idempotent, undoes; crank with `STRESS_IMPORT_HOUSEHOLDS`).
+- **Storage: GeocodeCache `raw`** — each cache entry stored the full Geocodio response blob, written
+  but **never read** (reads project it out; the useful `accuracyType/accuracy/confidence` are already
+  separate fields). Dropped it — cuts each entry ~5–6×. Reclaim existing rows with
+  `npm run migrate:strip-geocode-raw -- --apply`. This is the single biggest free-tier storage lever
+  (a no-coords import is a double hit: geocoding $ **and** cache storage).
+- **Atlas tier** — M0 (512 MB, no backups, 500-conn) is undersized for real use: ~1–2 GB per busy
+  org per cycle. Move to **M10 with auto-scaling** (backups/PITR, dedicated CPU/RAM, 1500 conn); the
+  storage ceiling + no-backups are the risks that bite before load does.
+- **Running the suites** — `npm run test:int` ([scripts/test-int.sh](../server/scripts/test-int.sh))
+  boots a throwaway `mongod`, runs every `*.int.test.js` (one DB per file), and tears it down; the
+  int suites skip without `MONGODB_URI_TEST`.
 
 ## State-reset patterns (no reset-in-effect)
 

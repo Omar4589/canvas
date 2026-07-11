@@ -229,10 +229,17 @@ router.get('/map', async (req, res, next) => {
       householdFilter._id = { $in: idStrings.map((id) => new mongoose.Types.ObjectId(id)) };
     }
 
+    // Cap the map fetch so an unbounded org-/campaign-wide open can't pull every active household
+    // into memory + a multi-MB payload. Pass- and interaction-scoped opens are already bounded by
+    // _id:$in above; this guards the default campaign/org open. Backed by {campaignId,isActive}.
+    const MAP_HOUSEHOLD_CAP = 50000;
     let households = await Household.find(
       householdFilter,
       'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt'
-    ).lean();
+    )
+      .limit(MAP_HOUSEHOLD_CAP)
+      .lean();
+    const mapTruncated = households.length === MAP_HOUSEHOLD_CAP;
 
     if (!households.length) {
       return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
@@ -392,7 +399,8 @@ router.get('/map', async (req, res, next) => {
             }
           : null,
       })),
-      total: result.length,
+      total: mapTruncated ? await Household.countDocuments(householdFilter) : result.length,
+      truncated: mapTruncated,
     });
   } catch (err) {
     next(err);

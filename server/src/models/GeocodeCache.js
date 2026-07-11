@@ -27,7 +27,10 @@ const geocodeCacheSchema = new mongoose.Schema(
     location: { type: pointSchema, default: null }, // null when unmatched
     matchedAddress: { type: String, default: null }, // provider's standardized address
     attempts: { type: Number, default: 1 }, // negative-cache retry budget
-    raw: { type: mongoose.Schema.Types.Mixed, default: null },
+    // NOTE: the full provider `raw` response is deliberately NOT stored — it was written but never
+    // read (every read projects it out), and the useful signal (accuracyType/accuracy/confidence)
+    // is already promoted to the fields above. Dropping it cuts each entry ~5-6×. A one-time
+    // migration ($unset raw) reclaims it on existing docs. See migrations/stripGeocodeRaw.js.
   },
   { timestamps: true }
 );

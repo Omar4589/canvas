@@ -17,19 +17,32 @@ import { FLAG_THRESHOLDS, maxSeverity } from './flagThresholds.js';
 //
 // Four flag types: far (distance − accuracy), weak_gps, rapid (impossibly short door-to-door
 // gap), one_spot (stationary: many distinct doors from one GPS spot whose pins are spread).
-export async function detectFlags(match, { organizationId, thresholds = FLAG_THRESHOLDS } = {}) {
-  // Admin BULK-authored rows (via:'bulk', e.g. book-level bulk-restrict) are
-  // invisible to detection by design: a batch shares one timestamp across many
-  // doors and would flood 'rapid' HIGH flags that audit nothing a canvasser did.
+// Memory backstop: detection loads every matched row into Node and sorts in-process, so a huge
+// window (e.g. 62-day, whole-campaign) could OOM the web dyno. Above this many rows we bail with
+// `truncated` rather than load them — a PARTIAL audit would silently hide flags, worse than asking
+// the user to narrow the range. Normal daily/weekly audits are far under this.
+const AUDIT_ROW_CAP = 250000;
+
+export async function detectFlags(match, { organizationId, thresholds = FLAG_THRESHOLDS, rowCap = AUDIT_ROW_CAP } = {}) {
+  // Admin BULK-authored rows (via:'bulk', e.g. book-level bulk-restrict) are invisible to detection
+  // by design: a batch shares one timestamp across many doors and would flood 'rapid' HIGH flags
+  // that audit nothing a canvasser did.
+  const scanFilter = { ...match, via: { $ne: 'bulk' } };
+
+  const scanCount = await CanvassActivity.countDocuments(scanFilter);
+  if (scanCount > rowCap) {
+    return { entries: [], summary: emptySummary(), windowActionCount: scanCount, truncated: true };
+  }
+
   const rows = await CanvassActivity.find(
-    { ...match, via: { $ne: 'bulk' } },
+    scanFilter,
     '_id userId householdId campaignId effortId passId actionType timestamp location distanceFromHouseMeters wasOfflineSubmission'
   )
     .sort({ userId: 1, timestamp: 1 })
     .lean();
 
   if (!rows.length) {
-    return { entries: [], summary: emptySummary(), windowActionCount: 0 };
+    return { entries: [], summary: emptySummary(), windowActionCount: 0, truncated: false };
   }
 
   // House pins + address (one query) — for the one-spot house-spread guard and to attach
@@ -109,7 +122,7 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
   }
   entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-  return { entries, summary: summarize(entries, byUser, nameOf), windowActionCount: rows.length };
+  return { entries, summary: summarize(entries, byUser, nameOf), windowActionCount: rows.length, truncated: false };
 }
 
 // PURE detection core (no DB) — exported for unit testing. `rows` are lean CanvassActivity

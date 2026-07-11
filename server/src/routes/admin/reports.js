@@ -2847,7 +2847,15 @@ router.get('/flags', async (req, res, next) => {
       match.userId = new mongoose.Types.ObjectId(req.query.userId);
     }
 
-    const { entries, summary } = await detectFlags(match, { organizationId: orgId });
+    // Guarantee a bounded scan even when `from` is absent — an open-ended range would otherwise pull
+    // the whole campaign/org ledger into memory. Default the lower bound to TIMELINE_MAX_DAYS back.
+    if (!match.timestamp || match.timestamp.$gte == null) {
+      const upper = (match.timestamp && (match.timestamp.$lte || match.timestamp.$lt)) || new Date();
+      const lower = new Date(new Date(upper).getTime() - TIMELINE_MAX_DAYS * 24 * 60 * 60 * 1000);
+      match.timestamp = { ...(match.timestamp || {}), $gte: lower };
+    }
+
+    const { entries, summary, truncated, windowActionCount } = await detectFlags(match, { organizationId: orgId });
 
     // Drill-in filters (post-detection; note: 'open' is not a DB status, so review-status
     // filtering happens here after the live join).
@@ -2874,6 +2882,10 @@ router.get('/flags', async (req, res, next) => {
       timeZone: tz,
       tzAbbrev: tzAbbrev(tz),
       thresholds: FLAG_THRESHOLDS,
+      // When the range is too large to audit in memory, entries are empty and this is set — the
+      // client shows a "narrow the range" notice with windowActionCount rather than a false "0 flags".
+      truncated: !!truncated,
+      windowActionCount,
     });
   } catch (err) {
     next(err);

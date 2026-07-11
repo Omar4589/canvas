@@ -45,7 +45,7 @@ export async function geocodeBatch(queries, { apiKey, timeoutMs = 120000, fields
     const matches = entry?.response?.results || entry?.results || [];
     const m = matches[0];
     if (!m || !m.location || typeof m.location.lat !== 'number' || typeof m.location.lng !== 'number') {
-      return { status: 'unmatched', accuracyType: null, accuracy: null, lat: null, lng: null, matchedAddress: null, raw: entry || null };
+      return { status: 'unmatched', accuracyType: null, accuracy: null, lat: null, lng: null, matchedAddress: null };
     }
     return {
       status: 'matched',
@@ -54,7 +54,6 @@ export async function geocodeBatch(queries, { apiKey, timeoutMs = 120000, fields
       lat: m.location.lat,
       lng: m.location.lng,
       matchedAddress: m.formatted_address || null,
-      raw: m,
     };
   });
 }

@@ -20,7 +20,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   if (!ids.length) return out;
 
   const group = { $group: { _id: '$campaignId', n: { $sum: 1 } } };
-  const [households, owned, passes, publishedTurfs, assignments, activePasses, activity, responses] =
+  const [households, owned, passes, publishedTurfs, assignments, activePasses, canvassedIds, respondedIds] =
     await Promise.all([
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true } }, group]),
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true, effortId: { $ne: null } } }, group]),
@@ -28,8 +28,12 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       Turf.aggregate([{ $match: { campaignId: { $in: ids }, status: 'published' } }, group]),
       TurfAssignment.aggregate([{ $match: { campaignId: { $in: ids } } }, group]),
       Pass.aggregate([{ $match: { campaignId: { $in: ids }, status: 'active' } }, group]),
-      CanvassActivity.aggregate([{ $match: { campaignId: { $in: ids } } }, group]),
-      SurveyResponse.aggregate([{ $match: { campaignId: { $in: ids } } }, group]),
+      // hasCanvassed needs EXISTENCE, not a count. `distinct('campaignId', …)` rides the campaignId
+      // index (DISTINCT_SCAN) and returns just the campaigns with ≥1 row — instead of counting the
+      // two LARGEST collections (CanvassActivity/SurveyResponse) all-time on every rollup +
+      // campaigns-list load, which was the single most expensive thing this function did.
+      CanvassActivity.distinct('campaignId', { campaignId: { $in: ids } }),
+      SurveyResponse.distinct('campaignId', { campaignId: { $in: ids } }),
     ]);
 
   const map = (agg) => new Map(agg.map((r) => [String(r._id), r.n]));
@@ -39,14 +43,14 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   const pubTurfBy = map(publishedTurfs);
   const assignBy = map(assignments);
   const activeBy = map(activePasses);
-  const activityBy = map(activity);
-  const responsesBy = map(responses);
+  const canvassedSet = new Set(canvassedIds.map(String));
+  const respondedSet = new Set(respondedIds.map(String));
 
   for (const campaign of campaigns) {
     const k = String(campaign._id);
     const hh = householdsBy.get(k) || 0;
     const ownedDoors = ownedBy.get(k) || 0;
-    const hasCanvassed = (activityBy.get(k) || 0) > 0 || (responsesBy.get(k) || 0) > 0;
+    const hasCanvassed = canvassedSet.has(k) || respondedSet.has(k);
     const setup = deriveSetupSteps({
       campaign,
       counts: {

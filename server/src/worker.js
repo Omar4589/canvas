@@ -24,7 +24,11 @@ process.on('uncaughtException', (err) => {
 });
 
 async function main() {
-  await connectDb(process.env.MONGODB_URI);
+  // The worker needs far fewer connections than the web dyno (2 job concurrencies, no request
+  // fan-out), so give it a smaller pool to keep the total Atlas connection count down.
+  await connectDb(process.env.MONGODB_URI, {
+    maxPoolSize: Number(process.env.WORKER_MONGO_MAX_POOL_SIZE) || 10,
+  });
 
   // autoIndex is off in production (config/db.js), so the GeocodeCache indexes — a NEW
   // collection — won't auto-build. The worker reads/writes that cache during imports,

@@ -77,5 +77,7 @@ surveyResponseSchema.index({ householdId: 1, passId: 1 }); // per-pass survey ex
 // Reports/dashboards: campaign-scoped, date-ranged, submittedAt-sorted (voters-by-answer,
 // campaign-rollup, canvassers, notes, survey-results). Twin of CanvassActivity {campaignId,timestamp}.
 surveyResponseSchema.index({ campaignId: 1, submittedAt: -1 });
+// Org-wide, date-ranged reports (no campaignId) — twin of CanvassActivity {organizationId,timestamp}.
+surveyResponseSchema.index({ organizationId: 1, submittedAt: -1 });
 
 export const SurveyResponse = mongoose.model('SurveyResponse', surveyResponseSchema);

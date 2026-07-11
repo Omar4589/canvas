@@ -90,4 +90,9 @@ const importJobSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Admin import history: org + campaign, newest first (routes/admin/imports.js GET /).
+importJobSchema.index({ organizationId: 1, campaignId: 1, createdAt: -1 });
+// Super-admin cross-org Imports page sorts all orgs by createdAt desc (routes/superAdmin/imports.js).
+importJobSchema.index({ createdAt: -1 });
+
 export const ImportJob = mongoose.model('ImportJob', importJobSchema);

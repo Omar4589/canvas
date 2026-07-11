@@ -61,5 +61,8 @@ canvassActivitySchema.index({ campaignId: 1, timestamp: -1 });
 canvassActivitySchema.index({ passId: 1, householdId: 1, timestamp: -1 }); // per-pass status derivation
 canvassActivitySchema.index({ campaignId: 1, passId: 1, householdId: 1 }); // per-round knock counts (Passes page)
 canvassActivitySchema.index({ userId: 1, householdId: 1, passId: 1 }); // within-pass dedup
+// Org-wide, date-ranged reports (rollup/timeline/audit without a campaignId): without this they
+// fall back to the single-field organizationId index and scan the org's whole ledger by date.
+canvassActivitySchema.index({ organizationId: 1, timestamp: -1 });
 
 export const CanvassActivity = mongoose.model('CanvassActivity', canvassActivitySchema);
