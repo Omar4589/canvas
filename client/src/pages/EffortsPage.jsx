@@ -305,17 +305,36 @@ export default function EffortsPage() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
   const create = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      // A revisit list (source:'import') is homes that are ALREADY owned/booked, so the
+      // create-time seed (which only claims Intake) would grab none. Create the walk list
+      // empty, then force-claim (re-carve) those owned homes into it.
+      const seedList = walkLists.find((w) => String(w._id) === String(effectiveSource));
+      const isRevisitSeed = seedList?.source === 'import';
       const doors =
         effectiveSource === '__intake__' ? { claimAllIntake: true }
-        : effectiveSource ? { seedWalkListId: effectiveSource }
+        : effectiveSource && !isRevisitSeed ? { seedWalkListId: effectiveSource }
         : {};
-      return api(`/admin/campaigns/${campaignId}/efforts`, {
+      const res = await api(`/admin/campaigns/${campaignId}/efforts`, {
         method: 'POST',
         body: { name, surveyTemplateId: surveyTemplateId || undefined, ...doors },
       });
+      if (isRevisitSeed && res?.effort?._id) {
+        const claim = await api(`/admin/campaigns/${campaignId}/efforts/${res.effort._id}/claim`, {
+          method: 'POST',
+          body: { walkListId: effectiveSource, force: true },
+        });
+        return { ...res, claimed: claim?.claimed ?? 0 };
+      }
+      return res;
     },
-    onSuccess: () => { setName(''); setSurveyTemplateId(''); setDoorSource('__intake__'); invalidate(); },
+    onSuccess: () => {
+      setName('');
+      setSurveyTemplateId('');
+      setDoorSource('__intake__');
+      invalidate();
+      qc.invalidateQueries({ queryKey: ['admin', 'walklists', campaignId] });
+    },
   });
   const update = useMutation({ mutationFn: ({ id, body }) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'PATCH', body }), onSuccess: invalidate });
   const archive = useMutation({ mutationFn: (id) => api(`/admin/campaigns/${campaignId}/efforts/${id}/archive`, { method: 'POST' }), onSuccess: invalidate });

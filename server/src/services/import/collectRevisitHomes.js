@@ -24,6 +24,17 @@ const WORKED_STATUSES = ['surveyed', 'lit_dropped'];
 export async function collectRevisitHomes(importJob, campaign, counts = {}) {
   if (!importJob?.revisitNewVoters || importJob.revisitSavedSearchId) return null;
 
+  // Idempotent by import: if a prior attempt already created this import's list, return
+  // it instead of making a second one. `revisitSavedSearchId` is persisted only in the
+  // import's FINAL update, so a crash between the create below and that write would
+  // otherwise let a BullMQ retry duplicate the list — this importJobId lookup closes
+  // that window regardless of when the crash happened.
+  const existing = await SavedSearch.findOne(
+    { campaignId: campaign._id, source: 'import', 'sourceMeta.importJobId': importJob._id },
+    { _id: 1, householdCount: 1 }
+  ).lean();
+  if (existing) return { savedSearchId: existing._id, householdCount: existing.householdCount || 0 };
+
   // Retry-safe: this run's inserted ids, else the ones persisted on a prior attempt.
   const insVoterIds =
     counts.insertedVoterIds?.length ? counts.insertedVoterIds : importJob.insertedVoterIds || [];

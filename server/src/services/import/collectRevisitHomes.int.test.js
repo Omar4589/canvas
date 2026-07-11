@@ -103,6 +103,20 @@ test('idempotent — a job with revisitSavedSearchId already set does nothing', 
   assert.strictEqual(await SavedSearch.countDocuments({ source: 'import' }), 0);
 });
 
+test('idempotent by importJobId — a retry that lost revisitSavedSearchId does not duplicate', { skip }, async () => {
+  const { newVoter } = await seed({ homeStatus: 'surveyed' });
+  const j = job(); // revisitSavedSearchId still null (crash before the final update persisted it)
+  const counts = { insertedVoterIds: [newVoter], insertedHouseholdIds: [] };
+  const first = await collectRevisitHomes(j, campaign, counts);
+  assert.ok(first);
+  // Same job re-runs (BullMQ retry) — revisitSavedSearchId is STILL null, but the list
+  // already exists (found by sourceMeta.importJobId), so no duplicate is created.
+  const second = await collectRevisitHomes(j, campaign, counts);
+  assert.ok(second);
+  assert.strictEqual(String(second.savedSearchId), String(first.savedSearchId));
+  assert.strictEqual(await SavedSearch.countDocuments({ source: 'import' }), 1);
+});
+
 test('lit-drop: a lit_dropped home that gained a new voter → included', { skip }, async () => {
   const { home, newVoter } = await seed({ homeStatus: 'lit_dropped' });
   const res = await collectRevisitHomes(

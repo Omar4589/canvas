@@ -7,6 +7,7 @@ import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../service
 import { ImportJob } from '../../models/ImportJob.js';
 import { ImportProfile } from '../../models/ImportProfile.js';
 import { Campaign } from '../../models/Campaign.js';
+import { SavedSearch } from '../../models/SavedSearch.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { saveRawImport } from '../../services/import/rawImportStore.js';
 import { buildImportRows } from '../../services/import/csvImporter.js';
@@ -423,6 +424,20 @@ router.post('/:importId/undo', async (req, res, next) => {
     try {
       // Undo the whole file across all its (crash-retry) upload attempts, not just this job.
       const enriched = await undoFileImport(job, activeOrgId(req), req.user._id);
+      // Remove any auto-generated "revisit" saved search for this file — it's an import
+      // artifact, so undoing the import should take it with it. Safe even if it was already
+      // claimed into a walk list (the effort keeps its doors via effortId, not this list).
+      if (job.filename) {
+        const fileJobs = await ImportJob.find(
+          { organizationId: activeOrgId(req), campaignId: job.campaignId, filename: job.filename, kind: 'apply' },
+          { _id: 1 }
+        ).lean();
+        await SavedSearch.deleteMany({
+          campaignId: job.campaignId,
+          source: 'import',
+          'sourceMeta.importJobId': { $in: fileJobs.map((j) => j._id) },
+        });
+      }
       await ImportJob.updateOne(
         { _id: job._id },
         {

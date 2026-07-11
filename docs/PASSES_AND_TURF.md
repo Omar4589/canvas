@@ -314,8 +314,9 @@ Instead, the **voter import has an opt-in checkbox — "Revisit already-worked h
 voter."** When it's on and the import lands new target voters in already-worked homes, those homes are
 collected into an auto-generated **saved search** ("New voters — <file>", `source: 'import'`). From
 the import summary, **Create revisit walk list →** deep-links to the Walk Lists page with that saved
-search preselected: create a new walk list from it (its homes are already owned, so the claim offers
-**"Move them here"**), cut books, and walk. Because it's a **new pass**, the revisit **bills as its own
+search preselected as the new list's door source: name it and **Create walk list**, and because those
+homes are already owned, the app **re-carves** them into the new list for you (pulling them from their
+old books). Then cut books and walk. Because it's a **new pass**, the revisit **bills as its own
 knock**, and the first knock stays intact in its original pass. Brand-new addresses from the same
 import still go to **Intake** as usual; to walk both together, claim Intake + this list into the one
 walk list. "Already worked" = the home's sticky status is a completion (`surveyed` for survey

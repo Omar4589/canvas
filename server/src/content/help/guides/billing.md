@@ -15,9 +15,11 @@ Billing is simple and predictable, and it never gets in the way of work you've a
 
 Pricing is **$300 per campaign, per month**. A campaign starts billing in the month it records its **first knock** — setup months, where you've created the campaign, imported voters, and cut turf but nobody's knocked yet, are free. Billing then runs through the month you [archive the campaign](archive-vs-delete-campaign), so archiving is what stops it.
 
+Your **Billing** page shows a running estimate of this month's cost — how many campaigns are canvassing and the expected total — so there are never any surprises. (See [Who can see the Billing page?](who-sees-billing) — it's limited to specific admins.)
+
 ## Your free trial
 
-Every new organization gets a **7-day free trial** with full access, so you can set everything up and see it in action before anything is owed. You'll see a countdown in the last few days, and an account manager can extend the trial if you need more time.
+Every new organization gets a **free trial** with full access — **7 days by default, though your account manager can set a longer one** (say two weeks) when they set you up. You'll see a countdown in the last few days, and the trial can be extended anytime if you need more time.
 
 ## How payment works
 
