@@ -463,6 +463,15 @@ export default function MapPage() {
     [selected, households]
   );
 
+  // Push the selected door to the highlight ring (see mapRender). Clears when nothing
+  // is selected or the selected door has no coordinates.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const src = mapRef.current.getSource('selected-household');
+    if (!src) return;
+    src.setData(pointToGeoJSON(selectedHousehold));
+  }, [selectedHousehold, mapReady, styleEpoch]);
+
   // "Move pin" mode: drop a draggable marker at the target's current spot; the drag
   // updates moveCoords; Save PATCHes the new location and refetches.
   useEffect(() => {

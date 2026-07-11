@@ -180,7 +180,8 @@ export default function AdminNotes() {
   }
 
   function openVoter(id) {
-    router.push(`/(app)/voters/${id}`);
+    // ?from=notes so the voter screen's back returns here, not to the Voters list.
+    router.push(`/(app)/voters/${id}?from=notes`);
   }
   async function openHousehold(id) {
     // The map reads the active campaign (not a param); re-assert this campaign in
@@ -194,8 +195,9 @@ export default function AdminNotes() {
         timeZone: campaign.timeZone,
       });
     }
-    // focusAt nonce so re-tapping the same door still re-focuses the mounted map.
-    router.push(`/(app)/admin/map?household=${id}&focusAt=${Date.now()}`);
+    // focusAt nonce so re-tapping the same door still re-focuses the mounted map;
+    // hcid lets the map safely give up if this campaign loads without the door.
+    router.push(`/(app)/admin/map?household=${id}&focusAt=${Date.now()}&hcid=${cId}`);
   }
 
   const sourcesWithCounts = SOURCES.map((s) => ({ ...s, count: counts[s.key] ?? 0 }));

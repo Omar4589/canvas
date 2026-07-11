@@ -38,8 +38,9 @@ export default function VoterProfile() {
   const qc = useQueryClient();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const { id } = useLocalSearchParams();
+  const { id, from } = useLocalSearchParams();
   const voterId = Array.isArray(id) ? id[0] : id;
+  const fromNotes = (Array.isArray(from) ? from[0] : from) === 'notes';
   const [campaign, setCampaign] = useState(undefined);
   const [note, setNote] = useState('');
   const cId = campaign?.id;
@@ -71,8 +72,11 @@ export default function VoterProfile() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Voters</Text>
+        <Pressable
+          onPress={() => (fromNotes ? router.dismissTo('/(app)/admin/notes') : router.back())}
+          hitSlop={8}
+        >
+          <Text style={styles.back}>{fromNotes ? '‹ Notes' : '‹ Voters'}</Text>
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{v?.fullName || 'Voter'}</Text>
         <View style={{ width: 64 }} />

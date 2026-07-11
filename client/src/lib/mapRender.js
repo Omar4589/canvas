@@ -395,6 +395,21 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
     });
   }
 
+  // Selection highlight — a bold ring around the door the admin last tapped or focused
+  // via a Notes "view on map" link. On top; MapPage pushes the single selected point.
+  map.addSource('selected-household', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'selected-household-ring',
+    type: 'circle',
+    source: 'selected-household',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 12, 13, 16, 16, 20, 18, 24],
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-color': '#2563eb',
+      'circle-stroke-width': 4,
+    },
+  });
+
   // GPS-audit flag overlay — colored by the worst reason, rendered ON TOP so flagged
   // entries stand out during a review. A soft halo + a ringed dot read as an alert (not a
   // status pin), with a dashed line back to the house. Empty until MapPage pushes flags.

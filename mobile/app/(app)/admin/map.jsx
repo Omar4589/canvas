@@ -235,6 +235,8 @@ export default function AdminMap() {
   const [selectedFlagId, setSelectedFlagId] = useState(null);
   const [flagFlash, setFlagFlash] = useState(null);
   const flagFlashTimer = useRef(null);
+  const [mapNotice, setMapNotice] = useState(null); // brief bottom toast (e.g. door has no location)
+  const mapNoticeTimer = useRef(null);
   const [moveTarget, setMoveTarget] = useState(null); // household being repositioned
 
   // Deep-link scope (from a walk list / pass / import "view on map" link) — seeded once
@@ -257,6 +259,9 @@ export default function AdminMap() {
   // leave it unchanged, so they never steal focus.
   const focusNonce = one(params.focusAt);
   const focusToken = householdFocus ? `${householdFocus}:${focusNonce}` : '';
+  // The door's own campaign (from the deep link) — lets the focus effect safely give up
+  // when THIS campaign has loaded without the door, without racing a campaign switch.
+  const focusCid = one(params.hcid);
 
   // Audit filters — mirror the web admin map. Default to TODAY (like the web):
   // the map opens on today's activity; "All time" is one tap away in the preset
@@ -447,7 +452,18 @@ export default function AdminMap() {
       // stops the reseed from snapping to today (which would drop the old door's
       // pin) the instant the param clears; a campaign switch resets both.
       dateTouchedRef.current = true;
-      router.setParams({ household: '', focusAt: '' });
+      router.setParams({ household: '', focusAt: '', hcid: '' });
+    } else if (focusCid && String(focusCid) === String(cId) && mapQ.isSuccess && !mapQ.isFetching) {
+      // The door's OWN campaign is now loaded and settled, but the door still isn't
+      // focusable (no map coordinates, or not returned). Give up: stop re-checking each
+      // poll and drop the consumed params (the range self-heals to today). Requiring
+      // cId to already equal the door's campaign means this can't fire on a stale
+      // other-campaign result during a switch.
+      focusedHouseholdRef.current = focusToken;
+      router.setParams({ household: '', focusAt: '', hcid: '' });
+      setMapNotice('This door has no map location');
+      clearTimeout(mapNoticeTimer.current);
+      mapNoticeTimer.current = setTimeout(() => setMapNotice(null), 3000);
     }
   }, [
     focusToken,
@@ -460,6 +476,10 @@ export default function AdminMap() {
     effortId,
     passId,
     importId,
+    focusCid,
+    cId,
+    mapQ.isSuccess,
+    mapQ.isFetching,
   ]);
 
   const lineFeatures = useMemo(
@@ -604,7 +624,10 @@ export default function AdminMap() {
     [moveTarget]
   );
 
-  useEffect(() => () => clearTimeout(flagFlashTimer.current), []);
+  useEffect(() => () => {
+    clearTimeout(flagFlashTimer.current);
+    clearTimeout(mapNoticeTimer.current);
+  }, []);
   function onFlagReviewed(review) {
     const status = review?.status || 'updated';
     setFlagFlash(FLAG_FLASH_LABEL[status] || 'updated');
@@ -836,6 +859,22 @@ export default function AdminMap() {
                 textOffset: [0, -2.1],
                 textAllowOverlap: true,
                 textIgnorePlacement: true,
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
+
+        {/* Selection highlight — a bold ring around the door last tapped or focused via
+            a Notes "view on map" link, so it's obvious which door is selected. Topmost. */}
+        {selected && !moveTarget && (
+          <Mapbox.ShapeSource id="admin-selected" shape={pointFeatures(selected)}>
+            <Mapbox.CircleLayer
+              id="admin-selected-ring"
+              style={{
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 12, 13, 16, 16, 20, 18, 24],
+                circleColor: 'rgba(0,0,0,0)',
+                circleStrokeColor: '#2563eb',
+                circleStrokeWidth: 4,
               }}
             />
           </Mapbox.ShapeSource>
@@ -1136,6 +1175,12 @@ export default function AdminMap() {
       {flagFlash && (
         <View style={styles.flagFlash} pointerEvents="none">
           <Text style={styles.flagFlashText}>✓ Flag {flagFlash}</Text>
+        </View>
+      )}
+
+      {mapNotice && (
+        <View style={styles.flagFlash} pointerEvents="none">
+          <Text style={styles.flagFlashText}>{mapNotice}</Text>
         </View>
       )}
 

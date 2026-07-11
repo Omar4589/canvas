@@ -40,7 +40,10 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
           .lean()
       : [],
     CanvassActivity.find(
-      { voterId: voter._id, note: { $exists: true, $ne: null, $not: /^\s*$/ } },
+      // Exclude survey_submitted: its note is the survey's note, surfaced below from
+      // SurveyResponse (dual-ledger). Without this it appears twice. Mirrors the Notes
+      // hub's doorMatch (routes/admin/reports.js).
+      { voterId: voter._id, actionType: { $ne: 'survey_submitted' }, note: { $exists: true, $ne: null, $not: /^\s*$/ } },
       '_id note timestamp actionType userId'
     )
       .sort({ timestamp: -1 })

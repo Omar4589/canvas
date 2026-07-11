@@ -300,8 +300,21 @@ function NoteCard({ note, campaignId, tz }) {
       ? { to: `/campaigns/${campaignId}/map?household=${note.household.id}`, label: 'View on map →' }
       : null;
 
+  // The whole card is the link (voter or map). A note with no target stays a plain,
+  // non-clickable card. `state` carries the referrer so the voter page's back button
+  // can return here (see VoterDetailPage).
+  const cardProps = link
+    ? {
+        as: Link,
+        to: link.to,
+        state: { from: 'notes', campaignId },
+        className:
+          'block p-4 transition-colors hover:border-brand-accent/40 hover:bg-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30',
+      }
+    : { className: 'p-4' };
+
   return (
-    <Card className="p-4">
+    <Card {...cardProps}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="neutral">
@@ -314,9 +327,7 @@ function NoteCard({ note, campaignId, tz }) {
           {note.edited && <span className="text-xs italic text-fg-subtle">edited</span>}
         </div>
         {link && (
-          <Link to={link.to} className="shrink-0 text-xs font-semibold text-brand-accent hover:underline">
-            {link.label}
-          </Link>
+          <span className="shrink-0 text-xs font-semibold text-brand-accent">{link.label}</span>
         )}
       </div>
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -267,6 +267,7 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
 export default function VoterDetailPage() {
   const { voterId } = useParams();
   const orgTz = useOrgTimeZone();
+  const { state } = useLocation(); // referrer (e.g. { from: 'notes', campaignId }) for a contextual back
   const qc = useQueryClient();
   const [newNote, setNewNote] = useState('');
   const [err, setErr] = useState('');
@@ -309,7 +310,12 @@ export default function VoterDetailPage() {
 
   return (
     <div className="max-w-4xl">
-      <Link to="/voters" className="text-sm font-medium text-brand-accent hover:underline">‹ Voters</Link>
+      <Link
+        to={state?.from === 'notes' && state.campaignId ? `/campaigns/${state.campaignId}/notes` : '/voters'}
+        className="text-sm font-medium text-brand-accent hover:underline"
+      >
+        {state?.from === 'notes' && state.campaignId ? '‹ Notes' : '‹ Voters'}
+      </Link>
       <div className="mb-6 mt-1 flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold text-fg">{v.fullName}</h1>
         <span className="font-mono text-xs text-fg-subtle">{v.stateVoterId}</span>
