@@ -7,6 +7,8 @@ import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { User } from '../../models/User.js';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
+import { canvasserStanding } from '../../services/reports/canvasserIdentity.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -33,15 +35,16 @@ router.get('/', async (req, res, next) => {
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     const assignments = await CampaignAssignment.find({ campaignId: campaign._id })
-      .populate({ path: 'userId', select: 'firstName lastName email isActive isSuperAdmin' })
+      .populate({ path: 'userId', select: 'firstName lastName email isActive deletedAt isSuperAdmin' })
       .lean();
     // Join org roles + coordinator (the "team" grouping) so the pickers/Team page can
     // show the admin badge, search, and group/assign by crew.
     const userIds = assignments.filter((a) => a.userId).map((a) => a.userId._id);
     const memberships = await Membership.find({ organizationId: campaign.organizationId, userId: { $in: userIds } })
-      .select('userId role coordinatorId')
+      .select('userId role coordinatorId isActive')
       .lean();
     const roleByUser = new Map(memberships.map((m) => [String(m.userId), m.role]));
+    const membershipByUser = new Map(memberships.map((m) => [String(m.userId), m]));
     const coordByUser = new Map(memberships.map((m) => [String(m.userId), m.coordinatorId ? String(m.coordinatorId) : null]));
     // Resolve the distinct coordinator (lead) ids to display names for the crew label.
     const coordIds = [...new Set([...coordByUser.values()].filter(Boolean))];
@@ -58,12 +61,19 @@ router.get('/', async (req, res, next) => {
         .filter((a) => a.userId)
         .map((a) => {
           const coordinatorId = coordByUser.get(String(a.userId._id)) || null;
+          // The composite standing, not User.isActive. This used to report User.isActive, which
+          // only goes false on account DELETION — so a member an admin had DEACTIVATED still
+          // came back as active, the book pickers kept offering them, and the server then
+          // refused the assignment with a 409 (partitionAssignable checks BOTH flags). Now the
+          // picker and the assign endpoint agree.
+          const status = canvasserStanding(a.userId, membershipByUser.get(String(a.userId._id)));
           return {
             userId: String(a.userId._id),
             firstName: a.userId.firstName,
             lastName: a.userId.lastName,
             email: a.userId.email,
-            isActive: a.userId.isActive,
+            status,
+            isActive: status === 'active',
             isSuperAdmin: !!a.userId.isSuperAdmin,
             role: roleByUser.get(String(a.userId._id)) || 'canvasser',
             coordinatorId,
@@ -134,11 +144,17 @@ router.delete('/:userId', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
-    await CampaignAssignment.deleteOne({
-      campaignId: campaign._id,
-      userId: req.params.userId,
-    });
-    res.json({ ok: true });
+    // This used to drop the CampaignAssignment ONLY, which left the removed person still
+    // holding every book (TurfAssignment) and effort-crew row they had on this campaign — so
+    // their books stayed "assigned" to somebody who was off the roster, those doors never
+    // resurfaced as unassigned, and the effort readiness rollup still counted them as crew.
+    // Exactly the bug that was already fixed for remove-from-ORG (memberships.js).
+    //
+    // Scoped to THIS campaign: releaseAssignedWork's org scope would also strip the user's
+    // books in every OTHER campaign of the org. Books are many-to-many, so co-assigned
+    // canvassers keep theirs. Knock history is never touched.
+    const released = await releaseAssignedWork(req.params.userId, { campaignId: campaign._id });
+    res.json({ ok: true, released });
   } catch (err) {
     next(err);
   }

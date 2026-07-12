@@ -18,13 +18,25 @@
 // Full teardown (also purges the campaign's orphaned Persons):
 //   npm run cleanup:test-campaigns -- --ids=<campaignId> --mock=<campaignId> --apply
 //
-// Logins default to demo-admin@doorline.app / admin1234! and
-//   demo-canvasser@doorline.app / Victory26! — override any of them via
-//   SEED_DEMO_ADMIN_EMAIL / SEED_DEMO_ADMIN_PASSWORD / SEED_DEMO_CANVASSER_EMAIL /
-//   SEED_DEMO_CANVASSER_PASSWORD (re-running --apply syncs a changed password onto the
-//   existing account). SEED_DEMO_CANVASSER_EMAIL may be a COMMA-SEPARATED list — one
-//   app-review canvasser account per platform (e.g. apple@review.com,android@review.com),
-//   each reserved a clean unwalked book (all share SEED_DEMO_CANVASSER_PASSWORD).
+// APP-REVIEW LOGINS. All four env vars are COMMA-SEPARATED lists, and the passwords line up
+//   positionally with the emails — so Apple and Google can hold different credentials:
+//
+//     SEED_DEMO_ADMIN_EMAIL=apple@review.com,android@review.com
+//     SEED_DEMO_ADMIN_PASSWORD=ApplePw1!,GooglePw2!
+//     SEED_DEMO_CANVASSER_EMAIL=apple-delete@review.com,android-delete@review.com
+//     SEED_DEMO_CANVASSER_PASSWORD=ApplePw3!,GooglePw4!
+//
+//   One password with several emails is fine (everybody shares it). A count that is neither 1
+//   nor N is a typo and exits loudly. Re-running --apply syncs a changed password onto an
+//   existing account, so rotating a credential is just an env change + a re-run.
+//
+//   ADMINS are deletion-LOCKED (they're the keys to the tenant; a reviewer pressing "Delete my
+//   account" must not be able to destroy them). The CANVASSER accounts are deliberately NOT
+//   locked — a reviewer has to be able to complete a deletion somewhere, or they fail you for
+//   "unable to verify account deletion". Re-running this seeder recreates one after it's deleted.
+//
+//   Every review login gets its own clean, unwalked reserved book (isReviewerBook).
+//   Defaults: demo-admin@doorline.app / admin1234! and demo-canvasser@doorline.app / Victory26!
 //   Optional SEED_DEMO_SHARE_TOKEN pins the /r/<token> URL.
 //
 // Identity safety: every stateVoterId is 'DEMO-IA-......' (real Iowa ids are numeric,
@@ -133,23 +145,63 @@ const BOOK_MAX_DOORS = 55;
 const CAMPAIGN_TZ = 'America/Chicago';
 const CAMPAIGN_STATE = 'IA';
 const SVID_PREFIX = 'DEMO-IA-';
-const ADMIN_EMAIL = (process.env.SEED_DEMO_ADMIN_EMAIL || 'demo-admin@doorline.app').toLowerCase().trim();
-const ADMIN_PASSWORD = process.env.SEED_DEMO_ADMIN_PASSWORD || 'admin1234!';
-const CANVASSER_EMAIL = (process.env.SEED_DEMO_CANVASSER_EMAIL || 'demo-canvasser@doorline.app').toLowerCase().trim();
-const CANVASSER_PASSWORD = process.env.SEED_DEMO_CANVASSER_PASSWORD || 'Victory26!';
-// One app-review canvasser account PER platform (Apple, Google, …). Comma-separate
-// SEED_DEMO_CANVASSER_EMAIL — e.g. `apple@review.com,android@review.com` — to reserve
-// one clean, unwalked book per reviewer. A single value keeps the old behavior.
-const REVIEWER_EMAILS = [...new Set(
-  CANVASSER_EMAIL.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+const emailList = (raw, fallback) => [...new Set(
+  (raw || fallback).split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
 )];
 
-// A friendly display name for a NEW reviewer account, derived from its email
+// App-review logins, one set per store (Apple, Google, …). Both vars are comma-separated;
+// a single value keeps the old behavior.
+//
+//   SEED_DEMO_ADMIN_EMAIL=apple@review.com,android@review.com
+//   SEED_DEMO_CANVASSER_EMAIL=apple-delete@review.com,android-delete@review.com
+//
+// EVERY review login gets its own clean, unwalked reserved book — admins included. An admin can
+// switch into canvass mode, and a reviewer who lands on an empty book list will (rightly) report
+// that they couldn't see the app do anything. Reserving books only for the canvasser accounts
+// left the admin logins — the ones actually handed to Apple and Google — staring at nothing.
+const ADMIN_EMAILS = emailList(process.env.SEED_DEMO_ADMIN_EMAIL, 'demo-admin@doorline.app');
+const REVIEWER_EMAILS = emailList(process.env.SEED_DEMO_CANVASSER_EMAIL, 'demo-canvasser@doorline.app');
+const ADMIN_EMAIL = ADMIN_EMAILS[0]; // the org's owner: assignedBy / addedBy on seeded rows
+
+// Passwords line up POSITIONALLY with the emails above, so Apple and Google can hold different
+// credentials — a leak on one store's portal doesn't hand anyone the other's login:
+//
+//   SEED_DEMO_ADMIN_EMAIL=apple@review.com,android@review.com
+//   SEED_DEMO_ADMIN_PASSWORD=ApplePw1!,GooglePw2!      ← apple gets the 1st, android the 2nd
+//
+// One password with several emails is still fine — everybody shares it. Anything in between (2
+// passwords for 3 emails) is a typo, and we'd rather fail loudly than silently seed an account
+// with a password you don't have.
+function passwordList(raw, fallback, emails, varName) {
+  const parts = (raw || fallback).split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 1) return emails.map(() => parts[0]);
+  if (parts.length === emails.length) return parts;
+  console.error(
+    `${varName} has ${parts.length} password(s) but there are ${emails.length} email(s). ` +
+      `Give exactly one (shared by all) or one per email, in the same order.`
+  );
+  process.exit(1);
+}
+const ADMIN_PASSWORDS = passwordList(
+  process.env.SEED_DEMO_ADMIN_PASSWORD, 'admin1234!', ADMIN_EMAILS, 'SEED_DEMO_ADMIN_PASSWORD'
+);
+const CANVASSER_PASSWORDS = passwordList(
+  process.env.SEED_DEMO_CANVASSER_PASSWORD, 'Victory26!', REVIEWER_EMAILS, 'SEED_DEMO_CANVASSER_PASSWORD'
+);
+
+// A friendly display name for a NEW review account, derived from its email
 // (apple@review.com → "Apple Review"). Existing accounts keep their current name.
 function reviewerName(email) {
   const local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
   const first = local ? local.charAt(0).toUpperCase() + local.slice(1) : 'App';
   return { firstName: first, lastName: 'Review' };
+}
+
+function adminName(email) {
+  // Keep the original demo persona for the default account; derive a name for review logins.
+  return email === 'demo-admin@doorline.app'
+    ? { firstName: 'Dana', lastName: 'Whitfield' }
+    : reviewerName(email);
 }
 
 // ---------------------------------------------------------------------------
@@ -523,7 +575,7 @@ async function main() {
   const plannedVoters = generateVoters(rng, plannedHouseholds);
   console.log(`\nplan: org '${DEMO_ORG_NAME}' (${DEMO_ORG_SLUG}) · campaign '${DEMO_CAMPAIGN_NAME}'`);
   console.log(`  ${plannedHouseholds.length} households · ${plannedVoters.length} voters on ${new Set(plannedHouseholds.map((h) => h.precinct)).size} precincts of real Des Moines addresses`);
-  console.log(`  accounts: admin ${ADMIN_EMAIL} · reviewer(s) ${REVIEWER_EMAILS.join(', ')} · ${DEMO_CANVASSERS.length} field canvassers`);
+  console.log(`  accounts: admin(s) ${ADMIN_EMAILS.join(', ')} · review canvasser(s) ${REVIEWER_EMAILS.join(', ')} · ${DEMO_CANVASSERS.length} field canvassers`);
 
   await connectDb(process.env.MONGODB_URI);
 
@@ -567,13 +619,23 @@ async function main() {
     { $set: { status: 'internal', statusChangedAt: new Date() } },
     { upsert: true }
   );
-  const { user: admin } = await ensureUser({
-    email: ADMIN_EMAIL, password: ADMIN_PASSWORD, firstName: 'Dana', lastName: 'Whitfield', syncPassword: true,
-  });
-  // One app-review canvasser account per platform (each gets a clean reserved book).
+  // Admin review logins (one per store). The first is the org's owner.
+  const admins = [];
+  for (const [k, email] of ADMIN_EMAILS.entries()) {
+    const { user } = await ensureUser({
+      email, password: ADMIN_PASSWORDS[k], ...adminName(email), syncPassword: true,
+    });
+    admins.push(user);
+  }
+  const admin = admins[0];
+
+  // Canvasser review logins (one per store). These are the DISPOSABLE ones: a store reviewer is
+  // asked to test account deletion, so they need an account they can actually destroy.
   const reviewers = [];
-  for (const email of REVIEWER_EMAILS) {
-    const { user } = await ensureUser({ email, password: CANVASSER_PASSWORD, ...reviewerName(email), syncPassword: true });
+  for (const [k, email] of REVIEWER_EMAILS.entries()) {
+    const { user } = await ensureUser({
+      email, password: CANVASSER_PASSWORDS[k], ...reviewerName(email), syncPassword: true,
+    });
     reviewers.push(user);
   }
   const background = [];
@@ -584,9 +646,29 @@ async function main() {
     });
     background.push(user);
   }
-  await ensureMembership(admin._id, org._id, 'admin');
+  for (const u of admins) await ensureMembership(u._id, org._id, 'admin');
   for (const u of [...reviewers, ...background]) await ensureMembership(u._id, org._id, 'canvasser');
-  console.log(`\n1. org ${org._id} · admin ${admin.email} · ${reviewers.length} reviewer + ${background.length} field canvassers`);
+
+  // The deletion lock, set here so it can't be forgotten before a submission.
+  //
+  // ADMINS LOCKED: these are the keys to the demo tenant. A reviewer WILL press "Delete my
+  // account" — verifying it is exactly what App Store 5.1.1(v) asks of them — and if the admin
+  // login is deletable they'd destroy the tenant on their way through, leaving the NEXT
+  // submission with no way in.
+  //
+  // CANVASSERS DELIBERATELY NOT LOCKED: locking everything is its own rejection. A reviewer who
+  // can't complete a deletion anywhere fails you for "unable to verify account deletion" — the
+  // very thing they came to check. So these exist to be deleted; name them in the review notes.
+  // Re-running this seeder recreates one after a reviewer destroys it (deletion releases the
+  // email), which is why it's the pre-submission command.
+  await User.updateMany({ _id: { $in: admins.map((u) => u._id) } }, { $set: { deletionLocked: true } });
+  await User.updateMany({ _id: { $in: reviewers.map((u) => u._id) } }, { $set: { deletionLocked: false } });
+
+  console.log(
+    `\n1. org ${org._id} · ${admins.length} admin (deletion-LOCKED: ${admins.map((u) => u.email).join(', ')})` +
+      `\n   ${reviewers.length} review canvasser (deletable: ${reviewers.map((u) => u.email).join(', ') || 'none'})` +
+      ` + ${background.length} field canvassers`
+  );
 
   // 2. Campaign + 3. survey template ----------------------------------------
   let campaign =
@@ -710,14 +792,18 @@ async function main() {
   // book per reviewer (kept clean for app review — Apple, Google, …) and distribute
   // the rest across the field canvassers. isReviewerBook is the durable anchor the
   // refresh button excludes by.
+  // EVERY app-review login gets a reserved clean book — the admins too, because an admin can
+  // switch into canvass mode and a reviewer who finds an empty book list reports that the app
+  // doesn't work. Only the background field canvassers share the walked ones.
+  const bookedReviewers = [...admins, ...reviewers];
   const turfs = await Turf.find({ passId: pass._id, status: 'published' }).sort({ name: 1 });
-  if (turfs.length <= reviewers.length) {
-    console.error(`only ${turfs.length} books but ${reviewers.length} reviewer(s) — need at least one field book left over`);
+  if (turfs.length <= bookedReviewers.length) {
+    console.error(`only ${turfs.length} books but ${bookedReviewers.length} review login(s) — need at least one field book left over`);
     process.exit(1);
   }
-  // The last N books (by name) become the reviewers' reserved books, one each.
-  const reviewerTurfs = turfs.slice(turfs.length - reviewers.length);
-  const reviewerByTurfId = new Map(reviewerTurfs.map((t, k) => [String(t._id), reviewers[k]]));
+  // The last N books (by name) become the review logins' reserved books, one each.
+  const reviewerTurfs = turfs.slice(turfs.length - bookedReviewers.length);
+  const reviewerByTurfId = new Map(reviewerTurfs.map((t, k) => [String(t._id), bookedReviewers[k]]));
   await TurfAssignment.deleteMany({ campaignId: campaign._id, passId: pass._id });
   const assignmentsByTurf = new Map();
   let bgIdx = 0;
@@ -733,7 +819,10 @@ async function main() {
   });
   await TurfAssignment.insertMany(assignmentDocs);
   const reviewerTurfIds = new Set(reviewerByTurfId.keys());
-  const crewIds = [...reviewers.map((u) => u._id), ...background.map((u) => u._id)];
+  // Admins are on the crew too now: CampaignAssignment is what gates a campaign's visibility on
+  // mobile, so without it an admin in canvass mode can't even see the campaign their reserved
+  // book belongs to.
+  const crewIds = [...bookedReviewers.map((u) => u._id), ...background.map((u) => u._id)];
   await ensureCampaignAssignments(campaign._id, crewIds, org._id, admin._id); // positional args
   for (const userId of crewIds) {
     await EffortMember.findOneAndUpdate(
@@ -742,8 +831,8 @@ async function main() {
       { upsert: true, setDefaultsOnInsert: true }
     );
   }
-  const reviewerBookNote = reviewerTurfs.map((t, k) => `'${t.name}' → ${reviewers[k].email}`).join(', ');
-  console.log(`7. assigned ${turfs.length} books across ${background.length} field canvassers · ${reviewers.length} reviewer book(s) kept clean: ${reviewerBookNote}`);
+  const reviewerBookNote = reviewerTurfs.map((t, k) => `'${t.name}' → ${bookedReviewers[k].email}`).join(', ');
+  console.log(`7. assigned ${turfs.length} books across ${background.length} field canvassers · ${bookedReviewers.length} review book(s) kept clean: ${reviewerBookNote}`);
 
   // Activate the round (mirrors routes/admin/passes.js invariants).
   if (pass.status !== 'active') {
@@ -804,12 +893,18 @@ async function main() {
   console.log(`Demo ready: '${DEMO_ORG_NAME}' / '${DEMO_CAMPAIGN_NAME}'`);
   console.log(`  campaignId: ${campaign._id}`);
   console.log(`  ${hh} doors · ${vv} voters · ${tt} books · ${aa} activities · ${ss} surveys`);
-  console.log(`  admin login:     ${admin.email} / ${ADMIN_PASSWORD}`);
-  reviewers.forEach((rev, k) => {
-    console.log(`  reviewer login:  ${rev.email} / ${CANVASSER_PASSWORD} — book '${reviewerTurfs[k].name}' is clean for reviewers`);
+  // Print exactly what goes into App Store Connect / Play Console, and say which account the
+  // reviewer is meant to DELETE — the admins refuse deletion, so if the notes don't point at a
+  // disposable one the reviewer concludes the feature doesn't work.
+  bookedReviewers.forEach((u, k) => {
+    const isAdmin = k < admins.length;
+    const pw = isAdmin ? ADMIN_PASSWORDS[k] : CANVASSER_PASSWORDS[k - admins.length];
+    const role = isAdmin ? 'ADMIN, deletion-LOCKED' : 'canvasser, DELETABLE — give this one to test deletion';
+    console.log(`  ${u.email} / ${pw} — ${role} — book '${reviewerTurfs[k].name}' kept clean`);
   });
   console.log(`  client portal:   /r/${share.token}`);
-  console.log(`  restage after reviewers knock: node src/utils/seedDemoOrg.js --reset --apply`);
+  console.log(`  restage after reviewers knock (and to recreate a deleted review account):`);
+  console.log(`    node src/utils/seedDemoOrg.js --reset --apply`);
   console.log(`  full teardown:   npm run cleanup:test-campaigns -- --ids=${campaign._id} --mock=${campaign._id} --apply`);
 
   await mongoose.disconnect();

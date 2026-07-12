@@ -381,7 +381,35 @@ The aggregation+rollup above lives in `computeOverlaps` ([services/reports/overl
 | `GET /admin/reports/canvassers/:id/daily` | one canvasser, per day | `days[{ homesKnocked, surveyKnocks, surveysSubmitted, connectionRatePct, … }]` | same |
 | `GET /admin/reports/overlaps` | overlap review | see §D | `timestamp` |
 | `GET /admin/reports/duplicate-surveys` | voters with >1 survey response | `duplicates[{ voter, household, responses[{ canvasser, submittedAt, roundLabel }], sameCanvasserSameDay, differentCanvassers }]` | `submittedAt` |
-| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path) or a **range** (`?from/&to`, max 62 days; missing `to` = today) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{} }` with per-canvasser `knocksByDay/surveysByDay`. Both: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in both modes; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range) |
+| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to`, max 62 days; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{} }` with per-canvasser `knocksByDay/surveysByDay`; `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
+
+### The 62-day cap, and why `totals` escapes it
+
+The cap exists to bound the **grid's columns** — a range renders one column per day — **not** the
+aggregation. So `?totals=1` lifts it by shipping no grid: no `knocksByDay`, no `days[]`, no hour
+maps. Everything else is unchanged, and it is the only way to see a whole campaign, which is the
+only way to see **every canvasser who ever worked it** — including the ones who have since left.
+
+Three invariants, each of which a plausible "simplification" would break:
+
+- **It still buckets BY DAY internally.** Grouping on `userId` alone would make `hoursOnDoors` equal
+  *(last knock ever − first knock ever)* — weeks, not hours — and collapse `doorsPerHour` to ~0.
+  Because it keeps the day bucket, every per-canvasser number in `totals` mode is **by construction**
+  the exact sum of its range-mode buckets. `test/timelineTotals.int.test.js` asserts that field by
+  field.
+- **Per-canvasser knocks are NOT `knocksPipeline`.** The endpoint runs two aggregations: a
+  `$group` on `{userId, bucket}` (raw row counts → the per-canvasser numbers) and
+  `knocksPipeline(scoped)` (dedupes by `(householdId, passId)`, collapses **across users**, `_id:null`
+  → the campaign-wide `billableKnocks`). `knocksPipeline` has **no `userId` dimension**. Per-canvasser
+  knocks are raw counts and *legitimately exceed* `billableKnocks` when two canvassers work the same
+  door in the same pass — that's the overlap-never-double-bills design, reconciled by `overlapDoors`.
+  Routing per-canvasser counts through `knocksPipeline` would silently rewrite everyone's numbers;
+  the test seeds a deliberate overlap and asserts `grandKnocks > billableKnocks` to catch it.
+- **Overlaps are skipped in `totals`.** `computeOverlaps` `$push`es every event into per-door arrays,
+  which over a whole campaign can breach Mongo's 100MB per-stage limit. The overlap **door count**
+  (`overlapDoors = grandKnocks − billableKnocks`) is pure arithmetic and stays honest; only the
+  per-door reconciliation **cards** need a bounded window. `overlapsOmitted:true` says so, so a client
+  never implies a campaign had zero overlaps.
 
 **Cumulative summability:** `households`, `homesKnocked`, `knocks`, `surveyedKnocks`,
 `litKnocks`, `refusedKnocks`, `surveysSubmitted`, `surveyedVoters`, `litDropped` (and the coverage
@@ -391,6 +419,52 @@ distinct counts don't overlap). Cumulative
 averaged). `activeCanvassers` is **not** summable — it uses a separate org-wide `distinct('userId')`.
 
 ## F. Invariants & edge cases
+
+- **A knock is a historical fact. Staffing changes never move a number.** Deactivating a canvasser,
+  removing them from a campaign, removing them from the org, or deleting their account **does not
+  change a single count** — not the campaign totals, not the leaderboard, not the invoice. Whether
+  someone can still log in is an *authorization* question; what they already did is a *ledger*
+  question, and the two are deliberately unrelated.
+
+  This holds because **every per-canvasser metric is ledger-first**: it aggregates
+  `CanvassActivity`, takes its row set from *the activity's* `userId`s, and only then joins out to
+  `User` for a name — never the reverse, never with a filter, never with a `$lookup`. See the shape
+  at [`services/reports/canvasserIdentity.js`](../server/src/services/reports/canvasserIdentity.js)
+  (`hydrateCanvassers`), which every canvasser-facing report uses so they cannot drift:
+
+  ```js
+  const userIds = [...byUser.keys()];              // ← the LEDGER decides who is on the report
+  const uMap = await hydrateCanvassers(userIds, orgId);   // ← decoration only; NEVER filters
+  const rows = userIds.map((uid) => ({ ...byUser.get(uid), ...uMap.get(uid) }));
+  ```
+
+  A row therefore survives even if the `User` document is gone entirely. Account deletion
+  ([`deleteAccount.js`](../server/src/services/users/deleteAccount.js)) *scrubs the user row in
+  place* rather than removing it, precisely so the ledger's `required` `userId` still resolves.
+  `test/timelineTotals.int.test.js` seeds a canvasser who is deactivated **and** off the campaign
+  roster and asserts every one of their knocks is still counted and attributed.
+
+- **`status` vs `isActive` — two different `isActive` flags, and the reports use the composite.**
+  `Membership.isActive` is what the admin **Deactivate** button writes. `User.isActive` is written by
+  **nothing except terminal account deletion**, so on a live database it just means *"not deleted"*.
+  Reports used to return the latter and label it "active", which meant the flag never went false for
+  someone an admin had actually deactivated. They now return a `status` of
+  `active` | `deactivated` | `removed` (no membership row — org removal hard-deletes it) | `deleted`,
+  with `isActive` kept as the boolean shorthand (`status === 'active'`). **This is a label, never a
+  filter** — no report hides anyone by default.
+
+- **`useCampaignTeam` returns two lists on purpose.** `members` = who you may *assign* work to
+  (deactivated people excluded; the server refuses them anyway, so offering them in a picker only
+  earns a 409 from `partitionAssignable`). `allMembers` = the full roster whatever their standing —
+  **reports join against this**, so a coordinator label or a roster headcount does not blink out the
+  moment somebody is deactivated while their knocks are still on the page.
+
+- **"Knocking N of M"** — M is the current roster **∪ everyone with activity in the range**, not the
+  roster alone. Someone who worked the campaign and then quit is *deleted from the roster*, so
+  counting only the roster erased them from **both** numbers: a campaign whose crew had turned over
+  read "1 of 1" with four people's work sitting in the table below it. The union also keeps `N ≤ M`
+  by construction (every knocker is in M). N counts people who actually **knocked** — a
+  restricted-only row has activity but no knock.
 
 - **Null `passId`** → one synthetic legacy bucket per household (pre-turf data = 1 knock/house;
   overlaps still flag 2+ distinct canvassers).
@@ -456,14 +530,14 @@ mobile [mobile/lib/rates.js](../mobile/lib/rates.js) (`rateFromPct` for the serv
 | [components/CanvasserTable.jsx](../client/src/components/CanvasserTable.jsx) | Leaderboard table: Surveys, Lit drops, Not home, Wrong addr, **Knocks**, **Connection**, Last activity. |
 | [components/CoverageBar.jsx](../client/src/components/CoverageBar.jsx) | Segmented bar + numeric legend (counts + %). |
 | [components/StatCard.jsx](../client/src/components/StatCard.jsx) | `label / value / hint / accent`. |
-| [pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx) + [components/CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) + [components/TimelineGrid.jsx](../client/src/components/TimelineGrid.jsx) + [components/TimelineOverlaps.jsx](../client/src/components/TimelineOverlaps.jsx) | **Timeline** (`/campaigns/:id/timeline`, `/canvasser-timeline`): live performance dashboard — KPI strip (Doors, Surveys, Connection rate, Doors/hr, Knocking N of M), sortable per-canvasser table (coordinator, rates, pace, start/last door, a **Restricted** tally column from `dayRestricted`), heatmap grid (hour columns for a day, day columns for a range), date-range presets + single-day stepper, coordinator crew filter (client-side; overlaps card stays campaign-wide), Knocks/Surveys toggle, LiveStatus 20s refresh while the range includes today, inline overlaps reconciliation. Coordinator names come from the Team roster cache (`useCampaignTeam`). First web overlaps surface. |
+| [pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx) + [components/CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) + [components/TimelineGrid.jsx](../client/src/components/TimelineGrid.jsx) + [components/TimelineOverlaps.jsx](../client/src/components/TimelineOverlaps.jsx) | **Timeline** (`/campaigns/:id/timeline`, `/canvasser-timeline`): live performance dashboard — KPI strip (Doors, Surveys, Connection rate, Doors/hr, Knocking N of M), sortable per-canvasser table (coordinator, rates, pace, start/last door, a **Restricted** tally column from `dayRestricted`), heatmap grid (hour columns for a day, day columns for a range), date-range presets **incl. All time** (campaign-to-date: swaps the grid + overlap cards for totals — see the `?totals=1` mode above) + single-day stepper, coordinator crew filter (client-side; overlaps card stays campaign-wide), Knocks/Surveys toggle, LiveStatus 20s refresh while the range includes today, inline overlaps reconciliation. Coordinator names come from the Team roster cache (`useCampaignTeam` — the **`allMembers`** list, not `members`: a report must still label a canvasser who has since been deactivated). First web overlaps surface. |
 
 ### Mobile ([mobile/app/(app)/admin](../mobile/app/(app)/admin))
 | File | Renders |
 |---|---|
 | [index.jsx](../mobile/app/(app)/admin/index.jsx) | Org Overview. `DateRangeBar` → `/campaign-rollup`. Cumulative card: `CoverageBar` + two stat rows (Knocks/Surveys/Surveyed; Connection/Lit/Canvassers). `CampaignCard`: full `CoverageBar` + coverage line + inline (knocks/surveys/voters/conn/canv); archived rows show knocks. |
 | [campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | **Activity** tiles (Knocks, Surveys/Lit, Surveyed voters, Connection rate via `rateFromPct`) from rollup; **Coverage** (all-time) from overview; Top canvassers from `/canvassers`; "Timeline" quick-link. |
-| [timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) + [components/LiveStatus.jsx](../mobile/components/LiveStatus.jsx) | **Timeline** (`/canvasser-timeline`): live performance dashboard at web parity — KPI tiles (`KpiGrid`: Doors, Surveys, Connection rate via `rateFromPct`, Doors/hr, Knocking N of M), per-canvasser cards (coordinator, `dayKnocks/daySurveys/connectionRate`, `hoursOnDoors`·doors/hr, `formatRange` shift line; tap → canvasser detail), `DateRangeBar` presets (no 'all') + single-day stepper, walk-list + coordinator `TabSwitcher` crew filters (client-side join from `/campaigns/:id/assignments`; overlaps stay campaign-wide with a note), Knocks/Surveys toggle, frozen-name-column heatmap grid (hour columns single-day, day columns for a range — `data.mode` guarded), reconciliation + overlap cards (`overlapCount` true total), `LiveStatus` pill (20s poll while the range includes today, pause/refresh) + `useFocusedPoll`. Reloads the campaign on focus + accepts a `campaignId` param. |
+| [timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) + [components/LiveStatus.jsx](../mobile/components/LiveStatus.jsx) | **Timeline** (`/canvasser-timeline`): live performance dashboard at web parity — KPI tiles (`KpiGrid`: Doors, Surveys, Connection rate via `rateFromPct`, Doors/hr, Knocking N of M), per-canvasser cards (coordinator, `dayKnocks/daySurveys/connectionRate`, `hoursOnDoors`·doors/hr, `formatRange` shift line; tap → canvasser detail), `DateRangeBar` presets **incl. 'all'** (campaign-to-date: `?totals=1`, grid hidden) + single-day stepper, walk-list + coordinator `TabSwitcher` crew filters (client-side join from `/campaigns/:id/assignments`; overlaps stay campaign-wide with a note), Knocks/Surveys toggle, frozen-name-column heatmap grid (hour columns single-day, day columns for a range — `data.mode` guarded), reconciliation + overlap cards (`overlapCount` true total), `LiveStatus` pill (20s poll while the range includes today, pause/refresh) + `useFocusedPoll`. Reloads the campaign on focus + accepts a `campaignId` param. |
 | [canvassers.jsx](../mobile/app/(app)/admin/canvassers.jsx) | Leaderboard. `rowDerived` uses `r.knocks` + `r.connectionRate`; totals use `knocks` + `completionKnocks`; overlap banner. |
 | [overlaps.jsx](../mobile/app/(app)/admin/overlaps.jsx) | Renders `overlaps[].passes[]` grouped by `roundLabel`. |
 | [canvasser/[id]/index.jsx](../mobile/app/(app)/admin/canvasser/[id]/index.jsx), [compare.jsx](../mobile/app/(app)/admin/canvasser/compare.jsx), [[id]/days.jsx](../mobile/app/(app)/admin/canvasser/[id]/days.jsx), [[id]/day/[date].jsx](../mobile/app/(app)/admin/canvasser/[id]/day/[date].jsx) | Per-canvasser drilldowns; `kpi.homesKnocked` (= knocks) + `connectionRatePct`. |

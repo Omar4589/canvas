@@ -38,7 +38,9 @@ const SUM_W = 48;
 // The endpoint caps ranges (62 days), so this screen doesn't offer "All time"
 // and validates custom ranges before querying (the server 400s as a backstop).
 const TIMELINE_MAX_DAYS = 62;
-const TIMELINE_PRESETS = PRESETS.filter((p) => p.key !== 'all');
+// 'All time' is offered again: it swaps the hour/day grid for campaign-to-date totals, the only
+// view that shows everyone who has ever worked the campaign — canvassers who left included.
+const TIMELINE_PRESETS = PRESETS;
 
 // Sort keys for the canvasser list/grid — mapped to the timeline row fields.
 const SORT_OPTIONS = [
@@ -162,13 +164,19 @@ export default function AdminTimeline() {
   // 'today' pins to the CURRENT today so the live poll doesn't silently widen into a
   // 2-day range after campaign-tz midnight. Recomputed every render.
   const today = todayInTz(tz);
+  // 'All time' = campaign-to-date. It asks for totals only (no hour/day buckets), which is what
+  // lets it escape the 62-day cap: the cap exists to stop the grid growing a column per day, not
+  // to limit the aggregation.
+  const allTime = range?.preset === 'all';
   const fromDay = range ? (range.preset === 'today' ? today : range.from) : null;
   const effectiveTo = range ? range.to || today : null;
-  const isSingleDay = !!range && fromDay === effectiveTo;
-  const includesToday = !!range && (!range.to || range.to >= today);
+  const isSingleDay = !allTime && !!range && fromDay === effectiveTo;
+  const includesToday = allTime || (!!range && (!range.to || range.to >= today));
   // Bad custom ranges (no start, inverted, > cap) get a notice instead of a query —
-  // otherwise the 20s live poll would retry the server's 400 forever.
+  // otherwise the 20s live poll would retry the server's 400 forever. All-time is unbounded on
+  // purpose, so none of that applies to it.
   const rangeInvalid =
+    !allTime &&
     !!range && (!fromDay || fromDay > effectiveTo || ymdSpanDays(fromDay, effectiveTo) > TIMELINE_MAX_DAYS);
 
   function stepDay(n) {
@@ -177,16 +185,20 @@ export default function AdminTimeline() {
   }
 
   const q = useQuery({
-    queryKey: ['admin', 'reports', 'canvasser-timeline', cId, effortId, fromDay, range?.to],
+    queryKey: ['admin', 'reports', 'canvasser-timeline', cId, effortId, allTime ? 'all' : fromDay, range?.to],
     queryFn: () => {
       const p = new URLSearchParams();
       p.set('campaignId', cId);
       if (effortId) p.set('effortId', effortId);
-      p.set('from', fromDay);
-      if (range?.to) p.set('to', range.to); // server defaults a missing `to` to today
+      if (allTime) {
+        p.set('totals', '1'); // no bounds at all — the server reads that as the whole ledger
+      } else {
+        p.set('from', fromDay);
+        if (range?.to) p.set('to', range.to); // server defaults a missing `to` to today
+      }
       return api(`/admin/reports/canvasser-timeline?${p.toString()}`);
     },
-    enabled: !!cId && !!fromDay && !rangeInvalid,
+    enabled: !!cId && (allTime || (!!fromDay && !rangeInvalid)),
     refetchInterval: live && includesToday ? 20_000 : false,
     refetchIntervalInBackground: false,
     // Keeps the grid/cards from blanking on every 20s poll and on preset switches.
@@ -214,6 +226,10 @@ export default function AdminTimeline() {
   const data = q.data || {};
   const overlaps = data.overlaps || [];
   const isRange = data.mode === 'range';
+  // Read the SERVER's mode, not the local `allTime` flag: keepPreviousData means the previous
+  // range-shaped payload is still on screen during an all-time fetch, and gating the grid on the
+  // local flag would blank it a beat early.
+  const isTotals = data.mode === 'totals';
 
   // Coordinator join from the roster; off-roster knockers (removed, cross-campaign)
   // resolve to null → '—' / the 'No coordinator' bucket.
@@ -308,9 +324,11 @@ export default function AdminTimeline() {
     return { doors, surveys, connPct, doorsPerHour };
   }, [coordRows]);
 
-  // "Knocking N of M": M = roster canvassers (crew-scoped when filtered), N = the
-  // subset with knocks — intersected with the roster so N ⊆ M (admins/off-roster
-  // knockers still show in the cards, but "5 of 4" would read as a bug).
+  // "Knocking N of M": M = the current roster UNION everyone who knocked in the range; N = how
+  // many of them actually knocked. The roster alone undercounted both numbers — a canvasser who
+  // worked the campaign and then quit is deleted from the roster, so a crew that had turned over
+  // read "1 of 1" with four people's work sitting in the cards below. The union keeps N ⊆ M by
+  // construction (every knocker is in M), so "5 of 4" still can't happen.
   const rosterIds = useMemo(() => {
     const canvasserRows = assignments.filter((a) => a.role === 'canvasser');
     const scoped = !coordinatorId
@@ -318,11 +336,15 @@ export default function AdminTimeline() {
       : coordinatorId === 'none'
         ? canvasserRows.filter((a) => !a.coordinatorId)
         : canvasserRows.filter((a) => String(a.coordinatorId || '') === coordinatorId);
-    return new Set(scoped.map((a) => String(a.userId)));
-  }, [assignments, coordinatorId]);
+    const ids = new Set(scoped.map((a) => String(a.userId)));
+    for (const r of coordRows) ids.add(String(r.userId));
+    return ids;
+  }, [assignments, coordinatorId, coordRows]);
+  // Counts people who actually KNOCKED: a restricted-only row has activity but no knock
+  // (restricted is never billable and never in dayKnocks), and the tile says "Knocking".
   const knockingCount = useMemo(
-    () => coordRows.filter((r) => rosterIds.has(String(r.userId))).length,
-    [coordRows, rosterIds]
+    () => coordRows.filter((r) => (r.dayKnocks || 0) > 0).length,
+    [coordRows]
   );
 
   // Grid columns: hours for a single day, days for a range. Mode-guarded so
@@ -664,7 +686,10 @@ export default function AdminTimeline() {
                 ) : null}
               </View>
 
-              {/* Frozen-name-column grid (hours or days) */}
+              {/* Frozen-name-column grid (hours or days). Campaign-to-date ships no buckets —
+                  that is precisely what lets it escape the 62-day cap — so there is nothing to
+                  draw. The totals above are complete either way. */}
+              {!isTotals && (
               <View style={styles.gridRow}>
                 <View style={{ width: NAME_W }}>
                   <View style={[styles.cellBase, styles.headCell, { width: NAME_W, alignItems: 'flex-start' }]}>
@@ -730,6 +755,15 @@ export default function AdminTimeline() {
                   </View>
                 </ScrollView>
               </View>
+              )}
+
+              {isTotals && (
+                <Text style={styles.totalsNote}>
+                  Campaign to date — everyone who has worked this campaign, including anyone who
+                  has since left the team. The hour-by-hour grid needs a range of{' '}
+                  {TIMELINE_MAX_DAYS} days or less.
+                </Text>
+              )}
             </>
           )}
 
@@ -967,6 +1001,12 @@ function makeStyles(t) {
     reconStrong: { fontWeight: '800', color: colors.textPrimary },
     reconWarn: { ...type.caption, color: colors.warnFg, marginTop: 2, fontWeight: '600' },
     reconMuted: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+    totalsNote: {
+      ...type.caption,
+      color: colors.textMuted,
+      paddingHorizontal: spacing.lg,
+      marginTop: spacing.md,
+    },
 
     gridRow: { flexDirection: 'row', paddingHorizontal: spacing.lg },
     cellBase: {

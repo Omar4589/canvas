@@ -218,7 +218,9 @@ export default function DashboardPage() {
   // here we normalize the /admin/reports/canvassers leaderboard rows into the same
   // shape — rename Doors/Surveys/Lit, compute doors-per-hour from first→last, and
   // join the coordinator from the shared campaign-assignments cache (like TimelinePage).
-  const { members } = useCampaignTeam(campaignId);
+  // allMembers: a leaderboard is a report — a deactivated canvasser's rows are still here, so
+  // their coordinator label has to resolve.
+  const { allMembers: members } = useCampaignTeam(campaignId);
   const coordByUserId = useMemo(() => {
     const m = new Map();
     for (const member of members) {

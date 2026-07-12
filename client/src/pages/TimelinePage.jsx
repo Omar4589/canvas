@@ -25,7 +25,9 @@ function buildQuery(params) {
 
 // The endpoint caps ranges (62 days), so this page doesn't offer "All time" and
 // validates custom ranges before querying (the server 400s as a backstop).
-const TIMELINE_PRESETS = RANGE_PRESETS.filter((p) => p.id !== 'all');
+// "All time" is offered again: it swaps the hour/day grid for campaign-to-date totals, which is
+// the only way to see everyone who has ever worked the campaign — including canvassers who left.
+const TIMELINE_PRESETS = RANGE_PRESETS;
 const TIMELINE_MAX_DAYS = 62;
 
 // Inclusive day count between two YYYY-MM-DD strings (UTC calendar math).
@@ -83,7 +85,10 @@ export default function TimelinePage() {
   });
   const efforts = effortsQ.data?.efforts || [];
 
-  const { members } = useCampaignTeam(campaignId);
+  // allMembers, not members: this is a REPORT. A canvasser who was deactivated still has their
+  // knocks on this page, so their coordinator label and their place in the roster count must not
+  // vanish the moment their account is switched off.
+  const { allMembers: members } = useCampaignTeam(campaignId);
 
   // Default the range to "today" in the campaign tz once it's known (so it's the
   // campaign's day for every admin). Skips if the admin already picked a range.
@@ -102,14 +107,21 @@ export default function TimelinePage() {
   // 'today' preset re-pins `from` to the CURRENT today (its stored `from` was captured at
   // selection time and would silently widen into a 2-day range overnight).
   const today = todayInTz(tz);
+  // "All time" = campaign-to-date. It asks the server for totals only (no hour/day buckets), which
+  // is what lets it escape the 62-day cap — the cap exists to stop the grid growing a column per
+  // day, not to limit the aggregation. This is the only view that shows every canvasser who ever
+  // worked the campaign, including the ones who have since left.
+  const allTime = dateRange?.preset === 'all';
   const fromDay = dateRange ? (dateRange.preset === 'today' ? today : dateRange.from) : null;
   const effectiveTo = dateRange ? dateRange.to || today : null;
-  const isSingleDay = !!dateRange && fromDay === effectiveTo;
-  const includesToday = !!dateRange && (!dateRange.to || dateRange.to >= today);
+  const isSingleDay = !allTime && !!dateRange && fromDay === effectiveTo;
+  const includesToday = allTime || (!!dateRange && (!dateRange.to || dateRange.to >= today));
   // Guard before querying: a custom "Until X" (from:null) is unbounded, a future start
   // inverts the range (the live poll would retry the 400 every 20s), and a long custom
   // range exceeds the endpoint's 62-day cap — show the notice, not a raw error.
+  // All-time is bounded by nothing on purpose, so none of that applies to it.
   const rangeInvalid =
+    !allTime &&
     !!dateRange &&
     (!fromDay || fromDay > effectiveTo || ymdSpanDays(fromDay, effectiveTo) > TIMELINE_MAX_DAYS);
 
@@ -119,17 +131,17 @@ export default function TimelinePage() {
   }
 
   const timelineQ = useQuery({
-    queryKey: ['reports', 'canvasser-timeline', campaignId, effortId, fromDay, dateRange?.to],
+    queryKey: ['reports', 'canvasser-timeline', campaignId, effortId, allTime ? 'all' : fromDay, dateRange?.to],
     queryFn: () =>
       api(
         `/admin/reports/canvasser-timeline${buildQuery({
           campaignId,
           effortId: effortId || undefined,
-          from: fromDay,
-          to: dateRange.to || undefined, // server defaults a missing `to` to today
+          // All-time sends no bounds at all — the server reads that as the whole ledger.
+          ...(allTime ? { totals: 1 } : { from: fromDay, to: dateRange.to || undefined }),
         })}`
       ),
-    enabled: !!campaignId && !!fromDay && !rangeInvalid,
+    enabled: !!campaignId && (allTime || (!!fromDay && !rangeInvalid)),
     refetchInterval: live && includesToday ? 20_000 : false,
     refetchIntervalInBackground: false,
     placeholderData: keepPreviousData,
@@ -196,10 +208,15 @@ export default function TimelinePage() {
     return { doors, surveys, connPct, doorsPerHour };
   }, [filteredRows]);
 
-  // "Knocking N of M": M = roster canvassers (this crew's when filtered), N = the subset
-  // of them with at least one knock in the range. Intersecting with the roster keeps
-  // N ⊆ M — admins/leads/off-roster knockers still show in the table, but "5 of 4"
-  // would read as a bug.
+  // "Knocking N of M": M = the people this campaign could expect work from in this range, N =
+  // how many actually knocked.
+  //
+  // M is the current roster UNION everyone who knocked in the range — not the roster alone.
+  // Somebody who worked the campaign and then quit is deleted from the roster, and counting
+  // only the roster silently erased them from BOTH numbers: a campaign whose whole crew turned
+  // over read "1 of 1" while four people's work sat in the table below. Their doors were always
+  // in the totals; this makes the headcount agree with them. The union also keeps N ⊆ M by
+  // construction — every knocker is in M, so "5 of 4" still can't happen.
   const rosterIds = useMemo(() => {
     const canvasserMembers = members.filter((m) => m.role === 'canvasser');
     const scoped = !coordinatorId
@@ -207,11 +224,19 @@ export default function TimelinePage() {
       : coordinatorId === 'none'
         ? canvasserMembers.filter((m) => !m.user.coordinatorId)
         : canvasserMembers.filter((m) => String(m.user.coordinatorId || '') === coordinatorId);
-    return new Set(scoped.map((m) => String(m.user.id)));
-  }, [members, coordinatorId]);
+    const ids = new Set(scoped.map((m) => String(m.user.id)));
+    // filteredRows is already coordinator-scoped, so a departed knocker joins the crew's M only
+    // when that crew is the one being shown (they land in "No coordinator", having lost their
+    // roster row along with their coordinator).
+    for (const r of filteredRows) ids.add(String(r.userId));
+    return ids;
+  }, [members, coordinatorId, filteredRows]);
+  // N counts people who actually KNOCKED. A row can exist with zero knocks — someone who only
+  // marked doors Restricted has activity but no knock (restricted is deliberately not billable
+  // and never in dayKnocks), and the tile says "Knocking".
   const knockingCount = useMemo(
-    () => filteredRows.filter((r) => rosterIds.has(String(r.userId))).length,
-    [filteredRows, rosterIds]
+    () => filteredRows.filter((r) => (r.dayKnocks || 0) > 0).length,
+    [filteredRows]
   );
 
   const hasRows = rows.length > 0;
@@ -366,7 +391,7 @@ export default function TimelinePage() {
             <StatCard
               label="Knocking"
               value={`${knockingCount} of ${rosterIds.size}`}
-              hint={coordinatorId ? 'Crew canvassers' : 'Roster canvassers'}
+              hint={coordinatorId ? 'Crew + anyone who worked' : 'Roster + anyone who worked'}
             />
           </div>
 
@@ -385,11 +410,25 @@ export default function TimelinePage() {
                 singleDay={isSingleDay}
                 litMode={current?.type === 'lit_drop'}
               />
-              <TimelineOverlaps
-                data={data}
-                note={coordinatorId ? 'Overlap totals are campaign-wide (not filtered to this crew).' : null}
-              />
-              <TimelineGrid data={data} rows={filteredRows} metric={metric} />
+              {allTime && (
+                <p className="text-sm text-fg-muted">
+                  Campaign to date — everyone who has worked this campaign, including anyone who has
+                  since left the team. The hour-by-hour grid and overlap reconciliation need a range
+                  of {TIMELINE_MAX_DAYS} days or less; pick a shorter range to see them.
+                </p>
+              )}
+              {/* Campaign-to-date ships no hour/day buckets — that is exactly what lets it escape
+                  the 62-day cap — so there is no grid to draw and no per-door overlap cards to
+                  reconcile. The Doors/Surveys/rates above are complete either way. */}
+              {!allTime && (
+                <>
+                  <TimelineOverlaps
+                    data={data}
+                    note={coordinatorId ? 'Overlap totals are campaign-wide (not filtered to this crew).' : null}
+                  />
+                  <TimelineGrid data={data} rows={filteredRows} metric={metric} />
+                </>
+              )}
             </>
           )}
         </div>

@@ -224,6 +224,10 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
   const kpi = summaryQ.data?.kpi;
   const isSurvey = campaignType !== 'lit_drop';
   const usersReturn = `/users?return=${encodeURIComponent(`/campaigns/${campaignId}/team`)}`;
+  // Removal now hands back the books they're holding on this campaign, which isn't undoable —
+  // so it takes a second tap. The reassurance matters as much as the warning: admins remove
+  // people who quit, and they need to know the work those people did is being kept.
+  const [confirming, setConfirming] = useState(false);
 
   return (
     <Modal
@@ -232,9 +236,20 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
       title={`${member.firstName} ${member.lastName}`}
       footer={
         <>
-          <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
-          <Button variant="danger" size="sm" loading={removing} onClick={() => onRemove(member.userId)}>
-            Remove from campaign
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={confirming ? () => setConfirming(false) : onClose}
+          >
+            {confirming ? 'Cancel' : 'Close'}
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            loading={removing}
+            onClick={confirming ? () => onRemove(member.userId) : () => setConfirming(true)}
+          >
+            {confirming ? 'Yes, remove them' : 'Remove from campaign'}
           </Button>
         </>
       }
@@ -244,6 +259,23 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
           <span className="truncate">{member.email}</span>
           <RoleBadge role={member.role} />
         </div>
+
+        {confirming && (
+          <div className="rounded-lg border border-danger/30 bg-danger-tint px-3 py-2 text-sm">
+            <p className="font-medium text-danger-fg">
+              Remove {member.firstName} from this campaign?
+            </p>
+            <p className="mt-1 text-fg-muted">
+              Any books they're holding here are released back to the pool, so you can hand them to
+              someone else. Books shared with other canvassers stay assigned to them. This doesn't
+              affect their other campaigns.
+            </p>
+            <p className="mt-1 text-fg-muted">
+              <strong className="font-medium text-fg">Their work is kept.</strong> Every door they
+              knocked still counts toward this campaign's totals.
+            </p>
+          </div>
+        )}
 
         <div>
           <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-fg-muted">Activity in this campaign</div>
@@ -322,9 +354,18 @@ export default function CampaignTeamPage() {
     mutationFn: (userIds) => api(`/admin/campaigns/${campaignId}/assignments`, { method: 'POST', body: { userIds } }),
     onSuccess: invalidate,
   });
+  // Removing someone from the campaign also hands back the books and effort-crew rows they
+  // were holding on it, so the book caches are stale the moment this resolves — without this,
+  // Turf Cutting and the book panels keep showing a departed person holding turf until a hard
+  // refresh. (Their knock history is untouched; only the assignment is released.)
   const unassignMut = useMutation({
     mutationFn: (userId) => api(`/admin/campaigns/${campaignId}/assignments/${userId}`, { method: 'DELETE' }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ['turf-assignments'] });
+      qc.invalidateQueries({ queryKey: ['turfs'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
+    },
   });
   // Create a net-new canvasser (or link a returning one by email) straight onto this
   // campaign, in one step. Available to admins AND leads (the crew endpoint accepts both);

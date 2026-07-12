@@ -105,7 +105,10 @@ export default function NotesPage() {
   });
   const efforts = effortsQ.data?.efforts || [];
 
-  const { members } = useCampaignTeam(campaignId);
+  // allMembers: the author filter has to list whoever WROTE the notes. A canvasser who was
+  // deactivated still has notes in this list; dropping them from the picker would make those
+  // notes unfilterable.
+  const { allMembers: members } = useCampaignTeam(campaignId);
   const authorOptions = useMemo(
     () =>
       (members || [])

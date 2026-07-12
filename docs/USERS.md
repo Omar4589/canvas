@@ -200,6 +200,36 @@ The important one: for a person who belongs to **more than one org**, a regular 
 their login email** (that would change how they sign into the *other* orgs). The email field is shown
 **disabled with an explanation** in that case. Only the user themselves or a super-admin can change it.
 
+## When someone leaves
+
+People quit mid-campaign. Two things have to happen, and they must not be confused with each other:
+
+**Their work stays. Always.** Every door they knocked still counts toward the campaign's totals, its
+coverage, and its bill — forever. A knock is a record of something that happened; whether the person
+who made it still has a login is a completely separate question. **Nothing you can do to an account
+changes a single count**: not deactivating it, not removing them from a campaign, not removing them
+from the org, not even deleting the account outright. They keep appearing on reports with their
+numbers. (On the **Timeline**, pick the **All time** range to see everyone who has ever worked the
+campaign — the default view is *today*, so people who left naturally have no rows in it.)
+
+**Their books come back.** Whatever they were *holding* is handed back so someone else can take it:
+
+| What you do | What they lose | What comes back |
+| --- | --- | --- |
+| **Deactivate** their account | Their login, in this org. Reversible any time. | Nothing — they keep their books, because you may well switch them back on tomorrow. |
+| **Remove from a campaign** | That campaign only. | Their books and effort-crew places **on that campaign**. Books they hold on *other* campaigns are untouched. |
+| **Remove from the org** | Everything, in this org. | Their books, crews, campaign places and team-lead grants across **every** campaign in the org. |
+| **Delete the account** (the person does this themselves) | The account, permanently. | Everything they were holding, everywhere. |
+
+A book can have **several canvassers on it**. Releasing one person leaves everyone else's assignment
+exactly where it was — only the departing person's is handed back. If they were the only one on it,
+the book simply returns to the pool as unassigned, ready to give to somebody else.
+
+> **Books orphaned by an older version.** Removing someone from a campaign used to release only their
+> place on the roster and leave the books themselves assigned to them. If that happened to you, run
+> `npm run repair:orphaned-assignments` (dry-run by default; add `--apply` to commit) to hand those
+> books back. It never touches a knock.
+
 ## Deleting your account
 
 Anyone can delete their own account from the mobile app: **Profile ▸ Delete account**. It's permanent —
@@ -531,6 +561,49 @@ a deleted canvasser still selectable on the campaign map with her GPS trail reso
 `EffortMember` — so removing someone from an org left them still holding their books: the doors never
 resurfaced as unassigned and the effort readiness rollup still counted them as crew. Both paths now share
 `releaseAssignedWork`.
+
+## Releasing work: `releaseAssignedWork(userId, scope)`
+
+The one place that hands back everything a person was holding. Three callers, three scopes —
+[services/users/deleteAccount.js](../server/src/services/users/deleteAccount.js):
+
+| Scope | Caller | Releases |
+|---|---|---|
+| `{}` (global) | account deletion | every org, every campaign |
+| `{ organizationId }` | `DELETE /admin/memberships/:userId` (remove from org) | all of that org's campaigns, **plus** `CampaignManager` grants and the org-level `coordinatorId` links |
+| `{ campaignId }` | `DELETE /admin/campaigns/:id/assignments/:userId` (remove from campaign) | **that campaign only** |
+
+The campaign scope was the missing one, and it had the *identical* bug the org path had already
+fixed: it deleted the `CampaignAssignment` and nothing else, leaving the person holding their books.
+Three things make the campaign scope correct, and each is a trap:
+
+- **It must not be the org scope.** All four work models (`TurfAssignment`, `EffortMember`,
+  `CampaignAssignment`, `CampaignManager`) denormalize `campaignId`, so the scope is exact. Reusing
+  `{ organizationId }` here would strip the person's books in **every other campaign in the org**.
+- **The coordinator reset is skipped.** `Membership` has **no** `campaignId`, so
+  `Membership.updateMany({ coordinatorId: userId })` is inherently org-level. Running it for a
+  campaign removal would sever a supervision link that has nothing to do with that campaign.
+- **`CampaignManager` is left alone.** The reason is *authorization*, not taxonomy: the route is
+  mounted behind `requireCampaignManager`, which passes for **any lead holding a grant on that
+  campaign** — cascading here would let one lead revoke another's grant (or their own) from a
+  walker-roster button. Revoking a grant stays admin-only, on the Users page.
+
+**It releases across ALL rounds, active and archived.** No history is lost: `CanvassActivity` stamps
+`userId`, `passId`, `turfId` and `effortId` on **every knock row**, so *who walked which book in
+which round* lives in the ledger. `TurfAssignment` is present-tense "who is supposed to walk this".
+Limiting the release to active rounds would in fact **fail to fix the bug** — `efforts.js`,
+`campaignSummaries.js` and `setupStatus.js` count assignments on passes of *any* status, so one stale
+archived row keeps a campaign reading as "staffed" by someone who is gone.
+
+Locked by [campaignRemoval.int.test.js](../server/test/campaignRemoval.int.test.js) (7/7): a sibling
+campaign is untouched, a **co-assigned canvasser keeps the shared book** (`TurfAssignment` is one row
+per `(turf, user)`), the `CampaignManager` grant and the org `coordinatorId` survive, **every
+`CanvassActivity` row survives**, and org-removal still cascades fully.
+
+Rows orphaned *before* this fix are repaired by
+[`repairOrphanedAssignments.js`](../server/src/migrations/repairOrphanedAssignments.js)
+(`npm run repair:orphaned-assignments`, dry-run by default) — it finds anyone holding work on a
+campaign they are no longer rostered on and hands it back. Idempotent; never touches the ledger.
 
 ## Migrations (run at deploy)
 

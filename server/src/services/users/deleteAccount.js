@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
+import { Organization } from '../../models/Organization.js'; // registered for populate
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CampaignManager } from '../../models/CampaignManager.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
@@ -65,13 +66,22 @@ export async function checkDeletionBlockers(userId) {
 
   const blockers = [];
 
-  // The App Review / Play reviewer demo login. A reviewer WILL press this button — testing
-  // it is the whole point of 5.1.1(v) — and letting them through would destroy the demo
-  // tenant and leave the next submission unreviewable.
+  // The App Review / Play reviewer demo login. A reviewer WILL press this button — testing it
+  // is the whole point of 5.1.1(v) — and letting them through would destroy the demo tenant and
+  // leave the NEXT submission with no working credentials to review.
+  //
+  // But locking it is only half the answer: a reviewer who cannot complete a deletion anywhere
+  // will reject us for "unable to verify account deletion", which is the very thing they came to
+  // check. So the demo tenant ships with a SECOND, disposable canvasser account that is NOT
+  // locked and exists purely to be deleted, and the App Review notes name it. This message points
+  // there, because a reviewer may well tap the button before reading the notes.
   if (user.deletionLocked) {
     blockers.push({
       code: 'DELETION_LOCKED',
-      message: 'This account is reserved for app review and cannot be deleted.',
+      message:
+        'This is an app-review demo account, so it can’t be deleted — otherwise the next ' +
+        'review would have no way in. To test account deletion, please sign in with the ' +
+        'disposable account listed in the App Review notes; it exists only for that purpose.',
     });
   }
 
@@ -229,19 +239,51 @@ export async function deleteAccount(userId, { reason = 'self' } = {}) {
 }
 
 /**
- * Hand back everything the user was holding. Shared with the admin remove-from-org route so
- * the two paths can't drift apart.
+ * Hand back everything the user was holding. Shared by account deletion, the admin
+ * remove-from-org route, and remove-from-CAMPAIGN, so the three paths can't drift apart.
+ *
+ * Scope, widest to narrowest:
+ *   {}                    — global (account deletion): every org, every campaign.
+ *   { organizationId }    — one org: all of that org's campaigns.
+ *   { campaignId }        — ONE campaign only. All four work models denormalize campaignId,
+ *                           so this is exact — a user removed from campaign A keeps every
+ *                           book they hold in campaign B of the same org.
+ *
+ * Two deliberate asymmetries in campaign scope:
+ *   - Membership has NO campaignId, so the coordinator reset is inherently org-level and is
+ *     skipped. Clearing it would sever a supervision link that has nothing to do with this
+ *     campaign.
+ *   - CampaignManager (a team lead's grant to MANAGE the campaign) is left alone. This route
+ *     is mounted behind requireCampaignManager, which passes for any lead holding a grant on
+ *     the campaign — cascading here would let one lead revoke another's grant (or their own)
+ *     from a walker-roster button. Revoking a grant stays admin-only, on the Users page.
+ *
+ * Never touches CanvassActivity / SurveyResponse: releasing work must not rewrite a single
+ * knock. The departed canvasser stays in every campaign total and on the invoice.
  */
-export async function releaseAssignedWork(userId, { organizationId = null } = {}) {
-  const scope = organizationId ? { organizationId } : {};
+export async function releaseAssignedWork(
+  userId,
+  { organizationId = null, campaignId = null } = {}
+) {
+  const scope = campaignId ? { campaignId } : organizationId ? { organizationId } : {};
+  // Books are released across ALL rounds, not just active ones: readiness rollups
+  // (efforts, campaignSummaries, setupStatus) count assignments on passes of any status, so a
+  // stale archived row would keep the campaign reading as "staffed" by someone who is gone.
+  // No history is lost — CanvassActivity stamps userId/passId/turfId on every knock, so who
+  // walked which book in which round lives in the ledger, not here.
   const [turf, efforts, campaigns, managed] = await Promise.all([
     TurfAssignment.deleteMany({ userId, ...scope }),
     EffortMember.deleteMany({ userId, ...scope }),
     CampaignAssignment.deleteMany({ userId, ...scope }),
-    CampaignManager.deleteMany({ userId, ...scope }),
+    campaignId ? Promise.resolve({ deletedCount: 0 }) : CampaignManager.deleteMany({ userId, ...scope }),
   ]);
-  // A coordinator who leaves must not keep supervising anybody.
-  await Membership.updateMany({ coordinatorId: userId, ...scope }, { $set: { coordinatorId: null } });
+  // A coordinator who leaves the ORG must not keep supervising anybody. Org/global scope only.
+  if (!campaignId) {
+    await Membership.updateMany(
+      { coordinatorId: userId, ...scope },
+      { $set: { coordinatorId: null } }
+    );
+  }
 
   return {
     turfAssignments: turf.deletedCount || 0,

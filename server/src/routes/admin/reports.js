@@ -26,6 +26,7 @@ import {
 } from '../../services/reports/aggregations.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps } from '../../services/reports/overlaps.js';
+import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import { detectFlags } from '../../services/audit/flagDetection.js';
 import { FLAG_THRESHOLDS, SEVERITY_RANK } from '../../services/audit/flagThresholds.js';
 import { FlagReview } from '../../models/FlagReview.js';
@@ -738,12 +739,7 @@ router.get('/canvassers', async (req, res, next) => {
       }
     }
 
-    const userIds = Array.from(byUser.keys()).map((id) => new mongoose.Types.ObjectId(id));
-    const users = await User.find(
-      { _id: { $in: userIds } },
-      'firstName lastName email isActive'
-    ).lean();
-    const userMap = new Map(users.map((u) => [String(u._id), u]));
+    const userMap = await hydrateCanvassers(Array.from(byUser.keys()), activeOrgId(req));
 
     const rows = Array.from(byUser.values())
       .map((u) => {
@@ -757,6 +753,7 @@ router.get('/canvassers', async (req, res, next) => {
           firstName: info?.firstName || '',
           lastName: info?.lastName || '',
           email: info?.email || '',
+          status: info?.status || 'deleted',
           isActive: info?.isActive ?? false,
           surveysSubmitted: u.surveysSubmitted,
           surveyKnocks: u.surveyKnocks,
@@ -1280,10 +1277,17 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       return addDaysYmd(s, 0) === s ? s : null;
     };
 
-    // Two request shapes. ?date= (or nothing) = single day, the original/mobile shape.
-    // ?from/&to = range. Relative presets send to:null (open-ended through today), so a
-    // missing `to` defaults to today-in-anchor-tz BEFORE the single-day check — otherwise
-    // "Today" (from=today, to=null) would never take the day path.
+    // THREE request shapes.
+    //   ?date=      (or nothing) — single day, the original/mobile shape.
+    //   ?from&to    — a range, capped at TIMELINE_MAX_DAYS.
+    //   ?totals=1   — campaign-to-date. No time buckets, so no columns, so NO CAP: the 62-day
+    //                 limit exists only because a range renders one grid column per day. This
+    //                 is the only way to see a whole campaign — including the people who worked
+    //                 it and have since left, whose knocks are in the totals either way.
+    // Relative presets send to:null (open-ended through today), so a missing `to` defaults to
+    // today-in-anchor-tz BEFORE the single-day check — otherwise "Today" (from=today, to=null)
+    // would never take the day path.
+    const totalsMode = req.query.totals === '1' || req.query.totals === 'true';
     const hasRange = req.query.from !== undefined || req.query.to !== undefined;
     let from;
     let to;
@@ -1291,21 +1295,23 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       to = validYmd(req.query.to) || zonedDayStr(new Date(), tz);
       from = validYmd(req.query.from) || to;
       if (from > to) return res.status(400).json({ error: 'from must be on or before to' });
-      if (ymdSpanDays(from, to) > TIMELINE_MAX_DAYS) {
+      if (!totalsMode && ymdSpanDays(from, to) > TIMELINE_MAX_DAYS) {
         return res.status(400).json({ error: `Date range too large (max ${TIMELINE_MAX_DAYS} days)` });
       }
-    } else {
+    } else if (!totalsMode) {
       from = validYmd(req.query.date) || zonedDayStr(new Date(), tz);
       to = from;
     }
-    const singleDay = from === to;
+    const singleDay = !totalsMode && from === to;
 
-    const window = zonedDayRange(from, to, tz);
-    const scoped = { ...baseFilter(req), timestamp: window };
+    // Campaign-to-date with no bounds = the whole ledger for this campaign: no timestamp filter.
+    const window = totalsMode && !hasRange ? null : zonedDayRange(from, to, tz);
+    const scoped = { ...baseFilter(req), ...(window ? { timestamp: window } : {}) };
 
     // One aggregation, mode-keyed bucket: hour-of-day for a single day, calendar day for
     // a range. Both bucket in the anchor tz ($hour/$dateToString with timezone), so DST
-    // days (23/25h) land in the wall-clock buckets an admin expects.
+    // days (23/25h) land in the wall-clock buckets an admin expects. In totals mode there is
+    // no bucket at all — we group on userId alone.
     const bucketExpr = singleDay
       ? { $hour: { date: '$timestamp', timezone: tz } }
       : dayBucketExpr('timestamp', tz);
@@ -1319,6 +1325,20 @@ router.get('/canvasser-timeline', async (req, res, next) => {
         { $match: { ...scoped, ...NOT_BULK, actionType: { $in: [...KNOCK_ACTIONS, 'restricted'] } } },
         {
           $group: {
+            // Totals mode still buckets BY DAY — it just never ships the per-day maps. Two
+            // reasons, both load-bearing:
+            //   · hoursOnDoors is the SUM OF PER-DAY spans (see below). Grouping on userId
+            //     alone would make it (last knock ever − first knock ever) — weeks, not hours —
+            //     and doors/hour would collapse to ~0.
+            //   · the 62-day cap protects the CLIENT GRID's columns, not this aggregation.
+            //     Grouping a whole campaign by day is cheap; rendering 300 columns is not.
+            // So every per-canvasser number in totals mode is, by construction, exactly the sum
+            // of its range-mode buckets.
+            //
+            // Do NOT source these from knocksPipeline: that dedupes by household×pass and
+            // collapses ACROSS users to produce the campaign-wide BILLABLE total. It has no
+            // userId dimension, and routing per-canvasser counts through it would silently
+            // rewrite everyone's numbers.
             _id: { userId: '$userId', bucket: bucketExpr },
             knocks: { $sum: { $cond: [{ $eq: ['$actionType', 'restricted'] }, 0, 1] } },
             surveys: { $sum: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
@@ -1332,8 +1352,16 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           },
         },
       ]),
+      // Campaign-wide BILLABLE knocks — distinct (household, pass), so a door two canvassers
+      // both worked is one knock. Unbucketed and uncapped already, so totals mode reuses it
+      // as-is and the invoice number is identical in every mode.
       CanvassActivity.aggregate(knocksPipeline(scoped)),
-      computeOverlaps(scoped, { organizationId: orgId }),
+      // Overlaps $push every event into per-door arrays, which over a whole campaign can breach
+      // Mongo's 100MB per-stage limit. Reconciling overlaps is a "what happened this week" job
+      // anyway — it needs a bounded window, so totals mode skips it rather than risk the query.
+      totalsMode
+        ? Promise.resolve({ overlaps: [], total: 0, householdIds: [], overlapUserIds: [] })
+        : computeOverlaps(scoped, { organizationId: orgId }),
     ]);
 
     const billableKnocks = knockAgg[0]?.knocks || 0;
@@ -1406,9 +1434,11 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     }
 
     // Every day of the range, inclusive — pure calendar-string math (the tz-aware
-    // bucketing above already put each knock on its wall-clock day).
+    // bucketing above already put each knock on its wall-clock day). Totals mode ships no
+    // grid, so it ships no day columns (and an unbounded totals request has no from/to to
+    // walk in the first place).
     const days = [];
-    if (!singleDay) {
+    if (!singleDay && !totalsMode) {
       for (let d = from; d <= to; d = addDaysYmd(d, 1)) days.push(d);
     }
 
@@ -1417,10 +1447,7 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     const overlapUserIds = new Set(overlapRes.overlapUserIds || []);
 
     const userIds = [...byUser.keys()];
-    const users = userIds.length
-      ? await User.find({ _id: { $in: userIds } }, 'firstName lastName email isActive').lean()
-      : [];
-    const uMap = new Map(users.map((u) => [String(u._id), u]));
+    const uMap = await hydrateCanvassers(userIds, orgId);
 
     const canvassers = userIds
       .map((uid) => {
@@ -1432,10 +1459,17 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           firstName: u?.firstName || '',
           lastName: u?.lastName || '',
           email: u?.email || '',
+          // Standing, not membership: the row set comes from the LEDGER, so a canvasser who
+          // quit still appears here with all their knocks. This only says where they stand.
+          status: u?.status || 'deleted',
           isActive: u?.isActive ?? false,
-          ...(singleDay
-            ? { knocksByHour: row.knocksByHour, surveysByHour: row.surveysByHour }
-            : { knocksByDay: row.knocksByDay, surveysByDay: row.surveysByDay }),
+          // Totals mode ships no grid, so it ships no per-bucket maps — a whole campaign would
+          // be hundreds of day columns nobody can read. The scalar totals below are unchanged.
+          ...(totalsMode
+            ? {}
+            : singleDay
+              ? { knocksByHour: row.knocksByHour, surveysByHour: row.surveysByHour }
+              : { knocksByDay: row.knocksByDay, surveysByDay: row.surveysByDay }),
           dayKnocks: row.dayKnocks,
           daySurveys: row.daySurveys,
           dayLit: row.dayLit,
@@ -1487,20 +1521,26 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     }
 
     res.json({
-      mode: singleDay ? 'day' : 'range',
-      range: { from, to },
+      mode: totalsMode ? 'totals' : singleDay ? 'day' : 'range',
+      range: { from: from ?? null, to: to ?? null }, // both null = campaign-to-date
       // Day mode keeps the original shape (date/hours/hourTotals) byte-compatible for
-      // the mobile admin screen; range mode swaps in days/dayTotals.
-      ...(singleDay ? { date: from, hours, hourTotals } : { days, dayTotals }),
+      // the mobile admin screen; range mode swaps in days/dayTotals. Totals mode has neither.
+      ...(totalsMode ? {} : singleDay ? { date: from, hours, hourTotals } : { days, dayTotals }),
       tz,
       tzAbbrev: tzAbbrev(tz),
       canvassers,
       grandKnocks,
       grandSurveys,
       billableKnocks,
+      // Pure arithmetic on two numbers we already have, so the overlap DOOR COUNT is honest
+      // even in totals mode — it's only the per-door reconciliation CARDS that need a bounded
+      // window (see the computeOverlaps skip above).
       overlapDoors: Math.max(0, grandKnocks - billableKnocks),
       overlaps: overlapRes.overlaps,
       overlapCount: overlapRes.total,
+      // Totals mode deliberately ships no overlap cards; the client says so rather than
+      // implying a campaign had zero overlaps.
+      overlapsOmitted: totalsMode,
     });
   } catch (err) {
     next(err);
@@ -1807,15 +1847,12 @@ router.get('/canvassers.csv', async (req, res, next) => {
       u.daysActive = r.daysActive;
     }
 
-    const userIds = Array.from(byUser.keys()).map((id) => new mongoose.Types.ObjectId(id));
-    const users = await User.find(
-      { _id: { $in: userIds } },
-      'firstName lastName email phone isActive'
-    ).lean();
-    const userMap = new Map(users.map((u) => [String(u._id), u]));
+    const userMap = await hydrateCanvassers(Array.from(byUser.keys()), activeOrgId(req), {
+      fields: 'phone',
+    });
 
     const headers = [
-      'Rank', 'First name', 'Last name', 'Email', 'Phone', 'Active',
+      'Rank', 'First name', 'Last name', 'Email', 'Phone', 'Status',
       'Knocks', 'Surveys', 'Lit drops', 'Not home', 'Wrong address',
       'Connection rate %', 'Hours on doors', 'Days active', 'Knocks/hr', 'Surveys/hr',
       'First activity', 'Last activity', 'Refused', 'Restricted',
@@ -1838,6 +1875,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
           lastName: info.lastName || '',
           email: info.email || '',
           phone: info.phone || '',
+          status: info.status || 'deleted',
           isActive: info.isActive ?? false,
           knocks,
           connection,
@@ -1856,7 +1894,10 @@ router.get('/canvassers.csv', async (req, res, next) => {
       u.lastName,
       u.email,
       u.phone,
-      u.isActive ? 'yes' : 'no',
+      // Was a yes/no "Active" column reading User.isActive — which only ever went false on
+      // account DELETION, so a deactivated or departed canvasser exported as "yes". The named
+      // standing is the honest column; their knocks are in this row either way.
+      u.status,
       u.knocks,
       u.surveysSubmitted,
       u.litDropped,

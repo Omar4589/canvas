@@ -33,8 +33,10 @@
     "migrate:build-indexes": "node src/migrations/buildIndexes.js",
     "migrate:strip-geocode-raw": "node src/migrations/stripGeocodeRaw.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
+    "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
     "demo:refresh": "node src/utils/refreshDemoDay.js",
-    "purge:deleted-identities": "node src/migrations/purgeDeletedIdentities.js"
+    "purge:deleted-identities": "node src/migrations/purgeDeletedIdentities.js",
+    "lock:account": "node src/utils/lockAccountDeletion.js"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",
