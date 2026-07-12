@@ -84,9 +84,13 @@ you're in more than one effort, an **effort switcher** sits at the top to flip b
 book, then **Enter** to open it on the houses map. The same **bottom-right controls** as the houses
 map are here too — Refresh, the terrain / base-map picker, and recenter (follow your location).
 
-If the campaign has key dates, a compact **Election Day countdown** ("🗳 12 days to Election Day")
-and the early-voting status ride along in the header here too — so the deadline stays in front of you
-while you work, not just on the "Pick a campaign" screen.
+The key dates and the pin legend share **one card** at the top. Election Day shows the **actual
+date**, with the countdown beside it — "🗳 Election Day · Wed, Nov 4" · *in 12 days* (and *tomorrow*
+/ *today* in brand red when it's imminent). Early voting always names **both ends of the window**
+("Early voting Oct 20–Nov 1"), because "when does early voting end?" is a question you get at the
+door — not just once the window has already opened. Under a divider, the legend shows the same book
+pins you see on the map: **Not started · In progress · Done**. A campaign with no key dates set
+simply shows the legend.
 
 ## Map or list — two ways to work the same doors
 
@@ -127,6 +131,13 @@ campaign type:
 - On a **Survey** campaign, you get the **voters at this address** (each a tappable card → their
   survey) plus three door buttons stacked at the bottom: **Not home**, **Wrong address**, and
   **Refused** — then **Restricted access** below them.
+
+Each voter reads the same everywhere — on the map's pull-up sheet and here on the door — as
+**Party · Age · Gender** (say, "Democratic · 34 yrs · Female"), plus a **✓ Voted** tag and whether
+they've been surveyed. Voter files are patchy, so any part that's missing is simply left out: a
+voter with no birthdate on file just shows "Democratic · Female", and one with nothing on file shows
+only their name. (Precinct isn't shown at a door — it's turf paperwork, not something you'd say on a
+porch. It's still on the voter's full profile under **Voters**.)
 
 Any door button recolors the pin and drops you back on the map the instant you tap — you're never
 waiting on the network.
@@ -340,6 +351,30 @@ branch the action area:
 All route through `submitAction`, which fires `recordHouseholdAction(qc, id, action, …)` and
 `router.back()`s without awaiting — `firedRef` blocks a double-tap synchronously, `isSubmitting`
 disables the buttons.
+
+### The voter identity line (one component, both door surfaces)
+
+The door screen and the map's house sheet read the **same** `['bootstrap']` voter object, but each
+used to compose its own meta line — the sheet showed `party · gender · age`, the door screen showed
+`party · gender · precinct`. Same person, same cache, two different lines.
+
+Both now render [components/VoterMeta.jsx](../mobile/components/VoterMeta.jsx), backed by
+[lib/voters.js](../mobile/lib/voters.js):
+
+| Export | Purpose |
+|---|---|
+| `voterAge(dob)` | Years from `dateOfBirth`; `null` on a missing/unparseable date. (Was private to `map.jsx`.) |
+| `voterMetaParts(voter)` | The canonical order — `[party, '34 yrs', gender].filter(Boolean)`. |
+
+`VoterMeta` returns `null` when no part survives, so a sparse import can never render a dangling
+`·` or an empty row. **Precinct is deliberately absent** — it's turf metadata, not door-useful. It
+survives on the voter profile (`voters/[id].jsx`) and admin response-details, both fed by *other*
+endpoints; consequently `precinct` was dropped from the `/mobile/bootstrap` voter projection, where
+it had become dead payload shipped for every voter.
+
+> Don't confuse `VoterMeta` with the pre-existing
+> [components/VoterRow.jsx](../mobile/components/VoterRow.jsx) — that one is a *survey-response* row
+> (`{responseId, submittedAt, voter, household, canvasser}`) used by admin screens.
 
 `StatusPill` recognizes a third visual state for `refused`: amber `warnBg`/`warnBorder`/`warnFg` (done
 statuses stay green `successBg`, everything else — including `restricted` — neutral chrome). The dot

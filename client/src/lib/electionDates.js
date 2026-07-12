@@ -39,10 +39,15 @@ export function earlyVotingState(startStr, endStr, tz) {
   if (!startStr && !endStr) return null;
   const t = today(tz);
   if (startStr && t < startStr) {
-    return { state: 'upcoming', label: `Opens ${formatDateLabel(startStr)}` };
+    // Carry the END date too: "when does early voting end?" is asked long before the window
+    // opens, and naming only the start left the admin who typed both dates unable to see one.
+    const label = endStr
+      ? `Opens ${formatDateLabel(startStr)} · through ${formatDateLabel(endStr)}`
+      : `Opens ${formatDateLabel(startStr)}`;
+    return { state: 'upcoming', label };
   }
   if (endStr && t > endStr) {
-    return { state: 'closed', label: 'Closed' };
+    return { state: 'closed', label: `Ended ${formatDateLabel(endStr)}` };
   }
   let label = 'Open now';
   if (startStr && endStr) label = `Open now · ${formatDateLabel(startStr)} – ${formatDateLabel(endStr)}`;

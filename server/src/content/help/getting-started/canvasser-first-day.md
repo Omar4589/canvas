@@ -15,8 +15,8 @@ Welcome! Here's the whole flow on your first day in the field.
 
 1. **Sign in** with the email and temporary password your admin or team lead gave you. On that first sign-in you'll be asked to set your own strong password.
 2. **Pick your campaign** on the "Pick a campaign" screen. If a campaign is split into several walk lists, it expands so you can pick the one you're working — then you land on your books.
-3. **Open a book** — your assigned books are waiting. Each book is an ordered list of houses for you to walk.
-4. **Knock a door** — tap a house to see who lives there and record what happened.
+3. **Open a book** — your assigned books are waiting as pins on a map. Each book is an ordered list of houses for you to walk. The card at the top tells you two things: the campaign's **key dates** (Election Day with the actual date and how far off it is, plus the early-voting window) and a **legend** showing what the book pins mean — **Not started**, **In progress**, **Done**. Tap a book, then **Enter** to start.
+4. **Knock a door** — tap a house to see who lives there and record what happened. Each voter shows their party, age, and gender, when the record has them.
 
 ## Recording a door
 

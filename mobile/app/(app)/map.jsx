@@ -52,6 +52,7 @@ import MapControlStack from '../../components/MapControlStack';
 import StatusPill from '../../components/StatusPill';
 import TabSwitcher from '../../components/TabSwitcher';
 import DoorList from '../../components/DoorList';
+import VoterMeta from '../../components/VoterMeta';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { makeRateColors, formatPace } from '../../lib/rates';
 import { radius, spacing } from '../../lib/theme';
@@ -94,13 +95,6 @@ async function tryGetUserCoords() {
   } catch {
     return null;
   }
-}
-
-function voterAge(dob) {
-  if (!dob) return null;
-  const d = new Date(dob);
-  if (Number.isNaN(d.getTime())) return null;
-  return Math.floor((Date.now() - d.getTime()) / (365.25 * 86400000));
 }
 
 function formatTime(iso) {
@@ -1443,37 +1437,29 @@ function SelectedHouseSheetContent({
           contentContainerStyle={styles.voterList}
           showsVerticalScrollIndicator={false}
         >
-          {voters.map((v) => {
-            const age = voterAge(v.dateOfBirth);
-            const metaParts = [v.party, v.gender, age != null ? `${age} yrs` : null].filter(Boolean);
-            return (
-              <View key={v._id} style={styles.voterRow}>
-                <View style={styles.voterMain}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.voterName} numberOfLines={1}>
-                      {v.fullName}
-                    </Text>
-                    {v.voted && <Text style={styles.votedTag}>✓ Voted</Text>}
-                  </View>
-                  {metaParts.length > 0 && (
-                    <Text style={styles.voterMeta} numberOfLines={1}>
-                      {metaParts.join(' · ')}
-                    </Text>
-                  )}
+          {voters.map((v) => (
+            <View key={v._id} style={styles.voterRow}>
+              <View style={styles.voterMain}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.voterName} numberOfLines={1}>
+                    {v.fullName}
+                  </Text>
+                  {v.voted && <Text style={styles.votedTag}>✓ Voted</Text>}
                 </View>
-                <Text
-                  style={[
-                    styles.voterStatus,
-                    v.surveyStatus === 'surveyed'
-                      ? styles.voterStatusDone
-                      : styles.voterStatusOpen,
-                  ]}
-                >
-                  {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
-                </Text>
+                <VoterMeta voter={v} style={styles.voterMeta} numberOfLines={1} />
               </View>
-            );
-          })}
+              <Text
+                style={[
+                  styles.voterStatus,
+                  v.surveyStatus === 'surveyed'
+                    ? styles.voterStatusDone
+                    : styles.voterStatusOpen,
+                ]}
+              >
+                {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
+              </Text>
+            </View>
+          ))}
         </ScrollView>
       )}
     </>

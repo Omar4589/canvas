@@ -239,7 +239,6 @@ router.get('/bootstrap', async (req, res, next) => {
               party: 1,
               gender: 1,
               dateOfBirth: 1,
-              precinct: 1,
               surveyStatus: 1,
             }
           ).lean()

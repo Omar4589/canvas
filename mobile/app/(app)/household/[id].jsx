@@ -16,6 +16,7 @@ import { recordHouseholdAction } from '../../../lib/recordAction';
 import { guardedPush } from '../../../lib/navGuard';
 import { buildingKey } from '../../../lib/buildings';
 import FixPinModal from '../../../components/FixPinModal';
+import VoterMeta from '../../../components/VoterMeta';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -72,7 +73,6 @@ function VoterCard({ voter, onPress }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const surveyed = voter.surveyStatus === 'surveyed';
-  const meta = [voter.party, voter.gender, voter.precinct].filter(Boolean).join(' · ');
   return (
     <Pressable
       onPress={onPress}
@@ -106,7 +106,7 @@ function VoterCard({ voter, onPress }) {
             </View>
           )}
         </View>
-        {meta ? <Text style={styles.voterMeta}>{meta}</Text> : null}
+        <VoterMeta voter={voter} style={styles.voterMeta} />
         <View style={styles.voterStatusRow}>
           <View
             style={[

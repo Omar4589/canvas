@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +24,7 @@ import CanvasserHeader from '../../components/CanvasserHeader';
 import MapControlStack from '../../components/MapControlStack';
 import EffortPicker from '../../components/EffortPicker';
 import ElectionCountdownChip from '../../components/ElectionCountdownChip';
+import { hasKeyDates } from '../../lib/electionDates';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -34,6 +35,21 @@ if (MAPBOX_PUBLIC_TOKEN) {
 }
 
 const DEFAULT_CENTER = [-84.5, 39.0];
+
+// The book pin art, hoisted so the MAP LAYER and the LEGEND consume the same three files: the
+// legend swatches ARE the map icons, so the legend can never drift from the pins it explains.
+// (Deliberately not theme tokens — the glyph yellow has no token, and the theme's nearest yellow
+// is the Refused disposition's, a different and theme-varying color. Token dots would lie.)
+const BOOK_ICONS = {
+  'book-grey': require('../../assets/icons/book-grey.png'),
+  'book-yellow': require('../../assets/icons/book-yellow.png'),
+  'book-green': require('../../assets/icons/book-green.png'),
+};
+const BOOK_LEGEND = [
+  { icon: 'book-grey', label: 'Not started' },
+  { icon: 'book-yellow', label: 'In progress' },
+  { icon: 'book-green', label: 'Done' },
+];
 
 export default function BooksScreen() {
   const router = useRouter();
@@ -189,6 +205,14 @@ export default function BooksScreen() {
   );
   const selectedBook = bookMarkers.find((b) => b.id === selected) || null;
 
+  // Gate the card's divider on the SAME predicate the chip uses to render itself — `campaign` is
+  // truthy even with no dates set, so checking it here would hang a hairline over nothing.
+  const hasDates = hasKeyDates({
+    electionDay: data?.campaign?.electionDay,
+    earlyVotingStart: data?.campaign?.earlyVotingStart,
+    earlyVotingEnd: data?.campaign?.earlyVotingEnd,
+  });
+
   // Frame all the book markers — but only once the map is ready, otherwise the
   // camera ref isn't attached yet and we'd silently stay at the default center.
   useEffect(() => {
@@ -330,13 +354,7 @@ export default function BooksScreen() {
           animationDuration={500}
         />
         <Mapbox.UserLocation visible />
-        <Mapbox.Images
-          images={{
-            'book-grey': require('../../assets/icons/book-grey.png'),
-            'book-yellow': require('../../assets/icons/book-yellow.png'),
-            'book-green': require('../../assets/icons/book-green.png'),
-          }}
-        />
+        <Mapbox.Images images={BOOK_ICONS} />
         {/* Book markers as native symbols + haloed label. Tap selects; the
             selected glyph grows via the `selected` feature property. */}
         <Mapbox.ShapeSource id="books" shape={bookFeatures} onPress={onBookMarkerPress} cluster={false}>
@@ -375,19 +393,36 @@ export default function BooksScreen() {
             <EffortPicker efforts={efforts} value={currentEffort} onChange={onEffortChange} />
           </View>
         )}
-        {data?.campaign && (
-          <ElectionCountdownChip
-            electionDay={data.campaign.electionDay}
-            earlyVotingStart={data.campaign.earlyVotingStart}
-            earlyVotingEnd={data.campaign.earlyVotingEnd}
-            timeZone={data.campaign.timeZone}
-            style={styles.keyDatesBar}
-          />
-        )}
-        <View style={styles.hint}>
-          <Text style={styles.hintText}>
-            Tap your books to pick where to start. Grey = not started · yellow = in progress · green = done.
-          </Text>
+        {/* One card, not two. The key dates and the legend used to be two byte-identical floating
+            chrome bars stacked 8px apart; a hairline separates them for less map coverage. The old
+            "Tap your books…" sentence is gone — the only tappable things on this screen are the
+            three book glyphs, the legend sits right under them, and an Enter CTA appears on tap. */}
+        <View style={styles.headerCard}>
+          {hasDates && (
+            <>
+              <ElectionCountdownChip
+                electionDay={data.campaign.electionDay}
+                earlyVotingStart={data.campaign.earlyVotingStart}
+                earlyVotingEnd={data.campaign.earlyVotingEnd}
+                timeZone={data.campaign.timeZone}
+              />
+              <View style={styles.cardDivider} />
+            </>
+          )}
+          <View style={styles.legendRow}>
+            {BOOK_LEGEND.map((it) => (
+              <View key={it.icon} style={styles.legendItem}>
+                {/* accessible={false}: VoiceOver reads the label, not "image". */}
+                <Image
+                  source={BOOK_ICONS[it.icon]}
+                  style={styles.legendSwatch}
+                  resizeMode="contain"
+                  accessible={false}
+                />
+                <Text style={styles.legendLabel}>{it.label}</Text>
+              </View>
+            ))}
+          </View>
         </View>
       </SafeAreaView>
 
@@ -436,7 +471,7 @@ function makeStyles(t) {
   headerWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
   controlsWrap: { position: 'absolute', right: spacing.lg, alignItems: 'flex-end' },
   effortRow: { marginHorizontal: 12, marginBottom: 8, zIndex: 10 },
-  hint: {
+  headerCard: {
     marginHorizontal: 12,
     backgroundColor: colors.chromeBar,
     borderRadius: radius.md,
@@ -445,17 +480,21 @@ function makeStyles(t) {
     borderWidth: 1,
     borderColor: colors.border,
   },
-  hintText: { fontSize: 12, color: colors.textSecondary },
-  keyDatesBar: {
-    marginHorizontal: 12,
-    marginBottom: 8,
-    backgroundColor: colors.chromeBar,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
+  // Full-bleed: the negative margin cancels the card's horizontal padding.
+  cardDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginHorizontal: -12,
+    marginVertical: 8,
   },
+  // flexWrap, NOT numberOfLines: nothing in mobile/ sets allowFontScaling, so iOS Larger Text
+  // scales these labels several times over — clipping would eat "Done", wrapping degrades.
+  legendRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 12, rowGap: 4 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  // 16pt floor: the glyph is mostly white page area, which vanishes into the light chromeBar
+  // below that size, leaving only a colored outline.
+  legendSwatch: { width: 16, height: 16 },
+  legendLabel: { fontSize: 12, color: colors.textSecondary },
   enterWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, alignItems: 'center' },
   enterButton: {
     backgroundColor: colors.brand,

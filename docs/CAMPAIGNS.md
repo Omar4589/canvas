@@ -72,19 +72,25 @@ admins only — leads see them but can't change them):
 
 - **Election Day** — shown with a live countdown chip ("12 days", "Today", then a muted "Passed")
   on the campaign card, the table's Election Day column, and the campaign dashboard header.
-- **Early voting start / end** — shown as a state, not raw dates: *"Opens Oct 20"* before the
-  window, a green *"Open now · Oct 20 – Nov 1"* while it's open, *"Closed"* after. Either bound can
-  be left empty (open-ended on that side); the end can't be before the start (enforced on save).
+- **Early voting start / end** — shown as a state, and **always naming both ends of the window**:
+  *"Opens Oct 20 · through Nov 1"* before it starts, *"Open now · Oct 20 – Nov 1"* (green) while it
+  runs, *"Ended Nov 1"* after. Either bound can be left empty (open-ended on that side); the end
+  can't be before the start (enforced on save).
 - **Key dates note** — up to 280 characters of free text (polling hours, clerk's-office address…),
   shown beside the dates everywhere they appear.
 
-**Canvassers see them too**: the mobile "Pick a campaign" screen shows the countdown chip
-("🗳 12 days to Election Day"), the early-voting state, and the note under each campaign — so the
-field team knows the stakes without asking. The same compact chip now also rides along **inside** a
-campaign, so the countdown doesn't disappear the moment they start knocking: it appears in the header
-of the canvasser's **Books** screen (countdown + early-voting state, no note — kept glanceable over
-the map) and on the mobile **admin campaign detail** screen (with the note, for leads/admins working
-from their phone). All countdown math runs in the **campaign's timezone** (dates are stored as plain
+**Canvassers see them too**: the mobile "Pick a campaign" screen shows the key-dates chip, the
+early-voting window, and the note under each campaign — so the field team knows the stakes without
+asking. The same chip rides along **inside** a campaign, so the dates don't disappear the moment
+they start knocking: it's in the header of the canvasser's **Books** screen (no note — kept
+glanceable over the map) and on the mobile **admin campaign detail** screen (with the note, for
+leads/admins working from their phone).
+
+The chip always names the **actual date**, never a bare countdown: *"🗳 Election Day · Wed, Nov 4"*
+with *in 12 days* beside it (*tomorrow* / *today* turn brand-red as it lands; once it's behind you,
+*"Election Day was Wed, Nov 4"*). Early voting likewise always names **both** bounds — *"Early
+voting Oct 20–Nov 1"* — including before the window opens, which is when canvassers are most often
+asked when it *ends*. All date math runs in the **campaign's timezone** (dates are stored as plain
 `YYYY-MM-DD` civil dates), so every admin and canvasser sees the same day regardless of where they
 are.
 
@@ -281,9 +287,25 @@ The cold-start readiness chain is a pure derivation in
   formatting goes through UTC-anchored parts so a `'YYYY-MM-DD'` never shifts a day. The campaign
   dashboard header ([DashboardPage.jsx](../client/src/pages/DashboardPage.jsx)) and the mobile
   campaign picker ([campaigns.jsx](../mobile/app/(app)/campaigns.jsx)) render from the same helpers.
-  On mobile, the compact in-campaign chip is one shared component,
+  On mobile, the in-campaign chip is one shared component,
   [ElectionCountdownChip.jsx](../mobile/components/ElectionCountdownChip.jsx), reused by the canvasser
   Books header ([books.jsx](../mobile/app/(app)/books.jsx)) and the mobile admin campaign detail
   ([admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)).
+
+  Invariants worth keeping:
+  - **`earlyVotingState` names both bounds in every state**, `upcoming` included. It used to return
+    a start-only `"Early voting opens Oct 20"` until the window actually opened — which hid the end
+    date for most of a campaign, exactly when canvassers get asked for it. (Web had the same defect
+    and got the same fix.) It also returns an `urgent` flag for *opens tomorrow* / *last day today*.
+  - **The chip always renders the real date**, not a bare countdown; the countdown is a **sibling**
+    `Text`, never inside the pill (a pill child that overruns wraps *inside the lozenge*, and a
+    two-line pill reads as broken).
+  - `formatDay(dateStr, opts)` takes `Intl` overrides (the chip passes `{ weekday: 'short' }`).
+  - **`hasKeyDates(campaign)`** is the single predicate for "is there anything to show". The chip
+    self-nulls on it, and any caller drawing chrome *around* the chip must gate on the same call —
+    `campaign` is truthy even with no dates set, so a naive `campaign &&` check hangs a divider over
+    nothing. The Books header card uses it for exactly that.
+  - **One urgency color.** Imminent dates go brand-red; amber is the Refused disposition's color and
+    is never spent here.
 - Extend-a-campaign guards: [EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) — the ClaimPanel
   "Claim all Intake" count + note + confirm modal, and the per-effort readiness chip on each row.
