@@ -48,7 +48,7 @@ export default function TimelineOverlaps({ data, note }) {
             <>
               {' · '}
               <span className="font-semibold text-warning-fg">{overlapDoors.toLocaleString()}</span>{' '}
-              overlap door-pass{overlapDoors === 1 ? '' : 'es'} (billed once →{' '}
+              overlap door-pass{overlapDoors === 1 ? '' : 'es'} (counted once →{' '}
               <span className="font-semibold">{billable.toLocaleString()}</span>)
             </>
           ) : (

@@ -127,6 +127,39 @@ router.get('/map', async (req, res, next) => {
       }
     }
 
+    // Optional: a date-INDEPENDENT bounding box over the campaign's (or org's) geocoded
+    // doors, so a client can frame the camera on the real neighborhood even when the
+    // date-filtered door set is empty (e.g. "today" before anyone has knocked). Computed
+    // once — the client sends the flag on mount, not on every pan/filter.
+    const includeBounds = req.query.includeBounds === '1';
+    let bounds = null;
+    if (includeBounds) {
+      const [ext] = await Household.aggregate([
+        {
+          $match: {
+            organizationId: orgId,
+            isActive: true,
+            'location.coordinates': { $exists: true, $ne: null },
+            ...(campaignId ? { campaignId } : {}),
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            minLng: { $min: { $arrayElemAt: ['$location.coordinates', 0] } },
+            maxLng: { $max: { $arrayElemAt: ['$location.coordinates', 0] } },
+            minLat: { $min: { $arrayElemAt: ['$location.coordinates', 1] } },
+            maxLat: { $max: { $arrayElemAt: ['$location.coordinates', 1] } },
+          },
+        },
+      ]);
+      if (ext && Number.isFinite(ext.minLng)) {
+        bounds = { minLng: ext.minLng, minLat: ext.minLat, maxLng: ext.maxLng, maxLat: ext.maxLat };
+      }
+    }
+    // Merge the extent into any response shape (null unless requested).
+    const withBounds = (payload) => (includeBounds ? { ...payload, bounds } : payload);
+
     // Scoped audit: narrow the map to one effort's doors, or one pass's books.
     const effortId =
       req.query.effortId && mongoose.isValidObjectId(req.query.effortId)
@@ -185,7 +218,7 @@ router.get('/map', async (req, res, next) => {
       const job = await ImportJob.findOne({ _id: importId, organizationId: orgId }, 'insertedHouseholdIds').lean();
       const ids = job?.insertedHouseholdIds || [];
       if (!ids.length) {
-        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
+        return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
       }
       householdFilter._id = { $in: ids };
     }
@@ -223,7 +256,7 @@ router.get('/map', async (req, res, next) => {
       passHhSet = new Set();
       for (const t of turfDocs) for (const id of t.householdIds || []) passHhSet.add(String(id));
       if (passHhSet.size === 0) {
-        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
+        return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
       }
     }
 
@@ -246,7 +279,7 @@ router.get('/map', async (req, res, next) => {
         idStrings = [...passHhSet];
       }
       if (!idStrings.length) {
-        return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
+        return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
       }
       householdFilter._id = { $in: idStrings.map((id) => new mongoose.Types.ObjectId(id)) };
     }
@@ -264,7 +297,7 @@ router.get('/map', async (req, res, next) => {
     const mapTruncated = households.length === MAP_HOUSEHOLD_CAP;
 
     if (!households.length) {
-      return res.json({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 });
+      return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
     }
 
     let householdIds = households.map((h) => h._id);
@@ -406,7 +439,7 @@ router.get('/map', async (req, res, next) => {
       };
     });
 
-    res.json({
+    res.json(withBounds({
       households: result,
       canvassers,
       activities: activities.map((a) => ({
@@ -428,7 +461,7 @@ router.get('/map', async (req, res, next) => {
       })),
       total: mapTruncated ? await Household.countDocuments(householdFilter) : result.length,
       truncated: mapTruncated,
-    });
+    }));
   } catch (err) {
     next(err);
   }

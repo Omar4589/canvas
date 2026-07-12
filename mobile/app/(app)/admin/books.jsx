@@ -350,7 +350,7 @@ export default function AdminBooks() {
     const label = bookList.length === 1 ? `“${bookList[0].name}”` : `${bookList.length} books`;
     Alert.alert(
       `Mark ${label} restricted?`,
-      `~${totalDoors} doors get a Restricted Access mark — canvassers see them slate and they stay out of every rate and billable count. Doors completed this round keep their result; already-restricted doors are skipped. Reversible.`,
+      `~${totalDoors} doors get a Restricted Access mark — canvassers see them slate and they stay out of every rate and knock count. Doors completed this round keep their result; already-restricted doors are skipped. Reversible.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Mark restricted', style: 'destructive', onPress: () => restrictMut.mutate(ids) },

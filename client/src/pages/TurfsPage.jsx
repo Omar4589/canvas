@@ -347,7 +347,7 @@ function RestrictModal({ mode, books, pending, error, onCancel, onConfirm }) {
           <p className="mt-2 text-sm text-fg-muted">
             Every eligible door in {books.length === 1 ? 'this book' : 'these books'} (~
             {totalDoors.toLocaleString()}) gets a <strong>Restricted Access</strong> mark — canvassers see them
-            slate, they stay out of every rate and billable count, and the next cut can exclude them. Doors already{' '}
+            slate, they stay out of every rate and knock count, and the next cut can exclude them. Doors already{' '}
             <strong>completed this round</strong> keep their result; doors already restricted are skipped. Reversible
             via <strong>Unmark restricted</strong>, and a canvasser can re-disposition any door in the field.
           </p>

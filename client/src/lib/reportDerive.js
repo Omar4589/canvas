@@ -39,7 +39,7 @@ const CONTACT_HELP = {
   lit_dropped: 'Doors where we dropped literature.',
 };
 const KPI_HELP = {
-  doorsKnocked: 'Every door we knocked, counted once per pass. Going back in a later pass counts again. This is the billable number.',
+  doorsKnocked: 'Every door we knocked, counted once per round. Going back in a later round counts again.',
   surveysTaken: 'Total survey forms collected — one per voter per pass. A home with two voters surveyed in one visit counts as two surveys.',
   surveyedVoters: 'How many distinct people we surveyed — not how many forms were filled out.',
   litDropped: 'Doors where we dropped literature, counted once per door per pass.',

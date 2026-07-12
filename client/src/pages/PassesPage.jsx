@@ -31,7 +31,7 @@ export default function PassesPage() {
           Passes{effort ? ` — ${effort.name}` : ''}
         </h1>
         <p className="mt-1 text-sm text-fg-muted">
-          Each pass is a billable trip through this walk list's doors. Cut a pass's books on the Turf Cutting page, then activate it here.
+          Each pass is a fresh trip through this walk list's doors. Cut a pass's books on the Turf Cutting page, then activate it here.
         </p>
       </div>
 

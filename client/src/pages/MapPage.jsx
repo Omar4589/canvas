@@ -31,6 +31,33 @@ import {
 const DEFAULT_CENTER = [-95.7129, 37.0902]; // continental US
 const DEFAULT_ZOOM = 3.5;
 
+// Prefetch buffer for the households map: fetch a box padded beyond the viewport, and skip the
+// refetch entirely while the viewport stays inside the last padded box — so small pans are instant
+// without giving back the viewport-scoping wins (a padded box is still tiny vs. the whole campaign).
+const BBOX_PAD = 0.5; // half a viewport of buffer per side → ~4× the visible area
+// Keep the padded box just under the server's near-world cutoff — households.js rejects a bbox whose
+// span reaches 350°/170° and falls back to the unbounded (still 50k-capped) pull.
+const MAX_LON_SPAN = 349;
+const MAX_LAT_SPAN = 169;
+const r4 = (x) => Math.round(x * 10000) / 10000; // ~11m precision — stable query keys
+
+// Inflate raw visible bounds {w,s,e,n} into a padded fetch box → { box, key }. box is the rounded
+// {w,s,e,n} (or null when the viewport is already continental — send unbounded, matching the
+// null→unbounded first-load path). The pad is clamped so the padded span never reaches MAX_*_SPAN, so
+// it never needlessly trips the server's unbounded fallback and always contains the raw box.
+function inflateBbox(raw) {
+  const wSpan = raw.e - raw.w;
+  const hSpan = raw.n - raw.s;
+  if (wSpan >= MAX_LON_SPAN || hSpan >= MAX_LAT_SPAN) return { box: null, key: null };
+  const padW = Math.min(wSpan * BBOX_PAD, (MAX_LON_SPAN - wSpan) / 2);
+  const padH = Math.min(hSpan * BBOX_PAD, (MAX_LAT_SPAN - hSpan) / 2);
+  const w = r4(Math.max(raw.w - padW, -180));
+  const s = r4(Math.max(raw.s - padH, -90));
+  const e = r4(Math.min(raw.e + padW, 180));
+  const n = r4(Math.min(raw.n + padH, 90));
+  return { box: { w, s, e, n }, key: `${w},${s},${e},${n}` };
+}
+
 function buildQuery(params) {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -122,6 +149,9 @@ export default function MapPage() {
   // pulls the visible area (server-side $geoWithin on the 2dsphere index) instead of the whole
   // universe on every refetch.
   const [bbox, setBbox] = useState(null);
+  // The padded box currently fetched (numbers), for the moveend containment check. A ref (not state)
+  // so the once-bound moveend handler always reads the latest without rebinding. null = unbounded.
+  const paddedBboxRef = useRef(null);
 
   // GPS-audit flag overlay. When deep-linked to a specific entry (?focusActivityId), start on
   // "all" statuses so that entry is present even if it's already been reviewed.
@@ -342,8 +372,15 @@ export default function MapPage() {
       clearTimeout(bboxTimer);
       bboxTimer = setTimeout(() => {
         const b = map.getBounds();
-        const r = (x) => Math.round(x * 10000) / 10000; // ~11m precision — stable query keys
-        setBbox([r(b.getWest()), r(b.getSouth()), r(b.getEast()), r(b.getNorth())].join(','));
+        const raw = { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() };
+        // Still fully inside the last padded box we fetched? Then the visible doors already cover the
+        // viewport — no key change, no fetch. This is what makes small pans instant. (Zoom-out grows
+        // the viewport past the box, so containment fails and we refetch.)
+        const last = paddedBboxRef.current;
+        if (last && raw.w >= last.w && raw.s >= last.s && raw.e <= last.e && raw.n <= last.n) return;
+        const next = inflateBbox(raw);
+        paddedBboxRef.current = next.box; // null at continental zoom → re-evaluated on the next move
+        setBbox(next.key); // padded "w,s,e,n" (or null) → drives the query string + key
       }, 400);
     });
 
@@ -364,6 +401,7 @@ export default function MapPage() {
   // (unbounded) pull re-frames the map on that campaign's doors instead of the old city's view.
   useEffect(() => {
     setBbox(null);
+    paddedBboxRef.current = null; // forget the old geography's padded box
     if (mapRef.current) mapRef.current._didFitBounds = false;
   }, [campaignId]);
 

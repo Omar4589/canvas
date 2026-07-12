@@ -371,6 +371,7 @@ export default function AdminMap() {
       if (passId) p.set('passId', passId);
       if (importId) p.set('importId', importId);
       if (showPings) p.set('includeActivities', '1');
+      p.set('includeBounds', '1'); // campaign door extent, to frame the camera even with no knocks today
       if (bbox) p.set('bbox', bbox);
       return api(`/admin/households/map?${p.toString()}`);
     },

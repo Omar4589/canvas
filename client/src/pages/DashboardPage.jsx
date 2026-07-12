@@ -406,7 +406,7 @@ export default function DashboardPage() {
             <StatCard
               label="Knocks"
               value={rangeStats.knocks?.toLocaleString()}
-              hint="billable · per house-pass"
+              hint="one per house · per round"
               accent="brand"
               help={metricHelp.doors}
             />

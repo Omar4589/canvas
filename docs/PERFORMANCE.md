@@ -154,9 +154,13 @@ Voters ship only for survey campaigns, scoped to those doors
   when / who / note — **`answers[]` no longer ships or is even fetched**; the detail panel
   lazy-loads it per door via `GET /admin/households/:id/surveys`), and a last-activity row per
   door. It is **viewport-bounded**: both clients send `bbox=west,south,east,north` after the first
-  auto-fit and on every settled pan/zoom (debounced), which the server turns into a `$geoWithin`
+  auto-fit and on settled pan/zoom (debounced), which the server turns into a `$geoWithin`
   on the household `2dsphere` index — so the 20s live poll re-pulls only the visible area, not the
-  universe. A missing/degenerate/near-world bbox falls back to the unbounded pull, still **capped
+  universe. To keep panning smooth the **web** client sends a **padded buffer** box (~4× the
+  viewport, `BBOX_PAD`, `inflateBbox` in [MapPage.jsx](../client/src/pages/MapPage.jsx)) and **skips
+  the refetch entirely while the viewport stays inside the last padded box** — so small pans cost no
+  network, only a pan/zoom beyond the buffer refetches (the mobile admin map already pads its box
+  ~10%/side + epsilon-gates). A missing/degenerate/near-world bbox falls back to the unbounded pull, still **capped
   at 50,000 households** (`MAP_HOUSEHOLD_CAP`) with `truncated`+`total`, backed by the
   `{campaignId,isActive}` index. The **date window is the other guard**: with from/to
   set, doors narrow to interaction-touched ones
@@ -184,8 +188,10 @@ requests `/turfs/doors?slim=1` (address fields dropped server-side;
 lazy-loaded per door on panel open (the web `HouseholdDetailPanel` was its only reader; the mobile
 sheet never read it); (2) **viewport-bounded** map fetches — `bbox` → `$geoWithin` `$geometry`
 polygon, which finally puts the household `2dsphere` index to work (verified IXSCAN). The 50k cap
-stays as the no-bbox backstop. **Remaining lever:** a size guard or chunked storage in
-`saveBootstrap` for the everyone-assignment case.
+stays as the no-bbox backstop. (3) the web map fetches a **padded buffer** and skips the refetch
+while the viewport stays inside it, so panning no longer costs a round-trip per settled move.
+**Remaining lever:** a size guard or chunked storage in `saveBootstrap` for the everyone-assignment
+case.
 
 ## Database scaling (connection pool, indexes, storage)
 

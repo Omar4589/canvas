@@ -37,7 +37,7 @@ function columnsFor(litMode) {
     { key: 'connectionRate', label: 'Conn %', numeric: true, help: metricHelp.connectionRate },
     { key: 'contactRate', label: 'Contact %', numeric: true, help: metricHelp.contactRate },
     { key: 'doorsPerHour', label: 'Doors/hr', numeric: true, help: metricHelp.doorsPerHour },
-    { key: 'dayRestricted', label: 'Restricted', numeric: true, help: 'Inaccessible homes flagged — recorded and shown, but never a knock or billable.' },
+    { key: 'dayRestricted', label: 'Restricted', numeric: true, help: 'Inaccessible homes flagged — recorded and shown, but never counted as a knock.' },
     { key: 'firstActivityAt', label: 'Start', numeric: true, help: metricHelp.start },
     { key: 'lastActivityAt', label: 'Last door', numeric: true, help: metricHelp.lastDoor },
   ];

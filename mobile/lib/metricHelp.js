@@ -3,7 +3,7 @@
 // so web and mobile read the same explanations.
 export const metricHelp = {
   doors:
-    'Doors knocked in the selected range — every knock action, counted once per house-pass. Going back in a later pass counts again.',
+    'Doors knocked in the selected range — every knock action, counted once per house each round. Going back in a later round counts again.',
   surveys: 'Survey forms collected at the door — one per voter, so a two-voter home in one visit is two surveys.',
   surveyedVoters: 'Distinct voters who completed a survey — not how many forms were filled out.',
   litDrops: 'Doors where literature was dropped, counted once per door per pass.',

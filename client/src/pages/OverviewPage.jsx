@@ -231,7 +231,7 @@ export default function OverviewPage() {
                 compact
                 label="Knocks"
                 value={cumulative.knocks?.toLocaleString()}
-                hint="billable · per house-pass"
+                hint="one per house · per round"
               />
               <StatCard
                 compact

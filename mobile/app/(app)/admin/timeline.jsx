@@ -653,7 +653,7 @@ export default function AdminTimeline() {
                 </Text>
                 {data.overlapDoors > 0 ? (
                   <Text style={styles.reconWarn}>
-                    {data.overlapDoors} overlap door-pass{data.overlapDoors === 1 ? '' : 'es'} (billed once →{' '}
+                    {data.overlapDoors} overlap door-pass{data.overlapDoors === 1 ? '' : 'es'} (counted once →{' '}
                     {data.billableKnocks})
                   </Text>
                 ) : (
