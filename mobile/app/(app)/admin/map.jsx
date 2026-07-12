@@ -226,6 +226,7 @@ export default function AdminMap() {
   const qc = useQueryClient();
   const cameraRef = useRef(null);
   const mapRef = useRef(null);
+  const framedRef = useRef(false); // camera framed on this campaign's doors once (reset on campaign change)
   const focusedHouseholdRef = useRef(null); // last door focused from a ?household= link
   const [campaign, setCampaign] = useState(undefined);
   const [showPings, setShowPings] = useState(false);
@@ -350,6 +351,7 @@ export default function AdminMap() {
     setBbox(null);
     bboxArmedRef.current = false;
     lastBoundsRef.current = null;
+    framedRef.current = false; // re-frame the camera on the new campaign's doors
   }, [cId]);
 
   const mapQ = useQuery({
@@ -419,8 +421,40 @@ export default function AdminMap() {
   const households = mapQ.data?.households || [];
   const activities = mapQ.data?.activities || [];
   const canvassers = mapQ.data?.canvassers || [];
+  const bounds = mapQ.data?.bounds || null; // date-independent campaign door extent (for camera framing)
   const flagEntries = flagsQ.data?.entries || [];
   const openFlagCount = flagsQ.data?.summary?.totals?.open ?? 0;
+
+  // Frame the camera on the campaign's doors once, when data first arrives: the doors
+  // currently shown if any, else the campaign's full door extent — so opening on "today"
+  // before anyone has knocked lands on the real neighborhood, not the default fallback.
+  // Runs once per campaign; the viewport-bbox machinery takes over after the user pans.
+  useEffect(() => {
+    if (framedRef.current || householdFocus) return;
+    if (!mapQ.data || !cameraRef.current) return;
+    let box = null;
+    const pts = households.filter((h) => h.location);
+    if (pts.length) {
+      let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+      for (const h of pts) {
+        if (h.location.lng < minLng) minLng = h.location.lng;
+        if (h.location.lng > maxLng) maxLng = h.location.lng;
+        if (h.location.lat < minLat) minLat = h.location.lat;
+        if (h.location.lat > maxLat) maxLat = h.location.lat;
+      }
+      box = { minLng, minLat, maxLng, maxLat };
+    } else if (bounds) {
+      box = bounds;
+    }
+    if (!box) return; // no doors + no extent (campaign has no geocoded doors) → keep default
+    framedRef.current = true;
+    // A single door (or a near-zero span) would over-zoom fitBounds — center on it instead.
+    if (box.maxLng - box.minLng < 1e-4 && box.maxLat - box.minLat < 1e-4) {
+      cameraRef.current.setCamera({ centerCoordinate: [box.minLng, box.minLat], zoomLevel: 15, animationDuration: 0 });
+    } else {
+      cameraRef.current.fitBounds([box.maxLng, box.maxLat], [box.minLng, box.minLat], [60, 60, 60, 60], 0);
+    }
+  }, [mapQ.data, households, bounds, householdFocus]);
 
   const householdFeatures = useMemo(() => householdsToFeatures(households), [households]);
   const pingFeatures = useMemo(

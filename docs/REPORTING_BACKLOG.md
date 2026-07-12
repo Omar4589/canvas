@@ -27,6 +27,13 @@ The metrics are correct but the distinction is subtle and could be misread (esp.
 - So **knocks > homes** once you run second rounds — *by design*, but the only cue today is a tiny
   "per house-pass" hint. Make the labels + tooltips unmistakable (Dashboard, Overview, Client Reports).
 
+> **Done (2026-07)** — the vocabulary/framing pass shipped: the Knocks metric now reads
+> **"one per house · per round"** (Overview, Dashboard), and the "billable" / "house-pass" /
+> "billed once" framing was pulled out of the dashboards, the metric tooltips, the Timeline overlaps
+> line, and the client report — billing framing now lives only on the Billing page. The per-round vs
+> global distinction reads clearer. The **round breakdown** (Round 1 vs Round 2 side by side) is still
+> open under item 1.
+
 ## 3. Walk one surface in depth (do last)
 After 1–2, pick **Dashboard**, **Overview**, or the public **Client Reports** and walk it the way we
 walked Turf Cutting ("what do we see / what should we see / what can/can't we do"), gap-analysis first.

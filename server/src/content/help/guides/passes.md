@@ -5,7 +5,7 @@ audience: lead
 kind: guide
 order: 15
 sourceDoc: PASSES.md
-summary: A pass is one billable sweep through a walk list's doors — how they're numbered, created, and closed.
+summary: A pass is one planned sweep through a walk list's doors — how they're numbered, created, and closed.
 tags: passes, walk lists, billing, activate, archive, follow-up
 ---
 
@@ -13,7 +13,7 @@ tags: passes, walk lists, billing, activate, archive, follow-up
 
 A **pass** is one planned trip through a single [walk list](walk-lists)'s doors — Pass 1, then a follow-up Pass 2, and so on. Each pass is cut into books on the Turf Cutting page and handed to canvassers.
 
-Passes are the billing unit. Knocking a door in Pass 1 and again in Pass 2 counts as two door-knocks. See [Coverage vs. knocks](coverage-vs-knocks) for how that adds up.
+Knocking a door in Pass 1 and again in Pass 2 counts as two door-knocks — so each new pass adds knocks. See [Coverage vs. knocks](coverage-vs-knocks) for how that adds up.
 
 Pass numbers **restart per walk list**, so you'll have a North Pass 1 and a South Pass 1 — they don't share a counter.
 

@@ -226,6 +226,7 @@ export default function MapPage() {
     option: answerFilter.option,
     optionId: answerFilter.optionId,
     includeActivities: showCanvasserPins ? '1' : '',
+    includeBounds: '1', // campaign door extent, to frame the camera even with no knocks today
     effortId: scopeEffortId,
     passId: scopePassId,
     importId: scopeImportId,
@@ -263,6 +264,7 @@ export default function MapPage() {
   const households = householdsQ.data?.households || [];
   const canvassers = householdsQ.data?.canvassers || [];
   const activities = householdsQ.data?.activities || [];
+  const mapBounds = householdsQ.data?.bounds || null; // date-independent campaign door extent (camera framing)
 
   // GPS-audit flags — a SEPARATE query (only when the layer is on) so toggling flags never
   // refetches households. Server returns the full per-reason summary (for the chip counts)
@@ -432,16 +434,23 @@ export default function MapPage() {
     const geojson = householdsToGeoJSON(households);
     src.setData(geojson);
 
-    // Auto-fit on first load (only when bounds are valid and we haven't moved yet).
-    if (geojson.features.length && !mapRef.current._didFitBounds) {
+    // Auto-fit on first load. Prefer the doors currently shown; if none are shown
+    // (e.g. "today" before anyone has knocked), fall back to the campaign's full door
+    // extent from the server so the map still frames the real neighborhood instead of
+    // the continental-US default.
+    if (!mapRef.current._didFitBounds) {
       const bounds = new mapboxgl.LngLatBounds();
       for (const f of geojson.features) bounds.extend(f.geometry.coordinates);
+      if (bounds.isEmpty() && mapBounds) {
+        bounds.extend([mapBounds.minLng, mapBounds.minLat]);
+        bounds.extend([mapBounds.maxLng, mapBounds.maxLat]);
+      }
       if (!bounds.isEmpty()) {
         mapRef.current.fitBounds(bounds, { padding: 60, maxZoom: 14, duration: 0 });
         mapRef.current._didFitBounds = true;
       }
     }
-  }, [households, mapReady, styleEpoch]);
+  }, [households, mapBounds, mapReady, styleEpoch]);
 
   const householdsById = useMemo(() => {
     const m = new Map();

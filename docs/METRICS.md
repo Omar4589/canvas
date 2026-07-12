@@ -34,7 +34,7 @@ Two lenses sit on top of that, and they answer different questions:
 - **Coverage** (the colored bar) — *how much of the universe have we touched?* One bucket per
   household, current standing, all-time.
 - **Activity / Knocks** — *how much work did we do (and bill for)?* Counts knock events per
-  house-pass, honors the date filter.
+  house per round, honors the date filter.
 
 They can disagree (Knocks can exceed Houses once you do a second pass) — that's expected.
 
@@ -45,7 +45,7 @@ Distinct households that have been knocked at least once (status ≠ `unknocked`
 **current-state and all-time** — it doesn't move with the date filter. It answers "how much of
 the turf is done." Field: `homesKnocked`.
 
-### Knocks  *(this is the billable number)*
+### Knocks
 **One knock = one distinct (household, pass).** So:
 
 - Same canvasser corrects/re-enters the same house **in the same pass** → **1 knock** (the app

@@ -330,7 +330,7 @@ address). The same hex drives the house pin and the canvasser **ping** circle (t
 marker (all campaign types), kept distinct from the neutral grey `unknocked`. The same hex drives its
 house pin (`house-restricted`) and its ping circle (the `registerLayers` `actionType` match includes
 `restricted`), so a restricted mark's GPS stamp shows on the admin map like any other. It is **not** a
-billable knock — the color is purely a coverage/audit signal (see [METRICS.md](METRICS.md)).
+counted as a knock — the color is purely a coverage/audit signal (see [METRICS.md](METRICS.md)).
 
 - **Mobile (canonical):** [lib/theme.js](../mobile/lib/theme.js) `colors.status.refused = '#F59E0B'` /
   `colors.statusLabels.refused = 'Refused'` and `colors.status.restricted = '#475569'` /

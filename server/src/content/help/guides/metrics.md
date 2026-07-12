@@ -11,9 +11,9 @@ tags: metrics, knocks, coverage, rate, billing
 
 A few definitions make every dashboard number click into place.
 
-## Knocks (the billable unit)
+## Knocks
 
-A **knock** is one distinct door within one pass. If two canvassers hit the same door in the same pass, it counts **once**. Knock the same door again in a *new* pass and that's a new knock. So running another pass **adds knocks** — this is the unit you're billed on.
+A **knock** is one distinct door within one pass. If two canvassers hit the same door in the same pass, it counts **once**. Knock the same door again in a *new* pass and that's a new knock. So running another pass **adds knocks** — each door counts once per round.
 
 ## Coverage (houses knocked)
 
