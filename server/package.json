@@ -33,7 +33,8 @@
     "migrate:build-indexes": "node src/migrations/buildIndexes.js",
     "migrate:strip-geocode-raw": "node src/migrations/stripGeocodeRaw.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
-    "demo:refresh": "node src/utils/refreshDemoDay.js"
+    "demo:refresh": "node src/utils/refreshDemoDay.js",
+    "purge:deleted-identities": "node src/migrations/purgeDeletedIdentities.js"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",

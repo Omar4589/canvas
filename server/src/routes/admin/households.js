@@ -50,6 +50,9 @@ async function resolveMapTz(orgId, campaignId) {
 // rostered to it (so a just-assigned canvasser with zero knocks is still selectable).
 // Deliberately does NOT gate on User.isActive: a since-deactivated canvasser still has pins
 // on the map, so they must stay filterable — the dropdown must never drop a visible pin's owner.
+// This is also what keeps a SELF-DELETED canvasser auditable: deletion scrubs their name to
+// "Deleted user" and drops them from the org-wide dropdown, but the campaign map — the one an
+// admin actually investigates GPS flags on — still lists them, so their pins can be isolated.
 async function loadCanvasserRoster(orgId, campaignId = null) {
   if (!campaignId) {
     const memberIds = await Membership.find({ organizationId: orgId, isActive: true }).distinct('userId');

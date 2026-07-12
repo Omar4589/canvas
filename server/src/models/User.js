@@ -10,6 +10,23 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, required: true },
     isSuperAdmin: { type: Boolean, default: false, index: true },
     isActive: { type: Boolean, default: true },
+    // Set when the user deletes their own account (App Store 5.1.1(v) / Play's
+    // account-deletion policy). Deliberately NOT the same thing as isActive:false:
+    // deactivate is a reversible admin toggle (PATCH /:userId/password re-issues a temp
+    // password and revives the account), and Apple is explicit that "only offering to
+    // temporarily deactivate or disable an account is insufficient". Deletion is terminal —
+    // every auth path refuses a deletedAt user and every admin write route rejects one.
+    //
+    // The document itself must SURVIVE: CanvassActivity.userId, SurveyResponse.userId and
+    // FlagReview.reviewedBy all declare the ref as `required`, and that knock ledger is what
+    // campaign counts and billing are computed from. So deletion scrubs the PII off this row
+    // rather than removing it — see services/users/deleteAccount.js.
+    deletedAt: { type: Date, default: null, index: true },
+    // Accounts that may never be self-deleted: the App Review / Play reviewer demo logins.
+    // A reviewer WILL press "Delete my account" — that is precisely what 5.1.1(v) asks them
+    // to test — and an unguarded delete would destroy the demo tenant and leave the NEXT
+    // submission unreviewable.
+    deletionLocked: { type: Boolean, default: false },
     // When true, the user was issued a temporary password (e.g. an admin reset)
     // and must choose a new one before they can use the app. See passwordGate.js.
     mustChangePassword: { type: Boolean, default: false },
@@ -38,6 +55,7 @@ userSchema.methods.toSafeJSON = function () {
     phone: this.phone,
     isSuperAdmin: !!this.isSuperAdmin,
     isActive: this.isActive,
+    deletedAt: this.deletedAt || null,
     mustChangePassword: !!this.mustChangePassword,
     lastLoginAt: this.lastLoginAt,
     createdAt: this.createdAt,

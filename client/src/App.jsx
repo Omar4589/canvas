@@ -45,6 +45,7 @@ const EffortsPage = lazy(() => import('./pages/EffortsPage.jsx'));
 const WalkListsPage = lazy(() => import('./pages/WalkListsPage.jsx'));
 const QueuesPage = lazy(() => import('./pages/QueuesPage.jsx'));
 const PrivacyPolicyPage = lazy(() => import('./pages/PrivacyPolicyPage.jsx'));
+const DeleteAccountPage = lazy(() => import('./pages/DeleteAccountPage.jsx'));
 const SelectOrgPage = lazy(() => import('./pages/SelectOrgPage.jsx'));
 const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage.jsx'));
 const SuperAdminHomePage = lazy(() => import('./pages/SuperAdminHomePage.jsx'));
@@ -87,6 +88,10 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route path="/terms" element={<TermsPage />} />
+        {/* Google Play requires a deletion request page reachable WITHOUT a login — someone who
+            already uninstalled the app has to be able to get here. Declared in Play Console under
+            App content → Data safety → Data deletion. Keep it public. */}
+        <Route path="/delete-account" element={<DeleteAccountPage />} />
         {/* Public shared report hub — no login. */}
         <Route element={<PublicReportLayout />}>
           <Route path="/r/:token" element={<PublicReportListPage />} />

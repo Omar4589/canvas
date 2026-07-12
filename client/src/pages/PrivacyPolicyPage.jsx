@@ -168,9 +168,38 @@ export default function PrivacyPolicyPage() {
             customer organization that controls the information, and thereafter
             as needed to comply with our legal obligations or resolve disputes.
             A customer may request export or deletion of the information it
-            controls. Individual users may request deletion of their own
-            account by contacting us or their organization&apos;s
-            administrator.
+            controls.
+          </p>
+        </Section>
+
+        {/* Anchor id is load-bearing: Google Play lets a privacy policy double as the required
+            public deletion resource only when the deletion section is "prominently featured and
+            easily discoverable" — i.e. anchor-linked. Do not rename #delete-account. */}
+        <Section title="Deleting your account" id="delete-account">
+          <p>
+            You can delete your {APP_NAME} account yourself, at any time, from
+            inside the mobile app: <strong>Profile → Delete account</strong>.
+            Deleting is permanent — it removes your login, your name, your
+            email address, your phone number and your password, and it cannot
+            be undone by you or by an administrator. If you have already
+            uninstalled the app, see the{' '}
+            <a className="font-medium text-red-600 underline" href="/delete-account">
+              account deletion page
+            </a>
+            .
+          </p>
+          <p>
+            The doors you knocked and the survey answers you recorded stay with
+            the campaign. Those are the organization&apos;s records of work
+            performed, not your personal content, and the organization — not{' '}
+            {APP_NAME} — controls them. Alongside those records we keep your
+            name for a limited period (180 days by default) so the organization
+            can verify who performed which field work; canvassing records
+            include the location at which each door was logged, and an
+            organization must be able to attach that record to a person in
+            order to check it. This is a fraud- and quality-prevention measure.
+            After that period your name is permanently removed and the records
+            become anonymous.
           </p>
         </Section>
 
@@ -244,9 +273,12 @@ export default function PrivacyPolicyPage() {
   );
 }
 
-function Section({ title, children }) {
+// `id` is optional and only used by the deletion section, whose anchor Google Play relies on
+// to treat this page as the required public deletion resource. Without it the #delete-account
+// link is dead and the section is no longer "easily discoverable".
+function Section({ title, id, children }) {
   return (
-    <section className="mt-8 space-y-3 text-sm leading-relaxed text-gray-700">
+    <section id={id} className="mt-8 space-y-3 text-sm leading-relaxed text-gray-700">
       <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
       {children}
     </section>

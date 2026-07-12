@@ -17,6 +17,7 @@ import {
   resolveCoordinatorId,
   resolveManagedCampaigns,
 } from '../../services/memberships/createMember.js';
+import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
 import { phoneSchema, nameSchema, emailSchema, passwordSchema as passwordField } from '../../utils/validators.js';
 
 const router = Router();
@@ -315,9 +316,13 @@ router.delete('/:userId', async (req, res, next) => {
     }
     const orgId = activeOrgId(req);
     await Membership.deleteOne({ userId: req.params.userId, organizationId: orgId });
-    await CampaignAssignment.deleteMany({ userId: req.params.userId, organizationId: orgId });
-    await CampaignManager.deleteMany({ userId: req.params.userId, organizationId: orgId });
-    res.json({ ok: true });
+    // This used to drop CampaignAssignment + CampaignManager only, which left the removed
+    // person still holding every TurfAssignment and EffortMember row they had — so their
+    // books stayed "assigned" to somebody who was no longer in the org, those doors never
+    // resurfaced as unassigned, and the effort readiness rollup still counted them as crew.
+    // releaseAssignedWork is shared with account deletion so the two paths can't drift.
+    const released = await releaseAssignedWork(req.params.userId, { organizationId: orgId });
+    res.json({ ok: true, released });
   } catch (err) {
     next(err);
   }
@@ -337,6 +342,10 @@ router.patch('/:userId/user', async (req, res, next) => {
 
     const targetUser = await User.findById(req.params.userId);
     if (!targetUser) return res.status(404).json({ error: 'User not found' });
+    // A deleted account is terminal. Without this guard an admin could write a real name and
+    // a routable email straight back onto the tombstone — un-deleting the PII the user asked
+    // us to destroy — because this route only checks that a Membership exists in the org.
+    if (targetUser.deletedAt) return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
 
     const data = updateUserSchema.parse(req.body);
     if (data.email) data.email = data.email.toLowerCase();
@@ -385,6 +394,13 @@ router.patch('/:userId/password', async (req, res, next) => {
     });
     if (!membership) return res.status(404).json({ error: 'Member not in this org' });
 
+    // Without this, "deleted" would be resurrectable: an admin re-issues a temp password and
+    // the account is alive again. Apple: "only offering to temporarily deactivate or disable
+    // an account is insufficient." Deletion has to be the one thing an admin cannot undo.
+    const target = await User.findById(req.params.userId).select('deletedAt');
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.deletedAt) return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+
     const { password } = passwordSchema.parse(req.body);
     const passwordHash = await User.hashPassword(password);
     // This is a TEMPORARY password: the user is forced to choose a new one at
@@ -421,6 +437,13 @@ router.patch('/:userId/deactivate', async (req, res, next) => {
 router.patch('/:userId/reactivate', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    // Reactivating a deleted user's membership would put a tombstone back on the roster and
+    // back into the team headcount. The login stays shut either way (auth gates on
+    // deletedAt), but the org should never see them offered as assignable again.
+    const target = await User.findById(req.params.userId).select('deletedAt');
+    if (target?.deletedAt) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    }
     const membership = await Membership.findOneAndUpdate(
       { userId: req.params.userId, organizationId: activeOrgId(req) },
       { isActive: true },

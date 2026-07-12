@@ -17,6 +17,7 @@ import { api } from '../../lib/api';
 import { loadCurrentUser, saveCurrentUser, saveMemberships } from '../../lib/cache';
 import PasswordInput from '../../components/PasswordInput';
 import PasswordRequirements from '../../components/PasswordRequirements';
+import DeleteAccountSheet from '../../components/DeleteAccountSheet';
 import { isStrongPassword, passwordProblem } from '../../lib/validators';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
@@ -48,6 +49,8 @@ export default function ProfileScreen() {
   const [savingPw, setSavingPw] = useState(false);
   const [pwError, setPwError] = useState(null);
   const [pwSaved, setPwSaved] = useState(false);
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(() => {
     loadCurrentUser().then((u) => {
@@ -289,9 +292,28 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
 
+          {/* Required by App Store 5.1.1(v) and Play's account-deletion policy — both demand a
+              self-serve path inside the app, and both reject "ask your admin" as a substitute.
+              The sheet syncs any unsent doors and checks with the server before it offers the
+              button, so nobody deletes their way into losing field work or bricking their org. */}
+          <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>Delete account</Text>
+          <View style={styles.card}>
+            <Text style={styles.hint}>
+              Permanently delete your login and personal details. This can’t be undone.
+            </Text>
+            <Pressable
+              onPress={() => setDeleteOpen(true)}
+              style={({ pressed }) => [styles.dangerButton, pressed && { opacity: 0.85 }]}
+            >
+              <Text style={styles.dangerButtonText}>Delete my account</Text>
+            </Pressable>
+          </View>
+
           <Text style={styles.buildStamp}>{buildInfo}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <DeleteAccountSheet visible={deleteOpen} onClose={() => setDeleteOpen(false)} />
     </SafeAreaView>
   );
 }
@@ -355,6 +377,17 @@ function makeStyles(t) {
     },
     buttonDisabled: { opacity: 0.5 },
     buttonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
+
+    // Outlined, not filled: destructive but not the thing we're steering anyone toward.
+    dangerButton: {
+      borderWidth: 1,
+      borderColor: colors.danger,
+      borderRadius: radius.md,
+      paddingVertical: spacing.md + 2,
+      alignItems: 'center',
+      marginTop: spacing.md,
+    },
+    dangerButtonText: { color: colors.danger, fontWeight: '700', fontSize: 16 },
 
     buildStamp: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
   });

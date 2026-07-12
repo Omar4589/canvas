@@ -11,7 +11,11 @@ export async function requireAuth(req, res, next) {
     }
     const payload = verifyToken(token);
     const user = await User.findById(payload.sub);
-    if (!user || !user.isActive) {
+    // deletedAt is checked here, not just at login, because our JWT is stateless and lives
+    // for 30d (services/auth/tokens.js) — a deleted user holding a valid token would keep
+    // recording knocks and reading voter PII for a month. This route loads the user from the
+    // DB on every request, so refusing here IS the revocation.
+    if (!user || !user.isActive || user.deletedAt) {
       return res.status(401).json({ error: 'Invalid or inactive user' });
     }
     req.user = user;

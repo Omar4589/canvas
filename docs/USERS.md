@@ -200,6 +200,42 @@ The important one: for a person who belongs to **more than one org**, a regular 
 their login email** (that would change how they sign into the *other* orgs). The email field is shown
 **disabled with an explanation** in that case. Only the user themselves or a super-admin can change it.
 
+## Deleting your account
+
+Anyone can delete their own account from the mobile app: **Profile ▸ Delete account**. It's permanent —
+their login, name, email, phone and password are gone, and **no admin can bring the account back**. This
+is different from *deactivating* someone, which an admin can undo at any time.
+
+**What the campaign keeps.** The doors they knocked and the survey answers they recorded **stay with the
+campaign**. Those are the organization's records of work performed, not the person's personal content, so
+deleting an account never changes a campaign's counts, its coverage, or its bill. On reports and the map
+the person simply shows up as **"Deleted user"** from then on.
+
+**Their name is kept for a while, on purpose.** Alongside those records we hold their name for **180 days**
+so the organization can still check *who* did which field work — canvassing records include the location
+each door was logged at, and a GPS audit is worthless if you can't attach it to a person. This is stated
+plainly to the user before they delete, and it means **nobody can delete their way out of a quality audit**.
+After 180 days the name is removed for good and the old records become anonymous.
+
+**Four things will stop a deletion**, and the app says which:
+
+- **Unsynced doors.** If they knocked houses while offline and those haven't reached the server yet, the app
+  syncs first and refuses to delete until it's done — otherwise that work would be thrown away.
+- **You're the only admin.** A sole admin deleting themselves would leave the org with nobody who can add
+  users, cut turf, or run reports. Make someone else an admin first.
+- **You're the only admin who can manage billing.** Same reasoning, sharper edge: with no bill-payer left,
+  nobody could pay the subscription and the whole org would eventually go read-only.
+- **You're the only super-admin.** Promote another one first.
+
+**What happens to their work.** Any walk lists or books they were holding are **handed back** and become
+unassigned, so no doors are stranded with someone who's gone. They come off every campaign roster.
+
+**If they come back later.** Deleting releases their email address, so they can be re-added. They get a
+**brand-new account** — their old knocks stay attached to the deleted one. That's deliberate: re-hiring
+someone must not quietly re-attach them to a flag history they deleted.
+
+Someone who's already uninstalled the app can request deletion at **doorline.app/delete-account**.
+
 ---
 
 # Part 2 — Technical reference
@@ -419,7 +455,84 @@ mobile. No new dependency, and **no migration** — phone is display-only contac
 normalized; old values format best-effort). Locked by
 [validators.test.js](../server/test/validators.test.js).
 
-## Migration (run once at deploy)
+## Account deletion (App Store 5.1.1(v) / Play account-deletion policy)
+
+**Why we owe this at all.** Both stores trigger on **account *creation***, not on having a login. Google's
+wording: *"If your app allows users to create an account from within your app, then it must also allow
+users to request for their account to be deleted."* Our mobile binary creates accounts — the admin
+`CreateUserForm` in `admin/users.jsx` and the crew endpoint in `admin/campaign-assignments/[campaignId].jsx`
+— so the trigger fires. Apple additionally forbids the support-flow substitute: *"Apps not operating in
+highly regulated industries should not require people to make a phone call, send an email, or go through
+other support flows."* Canvassing is not a regulated industry.
+
+**Deletion is a scrub-in-place, not a row removal — and that is forced by the schema, not chosen.**
+`CanvassActivity.userId`, `SurveyResponse.userId`, `FlagReview.reviewedBy` and
+`HouseholdLocationChange.userId` are all `required`, so the `User` document **cannot** be removed without
+destroying the knock ledger — and that ledger is what campaign counts and the invoice are computed from.
+`knocksPipeline` groups on `{householdId, passId}` and **never joins `User`**, so a scrub provably cannot
+move a bill. Every per-canvasser report LEFT-joins `User` with a null-safe fallback, so rows go *nameless*,
+never missing.
+
+| Field | Meaning |
+| --- | --- |
+| `User.deletedAt` | Terminal. Checked in `requireAuth` **and** at login. Distinct from `isActive` on purpose — `isActive:false` is the reversible admin deactivate, and `PATCH /admin/memberships/:userId/password` can revive it. Apple: *"only offering to temporarily deactivate or disable an account is insufficient."* |
+| `User.deletionLocked` | The App Review / Play reviewer demo login. A reviewer **will** press the button — that's what 5.1.1(v) asks them to test — and an unguarded delete would destroy the demo tenant and leave the *next* submission unreviewable. |
+| `DeletedUserRecord` | The identity snapshot. See below. |
+
+**`requireAuth` is the revocation.** The JWT is stateless with a 30-day life
+([tokens.js](../server/src/services/auth/tokens.js)) and carries no `jti`/`tokenVersion` — but
+`requireAuth` loads the user from the DB on **every** request, so refusing a `deletedAt` user there kills
+the session immediately rather than in a month.
+
+**The fraud-audit problem, and `DeletedUserRecord`.** Scrubbing the `User` row satisfies the stores but
+destroys the only join key the GPS audit has: `flagDetection` resolves a flagged canvasser through
+`User.firstName/lastName/email`. Without a snapshot, a canvasser could fabricate a day of *billable* doors,
+delete their account, and leave the org holding a GPS trail it cannot attach to anybody — then rejoin under
+the freed email with a clean flag history. **The flagged rows survive a scrub; the attribution is what
+dies.** So we snapshot identity **before** scrubbing, org-scoped, with a bounded and disclosed retention
+window (`DELETED_IDENTITY_RETENTION_DAYS`, default 180). Both stores permit this — Play names *"security,
+fraud prevention or regulatory compliance"* outright; Apple requires retained data be disclosed — and the
+deletion sheet, the public page and the privacy policy all say so in the same words.
+
+**Guards** (all in [deleteAccount.js](../server/src/services/users/deleteAccount.js), all enforced on the
+*write*, not just the pre-check): `DELETION_LOCKED`, `LAST_SUPER_ADMIN`, `LAST_ADMIN`, `LAST_BILLING_ADMIN`.
+The billing one matters most: losing the last `billingAccess` admin means nobody can pay the subscription,
+and the entitlement gate drives the whole org read-only when it lapses — **self-deletion must not be able to
+financially suspend a customer.**
+
+**The offline queue is a live hazard.** [offlineQueue.js](../mobile/lib/offlineQueue.js) *drops* any 4xx so
+one bad submission can't wedge the queue forever. The moment the account dies, every unsynced knock 401s and
+is silently discarded — real, billable field work. `DeleteAccountSheet` therefore **flushes first and refuses
+to delete while anything is still pending**. Do not weaken that.
+
+**Two `required` traps** worth stating, since both fail *silently* the wrong way:
+`passwordHash` cannot be cleared (a `.save()` throws; a `$set: null` slips past the validator and then makes
+`bcrypt.compare(plain, null)` **throw**, turning a clean 401 into a 500) — burn it to an unusable random hash
+instead. And `email` is `unique`, so the tombstone must embed the user id (`deleted+<id>@…`); a single shared
+constant would `E11000` on the **second** deletion, surfacing as a misleading "Email already exists" 409.
+
+**Re-hiring gives a new `_id` on purpose.** Scrubbing releases the real email, so a returning person is a
+*new* `User`. Their old knocks stay bound to the tombstone — re-hiring must not quietly re-attach someone to
+a flag history they deleted.
+
+**Surfaces.** `GET /auth/account/deletion-check` (blockers + retention copy) and `DELETE /auth/account`
+(re-authenticated with the current password). Mobile: `components/DeleteAccountSheet.jsx`. Web:
+`/delete-account` — **public, no login** — which Google requires *in addition to* the in-app path, because
+*"some users may have already uninstalled your app."* Declared in Play Console under **App content ▸ Data
+safety ▸ Data deletion**. The privacy policy's `#delete-account` anchor is load-bearing for the same reason;
+don't rename it.
+
+Locked by [accountDeletion.int.test.js](../server/test/accountDeletion.int.test.js) (8/8), which asserts the
+things that protect the business, not just the stores: billable knocks unchanged across a deletion, the
+already-issued token dead immediately, a sole admin/bill-payer blocked, the reviewer account untouchable, and
+a deleted canvasser still selectable on the campaign map with her GPS trail resolvable to a real person.
+
+**Bonus fix shipped alongside.** `DELETE /admin/memberships/:userId` never released `TurfAssignment` or
+`EffortMember` — so removing someone from an org left them still holding their books: the doors never
+resurfaced as unassigned and the effort readiness rollup still counted them as crew. Both paths now share
+`releaseAssignedWork`.
+
+## Migrations (run at deploy)
 
 `acknowledgedAt`'s `default: null` only applies to *new* docs, so existing memberships would all read as
 `isNew` and spam every current member. Backfill them:
@@ -433,3 +546,19 @@ It sets `acknowledgedAt = createdAt` for memberships where the field is **absent
 so it never clobbers a genuinely-new unacknowledged membership. See
 [server/src/migrations/migrateAckMemberships.js](../server/src/migrations/migrateAckMemberships.js).
 `mustChangePassword`/`tempPasswordSetAt` need no backfill (absent → falsy → "not required").
+
+**Account deletion needs no backfill** — `deletedAt`/`deletionLocked` default to `null`/`false`, which read
+correctly for every existing user. Two things *do* need doing at deploy:
+
+```
+npm run purge:deleted-identities             # dry run
+npm run purge:deleted-identities -- --apply  # schedule this daily
+```
+
+Without it on a schedule, *"we keep your name for a limited period"* is a promise we don't keep — which is
+exactly what a privacy complaint is made of. Heroku Scheduler daily is enough; the window is months.
+
+And **set `deletionLocked: true` on the App Review / Play reviewer demo accounts before you submit.** If a
+reviewer deletes the demo login while testing the delete button, the next submission can't be reviewed.
+Note also that prod runs with `autoIndex` off, so the new `DeletedUserRecord` indexes need
+`npm run migrate:build-indexes -- --apply`.
