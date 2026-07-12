@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
@@ -288,8 +288,13 @@ export default function AdminMap() {
   // Viewport bound ("west,south,east,north"): once ARMED (the camera has actually shown some of
   // the loaded doors), every settled camera move refetches just the visible area — the 20s live
   // poll included — matching the web map. Unarmed/null = the unbounded (capped) pull.
+  // lastBoundsRef holds the raw bounds of the last ACCEPTED viewport: onMapIdle fires after every
+  // data-driven re-render too (not just user moves, unlike web's moveend), and its reported
+  // bounds jitter by a hair — so updates are epsilon-gated against this ref (see handleMapIdle)
+  // or the map refetches itself in a loop.
   const [bbox, setBbox] = useState(null);
   const bboxArmedRef = useRef(false);
+  const lastBoundsRef = useRef(null); // { w, s, e, n } raw (unpadded)
 
   const pingDetailQ = useQuery({
     queryKey: ['admin', 'activity', selectedPing?.id],
@@ -344,6 +349,7 @@ export default function AdminMap() {
   useEffect(() => {
     setBbox(null);
     bboxArmedRef.current = false;
+    lastBoundsRef.current = null;
   }, [cId]);
 
   const mapQ = useQuery({
@@ -370,6 +376,10 @@ export default function AdminMap() {
     },
     enabled: !!cId,
     refetchInterval: live ? 20 * 1000 : false,
+    // keepPreviousData so a bbox/filter/campaign key change never blanks the pins mid-fetch
+    // (same idiom as books.jsx) — without it every viewport update unmounted every pin for the
+    // fetch duration, which read as the whole map flashing.
+    placeholderData: keepPreviousData,
     // Tabs keep this screen mounted forever once visited — pause the live poll
     // (and refresh on return) whenever another screen covers it.
     ...useFocusedPoll(),
@@ -570,6 +580,13 @@ export default function AdminMap() {
   // shown ≥1 loaded door, so a stray initial viewport (camera mounted before data, or pointed
   // at the default center) can never misbound the first refetch; after arming it tracks the
   // viewport freely (self-correcting — pan somewhere and that's what gets fetched).
+  //
+  // Two guards keep this from feeding back on itself (onMapIdle also fires after every
+  // data-driven re-render, with slightly jittering bounds):
+  //   • EPSILON GATE — a new viewport counts only when an edge moved > 5% of the visible span.
+  //     Render jitter is orders of magnitude below that; a real pan/zoom always clears it.
+  //   • PADDING — the bbox actually sent is widened ~10% per side, so sub-threshold drags stay
+  //     inside the already-fetched area (no edge pop-in, no refetch needed).
   async function handleMapIdle() {
     if (!mapRef.current || !mapQ.data) return;
     let b;
@@ -589,9 +606,32 @@ export default function AdminMap() {
       if (!anyVisible) return;
       bboxArmedRef.current = true;
     }
+
+    const raw = { w: swLng, s: swLat, e: neLng, n: neLat };
+    const spanLng = Math.max(raw.e - raw.w, 0.0001);
+    const spanLat = Math.max(raw.n - raw.s, 0.0001);
+    const last = lastBoundsRef.current;
+    if (last) {
+      const moved =
+        Math.abs(raw.w - last.w) > spanLng * 0.05 ||
+        Math.abs(raw.e - last.e) > spanLng * 0.05 ||
+        Math.abs(raw.s - last.s) > spanLat * 0.05 ||
+        Math.abs(raw.n - last.n) > spanLat * 0.05;
+      if (!moved) return;
+    }
+    lastBoundsRef.current = raw;
+
     const r = (x) => Math.round(x * 10000) / 10000; // ~11m precision — stable query keys
-    const next = [r(swLng), r(swLat), r(neLng), r(neLat)].join(',');
-    setBbox((prev) => (prev === next ? prev : next));
+    const padLng = spanLng * 0.1;
+    const padLat = spanLat * 0.1;
+    setBbox(
+      [
+        r(raw.w - padLng),
+        r(Math.max(raw.s - padLat, -90)),
+        r(raw.e + padLng),
+        r(Math.min(raw.n + padLat, 90)),
+      ].join(',')
+    );
   }
 
   // Enter move mode: close the sheet and center the camera tightly on the door so the
