@@ -64,6 +64,22 @@ export async function api(
     ) {
       window.location.assign('/change-password');
     }
+    // The active org isn't ours — removed from the org mid-session, or a stale localStorage
+    // id. Drop it and send the user to the picker, the same recovery the mobile client
+    // already does centrally. Without this, every panel fails with a Retry button that can
+    // never succeed.
+    //
+    // Deliberately NOT done for code === 'FORBIDDEN_ROLE': that only means the caller hit an
+    // endpoint above their role, which must not eject them from the org.
+    if (
+      res.status === 403 &&
+      data?.code === 'ORG_CONTEXT' &&
+      typeof window !== 'undefined' &&
+      window.location.pathname !== '/select-org'
+    ) {
+      setActiveOrgId(null);
+      window.location.assign('/select-org');
+    }
     const err = new Error(data?.error || `Request failed: ${res.status}`);
     err.status = res.status;
     err.data = data;

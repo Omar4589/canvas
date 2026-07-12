@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { isConsoleRole } from '../lib/roles.js';
 
-const ROLE_LABEL = { admin: 'an admin', canvasser: 'a canvasser' };
+const ROLE_LABEL = { admin: 'an admin', lead: 'a team lead', canvasser: 'a canvasser' };
 
 /**
  * Notifies a user, in-app, when an admin has added them to an organization.
@@ -40,6 +41,9 @@ export default function AddedToOrgBanner() {
               {ROLE_LABEL[m.role] || m.role}
             </span>
             .
+            {/* A canvasser membership can't be opened in the console at all, so say where
+                it CAN be used rather than leaving the user hunting for it in the switcher. */}
+            {!isConsoleRole(m.role) && ' Knock doors for it in the Doorline mobile app.'}
           </div>
           <button
             type="button"

@@ -34,6 +34,23 @@ Account (one per email)
 So "what happens if two orgs have the same email?" → it's **the same person**, with two memberships.
 You can't create two separate accounts on the same email.
 
+## Signing in with mixed roles
+
+The diagram above is a real, ordinary situation: **admin in one org, canvasser in another.** Where you
+land depends on which surface you sign in to, because the two surfaces are for different jobs.
+
+- **The web console** is for admins and team leads. It shows you Org A. Org B — where you're a canvasser
+  — still appears on the org picker, greyed out under **No console access**, so you can see it's there;
+  it just can't be opened, because there's nothing in the console for a canvasser to do.
+- **If Org A is the only org you can run from the console, sign-in takes you straight there.** You'll
+  only see the org picker when you have two or more orgs you can actually open.
+- **The mobile app** is where Org B lives. Every role has a home there, so *all* your orgs are
+  selectable — switching orgs in the app is how you move between running Org A and knocking doors for
+  Org B. Same email, same password.
+
+Switching orgs in the console always drops you on the new org's home page, never on a page that belonged
+to the org you just left.
+
 ## Adding someone to your org
 
 On the Users page, "Add member" has two modes:
@@ -341,6 +358,33 @@ are **not** yet coordinator-scoped (only `effortId` is — see [reports.js](../s
   itself, via `allowPasswordChange`). `LoginPage` redirects on the flag; `api/client.js` funnels an
   in-flight `PASSWORD_CHANGE_REQUIRED` 403 to the same page.
 - Mobile: `app/index.jsx` redirects to `app/change-password.jsx` when the cached user has the flag.
+
+## The active org (`canvass.activeOrgId`)
+
+The JWT carries **no org claim** — it's org-agnostic. The active org is a client-held value sent as the
+`X-Org-Id` header on every request (web: `localStorage` key `canvass.activeOrgId`, set in
+[api/client.js](../client/src/api/client.js); mobile: the same key in `AsyncStorage`). The server resolves
+and re-authorizes it per request in [middleware/orgContext.js](../server/src/middleware/orgContext.js),
+so the client's copy is a *preference*, never a grant.
+
+Because it **persists**, a bad value used to be sticky: pick an org you have no console role in, and every
+reload landed back on the same Forbidden screen until you cleared site data. Two guarantees now prevent
+that (see [ROLES.md](ROLES.md) for the full contract):
+
+- **Self-heal.** `AuthContext` clears `activeOrgId` whenever the persisted org is one the user has no
+  console role in — demoted, removed, hand-edited, or stale from an older build. Super admins are exempt
+  (they legitimately hold an `activeOrgId` for orgs they aren't members of).
+- **Auto-select is console-aware.** `autoSelectOrgId` ([lib/roles.js](../client/src/lib/roles.js)) enters
+  an org at login only when the user has console access to **exactly one**. The old rule keyed off
+  `memberships.length === 1`, which happily auto-selected a *canvasser* org.
+
+**Response codes for recovery.** `ORG_CONTEXT` (403 not-a-member / 404 org-gone / 400 bad header) means
+"that isn't your org" → both clients drop `activeOrgId` and route to the picker. `FORBIDDEN_ROLE` (403
+from any role gate) means "the org is fine, your role isn't" → the web client does *not* eject on it;
+mobile uses it to detect a mid-session role change, refetching `/auth/me`
+([mobile/lib/session.js](../mobile/lib/session.js)) and re-routing only if the role actually changed.
+Mobile otherwise cached memberships at login and never refetched them, so a demoted user kept rendering
+admin screens whose every query 403'd onto a dead Retry button.
 
 ## Input validation
 

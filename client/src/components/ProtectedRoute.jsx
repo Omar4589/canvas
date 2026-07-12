@@ -1,16 +1,33 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { isConsoleRole } from '../lib/roles.js';
 
+// The ORG-level gate. It wraps <Layout/>, so it may only ever REDIRECT — never render a
+// message in Layout's place. That was the dead end: a Forbidden <div> here nuked the
+// sidebar, the org switcher and Sign out, leaving no way out but clearing site data.
+// Role-level checks that SHOULD show a message now live in RoleGate, inside Layout.
+//
+// Props:
+//   requireActiveOrg     (default true) — an org must be selected
+//   requireConsoleAccess — USER-level: does this user hold an admin/lead role in ANY org?
+//   allowPasswordChange  — the one screen a password-owing user may see
+// requireOrgAdmin / requireSuperAdmin / requireConsoleUser are GONE — that is RoleGate's job.
 export default function ProtectedRoute({
   children,
-  requireOrgAdmin = false,
-  requireSuperAdmin = false,
-  requireConsoleUser = false,
   requireActiveOrg = true,
+  requireConsoleAccess = false,
   allowPasswordChange = false,
 }) {
-  const { user, memberships, activeOrgId, isSuperAdmin, isOrgAdmin, isConsoleUser, mustChangePassword, loading } =
-    useAuth();
+  const {
+    user,
+    memberships,
+    activeOrgId,
+    activeMembership,
+    isSuperAdmin,
+    hasConsoleAccess,
+    mustChangePassword,
+    loading,
+  } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -30,16 +47,17 @@ export default function ProtectedRoute({
     return <Navigate to="/change-password" state={{ from: location }} replace />;
   }
 
-  if (requireSuperAdmin && !isSuperAdmin) {
-    return <div className="p-8 text-danger">Forbidden — super admin access required.</div>;
+  // No memberships at all → the picker, which says "ask an admin to add you" + Sign out.
+  // Every redirect below is gated on requireActiveOrg / requireConsoleAccess, and the
+  // targets (/select-org, /change-password) are mounted with those OFF — so no branch here
+  // can fire on them and no redirect loop is possible.
+  if (requireActiveOrg && !isSuperAdmin && memberships.length === 0) {
+    return <Navigate to="/select-org" state={{ from: location }} replace />;
   }
 
-  if (!isSuperAdmin && memberships.length === 0) {
-    return (
-      <div className="p-8 text-fg-muted">
-        You're not a member of any organization yet. Ask an admin to add you.
-      </div>
-    );
+  // Can't use the console anywhere (a canvasser) → the picker explains why + Sign out.
+  if (requireConsoleAccess && !hasConsoleAccess) {
+    return <Navigate to="/select-org" state={{ from: location }} replace />;
   }
 
   if (requireActiveOrg && !activeOrgId) {
@@ -52,15 +70,14 @@ export default function ProtectedRoute({
     );
   }
 
-  if (requireOrgAdmin && !isOrgAdmin) {
-    return <div className="p-8 text-danger">Forbidden — admin access required for this org.</div>;
-  }
-
-  // Console surfaces (super/admin/team-lead) reachable without an active org — e.g. the
-  // shared /profile page, which a super admin in platform view must still be able to open.
-  // Team leads are console users too, scoped to the campaigns they manage.
-  if (requireConsoleUser && !isConsoleUser) {
-    return <div className="p-8 text-danger">Forbidden — admin access required.</div>;
+  // ── THE STRUCTURAL FIX ──
+  // There IS an active org, but this user has no console role in it. However we got here —
+  // a stale localStorage activeOrgId, a role changed under the user mid-session, a
+  // hand-typed URL — the answer is the picker, NEVER a Forbidden that replaces the Layout.
+  // AuthContext also clears the bad id (its self-heal effect), so this is belt-and-braces;
+  // the redirect guarantees correctness even in the render before that effect runs.
+  if (requireActiveOrg && !isSuperAdmin && !isConsoleRole(activeMembership?.role)) {
+    return <Navigate to="/select-org" state={{ from: location }} replace />;
   }
 
   return children;

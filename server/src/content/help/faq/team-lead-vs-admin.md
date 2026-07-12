@@ -18,4 +18,8 @@ What stays with an **org admin**:
 - Billing and account settings
 - Building or changing surveys and tags
 
-So a lead runs the operation; an admin owns the organization. See [User roles and your team](roles-and-team).
+So a lead runs the operation; an admin owns the organization.
+
+**Where a lead lands in the console:** on **Campaigns** — a lead has no org Overview, so that's their home page. The org-only areas (Users, Voters, Surveys, Tags, Billing) aren't in their navigation. If a lead reaches one of those pages by URL, they'll see an "admin access required" notice with their navigation still on screen — no dead end.
+
+See [User roles and your team](roles-and-team) and [Why doesn't my other organization show up when I sign in?](why-cant-i-see-my-other-org).

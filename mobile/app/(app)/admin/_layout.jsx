@@ -7,6 +7,7 @@ import {
   loadMemberships,
   loadActiveOrgId,
 } from '../../../lib/cache';
+import { isConsoleRole } from '../../../lib/role';
 import { useTheme } from '../../../lib/ThemeContext';
 
 function OverviewIcon({ color, size }) {
@@ -94,12 +95,11 @@ export default function AdminLayout() {
 
   const isSuperAdmin = !!user.isSuperAdmin;
   const activeMembership = memberships.find((m) => m.organizationId === activeOrgId);
-  const isOrgAdmin = activeMembership?.role === 'admin';
-  // Team leads are campaign-scoped admins — they get the admin tab too. The data
-  // itself is scoped server-side to the campaigns they manage.
-  const isLead = activeMembership?.role === 'lead';
 
-  if (!isSuperAdmin && !isOrgAdmin && !isLead) {
+  // Team leads are campaign-scoped admins — they get the admin tab too. The data itself is
+  // scoped server-side to the campaigns they manage. isConsoleRole is the shared predicate
+  // (lib/role.js), so this gate can't drift from the drawer's "Admin dashboard" row again.
+  if (!isSuperAdmin && !isConsoleRole(activeMembership?.role)) {
     return <Redirect href="/" />;
   }
 

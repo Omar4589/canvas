@@ -144,8 +144,13 @@ marks are never touched). Bulk marks never appear in per-canvasser stats or the 
 ## Navigation
 [app/(app)/admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) is a `Tabs` navigator: visible
 tabs `index` (Overview), `canvassers` (labeled **Insights** — route unchanged), `map`, `books`, `more`;
-all detail screens are `href:null` (pushed). The router gate sends `role==='admin' || isSuperAdmin` to
-`/(app)/admin`, so super admins share these screens in-org.
+all detail screens are `href:null` (pushed). The router gate sends `isConsoleRole(role) || isSuperAdmin`
+to `/(app)/admin` — i.e. admins **and team leads** (see [ROLES.md](ROLES.md)) — so super admins share
+these screens in-org. `isConsoleRole` lives in [lib/role.js](../mobile/lib/role.js) alongside the
+`isOrgAdmin` (unscoped org authority; **excludes** `lead`) vs `isConsoleUser` (may see the admin app;
+**includes** `lead`) split. Gate admin *entry points* on `isConsoleUser` — the canvasser drawer's "Admin
+dashboard" row was gated on `isOrgAdmin`, which left a lead who tapped "Switch to canvass mode" with no
+way back short of restarting the app.
 
 ## The Books screen
 [app/(app)/admin/books.jsx](../mobile/app/(app)/admin/books.jsx) — the active round's books, assignable

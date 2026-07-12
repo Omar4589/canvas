@@ -4,6 +4,7 @@ import { Redirect } from 'expo-router';
 import { useAuthToken, useAuthReady } from '../lib/authState';
 import { useTheme } from '../lib/ThemeContext';
 import { CLIENT_API_VERSION } from '../lib/config';
+import { isConsoleRole } from '../lib/role';
 import {
   loadActiveCampaign,
   loadCurrentUser,
@@ -86,7 +87,8 @@ export default function Index() {
   const role = activeMembership?.role;
 
   // Team leads land in the admin tab (scoped to their managed campaigns), like admins.
-  if (role === 'admin' || role === 'lead' || isSuperAdmin) {
+  // isConsoleRole is the shared predicate — see lib/role.js.
+  if (isConsoleRole(role) || isSuperAdmin) {
     return <Redirect href="/(app)/admin" />;
   }
   if (!boot?.campaign) return <Redirect href="/(app)/campaigns" />;

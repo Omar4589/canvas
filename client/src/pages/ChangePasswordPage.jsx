@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId, setActiveOrgId } from '../api/client.js';
-import { homePathForRole } from '../lib/homePath.js';
+import { resolveHomePath } from '../lib/homePath.js';
+import { autoSelectOrgId } from '../lib/roles.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import PasswordRequirements from '../components/PasswordRequirements.jsx';
 import { isStrongPassword, passwordProblem } from '../lib/validators.js';
@@ -28,21 +29,21 @@ export default function ChangePasswordPage() {
     if (user && !mustChangePassword) navigate(homePath, { replace: true });
   }, [user, mustChangePassword, homePath, navigate]);
 
+  // Reuses the ONE routing rule (lib/homePath.js + lib/roles.js) so this screen can't drift
+  // from login. It used to inline its own branches and ended on
+  // homePathForRole(memberships[0]?.role) — which auto-selected a canvasser org and sent
+  // that user to the admin-only /admin. The server returns the already-updated user here
+  // (mustChangePassword: false), so resolveHomePath won't bounce back to this page.
   function routeOnward(res) {
     const memberships = res.memberships || [];
-    if (res.user.isSuperAdmin) {
-      navigate(getActiveOrgId() ? '/admin' : '/super-admin', { replace: true });
-      return;
-    }
-    if (memberships.length > 1) {
-      navigate('/select-org', { replace: true });
-      return;
-    }
-    if (memberships.length === 1) {
-      setActiveOrgId(memberships[0].organizationId);
-    }
-    // A team lead has no org Overview — land them on /campaigns, not the admin-only /admin.
-    navigate(homePathForRole(memberships[0]?.role), { replace: true });
+    if (!res.user.isSuperAdmin) setActiveOrgId(autoSelectOrgId(memberships)); // null clears
+    const dest = resolveHomePath({
+      user: res.user,
+      memberships,
+      activeOrgId: getActiveOrgId(),
+    });
+    // No console access anywhere (a canvasser) → the picker explains why + offers Sign out.
+    navigate(dest || '/select-org', { replace: true });
   }
 
   async function onSubmit(e) {

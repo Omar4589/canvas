@@ -19,6 +19,16 @@ Everyone on your organization has one of three roles, and there's a platform-wid
 
 A **super admin** sits above every organization for oversight and help — that's the platform's support team, not someone in your org.
 
+## Signing in when you belong to more than one organization
+
+One account, one email — but a **separate role in each organization**. Someone can be an admin in one org and a canvasser in another, and where they land depends on which surface they sign in to:
+
+- **The web console** shows only the organizations where they're an **admin or team lead**. An org where they're a canvasser appears on the org picker greyed out under **No console access** — the work for it lives in the mobile app.
+- **If there's only one org they can run from the console, sign-in takes them straight into it** — no picker.
+- **The mobile app** shows *all* their organizations, because every role has a home there.
+
+Switching organizations in the console always lands on the new org's home page — Overview for an admin, Campaigns for a team lead.
+
 ## What a team lead can do
 
 Inside a campaign you grant them, a team lead is as powerful as an admin: import the voter file, attach a survey, build [walk lists](walk-lists), cut [turf and books](turf-and-books), run [passes](passes), [assign canvassers](assigning-canvassers), build the crew (including creating new canvasser accounts), and see all the reporting.

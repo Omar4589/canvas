@@ -34,7 +34,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Doorline needs your location to log when you knock on a door."
+          "locationWhenInUsePermission": "Doorline needs your location to log when you knock on a door, so admins can verify field activity.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false
         }
       ],
       [

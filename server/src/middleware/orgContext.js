@@ -26,11 +26,11 @@ export async function orgContext(req, res, next) {
   try {
     if (orgIdRaw) {
       if (!mongoose.isValidObjectId(orgIdRaw)) {
-        return res.status(400).json({ error: 'Invalid X-Org-Id' });
+        return res.status(400).json({ error: 'Invalid X-Org-Id', code: 'ORG_CONTEXT' });
       }
       const org = await Organization.findById(orgIdRaw);
       if (!org || !org.isActive) {
-        return res.status(404).json({ error: 'Organization not found' });
+        return res.status(404).json({ error: 'Organization not found', code: 'ORG_CONTEXT' });
       }
       if (req.user.isSuperAdmin) {
         req.activeOrg = org;
@@ -42,7 +42,14 @@ export async function orgContext(req, res, next) {
         isActive: true,
       });
       if (!membership) {
-        return res.status(403).json({ error: 'Not a member of this organization' });
+        // The caller sent an X-Org-Id for an org they're not (or are no longer) a member of.
+        // Tagged so BOTH clients self-heal identically: drop the stale activeOrgId and route
+        // to the org picker. mobile/lib/api.js already matches this case by its error STRING
+        // (ORG_CONTEXT_ERRORS); the code makes it explicit and lets the web client do the
+        // same without string-matching.
+        return res
+          .status(403)
+          .json({ error: 'Not a member of this organization', code: 'ORG_CONTEXT' });
       }
       req.activeOrg = org;
       req.activeMembership = membership;

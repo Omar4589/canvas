@@ -60,7 +60,27 @@ until an admin grants one.
   (Overview, Surveys, Tags, Voters, Users) simply aren't in their nav.
 - **Mobile admin app** — they get the same admin tab (Overview / Insights / Map / Books), scoped to
   their campaigns. If a lead also walks doors, that's a separate thing: they're added to a campaign's
-  walker roster like any canvasser and use the canvassing flow for their own books.
+  walker roster like any canvasser and use the canvassing flow for their own books. When a lead
+  switches into canvass mode, the drawer's **Admin dashboard** row brings them straight back.
+
+## If you have different roles in different organizations
+
+One account, one email — but a separate role in each org you belong to. You might be an **admin** in one
+and a **canvasser** in another. Two rules follow from that, and they're worth knowing:
+
+- **The web console only shows the orgs where you're an admin or team lead.** An org where you're a
+  canvasser can't be opened in the console — there's nothing there for you to run. It still appears on
+  the org picker, greyed out under **No console access**, so you can see it's there; the work for it
+  lives in the mobile app.
+- **If there's exactly one org you can run from the console, signing in takes you straight into it.**
+  No picker, no choice to get wrong. You'll only see the picker when you genuinely have two or more.
+
+The **mobile app** has no such restriction: every role has a home there, so *all* your orgs are
+selectable, and switching between them is how an admin-in-one/canvasser-in-another account moves between
+running a campaign and walking doors.
+
+Switching orgs in the console always lands you on that org's home page (Overview for an admin, Campaigns
+for a lead) — it never leaves you on a page belonging to the org you just left.
 
 ---
 
@@ -153,34 +173,130 @@ Member creation + validation is shared in
 The login / `/auth/me` payload carries `managedCampaignIds` on a lead membership so the client scopes
 without an extra fetch.
 
+## Who may open the console: the one predicate
+
+[client/src/lib/roles.js](../client/src/lib/roles.js) is the **single** definition of "this membership
+role can use the web console" — `CONSOLE_ROLES = ['admin', 'lead']`, plus `isConsoleRole`,
+`consoleMemberships`, `nonConsoleMemberships`, and `autoSelectOrgId`. Super admin is a global `User`
+boolean, not a membership role, so it is deliberately **not** in that list; callers pass `isSuperAdmin`
+separately to `consoleHomePath` ([lib/homePath.js](../client/src/lib/homePath.js)). Never inline
+`role === 'admin' || role === 'lead'` again.
+
+The bug that produced this file: the org picker and the sidebar switcher each built their own unfiltered
+membership list, so a user who was an admin in Org A and a **canvasser** in Org B could pick Org B, get
+routed by `homePathForRole('canvasser')` to the admin-only `/admin`, and hit a Forbidden screen that had
+replaced the whole app — no nav, no way back, and sticky across reloads because `canvass.activeOrgId`
+persists in `localStorage`.
+
+`homePathForRole` is now a lookup (`{admin: '/admin', lead: '/campaigns'}`) that returns **`null`** for
+any other role, so no role can silently land on `/admin` again. `resolveHomePath` counts *console*
+memberships: exactly one → enter it and skip the picker; two or more → the picker; zero → `null`, and the
+caller shows "you need an admin or team-lead role".
+
+## The gate invariant
+
+> **A gate that wraps `<Layout/>` may only *redirect*. A gate that renders *inside* `<Layout/>` may
+> render `<Forbidden/>`.**
+
+Breaking this rule is what made the bug unrecoverable rather than merely wrong.
+
+- [ProtectedRoute.jsx](../client/src/components/ProtectedRoute.jsx) is the **ORG-level** gate and wraps
+  `<Layout/>`, so it only ever `<Navigate>`s: not signed in → `/login`; owes a password change →
+  `/change-password`; no active org → `/select-org`; **active org but no console role in it** →
+  `/select-org`. Props are `requireActiveOrg`, `requireConsoleAccess`, `allowPasswordChange`. No
+  redirect loop is possible: every target is mounted with those flags off.
+- [RoleGate.jsx](../client/src/components/RoleGate.jsx) is the **ROLE-level** gate and lives *inside*
+  `<Layout/>` as a pathless layout route (`require="orgAdmin" | "billing" | "super"`). On failure it
+  renders [Forbidden.jsx](../client/src/components/Forbidden.jsx) in the content area, with the sidebar,
+  the org switcher and Sign out still on screen. It replaced four inline
+  `<div className="p-8 text-danger">Forbidden…</div>`s.
+
+`AuthContext` **self-heals** a stale `activeOrgId`: if the persisted org is one the user has no console
+role in (demoted, removed, hand-edited, left over from an older build), it is cleared, so the app can
+never be pinned to an unusable org across reloads. Super admins are exempt — they legitimately hold an
+`activeOrgId` for orgs they aren't members of. `AuthContext.homePath` is guaranteed non-null (falls back
+to `/select-org`) because six render-time consumers pass it straight to `<Link to>` / `navigate()`.
+
 ## Client & mobile scoping
 
-- **Web** — `AuthContext` derives `isLead`, `isConsoleUser`, `managedCampaignIds`.
-  [ProtectedRoute.jsx](../client/src/components/ProtectedRoute.jsx) `requireConsoleUser` admits leads;
-  [App.jsx](../client/src/App.jsx) splits the admin area into a **console group** (`requireConsoleUser` —
-  all campaign pages, incl. import + the campaign Survey *select*) and an **org-admin group**
-  (`requireOrgAdmin` — Overview, the survey-template *builder*, Surveys, Tags, Voters, Users, queues).
-  Route ranking keeps `/campaigns/:id/survey/new|edit` (builder, admin) ahead of
-  `/campaigns/:id/survey` (attach, console). Nav ([navItems.js](../client/src/components/navItems.js) +
-  [Layout.jsx](../client/src/components/Layout.jsx) + [BottomNav.jsx](../client/src/components/BottomNav.jsx))
-  filters the top-level list to `leadVisible` (just Campaigns) for a lead; the full campaign drill-in nav
-  is unchanged. [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) hides create/edit/archive/delete
-  for leads; [CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) hides the build/edit
-  affordances; [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) reads the picker from the
-  `crew` endpoint and gives leads an inline create-canvasser modal. Login/select-org land a lead on
-  `/campaigns` (they have no `/admin` Overview).
-- **Mobile** — [admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) admits `lead`;
-  [index.jsx](../mobile/app/index.jsx) lands a lead in the admin tab; the admin landing's
-  `/admin/reports/campaign-rollup` self-scopes to managed campaigns, and every deeper admin screen
-  (Insights / Map / Books) is per-campaign, so it inherits the scope. The org Users row is hidden for
-  leads in [more.jsx](../mobile/app/(app)/admin/more.jsx). The **canvasser** flow is untouched — a lead
-  who walks is scoped as a canvasser via `CampaignAssignment` exactly like anyone else.
+- **Web** — `AuthContext` derives `isOrgAdmin`, `isLead`, `isConsoleUser` (the *active* org) and
+  `hasConsoleAccess` (*any* org), plus `managedCampaignIds`. [App.jsx](../client/src/App.jsx) mounts
+  **two** `<Layout/>` shells: an **org-scoped** one (`requireConsoleAccess` — all campaign pages, incl.
+  import and the campaign Survey select *and builder*, which leads may reach; the server's
+  `canManageSurvey` enforces per-survey scope) with a nested `RoleGate require="orgAdmin"` around the
+  org-admin screens (Overview, Surveys, Tags, Voters, Users, queues) and a `RoleGate require="billing"`
+  nested inside that around `/billing`; and an **org-agnostic** one (`requireActiveOrg={false}` —
+  `/profile`, `/help`) with a nested `RoleGate require="super"` around the platform screens. Nav
+  ([navItems.js](../client/src/components/navItems.js) + [Layout.jsx](../client/src/components/Layout.jsx)
+  + [BottomNav.jsx](../client/src/components/BottomNav.jsx)) filters the top-level list to `leadVisible`
+  (just Campaigns) for a lead; the full campaign drill-in nav is unchanged.
+  [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) hides create/edit/archive/delete for leads;
+  [CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) hides the build/edit affordances;
+  [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) reads the picker from the `crew`
+  endpoint and gives leads an inline create-canvasser modal. Login/select-org land a lead on `/campaigns`
+  (they have no `/admin` Overview).
+- **The two org lists** — [SelectOrgPage.jsx](../client/src/pages/SelectOrgPage.jsx) makes only
+  `consoleMemberships` selectable, renders `nonConsoleMemberships` as a muted, non-interactive **"No
+  console access"** section pointing at the mobile app, and auto-enters when there is exactly one console
+  org. [OrgSwitcher.jsx](../client/src/components/OrgSwitcher.jsx) lists only `consoleMemberships` and,
+  critically, **navigates to the new org's role home on every switch**. Not navigating was a second bug:
+  a URL is org-scoped, so switching while sitting on `/users` (admin → lead org) 403'd, and switching
+  while drilled into `/campaigns/<old org's id>` produced "Campaign not found".
+- **Mobile** — canvasser-first, so **every** membership is selectable and there is no Forbidden screen
+  anywhere: every gate is a `<Redirect>`, and the root re-router ([index.jsx](../mobile/app/index.jsx))
+  re-derives the role after each org switch. [lib/role.js](../mobile/lib/role.js) mirrors the web split —
+  `isOrgAdmin` (unscoped org authority; **excludes** `lead`) vs `isConsoleUser` / `isConsoleRole` (may see
+  the admin app; **includes** `lead`). Gate admin *entry points* on `isConsoleUser`, billing/org-wide
+  affordances on `isOrgAdmin`. [admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) and
+  [index.jsx](../mobile/app/index.jsx) both use `isConsoleRole`; the canvasser drawer's **Admin
+  dashboard** row is gated on `isConsoleUser` (it was `isOrgAdmin`, which stranded a lead who switched to
+  canvass mode). The org Users row is hidden for leads in
+  [more.jsx](../mobile/app/(app)/admin/more.jsx). The **canvasser** flow is untouched — a lead who walks
+  is scoped as a canvasser via `CampaignAssignment` exactly like anyone else.
+
+## Machine-readable 403s
+
+Both role gates in [middleware/auth.js](../server/src/middleware/auth.js) (`requireOrgRole`,
+`requireOrgMember`, `requireCampaignManager`) return `403 { error, code: 'FORBIDDEN_ROLE' }`, and every
+org-resolution failure in [middleware/orgContext.js](../server/src/middleware/orgContext.js) (not a
+member → 403, org not found → 404, bad header → 400) carries `code: 'ORG_CONTEXT'`. The distinction is
+what lets the clients self-heal *correctly*:
+
+- **`ORG_CONTEXT`** = "that isn't your org" → drop `activeOrgId`, route to the picker. Both clients do
+  this ([client/src/api/client.js](../client/src/api/client.js);
+  [mobile/app/_layout.jsx](../mobile/app/_layout.jsx)'s `QueryCache.onError`).
+- **`FORBIDDEN_ROLE`** = "the org is fine, your role isn't." The web client deliberately does **not**
+  eject on this (a lead calling an admin-only endpoint is a bug to fix, not a reason to sign them out).
+  Mobile uses it to detect a **mid-session role change**: it refetches `/auth/me` via
+  [lib/session.js](../mobile/lib/session.js) and only re-routes if the role actually changed — which
+  makes the recovery loop-proof. `refreshSession()` also runs on app foreground, on the authenticated
+  shell mounting, and before the org picker lists memberships, since mobile otherwise cached roles at
+  login and never refetched them.
 
 ## Verification
 
-Server files pass `node --check`; the client passes `npm run build`. The authorization matrix is covered
-by a throwaway-mongod integration test ([teamLead.int.test.js](../server/test/teamLead.int.test.js)):
-seed an org, an admin, and a lead granted campaign A only (with a campaign B they don't manage), then
-assert the lead gets 200 on A's field routes / import / scoped reports / campaign survey PATCH, and 403
-on the same for B, on campaign create/archive/delete, on the org survey/tag mutations and the org Users
-admin — while 200 on `.../crew` — and that `GET /admin/campaigns` returns only A.
+Server files pass `node --check`; the client passes `npm run build`.
+
+**The console-access rule** is a pure function, so it's unit-tested with no React, DOM or DB:
+[client/src/lib/homePath.test.js](../client/src/lib/homePath.test.js) (`npm --prefix client test`) walks
+the roles × org-count matrix and locks the regressions — `homePathForRole('canvasser') === null`;
+admin-in-A + canvasser-in-B resolves to `/admin` **even with a stale `activeOrgId` pointing at B**;
+`autoSelectOrgId` never picks a canvasser org; and `consoleHomePath` still handles the synthetic
+`'super_admin'` role the two org lists build (the trap in the refactor — a lookup map returns `null` for
+it, which would have silently broken super-admin org entry).
+
+**The authorization matrix** is covered by throwaway-mongod integration tests (`npm --prefix server run
+test:int`):
+
+- [teamLead.int.test.js](../server/test/teamLead.int.test.js) — seed an org, an admin, and a lead granted
+  campaign A only (with a campaign B they don't manage), then assert the lead gets 200 on A's field
+  routes / import / scoped reports / campaign survey PATCH, and 403 on the same for B, on campaign
+  create/archive/delete, on the org survey/tag mutations and the org Users admin — while 200 on
+  `.../crew` — and that `GET /admin/campaigns` returns only A. Also asserts role 403s carry
+  `code: 'FORBIDDEN_ROLE'` at both the org and campaign gate.
+- [multiOrgRoles.int.test.js](../server/test/multiOrgRoles.int.test.js) — the mixed-role contract: ONE
+  user who is `admin` in Org A and `canvasser` in Org B. Asserts login returns **both** memberships with
+  their true roles (the client's picker filter depends on the canvasser row being present), that
+  admin-only routes with `X-Org-Id: B` are 403 + `FORBIDDEN_ROLE` (the server never trusted the client's
+  role logic), that an org with no membership is 403 + `ORG_CONTEXT` (a *different* recovery), and that
+  Org B still serves the routes a canvasser is entitled to.

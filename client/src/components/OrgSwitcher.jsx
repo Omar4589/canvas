@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
+import { consoleHomePath } from '../lib/homePath.js';
+import { consoleMemberships } from '../lib/roles.js';
 
 export default function OrgSwitcher() {
   const { memberships, activeOrgId, switchOrg, isSuperAdmin } = useAuth();
@@ -28,7 +30,9 @@ export default function OrgSwitcher() {
         role: 'super_admin',
       }));
     }
-    return memberships;
+    // Only orgs this user can actually OPEN. Listing a canvasser membership here made it
+    // clickable, and picking it dropped the user on an admin URL they'd be Forbidden from.
+    return consoleMemberships(memberships);
   }, [isSuperAdmin, allOrgs, memberships]);
 
   const active = list.find((m) => m.organizationId === activeOrgId);
@@ -41,10 +45,19 @@ export default function OrgSwitcher() {
     });
   }
 
-  function pick(orgId) {
+  function pick(orgId, role) {
     switchOrg(orgId);
     setOpen(false);
     resetOrgScopedCache();
+    // ALWAYS land on the new org's role home. The old pick() didn't navigate at all, so the
+    // URL survived the switch — and a URL is org-scoped:
+    //   • admin-org → lead-org while sitting on /users → an admin-only URL in an org where
+    //     you're only a lead → Forbidden.
+    //   • admin-org → admin-org while sitting on /campaigns/<A's id>/turfs → a campaign id
+    //     that doesn't exist in the new org → "Campaign not found".
+    // Going home on every switch fixes both classes at once.
+    const home = consoleHomePath({ isSuperAdmin, role, hasActiveOrg: true }) || '/select-org';
+    navigate(home, { replace: true });
   }
 
   function pickPlatform() {
@@ -96,7 +109,7 @@ export default function OrgSwitcher() {
             {list.map((m) => (
               <li key={m.organizationId}>
                 <button
-                  onClick={() => pick(m.organizationId)}
+                  onClick={() => pick(m.organizationId, m.role)}
                   className={[
                     'flex w-full items-center justify-between px-3 py-2 text-left text-sm',
                     m.organizationId === activeOrgId

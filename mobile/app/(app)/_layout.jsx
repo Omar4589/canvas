@@ -1,13 +1,22 @@
+import { useEffect } from 'react';
 import { View } from 'react-native';
 import { Stack, Redirect } from 'expo-router';
 import { useAuthToken, useAuthReady } from '../../lib/authState';
 import AddedToOrgBanner from '../../components/AddedToOrgBanner';
 import { DrawerProvider } from '../../lib/DrawerContext';
 import CanvasserDrawer from '../../components/CanvasserDrawer';
+import { refreshSession } from '../../lib/session';
 
 export default function AppLayout() {
   const token = useAuthToken();
   const ready = useAuthReady();
+
+  // Cold start: the cached memberships could be weeks old. Re-pull them once so every role
+  // gate below (admin tab, drawer, root re-router) decides on current data. Throttled and
+  // failure-tolerant — see lib/session.js.
+  useEffect(() => {
+    if (token) refreshSession();
+  }, [token]);
 
   if (!ready) return null;
   if (!token) return <Redirect href="/login" />;

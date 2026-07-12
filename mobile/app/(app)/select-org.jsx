@@ -20,6 +20,7 @@ import {
   clearActiveCampaign,
   clearBootstrap,
 } from '../../lib/cache';
+import { refreshSession } from '../../lib/session';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
@@ -38,6 +39,10 @@ export default function SelectOrgScreen() {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      // Re-pull memberships before listing them, so the picker (and the root re-router it
+      // hands off to) sees the CURRENT roles rather than the snapshot taken at login. A
+      // failure here is a no-op — the cached copy is used, so this still works offline.
+      await refreshSession({ force: true });
       const [u, mems] = await Promise.all([loadCurrentUser(), loadMemberships()]);
       if (!mounted) return;
       setUser(u);

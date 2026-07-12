@@ -13,6 +13,8 @@ Welcome! Here's the whole flow on your first day in the field.
 
 ## Getting to your doors
 
+Everything you need is right here in the app — the web console is for admins and team leads, so there's nothing there for you to do. If you're *also* an admin somewhere else, that organization is the one you'd open in the console; this one lives in the app.
+
 1. **Sign in** with the email and temporary password your admin or team lead gave you. On that first sign-in you'll be asked to set your own strong password.
 2. **Pick your campaign** on the "Pick a campaign" screen. If a campaign is split into several walk lists, it expands so you can pick the one you're working — then you land on your books.
 3. **Open a book** — your assigned books are waiting as pins on a map. Each book is an ordered list of houses for you to walk. The card at the top tells you two things: the campaign's **key dates** (Election Day with the actual date and how far off it is, plus the early-voting window) and a **legend** showing what the book pins mean — **Not started**, **In progress**, **Done**. Tap a book, then **Enter** to start.

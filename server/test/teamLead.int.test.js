@@ -190,6 +190,22 @@ test('libraries: lead reads surveys/tags but cannot mutate them, and cannot reac
   assert.strictEqual((await call('GET', '/api/admin/voters', opt)).status, 403, 'org voters');
 });
 
+test('a role 403 carries code FORBIDDEN_ROLE', { skip }, async () => {
+  const { leadTok, org, B } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  // Machine-readable so a client can tell "your role is too low here" apart from "that's not
+  // your org" (ORG_CONTEXT). Mobile uses it to notice a mid-session demotion; without it the
+  // body is a bare {error:'Forbidden'} and no client can act on it. Covers both role gates:
+  // requireOrgRole (org-level) and requireCampaignManager (campaign-level).
+  const orgLevel = await call('GET', '/api/admin/memberships', opt);
+  assert.strictEqual(orgLevel.status, 403);
+  assert.strictEqual(orgLevel.json.code, 'FORBIDDEN_ROLE');
+
+  const campaignLevel = await call('GET', `/api/admin/campaigns/${B._id}/turfs`, opt);
+  assert.strictEqual(campaignLevel.status, 403);
+  assert.strictEqual(campaignLevel.json.code, 'FORBIDDEN_ROLE');
+});
+
 test('lead survey edit/duplicate is scoped: own or managed-attached yes, unmanaged no', { skip }, async () => {
   const { leadTok, org, survOverrideA, survDefaultB, survLeadDraft } = ctx;
   const opt = { token: leadTok, orgId: org._id };

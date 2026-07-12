@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
-import { useAuth } from './auth/AuthContext.jsx';
+import RoleGate from './components/RoleGate.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
@@ -59,17 +59,6 @@ function PageFallback() {
   );
 }
 
-// The /billing route sits in the org-admin group, but billing is further gated to super
-// admins + org admins granted billing access. Match ProtectedRoute's Forbidden state for
-// an admin who reaches the URL directly without that grant.
-function BillingRoute() {
-  const { canViewBilling } = useAuth();
-  if (!canViewBilling) {
-    return <div className="p-8 text-danger">Forbidden — billing access required for this org.</div>;
-  }
-  return <BillingPage />;
-}
-
 // Back-compat: old /dashboard/:campaignId → the campaign home at /campaigns/:campaignId.
 function DashboardRedirect() {
   const { campaignId } = useParams();
@@ -119,29 +108,20 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        {/* ── Console shell A: ORG-SCOPED. One Layout for every in-org console screen.
+            The outer gate is ORG-level only (auth → password → membership → active org →
+            "do you have a console role in THIS org?") and may only REDIRECT. Role gates
+            live INSIDE, as nested RoleGate layout routes, so a Forbidden keeps the sidebar,
+            the org switcher and Sign out on screen. See components/RoleGate.jsx. */}
         <Route
           element={
-            <ProtectedRoute requireSuperAdmin requireActiveOrg={false}>
+            <ProtectedRoute requireConsoleAccess>
               <Layout />
             </ProtectedRoute>
           }
         >
-          <Route path="/super-admin" element={<SuperAdminHomePage />} />
-          <Route path="/super-admin/users" element={<SuperAdminUsersPage />} />
-          <Route path="/super-admin/people" element={<SuperAdminPeoplePage />} />
-          <Route path="/super-admin/people/:personId" element={<PersonDetailPage />} />
-          <Route path="/super-admin/imports" element={<SuperAdminImportsPage />} />
-          <Route path="/organizations" element={<OrganizationsPage />} />
-        </Route>
-        {/* Campaign console — team leads (campaign-scoped admins) reach these too; the
-            server scopes every response to the campaigns they manage. */}
-        <Route
-          element={
-            <ProtectedRoute requireConsoleUser>
-              <Layout />
-            </ProtectedRoute>
-          }
-        >
+          {/* Campaign console — team leads (campaign-scoped admins) reach these too; the
+              server scopes every response to the campaigns they manage. */}
           <Route path="/campaigns" element={<CampaignsPage />} />
           {/* Campaign drill-in — the URL is the active campaign */}
           <Route path="/campaigns/:campaignId" element={<DashboardPage />} />
@@ -176,31 +156,35 @@ export default function App() {
           <Route path="/early-voting" element={<Navigate to="/campaigns" replace />} />
           <Route path="/admin/client-reports" element={<Navigate to="/campaigns" replace />} />
           <Route path="/admin/client-reports/:id" element={<Navigate to="/campaigns" replace />} />
+
+          {/* Org administration — org admins / super only (NOT team leads). A lead who
+              hand-types /users now gets a friendly in-console Forbidden with the nav still
+              there, instead of a bare div that replaced the whole app. */}
+          <Route element={<RoleGate require="orgAdmin" />}>
+            <Route path="/admin" element={<OverviewPage />} />
+            <Route path="/queues" element={<QueuesPage />} />
+            <Route path="/users" element={<UsersPage />} />
+            <Route path="/voters" element={<VotersPage />} />
+            <Route path="/voters/:voterId" element={<VoterDetailPage />} />
+            <Route path="/surveys" element={<SurveysPage />} />
+            <Route path="/surveys/new" element={<SurveyEditorPage mode="new" />} />
+            <Route path="/surveys/:surveyId/edit" element={<SurveyEditorPage mode="edit" />} />
+            <Route path="/tags" element={<TagsPage />} />
+            <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />
+            {/* Billing is further gated to admins granted billingAccess. */}
+            <Route element={<RoleGate require="billing" />}>
+              <Route path="/billing" element={<BillingPage />} />
+            </Route>
+          </Route>
         </Route>
-        {/* Org administration — org admins / super only (NOT team leads). */}
+        {/* ── Console shell B: ORG-AGNOSTIC. Reachable without an active org — the shared
+            /profile + /help, and the super-admin platform screens. Gated on
+            hasConsoleAccess ("an admin/lead role in ANY org?") rather than the active
+            membership, so a multi-org admin who hasn't picked an org yet can still open
+            Help. */}
         <Route
           element={
-            <ProtectedRoute requireOrgAdmin>
-              <Layout />
-            </ProtectedRoute>
-          }
-        >
-          <Route path="/admin" element={<OverviewPage />} />
-          {/* Org-level screens */}
-          <Route path="/queues" element={<QueuesPage />} />
-          <Route path="/users" element={<UsersPage />} />
-          <Route path="/voters" element={<VotersPage />} />
-          <Route path="/voters/:voterId" element={<VoterDetailPage />} />
-          <Route path="/surveys" element={<SurveysPage />} />
-          <Route path="/surveys/new" element={<SurveyEditorPage mode="new" />} />
-          <Route path="/surveys/:surveyId/edit" element={<SurveyEditorPage mode="edit" />} />
-          <Route path="/tags" element={<TagsPage />} />
-          <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />
-          <Route path="/billing" element={<BillingRoute />} />
-        </Route>
-        <Route
-          element={
-            <ProtectedRoute requireConsoleUser requireActiveOrg={false}>
+            <ProtectedRoute requireConsoleAccess requireActiveOrg={false}>
               <Layout />
             </ProtectedRoute>
           }
@@ -210,6 +194,14 @@ export default function App() {
               outside the billing gate and self-scopes to the caller's role). */}
           <Route path="/help" element={<HelpPage />} />
           <Route path="/help/:slug" element={<HelpArticlePage />} />
+          <Route element={<RoleGate require="super" />}>
+            <Route path="/super-admin" element={<SuperAdminHomePage />} />
+            <Route path="/super-admin/users" element={<SuperAdminUsersPage />} />
+            <Route path="/super-admin/people" element={<SuperAdminPeoplePage />} />
+            <Route path="/super-admin/people/:personId" element={<PersonDetailPage />} />
+            <Route path="/super-admin/imports" element={<SuperAdminImportsPage />} />
+            <Route path="/organizations" element={<OrganizationsPage />} />
+          </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

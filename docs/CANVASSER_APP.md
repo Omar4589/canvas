@@ -204,12 +204,35 @@ Expo Router, file-based. The authenticated group is a flat stack with native hea
 (`headerShown: false`) — every screen renders its own header.
 
 - Root redirect: [app/index.jsx](../mobile/app/index.jsx) routes by role/state (no token → login;
-  no org → select-org; admin/super → admin/super-admin; canvasser without a campaign → campaigns;
-  otherwise → map).
+  no org → select-org; console role (`isConsoleRole` — admin **or** lead) or super → admin/super-admin;
+  canvasser without a campaign → campaigns; otherwise → map). **Every role has a valid home here**, which
+  is why the org picker offers *all* memberships on mobile (unlike the web console, which is admin/lead
+  only — see [ROLES.md](ROLES.md)) and why there is no Forbidden screen anywhere in the app: every gate
+  is a `<Redirect>` back through this re-router.
 - Group + overlays: [app/(app)/_layout.jsx](../mobile/app/(app)/_layout.jsx).
 - Canvasser screens: [select-org.jsx](../mobile/app/(app)/select-org.jsx),
   [campaigns.jsx](../mobile/app/(app)/campaigns.jsx), [books.jsx](../mobile/app/(app)/books.jsx),
   [map.jsx](../mobile/app/(app)/map.jsx).
+
+### Session & role recovery
+
+The app used to cache `user` + `memberships` at **login only** and never refetch, so a role changed
+server-side mid-session left it rendering screens whose every query 403'd onto a Retry button that could
+never succeed. [lib/session.js](../mobile/lib/session.js)'s `refreshSession()` re-pulls `/auth/me` and
+re-saves the identity payload. It is throttled (≤1/min), idempotent, and **failure-tolerant** — offline it
+keeps the cached copy and tries later, so a canvasser in a dead zone is never logged out. It runs on app
+**foreground**, on the authenticated shell **mounting** (cold start), and **before the org picker lists
+memberships**, so the root re-router always decides on fresh roles.
+
+Two error codes drive the central recovery in [app/_layout.jsx](../mobile/app/_layout.jsx)'s
+`QueryCache.onError` (tagged in [lib/api.js](../mobile/lib/api.js)):
+
+- **`ORG_CONTEXT`** — the active org is invalid (stale id, removed from the org). Clear the org +
+  campaign, `queryClient.clear()`, bounce to `/`.
+- **`FORBIDDEN_ROLE`** — the org is fine but the role isn't. This is *ambiguous*: it usually means a
+  screen called an endpoint above its role (a bug), but it can also mean the user was demoted mid-session.
+  So the handler refetches and **re-routes only if the role actually changed** — which is what makes it
+  loop-proof rather than an endless bounce through the re-router.
 
 Admins have their own bottom-tab navigator under `app/(app)/admin/` with a "More" tab; the canvasser
 drawer below is for the canvasser screens only.

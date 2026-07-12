@@ -67,7 +67,13 @@ export default function CanvasserDrawer() {
   const panelWidth = Math.min(360, width * 0.86);
 
   const [user, setUser] = useState(null);
-  const [ctx, setCtx] = useState({ isOrgAdmin: false, isSuperAdmin: false, memberships: [] });
+  const [ctx, setCtx] = useState({
+    isOrgAdmin: false,
+    isLead: false,
+    isConsoleUser: false,
+    isSuperAdmin: false,
+    memberships: [],
+  });
   const [activeCampaign, setActiveCampaign] = useState(null);
   const [orgName, setOrgName] = useState(null);
 
@@ -209,7 +215,11 @@ export default function CanvasserDrawer() {
                 {ctx.isSuperAdmin && (
                   <Row icon="🌐" label="Platform view" sub="All organizations" onPress={onPlatformView} />
                 )}
-                {ctx.isOrgAdmin && (
+                {/* isConsoleUser, NOT isOrgAdmin — a team lead reaches the admin tab too
+                    (admin/_layout.jsx admits them). Gating on isOrgAdmin hid this row from
+                    leads, so a lead who tapped "Switch to canvass mode" was stuck in the
+                    canvasser flow until they restarted the app. */}
+                {ctx.isConsoleUser && (
                   <Row icon="🛠" label="Admin dashboard" onPress={onAdminDashboard} />
                 )}
                 {canSwitchOrg && (

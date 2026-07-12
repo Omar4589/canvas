@@ -77,9 +77,19 @@ export async function api(
       const err = new Error(data?.error || `Request failed: ${res.status}`);
       err.status = res.status;
       err.data = data;
-      // Tag org-context failures so the global handler can recover gracefully.
+      // Tag org-context failures so the global handler can recover gracefully. The server
+      // now also sends code:'ORG_CONTEXT' explicitly (middleware/orgContext.js); keep the
+      // string set as the fallback so an older server still recovers.
       if (res.status === 400 || res.status === 403 || res.status === 404) {
-        if (ORG_CONTEXT_ERRORS.has(data?.error)) err.code = 'ORG_CONTEXT';
+        if (data?.code === 'ORG_CONTEXT' || ORG_CONTEXT_ERRORS.has(data?.error)) {
+          err.code = 'ORG_CONTEXT';
+        }
+      }
+      // "Your ROLE is too low for this endpoint." Distinct from ORG_CONTEXT: the org is
+      // fine, the role isn't. Usually a screen bug — but it ALSO fires when a role changed
+      // under the user mid-session, which the global handler disambiguates by refetching.
+      if (res.status === 403 && data?.code === 'FORBIDDEN_ROLE' && !err.code) {
+        err.code = 'FORBIDDEN_ROLE';
       }
       throw err;
     }

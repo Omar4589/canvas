@@ -33,7 +33,13 @@ export function requireOrgRole(...roles) {
     if (req.user.isSuperAdmin) return next();
     const role = req.activeMembership?.role;
     if (!role || !roles.includes(role)) {
-      return res.status(403).json({ error: 'Forbidden' });
+      // Machine-readable so clients can tell "your ROLE is too low here" apart from "your
+      // ORG context is invalid" (orgContext.js emits ORG_CONTEXT for that). Mobile uses it
+      // to notice a mid-session demotion and re-derive its route from a fresh /auth/me; the
+      // web client deliberately does NOT auto-recover on it — a lead calling an admin-only
+      // endpoint is a bug to fix, not a reason to eject them from the org. Mirrors
+      // passwordGate's code:'PASSWORD_CHANGE_REQUIRED'.
+      return res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN_ROLE' });
     }
     next();
   };
@@ -42,7 +48,9 @@ export function requireOrgRole(...roles) {
 export function requireOrgMember(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   if (req.user.isSuperAdmin) return next();
-  if (!req.activeMembership) return res.status(403).json({ error: 'No active org membership' });
+  if (!req.activeMembership) {
+    return res.status(403).json({ error: 'No active org membership', code: 'FORBIDDEN_ROLE' });
+  }
   next();
 }
 
@@ -54,7 +62,7 @@ export function requireCampaignManager(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   Promise.resolve(canManageCampaign(req, req.params.campaignId))
     .then((ok) => {
-      if (!ok) return res.status(403).json({ error: 'Forbidden' });
+      if (!ok) return res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN_ROLE' });
       next();
     })
     .catch(next);
