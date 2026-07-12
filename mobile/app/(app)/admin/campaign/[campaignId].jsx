@@ -18,6 +18,7 @@ import NavTileGrid from '../../../../components/NavTileGrid';
 import DateRangeBar from '../../../../components/DateRangeBar';
 import CanvasserCard from '../../../../components/CanvasserCard';
 import InfoHint from '../../../../components/InfoHint';
+import ElectionCountdownChip from '../../../../components/ElectionCountdownChip';
 import { rangeFor, deviceTimezone } from '../../../../lib/dateRanges';
 import { rateFromPct, makeRateColors } from '../../../../lib/rates';
 import { metricHelp } from '../../../../lib/metricHelp';
@@ -247,6 +248,19 @@ export default function CampaignDetail() {
             <Text style={styles.bannerText}>
               This campaign is archived — data is read-only. Reactivate it from the web to resume canvassing.
             </Text>
+          </View>
+        )}
+
+        {campaign && (
+          <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.sm }}>
+            <ElectionCountdownChip
+              electionDay={campaign.electionDay}
+              earlyVotingStart={campaign.earlyVotingStart}
+              earlyVotingEnd={campaign.earlyVotingEnd}
+              timeZone={campaign.timeZone}
+              datesNote={campaign.datesNote}
+              showNote
+            />
           </View>
         )}
 

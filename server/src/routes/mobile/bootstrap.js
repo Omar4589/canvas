@@ -282,6 +282,12 @@ router.get('/bootstrap', async (req, res, next) => {
         type: campaign.type,
         state: campaign.state,
         timeZone: campaign.timeZone || 'America/New_York',
+        // Key dates — additive; older clients ignore them. Carried in-campaign (not just on the
+        // picker) so the Books header + mobile admin detail can show the Election Day countdown.
+        electionDay: campaign.electionDay ?? null,
+        earlyVotingStart: campaign.earlyVotingStart ?? null,
+        earlyVotingEnd: campaign.earlyVotingEnd ?? null,
+        datesNote: campaign.datesNote ?? '',
       },
       activeSurvey: survey,
       surveys,

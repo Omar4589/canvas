@@ -23,6 +23,7 @@ import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import MapControlStack from '../../components/MapControlStack';
 import EffortPicker from '../../components/EffortPicker';
+import ElectionCountdownChip from '../../components/ElectionCountdownChip';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -374,6 +375,15 @@ export default function BooksScreen() {
             <EffortPicker efforts={efforts} value={currentEffort} onChange={onEffortChange} />
           </View>
         )}
+        {data?.campaign && (
+          <ElectionCountdownChip
+            electionDay={data.campaign.electionDay}
+            earlyVotingStart={data.campaign.earlyVotingStart}
+            earlyVotingEnd={data.campaign.earlyVotingEnd}
+            timeZone={data.campaign.timeZone}
+            style={styles.keyDatesBar}
+          />
+        )}
         <View style={styles.hint}>
           <Text style={styles.hintText}>
             Tap your books to pick where to start. Grey = not started · yellow = in progress · green = done.
@@ -436,6 +446,16 @@ function makeStyles(t) {
     borderColor: colors.border,
   },
   hintText: { fontSize: 12, color: colors.textSecondary },
+  keyDatesBar: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    backgroundColor: colors.chromeBar,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   enterWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, alignItems: 'center' },
   enterButton: {
     backgroundColor: colors.brand,

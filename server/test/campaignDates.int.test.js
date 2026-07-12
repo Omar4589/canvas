@@ -177,3 +177,13 @@ test('GET /mobile/campaigns includes the four fields on each item', { skip }, as
   assert.strictEqual(item.earlyVotingEnd, '2026-10-25');
   assert.strictEqual(item.datesNote, 'Runoff moved.');
 });
+
+test('GET /mobile/bootstrap carries the four key-date fields on the campaign (in-campaign)', { skip }, async () => {
+  // The in-campaign payload feeds the canvasser Books header + mobile admin detail chip.
+  const r = await call('GET', `/mobile/bootstrap?campaignId=${ctx.campId}`, auth());
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.json.campaign.electionDay, '2026-11-10');
+  assert.strictEqual(r.json.campaign.earlyVotingStart, '2026-10-19');
+  assert.strictEqual(r.json.campaign.earlyVotingEnd, '2026-10-25');
+  assert.strictEqual(r.json.campaign.datesNote, 'Runoff moved.');
+});

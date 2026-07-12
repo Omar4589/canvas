@@ -84,6 +84,10 @@ you're in more than one effort, an **effort switcher** sits at the top to flip b
 book, then **Enter** to open it on the houses map. The same **bottom-right controls** as the houses
 map are here too — Refresh, the terrain / base-map picker, and recenter (follow your location).
 
+If the campaign has key dates, a compact **Election Day countdown** ("🗳 12 days to Election Day")
+and the early-voting status ride along in the header here too — so the deadline stays in front of you
+while you work, not just on the "Pick a campaign" screen.
+
 ## Map or list — two ways to work the same doors
 
 A **Map / List** toggle at the top switches between the pin map and a scrollable **list** of the same

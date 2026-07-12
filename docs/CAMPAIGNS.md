@@ -80,9 +80,13 @@ admins only — leads see them but can't change them):
 
 **Canvassers see them too**: the mobile "Pick a campaign" screen shows the countdown chip
 ("🗳 12 days to Election Day"), the early-voting state, and the note under each campaign — so the
-field team knows the stakes without asking. All countdown math runs in the **campaign's timezone**
-(dates are stored as plain `YYYY-MM-DD` civil dates), so every admin and canvasser sees the same
-day regardless of where they are.
+field team knows the stakes without asking. The same compact chip now also rides along **inside** a
+campaign, so the countdown doesn't disappear the moment they start knocking: it appears in the header
+of the canvasser's **Books** screen (countdown + early-voting state, no note — kept glanceable over
+the map) and on the mobile **admin campaign detail** screen (with the note, for leads/admins working
+from their phone). All countdown math runs in the **campaign's timezone** (dates are stored as plain
+`YYYY-MM-DD` civil dates), so every admin and canvasser sees the same day regardless of where they
+are.
 
 ## Navigating a campaign (the drill-in)
 
@@ -216,8 +220,10 @@ is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archiv
 - **Where the fields surface:** GET `/admin/campaigns` (lean-doc spread — automatic), the
   per-campaign rows of GET `/admin/reports/campaign-rollup` (added to its projection + row object in
   [reports.js](../server/src/routes/admin/reports.js) — it picks fields, nothing flows automatically),
-  and GET `/mobile/campaigns` ([bootstrap.js](../server/src/routes/mobile/bootstrap.js), additive so
-  older clients ignore them). Covered end-to-end by
+  GET `/mobile/campaigns` (the picker) **and** the per-campaign GET `/mobile/bootstrap` `campaign`
+  object ([bootstrap.js](../server/src/routes/mobile/bootstrap.js) — both additive, so older clients
+  ignore them; bootstrap carries them so the Books header + mobile admin detail can show the chip
+  in-campaign, not just on the picker). Covered end-to-end by
   [campaignDates.int.test.js](../server/test/campaignDates.int.test.js).
 - **DELETE `/admin/campaigns/:id`** — **only when `!hasCanvassed`** (else `400 { code: 'has-activity' }`).
   Cascades via [deleteCampaign.js](../server/src/services/campaigns/deleteCampaign.js):
@@ -275,5 +281,9 @@ The cold-start readiness chain is a pure derivation in
   formatting goes through UTC-anchored parts so a `'YYYY-MM-DD'` never shifts a day. The campaign
   dashboard header ([DashboardPage.jsx](../client/src/pages/DashboardPage.jsx)) and the mobile
   campaign picker ([campaigns.jsx](../mobile/app/(app)/campaigns.jsx)) render from the same helpers.
+  On mobile, the compact in-campaign chip is one shared component,
+  [ElectionCountdownChip.jsx](../mobile/components/ElectionCountdownChip.jsx), reused by the canvasser
+  Books header ([books.jsx](../mobile/app/(app)/books.jsx)) and the mobile admin campaign detail
+  ([admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)).
 - Extend-a-campaign guards: [EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) — the ClaimPanel
   "Claim all Intake" count + note + confirm modal, and the per-effort readiness chip on each row.
