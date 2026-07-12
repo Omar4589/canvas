@@ -79,9 +79,9 @@ effort, so this keeps two different "Book 6"s from colliding.)
 
 ## The book picker
 
-A map of your books as colored pins — grey (not started), yellow (in progress), green (done). If
-you're in more than one effort, an **effort switcher** sits at the top to flip between them. Tap a
-book, then **Enter** to open it on the houses map. The same **bottom-right controls** as the houses
+A map of your books as colored pins (the legend at the top says which is which). If you're in more
+than one effort, an **effort switcher** sits at the top to flip between them. Tap a book, then
+**Enter** to open it on the houses map. The same **bottom-right controls** as the houses
 map are here too — Refresh, the terrain / base-map picker, and recenter (follow your location).
 
 The key dates and the pin legend share **one card** at the top. Election Day shows the **actual

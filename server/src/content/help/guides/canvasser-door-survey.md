@@ -11,6 +11,8 @@ tags: canvasser, survey, voter, door
 
 On a survey campaign, tap a voter at the house to open their survey.
 
+Each voter shows their **party, age, and gender** — whatever the voter file has on them — plus a **✓ Voted** tag if they've already voted early, and whether they've been surveyed. It's the same line you saw on the map panel before you walked up. Records are often incomplete, so anything missing is just left out; that's normal.
+
 ## Answering
 
 Work through the questions and tap your answers. Some questions only appear **based on earlier answers** — for example, a follow-up that shows up only if someone said they're undecided — so the survey adapts as you go. Don't worry about which questions to skip; the app shows the right ones.

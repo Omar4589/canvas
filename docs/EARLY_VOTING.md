@@ -199,9 +199,9 @@ admin-only, campaign loaded/validated per request.
 
 | Area | Effect | Source |
 |---|---|---|
-| **Doors (mobile)** | Fully-voted households are filtered out of the canvasser's door pool (`fullyVoted: { $ne: true }`) and out of the 30s delta sync (client drops them live). | [bootstrap.js:145](../server/src/routes/mobile/bootstrap.js#L145), [bootstrap.js:245](../server/src/routes/mobile/bootstrap.js#L245), [map.jsx:434](../mobile/app/(app)/map.jsx#L434) |
+| **Doors (mobile)** | Fully-voted households are filtered out of the canvasser's door pool (`fullyVoted: { $ne: true }`) and out of the 30s delta sync (client drops them live). | [bootstrap.js:196](../server/src/routes/mobile/bootstrap.js#L196), [bootstrap.js:339](../server/src/routes/mobile/bootstrap.js#L339), [map.jsx:516](../mobile/app/(app)/map.jsx#L516) |
 | **Books / turf** | Book door counts are computed **live** as "active & not-fully-voted" — on mobile *and* now in the admin turf list (`eligibleDoorCount`), so a book's count shrinks as doors drop. **`Turf.householdIds` is not mutated and turfs are not re-cut**; the stored `Turf.doorCount` is kept for snapshots/splits but no longer shown to admins. | [bootstrap.js:80-94](../server/src/routes/mobile/bootstrap.js#L80), [turfs.js:280](../server/src/routes/admin/turfs.js#L280) |
-| **Voters** | Not hidden — flagged `voted: true` in the bootstrap payload and shown with a ✓ badge. No write to the `Voter` doc. | [bootstrap.js:190-193](../server/src/routes/mobile/bootstrap.js#L190) |
+| **Voters** | Not hidden — flagged `voted: true` in the bootstrap payload and shown with a ✓ badge. No write to the `Voter` doc. | [bootstrap.js:257](../server/src/routes/mobile/bootstrap.js#L257) |
 | **Passes** | No interaction — voted filtering is campaign-wide, not pass-specific. Passes/knocks are unaffected. | — |
 | **Efforts / Intake** | No interaction with ownership — voted filtering is campaign-wide and **effort-independent** (like passes); a fully-voted door drops from every effort and from Intake. New voters land in **Intake**; the sticky re-apply marks them on the next import, and **claiming** doors into an effort carries the marks (fully-voted doors are excluded from the effort's cuts/maps). | [reapplyVotedLists.js](../server/src/services/voted/reapplyVotedLists.js), [importProcessor.js:66](../server/src/services/import/importProcessor.js#L66) |
 | **Campaigns** | The mark is per-campaign; the same voter is tracked independently per campaign. | [VotedVoter.js](../server/src/models/VotedVoter.js) |
@@ -223,8 +223,10 @@ admin-only, campaign loaded/validated per request.
   campaign-scoped sidebar (`CAMPAIGN_NAV`, slug `early-voting`, in
   [navItems.js](../client/src/components/navItems.js)).
 - **Mobile** — bootstrap derives the per-voter `voted` flag and drops fully-voted doors (§D). The
-  ✓ Voted badge renders in [map.jsx:1112](../mobile/app/(app)/map.jsx#L1112) and
-  [household/[id].jsx:96](../mobile/app/(app)/household/[id].jsx#L96).
+  ✓ Voted badge renders in [map.jsx:1447](../mobile/app/(app)/map.jsx#L1447) and
+  [household/[id].jsx:104](../mobile/app/(app)/household/[id].jsx#L104) — beside the shared
+  [VoterMeta](../mobile/components/VoterMeta.jsx) line (Party · Age · Gender) that both surfaces
+  now render.
 
 ## F. Known interactions & gotchas
 

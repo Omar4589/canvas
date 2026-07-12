@@ -87,6 +87,16 @@ Canvassers get **lookup**: search voters in the **active campaign** (limited to 
 to them), open a **read-only** profile, and **add a note** from the field. Editing voter fields and
 survey answers is **web-admin only**.
 
+**At a door**, a canvasser sees a deliberately short line: **Party · Age · Gender** ("Democratic ·
+34 yrs · Female"), plus a ✓ Voted tag and their survey status. It reads identically on the map's
+house sheet and inside the household — both render one shared
+[VoterMeta](../mobile/components/VoterMeta.jsx). Voter files are sparse, so any part the record
+lacks is simply omitted (a voter with nothing on file shows only their name).
+
+**Precinct is not shown at a door** — it's turf paperwork, not something you'd say on a porch. It
+still appears on the mobile **voter profile** (above) and on admin response-details, which are fed
+by different endpoints; it is no longer in the map/door bootstrap payload at all.
+
 ---
 
 # Part 2 — Technical reference

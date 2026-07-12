@@ -5,8 +5,8 @@ audience: lead
 kind: faq
 order: 30
 sourceDoc: CAMPAIGNS.md
-summary: Set them in the campaign create/edit drawer; they show a countdown everywhere, canvassers included.
-tags: election day, early voting, dates, countdown
+summary: Set them in the campaign create/edit drawer; the actual dates (plus a countdown) then show everywhere, canvassers included.
+tags: election day, early voting, dates, countdown, early voting window
 ---
 
 Open the campaign's **edit drawer** (org admins) and fill in **Election Day**, the **early-voting start and end**, and an optional note. That's it.

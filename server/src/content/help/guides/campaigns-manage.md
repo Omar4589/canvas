@@ -30,7 +30,7 @@ The Campaigns page opens on a summary strip — how many campaigns, how many act
 
 ## Key dates
 
-An admin can set an Election Day, an early-voting window, and a short note. Election Day shows a live countdown; the window reads "Opens Oct 20," "Open now," or "Closed." Canvassers see all of this on their campaign picker too. See [Setting election dates](set-election-dates).
+An admin can set an Election Day, an early-voting window, and a short note. Election Day shows the actual date with a countdown beside it — "Election Day · Wed, Nov 4," then "in 12 days." The early-voting window always names **both** of its ends: "Opens Oct 20 · through Nov 1" before it starts, "Open now · Oct 20 – Nov 1" while it runs, "Ended Nov 1" after. Canvassers see all of this on their campaign picker **and** at the top of their book list once they're working, so the dates stay in front of the field team. See [Setting election dates](set-election-dates).
 
 ## Archive vs. delete
 
