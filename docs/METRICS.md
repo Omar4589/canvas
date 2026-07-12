@@ -511,3 +511,36 @@ it does **not** equal the admin dashboard's campaign-wide **Unknocked** coverage
 So a canvasser assigned a slice of the campaign sees a smaller number, and an admin in canvass mode sees
 only their own assigned books. (Both correctly exclude fully-voted doors — a mismatch there was a real
 bug, fixed by adding the `fullyVoted` filter + the per-user scope.)
+
+## H. Denormalized all-time counters (`Campaign.stats`)
+
+The unbounded "All time" dashboards no longer re-aggregate the whole ledger on every load. Each
+campaign carries a maintained counter subdoc — [models/Campaign.js](../server/src/models/Campaign.js)
+`stats`: `activityCount` (every activity row, bulk included — powers `hasCanvassed`), the
+`knocksPipeline` quadruple (`knockCount`/`surveyedKnockCount`/`litKnockCount`/`refusedKnockCount`,
+distinct household×pass), `litDroppedCount` (volume), `surveyCount` (`SurveyResponse` rows),
+`lastActivityAt` + `canvasserIds` (non-bulk, mirroring `NOT_BULK`), and `reconciledAt` (the trust
+marker).
+
+**The semantics are identical to the live pipelines by construction** — maintenance lives in
+[services/reports/campaignCounters.js](../server/src/services/reports/campaignCounters.js): the
+mobile write path applies exact per-pair deltas (one indexed pre-read of the pair's replaceable
+rows derives the before/after knock state), and every rare admin bulk op (re-cut clear-knocks,
+snapshot restore, bulk-restrict/unrestrict, admin survey delete, demo staging) triggers a full
+per-campaign recompute. Locked by
+[test/campaignStats.int.test.js](../server/test/campaignStats.int.test.js) — parity against an
+independent ledger recompute after every operation type.
+
+**Who reads them:** `/campaign-rollup` with no date window and no effort filter (knocks quadruple,
+`litDropped`, `activeCanvassers`, `lastActivityAt`); `/overview`'s knocks + survey volume; and
+`campaignSummaries.hasCanvassed` (the archive/delete gate). Date-ranged and effort-scoped requests
+always use the live pipelines (a scalar counter can't be windowed), as do DISTINCT counts
+(surveyed voters, ranged active canvassers).
+
+**Fallback, not failure:** a campaign whose `stats.reconciledAt` is null (created before the
+feature) makes the whole request fall back to the live aggregation — counters are exact or unused,
+never approximate. Seed/repair with `npm run migrate:campaign-stats -- --apply`
+([migrations/reconcileCampaignStats.js](../server/src/migrations/reconcileCampaignStats.js); the
+dry run lists unseeded/drifted campaigns). `reconcileCounts --apply` also re-syncs stats after its
+ledger dedups. Known limit: two truly simultaneous writes on the same (household, pass) can drift a
+pair counter by 1 until the next reconcile — documented in the service header.

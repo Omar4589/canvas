@@ -200,6 +200,30 @@ router.get('/overview', async (req, res, next) => {
       isActive: true,
     });
 
+    // Stats substitution for the two whole-ledger reads (billable knocks + survey volume):
+    // /overview never has a date window, so when the scope is org- or campaign-wide (no effortId)
+    // and every campaign in scope carries trusted Campaign.stats, sum the maintained counters
+    // instead of re-aggregating. The per-actionType event breakdown and the DISTINCT surveyed-voter
+    // count have no scalar-counter equivalent and stay live. Any unseeded legacy campaign
+    // (stats.reconciledAt null) drops the whole scope back to the live pipelines.
+    let statTotals = null;
+    if (!cFilter.effortId) {
+      const scopeFilter = cFilter.campaignId ? { _id: cFilter.campaignId } : { organizationId: orgId };
+      const statDocs = await Campaign.find(scopeFilter, { stats: 1 }).lean();
+      if (statDocs.length && statDocs.every((d) => d.stats?.reconciledAt)) {
+        statTotals = statDocs.reduce(
+          (acc, d) => ({
+            knocks: acc.knocks + (d.stats.knockCount || 0),
+            surveyedKnocks: acc.surveyedKnocks + (d.stats.surveyedKnockCount || 0),
+            litKnocks: acc.litKnocks + (d.stats.litKnockCount || 0),
+            refusedKnocks: acc.refusedKnocks + (d.stats.refusedKnockCount || 0),
+            surveysSubmitted: acc.surveysSubmitted + (d.stats.surveyCount || 0),
+          }),
+          { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, surveysSubmitted: 0 }
+        );
+      }
+    }
+
     const [
       households,
       voterDocs,
@@ -214,7 +238,7 @@ router.get('/overview', async (req, res, next) => {
       Household.countDocuments(householdMatch),
       Household.find(householdMatch, { _id: 1 }).lean(),
       memberCountPromise,
-      SurveyResponse.countDocuments(cFilter),
+      statTotals ? statTotals.surveysSubmitted : SurveyResponse.countDocuments(cFilter),
       SurveyResponse.distinct('voterId', cFilter),
       Household.countDocuments({ ...householdMatch, status: { $nin: ['unknocked', 'restricted'] } }),
       Household.aggregate([
@@ -226,7 +250,7 @@ router.get('/overview', async (req, res, next) => {
         { $group: { _id: '$actionType', count: { $sum: 1 } } },
       ]),
       // Billable knocks: distinct (household, pass). See knocksPipeline.
-      CanvassActivity.aggregate(knocksPipeline(cFilter)),
+      statTotals ? [] : CanvassActivity.aggregate(knocksPipeline(cFilter)),
     ]);
 
     const voterIds = voterDocs.map((h) => h._id);
@@ -257,7 +281,7 @@ router.get('/overview', async (req, res, next) => {
       else if (r._id === 'restricted') events.restricted = r.count;
     }
 
-    const k = knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
+    const k = statTotals || knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
     const surveyedVoters = surveyedVoterIds.length;
 
     res.json({
@@ -315,7 +339,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
       }
     }
 
-    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1, electionDay: 1, earlyVotingStart: 1, earlyVotingEnd: 1, datesNote: 1 }).lean();
+    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1, electionDay: 1, earlyVotingStart: 1, earlyVotingEnd: 1, datesNote: 1, stats: 1 }).lean();
     const ids = campaigns.map((c) => c._id);
 
     if (ids.length === 0) {
@@ -376,6 +400,15 @@ router.get('/campaign-rollup', async (req, res, next) => {
     const activityMatch = { ...match, ...dateMatch('timestamp') };
     const surveyMatch = { ...match, ...dateMatch('submittedAt') };
 
+    // All-time, whole-campaign scope with every campaign's stats trusted → read the
+    // CanvassActivity numbers straight off Campaign.stats (maintained write-side by
+    // services/reports/campaignCounters.js) and skip every CanvassActivity aggregation below.
+    // Any date window, effort scoping, or unseeded legacy campaign (stats.reconciledAt null,
+    // pre-migrate:campaign-stats) falls back to the live pipelines — stats are exact or unused,
+    // never approximate.
+    const useStats =
+      !fromDay && !toDay && !req.query.effortId && campaigns.every((c) => c.stats?.reconciledAt);
+
     const [coverageAgg, eventAgg, knockAgg, surveyAgg, canvasserAgg, cumulativeCanvassers] =
       await Promise.all([
         Household.aggregate([
@@ -387,18 +420,22 @@ router.get('/campaign-rollup', async (req, res, next) => {
             },
           },
         ]),
-        CanvassActivity.aggregate([
-          { $match: activityMatch },
-          {
-            $group: {
-              _id: { campaignId: '$campaignId', actionType: '$actionType' },
-              count: { $sum: 1 },
-            },
-          },
-        ]),
+        useStats
+          ? []
+          : CanvassActivity.aggregate([
+              { $match: activityMatch },
+              {
+                $group: {
+                  _id: { campaignId: '$campaignId', actionType: '$actionType' },
+                  count: { $sum: 1 },
+                },
+              },
+            ]),
         // Billable knocks per campaign: distinct (household, pass). See knocksPipeline.
-        CanvassActivity.aggregate(knocksPipeline(activityMatch, { byCampaign: true })),
+        useStats ? [] : CanvassActivity.aggregate(knocksPipeline(activityMatch, { byCampaign: true })),
         // Surveys (volume) + surveyed voters (distinct) per campaign, from SurveyResponse.
+        // Stays live even with stats: surveyedVoters is a DISTINCT-voter count, which a
+        // maintained scalar counter can't represent.
         SurveyResponse.aggregate([
           { $match: surveyMatch },
           { $group: { _id: { campaignId: '$campaignId', voterId: '$voterId' }, responses: { $sum: 1 } } },
@@ -410,21 +447,23 @@ router.get('/campaign-rollup', async (req, res, next) => {
             },
           },
         ]),
-        CanvassActivity.aggregate([
-          // NOT_BULK: an admin's bulk restrict must not count them as an
-          // "active canvasser" on the campaign card. The event tallies above
-          // deliberately stay inclusive (campaign-scope counts are truthful).
-          { $match: { ...activityMatch, ...NOT_BULK } },
-          {
-            $group: {
-              _id: '$campaignId',
-              users: { $addToSet: '$userId' },
-              last: { $max: '$timestamp' },
-            },
-          },
-          { $project: { activeCanvassers: { $size: '$users' }, last: 1 } },
-        ]),
-        CanvassActivity.distinct('userId', { ...activityMatch, ...NOT_BULK }),
+        useStats
+          ? []
+          : CanvassActivity.aggregate([
+              // NOT_BULK: an admin's bulk restrict must not count them as an
+              // "active canvasser" on the campaign card. The event tallies above
+              // deliberately stay inclusive (campaign-scope counts are truthful).
+              { $match: { ...activityMatch, ...NOT_BULK } },
+              {
+                $group: {
+                  _id: '$campaignId',
+                  users: { $addToSet: '$userId' },
+                  last: { $max: '$timestamp' },
+                },
+              },
+              { $project: { activeCanvassers: { $size: '$users' }, last: 1 } },
+            ]),
+        useStats ? [] : CanvassActivity.distinct('userId', { ...activityMatch, ...NOT_BULK }),
       ]);
 
     // Per-campaign setup progress + management flags (campaign-wide; independent of
@@ -468,6 +507,21 @@ router.get('/campaign-rollup', async (req, res, next) => {
       // are not "homes knocked". Restricted is its own coverage segment, never billable.
       if (bucket !== 'unknocked' && bucket !== 'voted' && bucket !== 'restricted') c.homesKnocked += r.count;
       if (bucket in c.coverage) c.coverage[bucket] = r.count;
+    }
+    // Stats path: the per-campaign activity numbers come off the campaign doc; the agg loops
+    // below then no-op on their empty arrays. (Coverage + surveys always come from their aggs.)
+    if (useStats) {
+      for (const campaign of campaigns) {
+        const c = byCampaign.get(String(campaign._id));
+        const s = campaign.stats;
+        c.knocks = s.knockCount || 0;
+        c.surveyedKnocks = s.surveyedKnockCount || 0;
+        c.litKnocks = s.litKnockCount || 0;
+        c.refusedKnocks = s.refusedKnockCount || 0;
+        c.litDropped = s.litDroppedCount || 0;
+        c.activeCanvassers = (s.canvasserIds || []).length;
+        c.lastActivityAt = s.lastActivityAt || null;
+      }
     }
     for (const r of eventAgg) {
       const c = byCampaign.get(String(r._id.campaignId));
@@ -547,7 +601,11 @@ router.get('/campaign-rollup', async (req, res, next) => {
       litDropped: sum('litDropped'),
       connectionRate: 0,
       contactRate: 0,
-      activeCanvassers: cumulativeCanvassers.length,
+      // Org-level distinct: a canvasser active in two campaigns counts once. Stats path takes the
+      // union of the per-campaign canvasser sets (bounded by roster sizes).
+      activeCanvassers: useStats
+        ? new Set(campaigns.flatMap((c) => (c.stats.canvasserIds || []).map(String))).size
+        : cumulativeCanvassers.length,
       lastActivityAt: rows.reduce(
         (acc, r) =>
           r.lastActivityAt && (!acc || r.lastActivityAt > acc) ? r.lastActivityAt : acc,

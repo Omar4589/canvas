@@ -2,6 +2,7 @@ import { Household } from '../../models/Household.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
+import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { deriveSetupSteps } from './setupSteps.js';
@@ -20,7 +21,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   if (!ids.length) return out;
 
   const group = { $group: { _id: '$campaignId', n: { $sum: 1 } } };
-  const [households, owned, passes, publishedTurfs, assignments, activePasses, canvassedIds, respondedIds] =
+  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs] =
     await Promise.all([
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true } }, group]),
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true, effortId: { $ne: null } } }, group]),
@@ -28,13 +29,35 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       Turf.aggregate([{ $match: { campaignId: { $in: ids }, status: 'published' } }, group]),
       TurfAssignment.aggregate([{ $match: { campaignId: { $in: ids } } }, group]),
       Pass.aggregate([{ $match: { campaignId: { $in: ids }, status: 'active' } }, group]),
-      // hasCanvassed needs EXISTENCE, not a count. `distinct('campaignId', …)` rides the campaignId
-      // index (DISTINCT_SCAN) and returns just the campaigns with ≥1 row — instead of counting the
-      // two LARGEST collections (CanvassActivity/SurveyResponse) all-time on every rollup +
-      // campaigns-list load, which was the single most expensive thing this function did.
-      CanvassActivity.distinct('campaignId', { campaignId: { $in: ids } }),
-      SurveyResponse.distinct('campaignId', { campaignId: { $in: ids } }),
+      // hasCanvassed comes from the maintained Campaign.stats counters (one tiny Campaign read,
+      // zero ledger queries). It gates delete/edit, so untrusted stats are never used —
+      // unseeded legacy docs (stats.reconciledAt null, pre-migrate:campaign-stats) fall back to
+      // the indexed existence distincts below.
+      Campaign.find(
+        { _id: { $in: ids } },
+        { 'stats.activityCount': 1, 'stats.surveyCount': 1, 'stats.reconciledAt': 1 }
+      ).lean(),
     ]);
+
+  const canvassedByStats = new Map(); // idStr → boolean, trusted stats only
+  const unseeded = [];
+  for (const d of statDocs) {
+    if (d.stats?.reconciledAt) {
+      canvassedByStats.set(String(d._id), (d.stats.activityCount || 0) > 0 || (d.stats.surveyCount || 0) > 0);
+    } else {
+      unseeded.push(d._id);
+    }
+  }
+  let canvassedSet = new Set();
+  let respondedSet = new Set();
+  if (unseeded.length) {
+    const [canvassedIds, respondedIds] = await Promise.all([
+      CanvassActivity.distinct('campaignId', { campaignId: { $in: unseeded } }),
+      SurveyResponse.distinct('campaignId', { campaignId: { $in: unseeded } }),
+    ]);
+    canvassedSet = new Set(canvassedIds.map(String));
+    respondedSet = new Set(respondedIds.map(String));
+  }
 
   const map = (agg) => new Map(agg.map((r) => [String(r._id), r.n]));
   const householdsBy = map(households);
@@ -43,14 +66,14 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   const pubTurfBy = map(publishedTurfs);
   const assignBy = map(assignments);
   const activeBy = map(activePasses);
-  const canvassedSet = new Set(canvassedIds.map(String));
-  const respondedSet = new Set(respondedIds.map(String));
 
   for (const campaign of campaigns) {
     const k = String(campaign._id);
     const hh = householdsBy.get(k) || 0;
     const ownedDoors = ownedBy.get(k) || 0;
-    const hasCanvassed = canvassedSet.has(k) || respondedSet.has(k);
+    const hasCanvassed = canvassedByStats.has(k)
+      ? canvassedByStats.get(k)
+      : canvassedSet.has(k) || respondedSet.has(k);
     const setup = deriveSetupSteps({
       campaign,
       counts: {

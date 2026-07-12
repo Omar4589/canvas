@@ -154,6 +154,28 @@ router.get('/map', async (req, res, next) => {
       isActive: true,
       'location.coordinates': { $exists: true, $ne: null },
     };
+    // Viewport bound: `bbox=west,south,east,north` narrows the pull to the visible map area via
+    // $geoWithin on the 2dsphere index — both clients send it on pan/zoom so the periodic live
+    // refetch never re-pulls the whole universe. Absent/invalid/near-world boxes fall back to the
+    // unbounded (still capped) pull, so a bad bbox can only widen, never wrongly narrow.
+    if (req.query.bbox) {
+      const parts = String(req.query.bbox).split(',').map(Number);
+      if (parts.length === 4 && parts.every(Number.isFinite)) {
+        const w = Math.max(parts[0], -180);
+        const s = Math.max(parts[1], -90);
+        const e = Math.min(parts[2], 180);
+        const n = Math.min(parts[3], 90);
+        // Reject degenerate boxes, and treat a near-whole-world viewport as "no bound" — a
+        // full-span GeoJSON polygon risks the smaller-area (inverted) interpretation.
+        if (w < e && s < n && e - w < 350 && n - s < 170) {
+          householdFilter.location = {
+            $geoWithin: {
+              $geometry: { type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] },
+            },
+          };
+        }
+      }
+    }
     // When scoped to a round we filter by PER-ROUND status (resolved below), not
     // the global Household.status — so the door set matches the colors shown.
     if (status && status.length && !passId) householdFilter.status = { $in: status };
@@ -268,7 +290,13 @@ router.get('/map', async (req, res, next) => {
         { householdId: { $in: householdIds }, organizationId: orgId },
         'householdId fullName surveyStatus party'
       ).lean(),
-      SurveyResponse.find({ householdId: { $in: householdIds }, organizationId: orgId, ...(passId ? { passId } : {}) })
+      // `answers` is deliberately NOT fetched or shipped here — it's the heaviest field of the
+      // whole map payload. The detail panel lazy-loads it per household on open
+      // (GET /:householdId/surveys below).
+      SurveyResponse.find(
+        { householdId: { $in: householdIds }, organizationId: orgId, ...(passId ? { passId } : {}) },
+        'householdId submittedAt note voterId userId'
+      )
         .populate('voterId', 'fullName')
         .populate('userId', 'firstName lastName')
         .lean(),
@@ -326,7 +354,6 @@ router.get('/map', async (req, res, next) => {
               lastName: s.userId.lastName,
             }
           : null,
-        answers: s.answers || [],
         note: s.note || null,
       });
     }
@@ -401,6 +428,55 @@ router.get('/map', async (req, res, next) => {
       })),
       total: mapTruncated ? await Household.countDocuments(householdFilter) : result.length,
       truncated: mapTruncated,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// One door's surveys WITH answers — the map detail panel lazy-loads this on open. The bulk /map
+// payload ships each survey's meta only (id/when/who/note); `answers` is its heaviest field, so
+// it moves per-door on demand instead of riding every 20s live refetch. `passId` mirrors the
+// map's round scoping so the panel shows the same survey set as the pins.
+router.get('/:householdId/surveys', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const { householdId } = req.params;
+    if (!mongoose.isValidObjectId(householdId)) return res.status(400).json({ error: 'Invalid id' });
+    const hid = new mongoose.Types.ObjectId(householdId);
+    // A lead may only read surveys for a household in a campaign they manage.
+    if (!isOrgAdmin(req)) {
+      const hh = await Household.findOne({ _id: hid, organizationId: orgId }, { campaignId: 1 }).lean();
+      if (!hh) return res.status(404).json({ error: 'Household not found' });
+      if (!(await canManageCampaign(req, hh.campaignId))) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    const passId =
+      req.query.passId && mongoose.isValidObjectId(req.query.passId)
+        ? new mongoose.Types.ObjectId(req.query.passId)
+        : null;
+
+    const surveys = await SurveyResponse.find(
+      { householdId: hid, organizationId: orgId, ...(passId ? { passId } : {}) },
+      'submittedAt note answers voterId userId'
+    )
+      .populate('voterId', 'fullName')
+      .populate('userId', 'firstName lastName')
+      .lean();
+
+    res.json({
+      surveys: surveys.map((s) => ({
+        id: String(s._id),
+        submittedAt: s.submittedAt,
+        voter: s.voterId ? { id: String(s.voterId._id), fullName: s.voterId.fullName } : null,
+        canvasser: s.userId
+          ? { id: String(s.userId._id), firstName: s.userId.firstName, lastName: s.userId.lastName }
+          : null,
+        answers: s.answers || [],
+        note: s.note || null,
+      })),
     });
   } catch (err) {
     next(err);

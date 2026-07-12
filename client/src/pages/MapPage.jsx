@@ -117,6 +117,12 @@ export default function MapPage() {
   const [scopePassId, setScopePassId] = useState(searchParams.get('passId') || '');
   const [scopeImportId, setScopeImportId] = useState(searchParams.get('importId') || '');
 
+  // Viewport bound ("west,south,east,north"): null until the first auto-fit, then updated on
+  // every settled move (debounced) so the households query — including the 20s live poll — only
+  // pulls the visible area (server-side $geoWithin on the 2dsphere index) instead of the whole
+  // universe on every refetch.
+  const [bbox, setBbox] = useState(null);
+
   // GPS-audit flag overlay. When deep-linked to a specific entry (?focusActivityId), start on
   // "all" statuses so that entry is present even if it's already been reviewed.
   const [showFlags, setShowFlags] = useState(searchParams.get('flag') === '1');
@@ -191,6 +197,7 @@ export default function MapPage() {
     effortId: scopeEffortId,
     passId: scopePassId,
     importId: scopeImportId,
+    bbox,
   });
 
   const householdsQ = useQuery({
@@ -209,6 +216,7 @@ export default function MapPage() {
       scopeEffortId,
       scopePassId,
       scopeImportId,
+      bbox,
     ],
     queryFn: () => api(`/admin/households/map${queryString}`),
     enabled: !!campaignId,
@@ -322,17 +330,40 @@ export default function MapPage() {
     map.on('mouseenter', 'flagged-pings', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'flagged-pings', () => { map.getCanvas().style.cursor = ''; });
 
+    // Viewport-bounded fetching: after the first auto-fit, every settled move (pan OR zoom —
+    // mapbox fires moveend for both) updates `bbox` debounced, so the query above refetches
+    // just the visible area. Pre-fit moves are ignored — the first pull stays unbounded so
+    // fitBounds has the campaign's full extent to frame.
+    let bboxTimer = null;
+    map.on('moveend', () => {
+      if (!map._didFitBounds) return;
+      clearTimeout(bboxTimer);
+      bboxTimer = setTimeout(() => {
+        const b = map.getBounds();
+        const r = (x) => Math.round(x * 10000) / 10000; // ~11m precision — stable query keys
+        setBbox([r(b.getWest()), r(b.getSouth()), r(b.getEast()), r(b.getNorth())].join(','));
+      }, 400);
+    });
+
     map.on('load', () => {
       registerLayers(map, darkBase);
       mapRef.current = map;
       setMapReady(true);
     });
     return () => {
+      clearTimeout(bboxTimer);
       map.remove();
       mapRef.current = null;
       setMapReady(false);
     };
   }, [tokenQ.data]);
+
+  // New campaign = new geography: drop the viewport bound and re-arm the auto-fit so the next
+  // (unbounded) pull re-frames the map on that campaign's doors instead of the old city's view.
+  useEffect(() => {
+    setBbox(null);
+    if (mapRef.current) mapRef.current._didFitBounds = false;
+  }, [campaignId]);
 
   // Swap the basemap style when the picker changes. setStyle wipes our sources/
   // layers/images, so re-register them on `style.load`, then bump styleEpoch to
@@ -458,10 +489,15 @@ export default function MapPage() {
     }
   }, [mapReady, householdsById, searchParams]);
 
-  const selectedHousehold = useMemo(
-    () => households.find((h) => h.id === selected) || null,
-    [selected, households]
-  );
+  // A viewport-bounded refetch can drop an off-screen selected door from the payload — keep the
+  // last snapshot so the open panel doesn't snap shut mid-read when the user pans away.
+  const lastSelectedRef = useRef(null);
+  const selectedHousehold = useMemo(() => {
+    const h = households.find((x) => x.id === selected) || null;
+    if (h) lastSelectedRef.current = h;
+    if (!selected) return null;
+    return h || (lastSelectedRef.current?.id === selected ? lastSelectedRef.current : null);
+  }, [selected, households]);
 
   // Push the selected door to the highlight ring (see mapRender). Clears when nothing
   // is selected or the selected door has no coordinates.
@@ -672,6 +708,7 @@ export default function MapPage() {
                 statusColors={STATUS_COLORS}
                 statusLabels={STATUS_LABELS}
                 tz={tz}
+                passId={scopePassId}
               />
             </div>
           )}

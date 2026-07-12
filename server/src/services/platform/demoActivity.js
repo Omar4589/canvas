@@ -3,6 +3,7 @@ import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { resolveStatus } from '../../utils/statusPrecedence.js';
+import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 import { normalizeAndFilterAnswers } from '../surveys/normalizeAnswers.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { zonedDayRange } from '../../utils/timezone.js';
@@ -304,4 +305,8 @@ export async function persistDemoActivity({ campaign, activities, surveys }) {
       { $set: { surveyStatus: 'surveyed' } }
     );
   }
+
+  // The wipe + bulk restage bypassed the per-knock stats deltas — recompute Campaign.stats from
+  // the restaged ledger so the demo org's dashboards stay exact (both seed + refresh land here).
+  await recomputeCampaignStats(campaign._id);
 }

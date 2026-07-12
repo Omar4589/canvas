@@ -28,6 +28,7 @@ import { Voter } from '../models/Voter.js';
 import { Household } from '../models/Household.js';
 import { Campaign } from '../models/Campaign.js';
 import { ACTION_TO_STATUS } from './statusPrecedence.js';
+import { recomputeCampaignStats } from '../services/reports/campaignCounters.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, '../../.env') });
@@ -214,6 +215,15 @@ async function main() {
   await dedupCanvassActivities();
   await reconcileVoterStatus();
   await reconcileHouseholdStatus();
+
+  // The dedup deletions above change the ledgers directly, so the denormalized Campaign.stats
+  // counters must be recomputed to match (same repair migrate:campaign-stats runs).
+  if (APPLY) {
+    console.log('\nRecomputing Campaign.stats from the cleaned ledgers…');
+    const ids = await Campaign.find({}, { _id: 1 }).lean();
+    await recomputeCampaignStats(ids.map((c) => c._id));
+    console.log(`  reconciled stats on ${ids.length} campaign(s).`);
+  }
 
   await mongoose.disconnect();
   console.log(

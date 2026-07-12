@@ -150,11 +150,15 @@ Voters ship only for survey campaigns, scoped to those doors
 **The whole-universe surfaces are the admin map and full self-assignment:**
 
 - `/admin/households/map` ([routes/admin/households.js:97](../server/src/routes/admin/households.js#L97))
-  returns every matching door, all their voters (4-field projection), **all** matching
-  `SurveyResponse` docs (full `answers[]`, no projection, two populates), and a last-activity row
-  per door. It is now **capped at 50,000 households** (`MAP_HOUSEHOLD_CAP`, July 2026), returning
-  `truncated`+`total` past that so a runaway org-/campaign-wide open can't OOM the dyno; the fetch
-  is backed by the `{campaignId,isActive}` index. The **date window is the guard**: with from/to
+  returns every matching door, their voters (4-field projection), each door's survey META (id /
+  when / who / note — **`answers[]` no longer ships or is even fetched**; the detail panel
+  lazy-loads it per door via `GET /admin/households/:id/surveys`), and a last-activity row per
+  door. It is **viewport-bounded**: both clients send `bbox=west,south,east,north` after the first
+  auto-fit and on every settled pan/zoom (debounced), which the server turns into a `$geoWithin`
+  on the household `2dsphere` index — so the 20s live poll re-pulls only the visible area, not the
+  universe. A missing/degenerate/near-world bbox falls back to the unbounded pull, still **capped
+  at 50,000 households** (`MAP_HOUSEHOLD_CAP`) with `truncated`+`total`, backed by the
+  `{campaignId,isActive}` index. The **date window is the other guard**: with from/to
   set, doors narrow to interaction-touched ones
   ([:211-230](../server/src/routes/admin/households.js#L211-L230)), and both the web and mobile
   admin maps default to **Today**. The heavy pull only happens when a user clears/widens the dates:
@@ -176,11 +180,12 @@ JSON.parse cost and retained JS heap on mobile are unchanged, which is why the m
 requests `/turfs/doors?slim=1` (address fields dropped server-side;
 [turfs.js](../server/src/routes/admin/turfs.js) `GET /doors`).
 
-**If universes keep growing, the remaining levers in order:** (1) project
-`SurveyResponse.answers` out of the map payload — but first verify what the household panel and
-answer-filter chips actually read from it; (2) a size guard or chunked storage in `saveBootstrap`
-for the everyone-assignment case; (3) **viewport-bounded** map fetches (bbox → `$geoWithin:{$box}`,
-which finally uses the dormant `2dsphere` index) — the planned Phase-2 replacement for the 50k cap.
+**Delivered (scale-hardening Phase 2):** (1) `SurveyResponse.answers` is out of the map payload —
+lazy-loaded per door on panel open (the web `HouseholdDetailPanel` was its only reader; the mobile
+sheet never read it); (2) **viewport-bounded** map fetches — `bbox` → `$geoWithin` `$geometry`
+polygon, which finally puts the household `2dsphere` index to work (verified IXSCAN). The 50k cap
+stays as the no-bbox backstop. **Remaining lever:** a size guard or chunked storage in
+`saveBootstrap` for the everyone-assignment case.
 
 ## Database scaling (connection pool, indexes, storage)
 
@@ -208,6 +213,14 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
   range". `campaignSummaries` ([campaignSummaries.js](../server/src/services/reports/campaignSummaries.js))
   stopped **counting** the two largest collections all-time just to test `hasCanvassed>0` — now an
   indexed `distinct('campaignId', …)` (DISTINCT_SCAN).
+- **Denormalized rollup counters (Phase 2)** — the "All time" dashboards no longer re-aggregate the
+  ledger at all: `Campaign.stats` carries maintained all-time counters (knocks quadruple, survey +
+  lit volume, activity count, last-activity, canvasser set), applied write-side by
+  [services/reports/campaignCounters.js](../server/src/services/reports/campaignCounters.js) and
+  read by `/campaign-rollup`, `/overview`, and `campaignSummaries` — with an automatic
+  live-aggregation fallback for any campaign not yet seeded. Backfill/repair:
+  `npm run migrate:campaign-stats -- --apply`. Full semantics + parity test in
+  [METRICS.md](METRICS.md) § H.
 - **Import memory** — the one un-chunked `$in` in
   [csvImporter.js](../server/src/services/import/csvImporter.js) (normalizedAddress→\_id resolution)
   is now chunked + `.lean()`, matching the rest of the batched pipeline. Proven by

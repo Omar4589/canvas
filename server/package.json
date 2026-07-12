@@ -32,6 +32,7 @@
     "migrate:billing-access": "node src/migrations/migrateBillingAccess.js",
     "migrate:build-indexes": "node src/migrations/buildIndexes.js",
     "migrate:strip-geocode-raw": "node src/migrations/stripGeocodeRaw.js",
+    "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
     "demo:refresh": "node src/utils/refreshDemoDay.js"
   },
   "dependencies": {

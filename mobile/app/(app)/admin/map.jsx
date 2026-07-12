@@ -285,6 +285,11 @@ export default function AdminMap() {
   const [openMenu, setOpenMenu] = useState(null); // 'date' | 'canvasser' | 'status' | 'answer' | null
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const isFocused = useIsFocused();
+  // Viewport bound ("west,south,east,north"): once ARMED (the camera has actually shown some of
+  // the loaded doors), every settled camera move refetches just the visible area — the 20s live
+  // poll included — matching the web map. Unarmed/null = the unbounded (capped) pull.
+  const [bbox, setBbox] = useState(null);
+  const bboxArmedRef = useRef(false);
 
   const pingDetailQ = useQuery({
     queryKey: ['admin', 'activity', selectedPing?.id],
@@ -334,10 +339,17 @@ export default function AdminMap() {
     setRange((prev) => (prev.preset === 'today' && prev.from === r.from ? prev : { preset: 'today', from: r.from, to: r.to }));
   }, [tz, householdFocus, cId]);
 
+  // New campaign = new geography: drop the viewport bound and re-arm from scratch so the next
+  // (unbounded) pull can show the new campaign's doors wherever they are.
+  useEffect(() => {
+    setBbox(null);
+    bboxArmedRef.current = false;
+  }, [cId]);
+
   const mapQ = useQuery({
     queryKey: [
       'admin', 'households', 'map', cId, range?.from, range?.to, statusFilter.join(','),
-      canvasserId, answerFilter.questionKey, answerFilter.optionId, effortId, passId, importId, showPings,
+      canvasserId, answerFilter.questionKey, answerFilter.optionId, effortId, passId, importId, showPings, bbox,
     ],
     queryFn: () => {
       const p = new URLSearchParams({ campaignId: String(cId) });
@@ -353,6 +365,7 @@ export default function AdminMap() {
       if (passId) p.set('passId', passId);
       if (importId) p.set('importId', importId);
       if (showPings) p.set('includeActivities', '1');
+      if (bbox) p.set('bbox', bbox);
       return api(`/admin/households/map?${p.toString()}`);
     },
     enabled: !!cId,
@@ -553,6 +566,34 @@ export default function AdminMap() {
     },
   });
 
+  // Settled camera move → update the viewport bound. Armed only once the camera has actually
+  // shown ≥1 loaded door, so a stray initial viewport (camera mounted before data, or pointed
+  // at the default center) can never misbound the first refetch; after arming it tracks the
+  // viewport freely (self-correcting — pan somewhere and that's what gets fetched).
+  async function handleMapIdle() {
+    if (!mapRef.current || !mapQ.data) return;
+    let b;
+    try {
+      b = await mapRef.current.getVisibleBounds(); // [[neLng, neLat], [swLng, swLat]]
+    } catch {
+      return; // map not ready yet
+    }
+    const [[neLng, neLat], [swLng, swLat]] = b;
+    if (!bboxArmedRef.current) {
+      const anyVisible = households.some(
+        (h) =>
+          h.location &&
+          h.location.lng >= swLng && h.location.lng <= neLng &&
+          h.location.lat >= swLat && h.location.lat <= neLat
+      );
+      if (!anyVisible) return;
+      bboxArmedRef.current = true;
+    }
+    const r = (x) => Math.round(x * 10000) / 10000; // ~11m precision — stable query keys
+    const next = [r(swLng), r(swLat), r(neLng), r(neLat)].join(',');
+    setBbox((prev) => (prev === next ? prev : next));
+  }
+
   // Enter move mode: close the sheet and center the camera tightly on the door so the
   // fixed screen crosshair starts right on top of it. The user then drags the map to
   // reposition the crosshair, and Save reads the map center.
@@ -675,7 +716,7 @@ export default function AdminMap() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Mapbox.MapView ref={mapRef} style={{ flex: 1 }} styleURL={styleURL}>
+      <Mapbox.MapView ref={mapRef} style={{ flex: 1 }} styleURL={styleURL} onMapIdle={handleMapIdle}>
         <Mapbox.Camera
           ref={cameraRef}
           defaultSettings={{ centerCoordinate: initialCenter, zoomLevel: 12 }}

@@ -44,6 +44,34 @@ const campaignSchema = new mongoose.Schema(
     // (services/billing/statement.js). Legacy archived campaigns have null —
     // migrate:billing backfills updatedAt.
     archivedAt: { type: Date, default: null },
+    // Denormalized ALL-TIME ledger counters, maintained by services/reports/campaignCounters.js
+    // so the no-date-window dashboards (rollup "All time", campaigns list) read the campaign doc
+    // instead of re-aggregating the whole CanvassActivity/SurveyResponse ledgers on every load.
+    // Semantics mirror the live aggregations EXACTLY (see aggregations.js):
+    //   knockCount..refusedKnockCount = knocksPipeline (distinct household×pass, billable);
+    //   litDroppedCount = lit_dropped row volume; activityCount = every activity row (any type,
+    //   bulk included — powers hasCanvassed); surveyCount = SurveyResponse rows;
+    //   lastActivityAt / canvasserIds = NON-bulk only (matching NOT_BULK canvasser surfaces;
+    //   canvasserIds is bounded by the campaign roster, ~dozens).
+    // `reconciledAt` is the trust marker: readers fall back to live aggregation when it's null
+    // (legacy docs pre-backfill), and the counter bump no-ops until the reconcile seeds it —
+    // stats are either exact or absent, never partial. Repair/backfill: migrate:campaign-stats.
+    stats: {
+      activityCount: { type: Number, default: 0 },
+      knockCount: { type: Number, default: 0 },
+      surveyedKnockCount: { type: Number, default: 0 },
+      litKnockCount: { type: Number, default: 0 },
+      refusedKnockCount: { type: Number, default: 0 },
+      litDroppedCount: { type: Number, default: 0 },
+      surveyCount: { type: Number, default: 0 },
+      lastActivityAt: { type: Date, default: null },
+      canvasserIds: { type: [mongoose.Schema.Types.ObjectId], default: [] },
+      // Trust marker. Default NULL on purpose: a legacy doc that materializes this subdoc via an
+      // unrelated .save() must stay untrusted (its true counts aren't zero). Only genuinely NEW
+      // campaigns are stamped (pre-validate below — all-zero is exact at birth); legacy docs get
+      // stamped by the backfill migration.
+      reconciledAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );
@@ -53,6 +81,11 @@ campaignSchema.pre('validate', function (next) {
   // requirement is enforced at round activation (routes/admin/passes.js), not here.
   if (this.type === 'lit_drop' && this.surveyTemplateId) {
     this.surveyTemplateId = null;
+  }
+  // A brand-new campaign has an empty ledger, so its all-zero stats are exact — stamp it trusted
+  // at birth. Existing docs (isNew false) are never stamped here; see the stats comment above.
+  if (this.isNew && this.stats && !this.stats.reconciledAt) {
+    this.stats.reconciledAt = new Date();
   }
   next();
 });

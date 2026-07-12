@@ -6,6 +6,7 @@ import { Household } from '../../models/Household.js';
 import { Pass } from '../../models/Pass.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../canvass/status.js';
+import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 
 // Capture a pass's current book set (+ assignments, + optionally the knock
 // history about to be cleared) into a TurfSnapshot for undo. Call this BEFORE
@@ -139,6 +140,8 @@ export async function restoreSnapshot({ campaign, snapshot, userId }) {
     const voterIds = [...new Set((snap.responses || []).map((r) => String(r.voterId)))];
     await recomputeHouseholdStatusesByIds(hhIds, campaign.type);
     await recomputeSurveyStatus(voterIds);
+    // Bulk ledger restore (raw inserts bypass every hook) → recompute Campaign.stats exactly.
+    await recomputeCampaignStats(snap.campaignId, { swallowErrors: true });
   }
 
   snapshot.restoredAt = new Date();

@@ -49,10 +49,21 @@ export default function HouseholdDetailPanel({
   statusColors,
   statusLabels,
   tz,
+  passId,
 }) {
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
   const h = household;
+  // Survey ANSWERS are lazy-loaded per door — the bulk map payload ships each survey's meta
+  // only (its heaviest field stays off the every-20s live poll). Merged by survey id below;
+  // the meta list renders instantly and answers fill in on arrival. passId mirrors the map's
+  // round scoping so the panel shows the same survey set as the pins.
+  const surveysQ = useQuery({
+    queryKey: ['household-surveys', h?.id, passId || ''],
+    queryFn: () => api(`/admin/households/${h.id}/surveys${passId ? `?passId=${passId}` : ''}`),
+    enabled: !!h?.id && (h.surveys?.length || 0) > 0,
+  });
+  const surveyDetailById = new Map((surveysQ.data?.surveys || []).map((s) => [s.id, s]));
   // Full per-round activity history (so a door worked in multiple rounds shows all).
   const activityQ = useQuery({
     queryKey: ['household-activity', h?.id],
@@ -197,38 +208,44 @@ export default function HouseholdDetailPanel({
         </div>
         {h.surveys?.length ? (
           <div className="space-y-3">
-            {h.surveys.map((s) => (
-              <div key={s.id} className="rounded border border-border p-3">
-                <div className="flex items-baseline justify-between gap-2 text-sm">
-                  <div className="font-medium text-fg">
-                    {s.voter?.fullName || 'Unknown voter'}
+            {h.surveys.map((s) => {
+              const answers = surveyDetailById.get(s.id)?.answers || [];
+              return (
+                <div key={s.id} className="rounded border border-border p-3">
+                  <div className="flex items-baseline justify-between gap-2 text-sm">
+                    <div className="font-medium text-fg">
+                      {s.voter?.fullName || 'Unknown voter'}
+                    </div>
+                    <div className="text-xs text-fg-muted">
+                      {formatDateTime(s.submittedAt, zone)}
+                    </div>
                   </div>
-                  <div className="text-xs text-fg-muted">
-                    {formatDateTime(s.submittedAt, zone)}
-                  </div>
+                  {s.canvasser && (
+                    <div className="mt-0.5 text-xs text-fg-muted">
+                      by {s.canvasser.firstName} {s.canvasser.lastName}
+                    </div>
+                  )}
+                  {surveysQ.isLoading && (
+                    <div className="mt-2 text-xs text-fg-subtle">Loading answers…</div>
+                  )}
+                  {answers.length > 0 && (
+                    <dl className="mt-2 space-y-1">
+                      {answers.map((a, i) => (
+                        <div key={i} className="text-sm">
+                          <dt className="text-xs text-fg-muted">{a.questionLabel}</dt>
+                          <dd className="text-fg">{formatAnswer(a.answer)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {s.note && (
+                    <div className="mt-2 rounded bg-sunken px-2 py-1 text-xs italic text-fg-muted">
+                      “{s.note}”
+                    </div>
+                  )}
                 </div>
-                {s.canvasser && (
-                  <div className="mt-0.5 text-xs text-fg-muted">
-                    by {s.canvasser.firstName} {s.canvasser.lastName}
-                  </div>
-                )}
-                {s.answers?.length > 0 && (
-                  <dl className="mt-2 space-y-1">
-                    {s.answers.map((a, i) => (
-                      <div key={i} className="text-sm">
-                        <dt className="text-xs text-fg-muted">{a.questionLabel}</dt>
-                        <dd className="text-fg">{formatAnswer(a.answer)}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                )}
-                {s.note && (
-                  <div className="mt-2 rounded bg-sunken px-2 py-1 text-xs italic text-fg-muted">
-                    “{s.note}”
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-sm text-fg-muted">No surveys at this household yet.</div>

@@ -11,6 +11,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { recomputeSurveyStatus } from '../../services/canvass/status.js';
+import { bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
 import { Person } from '../../models/Person.js';
@@ -370,12 +371,16 @@ router.patch('/:voterId/surveys/:responseId', async (req, res, next) => {
 router.delete('/:voterId/surveys/:responseId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const r = await SurveyResponse.deleteOne({
+    // findOneAndDelete (not deleteOne) so the doc's campaignId is in hand for the stats bump.
+    const deleted = await SurveyResponse.findOneAndDelete({
       _id: req.params.responseId,
       voterId: req.params.voterId,
       organizationId: activeOrgId(req),
-    });
-    if (!r.deletedCount) return res.status(404).json({ error: 'Survey response not found' });
+    }).lean();
+    if (!deleted) return res.status(404).json({ error: 'Survey response not found' });
+    // Only surveyCount moves — the survey_submitted ACTIVITY row survives, so knock counters
+    // are untouched (matching the live aggregations, which read the two ledgers independently).
+    await bumpCampaignStats(deleted.campaignId, { surveys: -1 });
     await recomputeSurveyStatus([req.params.voterId]);
     const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
     res.json(profile);

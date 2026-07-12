@@ -17,6 +17,7 @@ import { recomputeTurf, recomputePassTerritories, addSupplementalBooks } from '.
 import { ATTR_COLUMN } from '../../services/turf/attributeCut.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
+import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
@@ -341,6 +342,9 @@ router.post('/discard', async (req, res, next) => {
       clearedVoters = await SurveyResponse.distinct('voterId', { passId });
       await CanvassActivity.deleteMany({ passId });
       await SurveyResponse.deleteMany({ passId });
+      // Bulk ledger delete → recompute Campaign.stats exactly (rare admin op; delta math for a
+      // whole-pass wipe would be error-prone). Swallow: stats are a read cache, not the op.
+      await recomputeCampaignStats(req.campaign._id, { swallowErrors: true });
     }
 
     // Wipe the books + their household mirror + assignments.
@@ -775,6 +779,10 @@ router.post('/restrict-bulk', async (req, res, next) => {
       // touched door. lastActionAt matches the single-door path; lastActionBy
       // is deliberately NOT set (don't attribute a whole community to the admin).
       await Household.updateMany({ _id: { $in: touched } }, { $set: { lastActionAt: now } });
+      // Bulk restricted rows change activityCount (campaign tallies include bulk) but never the
+      // knock/canvasser counters (restricted ∉ KNOCK_ACTIONS; via:'bulk' is NOT_BULK-excluded) —
+      // recompute keeps every stats field exact in one move.
+      await recomputeCampaignStats(req.campaign._id, { swallowErrors: true });
     }
     res.json({ marked, skipped, perTurf });
   } catch (err) {
@@ -803,6 +811,8 @@ router.post('/unrestrict-bulk', async (req, res, next) => {
       // to the same status → no save → no updatedAt bump). Nothing "happened to"
       // the door, so bump updatedAt without touching lastActionAt.
       await Household.updateMany({ _id: { $in: touched } }, { $currentDate: { updatedAt: true } });
+      // Bulk ledger delete → keep Campaign.stats.activityCount exact (see restrict-bulk above).
+      await recomputeCampaignStats(req.campaign._id, { swallowErrors: true });
     }
     res.json({ unmarked: r.deletedCount, households: touched.length });
   } catch (err) {

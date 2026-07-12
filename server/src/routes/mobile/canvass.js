@@ -13,6 +13,7 @@ import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
+import { knockStateOf, knockStateDelta, bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { canvasserHouseholdScope } from '../../services/canvass/canvasserScope.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
@@ -104,6 +105,16 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   const distance = distanceFromHouse(household, data.location);
   const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
 
+  // Campaign.stats deltas: one indexed read of the pair's replaceable rows gives the pair's
+  // billable-knock state BEFORE, and — because the delete below removes exactly THIS canvasser's
+  // rows and the create adds one known row — the state AFTER, plus the per-type deleted counts.
+  // Must match the deleteMany filter's actionType set (REPLACEABLE_ACTIONS) exactly.
+  const pairRows = await CanvassActivity.find(
+    { householdId, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
+    'actionType userId'
+  ).lean();
+  const mineRows = pairRows.filter((r) => String(r.userId) === String(userId));
+
   // Replace this canvasser's prior action at this house for THIS pass.
   await CanvassActivity.deleteMany({
     userId,
@@ -138,6 +149,20 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   household.lastActionAt = ts;
   household.lastActionBy = userId;
   await household.save();
+
+  // Campaign.stats: net row delta (1 created − mine deleted), the pair's knock-state delta,
+  // lit-drop volume delta, and the replaced surveys. Mobile writes are never bulk → at/userId set.
+  const afterRows = [...pairRows.filter((r) => String(r.userId) !== String(userId)), { actionType }];
+  await bumpCampaignStats(household.campaignId, {
+    activity: 1 - mineRows.length,
+    knocks: knockStateDelta(knockStateOf(pairRows), knockStateOf(afterRows)),
+    litDropped:
+      (actionType === 'lit_dropped' ? 1 : 0) -
+      mineRows.filter((r) => r.actionType === 'lit_dropped').length,
+    surveys: -priorSurveys.length,
+    at: ts,
+    userId,
+  });
 
   return { household, activity };
 }
@@ -346,6 +371,14 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     const distance = distanceFromHouse(household, data.location);
     const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
 
+    // Campaign.stats deltas — same pre-read pattern as recordHouseholdAction (see the comment
+    // there): the pair's replaceable rows give before/after knock state + deleted counts.
+    const pairRows = await CanvassActivity.find(
+      { householdId: household._id, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
+      'actionType userId'
+    ).lean();
+    const mineRows = pairRows.filter((r) => String(r.userId) === String(req.user._id));
+
     // Normalize answers against the template (stable optionIds, retired-inclusive,
     // unknown ids/rows pruned) and drop ghost answers to questions hidden by the
     // current visibleIf logic. Shared with admin-edit so the two can't drift.
@@ -377,6 +410,10 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       editedAt: null,
     };
     const surveyFilter = { voterId: voter._id, passId };
+    // Whether the upsert truly INSERTED (vs replaced) decides the stats.surveyCount bump. The
+    // pre-check + the E11000 override below stay exact under the double-tap race: both racers can
+    // see "not exists", but only the insert winner keeps surveyInserted true.
+    let surveyInserted = !(await SurveyResponse.exists(surveyFilter));
     let surveyResponse;
     try {
       surveyResponse = await SurveyResponse.findOneAndUpdate(
@@ -388,6 +425,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       if (err.code === 11000) {
         // Lost the insert race to a concurrent submit for this (voter, pass) — the winner's row
         // now exists, so update it (latest answers win).
+        surveyInserted = false;
         surveyResponse = await SurveyResponse.findOneAndUpdate(
           surveyFilter,
           { $set: surveyFields },
@@ -427,6 +465,21 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     household.lastActionAt = ts;
     household.lastActionBy = req.user._id;
     await household.save();
+
+    // Campaign.stats: the created row is a survey_submitted knock; a re-submit that only
+    // replaced the SurveyResponse (surveyInserted false) leaves surveyCount untouched.
+    const afterRows = [
+      ...pairRows.filter((r) => String(r.userId) !== String(req.user._id)),
+      { actionType: 'survey_submitted' },
+    ];
+    await bumpCampaignStats(campaign._id, {
+      activity: 1 - mineRows.length,
+      knocks: knockStateDelta(knockStateOf(pairRows), knockStateOf(afterRows)),
+      litDropped: -mineRows.filter((r) => r.actionType === 'lit_dropped').length,
+      surveys: surveyInserted ? 1 : 0,
+      at: ts,
+      userId: req.user._id,
+    });
 
     res.status(201).json({ household, voter, surveyResponse, activity });
   } catch (err) {
