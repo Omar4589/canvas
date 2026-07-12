@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 
@@ -9,14 +9,16 @@ export default function OrgSwitcher() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [allOrgs, setAllOrgs] = useState([]);
 
-  useEffect(() => {
-    if (!isSuperAdmin) return;
-    api('/super-admin/organizations')
-      .then((res) => setAllOrgs(res.organizations || []))
-      .catch(() => setAllOrgs([]));
-  }, [isSuperAdmin]);
+  // Super admins pick from ALL orgs. Shares the SAME query key as OrganizationsPage's list, so a
+  // create/deactivate/delete there (each invalidates ['super-admin','organizations']) refreshes
+  // this switcher automatically — the old one-shot useEffect fetch never updated without a reload.
+  const orgsQ = useQuery({
+    queryKey: ['super-admin', 'organizations'],
+    queryFn: () => api('/super-admin/organizations'),
+    enabled: isSuperAdmin,
+  });
+  const allOrgs = orgsQ.data?.organizations || [];
 
   const list = useMemo(() => {
     if (isSuperAdmin) {
@@ -31,16 +33,24 @@ export default function OrgSwitcher() {
 
   const active = list.find((m) => m.organizationId === activeOrgId);
 
+  // Switching orgs must drop the previous org's cached data — but KEEP the platform-level org list
+  // (org-agnostic), so the switcher itself doesn't blank + refetch on every switch.
+  function resetOrgScopedCache() {
+    qc.removeQueries({
+      predicate: (q) => !(q.queryKey?.[0] === 'super-admin' && q.queryKey?.[1] === 'organizations'),
+    });
+  }
+
   function pick(orgId) {
     switchOrg(orgId);
     setOpen(false);
-    qc.clear();
+    resetOrgScopedCache();
   }
 
   function pickPlatform() {
     switchOrg(null);
     setOpen(false);
-    qc.clear();
+    resetOrgScopedCache();
     navigate('/super-admin');
   }
 

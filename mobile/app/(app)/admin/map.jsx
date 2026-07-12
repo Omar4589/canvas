@@ -385,10 +385,16 @@ export default function AdminMap() {
     ...useFocusedPoll(),
   });
 
-  // Survey (for the answer-filter chips) — same source the web map uses.
+  // Survey (for the answer-filter chips) — same source the web map uses. Honors the map's date
+  // range so the per-answer counts match the visible dates (absent from/to = all-time).
   const surveyQ = useQuery({
-    queryKey: ['admin', 'survey-results', cId],
-    queryFn: () => api(`/admin/reports/survey-results?campaignId=${cId}`),
+    queryKey: ['admin', 'survey-results', cId, range?.from, range?.to],
+    queryFn: () => {
+      const p = new URLSearchParams({ campaignId: String(cId) });
+      if (range?.from) p.set('from', range.from);
+      if (range?.to) p.set('to', range.to);
+      return api(`/admin/reports/survey-results?${p.toString()}`);
+    },
     enabled: !!cId,
     staleTime: 5 * 60 * 1000,
   });

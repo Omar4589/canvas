@@ -177,10 +177,12 @@ export default function MapPage() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // The answer-filter chip counts honor the map's date range (same endpoint the Dashboard uses).
+  // buildQuery drops null from/to, so the "All time" preset still returns all-time counts.
   const surveyQ = useQuery({
-    queryKey: ['reports', 'survey-results', campaignId],
+    queryKey: ['reports', 'survey-results', campaignId, dateRange.from, dateRange.to],
     queryFn: () =>
-      api(`/admin/reports/survey-results${buildQuery({ campaignId })}`),
+      api(`/admin/reports/survey-results${buildQuery({ campaignId, from: dateRange.from, to: dateRange.to })}`),
     enabled: !!campaignId && selectedCampaign?.type !== 'lit_drop',
   });
 
