@@ -171,10 +171,20 @@ Voters ship only for survey campaigns, scoped to those doors
   ([MapPage.jsx:218](../client/src/pages/MapPage.jsx#L218); the mobile admin map is focus-gated,
   `staleTime` 60s, no interval).
 - Bulk-assigning **all books to one user** (assign-bulk `everyone` mode) makes that user's
-  bootstrap the whole universe (~10–15MB on FL). `saveBootstrap` writes it as ONE AsyncStorage row
-  ([mobile/lib/cache.js:16-18](../mobile/lib/cache.js#L16-L18)); Android's SQLite-backed
-  AsyncStorage can't read rows past ~2MB (CursorWindow) and defaults to a ~6MB total DB — the
-  offline cache would silently stop restoring on Android. iOS is file-based and unaffected.
+  bootstrap the whole universe (~10–15MB on FL). `saveBootstrap` used to write it as ONE
+  AsyncStorage row; Android's SQLite-backed AsyncStorage can't read rows past ~2MB (CursorWindow)
+  and defaults to a ~6MB total DB, which crashed exactly this case in July 2026 (a canvasser
+  assigned all 16k homes hit "Row too big" + SQLITE_FULL at "loading houses"; iOS is file-based
+  and was unaffected). **Fixed:** the bootstrap now lives in a documents-directory file
+  (`canvass.bootstrap.json` via `expo-file-system/legacy`,
+  [mobile/lib/cache.js](../mobile/lib/cache.js)) with no row/DB size limits on either platform;
+  startup migrates a readable legacy AsyncStorage row into the file (an oversized Android row
+  throws on read, lands in the catch, and is deleted unread — removeItem never reads, which is
+  what frees the 6MB DB); saves are atomic (temp file + rename, so a mid-write kill can't corrupt
+  the cache) and coalesced (a knock burst collapses into one write of the newest snapshot); all
+  file ops run through one serialization chain; and `saveBootstrap` swallows its own errors so a
+  cache-write failure can never fail an otherwise-successful fetch. The remaining whole-universe
+  cost is JS heap + `JSON.parse`, not storage.
 
 **Compression was missing until July 2026** — Express does not gzip by default and the Heroku
 router doesn't add it, so every JSON response used to ship uncompressed. Fixed in the billing
@@ -190,8 +200,9 @@ sheet never read it); (2) **viewport-bounded** map fetches — `bbox` → `$geoW
 polygon, which finally puts the household `2dsphere` index to work (verified IXSCAN). The 50k cap
 stays as the no-bbox backstop. (3) the web map fetches a **padded buffer** and skips the refetch
 while the viewport stays inside it, so panning no longer costs a round-trip per settled move.
-**Remaining lever:** a size guard or chunked storage in `saveBootstrap` for the everyone-assignment
-case.
+**Remaining lever:** ~~a size guard or chunked storage in `saveBootstrap` for the
+everyone-assignment case~~ — delivered July 2026 as file-backed storage (see the bullet above);
+what's left of that case is parse/heap cost on low-end phones, not storage.
 
 ## Database scaling (connection pool, indexes, storage)
 

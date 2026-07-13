@@ -1,6 +1,21 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// The main expo-file-system entry (v19+) throws on the legacy functions and no
+// longer exports documentDirectory — the legacy subpath keeps them.
+import * as FileSystem from 'expo-file-system/legacy';
 
+// Legacy AsyncStorage key for the bootstrap — kept only so startup can migrate
+// the old row into the file and delete it (see the chain seed below). The
+// bootstrap now lives in a file: on Android, AsyncStorage is SQLite with a
+// ~2MB per-row read limit (CursorWindow) and a ~6MB total-DB cap, so a large
+// turf's bootstrap crashed with "Row too big" / SQLITE_FULL. Files have
+// neither limit; iOS was always file-backed and unaffected.
 const KEY = 'canvass.bootstrap';
+const BOOTSTRAP_FILE = `${FileSystem.documentDirectory}canvass.bootstrap.json`;
+// writeAsStringAsync truncates the target in place, so a process kill mid-write
+// would leave a corrupt file where SQLite's row write was transactional. Saves
+// write here first, then moveAsync (a rename) over the real file — the cache is
+// always either the previous snapshot or the new one, never a partial.
+const BOOTSTRAP_TMP = `${BOOTSTRAP_FILE}.tmp`;
 const CAMPAIGN_KEY = 'canvass.activeCampaign';
 const USER_KEY = 'canvass.currentUser';
 const MEMBERSHIPS_KEY = 'canvass.memberships';
@@ -13,22 +28,91 @@ const MAP_STYLE_KEY = 'canvass.mapStyle';
 const SERVER_META_KEY = 'canvass.serverMeta';
 const THEME_KEY = 'canvass.themePreference';
 
-export async function saveBootstrap(data) {
-  await AsyncStorage.setItem(KEY, JSON.stringify({ ...data, cachedAt: new Date().toISOString() }));
-}
-
-export async function loadBootstrap() {
-  const raw = await AsyncStorage.getItem(KEY);
-  if (!raw) return null;
+// Serialize every bootstrap file op (mirrors offlineQueue's withQueueLock).
+// Three writers interleave — the bootstrap fetch, the 30s changes poll, and
+// recordAction's fire-and-forget optimistic save — and file ops give no
+// cross-call ordering guarantee, so an unserialized load could race a write.
+// The chain is seeded with a one-time migration of the legacy AsyncStorage
+// row: a readable row (iOS, or a normal-sized Android one) is copied into the
+// file so the update never costs anyone their offline cache; the oversized
+// Android rows this rewrite exists for throw on getItem (CursorWindow), land
+// in the catch, and are deleted unread — removeItem never reads the row, so
+// it can't throw, and it's what frees Android's 6MB AsyncStorage DB.
+let bootstrapChain = (async () => {
   try {
-    return JSON.parse(raw);
+    const legacy = await AsyncStorage.getItem(KEY);
+    if (legacy) {
+      const info = await FileSystem.getInfoAsync(BOOTSTRAP_FILE);
+      if (!info.exists) {
+        await FileSystem.writeAsStringAsync(BOOTSTRAP_TMP, legacy);
+        await FileSystem.moveAsync({ from: BOOTSTRAP_TMP, to: BOOTSTRAP_FILE });
+      }
+    }
+    await AsyncStorage.removeItem(KEY);
   } catch {
-    return null;
+    await AsyncStorage.removeItem(KEY).catch(() => {});
   }
+})();
+function withBootstrapLock(fn) {
+  const run = bootstrapChain.then(fn, fn);
+  bootstrapChain = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
 }
 
-export async function clearBootstrap() {
-  await AsyncStorage.removeItem(KEY);
+// Coalescing: rapid saves (a knock burst, a delta landing beside a fetch) each
+// used to serialize + write the full multi-MB blob back-to-back. Instead, the
+// newest snapshot is parked in `pendingSave` and one queued writer drains it —
+// N calls while a write is queued collapse into that one write of the newest
+// data, so a caller's resolved save always means "your data or newer is on
+// disk", and loads/clears never wait behind a stack of superseded writes.
+let pendingSave = null;
+let queuedSave = null;
+
+// Best-effort by design: a failed cache write must never fail the data path —
+// the map/books queryFns call this right after a successful fetch, and the
+// delta poll + recordAction call it fire-and-forget with no catch of their own.
+export function saveBootstrap(data) {
+  pendingSave = { ...data, cachedAt: new Date().toISOString() };
+  if (queuedSave) return queuedSave;
+  queuedSave = withBootstrapLock(async () => {
+    queuedSave = null; // saves arriving once this write starts queue a fresh one
+    const snapshot = pendingSave;
+    pendingSave = null;
+    try {
+      await FileSystem.writeAsStringAsync(BOOTSTRAP_TMP, JSON.stringify(snapshot));
+      await FileSystem.moveAsync({ from: BOOTSTRAP_TMP, to: BOOTSTRAP_FILE });
+    } catch (err) {
+      console.warn('saveBootstrap failed', err);
+    }
+  });
+  return queuedSave;
+}
+
+export function loadBootstrap() {
+  return withBootstrapLock(async () => {
+    try {
+      const raw = await FileSystem.readAsStringAsync(BOOTSTRAP_FILE);
+      return JSON.parse(raw);
+    } catch {
+      // Missing file, read error, or corrupt JSON — same contract as before:
+      // no cache. Callers fall back to fetching.
+      return null;
+    }
+  });
+}
+
+// Swallows errors: logout runs this inside a Promise.all that must not abort.
+export function clearBootstrap() {
+  return withBootstrapLock(async () => {
+    try {
+      await FileSystem.deleteAsync(BOOTSTRAP_FILE, { idempotent: true });
+    } catch (err) {
+      console.warn('clearBootstrap failed', err);
+    }
+  });
 }
 
 export async function saveActiveCampaign(campaign) {

@@ -87,7 +87,9 @@ export default function BooksScreen() {
     queryFn: async () => {
       try {
         const fresh = await api(`/mobile/bootstrap?campaignId=${activeCampaign.id}`);
-        await saveBootstrap(fresh);
+        // Fire-and-forget: saveBootstrap never rejects, and awaiting a multi-MB
+        // disk write here would only delay first paint of the fresh data.
+        saveBootstrap(fresh);
         return fresh;
       } catch (err) {
         const cached = await loadBootstrap();

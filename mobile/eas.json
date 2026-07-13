@@ -35,6 +35,7 @@
     "production": {
       "ios": {
         "appleId": "omar4589@hotmail.com",
+        "ascAppId": "6764581850",
         "appleTeamId": "62RUXR2CLQ"
       },
       "android": {

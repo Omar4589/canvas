@@ -291,7 +291,9 @@ export default function MapScreen() {
         // Hold any just-recorded, server-not-yet-confirmed statuses over this full
         // refetch so it can't revert a fresh optimistic recolor (see recordAction).
         fresh.households = reconcilePendingLocations(reconcilePendingHouseholds(fresh.households));
-        await saveBootstrap(fresh);
+        // Fire-and-forget: saveBootstrap never rejects, and awaiting a multi-MB
+        // disk write here would only delay first paint of the fresh data.
+        saveBootstrap(fresh);
         return fresh;
       } catch (err) {
         const cached = await loadBootstrap();
