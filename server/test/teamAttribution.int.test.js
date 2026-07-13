@@ -345,6 +345,41 @@ test('ADMINS and SUPER-ADMINS who knock land in "No team" — and everything sti
   );
 });
 
+test("a lead's PRE-BACKFILL rows (coordinatorId ABSENT, not null) still fold onto their own team", { skip }, async () => {
+  const { org, campaign, token, frank, effort, pass } = ctx;
+  // The backfill only stamps members who HAVE a coordinator — a lead's own history keeps the field
+  // ABSENT. In aggregation expressions missing ≠ null ({$ne:[missing,null]} → true, verified on
+  // Mongo 7), so an unguarded fold routes these rows through the "has a team" branch, emits a
+  // MISSING team, and $group parks them in the No-team bucket. The reconciliation still balances
+  // (the doors are counted, in the wrong row), which is why only a bucket-level assertion can
+  // catch it. Mongoose's default:null would write an explicit null and hide the bug — so this
+  // seeds through the RAW driver, exactly like real pre-migration rows.
+  const before = await call(`/admin/reports/team-breakdown?campaignId=${campaign._id}`, token, org._id);
+  const frankBefore = before.json.teams.find((t) => t.coordinatorName === 'Frank X')?.doors || 0;
+  const noneBefore = before.json.teams.find((t) => !t.coordinatorId)?.doors || 0;
+
+  const hh = await Household.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: '9100 Legacy Ln', city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: '9100 LEGACY LN|TOWN|FL|34741',
+    location: { type: 'Point', coordinates: [-81.4, 28.3] },
+  });
+  await CanvassActivity.collection.insertOne({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: hh._id, userId: frank._id, actionType: 'not_home',
+    // NO coordinatorId key at all — a genuine legacy row.
+    timestamp: new Date('2026-07-08T14:00:00Z'), location: { lat: 28.3, lng: -81.4 },
+  });
+
+  const res = await call(`/admin/reports/team-breakdown?campaignId=${campaign._id}`, token, org._id);
+  const frankRow = res.json.teams.find((t) => t.coordinatorName === 'Frank X');
+  const noneRow = res.json.teams.find((t) => !t.coordinatorId);
+
+  assert.equal(frankRow.doors, frankBefore + 1, "the lead's legacy door folds onto HIS team");
+  assert.equal(noneRow.doors, noneBefore, 'and the No-team bucket does NOT quietly absorb it');
+  assert.equal(res.json.teamSum - res.json.crossTeamDoors, res.json.campaign.doors, 'identity holds');
+});
+
 test('an org with no backfill yet REFUSES to report team numbers rather than mislead', { skip }, async () => {
   const { org, campaign, token } = ctx;
   await Organization.updateOne({ _id: org._id }, { $set: { teamAttributionReadyAt: null } });

@@ -38,12 +38,21 @@ export const NOT_BULK = { via: { $ne: 'bulk' } };
 // fallback for people the system lost track of.
 export function teamFoldStage(leadIds) {
   const ids = (leadIds || []).map((s) => new mongoose.Types.ObjectId(String(s)));
+  // $ifNull is LOAD-BEARING, not defensive fluff. Rows written before the coordinatorId field
+  // existed have it ABSENT (the backfill only stamps members who HAVE a coordinator — a lead's own
+  // history stays unstamped). In aggregation expressions, missing is NOT equal to null
+  // ({$ne: [missing, null]} → true — verified empirically on Mongo 7), so without the $ifNull the
+  // fold takes the "has a team" branch, emits a MISSING team, and $group then collapses missing to
+  // null — silently parking every lead's own pre-backfill doors in the "No team" bucket. The
+  // reconciliation still balances (the doors are counted, in the wrong row), so no sum-check can
+  // catch it. (Query-context filters are unaffected: {coordinatorId: null} DOES match absent.)
+  const coord = { $ifNull: ['$coordinatorId', null] };
   return {
     $set: {
       team: {
         $cond: [
-          { $ne: ['$coordinatorId', null] },
-          '$coordinatorId',
+          { $ne: [coord, null] },
+          coord,
           { $cond: [{ $in: ['$userId', ids] }, '$userId', null] },
         ],
       },
