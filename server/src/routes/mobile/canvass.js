@@ -4,6 +4,7 @@ import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
+import { Membership } from '../../models/Membership.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
@@ -24,6 +25,26 @@ router.use(requireAuth, orgContext, requireOrgMember);
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
+}
+
+// The TEAM a knock belongs to, resolved ONCE at knock time and frozen onto the row.
+//
+// `orgContext` already loaded this request's Membership, so the normal canvasser path costs ZERO
+// extra queries. The one exception is a SUPER-ADMIN: orgContext returns early for them without
+// loading a membership (orgContext.js:35-38), so fall back to a lookup rather than silently
+// stamping null — a super-admin who is also a coordinated member of the org should still have
+// their doors land on their team.
+//
+// null is a real answer, not a failure: a candidate knocking their own district, or anyone with no
+// coordinator, belongs in the "No coordinator" bucket. Never invent a team here.
+async function coordinatorForWrite(req, organizationId) {
+  if (req.activeMembership) return req.activeMembership.coordinatorId ?? null;
+  if (!organizationId) return null;
+  const m = await Membership.findOne(
+    { userId: req.user._id, organizationId },
+    'coordinatorId'
+  ).lean();
+  return m?.coordinatorId ?? null;
 }
 
 function isOrgAdminOrSuper(req) {
@@ -129,6 +150,10 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     await recomputeSurveyStatus(priorSurveys.map((s) => s.voterId));
   }
 
+  // Freeze the team on the door. Resolved now, never re-derived — so this door stays on this
+  // team even after the canvasser is deactivated, taken off the campaign, or leaves the org.
+  const coordinatorId = await coordinatorForWrite(req, household.organizationId);
+
   const activity = await CanvassActivity.create({
     organizationId: household.organizationId,
     campaignId: household.campaignId,
@@ -138,6 +163,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     passId,
     turfId,
     effortId,
+    coordinatorId,
     note: data.note ?? null,
     location: data.location,
     distanceFromHouseMeters: distance,
@@ -389,6 +415,12 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // unique index — two concurrent submits (a double-tap) can never persist two rows; the loser
     // of the insert race updates the winner instead. Resets editedBy/editedAt so a fresh canvasser
     // submission clears any prior admin-edit audit.
+    // Freeze the team on the survey too, so a team's SURVEY numbers survive a canvasser leaving
+    // exactly like their door numbers do. (A re-submit restamps it — correct: it records the team
+    // of whoever last did the fieldwork. An ADMIN editing the answers later must not touch it;
+    // that path sets only editedBy/editedAt.)
+    const coordinatorId = await coordinatorForWrite(req, household.organizationId);
+
     const surveyFields = {
       organizationId: household.organizationId,
       campaignId: campaign._id,
@@ -405,6 +437,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       passId,
       turfId,
       effortId,
+      coordinatorId,
       wasOfflineSubmission: !!data.wasOfflineSubmission,
       editedBy: null,
       editedAt: null,
@@ -451,6 +484,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       passId,
       turfId,
       effortId,
+      coordinatorId, // same team as the SurveyResponse above — the two ledgers must not drift
       note: data.note ?? null,
       location: data.location,
       distanceFromHouseMeters: distance,

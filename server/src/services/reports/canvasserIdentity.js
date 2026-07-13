@@ -1,5 +1,6 @@
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
+import { resolveDeletedIdentities } from '../users/deleteAccount.js';
 
 // Who a canvasser IS, for a report that already knows what they DID.
 //
@@ -46,13 +47,28 @@ export async function hydrateCanvassers(userIds, orgId, { fields = '' } = {}) {
   ]);
   const mById = new Map(memberships.map((m) => [String(m.userId), m]));
 
+  // Self-deletion scrubs the User row to "Deleted user" (App Store 5.1.1(v) requires a real delete),
+  // but the org's record of the WORK survives — and a knock ledger you can't attach to a person is
+  // useless for an audit or for telling a client who walked their district. DeletedUserRecord
+  // snapshots the identity for exactly this, and resolveDeletedIdentities() reads it. It was built,
+  // tested, and never wired in — so every report has been rendering "Deleted user". Wire it here,
+  // once, in the shared hydrator, so every canvasser surface gets it and none can drift.
+  //
+  // After the retention window lapses the snapshot is purged and the person is permanently
+  // anonymous. That is the intended end state, not a bug.
+  const deletedIds = users.filter((u) => u.deletedAt).map((u) => u._id);
+  const restored = deletedIds.length
+    ? await resolveDeletedIdentities(deletedIds, { organizationId: orgId })
+    : new Map();
+
   for (const id of ids) {
     const u = users.find((x) => String(x._id) === id) || null;
     const status = canvasserStanding(u, mById.get(id));
+    const snap = u?.deletedAt ? restored.get(String(u._id)) : null;
     out.set(id, {
-      firstName: u?.firstName || '',
-      lastName: u?.lastName || '',
-      email: u?.email || '',
+      firstName: snap?.firstName || u?.firstName || '',
+      lastName: snap?.lastName || u?.lastName || '',
+      email: snap?.email || u?.email || '',
       phone: u?.phone || null,
       status,
       isActive: status === 'active',

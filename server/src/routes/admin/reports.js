@@ -134,6 +134,61 @@ function baseFilter(req) {
   return filter;
 }
 
+// Optional TEAM (coordinator) scoping — deliberately NOT part of baseFilter().
+//
+// baseFilter's result is spread into HOUSEHOLD queries (see /overview: `{ isActive: true,
+// ...cFilter }`), and a household has no team — a door doesn't belong to a crew. Putting the key
+// there would make every household query match zero documents and silently ZERO OUT Coverage.
+// effortId only gets away with living in baseFilter because it IS denormalized onto Household.
+//
+// So this is opt-in, and is spread ONLY into CanvassActivity / SurveyResponse matches.
+//
+//   ?coordinatorId=<id>   → that team
+//   ?coordinatorId=none   → the "No team" bucket (a candidate knocking their own district, etc.)
+//
+// A team is its crew PLUS THE LEAD'S OWN DOORS. `coordinatorId` answers "who oversees me", so a
+// lead's own knocks stamp *their* coordinator (usually nobody) and would otherwise fall into the
+// No-team bucket — the lead would be missing from their own team's number. Hence the $or.
+// `none` then has to exclude the leads, or their doors would be counted twice.
+export function teamMatch(coordinatorId, allLeadIds = []) {
+  if (!coordinatorId) return {};
+  if (coordinatorId === 'none') {
+    return allLeadIds.length
+      ? { coordinatorId: null, userId: { $nin: allLeadIds } }
+      : { coordinatorId: null };
+  }
+  const id = new mongoose.Types.ObjectId(String(coordinatorId));
+  return { $or: [{ coordinatorId: id }, { userId: id, coordinatorId: null }] };
+}
+
+// The users who are somebody's coordinator in this org — i.e. the set of team leads. Needed so the
+// "No team" bucket can exclude them (their own doors belong to their own team, above).
+async function leadIdsForOrg(orgId) {
+  const ids = await Membership.distinct('coordinatorId', {
+    organizationId: orgId,
+    coordinatorId: { $ne: null },
+  });
+  return ids;
+}
+
+// Resolve ?coordinatorId into a match object, or {} when no team scope was requested.
+async function crewFilter(req) {
+  const raw = req.query.coordinatorId;
+  if (!raw) return {};
+  if (raw !== 'none' && !mongoose.isValidObjectId(raw)) return {};
+  const leads = raw === 'none' ? await leadIdsForOrg(activeOrgId(req)) : [];
+  return teamMatch(raw, leads);
+}
+
+// Merge a team clause into a match. NEVER spread it — teamMatch can return `$or`, and a plain
+// spread would clobber any `$or` the match already carries (the cross-timezone date windows build
+// one). $and composes safely no matter what either side contains.
+function withTeam(match, team) {
+  if (!team || !Object.keys(team).length) return match;
+  if (!team.$or) return { ...match, ...team };
+  return { ...match, $and: [...(match.$and || []), { $or: team.$or }] };
+}
+
 // KNOCK_ACTIONS, knocksPipeline, connectionRate, coverageBucketExpr now live in
 // services/reports/aggregations.js (shared with the client report builder).
 
@@ -675,11 +730,25 @@ router.get('/canvassers', async (req, res, next) => {
       ]),
       CanvassActivity.aggregate([
         { $match: activityMatch },
+        // Bucket by DAY first, so hoursOnDoors is the SUM OF PER-DAY working spans — not
+        // (last knock ever − first knock ever), which is a CALENDAR span. The Dashboard used to
+        // derive its own hours from firstActivityAt/lastActivityAt and therefore divided a week's
+        // doors by a week of wall-clock: a canvasser doing 737 doors over 6 days read 4.9/hr
+        // instead of 13.7. The endpoint now returns the real figure so no client has to guess.
         {
           $group: {
-            _id: '$userId',
-            firstActivityAt: { $min: '$timestamp' },
-            lastActivityAt: { $max: '$timestamp' },
+            _id: { userId: '$userId', day: dayBucketExpr('timestamp', tzOf(req)) },
+            first: { $min: '$timestamp' },
+            last: { $max: '$timestamp' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.userId',
+            firstActivityAt: { $min: '$first' },
+            lastActivityAt: { $max: '$last' },
+            hoursOnDoors: { $sum: { $divide: [{ $subtract: ['$last', '$first'] }, 3600000] } },
+            daysActive: { $sum: 1 },
           },
         },
       ]),
@@ -700,6 +769,8 @@ router.get('/canvassers', async (req, res, next) => {
           restricted: 0,
           firstActivityAt: null,
           lastActivityAt: null,
+          hoursOnDoors: 0,
+          daysActive: 0,
         });
       }
       return byUser.get(key);
@@ -731,6 +802,8 @@ router.get('/canvassers', async (req, res, next) => {
     for (const row of rangeAgg) {
       const u = ensure(row._id);
       u.firstActivityAt = row.firstActivityAt;
+      u.hoursOnDoors = row.hoursOnDoors || 0;
+      u.daysActive = row.daysActive || 0;
       if (
         row.lastActivityAt &&
         (!u.lastActivityAt || row.lastActivityAt > u.lastActivityAt)
@@ -777,6 +850,13 @@ router.get('/canvassers', async (req, res, next) => {
           }),
           firstActivityAt: u.firstActivityAt,
           lastActivityAt: u.lastActivityAt,
+          // Sum of per-DAY working spans — the same method the timeline and the CSV use, so the
+          // three surfaces finally agree. Clients must NOT re-derive this from first/last: that is
+          // a calendar span, and it under-reports pace by ~3x over a multi-day range.
+          hoursOnDoors: Math.round((u.hoursOnDoors || 0) * 100) / 100,
+          daysActive: u.daysActive || 0,
+          doorsPerHour:
+            u.hoursOnDoors > 0 ? Math.round((knocks / u.hoursOnDoors) * 100) / 100 : 0,
         };
       })
       .sort((a, b) => {
@@ -1262,6 +1342,144 @@ function ymdSpanDays(from, to) {
   return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000) + 1;
 }
 
+// Every team's numbers at once, with the reconciliation shown.
+//
+// The question this exists for: "how many doors has MY team knocked?" — asked by a client who runs
+// one crew, and by a candidate who wants each crew's numbers side by side. A one-team-at-a-time
+// filter makes an admin check three times and add up by hand, which is where the mistake gets made.
+//
+// The counting contract (see docs/METRICS.md):
+//   · Billing is team-blind: a billable knock is one distinct (household, pass). Unchanged.
+//   · A TEAM's doors = that same dedupe, applied within the team. Two of Asa's own people knocking
+//     one house in one pass collapses to ONE door inside Asa's number, automatically.
+//   · Σ teams + "no team" − crossTeamDoors == campaign billable, EXACTLY.
+//     crossTeamDoors = houses worked by two DIFFERENT teams. Each team fairly counts it (they each
+//     did the work) so it is claimed twice; the campaign counts it once. The difference is that
+//     over-claim, and it is pure arithmetic — no extra query. It should normally be 0: two teams on
+//     the same doors is an anomaly, and this surfaces it rather than papering over it.
+router.get('/team-breakdown', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const org = await Organization.findById(orgId, 'teamAttributionReadyAt').lean();
+
+    const scope = { ...baseFilter(req), ...parseDateRange(req, 'timestamp'), ...NOT_BULK };
+
+    // Until the backfill has run, history carries no team tag — and an unstamped row is invisible
+    // to a team while being swallowed by the No-team bucket. That reads as "every team did nothing
+    // and the unassigned bucket did everything", which looks like data rather than an error. Refuse
+    // rather than mislead.
+    if (!org?.teamAttributionReadyAt) {
+      return res.json({ ready: false, teams: [], campaign: null, crossTeamDoors: 0 });
+    }
+
+    const leadIds = (await leadIdsForOrg(orgId)).map(String);
+    const leadSet = new Set(leadIds);
+
+    const [rows, campaignAgg] = await Promise.all([
+      CanvassActivity.aggregate([
+        { $match: { ...scope, actionType: { $in: KNOCK_ACTIONS } } },
+        {
+          // A lead's OWN knocks stamp *their* coordinator (usually nobody), so fold them onto the
+          // team they run — otherwise the lead is missing from their own team's number and their
+          // doors leak into the "No team" bucket an admin deliberately excludes.
+          $set: {
+            team: {
+              $cond: [
+                { $ne: ['$coordinatorId', null] },
+                '$coordinatorId',
+                { $cond: [{ $in: ['$userId', leadIds.map((s) => new mongoose.Types.ObjectId(s))] }, '$userId', null] },
+              ],
+            },
+          },
+        },
+        // Dedupe to the DOOR-PASS *within a team* — this is what makes a team's number a true
+        // distinct-door count, and what absorbs a same-team double-knock for free.
+        {
+          $group: {
+            _id: { householdId: '$householdId', passId: '$passId', team: '$team' },
+            hasSurvey: { $max: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
+            hasLit: { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
+            hasRefused: { $max: { $cond: [{ $eq: ['$actionType', 'refused'] }, 1, 0] } },
+            users: { $addToSet: '$userId' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.team',
+            doors: { $sum: 1 },
+            surveyedKnocks: { $sum: '$hasSurvey' },
+            litKnocks: { $sum: '$hasLit' },
+            refusedKnocks: { $sum: '$hasRefused' },
+            people: { $addToSet: '$users' },
+          },
+        },
+      ]),
+      CanvassActivity.aggregate(knocksPipeline(scope)),
+    ]);
+
+    // Voter-unit surveys per team (the door-unit count is surveyedKnocks above — they are different
+    // questions and the UI must label them as such; one door can survey several voters).
+    const voterSurveys = await SurveyResponse.aggregate([
+      { $match: { ...baseFilter(req), ...parseDateRange(req, 'submittedAt') } },
+      { $group: { _id: '$coordinatorId', voters: { $sum: 1 } } },
+    ]);
+    const votersByTeam = new Map(voterSurveys.map((v) => [String(v._id), v.voters]));
+
+    const teamIds = rows.map((r) => r._id).filter(Boolean);
+    const names = await User.find({ _id: { $in: teamIds } }, 'firstName lastName').lean();
+    const nameById = new Map(names.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()]));
+
+    const teams = rows
+      .map((r) => {
+        const id = r._id ? String(r._id) : null;
+        const knocks = r.doors;
+        return {
+          coordinatorId: id,
+          coordinatorName: id ? nameById.get(id) || 'Unknown' : null, // null = the "No team" bucket
+          people: new Set(r.people.flat().map(String)).size,
+          doors: knocks, // DISTINCT (household, pass) worked by this team
+          surveyDoors: r.surveyedKnocks, // door-unit — the connection-rate numerator
+          votersSurveyed: votersByTeam.get(String(id)) || 0, // voter-unit — a different question
+          litKnocks: r.litKnocks,
+          connectionRate: connectionRate({
+            knocks,
+            surveyedKnocks: r.surveyedKnocks,
+            litKnocks: r.litKnocks,
+          }),
+          contactRate: contactRate({
+            knocks,
+            surveyedKnocks: r.surveyedKnocks,
+            refusedKnocks: r.refusedKnocks,
+          }),
+        };
+      })
+      .sort((a, b) => b.doors - a.doors);
+
+    const k = campaignAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
+    const teamSum = teams.reduce((n, t) => n + t.doors, 0);
+
+    res.json({
+      ready: true,
+      teams,
+      campaign: {
+        doors: k.knocks,
+        surveyDoors: k.surveyedKnocks,
+        litKnocks: k.litKnocks,
+        connectionRate: connectionRate(k),
+        contactRate: contactRate(k),
+      },
+      // Σ teams − campaign. A door-pass worked by k teams contributes k to the sum and 1 to the
+      // campaign, so the difference IS the over-claim. Normally 0; non-zero means two teams walked
+      // the same doors, which is worth knowing.
+      crossTeamDoors: Math.max(0, teamSum - k.knocks),
+      teamSum,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/canvasser-timeline', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -1306,7 +1524,13 @@ router.get('/canvasser-timeline', async (req, res, next) => {
 
     // Campaign-to-date with no bounds = the whole ledger for this campaign: no timestamp filter.
     const window = totalsMode && !hasRange ? null : zonedDayRange(from, to, tz);
-    const scoped = { ...baseFilter(req), ...(window ? { timestamp: window } : {}) };
+    // Team scope rides on the LEDGER (coordinatorId is frozen onto each knock), so scoping here
+    // makes EVERY number below team-correct at once — the rows, the raw totals, and crucially
+    // `billableKnocks`, which is deduped server-side and can never be derived client-side.
+    const scoped = withTeam(
+      { ...baseFilter(req), ...(window ? { timestamp: window } : {}) },
+      await crewFilter(req)
+    );
 
     // One aggregation, mode-keyed bucket: hour-of-day for a single day, calendar day for
     // a range. Both bucket in the anchor tz ($hour/$dateToString with timezone), so DST
@@ -1315,6 +1539,24 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     const bucketExpr = singleDay
       ? { $hour: { date: '$timestamp', timezone: tz } }
       : dayBucketExpr('timestamp', tz);
+
+    // Voter-unit surveys, per canvasser. The bucket agg below counts survey DOORS
+    // (CanvassActivity.survey_submitted); this counts survey VOTERS (SurveyResponse rows). One door
+    // can survey several voters, so the two genuinely differ — the Home tab showed one and the
+    // Timeline the other, both labelled "Surveys", which is why they appeared to contradict.
+    const voterSurveyAgg = await SurveyResponse.aggregate([
+      {
+        $match: withTeam(
+          {
+            ...baseFilter(req),
+            ...(window ? { submittedAt: window } : {}),
+          },
+          await crewFilter(req)
+        ),
+      },
+      { $group: { _id: '$userId', voters: { $sum: 1 } } },
+    ]);
+    const votersByUser = new Map(voterSurveyAgg.map((v) => [String(v._id), v.voters]));
 
     const [bucketAgg, knockAgg, overlapRes] = await Promise.all([
       CanvassActivity.aggregate([
@@ -1349,6 +1591,11 @@ router.get('/canvasser-timeline', async (req, res, next) => {
             restricted: { $sum: { $cond: [{ $eq: ['$actionType', 'restricted'] }, 1, 0] } },
             first: { $min: '$timestamp' },
             last: { $max: '$timestamp' },
+            // The team(s) this canvasser's doors are stamped with, straight from the LEDGER — no
+            // roster join, which is what used to lose a canvasser the moment they left a campaign.
+            // A set, because someone who transferred teams has doors under both, and the honest
+            // answer is "Multiple", not a silently-picked winner.
+            coordinatorIds: { $addToSet: '$coordinatorId' },
           },
         },
       ]),
@@ -1387,9 +1634,11 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           first: null,
           last: null,
           hoursOnDoors: 0,
+          coordinatorIds: new Set(),
         });
       }
       const row = byUser.get(uid);
+      for (const c of r.coordinatorIds || []) row.coordinatorIds.add(c ? String(c) : null);
       // The grid shows knocks only, so a restricted-only bucket (knocks === 0) never
       // creates an empty knock column — but its timestamps still extend the window below.
       if (singleDay) {
@@ -1447,6 +1696,19 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     const overlapUserIds = new Set(overlapRes.overlapUserIds || []);
 
     const userIds = [...byUser.keys()];
+    // Team names for the Coordinator column — resolved from the ledger's stamped ids, NOT from the
+    // campaign roster. That join is what used to blank the column (and drop the canvasser out of
+    // their team's total) the moment somebody was taken off a campaign.
+    const teamIds = [
+      ...new Set([...byUser.values()].flatMap((r) => [...r.coordinatorIds]).filter(Boolean)),
+    ];
+    const teamUsers = teamIds.length
+      ? await User.find({ _id: { $in: teamIds } }, 'firstName lastName').lean()
+      : [];
+    const teamNameById = new Map(
+      teamUsers.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()])
+    );
+
     const uMap = await hydrateCanvassers(userIds, orgId);
 
     const canvassers = userIds
@@ -1454,6 +1716,11 @@ router.get('/canvasser-timeline', async (req, res, next) => {
         const row = byUser.get(uid);
         const u = uMap.get(uid);
         const rawHours = row.hoursOnDoors;
+        // A canvasser who transferred has doors under two teams. Say "Multiple" rather than
+        // silently picking one — the by-team breakdown splits their doors correctly either way.
+        const teams = [...row.coordinatorIds].filter(Boolean);
+        const coordinatorName =
+          teams.length > 1 ? 'Multiple' : teams.length === 1 ? teamNameById.get(teams[0]) || null : null;
         return {
           userId: uid,
           firstName: u?.firstName || '',
@@ -1477,6 +1744,11 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           notHome: row.notHome,
           wrongAddress: row.wrongAddress,
           dayRestricted: row.dayRestricted, // inaccessible homes — a tally, never in dayKnocks
+          // daySurveys above = survey DOORS (the connection-rate numerator). This is survey VOTERS —
+          // a different question, always >= doors, and it must be labelled as such in the UI.
+          dayVoterSurveys: votersByUser.get(uid) || 0,
+          coordinatorId: teams.length === 1 ? teams[0] : null,
+          coordinatorName,
           firstActivityAt: row.first,
           lastActivityAt: row.last,
           hoursOnDoors: Math.round(rawHours * 100) / 100,

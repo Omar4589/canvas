@@ -212,6 +212,21 @@ from the org, not even deleting the account outright. They keep appearing on rep
 numbers. (On the **Timeline**, pick the **All time** range to see everyone who has ever worked the
 campaign — the default view is *today*, so people who left naturally have no rows in it.)
 
+**Their team stays too.** The team a door belongs to is **stamped on the door when it's knocked**, not
+looked up later — so a canvasser's doors stay on their team even after they're deactivated, taken off
+the campaign, or removed from the org. This matters when you report a team's number to a client:
+before, removing someone from a campaign silently moved their doors into "No coordinator", the bucket
+you exclude, and a real campaign under-reported one team by **104 doors**. It also means moving
+someone between teams no longer *retroactively* rewrites history — a figure you gave a client last
+month still reconciles today. See [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
+
+**Their name stays, within limits.** Deactivation, campaign-removal and org-removal all keep the
+person's name on reports. **Self-deletion is the exception**: the account is scrubbed (the App Store
+requires a real delete), but the org's record of the *work* survives, and a snapshot of the identity
+is kept for a **retention window** so an audit can still say who walked which doors. Once that window
+lapses the snapshot is purged and their past work is permanently anonymous — that is the intended end
+state, not a bug.
+
 **Their books come back.** Whatever they were *holding* is handed back so someone else can take it:
 
 | What you do | What they lose | What comes back |

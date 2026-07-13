@@ -31,9 +31,26 @@ function columnsFor(litMode) {
     { key: 'name', label: 'Canvasser', numeric: false },
     { key: 'coordinatorName', label: 'Coordinator', numeric: false, help: metricHelp.coordinator },
     { key: 'dayKnocks', label: 'Doors', numeric: true, help: metricHelp.doors },
-    litMode
-      ? { key: 'dayLit', label: 'Lit drops', numeric: true, help: metricHelp.litDrops }
-      : { key: 'daySurveys', label: 'Surveys', numeric: true, help: metricHelp.surveys },
+    // TWO survey units, named. A door can survey several voters, so these genuinely differ (the
+    // candidate works a house deeply: 18 doors, 37 voters). They used to share the bare label
+    // "Surveys", which made the Home tab and the Timeline look like they disagreed about the same
+    // canvasser. "Survey doors" is the one the connection rate divides by — say so.
+    ...(litMode
+      ? [{ key: 'dayLit', label: 'Lit drops', numeric: true, help: metricHelp.litDrops }]
+      : [
+          {
+            key: 'daySurveys',
+            label: 'Survey doors',
+            numeric: true,
+            help: 'Doors where at least one survey was taken. This is the numerator of the connection rate.',
+          },
+          {
+            key: 'dayVoterSurveys',
+            label: 'Voters surveyed',
+            numeric: true,
+            help: 'People surveyed. One door can survey several voters, so this is usually higher than Survey doors.',
+          },
+        ]),
     { key: 'connectionRate', label: 'Conn %', numeric: true, help: metricHelp.connectionRate },
     { key: 'contactRate', label: 'Contact %', numeric: true, help: metricHelp.contactRate },
     { key: 'doorsPerHour', label: 'Doors/hr', numeric: true, help: metricHelp.doorsPerHour },
@@ -138,9 +155,18 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = f
           <td className="px-3 py-2 text-right font-medium text-fg">
             {(r.dayKnocks || 0).toLocaleString()}
           </td>
-          <td className="px-3 py-2 text-right text-fg">
-            {((litMode ? r.dayLit : r.daySurveys) || 0).toLocaleString()}
-          </td>
+          {litMode ? (
+            <td className="px-3 py-2 text-right text-fg">{(r.dayLit || 0).toLocaleString()}</td>
+          ) : (
+            <>
+              <td className="px-3 py-2 text-right text-fg">
+                {(r.daySurveys || 0).toLocaleString()}
+              </td>
+              <td className="px-3 py-2 text-right text-fg-muted">
+                {(r.dayVoterSurveys || 0).toLocaleString()}
+              </td>
+            </>
+          )}
           <td className={`px-3 py-2 text-right font-medium ${rateClass(r.connectionRate)}`}>
             {ratePct(r.connectionRate)}
           </td>

@@ -420,6 +420,106 @@ averaged). `activeCanvassers` is **not** summable — it uses a separate org-wid
 
 ## F. Invariants & edge cases
 
+### Teams (coordinators) — the counting contract
+
+**The team is FROZEN ON THE KNOCK.** `CanvassActivity.coordinatorId` and
+`SurveyResponse.coordinatorId` record the canvasser's coordinator **at the moment they knocked**,
+stamped by [canvass.js](../server/src/routes/mobile/canvass.js) from `req.activeMembership` (already
+loaded by `orgContext`, so it costs zero extra queries).
+
+It used to be joined at read time from the **campaign roster**, which caused two failures:
+- Taking a canvasser off a campaign deleted their `CampaignAssignment`, so the join missed and their
+  doors silently fell into **"No coordinator"** — the bucket admins deliberately *exclude* when
+  reporting a team's number to a client. On the live HD54 campaign this under-reported one team by
+  **104 doors**.
+- Moving anyone between teams **retroactively rewrote history**, so a figure quoted to a client last
+  month stopped reconciling.
+
+Freezing also fixes the twin: a canvasser removed from the **org** has no `Membership` at all, so any
+read-time fix would still lose them. On the ledger, their history is immune to everything.
+
+**`null` is a real answer, not "unknown"** — a candidate knocking their own district belongs in the
+No-team bucket. Never backfill over an explicit null (see the migration note below).
+
+#### How a team's numbers are computed
+
+**Billing is team-blind and unchanged:** a billable knock is one distinct `(householdId, passId)`.
+Two canvassers on one house in one round = **1**. The same house in round 2 = **2**.
+
+**A team's doors are that same pipeline, run over that team's knocks** —
+`knocksPipeline({ ...scope, ...teamMatch })`. Because it already groups by `(household, pass)`, a
+house that **two of the same team's own people** double-knocked collapses to **one door inside that
+team's number, automatically**. No tie-breaking rule is needed.
+
+**The reconciliation** (asserted by `test/teamAttribution.int.test.js`):
+
+```
+Σ teams  +  "no team"  −  crossTeamDoors  ==  campaign billable      (exactly)
+
+crossTeamDoors = (Σ per-team doors) − campaignBillable
+```
+
+A door-pass worked by *k* teams contributes *k* to the team sum and 1 to the campaign, so the
+difference **is** the over-claim. It costs nothing to compute — the same arithmetic as
+`overlapDoors = grandKnocks − billableKnocks`.
+
+> ⚠️ **The subtraction is CROSS-team double-knocks only — NOT the overlap count on screen.**
+> `computeOverlaps` flags a door-pass touched by **2+ distinct `userId`s, not 2+ distinct teams**. A
+> house double-knocked by two people on the *same* team is one of those overlaps, yet that team
+> claims it only **once** (their own dedupe absorbed it), so nothing should be subtracted for it.
+> Subtracting the on-screen overlap count would land you **under**. Two teams should never share
+> doors, so `crossTeamDoors` is normally **0** — surface it when it isn't; never hide it.
+
+> ⚠️ **A team lead's OWN doors.** `coordinatorId` answers *"who oversees me"*, so a lead's own knocks
+> stamp *their* coordinator (usually nobody) and would fall into the No-team bucket — the lead
+> missing from their own team. Every team clause folds them back in:
+> `{ $or: [ {coordinatorId: X}, {userId: X, coordinatorId: null} ] }`, and the No-team bucket
+> excludes all leads so nobody is counted twice.
+
+> 🚨 **The team filter must NOT live in `baseFilter()`.** That result is spread into **Household**
+> queries (`/overview`: `{ isActive: true, ...cFilter }`), and a household has no team — a door
+> doesn't belong to a crew. Putting the key there matches zero households and **zeroes out
+> Coverage**. `effortId` only survives in `baseFilter` because it *is* denormalized onto Household.
+> Use the opt-in `crewFilter(req)` / `withTeam(match, team)`, spread only into activity/survey
+> matches. `withTeam` composes with `$and` — never spread a `$or` team clause into a match that may
+> already carry one.
+
+> 🚨 **The backfill keys on `{ coordinatorId: { $exists: false } }`, never `{ coordinatorId: null }`.**
+> In Mongo `{field: null}` **also matches documents where the field is absent**, so a null key would
+> re-stamp *deliberate* nulls on a second run and hand the candidate's doors to a team — the
+> migration would reintroduce the very bug it exists to fix. And because an unstamped row is
+> invisible to `coordinatorId: <team>` while being swallowed by the No-team bucket, a **half-run
+> backfill shows every team at ~zero and No-team enormous** — which looks like data, not an error.
+> Hence `Organization.teamAttributionReadyAt`: the team surfaces refuse to render until it's set.
+> Deploy order is not a safeguard; a gate is.
+
+**Coverage is never team-scopable.** It's a property of `Household.status`, and a household has no
+team.
+
+### Survey DOORS vs survey VOTERS (they are different numbers)
+
+| Number | Source | Meaning |
+|---|---|---|
+| **Survey doors** | `CanvassActivity.survey_submitted` (`surveyKnocks` / `daySurveys`) | doors where ≥1 survey was taken — **the connection-rate numerator** |
+| **Voters surveyed** | `SurveyResponse` rows (`surveysSubmitted` / `dayVoterSurveys`) | people surveyed — one door can survey several |
+
+`connectionRate = (surveyedKnocks + litKnocks) ÷ knocks` — **doors, not voters**. Live check: 273 ÷
+1,252 = 22% (voters would give 297/1,252 = 24%, which is not what the app shows).
+
+Both are correct; the dual ledger is deliberate (see [SURVEYS.md](SURVEYS.md)). But they were both
+labelled "Surveys" on different pages, so the same canvasser read 143 on the Timeline and 147 on
+Home, and the Home KPI row showed **neither** the number its own connection rate divides by. Every
+surface now names them separately. (`Surveys` and `Surveyed voters` were also *structurally
+identical* in a single-round campaign — the unique index on `{voterId, passId}` allows one response
+per voter per pass — so one card was always redundant.)
+
+### `hoursOnDoors` is a sum of per-DAY spans
+
+Never `(lastActivityAt − firstActivityAt)` — that is a **calendar** span. The Dashboard derived its
+own hours that way and divided a week's doors by a week of wall-clock, under-reporting pace ~3×
+(4.9 doors/hr where the truth was 13.7). `/canvassers` now returns `hoursOnDoors` and `doorsPerHour`
+computed the same way the timeline and the CSV do; **clients must not re-derive them.**
+
 - **A knock is a historical fact. Staffing changes never move a number.** Deactivating a canvasser,
   removing them from a campaign, removing them from the org, or deleting their account **does not
   change a single count** — not the campaign totals, not the leaderboard, not the invoice. Whether

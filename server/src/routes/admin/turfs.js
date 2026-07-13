@@ -762,6 +762,11 @@ router.post('/restrict-bulk', async (req, res, next) => {
           passId: turf.passId,
           turfId: turf._id,
           effortId: hh.effortId || null,
+          // Explicitly NO team. An admin's own coordinator is not a field-work attribution — the
+          // same reason lastActionBy is deliberately left unset below ("don't attribute a whole
+          // community to the admin"). Bulk rows already sit outside every per-canvasser surface
+          // (NOT_BULK), and they must sit outside every per-TEAM total for the same reason.
+          coordinatorId: null,
         });
         touched.push(hh._id);
         turfMarked += 1;

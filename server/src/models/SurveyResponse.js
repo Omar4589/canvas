@@ -61,6 +61,12 @@ const surveyResponseSchema = new mongoose.Schema(
     turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },
     effortId: { type: mongoose.Schema.Types.ObjectId, ref: 'Effort', default: null, index: true },
 
+    // The TEAM this survey belongs to — the canvasser's coordinator when they took it, frozen.
+    // Mirrors CanvassActivity.coordinatorId (see the long note there); kept in step so a team's
+    // SURVEY numbers survive a canvasser leaving exactly like their door numbers do.
+    // An admin editing a response later must NOT restamp this — it records who did the fieldwork.
+    coordinatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
     // Audit trail for in-place edits from the admin voter profile (null = never edited).
     editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     editedAt: { type: Date, default: null },

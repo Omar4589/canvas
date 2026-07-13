@@ -231,20 +231,25 @@ export default function DashboardPage() {
     return m;
   }, [members]);
   const canvasserRows = useMemo(() => {
-    return (canvassersQ.data || []).map((r) => {
-      const dayKnocks = r.knocks ?? r.homesKnocked ?? 0;
-      const first = r.firstActivityAt ? new Date(r.firstActivityAt).getTime() : null;
-      const last = r.lastActivityAt ? new Date(r.lastActivityAt).getTime() : null;
-      const hours = first && last ? (last - first) / 3600000 : 0;
-      return {
-        ...r,
-        dayKnocks,
-        daySurveys: r.surveysSubmitted ?? 0,
-        dayLit: r.litDropped ?? 0,
-        doorsPerHour: hours > 0 ? Math.round((dayKnocks / hours) * 100) / 100 : 0,
-        coordinatorName: coordByUserId.get(String(r.userId))?.coordinatorName || null,
-      };
-    });
+    return (canvassersQ.data || []).map((r) => ({
+      ...r,
+      dayKnocks: r.knocks ?? r.homesKnocked ?? 0,
+      // Two units, deliberately. `surveyKnocks` = DOORS with a survey (the connection-rate
+      // numerator); `surveysSubmitted` = VOTERS surveyed (one door can survey several). They are
+      // different questions with different answers — showing one under the bare label "Surveys"
+      // is why this table and the Timeline appeared to contradict each other.
+      daySurveys: r.surveyKnocks ?? 0,
+      dayVoterSurveys: r.surveysSubmitted ?? 0,
+      dayLit: r.litDropped ?? 0,
+      // Restricted was silently 0 here forever: the endpoint returns `restricted`, the table reads
+      // `dayRestricted`, and nothing mapped between them.
+      dayRestricted: r.restricted ?? 0,
+      // doorsPerHour now comes from the SERVER (sum of per-day working spans). It used to be
+      // re-derived here from lastActivityAt − firstActivityAt — a CALENDAR span — which divided a
+      // week's doors by a week of wall-clock and under-reported pace roughly threefold.
+      doorsPerHour: r.doorsPerHour ?? 0,
+      coordinatorName: coordByUserId.get(String(r.userId))?.coordinatorName || null,
+    }));
   }, [canvassersQ.data, coordByUserId]);
   const rangeTo = dateRange?.to || (tz ? todayInTz(tz) : null);
   const singleDayRange = !!dateRange && dateRange.from === rangeTo;
@@ -422,12 +427,18 @@ export default function DashboardPage() {
               />
             ) : (
               <>
+                {/* Survey DOORS — the connection rate's numerator, so the row proves itself. This
+                    card used to show surveysSubmitted (VOTERS), which is the same number as
+                    "Surveyed voters" beside it: in a single-round campaign a voter can only have one
+                    response (unique index on {voterId, passId}), so the two were always identical.
+                    Meanwhile the number the rate actually divides by appeared nowhere, and anyone
+                    checking 297 ÷ 1,252 got 24% and concluded the rate was broken. */}
                 <StatCard
-                  label="Surveys"
-                  value={rangeStats.surveysSubmitted?.toLocaleString()}
-                  hint="per voter"
+                  label="Survey doors"
+                  value={rangeStats.surveyedKnocks?.toLocaleString()}
+                  hint="doors with a survey"
                   accent="green"
-                  help={metricHelp.surveys}
+                  help="Doors where at least one survey was taken. This is the numerator of the connection rate — a door can survey several voters, so it is usually lower than 'Surveyed voters'."
                 />
                 <StatCard
                   label="Surveyed voters"
@@ -440,7 +451,7 @@ export default function DashboardPage() {
             <StatCard
               label={isLitDrop ? 'Lit rate' : 'Connection rate'}
               value={ratePct(rangeStats.connectionRate)}
-              hint={isLitDrop ? 'lit knocks ÷ knocks' : 'surveyed knocks ÷ knocks'}
+              hint={isLitDrop ? 'lit knocks ÷ knocks' : 'survey doors ÷ knocks'}
               accent={rateAccent(rangeStats.connectionRate)}
               help={metricHelp.connectionRate}
             />

@@ -51,6 +51,22 @@ const canvassActivitySchema = new mongoose.Schema(
     passId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', default: null },
     turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },
     effortId: { type: mongoose.Schema.Types.ObjectId, ref: 'Effort', default: null, index: true },
+
+    // The TEAM this door belongs to: the canvasser's coordinator AT THE MOMENT THEY KNOCKED,
+    // frozen here rather than looked up later.
+    //
+    // It used to be resolved at read time from the campaign roster, which meant (a) removing a
+    // canvasser from a campaign silently moved all their doors into "No coordinator" — the bucket
+    // admins deliberately EXCLUDE when reporting a team's number to a client — and (b) moving
+    // anyone between teams retroactively rewrote history, so a figure quoted to a client last
+    // month stopped reconciling. Freezing it makes a team's number immune to everything that
+    // happens to the person afterwards: deactivation, campaign removal, org removal, deletion.
+    //
+    // null is MEANINGFUL, not "unknown": it's the "no coordinator" bucket (a candidate knocking
+    // their own district, an admin's bulk marks). Do not backfill over an explicit null — see
+    // migrations/migrateActivityCoordinator.js, which keys on {$exists:false} for exactly that
+    // reason ({coordinatorId: null} would ALSO match absent fields and re-stamp deliberate nulls).
+    coordinatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }
 );

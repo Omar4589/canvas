@@ -13,6 +13,7 @@ import LiveStatus from '../components/LiveStatus.jsx';
 import CanvasserSummaryTable from '../components/CanvasserSummaryTable.jsx';
 import TimelineGrid from '../components/TimelineGrid.jsx';
 import TimelineOverlaps from '../components/TimelineOverlaps.jsx';
+import TeamBreakdown from '../components/TeamBreakdown.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -131,12 +132,18 @@ export default function TimelinePage() {
   }
 
   const timelineQ = useQuery({
-    queryKey: ['reports', 'canvasser-timeline', campaignId, effortId, allTime ? 'all' : fromDay, dateRange?.to],
+    queryKey: [
+      'reports', 'canvasser-timeline', campaignId, effortId,
+      allTime ? 'all' : fromDay, dateRange?.to, coordinatorId,
+    ],
     queryFn: () =>
       api(
         `/admin/reports/canvasser-timeline${buildQuery({
           campaignId,
           effortId: effortId || undefined,
+          // Team scope goes to the SERVER. It has to: billable doors are deduped by
+          // (household, pass) across users, so a team's real figure cannot be summed client-side.
+          coordinatorId: coordinatorId || undefined,
           // All-time sends no bounds at all — the server reads that as the whole ledger.
           ...(allTime ? { totals: 1 } : { from: fromDay, to: dateRange.to || undefined }),
         })}`
@@ -148,65 +155,61 @@ export default function TimelinePage() {
   });
   const data = timelineQ.data || {};
 
-  // Coordinator join: the roster cache (shared with the Team page) knows each
-  // canvasser's coordinator; the timeline rows don't. Off-roster canvassers
-  // (removed, cross-campaign) resolve to null → '—' / "No coordinator".
-  const coordByUserId = useMemo(() => {
-    const m = new Map();
-    for (const member of members) {
-      m.set(String(member.user.id), {
-        coordinatorId: member.user.coordinatorId ? String(member.user.coordinatorId) : null,
-        coordinatorName: member.user.coordinatorName || null,
-      });
-    }
-    return m;
-  }, [members]);
+  // The coordinator now comes from the LEDGER — it is stamped onto each knock at the moment it
+  // happens. It used to be joined from the campaign roster, which meant a canvasser who was taken
+  // off the campaign lost their team and their doors silently fell into "No coordinator" — the
+  // bucket admins deliberately exclude when reporting a team's number to a client.
+  //
+  // The filter is now SERVER-SIDE too (?coordinatorId), which is what makes the deduped billable
+  // figure team-correct: distinct doors can't be derived by summing rows in the browser.
+  const rows = data.canvassers || [];
+  const filteredRows = rows;
 
-  const rows = useMemo(() => {
-    return (data.canvassers || []).map((c) => ({
-      ...c,
-      coordinatorId: coordByUserId.get(String(c.userId))?.coordinatorId || null,
-      coordinatorName: coordByUserId.get(String(c.userId))?.coordinatorName || null,
-    }));
-  }, [data.canvassers, coordByUserId]);
+  const teamsQ = useQuery({
+    queryKey: ['reports', 'team-breakdown', campaignId, effortId, allTime ? 'all' : fromDay, dateRange?.to],
+    queryFn: () =>
+      api(
+        `/admin/reports/team-breakdown${buildQuery({
+          campaignId,
+          effortId: effortId || undefined,
+          ...(allTime ? {} : { from: fromDay, to: dateRange.to || undefined }),
+        })}`
+      ),
+    enabled: !!campaignId && (allTime || (!!fromDay && !rangeInvalid)),
+    placeholderData: keepPreviousData,
+  });
+  const breakdown = teamsQ.data || {};
 
-  const coordinatorOptions = useMemo(() => {
-    const seen = new Map();
-    for (const r of rows) {
-      if (r.coordinatorId && !seen.has(r.coordinatorId)) seen.set(r.coordinatorId, r.coordinatorName);
-    }
-    // Also offer coordinators whose whole crew hasn't knocked yet (from the roster).
-    for (const member of members) {
-      const cid = member.user.coordinatorId ? String(member.user.coordinatorId) : null;
-      if (cid && !seen.has(cid)) seen.set(cid, member.user.coordinatorName);
-    }
-    return [...seen.entries()]
-      .map(([id, name]) => ({ id, name: name || 'Coordinator' }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [rows, members]);
+  const coordinatorOptions = useMemo(
+    () =>
+      (breakdown.teams || [])
+        .filter((t) => t.coordinatorId)
+        .map((t) => ({ id: t.coordinatorId, name: t.coordinatorName || 'Coordinator' }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [breakdown.teams]
+  );
 
-  const filteredRows = useMemo(() => {
-    if (!coordinatorId) return rows;
-    if (coordinatorId === 'none') return rows.filter((r) => !r.coordinatorId);
-    return rows.filter((r) => r.coordinatorId === coordinatorId);
-  }, [rows, coordinatorId]);
-
-  // KPI totals from the visible rows, so the coordinator filter scopes them too.
+  // DOORS is the DEDUPED count, from the server — the number you'd quote a client. It cannot be
+  // computed here: summing rows gives the raw event count, which double-counts a house two
+  // canvassers both worked. The raw figure still has a home, in the reconciliation line below.
+  // The connection rate divides by the same deduped denominator, so it now agrees with the Home
+  // tab and the client report instead of quietly using a different base.
   const kpis = useMemo(() => {
-    let doors = 0;
+    const doors = data.billableKnocks ?? 0;
     let surveys = 0;
     let lit = 0;
     let hours = 0;
     for (const r of filteredRows) {
-      doors += r.dayKnocks || 0;
-      surveys += r.daySurveys || 0;
+      surveys += r.daySurveys || 0; // survey DOORS — the connection-rate numerator
       lit += r.dayLit || 0;
       hours += r.hoursOnDoors || 0;
     }
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
-    const doorsPerHour = hours > 0 ? doors / hours : null;
+    // Pace stays raw effort: it's per-person time on doors, not a billing figure.
+    const rawDoors = filteredRows.reduce((n, r) => n + (r.dayKnocks || 0), 0);
+    const doorsPerHour = hours > 0 ? rawDoors / hours : null;
     return { doors, surveys, connPct, doorsPerHour };
-  }, [filteredRows]);
+  }, [filteredRows, data.billableKnocks]);
 
   // "Knocking N of M": M = the people this campaign could expect work from in this range, N =
   // how many actually knocked.
@@ -375,13 +378,16 @@ export default function TimelinePage() {
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <StatCard label="Doors" value={kpis.doors.toLocaleString()} hint={rangeLabel} />
-            <StatCard label="Surveys" value={kpis.surveys.toLocaleString()} hint="Doors with a survey" />
+            {/* Distinct doors, deduped by (house, round) — the figure you'd give a client. The raw
+                event count lives in the reconciliation line below, where it can't be mistaken for
+                this one. */}
+            <StatCard label="Doors" value={kpis.doors.toLocaleString()} hint={`Distinct doors · ${rangeLabel}`} />
+            <StatCard label="Survey doors" value={kpis.surveys.toLocaleString()} hint="Doors with a survey" />
             <StatCard
               label="Connection rate"
               value={ratePct(kpis.connPct)}
               accent={rateAccent(kpis.connPct)}
-              hint="Surveys + lit ÷ doors"
+              hint="Survey doors + lit ÷ doors"
             />
             <StatCard
               label="Doors / hour"
@@ -394,6 +400,13 @@ export default function TimelinePage() {
               hint={coordinatorId ? 'Crew + anyone who worked' : 'Roster + anyone who worked'}
             />
           </div>
+
+          {/* Every team at once. One client asks for their own crew's number; the candidate asks for
+              all of them. Filtering one at a time means checking three times and adding up by hand —
+              which is where the mistake gets made. The total line proves the arithmetic closes. */}
+          {!coordinatorId && breakdown.ready && (breakdown.teams || []).length > 1 && (
+            <TeamBreakdown data={breakdown} onPick={setCoordinatorId} />
+          )}
 
           {filteredRows.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border bg-sunken p-8 text-center">
