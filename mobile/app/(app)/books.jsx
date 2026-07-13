@@ -18,6 +18,7 @@ import {
   clearCurrentEffort,
 } from '../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
+import { initMapbox } from '../../lib/mapbox';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
@@ -30,9 +31,7 @@ import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
 import { useMapStyle } from '../../lib/mapStyles';
 
-if (MAPBOX_PUBLIC_TOKEN) {
-  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
-}
+initMapbox();
 
 const DEFAULT_CENTER = [-84.5, 39.0];
 

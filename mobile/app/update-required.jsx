@@ -11,7 +11,7 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // cryptic 4xx errors deeper in the app.
 const STORE_URL = Platform.select({
   android: 'https://play.google.com/store/apps/details?id=com.canvassapp.mobile',
-  ios: 'https://apps.apple.com/app/doorline/id000000000',
+  ios: 'https://apps.apple.com/app/doorline/id6764581850',
 });
 
 export default function UpdateRequired() {

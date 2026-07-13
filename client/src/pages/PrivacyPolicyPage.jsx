@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-const LAST_UPDATED = 'July 5, 2026';
+const LAST_UPDATED = 'July 13, 2026';
 const CONTACT_EMAIL = 'hello@doorline.app';
 const APP_NAME = 'Doorline';
 
@@ -231,10 +231,27 @@ export default function PrivacyPolicyPage() {
           <p>
             You may decline the location permission on your device; you will
             still be able to browse the map and view records, but you will not
-            be able to record canvass actions. You may request access to,
-            correction of, or deletion of your personal information by
-            contacting us, and you may ask your organization&apos;s
-            administrator to disable your account.
+            be able to record canvass actions.
+          </p>
+          <p>
+            You can <strong>delete your account yourself, at any time</strong>,
+            from the mobile app: <strong>Profile → Delete account</strong>. See{' '}
+            <a
+              href="#delete-account"
+              className="text-brand-accent underline hover:text-brand-accent"
+            >
+              Deleting your account
+            </a>{' '}
+            above for what that removes and what your organization keeps. If you
+            have already uninstalled the app, you can request deletion at{' '}
+            <a
+              href="/delete-account"
+              className="text-brand-accent underline hover:text-brand-accent"
+            >
+              doorline.app/delete-account
+            </a>
+            . You may also request access to or correction of your personal
+            information by contacting us.
           </p>
         </Section>
 

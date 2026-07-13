@@ -25,14 +25,13 @@ import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import { primaryReason, reasonColor } from '../../../lib/flags';
 import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
+import { initMapbox } from '../../../lib/mapbox';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
-if (MAPBOX_PUBLIC_TOKEN) {
-  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
-}
+initMapbox();
 
 const DEFAULT_CENTER = [-84.5, 39.0];
 

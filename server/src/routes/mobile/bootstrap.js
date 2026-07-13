@@ -19,6 +19,34 @@ import { canvasserScopeWithPasses, isOrgAdminOrSuper } from '../../services/canv
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
 
+// The ONE place a voter is shaped for the phone. Both the bootstrap and the /changes delta go
+// through it, so the two projections cannot drift apart.
+//
+// It exists to drop `dateOfBirth`. The app downloads a canvasser's whole book and keeps it in an
+// AsyncStorage cache so the doors still work in a dead zone — which meant every voter's full date
+// of birth was sitting on every canvasser's phone. And the only thing the app ever did with it was
+// derive an integer age for the "Party · Age · Gender" line (mobile/lib/voters.js).
+//
+// A DOB is the most identity-theft-useful field in a voter file; an age is close to worthless. So
+// the arithmetic happens here and the date itself never leaves the server. The strongest protection
+// for a field is not sending it — a cached-but-encrypted DOB is still a DOB on a volunteer's phone.
+//
+// Keep the `dateOfBirth: 1` in the Mongo projections above: we need it HERE to compute the age. It
+// just must not survive into the response.
+function toWireVoter(v, voted) {
+  const { dateOfBirth, ...rest } = v;
+  return { ...rest, age: ageFromDob(dateOfBirth), voted };
+}
+
+function ageFromDob(dob) {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return null;
+  const age = Math.floor((Date.now() - d.getTime()) / (365.25 * 86400000));
+  // A voter file with a garbage DOB shouldn't render "Party · 1124 yrs · F" at a door.
+  return age >= 0 && age < 120 ? age : null;
+}
+
 function activeOrgId(req) {
   return req.activeOrg?._id;
 }
@@ -254,7 +282,7 @@ router.get('/bootstrap', async (req, res, next) => {
     // Early voting: flag (not hide) voters who already voted so the app can show
     // a ✓ next to their name. Fully-voted doors were already dropped above.
     const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
-    const voters = votersRaw.map((v) => ({ ...v, voted: votedSet.has(String(v._id)) }));
+    const voters = votersRaw.map((v) => toWireVoter(v, votedSet.has(String(v._id))));
 
     const { books, efforts } = await canvasserBooks(req, campaign);
     // The campaign's active round ids — the client compares this to the /changes
@@ -370,7 +398,7 @@ router.get('/changes', async (req, res, next) => {
         { voterId: 1 }
       ).lean();
       const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
-      changedVoters = raw.map((v) => ({ ...v, voted: votedSet.has(String(v._id)) }));
+      changedVoters = raw.map((v) => toWireVoter(v, votedSet.has(String(v._id))));
     }
 
     res.json({

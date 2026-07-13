@@ -694,7 +694,7 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
           <input
             value={name}
             onChange={(e) => { setName(e.target.value); if (errors.name) setErrors((p) => ({ ...p, name: undefined })); }}
-            placeholder="Scott Berger Door-to-Door Survey"
+            placeholder="Fall Canvass — Voter ID Survey"
             className={`w-full rounded border bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${errors.name ? 'border-danger' : 'border-border-strong focus:border-brand-accent'}`}
           />
           {errors.name

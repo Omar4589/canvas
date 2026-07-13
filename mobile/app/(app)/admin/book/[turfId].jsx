@@ -17,13 +17,14 @@ import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../../lib/api';
 import { loadActiveCampaign, loadCurrentUser } from '../../../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../lib/config';
+import { initMapbox } from '../../../../lib/mapbox';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../lib/mapStyles';
 import { outlineRing } from '../../../../lib/bookDensity';
 
-if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
+initMapbox();
 
 const STATUS_LABEL = {
   unknocked: 'Unknocked',

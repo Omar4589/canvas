@@ -13,6 +13,7 @@ import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../../lib/config';
+import { initMapbox } from '../../../../../lib/mapbox';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { formatExact } from '../../../../../lib/datetime';
 import { radius, spacing } from '../../../../../lib/theme';
@@ -23,9 +24,7 @@ import DateRangeBar from '../../../../../components/DateRangeBar';
 import TabSwitcher from '../../../../../components/TabSwitcher';
 import PinIcon from '../../../../../components/PinIcon';
 
-if (MAPBOX_PUBLIC_TOKEN) {
-  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
-}
+initMapbox();
 
 const ACTION_TABS = [
   { key: 'all', label: 'All' },

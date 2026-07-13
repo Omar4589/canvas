@@ -356,6 +356,20 @@ constants). A small legend labels the two rings when they're shown.
 
 ## H. Config
 
+- **Mapbox init — mobile: one chokepoint, [lib/mapbox.js](../mobile/lib/mapbox.js).** Every map screen
+  calls `initMapbox()` at module scope. **Never call `Mapbox.setAccessToken()` directly.**
+  - **Why:** `@rnmapbox/maps` ships anonymous usage **and location** to Mapbox by *default*, and
+    `setTelemetryEnabled(false)` has to be called to stop it. Setting the token had been copy-pasted
+    into **nine** files and every copy left telemetry on. A tenth map screen would have done the same.
+    Now the token and the telemetry switch travel together and there is nothing to copy.
+  - **Leaving telemetry on would have three costs:** it makes the published privacy policy false (it
+    states we use no *"third-party analytics, or tracking technologies … in our apps"*); it forces us
+    to declare Mapbox as a third party collecting Location + App activity on Play's Data safety form
+    and pushes the App Store label toward *"Data Used to Track You"*; and the SDK's own docs then
+    **require** us to ship a user-facing opt-out toggle. Turning it off deletes all three problems.
+  - Map **tiles** still reach Mapbox — that is what a map is — and that is disclosed in the privacy
+    policy under service providers *"providing maps and converting addresses into map coordinates."*
+    Telemetry is the separable, opt-outable part; that is what `initMapbox()` kills.
 - **Mapbox token — web:** the server returns it via `GET /admin/config/mapbox-token` (env
   `MAPBOX_PUBLIC_TOKEN`, a `pk.*` token); `MapPage` sets `mapboxgl.accessToken`.
 - **Mapbox token — mobile:** `EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN` (public, bundled; the *download* token

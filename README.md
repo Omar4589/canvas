@@ -1,6 +1,8 @@
-# Canvass App
+# Doorline
 
-Internal door-to-door canvassing system. Multi-tenant: each organization runs its own campaigns with its own admins and canvassers, under a super-admin tier. (Originally built for a single campaign with one admin and ~3 canvassers.)
+Multi-tenant SaaS for door-to-door canvassing, sold to political consulting firms, campaigns, and advocacy organizations. Each customer organization runs its own campaigns with its own admins, team leads, and canvassers, isolated from every other organization, under a super-admin (vendor) tier.
+
+A web console for the office (turf cutting, imports, oversight, client reports) plus an offline-first iOS/Android field app for canvassers. Marketing site: [doorline.app](https://doorline.app).
 
 ## Repo layout
 

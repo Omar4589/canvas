@@ -17,7 +17,12 @@ import MarketingFooter from '../marketing/MarketingFooter.jsx';
 // server/src/utils/seedDemoOrg.js + client/scripts/optimizeShots.js).
 export default function LandingPage() {
   useEffect(() => {
-    document.title = 'Doorline — Door-to-door canvassing platform for political consultants';
+    // Matches index.html's <title> on purpose. The narrower "for political consultants" framing that
+    // used to live here undersold the audience (campaigns and advocacy orgs buy directly too) — and a
+    // store listing that reads as a niche, single-customer tool is what invites an App Store 4.2/3.2
+    // "not for general distribution" rejection. Keep this in step with the privacy policy's customer
+    // sentence and the store listing.
+    document.title = 'Doorline — Door-to-door canvassing software for campaigns and causes';
   }, []);
 
   return (

@@ -5,13 +5,14 @@ import { useQuery } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../lib/api';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
+import { initMapbox } from '../../../lib/mapbox';
 import { useMapStyle } from '../../../lib/mapStyles';
 import { timeAgo } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
-if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
+initMapbox();
 
 function one(p) {
   return Array.isArray(p) ? p[0] : p;

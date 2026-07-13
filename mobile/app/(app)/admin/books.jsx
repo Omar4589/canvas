@@ -21,6 +21,7 @@ import { api } from '../../../lib/api';
 import { loadCurrentUser } from '../../../lib/cache';
 import { useMapStyle } from '../../../lib/mapStyles';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
+import { initMapbox } from '../../../lib/mapbox';
 import CampaignChip from '../../../components/CampaignChip';
 import EffortPicker from '../../../components/EffortPicker';
 import { radius, spacing } from '../../../lib/theme';
@@ -28,7 +29,7 @@ import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { outlineRing, doorsPerAcre } from '../../../lib/bookDensity';
 
-if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
+initMapbox();
 
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 

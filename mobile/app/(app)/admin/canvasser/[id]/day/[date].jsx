@@ -14,6 +14,7 @@ import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../../../lib/config';
+import { initMapbox } from '../../../../../../lib/mapbox';
 import { deviceTimezone } from '../../../../../../lib/dateRanges';
 import { formatRange } from '../../../../../../lib/datetime';
 import { radius, spacing } from '../../../../../../lib/theme';
@@ -22,9 +23,7 @@ import { useThemedStyles } from '../../../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../../../lib/mapStyles';
 import ActivityRow from '../../../../../../components/ActivityRow';
 
-if (MAPBOX_PUBLIC_TOKEN) {
-  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
-}
+initMapbox();
 
 function dayBounds(dateStr) {
   // One campaign-tz day, inclusive. dateStr is already a 'YYYY-MM-DD' campaign-tz day (from

@@ -41,6 +41,7 @@ import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdA
 import { distanceToCoords } from '../../lib/geo';
 import { guardedPush } from '../../lib/navGuard';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
+import { initMapbox } from '../../lib/mapbox';
 import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import MapContextCard from '../../components/MapContextCard';
@@ -59,9 +60,7 @@ import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
 
-if (MAPBOX_PUBLIC_TOKEN) {
-  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
-}
+initMapbox();
 
 const DEFAULT_CENTER = [-84.5, 39.0];
 

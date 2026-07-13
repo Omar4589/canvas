@@ -3,12 +3,12 @@ import { Modal, View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import Mapbox from '@rnmapbox/maps';
 import { getCurrentLocation } from '../lib/location';
 import { recordLocationCorrection } from '../lib/recordAction';
-import { MAPBOX_PUBLIC_TOKEN } from '../lib/config';
+import { initMapbox } from '../lib/mapbox';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 
-if (MAPBOX_PUBLIC_TOKEN) Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
+initMapbox();
 
 // Correct a door's pin: drop it at the canvasser's GPS spot, or drag the marker.
 // Writes via recordLocationCorrection (optimistic + offline-safe). When the door
