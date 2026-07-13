@@ -380,6 +380,21 @@ test("a lead's PRE-BACKFILL rows (coordinatorId ABSENT, not null) still fold ont
   assert.equal(res.json.teamSum - res.json.crossTeamDoors, res.json.campaign.doors, 'identity holds');
 });
 
+test('the Home LEADERBOARD names a departed canvasser\'s team from the ledger, matching the Timeline', { skip }, async () => {
+  const { org, campaign, token } = ctx;
+  // /canvassers used to leave the Coordinator column to a client-side roster join — so the same
+  // person read 'Asa Bryant' on the Timeline and '—' on the Home tab, purely by which page you had
+  // open. Both now resolve from the teams stamped on the knocks themselves.
+  const res = await call(`/admin/reports/canvassers?campaignId=${campaign._id}`, token, org._id);
+  assert.equal(res.status, 200);
+  const byName = new Map(res.json.map((r) => [r.firstName, r]));
+
+  assert.equal(byName.get('Julian').coordinatorName, 'Asa X',
+    'deactivated AND off the roster — the ledger still knows his team');
+  assert.equal(byName.get('Nathan').coordinatorName, 'Asa X');
+  assert.equal(byName.get('Randy').coordinatorName, null, 'the candidate stays teamless');
+});
+
 test('an org with no backfill yet REFUSES to report team numbers rather than mislead', { skip }, async () => {
   const { org, campaign, token } = ctx;
   await Organization.updateOne({ _id: org._id }, { $set: { teamAttributionReadyAt: null } });

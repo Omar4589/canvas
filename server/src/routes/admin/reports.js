@@ -176,6 +176,33 @@ async function leadIdsForOrg(orgId) {
 // the identical fold, and an audit that can be wrong in the same way as the thing it audits is
 // worth nothing.
 
+// The Coordinator label for a canvasser row, resolved from the LEDGER's stamped team ids — never
+// from the campaign roster, whose join blanked the column (and dropped the person from their team's
+// totals) the moment somebody was taken off a campaign. Takes Map<userId, Set<teamId|null>>, returns
+// Map<userId, {coordinatorId, coordinatorName}>. Someone who knocked for two teams in the window
+// reads 'Multiple' rather than a silently-picked winner — the by-team breakdown splits their doors
+// correctly either way. Shared by /canvasser-timeline and /canvassers so the Timeline and the Home
+// leaderboard can never disagree about the same person again.
+async function ledgerCoordinatorLabels(coordSetsByUser) {
+  const teamIds = [
+    ...new Set([...coordSetsByUser.values()].flatMap((s) => [...s]).filter(Boolean)),
+  ];
+  const teamUsers = teamIds.length
+    ? await User.find({ _id: { $in: teamIds } }, 'firstName lastName').lean()
+    : [];
+  const nameById = new Map(teamUsers.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()]));
+  const out = new Map();
+  for (const [uid, set] of coordSetsByUser) {
+    const teams = [...set].filter(Boolean);
+    out.set(uid, {
+      coordinatorId: teams.length === 1 ? teams[0] : null,
+      coordinatorName:
+        teams.length > 1 ? 'Multiple' : teams.length === 1 ? nameById.get(teams[0]) || null : null,
+    });
+  }
+  return out;
+}
+
 // Resolve ?coordinatorId into a match object, or {} when no team scope was requested.
 async function crewFilter(req) {
   const raw = req.query.coordinatorId;
@@ -745,6 +772,11 @@ router.get('/canvassers', async (req, res, next) => {
             _id: { userId: '$userId', day: dayBucketExpr('timestamp', tzOf(req)) },
             first: { $min: '$timestamp' },
             last: { $max: '$timestamp' },
+            // The team(s) stamped on this day's knocks. $ifNull is load-bearing: pre-backfill rows
+            // have the field ABSENT and $addToSet silently SKIPS a missing path — the set would
+            // come back empty and the coordinator column would blank for exactly the legacy rows
+            // it matters most for.
+            coordinatorIds: { $addToSet: { $ifNull: ['$coordinatorId', null] } },
           },
         },
         {
@@ -754,6 +786,7 @@ router.get('/canvassers', async (req, res, next) => {
             lastActivityAt: { $max: '$last' },
             hoursOnDoors: { $sum: { $divide: [{ $subtract: ['$last', '$first'] }, 3600000] } },
             daysActive: { $sum: 1 },
+            coordinatorIdSets: { $addToSet: '$coordinatorIds' },
           },
         },
       ]),
@@ -804,6 +837,7 @@ router.get('/canvassers', async (req, res, next) => {
         u.lastActivityAt = row.lastAt;
       }
     }
+    const coordSetsByUser = new Map();
     for (const row of rangeAgg) {
       const u = ensure(row._id);
       u.firstActivityAt = row.firstActivityAt;
@@ -815,9 +849,19 @@ router.get('/canvassers', async (req, res, next) => {
       ) {
         u.lastActivityAt = row.lastActivityAt;
       }
+      coordSetsByUser.set(
+        String(row._id),
+        new Set((row.coordinatorIdSets || []).flat().map((c) => (c ? String(c) : null)))
+      );
     }
 
-    const userMap = await hydrateCanvassers(Array.from(byUser.keys()), activeOrgId(req));
+    const [userMap, coordLabels] = await Promise.all([
+      hydrateCanvassers(Array.from(byUser.keys()), activeOrgId(req)),
+      // Same ledger-sourced Coordinator label the Timeline shows, so the Home leaderboard and the
+      // Timeline can never disagree about the same person (the leaderboard used to join the roster,
+      // which reads '—' for anyone taken off the campaign — the very people this work recovers).
+      ledgerCoordinatorLabels(coordSetsByUser),
+    ]);
 
     const rows = Array.from(byUser.values())
       .map((u) => {
@@ -833,6 +877,8 @@ router.get('/canvassers', async (req, res, next) => {
           email: info?.email || '',
           status: info?.status || 'deleted',
           isActive: info?.isActive ?? false,
+          coordinatorId: coordLabels.get(u.userId)?.coordinatorId ?? null,
+          coordinatorName: coordLabels.get(u.userId)?.coordinatorName ?? null,
           surveysSubmitted: u.surveysSubmitted,
           surveyKnocks: u.surveyKnocks,
           notHome: u.notHome,
@@ -1694,17 +1740,8 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     const overlapUserIds = new Set(overlapRes.overlapUserIds || []);
 
     const userIds = [...byUser.keys()];
-    // Team names for the Coordinator column — resolved from the ledger's stamped ids, NOT from the
-    // campaign roster. That join is what used to blank the column (and drop the canvasser out of
-    // their team's total) the moment somebody was taken off a campaign.
-    const teamIds = [
-      ...new Set([...byUser.values()].flatMap((r) => [...r.coordinatorIds]).filter(Boolean)),
-    ];
-    const teamUsers = teamIds.length
-      ? await User.find({ _id: { $in: teamIds } }, 'firstName lastName').lean()
-      : [];
-    const teamNameById = new Map(
-      teamUsers.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()])
+    const coordLabels = await ledgerCoordinatorLabels(
+      new Map(userIds.map((uid) => [uid, byUser.get(uid).coordinatorIds]))
     );
 
     const uMap = await hydrateCanvassers(userIds, orgId);
@@ -1714,11 +1751,7 @@ router.get('/canvasser-timeline', async (req, res, next) => {
         const row = byUser.get(uid);
         const u = uMap.get(uid);
         const rawHours = row.hoursOnDoors;
-        // A canvasser who transferred has doors under two teams. Say "Multiple" rather than
-        // silently picking one — the by-team breakdown splits their doors correctly either way.
-        const teams = [...row.coordinatorIds].filter(Boolean);
-        const coordinatorName =
-          teams.length > 1 ? 'Multiple' : teams.length === 1 ? teamNameById.get(teams[0]) || null : null;
+        const { coordinatorId: teamId, coordinatorName } = coordLabels.get(uid) || {};
         return {
           userId: uid,
           firstName: u?.firstName || '',
@@ -1745,8 +1778,8 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           // daySurveys above = survey DOORS (the connection-rate numerator). This is survey VOTERS —
           // a different question, always >= doors, and it must be labelled as such in the UI.
           dayVoterSurveys: votersByUser.get(uid) || 0,
-          coordinatorId: teams.length === 1 ? teams[0] : null,
-          coordinatorName,
+          coordinatorId: teamId ?? null,
+          coordinatorName: coordinatorName ?? null,
           firstActivityAt: row.first,
           lastActivityAt: row.last,
           hoursOnDoors: Math.round(rawHours * 100) / 100,

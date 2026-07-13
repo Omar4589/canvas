@@ -408,6 +408,30 @@ export default function TimelinePage() {
             <TeamBreakdown data={breakdown} onPick={setCoordinatorId} />
           )}
 
+          {/* Clicking a team row above swaps the whole page to that crew — and the table you clicked
+              disappears with it, leaving the header dropdown as the only (unobvious) way back. This
+              is that way back. */}
+          {coordinatorId && (
+            <div className="flex items-center gap-3 rounded-lg border border-border bg-sunken px-3 py-2">
+              <span className="text-sm text-fg">
+                Showing{' '}
+                <span className="font-semibold">
+                  {coordinatorId === 'none'
+                    ? 'canvassers with no team'
+                    : `${coordinatorOptions.find((c) => c.id === coordinatorId)?.name || 'this team'}'s crew`}
+                </span>{' '}
+                only — every number on this page is scoped to them.
+              </span>
+              <button
+                type="button"
+                onClick={() => setCoordinatorId('')}
+                className="ml-auto shrink-0 rounded-md border border-border-strong px-2.5 py-1 text-xs font-medium text-fg-muted hover:bg-card"
+              >
+                ← All teams
+              </button>
+            </div>
+          )}
+
           {filteredRows.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border bg-sunken p-8 text-center">
               <p className="text-sm font-medium text-fg">No activity for this coordinator's crew</p>

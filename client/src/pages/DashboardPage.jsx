@@ -15,7 +15,6 @@ import { CountdownChip } from '../components/campaigns/CampaignCard.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
 import { daysUntil, earlyVotingState, formatDateLabel } from '../lib/electionDates.js';
 import { metricHelp } from '../lib/metricHelp.js';
-import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { todayInTz } from '../lib/datePresets.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 
@@ -218,18 +217,10 @@ export default function DashboardPage() {
   // here we normalize the /admin/reports/canvassers leaderboard rows into the same
   // shape — rename Doors/Surveys/Lit, compute doors-per-hour from first→last, and
   // join the coordinator from the shared campaign-assignments cache (like TimelinePage).
-  // allMembers: a leaderboard is a report — a deactivated canvasser's rows are still here, so
-  // their coordinator label has to resolve.
-  const { allMembers: members } = useCampaignTeam(campaignId);
-  const coordByUserId = useMemo(() => {
-    const m = new Map();
-    for (const member of members) {
-      m.set(String(member.user.id), {
-        coordinatorName: member.user.coordinatorName || null,
-      });
-    }
-    return m;
-  }, [members]);
+  // The Coordinator column comes from the SERVER, resolved off the ledger (the team stamped on
+  // each knock). This page used to join it from the campaign roster, which reads '—' for anyone
+  // taken off the campaign — so the Home leaderboard and the Timeline disagreed about the same
+  // person (Julian/Nathan showed 'Asa Bryant' on one page and '—' on the other).
   const canvasserRows = useMemo(() => {
     return (canvassersQ.data || []).map((r) => ({
       ...r,
@@ -248,9 +239,8 @@ export default function DashboardPage() {
       // re-derived here from lastActivityAt − firstActivityAt — a CALENDAR span — which divided a
       // week's doors by a week of wall-clock and under-reported pace roughly threefold.
       doorsPerHour: r.doorsPerHour ?? 0,
-      coordinatorName: coordByUserId.get(String(r.userId))?.coordinatorName || null,
     }));
-  }, [canvassersQ.data, coordByUserId]);
+  }, [canvassersQ.data]);
   const rangeTo = dateRange?.to || (tz ? todayInTz(tz) : null);
   const singleDayRange = !!dateRange && dateRange.from === rangeTo;
 
