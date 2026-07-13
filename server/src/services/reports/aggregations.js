@@ -1,3 +1,5 @@
+import mongoose from 'mongoose';
+
 // Shared report aggregation primitives. Extracted from routes/admin/reports.js so the
 // admin dashboards AND the client report builder compute knocks/connection-rate/coverage
 // identically (one source of truth). These are pure — no req, no DB handles — so they can
@@ -14,6 +16,40 @@ export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_su
 // `{ ...match, ...NOT_BULK }`. `$ne` matches docs without the field, so legacy
 // rows need no backfill.
 export const NOT_BULK = { via: { $ne: 'bulk' } };
+
+// The $set stage that folds a TEAM LEAD'S OWN work onto the team they run.
+//
+// `coordinatorId` on a knock answers "who oversees the person who knocked this". A lead is overseen
+// by nobody, so their own knocks and surveys stamp `null` and would land in the "No team" bucket —
+// the bucket admins deliberately EXCLUDE when reporting a team's number to a client. The lead would
+// be missing from their own team, and the No-team bucket would be inflated by every lead's work.
+//
+// This MUST be applied identically to the CanvassActivity aggregate AND the SurveyResponse
+// aggregate. It once wasn't: doors were folded and voters-surveyed were not, so a team whose lead
+// knocks showed a row with the lead's DOORS included and their VOTERS excluded. A sum-based
+// reconciliation check cannot see that — the row just quietly lies. Hence ONE definition, shared by
+// routes/admin/reports.js and migrations/auditTeamCounts.js (an audit that can be wrong in the same
+// way as the thing it audits is worth nothing).
+//
+// `leadIds` = every userId that is somebody's coordinator in this org (whatever their ROLE — an
+// admin can run a crew just as a lead can). Anyone who is nobody's coordinator and has no
+// coordinator of their own — a plain org admin, a super-admin, a candidate knocking their own
+// district — correctly falls to `null`: the "No team" bucket, which is a real answer, not a
+// fallback for people the system lost track of.
+export function teamFoldStage(leadIds) {
+  const ids = (leadIds || []).map((s) => new mongoose.Types.ObjectId(String(s)));
+  return {
+    $set: {
+      team: {
+        $cond: [
+          { $ne: ['$coordinatorId', null] },
+          '$coordinatorId',
+          { $cond: [{ $in: ['$userId', ids] }, '$userId', null] },
+        ],
+      },
+    },
+  };
+}
 
 // Billable "knock" = one distinct (household, pass). Re-knocking a house within the SAME
 // pass (a correction, or a second/overlapping canvasser) counts once; going back in a NEW

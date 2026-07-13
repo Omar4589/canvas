@@ -21,7 +21,7 @@ export default function CampaignsTable({ campaigns, menuItems }) {
           <th className="px-4 py-3">Election Day</th>
           <th className="px-4 py-3 text-right">Households</th>
           <th className="px-4 py-3 text-right">Knocked</th>
-          <th className="px-4 py-3 text-right">Surveys / Lit</th>
+          <th className="px-4 py-3 text-right">Voters surveyed / Lit</th>
           <th className="px-4 py-3">Status</th>
           <th className="px-4 py-3 text-right">
             <span className="sr-only">Actions</span>

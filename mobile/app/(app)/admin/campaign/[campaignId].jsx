@@ -139,7 +139,10 @@ export default function CampaignDetail() {
   const canvass = overviewQ.data?.canvass || {};
   const rangeStats = rollupQ.data?.campaigns?.[0] || {};
   const rangeKnocks = rangeStats.knocks || 0;
-  const rangePrimary = isLitDrop ? rangeStats.litDropped || 0 : rangeStats.surveysSubmitted || 0;
+  // Survey DOORS (the connection-rate numerator), not voters — the tile used to show
+  // surveysSubmitted (voters) under a bare "Surveys", so the rate beside it couldn't be checked
+  // from the screen's own numbers. Voters keep their own tile ("Surveyed voters") below.
+  const rangePrimary = isLitDrop ? rangeStats.litDropped || 0 : rangeStats.surveyedKnocks || 0;
   const rangeRate = rateFromPct(rangeStats.connectionRate);
 
   const questions = surveyResultsQ.data?.questions || [];
@@ -277,8 +280,8 @@ export default function CampaignDetail() {
                 <StatTile value={rangeKnocks.toLocaleString()} label="Knocks" info={metricHelp.doors} />
                 <StatTile
                   value={rangePrimary.toLocaleString()}
-                  label={isLitDrop ? 'Lit drops' : 'Surveys'}
-                  info={isLitDrop ? metricHelp.litDrops : metricHelp.surveys}
+                  label={isLitDrop ? 'Lit drops' : 'Survey doors'}
+                  info={isLitDrop ? metricHelp.litDrops : metricHelp.surveyDoors}
                 />
                 {!isLitDrop && (
                   <StatTile
@@ -320,9 +323,10 @@ export default function CampaignDetail() {
                 items={[
                   { label: 'Doors', text: metricHelp.doors },
                   {
-                    label: isLitDrop ? 'Lit drops' : 'Surveys',
-                    text: isLitDrop ? metricHelp.litDrops : metricHelp.surveys,
+                    label: isLitDrop ? 'Lit drops' : 'Survey doors',
+                    text: isLitDrop ? metricHelp.litDrops : metricHelp.surveyDoors,
                   },
+                  ...(isLitDrop ? [] : [{ label: 'Surveyed voters', text: metricHelp.surveyedVoters }]),
                   { label: 'Conn %', text: metricHelp.connectionRate },
                   { label: 'Contact %', text: metricHelp.contactRate },
                   { label: 'Doors / hr', text: metricHelp.doorsPerHour },

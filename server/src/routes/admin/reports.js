@@ -23,6 +23,7 @@ import {
   connectionRate,
   contactRate,
   coverageBucketExpr,
+  teamFoldStage,
 } from '../../services/reports/aggregations.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps } from '../../services/reports/overlaps.js';
@@ -170,6 +171,10 @@ async function leadIdsForOrg(orgId) {
   });
   return ids;
 }
+
+// teamFoldStage lives in services/reports/aggregations.js (imported below) — the audit script needs
+// the identical fold, and an audit that can be wrong in the same way as the thing it audits is
+// worth nothing.
 
 // Resolve ?coordinatorId into a match object, or {} when no team scope was requested.
 async function crewFilter(req) {
@@ -1379,20 +1384,7 @@ router.get('/team-breakdown', async (req, res, next) => {
     const [rows, campaignAgg] = await Promise.all([
       CanvassActivity.aggregate([
         { $match: { ...scope, actionType: { $in: KNOCK_ACTIONS } } },
-        {
-          // A lead's OWN knocks stamp *their* coordinator (usually nobody), so fold them onto the
-          // team they run — otherwise the lead is missing from their own team's number and their
-          // doors leak into the "No team" bucket an admin deliberately excludes.
-          $set: {
-            team: {
-              $cond: [
-                { $ne: ['$coordinatorId', null] },
-                '$coordinatorId',
-                { $cond: [{ $in: ['$userId', leadIds.map((s) => new mongoose.Types.ObjectId(s))] }, '$userId', null] },
-              ],
-            },
-          },
-        },
+        teamFoldStage(leadIds),
         // Dedupe to the DOOR-PASS *within a team* — this is what makes a team's number a true
         // distinct-door count, and what absorbs a same-team double-knock for free.
         {
@@ -1420,9 +1412,15 @@ router.get('/team-breakdown', async (req, res, next) => {
 
     // Voter-unit surveys per team (the door-unit count is surveyedKnocks above — they are different
     // questions and the UI must label them as such; one door can survey several voters).
+    //
+    // It MUST use the same teamFoldStage as the doors aggregate. Without it, a lead who knocks gets
+    // their DOORS folded onto their own team while their VOTERS SURVEYED stay in the "No team"
+    // bucket — one row, two different notions of who's on the team. The reconciliation check is a
+    // SUM, so it cannot see that; the row just quietly lies.
     const voterSurveys = await SurveyResponse.aggregate([
       { $match: { ...baseFilter(req), ...parseDateRange(req, 'submittedAt') } },
-      { $group: { _id: '$coordinatorId', voters: { $sum: 1 } } },
+      teamFoldStage(leadIds),
+      { $group: { _id: '$team', voters: { $sum: 1 } } },
     ]);
     const votersByTeam = new Map(voterSurveys.map((v) => [String(v._id), v.voters]));
 
@@ -2388,10 +2386,17 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
 
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const actions = { not_home: 0, wrong_address: 0, survey_submitted: 0, lit_dropped: 0, note_added: 0, restricted: 0 };
+    const actions = { not_home: 0, wrong_address: 0, refused: 0, survey_submitted: 0, lit_dropped: 0, note_added: 0, restricted: 0 };
     for (const r of actionAgg) actions[r._id] = r.count;
+    // The same knock definition as /canvassers: notHome + wrongAddress + REFUSED + lit + surveyed.
+    // Refused was missing here (this endpoint predates the Refused disposition), which made this
+    // panel read FEWER doors than the Timeline for the same person over the same range — and
+    // inflated the rate below via the smaller denominator. Because the mobile write path keeps at
+    // most one replaceable row per (canvasser, household, pass), this action sum IS the canvasser's
+    // distinct door-pass count — no separate dedupe needed.
     const homesKnocked =
-      actions.not_home + actions.wrong_address + actions.survey_submitted + actions.lit_dropped;
+      actions.not_home + actions.wrong_address + actions.refused +
+      actions.survey_submitted + actions.lit_dropped;
 
     const surveysSubmitted = surveysCount;
 
@@ -2471,12 +2476,19 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
     const surveysPerHour = hoursOnDoors > 0 ? surveysSubmitted / hoursOnDoors : 0;
     const avgMinutesPerDoor =
       homesKnocked > 0 && hoursOnDoors > 0 ? (hoursOnDoors * 60) / homesKnocked : 0;
-    // Of this canvasser's knocks, how many landed a completion action (survey/lit). The
-    // numerator is door-pass-level (survey_submitted/lit_dropped activities), so it caps at 100%.
-    const connectionRatePct =
-      homesKnocked > 0
-        ? ((actions.survey_submitted + actions.lit_dropped) / homesKnocked) * 100
-        : 0;
+    // The SHARED rate helpers, so this panel can never disagree with the Timeline/leaderboard for
+    // the same person over the same range. (It used to: a hand-rolled formula divided by a knock
+    // count that omitted refused doors, so anyone with refusals read a higher rate here.)
+    const connectionRatePct = connectionRate({
+      knocks: homesKnocked,
+      surveyedKnocks: actions.survey_submitted,
+      litKnocks: actions.lit_dropped,
+    });
+    const contactRatePct = contactRate({
+      knocks: homesKnocked,
+      surveyedKnocks: actions.survey_submitted,
+      refusedKnocks: actions.refused,
+    });
 
     res.json({
       user: {
@@ -2499,13 +2511,19 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
       },
       kpi: {
         homesKnocked,
+        // TWO survey units, both named — one door can survey several voters, so these genuinely
+        // differ and must never share a bare "Surveys" label. surveyDoors is the connection-rate
+        // numerator; surveysSubmitted is voters (SurveyResponse rows).
+        surveyDoors: actions.survey_submitted,
         surveysSubmitted,
         litDropped: actions.lit_dropped,
         notHome: actions.not_home,
         wrongAddress: actions.wrong_address,
+        refused: actions.refused, // a real contact ("reached a person"), counted in the knocks
         notesAdded: actions.note_added,
         restricted: actions.restricted, // inaccessible-home marks — a tally, never a knock
-        connectionRatePct: Math.round(connectionRatePct * 10) / 10,
+        connectionRatePct,
+        contactRatePct,
         hoursOnDoors: Math.round(hoursOnDoors * 100) / 100,
         daysActive,
         doorsPerHour: Math.round(doorsPerHour * 100) / 100,

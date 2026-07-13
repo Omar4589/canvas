@@ -110,6 +110,30 @@ You set it two ways, both on the Users page:
 The Users list shows a **Coordinator** column, and a **Coordinator filter** lets you narrow the list to
 everyone a given admin oversees (or "No coordinator").
 
+### The team is recorded on each door, as it's knocked
+
+This is the part that matters when you report a team's numbers to a client.
+
+**A door remembers the team of whoever knocked it, at the moment they knocked it.** It is *not* looked
+up afterwards from who's currently on the campaign. That has three consequences, all of them the ones
+you want:
+
+- **Someone who leaves keeps their doors on their team.** Deactivate them, take them off the campaign,
+  remove them from the org — their doors stay where they belong. (This used to be broken: the team was
+  read from the campaign roster, so removing someone deleted the row the lookup depended on and their
+  doors fell silently into "No coordinator" — the bucket admins deliberately *exclude*. On a live
+  campaign that under-reported one team by **104 doors**.)
+- **Moving someone between teams doesn't rewrite history.** Their old doors stay with the team they
+  knocked them for; only their *new* doors go to the new team. A figure you gave a client last month
+  still reconciles today.
+- **"No coordinator" stays meaningful.** A candidate knocking their own district genuinely has no team,
+  and that bucket is theirs — not a dumping ground for anyone the system lost track of.
+
+The **Timeline** shows a **by-team breakdown**: every team's doors, survey doors, voters surveyed and
+connection rate, with a Campaign row that the teams add up to. See
+[METRICS.md](METRICS.md#teams-coordinators--the-counting-contract) for exactly how a team's doors are
+counted (and what happens in the rare case two teams knock the same house).
+
 **Coordinators are your "crews," and they drive book assignment.** Wherever you assign work in a
 campaign, people are grouped by coordinator:
 
@@ -120,9 +144,10 @@ campaign, people are grouped by coordinator:
   Each person shows their crew, and a book that ends up with **two crews** flags a "mixed crews" note.
 
 This lets you run, say, a paid team and a volunteer team in **one** walk list: put both crews on the
-Team, set each person's coordinator, cut the books, then assign each crew to its books. (Reporting is
-still **per-person** — there's no per-crew total yet; see the note in [EFFORTS.md](EFFORTS.md).) Dividing
-the *doors* into disjoint areas is still what separate walk lists do ([EFFORTS.md](EFFORTS.md)) —
+Team, set each person's coordinator, cut the books, then assign each crew to its books. **You get
+per-crew totals for free** — the campaign **Timeline** has a by-team table showing each crew's doors,
+survey doors, voters surveyed and connection rate, with a Campaign row they add up to. Dividing the
+*doors* into disjoint areas is still what separate walk lists do ([EFFORTS.md](EFFORTS.md)) —
 coordinators divide the *people*, walk lists divide the *territory*; use whichever (or both) fits.
 
 ## The campaign team (who can work a campaign)
@@ -253,8 +278,14 @@ is different from *deactivating* someone, which an admin can undo at any time.
 
 **What the campaign keeps.** The doors they knocked and the survey answers they recorded **stay with the
 campaign**. Those are the organization's records of work performed, not the person's personal content, so
-deleting an account never changes a campaign's counts, its coverage, or its bill. On reports and the map
-the person simply shows up as **"Deleted user"** from then on.
+deleting an account never changes a campaign's counts, its coverage, or its bill.
+
+**Where their name still shows.** For as long as the retention window below is open, the **leaderboard,
+the Timeline and the canvassers CSV** still show their real name — those three surfaces resolve it from
+the retained snapshot ([`hydrateCanvassers`](../server/src/services/reports/canvasserIdentity.js)), which
+is the whole point of keeping it. **Other surfaces — the map, the GPS audit, the per-canvasser
+drill-downs — read the scrubbed account row and show "Deleted user".** Once the window lapses and the
+snapshot is purged, everything shows "Deleted user" and their past work is permanently anonymous.
 
 **Their name is kept for a while, on purpose.** Alongside those records we hold their name for **180 days**
 so the organization can still check *who* did which field work — canvassing records include the location
@@ -389,9 +420,26 @@ partition the *doors/work*; the coordinator partitions *people*.
 resolved `coordinatorName` (one `User` lookup over the distinct coordinators). [useCampaignTeam.js](../client/src/lib/useCampaignTeam.js)
 carries it to the book-assignment picker ([BookAssignmentPanel.jsx](../client/src/components/BookAssignmentPanel.jsx)
 — crew filter chips + per-row crew label + a "mixed crews" flag) and the Team page
-([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) — the roster grouped by crew). Reports
-are **not** yet coordinator-scoped (only `effortId` is — see [reports.js](../server/src/routes/admin/reports.js)
-`baseFilter`); per-crew totals would add a `coordinatorId` filter there, mirroring the effort scoping.
+([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) — the roster grouped by crew).
+
+**Reports ARE team-scoped — but NOT through `baseFilter`.** `?coordinatorId=<id|none>` on
+`/canvasser-timeline`, plus `GET /admin/reports/team-breakdown` (every team at once, with the
+reconciliation). The team lives on the **ledger** (`CanvassActivity.coordinatorId`, frozen at knock
+time), not on the roster — a roster join is what used to lose a canvasser's doors the moment they were
+taken off a campaign.
+
+> 🚨 **Do NOT "mirror the effort scoping" by adding the key to `baseFilter()`.** An earlier version of
+> this doc recommended exactly that, and it is a trap: `baseFilter`'s result is spread into **Household**
+> queries (`/overview`: `{ isActive: true, ...cFilter }`), and a household has no team — a door doesn't
+> belong to a crew. The key would match zero households and **silently zero out Coverage**. `effortId`
+> only survives in `baseFilter` because it *is* denormalized onto `Household`.
+>
+> Use the opt-in `crewFilter(req)` + `withTeam(match, team)` helpers in
+> [reports.js](../server/src/routes/admin/reports.js), spread **only** into `CanvassActivity` /
+> `SurveyResponse` matches. `withTeam` composes with `$and` — never spread a `$or` team clause into a
+> match that may already carry one (the cross-timezone date windows build one).
+>
+> Full contract: [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
 
 ## Campaign roster & assignment gating
 
@@ -645,6 +693,45 @@ npm run purge:deleted-identities -- --apply  # schedule this daily
 
 Without it on a schedule, *"we keep your name for a limited period"* is a promise we don't keep — which is
 exactly what a privacy complaint is made of. Heroku Scheduler daily is enough; the window is months.
+
+### Team attribution (`coordinatorId` on the ledger) — a one-time backfill
+
+The scripts live in the server repo, so **the server must be deployed first** — you cannot run them
+before the push. That is safe: the schema addition is additive (`default: null`), new knocks start
+recording their team immediately, and the team surfaces **refuse to render** until
+`Organization.teamAttributionReadyAt` is set, so a single deploy can never show half-migrated numbers.
+
+Run them from the Heroku Run console (which starts at the **repo root** — the root `package.json`
+forwards each one to `server/`; see [OPERATIONS.md](OPERATIONS.md#-the-run-console-starts-you-at-the-repo-root-not-in-server)).
+
+```
+# 1. deploy, then:
+npm run migrate:activity-coordinator -- --preflight   # READ-ONLY. Run this first.
+npm run migrate:activity-coordinator                  # dry run
+npm run migrate:activity-coordinator -- --apply
+npm run audit:team-counts -- --campaign=<id>          # READ-ONLY; exits 1 if anything fails
+```
+
+> The trailing `--` is what carries the flag through the root → `server/` hop. Drop it and the flag is
+> **eaten silently** — you'd get a dry run and believe it applied. (Verified end-to-end: `--preflight`
+> prints PREFLIGHT, no flag prints DRY RUN, `--apply` prints APPLYING.)
+
+- **`--preflight` is read-only and mandatory.** It lists every canvasser who has ever knocked and
+  whether a team can still be resolved for them. Deactivation and campaign-removal keep the
+  coordinator; **removal from the ORG hard-deletes the `Membership`**, taking the coordinator with it —
+  so anyone in that state is unattributable *forever*. Find that out while someone can still say who
+  they belonged to.
+- **The idempotency key is `{ coordinatorId: { $exists: false } }`, never `{ coordinatorId: null }`.**
+  In Mongo `{field: null}` **also matches documents where the field is absent**, so a `null` key would
+  re-stamp *deliberate* nulls on the second run — handing a candidate's own doors to a team. The
+  migration would reintroduce the bug it exists to fix. (Same reason `migrate:ack-memberships` above
+  keys on `$exists: false`.)
+- **It stamps TODAY's teams onto ALL history.** No historical record of team membership exists to
+  recover. Correct for anyone who never changed coordinators; an approximation for anyone who did. From
+  the deploy onward, every knock freezes its own team as it happens.
+- **`audit:team-counts` is the gate.** It reconciles every column — doors, survey doors, voters
+  surveyed — on the live data and exits non-zero if the arithmetic doesn't close. Run it before you
+  quote any team's number to a client.
 
 And **set `deletionLocked: true` on the App Review / Play reviewer demo accounts before you submit.** If a
 reviewer deletes the demo login while testing the delete button, the next submission can't be reviewed.

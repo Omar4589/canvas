@@ -8,9 +8,9 @@ import { metricHelp } from '../lib/metricHelp.js';
 
 // The timeline dashboard's per-canvasser answers table: who knocked, whose crew,
 // doors/surveys/rates/pace, when they started and when their last door was. Rows come
-// from /admin/reports/canvasser-timeline (already coordinator-joined by TimelinePage).
-// Not CanvasserTable: that one renders the leaderboard row shape and opens the
-// responses modal on click; this one is sortable and range/day aware.
+// from /admin/reports/canvasser-timeline, which resolves each row's coordinatorName from
+// the LEDGER (the team stamped on the knocks) — not from the campaign roster, which is
+// what used to blank the crew column the moment somebody was taken off a campaign.
 
 const TIME_ONLY = { hour: 'numeric', minute: '2-digit' };
 
@@ -38,23 +38,13 @@ function columnsFor(litMode) {
     ...(litMode
       ? [{ key: 'dayLit', label: 'Lit drops', numeric: true, help: metricHelp.litDrops }]
       : [
-          {
-            key: 'daySurveys',
-            label: 'Survey doors',
-            numeric: true,
-            help: 'Doors where at least one survey was taken. This is the numerator of the connection rate.',
-          },
-          {
-            key: 'dayVoterSurveys',
-            label: 'Voters surveyed',
-            numeric: true,
-            help: 'People surveyed. One door can survey several voters, so this is usually higher than Survey doors.',
-          },
+          { key: 'daySurveys', label: 'Survey doors', numeric: true, help: metricHelp.surveyDoors },
+          { key: 'dayVoterSurveys', label: 'Voters surveyed', numeric: true, help: metricHelp.surveyedVoters },
         ]),
     { key: 'connectionRate', label: 'Conn %', numeric: true, help: metricHelp.connectionRate },
     { key: 'contactRate', label: 'Contact %', numeric: true, help: metricHelp.contactRate },
     { key: 'doorsPerHour', label: 'Doors/hr', numeric: true, help: metricHelp.doorsPerHour },
-    { key: 'dayRestricted', label: 'Restricted', numeric: true, help: 'Inaccessible homes flagged — recorded and shown, but never counted as a knock.' },
+    { key: 'dayRestricted', label: 'Restricted', numeric: true, help: metricHelp.restricted },
     { key: 'firstActivityAt', label: 'Start', numeric: true, help: metricHelp.start },
     { key: 'lastActivityAt', label: 'Last door', numeric: true, help: metricHelp.lastDoor },
   ];

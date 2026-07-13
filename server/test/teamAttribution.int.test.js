@@ -32,6 +32,8 @@ const { Membership } = await import('../src/models/Membership.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { Campaign } = await import('../src/models/Campaign.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
+const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
+const { Voter } = await import('../src/models/Voter.js');
 const { Household } = await import('../src/models/Household.js');
 const { Effort } = await import('../src/models/Effort.js');
 const { Pass } = await import('../src/models/Pass.js');
@@ -81,7 +83,7 @@ async function knock(user, coordinatorId, actionType = 'not_home', household = n
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity, Household, Effort, Pass])
+  for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity, SurveyResponse, Voter, Household, Effort, Pass])
     await M.deleteMany({});
 
   // teamAttributionReadyAt = the backfill has run. Without it the endpoint refuses to report.
@@ -268,6 +270,78 @@ test('FROZEN: moving a canvasser to another team does NOT move the doors they al
   assert.ok(
     frankRes.json.billableKnocks < 100,
     "Frank does NOT inherit 100 doors he never worked"
+  );
+});
+
+test('a LEAD who knocks: their doors AND their surveyed voters both land on their own team', { skip }, async () => {
+  const { org, campaign, token, asa, effort, pass } = ctx;
+  // Asa RUNS a crew, so nobody coordinates HIM — his own knocks stamp coordinatorId: null and would
+  // fall into the "No team" bucket admins deliberately exclude. The fold rescues them onto his team.
+  //
+  // This test exists because the fold was once applied to the DOORS aggregate but NOT the
+  // SURVEYS one, so a lead's doors landed on their team while their surveyed voters stayed in
+  // "No team" — one row, two different ideas of who is on the team. A sum-based reconciliation
+  // check cannot see that; the row just quietly lies.
+  const hh = await Household.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: '9001 Lead Ln', city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: '9001 LEAD LN|TOWN|FL|34741',
+    location: { type: 'Point', coordinates: [-81.4, 28.3] },
+  });
+  const voter = await Voter.create({
+    organizationId: org._id, householdId: hh._id, stateVoterId: 'LEAD-1',
+    firstName: 'Vera', lastName: 'Voter', fullName: 'Vera Voter',
+  });
+  await CanvassActivity.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: hh._id, userId: asa._id, actionType: 'survey_submitted',
+    coordinatorId: null, // ← a lead has no coordinator; this is what the fold has to handle
+    timestamp: new Date('2026-07-08T14:00:00Z'), location: { lat: 28.3, lng: -81.4 },
+  });
+  await SurveyResponse.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: hh._id, voterId: voter._id, userId: asa._id,
+    surveyTemplateId: new mongoose.Types.ObjectId(), surveyTemplateVersion: 1,
+    answers: [], coordinatorId: null,
+    submittedAt: new Date('2026-07-08T14:00:00Z'), location: { lat: 28.3, lng: -81.4 },
+  });
+
+  const res = await call(`/admin/reports/team-breakdown?campaignId=${campaign._id}`, token, org._id);
+  const asaRow = res.json.teams.find((t) => t.coordinatorName === 'Asa X');
+  const noTeam = res.json.teams.find((t) => !t.coordinatorId);
+
+  assert.equal(asaRow.surveyDoors, 1, "the lead's survey DOOR is on his own team");
+  assert.equal(asaRow.votersSurveyed, 1, "and so is his surveyed VOTER — the two must not disagree");
+  assert.equal(noTeam.votersSurveyed, 0, 'and "No team" is NOT inflated by the lead\'s survey');
+});
+
+test('ADMINS and SUPER-ADMINS who knock land in "No team" — and everything still reconciles', { skip }, async () => {
+  const { org, campaign, token, effort, pass } = ctx;
+  // An org admin (or a super-admin) who isn't anybody's coordinator has no team — the same as the
+  // candidate knocking his own district. "No team" is a real answer, not a dumping ground. What
+  // matters is that they are counted SOMEWHERE and the arithmetic still closes.
+  const omar = await mkUser('Omar');   // org admin, coordinates nobody
+  const sup = await mkUser('Sue');     // super-admin
+  sup.isSuperAdmin = true;
+  await sup.save();
+  await Membership.create({ userId: omar._id, organizationId: org._id, role: 'admin', isActive: true, coordinatorId: null });
+  await Membership.create({ userId: sup._id, organizationId: org._id, role: 'admin', isActive: true, coordinatorId: null });
+
+  const before = await call(`/admin/reports/team-breakdown?campaignId=${campaign._id}`, token, org._id);
+  const noTeamBefore = before.json.teams.find((t) => !t.coordinatorId).doors;
+
+  await knock(omar, null); // an admin's knock stamps null — nobody oversees them
+  await knock(sup, null);  // ditto a super-admin (orgContext leaves them without an activeMembership)
+
+  const res = await call(`/admin/reports/team-breakdown?campaignId=${campaign._id}`, token, org._id);
+  const noTeam = res.json.teams.find((t) => !t.coordinatorId);
+  assert.equal(noTeam.doors, noTeamBefore + 2, 'both land in "No team" — correct: they run no crew');
+
+  // THE point: however odd the knocker, the identity must still hold.
+  assert.equal(
+    res.json.teamSum - res.json.crossTeamDoors,
+    res.json.campaign.doors,
+    'Σ teams − cross-team still equals the campaign billable'
   );
 });
 

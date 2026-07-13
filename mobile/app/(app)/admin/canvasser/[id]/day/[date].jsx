@@ -164,7 +164,7 @@ export default function DayDetail() {
           <View style={styles.statsCard}>
             <Stat label="Knocks" value={s.kpi.homesKnocked} />
             <Stat
-              label="Surveys"
+              label="Voters surveyed"
               value={s.kpi.surveysSubmitted}
             />
             <Stat

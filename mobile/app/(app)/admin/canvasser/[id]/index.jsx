@@ -127,7 +127,10 @@ export default function CanvasserOverview() {
     const k = s.kpi;
     // Server-computed connection rate (completion knocks ÷ knocks, capped at 100).
     const cr = rateFromPct(k.connectionRatePct);
-    const primaryLabel = isLitDrop ? 'Lit drops' : 'Surveys';
+    // "Voters surveyed", not a bare "Surveys": this value is VOTER-unit (SurveyResponse rows), and
+    // the team-average delta compares against the same voter-unit figure — the label just has to
+    // say so, or it looks like it contradicts the door-unit survey counts on the Timeline.
+    const primaryLabel = isLitDrop ? 'Lit drops' : 'Voters surveyed';
     const primaryValue = isLitDrop ? k.litDropped : k.surveysSubmitted;
     return [
       {

@@ -6,7 +6,15 @@ import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
 import { SurveyResponse } from '../models/SurveyResponse.js';
-import { knocksPipeline, KNOCK_ACTIONS, NOT_BULK, connectionRate } from '../services/reports/aggregations.js';
+// teamFoldStage is the EXACT fold /team-breakdown uses. Sharing it is the point: an audit that can
+// be wrong in the same way as the thing it audits is worth nothing.
+import {
+  knocksPipeline,
+  KNOCK_ACTIONS,
+  NOT_BULK,
+  connectionRate,
+  teamFoldStage,
+} from '../services/reports/aggregations.js';
 
 // READ-ONLY. Prove the numbers on the REAL data, before any of them reach a client.
 //
@@ -57,25 +65,15 @@ async function main() {
   ).map(String);
   const leadSet = new Set(leadIds);
 
-  // A lead's OWN doors stamp *their* coordinator (usually nobody), so fold them onto the team they
-  // run — otherwise the lead is missing from their own team's number.
-  const teamOf = (row) =>
-    row.coordinatorId ? String(row.coordinatorId) : leadSet.has(String(row.userId)) ? String(row.userId) : null;
+  // The SAME fold the endpoint uses (imported, not re-implemented — a second copy is exactly how the
+  // doors and the voters drifted apart in the first place). A lead's own work stamps *their*
+  // coordinator, usually nobody, so fold it onto the team they run.
+  const fold = teamFoldStage(leadIds);
 
   // ── Per-team doors: dedupe to (house, round) WITHIN a team ─────────────────────────────────────
   const perTeam = await CanvassActivity.aggregate([
     { $match: { ...scope, actionType: { $in: KNOCK_ACTIONS } } },
-    {
-      $set: {
-        team: {
-          $cond: [
-            { $ne: ['$coordinatorId', null] },
-            '$coordinatorId',
-            { $cond: [{ $in: ['$userId', leadIds.map((s) => new mongoose.Types.ObjectId(s))] }, '$userId', null] },
-          ],
-        },
-      },
-    },
+    fold,
     {
       $group: {
         _id: { householdId: '$householdId', passId: '$passId', team: '$team' },
@@ -97,7 +95,8 @@ async function main() {
 
   const voterSurveys = await SurveyResponse.aggregate([
     { $match: { organizationId: campaign.organizationId, campaignId: campaign._id } },
-    { $group: { _id: '$coordinatorId', voters: { $sum: 1 } } },
+    fold,
+    { $group: { _id: '$team', voters: { $sum: 1 } } },
   ]);
   const votersByTeam = new Map(voterSurveys.map((v) => [String(v._id), v.voters]));
 

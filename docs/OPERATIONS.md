@@ -15,6 +15,43 @@ output, and shuts down. Nothing is installed on your computer, and closing the t
 
 The commands below are exactly what you type. Nothing else.
 
+## ⚠️ The Run console starts you at the REPO ROOT, not in `server/`
+
+This is the thing that will confuse you at 11pm. This is a **monorepo**: the scripts actually live in
+[`server/package.json`](../server/package.json), but the Run console drops you in the *root* directory,
+where [`package.json`](../package.json) only knows about the scripts it explicitly forwards.
+
+So a script can exist, be committed, be deployed — and still come back **"Missing script"** — simply
+because the root doesn't forward it.
+
+**Two ways through it:**
+
+1. **Use the short name** — it works if (and only if) the root forwards it. Every ops script is
+   forwarded today; the list is in the root `package.json`.
+   ```
+   npm run migrate:build-indexes -- --apply
+   ```
+2. **Reach past the root** — always works, even for a script nobody forwarded:
+   ```
+   npm --prefix server run migrate:build-indexes -- --apply
+   ```
+
+**If you add a new script to `server/package.json`, add a forwarding line to the root `package.json`
+too** — otherwise it's invisible from the Run console, which is the only place it's ever run in
+production. The forwarding line is mechanical:
+
+```jsonc
+// root package.json
+"my-script": "npm --prefix server run my-script --"
+```
+
+The trailing `--` is what lets `npm run my-script -- --apply` pass `--apply` all the way down. Leave it
+off and your flags get eaten silently — the script runs in dry-run mode and you think it worked.
+
+> Note `node src/utils/whatever.js` **will not work** from the Run console: that path is relative to
+> `server/`, and you're at the root. It'd be `node server/src/utils/whatever.js`. Prefer the npm scripts —
+> they're the ones we keep correct.
+
 ## Jobs that run themselves (set up once, then forget)
 
 **A "scheduled job" is a robot that runs a command for you on a timer.** You set it up once on Heroku's
@@ -104,12 +141,16 @@ typo, and the seeder exits rather than quietly seeding an account with a passwor
 Then, in the Run console:
 
 ```
-node src/utils/seedDemoOrg.js --reset --apply
+npm run seed:demo -- --reset --apply
 ```
 
 It prints exactly what to paste into App Store Connect and Play Console, including **which account is
 the deletable one**. Passwords never expire and never force a password change — reviewers must be able
 to log straight in.
+
+`--reset` restages the demo's activity (a fresh demo day) and keeps the org, accounts, campaign and
+voters. Drop it — `npm run seed:demo -- --apply` — to repair accounts *without* wiping the demo day,
+e.g. if you're mid-demo for a real prospect.
 
 ### Lock an account by hand (override / audit)
 
@@ -156,6 +197,39 @@ npm run migrate:build-indexes -- --apply
 did, every deploy would try to rebuild indexes across your biggest collections at boot, which can lock up
 the database while people are canvassing. So we build them on purpose, when we mean to.
 
+### Record which team knocked each door (ONE TIME — after the release that adds it)
+
+Doors now remember **which team knocked them**, so a canvasser who later leaves the team keeps their doors
+on it. New doors record this by themselves from the moment you deploy. **Doors knocked *before* that deploy
+have no team on them yet** — this is the one-time job that fills them in.
+
+Until you run it, the Timeline simply **won't show the team filter or the by-team table**. That's on
+purpose: half-filled-in data would show every team at nearly zero and "No team" as enormous, which looks
+like a real answer instead of an error. So it hides rather than lies. Run these in order:
+
+```
+npm run migrate:activity-coordinator -- --preflight     # 1. LOOK ONLY. Changes nothing.
+npm run migrate:activity-coordinator                    # 2. Dry run — shows what it would do.
+npm run migrate:activity-coordinator -- --apply         # 3. Do it.
+npm run audit:team-counts -- --campaign=<campaignId>    # 4. Prove the numbers add up.
+```
+
+**Step 1 is the one not to skip.** It lists every canvasser who has ever knocked and whether their team can
+still be worked out. Deactivating someone, or taking them off a campaign, keeps their team. **Removing
+someone from the *organisation* deletes it for good** — if anyone is in that state, this is your last chance
+to say who they belonged to, and it tells you before anything is written.
+
+**Step 4 is the gate.** It checks that every team's doors, survey doors and surveyed voters add up to the
+campaign's totals, on your real data, and **fails loudly if they don't**. Run it before you give any team's
+number to a client. It changes nothing.
+
+Safe to re-run at any time — it only ever fills in doors that have no team yet, and it never touches a knock.
+
+> It fills in history using **today's** teams, because nothing recorded who was on which team in the past.
+> That's exactly right for anyone who has never switched teams. If someone *has* moved between teams, their
+> older doors will be credited to their current team. The dry run lists every person and the team it will
+> give them, so you can check before committing.
+
 ---
 
 # Part 2 — Technical reference
@@ -186,6 +260,28 @@ fraud audit).
 | `npm run lock:account` | Lists every deletion-locked account |
 | `npm run migrate:build-indexes -- --apply` | Any deploy that adds or changes a schema index |
 | `npm run purge:deleted-identities` | Dry run of the scheduled job, to see what it *would* do |
+| `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
+| `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |
+| `npm run audit:team-counts -- --campaign=<id>` | **Read-only.** Proves Σ teams + no-team − cross-team == the campaign billable, column by column. Exits **1** on failure |
+| `npm run repair:orphaned-assignments` | Dry run — finds anyone still holding books on a campaign they're off the roster of |
+
+### Team attribution (`migrateActivityCoordinator.js`)
+
+[`migrateActivityCoordinator.js`](../server/src/migrations/migrateActivityCoordinator.js) stamps
+`coordinatorId` onto `CanvassActivity` + `SurveyResponse` from each member's current
+`Membership.coordinatorId`, then sets `Organization.teamAttributionReadyAt`.
+
+Three things that are load-bearing:
+
+- **The idempotency key is `{ coordinatorId: { $exists: false } }`, never `{ coordinatorId: null }`.** In
+  Mongo `{field: null}` **also matches absent fields**, so a `null` key would re-stamp *deliberate* nulls on
+  a second run — handing a candidate's own doors to a team. The migration would reintroduce the bug it
+  exists to fix, and only on the re-run. (Same reason `migrate:ack-memberships` keys on `$exists: false`.)
+- **`teamAttributionReadyAt` is a gate, not a marker.** `GET /admin/reports/team-breakdown` returns
+  `ready: false` until it's set, and the client renders no team filter at all. Deploy order is not a
+  safeguard — a half-run backfill is *plausible-looking*, not obviously broken.
+- **No new index.** `CanvassActivity` already carries nine on the hottest write path; the team clause rides
+  as a residual on `{campaignId, timestamp}`. **`migrate:build-indexes` is not part of this release.**
 
 [`lockAccountDeletion.js`](../server/src/utils/lockAccountDeletion.js) takes the email as a bare positional
 argument (not just `--email=`) because the Heroku web console is a single text box and `npm run x -- --flag

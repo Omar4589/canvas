@@ -285,7 +285,17 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <StatBox label="Doors knocked" value={(kpi.homesKnocked ?? 0).toLocaleString()} />
               {isSurvey ? (
-                <StatBox label="Surveys" value={(kpi.surveysSubmitted ?? 0).toLocaleString()} />
+                <>
+                  {/* Two units, named. "Survey doors" (houses, the Survey rate's numerator) used to
+                      render here as a bare "Surveys" showing the VOTER count — so the rate beside it
+                      couldn't be verified from the panel's own numbers. surveyDoors ?? surveysSubmitted
+                      keeps the panel sane against a server that predates the split. */}
+                  <StatBox
+                    label="Survey doors"
+                    value={(kpi.surveyDoors ?? kpi.surveysSubmitted ?? 0).toLocaleString()}
+                  />
+                  <StatBox label="Voters surveyed" value={(kpi.surveysSubmitted ?? 0).toLocaleString()} />
+                </>
               ) : (
                 <StatBox label="Lit drops" value={(kpi.litDropped ?? 0).toLocaleString()} />
               )}

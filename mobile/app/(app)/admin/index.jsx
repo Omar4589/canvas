@@ -67,9 +67,11 @@ function CampaignCard({ campaign, onPress }) {
         <Text style={styles.inlineStat}>
           <Text style={styles.inlineStatVal}>{fmt(c.knocks)}</Text> knocks
         </Text>
+        {/* Survey DOORS (the conn numerator) + voters. "surveys" here used to be surveysSubmitted —
+            voter-unit, i.e. the SAME number as the "voters" stat beside it in a one-round campaign. */}
         <Text style={styles.inlineStat}>
-          <Text style={styles.inlineStatVal}>{fmt(isLitDrop ? c.litDropped : c.surveysSubmitted)}</Text>{' '}
-          {isLitDrop ? 'lit' : 'surveys'}
+          <Text style={styles.inlineStatVal}>{fmt(isLitDrop ? c.litDropped : c.surveyedKnocks)}</Text>{' '}
+          {isLitDrop ? 'lit' : 'survey doors'}
         </Text>
         {!isLitDrop && (
           <Text style={styles.inlineStat}>
@@ -220,8 +222,12 @@ export default function AdminOverview() {
               <View style={styles.divider} />
               <View style={styles.statRow}>
                 <Stat value={cumulative.knocks} label="Knocks" />
-                <Stat value={cumulative.surveysSubmitted} label="Surveys" />
-                <Stat value={cumulative.surveyedVoters} label="Surveyed" />
+                {/* Doors, not voters — the Connection stat below divides by these. "Surveys" here
+                    used to be surveysSubmitted (voters), identical to the Surveyed stat beside it
+                    in a single-round campaign: the same number twice, and the rate's numerator
+                    nowhere on the screen. */}
+                <Stat value={cumulative.surveyedKnocks} label="Survey doors" />
+                <Stat value={cumulative.surveyedVoters} label="Surveyed voters" />
               </View>
               <View style={[styles.statRow, { marginTop: spacing.md }]}>
                 <Stat value={pct(cumulative.connectionRate)} label="Connection" />

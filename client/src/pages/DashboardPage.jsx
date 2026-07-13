@@ -438,7 +438,7 @@ export default function DashboardPage() {
                   value={rangeStats.surveyedKnocks?.toLocaleString()}
                   hint="doors with a survey"
                   accent="green"
-                  help="Doors where at least one survey was taken. This is the numerator of the connection rate — a door can survey several voters, so it is usually lower than 'Surveyed voters'."
+                  help={metricHelp.surveyDoors}
                 />
                 <StatCard
                   label="Surveyed voters"

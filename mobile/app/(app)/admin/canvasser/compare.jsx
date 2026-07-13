@@ -31,7 +31,9 @@ const KPIS = [
   },
   {
     key: 'surveysSubmitted',
-    label: 'Surveys',
+    // Voter-unit (SurveyResponse rows) — say so, or it reads as contradicting the door-unit
+    // survey counts on the Timeline for the same person.
+    label: 'Voters surveyed',
     accessor: (s) => s?.kpi.surveysSubmitted || 0,
     format: (v) => v.toLocaleString(),
     higherIsBetter: true,

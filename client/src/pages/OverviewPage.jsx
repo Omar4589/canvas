@@ -74,7 +74,11 @@ function CampaignCard({ campaign, onClick }) {
           <StatRow label="Lit drops" value={fmt(c.litDropped)} />
         ) : (
           <>
-            <StatRow label="Surveys" value={fmt(c.surveysSubmitted)} />
+            {/* Doors, not voters — this is the Connection rate's numerator, so the card can be
+                checked from its own rows. It used to show surveysSubmitted (voters), which is the
+                SAME number as "Surveyed voters" below in a single-round campaign (one response per
+                voter per pass) — two identical rows, and the rate's numerator nowhere. */}
+            <StatRow label="Survey doors" value={fmt(c.surveyedKnocks)} />
             <StatRow label="Surveyed voters" value={fmt(c.surveyedVoters)} />
           </>
         )}
@@ -235,9 +239,9 @@ export default function OverviewPage() {
               />
               <StatCard
                 compact
-                label="Surveys"
-                value={cumulative.surveysSubmitted?.toLocaleString()}
-                hint="per voter"
+                label="Survey doors"
+                value={cumulative.surveyedKnocks?.toLocaleString()}
+                hint="doors with a survey"
                 accent="green"
               />
               <StatCard
@@ -250,7 +254,7 @@ export default function OverviewPage() {
                 compact
                 label="Connection rate"
                 value={ratePct(cumulative.connectionRate)}
-                hint="surveyed knocks ÷ knocks"
+                hint="survey doors ÷ knocks"
                 accent={rateAccent(cumulative.connectionRate)}
               />
               <StatCard

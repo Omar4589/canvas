@@ -138,9 +138,13 @@ gets its own books:
    canvasser only sees their own, so the crews never overlap (a book with both crews shows a "mixed crews" flag).
 5. **Activate** the pass. Both crews go live.
 
-Note: per-crew *reporting* isn't split yet (reports scope by walk list via `effortId`, not by coordinator)
-— you'd read productivity per person. If you need clean team-vs-team totals, use **two walk lists**
-(split the territory by saved search) instead.
+**Per-crew reporting comes for free.** Open the campaign's **Timeline**: the **by-team** table gives you
+each crew's doors, survey doors, voters surveyed and connection rate side by side, with a Campaign row
+that the crews add up to. You no longer need two walk lists just to keep two crews' numbers apart —
+split the territory only if you actually want them working separate doors.
+
+The team is recorded on each door **as it's knocked**, so a canvasser who later leaves the team keeps
+their doors on it. See [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
 
 ### Assign new voters (Intake)
 1. After a voter upload, the **Walk Lists** page shows an **Intake** count (new addresses). The import

@@ -109,7 +109,7 @@ export default function SuperAdminHomePage() {
           <StatCard
             label="Today"
             value={totals?.today?.doorsKnocked?.toLocaleString()}
-            sub={`${totals?.today?.surveysSubmitted ?? 0} surveys · ${
+            sub={`${totals?.today?.surveysSubmitted ?? 0} voters surveyed · ${
               totals?.today?.litDropped ?? 0
             } lit drops`}
           />

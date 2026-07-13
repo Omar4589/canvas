@@ -185,11 +185,16 @@ export default function AdminTimeline() {
   }
 
   const q = useQuery({
-    queryKey: ['admin', 'reports', 'canvasser-timeline', cId, effortId, allTime ? 'all' : fromDay, range?.to],
+    queryKey: [
+      'admin', 'reports', 'canvasser-timeline', cId, effortId,
+      allTime ? 'all' : fromDay, range?.to, coordinatorId,
+    ],
     queryFn: () => {
       const p = new URLSearchParams();
       p.set('campaignId', cId);
       if (effortId) p.set('effortId', effortId);
+      // Team scope goes to the SERVER — a deduped door count can't be derived by filtering rows here.
+      if (coordinatorId) p.set('coordinatorId', coordinatorId);
       if (allTime) {
         p.set('totals', '1'); // no bounds at all — the server reads that as the whole ledger
       } else {
@@ -231,34 +236,20 @@ export default function AdminTimeline() {
   // local flag would blank it a beat early.
   const isTotals = data.mode === 'totals';
 
-  // Coordinator join from the roster; off-roster knockers (removed, cross-campaign)
-  // resolve to null → '—' / the 'No coordinator' bucket.
-  const coordByUserId = useMemo(() => {
-    const m = new Map();
-    for (const a of assignments) {
-      m.set(String(a.userId), {
-        coordinatorId: a.coordinatorId ? String(a.coordinatorId) : null,
-        coordinatorName: a.coordinatorName || null,
-      });
-    }
-    return m;
-  }, [assignments]);
-
-  const rows = useMemo(
-    () =>
-      (data.canvassers || []).map((c) => ({
-        ...c,
-        coordinatorId: coordByUserId.get(String(c.userId))?.coordinatorId || null,
-        coordinatorName: coordByUserId.get(String(c.userId))?.coordinatorName || null,
-      })),
-    [data.canvassers, coordByUserId]
-  );
+  // The coordinator comes from the LEDGER — the server stamps the team onto each knock when it
+  // happens, and returns it on the row. It used to be joined here from the campaign ROSTER, which
+  // meant a canvasser taken off the campaign lost their team and their doors fell silently into
+  // "No coordinator" — the bucket admins deliberately exclude when reporting a team to a client.
+  // (On the live HD54 campaign that under-reported one team by 104 doors.) Do not re-introduce a
+  // roster join here; the roster is for deciding who can be ASSIGNED work, not who DID it.
+  const rows = data.canvassers || [];
 
   const coordinatorOptions = useMemo(() => {
     const seen = new Map();
     for (const r of rows) {
       if (r.coordinatorId && !seen.has(r.coordinatorId)) seen.set(r.coordinatorId, r.coordinatorName);
     }
+    // Also offer a coordinator whose whole crew hasn't knocked yet (they'd have no ledger rows).
     for (const a of assignments) {
       const cid = a.coordinatorId ? String(a.coordinatorId) : null;
       if (cid && !seen.has(cid)) seen.set(cid, a.coordinatorName);
@@ -268,13 +259,10 @@ export default function AdminTimeline() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [rows, assignments]);
 
-  // Coordinator-scoped set — drives the KPI strip + "Knocking N of M" so those
-  // headline numbers reflect the crew selection but NOT the search box.
-  const coordRows = useMemo(() => {
-    if (!coordinatorId) return rows;
-    if (coordinatorId === 'none') return rows.filter((r) => !r.coordinatorId);
-    return rows.filter((r) => r.coordinatorId === coordinatorId);
-  }, [rows, coordinatorId]);
+  // The team filter is applied SERVER-SIDE (?coordinatorId), so the rows are already scoped. It has
+  // to be: the billable door count is deduped by (house, round) ACROSS canvassers, so a team's real
+  // figure cannot be produced by filtering and summing rows here.
+  const coordRows = rows;
 
   // Displayed set — hide-inactive + name/email search + sort shape the cards AND the
   // grid (so both agree), while the KPI strip above stays on coordRows.
@@ -307,22 +295,27 @@ export default function AdminTimeline() {
     });
   }, [coordRows, hideInactive, search, sortKey]);
 
-  // KPI totals from the coordinator-scoped rows so the crew filter scopes them.
+  // DOORS is the DEDUPED count, from the server — one house per round, however many people knocked
+  // it. It cannot be computed here: summing rows gives the RAW event count, which counts a house two
+  // canvassers both worked twice. (Web had the same flaw: its Doors card showed 1,255 while the
+  // campaign Home tab showed 1,252.) The raw figure still lives in the reconciliation line below.
   const kpis = useMemo(() => {
-    let doors = 0;
+    const doors = data.billableKnocks ?? 0;
     let surveys = 0;
     let lit = 0;
     let hours = 0;
+    let rawDoors = 0;
     for (const r of coordRows) {
-      doors += r.dayKnocks || 0;
-      surveys += r.daySurveys || 0;
+      rawDoors += r.dayKnocks || 0;
+      surveys += r.daySurveys || 0; // survey DOORS — the connection-rate numerator
       lit += r.dayLit || 0;
       hours += r.hoursOnDoors || 0;
     }
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
-    const doorsPerHour = hours > 0 ? doors / hours : null;
+    // Pace stays raw effort: it's a per-person rate, not a billing figure.
+    const doorsPerHour = hours > 0 ? rawDoors / hours : null;
     return { doors, surveys, connPct, doorsPerHour };
-  }, [coordRows]);
+  }, [coordRows, data.billableKnocks]);
 
   // "Knocking N of M": M = the current roster UNION everyone who knocked in the range; N = how
   // many of them actually knocked. The roster alone undercounted both numbers — a canvasser who
@@ -388,8 +381,8 @@ export default function AdminTimeline() {
   const rangeLabel = labelForRange(range);
 
   const kpiTiles = [
-    { label: 'Doors', value: kpis.doors.toLocaleString(), sub: rangeLabel },
-    { label: 'Surveys', value: kpis.surveys.toLocaleString(), sub: 'Doors with a survey' },
+    { label: 'Doors', value: kpis.doors.toLocaleString(), sub: `Distinct doors · ${rangeLabel}` },
+    { label: 'Survey doors', value: kpis.surveys.toLocaleString(), sub: 'Doors with a survey' },
     {
       label: 'Connection rate',
       value: kpis.connPct != null ? `${kpis.connPct}%` : '—',
