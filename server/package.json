@@ -38,7 +38,8 @@
     "audit:team-counts": "node src/migrations/auditTeamCounts.js",
     "demo:refresh": "node src/utils/refreshDemoDay.js",
     "purge:deleted-identities": "node src/migrations/purgeDeletedIdentities.js",
-    "lock:account": "node src/utils/lockAccountDeletion.js"
+    "lock:account": "node src/utils/lockAccountDeletion.js",
+    "delete:account": "node src/utils/deleteAccountByEmail.js"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",

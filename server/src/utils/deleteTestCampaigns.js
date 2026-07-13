@@ -76,7 +76,9 @@ async function inventory() {
       `· ${s.households} doors · ${s.voters} voters · ${s.efforts} walk lists · ${s.passes} passes · created ${created}`
     );
   }
-  console.log('\nNext: node src/utils/deleteTestCampaigns.js --ids=<id,id,...> [--mock=<id>]   (dry run), then add --apply.');
+  // Printed as it must be typed in Heroku's Run console, which starts at the REPO ROOT —
+  // `node src/utils/…` is relative to server/ and just errors there. See docs/OPERATIONS.md.
+  console.log('\nNext: npm run cleanup:test-campaigns -- --ids=<id,id,...> [--mock=<id>]   (dry run), then add --apply.');
 }
 
 async function purgeOrphanedPersons(personIds) {

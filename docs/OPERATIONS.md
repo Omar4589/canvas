@@ -152,6 +152,35 @@ to log straight in.
 voters. Drop it — `npm run seed:demo -- --apply` — to repair accounts *without* wiping the demo day,
 e.g. if you're mid-demo for a real prospect.
 
+### Honour a deletion request that came by email
+
+The public page at **doorline.app/delete-account** tells anyone who has already uninstalled the app to
+email `hello@doorline.app`, and **promises we'll delete their account within 30 days**. This is how you
+keep that promise. (Google Play requires that page, so the promise isn't optional — and a public
+commitment with nothing behind it is worse than no commitment.)
+
+**Verify the request first.** Confirm the mail actually came from the address on the account. This
+permanently destroys someone's login; treating an unverified email as authority makes it an
+account-takeover tool.
+
+```
+npm run delete:account someone@example.com            # dry run — shows exactly what would happen
+npm run delete:account someone@example.com -- --apply # do it
+```
+
+It runs the **same service as the in-app button**, so an operator deletion is identical to a
+self-deletion: identity scrubbed, books released, memberships deactivated, knock ledger untouched
+(counts and billing don't move), identity snapshot kept for the disclosed window.
+
+There is **deliberately no `--force`**. If it refuses — they're the last admin, or the last bill-payer —
+that's because deleting them breaks somebody *else*: the org would lose the only person who can run it,
+or the only person who can pay for it, and would silently go read-only when the subscription lapsed. Hand
+the org off properly, then re-run.
+
+> **Make sure `hello@doorline.app` actually receives mail.** Google requires the deletion resource to be
+> *functional*. A dead mailbox on that page is a broken pathway, and it's the kind of thing nobody notices
+> until a reviewer emails it.
+
 ### Lock an account by hand (override / audit)
 
 The seeder already locks the admin review logins, so you rarely need this. To check, or to lock

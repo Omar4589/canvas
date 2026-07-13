@@ -903,8 +903,10 @@ async function main() {
     console.log(`  ${u.email} / ${pw} — ${role} — book '${reviewerTurfs[k].name}' kept clean`);
   });
   console.log(`  client portal:   /r/${share.token}`);
+  // Print the command as it must be typed in Heroku's Run console, which starts at the REPO
+  // ROOT — `node src/utils/…` is relative to server/ and just errors there. See docs/OPERATIONS.md.
   console.log(`  restage after reviewers knock (and to recreate a deleted review account):`);
-  console.log(`    node src/utils/seedDemoOrg.js --reset --apply`);
+  console.log(`    npm run seed:demo -- --reset --apply`);
   console.log(`  full teardown:   npm run cleanup:test-campaigns -- --ids=${campaign._id} --mock=${campaign._id} --apply`);
 
   await mongoose.disconnect();

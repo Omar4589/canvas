@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { CONTACT_EMAIL } from '../marketing/contact.js';
 
-const CONTACT_EMAIL = 'privacy@doorline.app';
 const APP_NAME = 'Doorline';
 
 // The public account-deletion resource that Google Play requires.
