@@ -43,7 +43,8 @@
     "migrate:activity-coordinator": "npm --prefix server run migrate:activity-coordinator --",
     "repair:orphaned-assignments": "npm --prefix server run repair:orphaned-assignments --",
     "audit:team-counts": "npm --prefix server run audit:team-counts --",
-    "delete:account": "npm --prefix server run delete:account --"
+    "delete:account": "npm --prefix server run delete:account --",
+    "audit:cross-org-identity": "npm --prefix server run audit:cross-org-identity --"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
