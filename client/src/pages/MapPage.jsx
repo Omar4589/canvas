@@ -15,6 +15,7 @@ import MapStyleControl from '../components/MapStyleControl.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
+import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
 import {
   householdsToGeoJSON,
@@ -256,8 +257,7 @@ export default function MapPage() {
     // Live polling: refresh pins/pings on a timer when "Live" is on. Pauses in a
     // backgrounded tab; keepPreviousData avoids blanking the map during a poll
     // (or a filter change) — the Mapbox sources just setData the new features.
-    refetchInterval: live ? 20000 : false,
-    refetchIntervalInBackground: false,
+    ...livePollOptions(live),
     placeholderData: keepPreviousData,
   });
 
@@ -294,8 +294,7 @@ export default function MapPage() {
         })}`
       ),
     enabled: !!campaignId && showFlags,
-    refetchInterval: live ? 20000 : false,
-    refetchIntervalInBackground: false,
+    ...livePollOptions(live),
     placeholderData: keepPreviousData,
   });
   const flagEntries = flagsQ.data?.entries || [];
@@ -660,12 +659,13 @@ export default function MapPage() {
                 : `${households.length.toLocaleString()} households shown`}
             </span>
             <span className="text-fg-subtle" aria-hidden="true">·</span>
+            {/* Both polled layers. The flags layer is a number on this page too (the open-flag
+                chip), so the pill has to answer for it — not just for households. */}
             <LiveStatus
-              live={live}
-              onToggle={() => setLive((v) => !v)}
-              isFetching={householdsQ.isFetching}
-              updatedAt={householdsQ.dataUpdatedAt}
-              onRefresh={() => householdsQ.refetch()}
+              {...liveStatusProps(showFlags ? [householdsQ, flagsQ] : [householdsQ], {
+                live,
+                onToggle: () => setLive((v) => !v),
+              })}
             />
             {showFlags && flagSummary?.totals?.open > 0 && (
               <>

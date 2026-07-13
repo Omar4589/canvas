@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import CrossOrgActivityFeed from '../components/CrossOrgActivityFeed.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
+import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { BillingPill } from '../lib/billingStatus.jsx';
 
 function formatRelative(d) {
@@ -58,7 +59,7 @@ export default function SuperAdminHomePage() {
   const overviewQ = useQuery({
     queryKey: ['super-admin', 'platform-overview'],
     queryFn: () => api('/super-admin/platform-overview'),
-    refetchInterval: live ? 30_000 : false,
+    ...livePollOptions(live, true, 30_000),
   });
 
   function pickOrg(orgId) {
@@ -77,11 +78,7 @@ export default function SuperAdminHomePage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <h1 className="text-2xl font-semibold text-fg">Platform control room</h1>
             <LiveStatus
-              live={live}
-              onToggle={() => setLive((v) => !v)}
-              isFetching={overviewQ.isFetching}
-              updatedAt={overviewQ.dataUpdatedAt}
-              onRefresh={() => overviewQ.refetch()}
+              {...liveStatusProps([overviewQ], { live, onToggle: () => setLive((v) => !v) })}
             />
           </div>
           <p className="text-sm text-fg-muted">

@@ -6,14 +6,20 @@ kind: page
 order: 107
 sourceDoc: METRICS.md
 summary: Who knocked when, each team's numbers, and an All time view of everyone who's ever worked the campaign.
-tags: timeline, knocks, hours, page, all time, former canvassers, team, coordinator, doors
+tags: timeline, knocks, hours, page, all time, former canvassers, team, coordinator, doors, live, refresh
 ---
 
 The **Timeline** page shows an hourly grid of your canvassers' activity — who knocked when — with a day stepper to move between days and a toggle between knocks and surveys. It's the quickest way to see how a shift actually unfolded and to spot two canvassers overlapping on the same doors.
 
+## It updates itself
+
+While you're looking at **today**, the page refreshes about every 20 seconds — the **"Live · updated 3s ago"** pill in the corner tells you how fresh the numbers are. Doors land as your canvassers knock them; you never need to reload.
+
+**Every number on the page refreshes together** — the teams, the canvassers and the totals — so the pill's "updated" time is true of all of them. You can pause it and refresh by hand if you'd rather. On a date range in the past there's nothing to refresh, so the pill goes away.
+
 ## Each team's numbers
 
-Above the canvasser table there's a **by-team** breakdown: every team's people, doors, survey doors, voters surveyed and connection rate — with a **Campaign** row underneath. The teams **add up to the campaign total**, so a number you read off one team's row is consistent with the campaign figure. Click a team to drill into just their canvassers. See [How many doors has one team knocked?](team-door-counts).
+Above the canvasser table there's a **by-team** breakdown: every team's people, doors, survey doors, voters surveyed and connection rate — with a **Campaign** row underneath. The teams **add up to the campaign total**, so a number you read off one team's row is consistent with the campaign figure. Click a team to drill into just their canvassers — and **← All teams** brings you back. See [How many doors has one team knocked?](team-door-counts).
 
 ## What "Doors" counts
 

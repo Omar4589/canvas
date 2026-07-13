@@ -8,6 +8,7 @@ import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelecto
 import { todayInTz, shiftDays, formatDay, defaultRange, labelForRange } from '../lib/datePresets.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { ratePct, rateAccent } from '../lib/rates.js';
+import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import StatCard from '../components/StatCard.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
 import CanvasserSummaryTable from '../components/CanvasserSummaryTable.jsx';
@@ -149,8 +150,7 @@ export default function TimelinePage() {
         })}`
       ),
     enabled: !!campaignId && (allTime || (!!fromDay && !rangeInvalid)),
-    refetchInterval: live && includesToday ? 20_000 : false,
-    refetchIntervalInBackground: false,
+    ...livePollOptions(live, includesToday),
     placeholderData: keepPreviousData,
   });
   const data = timelineQ.data || {};
@@ -176,6 +176,11 @@ export default function TimelinePage() {
         })}`
       ),
     enabled: !!campaignId && (allTime || (!!fromDay && !rangeInvalid)),
+    // This poll is NOT optional: without it the by-team totals froze at page load while the
+    // canvasser table beside them refreshed every 20s — and the Live pill, reading only that other
+    // query, called the stale team number "updated 3s ago". It also feeds the coordinator dropdown
+    // below, so a newly-formed team wouldn't appear in the picker until a manual reload.
+    ...livePollOptions(live, includesToday),
     placeholderData: keepPreviousData,
   });
   const breakdown = teamsQ.data || {};
@@ -268,12 +273,13 @@ export default function TimelinePage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {includesToday && (
+            // Both queries, not just the timeline: the pill reports the OLDEST of them and its
+            // Refresh refetches both, so it can never claim a freshness the team table doesn't have.
             <LiveStatus
-              live={live}
-              onToggle={() => setLive((v) => !v)}
-              isFetching={timelineQ.isFetching}
-              updatedAt={timelineQ.dataUpdatedAt}
-              onRefresh={() => timelineQ.refetch()}
+              {...liveStatusProps([timelineQ, teamsQ], {
+                live,
+                onToggle: () => setLive((v) => !v),
+              })}
             />
           )}
           {data.tzAbbrev && (

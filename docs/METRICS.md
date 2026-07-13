@@ -525,6 +525,27 @@ and reasonably concluded the math was broken). The only bare "Surveys" left are 
 Knocks|Surveys heatmap **view toggles**, the survey-template **library** page/nav, and an activity
 **filter chip** — none of them sit next to a number in a different unit.
 
+### A live page's pill must answer for EVERY number under it
+
+The Timeline, Map, Audit and Control Room auto-refresh behind a **"Live · updated Xs ago"** pill.
+The rule, enforced by [`client/src/lib/livePoll.js`](../client/src/lib/livePoll.js):
+
+- every query that renders a **count** on a live page spreads `livePollOptions(live, includesToday)`;
+- the pill is built with `liveStatusProps([...every one of those queries])`, so it reports the
+  **oldest** of them and its Refresh button refetches **all** of them.
+
+**Both halves are load-bearing.** The by-team table shipped with no `refetchInterval` while the
+canvasser table beside it polled every 20s — so a live knock moved one number and not the other. That
+alone is a nuisance. What made it a *wrong number* is that the pill read only the polling query's
+`dataUpdatedAt` and therefore announced "updated 3s ago" over a team total that was minutes stale: an
+admin quoting it to a client had no way to know. **A stale number labelled stale is a nuisance; a
+stale number labelled fresh is a lie.** (The global default is `refetchOnWindowFocus: false`, so a
+query with no interval is frozen until its key changes — there is no accidental safety net.)
+
+`refetchIntervalInBackground: false` everywhere: a console left open in a background tab must go
+quiet. Home (`DashboardPage`) has no pill — it polls unconditionally at 30s — but routes through the
+same helper so it inherits that pause.
+
 ### `hoursOnDoors` is a sum of per-DAY spans
 
 Never `(lastActivityAt − firstActivityAt)` — that is a **calendar** span. The Dashboard derived its
@@ -634,6 +655,10 @@ Shared rate tiers (green ≥20% / amber 10–19% / red <10%): web
 mobile [mobile/lib/rates.js](../mobile/lib/rates.js) (`rateFromPct` for the server pct;
 `getConnectionRate` for the personal raw-event screens; `RATE_COLORS`).
 
+Shared live-refresh contract: [client/src/lib/livePoll.js](../client/src/lib/livePoll.js)
+(`livePollOptions` into **every** count query on a live page, `liveStatusProps` so the pill answers
+for all of them — see the gotcha in §F).
+
 ### Web ([client/src](../client/src))
 | File | Renders |
 |---|---|
@@ -642,14 +667,14 @@ mobile [mobile/lib/rates.js](../mobile/lib/rates.js) (`rateFromPct` for the serv
 | [components/CanvasserTable.jsx](../client/src/components/CanvasserTable.jsx) | Leaderboard table: Surveys, Lit drops, Not home, Wrong addr, **Knocks**, **Connection**, Last activity. |
 | [components/CoverageBar.jsx](../client/src/components/CoverageBar.jsx) | Segmented bar + numeric legend (counts + %). |
 | [components/StatCard.jsx](../client/src/components/StatCard.jsx) | `label / value / hint / accent`. |
-| [pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx) + [components/CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) + [components/TimelineGrid.jsx](../client/src/components/TimelineGrid.jsx) + [components/TimelineOverlaps.jsx](../client/src/components/TimelineOverlaps.jsx) | **Timeline** (`/campaigns/:id/timeline`, `/canvasser-timeline`): live performance dashboard — KPI strip (Doors, Surveys, Connection rate, Doors/hr, Knocking N of M), sortable per-canvasser table (coordinator, rates, pace, start/last door, a **Restricted** tally column from `dayRestricted`), heatmap grid (hour columns for a day, day columns for a range), date-range presets **incl. All time** (campaign-to-date: swaps the grid + overlap cards for totals — see the `?totals=1` mode above) + single-day stepper, coordinator crew filter (client-side; overlaps card stays campaign-wide), Knocks/Surveys toggle, LiveStatus 20s refresh while the range includes today, inline overlaps reconciliation. Coordinator names come from the Team roster cache (`useCampaignTeam` — the **`allMembers`** list, not `members`: a report must still label a canvasser who has since been deactivated). First web overlaps surface. |
+| [pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx) + [components/CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) + [components/TimelineGrid.jsx](../client/src/components/TimelineGrid.jsx) + [components/TimelineOverlaps.jsx](../client/src/components/TimelineOverlaps.jsx) | **Timeline** (`/campaigns/:id/timeline`, `/canvasser-timeline`): live performance dashboard — KPI strip (Doors, Surveys, Connection rate, Doors/hr, Knocking N of M), sortable per-canvasser table (coordinator, rates, pace, start/last door, a **Restricted** tally column from `dayRestricted`), heatmap grid (hour columns for a day, day columns for a range), date-range presets **incl. All time** (campaign-to-date: swaps the grid + overlap cards for totals — see the `?totals=1` mode above) + single-day stepper, coordinator crew filter (**server-side** `?coordinatorId` — a deduped billable figure cannot be summed in the browser; overlaps card stays campaign-wide), a **by-team breakdown table** (`/team-breakdown`) with the reconciliation footer + an "← All teams" bar when a team is picked, Knocks/Surveys toggle, inline overlaps reconciliation. **Coordinator names come from the LEDGER** (`coordinatorId` stamped on each knock), NOT from the campaign roster — the old `useCampaignTeam` join blanked the column for anyone taken off a campaign. `useCampaignTeam` survives only for the "Knocking N of M" roster denominator. **Live refresh:** every count query on the page spreads `livePollOptions()` and the pill is built with `liveStatusProps([...all of them])` — see §G. First web overlaps surface. |
 
 ### Mobile ([mobile/app/(app)/admin](../mobile/app/(app)/admin))
 | File | Renders |
 |---|---|
 | [index.jsx](../mobile/app/(app)/admin/index.jsx) | Org Overview. `DateRangeBar` → `/campaign-rollup`. Cumulative card: `CoverageBar` + two stat rows (Knocks/Surveys/Surveyed; Connection/Lit/Canvassers). `CampaignCard`: full `CoverageBar` + coverage line + inline (knocks/surveys/voters/conn/canv); archived rows show knocks. |
 | [campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | **Activity** tiles (Knocks, Surveys/Lit, Surveyed voters, Connection rate via `rateFromPct`) from rollup; **Coverage** (all-time) from overview; Top canvassers from `/canvassers`; "Timeline" quick-link. |
-| [timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) + [components/LiveStatus.jsx](../mobile/components/LiveStatus.jsx) | **Timeline** (`/canvasser-timeline`): live performance dashboard at web parity — KPI tiles (`KpiGrid`: Doors, Surveys, Connection rate via `rateFromPct`, Doors/hr, Knocking N of M), per-canvasser cards (coordinator, `dayKnocks/daySurveys/connectionRate`, `hoursOnDoors`·doors/hr, `formatRange` shift line; tap → canvasser detail), `DateRangeBar` presets **incl. 'all'** (campaign-to-date: `?totals=1`, grid hidden) + single-day stepper, walk-list + coordinator `TabSwitcher` crew filters (client-side join from `/campaigns/:id/assignments`; overlaps stay campaign-wide with a note), Knocks/Surveys toggle, frozen-name-column heatmap grid (hour columns single-day, day columns for a range — `data.mode` guarded), reconciliation + overlap cards (`overlapCount` true total), `LiveStatus` pill (20s poll while the range includes today, pause/refresh) + `useFocusedPoll`. Reloads the campaign on focus + accepts a `campaignId` param. |
+| [timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) + [components/LiveStatus.jsx](../mobile/components/LiveStatus.jsx) | **Timeline** (`/canvasser-timeline`): live performance dashboard at web parity — KPI tiles (`KpiGrid`: Doors, Surveys, Connection rate via `rateFromPct`, Doors/hr, Knocking N of M), per-canvasser cards (coordinator, `dayKnocks/daySurveys/connectionRate`, `hoursOnDoors`·doors/hr, `formatRange` shift line; tap → canvasser detail), `DateRangeBar` presets **incl. 'all'** (campaign-to-date: `?totals=1`, grid hidden) + single-day stepper, walk-list + coordinator `TabSwitcher` crew filters (the coordinator filter is **server-side** `?coordinatorId`, same as web; the option list is a union of the roster and the coordinators actually stamped on the ledger, so a departed canvasser's team still appears; overlaps stay campaign-wide with a note). **No by-team breakdown table** — that surface is web-only, Knocks/Surveys toggle, frozen-name-column heatmap grid (hour columns single-day, day columns for a range — `data.mode` guarded), reconciliation + overlap cards (`overlapCount` true total), `LiveStatus` pill (20s poll while the range includes today, pause/refresh) + `useFocusedPoll`. Reloads the campaign on focus + accepts a `campaignId` param. |
 | [canvassers.jsx](../mobile/app/(app)/admin/canvassers.jsx) | Leaderboard. `rowDerived` uses `r.knocks` + `r.connectionRate`; totals use `knocks` + `completionKnocks`; overlap banner. |
 | [overlaps.jsx](../mobile/app/(app)/admin/overlaps.jsx) | Renders `overlaps[].passes[]` grouped by `roundLabel`. |
 | [canvasser/[id]/index.jsx](../mobile/app/(app)/admin/canvasser/[id]/index.jsx), [compare.jsx](../mobile/app/(app)/admin/canvasser/compare.jsx), [[id]/days.jsx](../mobile/app/(app)/admin/canvasser/[id]/days.jsx), [[id]/day/[date].jsx](../mobile/app/(app)/admin/canvasser/[id]/day/[date].jsx) | Per-canvasser drilldowns; `kpi.homesKnocked` (= knocks) + `connectionRatePct`. |

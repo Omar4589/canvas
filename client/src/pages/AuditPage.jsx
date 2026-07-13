@@ -7,6 +7,7 @@ import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelecto
 import { todayInTz, defaultRange, labelForRange } from '../lib/datePresets.js';
 import StatCard from '../components/StatCard.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
+import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import Segmented from '../components/ui/Segmented.jsx';
 import AuditSummaryTable from '../components/AuditSummaryTable.jsx';
 import FlaggedEntryList from '../components/FlaggedEntryList.jsx';
@@ -144,8 +145,7 @@ export default function AuditPage() {
         })}`
       ),
     enabled: !!campaignId && !!fromDay && !rangeInvalid,
-    refetchInterval: live && includesToday ? 20_000 : false,
-    refetchIntervalInBackground: false,
+    ...livePollOptions(live, includesToday),
     placeholderData: keepPreviousData,
   });
   const data = flagsQ.data || {};
@@ -195,11 +195,7 @@ export default function AuditPage() {
         <div className="flex flex-wrap items-center gap-3">
           {includesToday && (
             <LiveStatus
-              live={live}
-              onToggle={() => setLive((v) => !v)}
-              isFetching={flagsQ.isFetching}
-              updatedAt={flagsQ.dataUpdatedAt}
-              onRefresh={() => flagsQ.refetch()}
+              {...liveStatusProps([flagsQ], { live, onToggle: () => setLive((v) => !v) })}
             />
           )}
           {data.tzAbbrev && (

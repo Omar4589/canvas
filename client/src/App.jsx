@@ -167,7 +167,6 @@ export default function App() {
               there, instead of a bare div that replaced the whole app. */}
           <Route element={<RoleGate require="orgAdmin" />}>
             <Route path="/admin" element={<OverviewPage />} />
-            <Route path="/queues" element={<QueuesPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/voters" element={<VotersPage />} />
             <Route path="/voters/:voterId" element={<VoterDetailPage />} />
@@ -206,6 +205,12 @@ export default function App() {
             <Route path="/super-admin/people/:personId" element={<PersonDetailPage />} />
             <Route path="/super-admin/imports" element={<SuperAdminImportsPage />} />
             <Route path="/organizations" element={<OrganizationsPage />} />
+            {/* Jobs (Bull Board) is a PLATFORM page, not an org one: the server gates the
+                ticket on requireSuperAdmin with no orgContext, and it's only ever linked from
+                SUPER_NAV. Mounting it in the org-scoped shell meant a super admin in platform
+                view (no active org) was bounced to /super-admin before it could render — the
+                one SUPER_NAV item that required an org. */}
+            <Route path="/queues" element={<QueuesPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

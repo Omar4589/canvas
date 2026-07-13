@@ -13,6 +13,7 @@ import SetupProgress from '../components/SetupProgress.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import { CountdownChip } from '../components/campaigns/CampaignCard.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
+import { livePollOptions } from '../lib/livePoll.js';
 import { daysUntil, earlyVotingState, formatDateLabel } from '../lib/electionDates.js';
 import { metricHelp } from '../lib/metricHelp.js';
 import { todayInTz } from '../lib/datePresets.js';
@@ -73,6 +74,11 @@ export default function DashboardPage() {
     deepLinkedRef.current = false;
   }, [campaignId, surveyParam]);
 
+  // Home has no Live toggle — it polls unconditionally. Routed through the shared helper so it
+  // inherits the background-tab pause: these four were the only pollers in the app still hitting the
+  // server every 30s in a tab nobody was looking at.
+  const HOME_POLL = livePollOptions(true, true, 30_000);
+
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
@@ -110,7 +116,7 @@ export default function DashboardPage() {
     queryFn: () =>
       api(`/admin/reports/overview${buildQuery({ campaignId, effortId: effortId || undefined })}`),
     enabled: !!campaignId,
-    refetchInterval: 30_000,
+    ...HOME_POLL,
   });
 
   // Range-scoped activity (knocks/surveys/rate). Coverage stays all-time from /overview.
@@ -126,7 +132,7 @@ export default function DashboardPage() {
         })}`
       ),
     enabled: !!campaignId && !!dateRange,
-    refetchInterval: 30_000,
+    ...HOME_POLL,
   });
 
   const surveysQ = useQuery({
@@ -148,7 +154,7 @@ export default function DashboardPage() {
         })}`
       ),
     enabled: !!campaignId && !!dateRange,
-    refetchInterval: 30_000,
+    ...HOME_POLL,
   });
 
   const surveyResultsQ = useQuery({
@@ -173,7 +179,7 @@ export default function DashboardPage() {
         })}`
       ),
     enabled: !!campaignId && !!dateRange && selectedCampaign?.type !== 'lit_drop',
-    refetchInterval: 30_000,
+    ...HOME_POLL,
   });
 
   const surveyResultsRef = useRef(null);
