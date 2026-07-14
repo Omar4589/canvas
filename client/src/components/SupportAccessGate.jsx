@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 // The handle on the lock.
 //
@@ -21,6 +23,8 @@ import { api } from '../api/client.js';
 // something you can be asked about later.
 export default function SupportAccessGate() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const { switchOrg } = useAuth();
   const [org, setOrg] = useState(null); // { organizationId, organizationName } | null
   const [reason, setReason] = useState('');
   const [hours, setHours] = useState(4);
@@ -39,18 +43,45 @@ export default function SupportAccessGate() {
   useEffect(() => {
     if (!org) return;
     function onKey(e) {
-      if (e.key === 'Escape') close();
+      if (e.key === 'Escape') decline();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [org]);
 
-  function close() {
+  // Backing out has to actually take you OUT of the organization.
+  //
+  // Merely hiding the modal is a trap: the page behind it is still scoped to an org you cannot read,
+  // every query on it is still 403ing, and each 403 re-fires the event that opened this — so the modal
+  // reappears the instant you dismiss it. And because the backdrop covers the sidebar, the org switcher
+  // is unreachable while it is up. Cancel became a button that does nothing, with no way out but editing
+  // the URL. (Found in production verification, right after ending a session and clicking Voters.)
+  //
+  // So declining does what declining means: drop the org context and go back to the platform view. Same
+  // path the switcher's "🌐 Platform view" takes. You said no, so you are no longer in the customer's
+  // organization — which is also the honest state to be in.
+  function decline() {
     setOrg(null);
     setReason('');
     setError(null);
+    switchOrg(null);
+    // Drop the org-scoped cache but KEEP the platform org list, or the switcher blanks and refetches
+    // on the way out. Same predicate OrgSwitcher.resetOrgScopedCache uses.
+    qc.removeQueries({
+      predicate: (q) => !(q.queryKey?.[0] === 'super-admin' && q.queryKey?.[1] === 'organizations'),
+    });
+    navigate('/super-admin', { replace: true });
   }
 
+  // `saving` MUST be reset on the success path too, not just on error.
+  //
+  // This component is mounted permanently by Layout and renders null when there is no org — it never
+  // unmounts, so its state survives every open/close cycle. The first version only cleared `saving` in
+  // the catch block, so after one successful grant it stayed true forever. The next time the modal
+  // opened, Start read "Starting…" and was disabled, and Cancel — `disabled={saving}` — was disabled
+  // too. Both buttons dead, backdrop over the sidebar, no way out but editing the URL.
+  //
+  // Reproduced in production: start a session, open Voters, End now, click Voters again.
   async function start() {
     setError(null);
     setSaving(true);
@@ -59,11 +90,13 @@ export default function SupportAccessGate() {
         method: 'POST',
         body: { organizationId: org.organizationId, reason: reason.trim(), hours: Number(hours) },
       });
-      close();
+      setOrg(null);
+      setReason('');
       // Every panel on screen 403'd. Refetch them all now that the door is open.
       qc.invalidateQueries();
     } catch (err) {
       setError(err.message);
+    } finally {
       setSaving(false);
     }
   }
@@ -131,11 +164,11 @@ export default function SupportAccessGate() {
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
-            onClick={close}
+            onClick={decline}
             disabled={saving}
             className="rounded border border-border-strong px-4 py-2 text-sm font-medium text-fg hover:bg-muted disabled:opacity-50"
           >
-            Cancel
+            Don&apos;t go in
           </button>
           <button
             type="button"

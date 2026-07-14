@@ -5,7 +5,7 @@ are in the last section if you ever want them.
 
 | Fact | Value |
 |---|---|
-| Heroku app | **`canvass`** |
+| Heroku app | **`doorline-test`** — the name is a leftover. **This is production.** There is no app called `canvass`. |
 | Branch to deploy | **`sharedVoters`** |
 | Apps | **ONE.** API + web are the same dyno (`server/src/app.js:79-90` serves `client/dist`) |
 | Dynos | `web`, `worker` |
@@ -26,7 +26,7 @@ are in the last section if you ever want them.
 > | Scheduler | **Resources** → *Heroku Scheduler* |
 
 > ### In the Run console, type the command BARE
-> No `heroku run`, no `-a canvass`. The console is already scoped to the app. Exactly like the
+> No `heroku run`, no `-a doorline-test`. The console is already scoped to the app. Exactly like the
 > `seed:demo` runs you've already done:
 > ```
 > npm run migrate:platform-roles -- --apply
@@ -471,15 +471,15 @@ after step 4.** That is the entire reason for the snapshot.
 # CLI equivalents (if you ever want them)
 
 ```
-heroku releases -a canvass | head -3
-heroku maintenance:on  -a canvass
+heroku releases -a doorline-test | head -3
+heroku maintenance:on  -a doorline-test
 git push heroku sharedVoters:main
-heroku ps -a canvass                 # worker.1 must be up
-heroku ps:scale worker=1 -a canvass
-heroku run -a canvass "npm run migrate:platform-roles -- --apply"
-heroku run -a canvass "npm run migrate:persons-org-scope -- --apply"
-heroku run -a canvass "npm run migrate:build-indexes -- --apply"
-heroku maintenance:off -a canvass
+heroku ps -a doorline-test                 # worker.1 must be up
+heroku ps:scale worker=1 -a doorline-test
+heroku run -a doorline-test "npm run migrate:platform-roles -- --apply"
+heroku run -a doorline-test "npm run migrate:persons-org-scope -- --apply"
+heroku run -a doorline-test "npm run migrate:build-indexes -- --apply"
+heroku maintenance:off -a doorline-test
 ```
-*Note the quoting: unquoted, `-a canvass` can be swallowed by the script's own argv. The Run console has
+*Note the quoting: unquoted, `-a doorline-test` can be swallowed by the script's own argv. The Run console has
 no such problem — it's already scoped to the app.*
