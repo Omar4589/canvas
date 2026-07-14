@@ -36,7 +36,24 @@ export default function SupportAccessPage() {
 
   const revoke = useMutation({
     mutationFn: (id) => api(`/super-admin/access/grants/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['support-grants'] }),
+    onSuccess: () => {
+      // Ending the session must take the customer's data OFF THE SCREEN, not just off the server.
+      //
+      // React Query keeps whatever you loaded during the grant. Without this, navigating back to
+      // Voters after "End now" rendered the cached voter list for a beat before the refetch 403'd and
+      // the banner replaced it. No new request, no new audit row — but a revoked session should not
+      // still be painting a customer's voter file. Drop the org-scoped cache; keep the platform org
+      // list so the switcher does not blank.
+      qc.removeQueries({
+        predicate: (q) =>
+          !(q.queryKey?.[0] === 'super-admin' && q.queryKey?.[1] === 'organizations') &&
+          q.queryKey?.[0] !== 'support-grants' &&
+          q.queryKey?.[0] !== 'access-log' &&
+          q.queryKey?.[0] !== 'retention-health',
+      });
+      qc.invalidateQueries({ queryKey: ['support-grants'] });
+      qc.invalidateQueries({ queryKey: ['access-log'] });
+    },
   });
 
   const h = health.data;
