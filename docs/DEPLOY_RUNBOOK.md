@@ -49,9 +49,7 @@ Nothing below exists on Heroku until the code is there.
 
 **Activity** tab → note the current release number (`v###`).
 
-### 0c. ⚠️ Atlas snapshot — and *look at it* before you move on
-
-**This is the single most important line in this document.**
+### 0c. ⚠️ The backup. This is the single most important line in this document.
 
 `migrate:persons-org-scope --apply` is **irreversible**. It drops indexes, **deletes orphan Persons**,
 and **deletes pending edit proposals**. There is no down-migration — and past that point, **rolling the
@@ -62,8 +60,29 @@ On your data this migration is nearly a no-op (the audit found zero shared Perso
 `organizationId` and split nothing). **"Nearly a no-op" plus "irreversible" is exactly the combination
 where people skip the backup because it feels unnecessary.**
 
-**Go to the Atlas UI. Confirm the snapshot shows as COMPLETED and restorable. Then continue.** Not
-"clicked the button" — *saw it finish*.
+> 🛑 **You are on Atlas Free (M0), which is *physically incapable* of being backed up.** Not "backups are
+> off" — the feature does not exist on the tier. MongoDB's docs: *"You can't enable backups on Free
+> clusters."* The Backup tab shows you an upsell page, not a button.
+>
+> **So the snapshot gate below cannot be satisfied until you upgrade.** The upgrade is therefore part of
+> this deploy, not a side quest — see **STEP 1b**.
+
+**Take the dump now, from the M0, before anything moves.** Get `MONGODB_URI` from Heroku → Settings →
+Config Vars → *Reveal*.
+
+```
+mongodump --uri="<MONGODB_URI>" --archive=$HOME/doorline-preflight.archive.gz --gzip
+```
+
+**Then prove it restores.** A dump file you have never restored is not a backup, it is a hope.
+
+```
+./verify-backup.sh $HOME/doorline-preflight.archive.gz
+```
+
+*It spins up a throwaway local mongod, actually restores the archive, and prints a census — including
+**"Persons with NO organizationId"**, which is precisely the number the irreversible migration touches.
+If it prints zero collections, or the restore fails: **stop.** You have no rollback.*
 
 ---
 
@@ -71,9 +90,64 @@ where people skip the backup because it feels unnecessary.**
 
 **Settings** → scroll to **Maintenance Mode** → toggle **ON**.
 
-*Between the deploy and the migrations, new code runs against the old schema: existing `Person` docs have
-no `organizationId`, so the new matcher won't find them — an import in that window would either duplicate
-Persons or fail on the old unique index. Maintenance closes the site. **The Run console still works.***
+*This one toggle covers **both** hazards below. Atlas requires it too: "**halt write operations to your
+cluster for the duration of your scale operation.**" **The Run console keeps working** — that's the whole
+trick.*
+
+*The migration hazard: between the deploy and the migrations, new code runs against the old schema.
+Existing `Person` docs have no `organizationId`, so the new matcher won't find them — an import in that
+window would either duplicate Persons or fail on the old unique index.*
+
+---
+
+# STEP 1b — ⚠️ Atlas: Free → M10. **Has downtime. Do it inside this window.**
+
+This is **not a resize** — Atlas rebuilds the cluster on dedicated nodes and copies your data across
+(*"requires an initial sync"*). **Budget 10–20 minutes.**
+
+**Atlas → your cluster → Edit Configuration.** In that one dialog:
+
+| Setting | Value | Why |
+|---|---|---|
+| Tier | **M10** | The floor for dedicated. There is nothing between Flex and M10. |
+| Cloud provider / region | **the same one you're on now** | Don't move regions during a migration. |
+| **Turn on Cloud Backup** | **ON** | This is the entire point of the upgrade. |
+| **Storage auto-scaling** | **ON** (leave checked) | Fires at 90% disk. Free insurance; you'll never hit it. |
+| **Cluster tier auto-scaling** | **🛑 OFF — uncheck it** | See below. This is the one that bites. |
+
+> ### Why compute auto-scaling comes OFF
+> M10/M20 are **burstable** instances, and Atlas measures their CPU against *baseline*, not 100%. From
+> the docs: *"The 90% Relative System CPU Utilization threshold equals **18% absolute CPU** (90% of 20%)."*
+>
+> **An M10 can trip a scale-up at 18% real CPU.** A CSV voter import pegging one core for twenty minutes
+> sits squarely in that zone. Scale-*down* then requires CPU under 45% for the last 10 minutes **and** the
+> last 4 hours, with no scale event in 24h — so a twenty-minute import can buy you **a day or more at M20
+> rates** ($147/mo vs $57). You are buying a tripwire, not headroom.
+
+### 1c. Diff the connection string. Expect it to be identical.
+
+When the cluster reports healthy: **Atlas → Connect → Drivers**, copy the `mongodb+srv://` string, and
+compare it to `MONGODB_URI` in Heroku → Settings → Config Vars.
+
+**It should be unchanged** — the SRV hostname is preserved; what changes is the **IPs behind it**. If it
+*does* differ, update the config var now. (Twenty seconds of paranoia. MongoDB never states hostname
+preservation in one sentence anywhere, so verify rather than trust.)
+
+***The stale-DNS trap:*** *your running dynos now hold a driver topology pointed at dead IPs. Atlas is
+explicit — "**you must restart your applications before connecting to the upgraded cluster.**" There are
+forum threads of exactly this: URI correct, app hangs, redeploy fixes it.* **STEP 2 restarts every dyno,
+so the deploy IS the restart.** That's why the upgrade goes here and not after.
+
+*(Your `maxPoolSize` is already pinned at 20 per process in `config/db.js:10`, so you're immune to the
+other classic surprise — M0's 500-connection ceiling lifting to 1500 and the driver suddenly opening far
+more sockets.)*
+
+### 1d. 🛑 NOW take the snapshot — and *look at it*
+
+**Atlas → Backup → Take Snapshot Now.**
+
+**Confirm it shows COMPLETED and restorable before you go on.** Not "clicked the button" — *saw it
+finish*. This is the safety net for STEP 4, and STEP 4 is a one-way door.
 
 ---
 
@@ -168,7 +242,11 @@ step 4 drops the legacy indexes itself, and why running this first wouldn't have
 
 **Settings** → **Maintenance Mode** → toggle **OFF**.
 
-**Expected total downtime: ~8–12 minutes**, nearly all of it the build.
+**Expected total downtime: ~20–35 minutes.** The two long poles are the **Atlas rebuild (10–20 min)** and
+the **Heroku build (3–5 min)**. The migrations themselves are seconds on data this size.
+
+*Then, while you're still in Atlas: set a **billing alert**. You're moving from $0/mo to ~$60/mo, and an
+alert is how you find out if that ever stops being true.*
 
 ---
 
@@ -253,10 +331,11 @@ at a maintenance page.*
 
 # ROLLBACK — the honest answer
 
-| Migration | Reversible? |
+| Step | Reversible? |
 |---|---|
+| Atlas Free → M10 (**1b**) | **Effectively no.** The old M0 is destroyed. Your `mongodump` (**0c**) is the rollback — which is why you restore-tested it. |
 | `migrate:platform-roles` | **Yes.** Sets a field. Nothing destroyed. |
-| `migrate:persons-org-scope` | **NO. ONE-WAY.** Drops indexes, deletes orphan Persons, deletes pending edit proposals. **The Atlas snapshot is your only rollback.** |
+| `migrate:persons-org-scope` | **NO. ONE-WAY.** Drops indexes, deletes orphan Persons, deletes pending edit proposals. **The Atlas snapshot (1d) is your only rollback.** |
 | `migrate:build-indexes` | **Yes.** Additive. Safe to re-run. |
 
 **If step 4 succeeds and step 5 fails** — the realistic bad case:
