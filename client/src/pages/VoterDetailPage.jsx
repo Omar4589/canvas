@@ -47,18 +47,15 @@ const EDIT_FIELDS = [
 function VoterFields({ voter, person, onSave, saving, tz }) {
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({});
-  // Shared-voter-DB: when another org owns this person's canonical identity, this org's
-  // name/contact edits become review proposals (district fields stay org-local). For a
-  // single-org customer managedByThisOrg is always true, so nothing shows.
-  const managedElsewhere = !!(person && !person.managedByThisOrg);
-  const lockNote = managedElsewhere ? (
-    <div className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
-      🔒 This person&apos;s identity is managed by{' '}
-      {person.ownerOrgName ? <span className="font-medium">{person.ownerOrgName}</span> : 'another organization'}.
-      {' '}Your edits to name &amp; contact are submitted as a proposal for review and applied to your copy
-      now; district fields are always yours.
-    </div>
-  ) : null;
+  // There used to be a "🔒 This person's identity is managed by {Other Customer Ltd}" banner here.
+  // It named a DIFFERENT customer organization to this one — telling a consulting firm, by name,
+  // which of its voters a rival firm also held. It existed because a Person was a global record
+  // shared between customers.
+  //
+  // Persons are org-scoped now (server/src/models/Person.js), so a voter's identity is only ever
+  // this org's. There is no other owner, no proposal flow, and nothing to disclose. Every edit
+  // applies directly to this org's own copy, which is what an admin always expected anyway.
+  const lockNote = null;
 
   function startEdit() {
     const f = {};

@@ -92,11 +92,18 @@ export async function propagateIdentity(personId, identity, { orgId = null, sour
   }
   const fields = built.fields;
 
-  // 2. Fan out to the Person's Voter caches across all orgs, paginated by _id (lean) so a
-  //    Person with thousands of cross-org voters never holds the whole set in memory.
+  // 2. Fan out to the Person's Voter caches WITHIN ITS OWN ORG, paginated by _id (lean) so a
+  //    Person with thousands of voter rows never holds the whole set in memory.
+  //
+  //    `organizationId` in this query is the whole point of the org-scoping change. It used to be
+  //    absent: `{ personId }` alone selected every Voter row in EVERY organization linked to this
+  //    Person, so one customer's admin correcting a phone number rewrote that field in another
+  //    customer's database. The Person is now org-scoped (models/Person.js), so in principle this
+  //    filter is redundant — belt and braces on purpose. If a bug ever re-links a Voter across an
+  //    org boundary, this line is what stops it becoming a cross-customer write.
   let lastId = null;
   for (;;) {
-    const q = { personId: person._id };
+    const q = { personId: person._id, organizationId: person.organizationId };
     if (lastId) q._id = { $gt: lastId };
     const voters = await Voter.find(q, VOTER_FANOUT_PROJ).sort({ _id: 1 }).limit(1000).lean().session(session || null);
     if (!voters.length) break;

@@ -220,13 +220,16 @@ router.get('/activity-feed', async (req, res, next) => {
         campaign: e.campaignId
           ? { id: String(e.campaignId._id), name: e.campaignId.name }
           : null,
+        // The street address is gone from this feed on purpose.
+        //
+        // The Control Room is an operational dashboard — "is the platform busy, is anything on fire"
+        // — and it is visible to any staff member with NO access grant and NO audit trail. It used to
+        // stream, cross-org and unlogged, a live line of "canvasser Jane knocked 412 Elm St at 3:47pm
+        // for Acme Campaigns". That is voter content, and voter content now requires a grant and gets
+        // logged (see models/SupportAccessGrant.js). City/state stays: it tells you WHERE the platform
+        // is busy without identifying a home.
         household: e.householdId
-          ? {
-              id: String(e.householdId._id),
-              addressLine1: e.householdId.addressLine1,
-              city: e.householdId.city,
-              state: e.householdId.state,
-            }
+          ? { id: String(e.householdId._id), city: e.householdId.city, state: e.householdId.state }
           : null,
       })),
     });

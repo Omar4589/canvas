@@ -6,7 +6,7 @@ import { Organization } from '../../models/Organization.js';
 import { Membership } from '../../models/Membership.js';
 import { User } from '../../models/User.js';
 import { Campaign } from '../../models/Campaign.js';
-import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
+import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
 import { slugSchema, emailSchema, nameSchema, passwordSchema } from '../../utils/validators.js';
 import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
@@ -178,7 +178,8 @@ router.patch('/:orgId', async (req, res, next) => {
 // cross-org Person hygiene; see services/platform/deleteOrganization.js). The
 // caller must type the org's slug back: a mismatched confirmSlug is a 400, so
 // no single stray click can destroy an org.
-router.delete('/:orgId', async (req, res, next) => {
+// Break-glass only: this destroys a customer's entire account, irreversibly.
+router.delete('/:orgId', requireBreakGlass, async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.orgId)) {
       return res.status(400).json({ error: 'Invalid orgId' });

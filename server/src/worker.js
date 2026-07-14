@@ -5,6 +5,7 @@ import { createRedis, assertNoeviction } from './queues/connection.js';
 import { QUEUE_NAMES } from './queues/index.js';
 import { processImportJob } from './services/import/importProcessor.js';
 import { processTurfJob } from './services/turf/turfProcessor.js';
+import { registerMaintenanceJobs, processMaintenanceJob } from './services/retention/scheduler.js';
 import { GeocodeCache } from './models/GeocodeCache.js';
 
 const IMPORT_CONCURRENCY = Number(process.env.IMPORT_JOB_CONCURRENCY || 2);
@@ -39,6 +40,11 @@ async function main() {
   await assertNoeviction(probe);
   await probe.quit().catch(() => {});
 
+  // Declare the repeatable schedule (the 180-day identity purge) before the consumer starts. This is
+  // what replaces the Heroku Scheduler add-on: the promise is now kept by code that ships with the
+  // app, is covered by a test, and shows up in a diff.
+  await registerMaintenanceJobs();
+
   const workers = [
     new Worker(QUEUE_NAMES.IMPORT, processImportJob, {
       connection: createRedis(),
@@ -47,6 +53,10 @@ async function main() {
     new Worker(QUEUE_NAMES.TURF, processTurfJob, {
       connection: createRedis(),
       concurrency: TURF_CONCURRENCY,
+    }),
+    new Worker(QUEUE_NAMES.MAINTENANCE, processMaintenanceJob, {
+      connection: createRedis(),
+      concurrency: 1, // housekeeping; never compete with real work
     }),
   ];
 

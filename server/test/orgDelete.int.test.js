@@ -7,8 +7,8 @@ import mongoose from 'mongoose';
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/orgdel_test node --test test/orgDelete.int.test.js
 // Asserts: slug confirmation is required; every org-scoped row dies; USER
 // ACCOUNTS survive (decision, Jul 2026) while their memberships don't; a
-// sibling org is untouched; orphaned Persons are purged while shared Persons
-// survive with ownership released to null.
+// sibling org is untouched; and EVERY Person belonging to the deleted org is purged
+// (Persons are org-scoped now — there is no shared identity graph to preserve).
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-org-delete';
 
 const { createApp } = await import('../src/app.js');
@@ -41,7 +41,10 @@ before(async () => {
 
   const doomed = await Organization.create({ name: 'Doomed Org', slug: 'doomed-org', isActive: true });
   const survivor = await Organization.create({ name: 'Survivor Org', slug: 'survivor-org', isActive: true });
-  const superU = await User.create({ firstName: 'Sue', lastName: 'Super', email: 'su@t.co', passwordHash: 'x', isActive: true, isSuperAdmin: true });
+  // Deleting an organization is irreversible, so it now needs BREAK-GLASS authority — a plain
+  // `support` staff account cannot do it. That split exists so hiring a second person doesn't mean
+  // handing them a god account. Existing super-admins are grandfathered by migrate:platform-roles.
+  const superU = await User.create({ firstName: 'Sue', lastName: 'Super', email: 'su@t.co', passwordHash: 'x', isActive: true, isSuperAdmin: true, platformRole: 'break_glass' });
   const onlyHere = await User.create({ firstName: 'Olive', lastName: 'Only', email: 'only@t.co', passwordHash: 'x', isActive: true });
   const shared = await User.create({ firstName: 'Sam', lastName: 'Shared', email: 'shared@t.co', passwordHash: 'x', isActive: true });
   await Membership.create({ userId: onlyHere._id, organizationId: doomed._id, role: 'canvasser', isActive: true });
@@ -59,10 +62,15 @@ before(async () => {
     normalizedAddress: '9 DOOM ST|TOWN|KY|40009',
     location: { type: 'Point', coordinates: [-84.5, 38.0] },
   });
-  // Person only linked in the doomed org → should be purged.
-  const orphanPerson = await Person.create({ identityOwnerOrgId: doomed._id });
-  // Person shared with the survivor org, but OWNED by the doomed org → survives, ownership released.
-  const sharedPerson = await Person.create({ identityOwnerOrgId: doomed._id });
+  // Persons belong to an org now (they used to be global, shared between customers). So there is no
+  // longer any such thing as a "shared person that survives with ownership released" — the doomed
+  // org's Persons die with it, and the survivor's are simply its own and are never touched.
+  //
+  // The old fixture built ONE Person linked from both orgs and asserted it must survive. That was
+  // correct for a shared identity graph, and the shared identity graph is what we removed.
+  const orphanPerson = await Person.create({ organizationId: doomed._id }); // no voter → still dies
+  const doomedPerson = await Person.create({ organizationId: doomed._id }); // the doomed org's own
+  const survivorPerson = await Person.create({ organizationId: survivor._id }); // the survivor's own
   await Voter.create({
     organizationId: doomed._id,
     campaignId: camp._id,
@@ -81,7 +89,7 @@ before(async () => {
     firstName: 'C',
     lastName: 'D',
     fullName: 'C D',
-    personId: sharedPerson._id,
+    personId: doomedPerson._id,
   });
   const survivorHh = await Household.create({
     organizationId: survivor._id,
@@ -101,7 +109,7 @@ before(async () => {
     firstName: 'E',
     lastName: 'F',
     fullName: 'E F',
-    personId: sharedPerson._id,
+    personId: survivorPerson._id,
   });
   await CanvassActivity.create({
     organizationId: doomed._id,
@@ -118,7 +126,7 @@ before(async () => {
   server = http.createServer(app);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
-  Object.assign(ctx, { doomed, survivor, onlyHere, shared, orphanPerson, sharedPerson, superTok: signUserToken(superU) });
+  Object.assign(ctx, { doomed, survivor, onlyHere, shared, orphanPerson, doomedPerson, survivorPerson, superTok: signUserToken(superU) });
 });
 
 after(async () => {
@@ -153,14 +161,14 @@ test('wrong or missing confirmSlug is refused', { skip }, async () => {
   assert.ok(await Organization.findById(ctx.doomed._id), 'org must still exist after refused attempts');
 });
 
-test('cascade delete: org-scoped rows die, users/survivor org/shared person live', { skip }, async () => {
+test('cascade delete: org-scoped rows die; users and the sibling org live; the org\'s Persons do NOT', { skip }, async () => {
   const r = await call('DELETE', `/super-admin/organizations/${ctx.doomed._id}`, {
     token: ctx.superTok,
     body: { confirmSlug: 'doomed-org' },
   });
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.json.organization.slug, 'doomed-org');
-  assert.strictEqual(r.json.personsPurged, 1);
+  assert.strictEqual(r.json.personsPurged, 2, 'both of the doomed org\'s Persons are purged');
 
   // Everything org-scoped is gone.
   assert.strictEqual(await Organization.countDocuments({ _id: ctx.doomed._id }), 0);
@@ -174,11 +182,20 @@ test('cascade delete: org-scoped rows die, users/survivor org/shared person live
   assert.ok(await User.findById(ctx.shared._id));
   assert.strictEqual(await Membership.countDocuments({ userId: ctx.shared._id, organizationId: ctx.survivor._id }), 1);
 
-  // Person hygiene: orphan purged; shared person survives with ownership released.
-  assert.strictEqual(await Person.countDocuments({ _id: ctx.orphanPerson._id }), 0);
-  const sharedP = await Person.findById(ctx.sharedPerson._id).lean();
-  assert.ok(sharedP, 'shared person must survive');
-  assert.strictEqual(sharedP.identityOwnerOrgId, null, 'ownership must be released to null');
+  // Persons: every one belonging to the deleted org is GONE — no exceptions, no "shared" survivors.
+  //
+  // This used to assert that a Person linked from a second org survives with its ownership released
+  // to null. That was right when a Person was a global record two customers both pointed at. Now a
+  // Person belongs to one org, so "delete my data" means the humans in that customer's voter file
+  // leave our database — rather than lingering because someone else also imported them.
+  assert.strictEqual(await Person.countDocuments({ _id: ctx.orphanPerson._id }), 0, 'orphan Person purged');
+  assert.strictEqual(await Person.countDocuments({ _id: ctx.doomedPerson._id }), 0, 'the org\'s own Person purged');
+  assert.strictEqual(await Person.countDocuments({ organizationId: ctx.doomed._id }), 0, 'no Person of the deleted org survives');
+
+  // The survivor org's Person is untouched — it was never shared, so there is nothing to release.
+  const survivorP = await Person.findById(ctx.survivorPerson._id).lean();
+  assert.ok(survivorP, 'the OTHER org\'s Person must survive');
+  assert.strictEqual(String(survivorP.organizationId), String(ctx.survivor._id));
 
   // The survivor org is untouched.
   assert.strictEqual(await Voter.countDocuments({ organizationId: ctx.survivor._id }), 1);

@@ -22,14 +22,34 @@ const reportShareLinkSchema = new mongoose.Schema(
     // Opaque capability token in the URL (crypto.randomBytes base64url). Unique + indexed.
     token: { type: String, required: true, unique: true },
     label: { type: String, default: '', trim: true },
-    // bcrypt hash of the optional per-link password; null = open link.
+    // bcrypt hash of the per-link password.
+    //
+    // This is NO LONGER OPTIONAL for new links (routes/admin/clientReports.js generates one when the
+    // operator doesn't supply it). It used to default to null, and share.js waved through any link
+    // without one — so a published report was an OPEN, UNAUTHENTICATED URL. And what a report carries
+    // is not aggregate: every map point is a household's exact street address and coordinates plus
+    // that household's survey answers ("412 Elm St → Opposed"). A name is a public voter-file lookup
+    // away. The token being unguessable is not access control; it is obscurity, and it survives being
+    // forwarded, pasted into a group chat, or sitting in a mail archive forever.
+    //
+    // `default: null` stays only so the migration can identify pre-existing open links.
     passwordHash: { type: String, default: null },
+    // Links now expire. There was no expiry at all: a token stayed live forever unless a human
+    // remembered to revoke it, long after the campaign, the staffer and the client relationship were
+    // gone. Nullable so legacy rows read as "no expiry" and the migration can find them.
+    expiresAt: { type: Date, default: null, index: true },
     isActive: { type: Boolean, default: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     lastAccessedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
+
+// True for a link that predates the password+expiry rules. Used by the migration and by the admin
+// UI to nag about legacy open links rather than silently breaking a client's live URL.
+reportShareLinkSchema.methods.isLegacyOpen = function () {
+  return !this.passwordHash || !this.expiresAt;
+};
 
 reportShareLinkSchema.index({ campaignId: 1, isActive: 1 });
 

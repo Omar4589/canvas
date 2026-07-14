@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
+import { accessLog } from '../middleware/accessLog.js';
 import { blockIfMustChangePassword } from '../middleware/passwordGate.js';
 import { requireEntitlement } from '../middleware/entitlement.js';
 import authRouter from './auth.js';
@@ -29,6 +30,7 @@ import superAdminBillingRouter from './superAdmin/billing.js';
 import adminBillingRouter from './admin/billing.js';
 import superAdminUsersRouter from './superAdmin/users.js';
 import superAdminPersonsRouter from './superAdmin/persons.js';
+import superAdminAccessRouter from './superAdmin/access.js';
 import superAdminImportsRouter from './superAdmin/imports.js';
 import superAdminPlatformRouter from './superAdmin/platform.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
@@ -62,10 +64,19 @@ router.use(['/super-admin', '/admin', '/mobile'], requireAuth, blockIfMustChange
 // need an entitled org; super-admin surfaces are exempt (account managers).
 router.use(['/admin', '/mobile'], requireEntitlement);
 
+// Vendor-access audit. Records an AccessLog row whenever DOORLINE STAFF successfully read a
+// customer's voter content — never for a customer reading their own. Mounted once, here, rather than
+// per-route: a per-route hook is one someone forgets on the next route, and an unlogged path into
+// customer data is exactly what this exists to prevent. See middleware/accessLog.js for why every
+// decision inside it is deferred to res.on('finish').
+router.use(['/admin', '/mobile'], accessLog);
+
 router.use('/super-admin/organizations/:orgId/billing', superAdminBillingRouter);
 router.use('/super-admin/organizations', superAdminOrganizationsRouter);
 router.use('/super-admin/users', superAdminUsersRouter);
 router.use('/super-admin/persons', superAdminPersonsRouter);
+// Support access grants + the vendor-access audit log + retention health.
+router.use('/super-admin/access', superAdminAccessRouter);
 router.use('/super-admin/imports', superAdminImportsRouter);
 router.use('/super-admin', superAdminPlatformRouter);
 

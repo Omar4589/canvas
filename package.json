@@ -44,7 +44,9 @@
     "repair:orphaned-assignments": "npm --prefix server run repair:orphaned-assignments --",
     "audit:team-counts": "npm --prefix server run audit:team-counts --",
     "delete:account": "npm --prefix server run delete:account --",
-    "audit:cross-org-identity": "npm --prefix server run audit:cross-org-identity --"
+    "audit:cross-org-identity": "npm --prefix server run audit:cross-org-identity --",
+    "migrate:persons-org-scope": "npm --prefix server run migrate:persons-org-scope --",
+    "migrate:platform-roles": "npm --prefix server run migrate:platform-roles --"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

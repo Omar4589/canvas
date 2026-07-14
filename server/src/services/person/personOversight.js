@@ -55,11 +55,23 @@ export function serializePerson(p, { ownerOrgName = null } = {}) {
 }
 
 /**
- * Super-admin per-person oversight view. Privacy holds STRUCTURALLY: each org's summary
- * is built from aggregation $group/$count + an explicit address allow-list, and NEVER
- * reads a survey answer (SurveyResponse.answers/note), canvass note (CanvassActivity.note),
- * or voter note body (VoterNote.body) into memory. Counts / dates / booleans / status
- * tallies only. Returns null if the person doesn't exist.
+ * Super-admin per-person oversight view.
+ *
+ * The old comment here claimed this returns "counts / dates / booleans / status tallies only." THAT
+ * WAS FALSE, and a false comment about a privacy boundary is worse than no comment — it is what a
+ * reviewer reads instead of the code. This function returns the person's full name, date of birth,
+ * party, phone, state voter ID, and their HOME ADDRESSES.
+ *
+ * What IS true, and is worth keeping: the CANVASSING side really is structural. Every survey/activity/
+ * note figure is an aggregation $group/$count, and this never reads a survey answer
+ * (SurveyResponse.answers/note), a canvass note (CanvassActivity.note), or a voter note body
+ * (VoterNote.body) into memory. So the vendor sees THAT a person was surveyed three times and refused
+ * twice — never what they said.
+ *
+ * The identity fields it does return are voter content, and reaching this route now requires the
+ * caller to hold a SupportAccessGrant; every read is written to AccessLog.
+ *
+ * Returns null if the person doesn't exist.
  */
 export async function buildPersonOversight(personId) {
   const raw = await Person.findById(personId);

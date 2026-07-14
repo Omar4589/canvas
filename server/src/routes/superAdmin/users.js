@@ -2,7 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
-import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
+import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
 import { clearLoginLockout } from '../../middleware/loginRateLimit.js';
 
 const router = Router();
@@ -46,7 +46,8 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/:userId/promote', async (req, res, next) => {
+// Break-glass only: granting platform authority is how a support account would become a god account.
+router.post('/:userId/promote', requireBreakGlass, async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });

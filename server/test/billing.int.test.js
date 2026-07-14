@@ -20,6 +20,7 @@ const { Campaign } = await import('../src/models/Campaign.js');
 const { Household } = await import('../src/models/Household.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Subscription } = await import('../src/models/Subscription.js');
+const { SupportAccessGrant } = await import('../src/models/SupportAccessGrant.js');
 const { SubscriptionEvent } = await import('../src/models/SubscriptionEvent.js');
 const { entitlementFor } = await import('../src/services/billing/entitlement.js');
 const { monthlyStatement } = await import('../src/services/billing/statement.js');
@@ -49,7 +50,7 @@ before(async () => {
   server = http.createServer(app);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
-  Object.assign(ctx, { org, camp, sub, adminTok: signUserToken(admin), superTok: signUserToken(superU) });
+  Object.assign(ctx, { org, camp, sub, adminTok: signUserToken(admin), superTok: signUserToken(superU), superId: superU._id });
 });
 
 after(async () => {
@@ -158,7 +159,18 @@ test('internal org: never gated', { skip }, async () => {
   assert.strictEqual(ok.status, 200);
 });
 
-test('super admin bypasses a suspended org entirely', { skip }, async () => {
+test('super admin bypasses a suspended org entirely (with a support grant)', { skip }, async () => {
+  // The entitlement bypass is unchanged: a suspended org is read-only for its own admins, and staff
+  // can still act. What changed is the DOOR — staff can no longer be inside a customer's account at
+  // all without a time-boxed, reasoned SupportAccessGrant. The rule is org ENTRY, not content type:
+  // billing metadata is readable from /super-admin/* without entering anything, but the moment you
+  // are in their account there is a grant and a reason. See models/SupportAccessGrant.js.
+  await SupportAccessGrant.create({
+    actorUserId: ctx.superId,
+    organizationId: ctx.org._id,
+    reason: 'Re-enabling a suspended account after payment cleared.',
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
   await setStatus('suspended');
   const ok = await call('PATCH', `/admin/campaigns/${ctx.camp._id}`, {
     token: ctx.superTok,

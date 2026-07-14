@@ -8,7 +8,28 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     phone: { type: String, default: null, trim: true },
     passwordHash: { type: String, required: true },
+    // "Is this person Doorline staff at all." Kept as-is so every existing check still works.
     isSuperAdmin: { type: Boolean, default: false, index: true },
+    // WHICH staff. This split exists so that hiring a second person does not mean handing them an
+    // omniscient login.
+    //
+    //   support     — the default, and least privilege. Sees the platform METADATA dashboard freely
+    //                 (org / user / campaign counts, billing state, usage, health). Reaches a
+    //                 customer's VOTER CONTENT only through a SupportAccessGrant: time-boxed, with a
+    //                 typed reason, and every read written to AccessLog. Cannot delete an
+    //                 organization, promote staff, or edit canonical identity.
+    //
+    //   break_glass — full platform authority (org deletion, staff promotion, identity merges). Still
+    //                 needs a grant to enter a customer org, and is still logged. "No god mode"
+    //                 means no unlogged mode — not no access.
+    //
+    // Existing super-admins default to break_glass so nothing they can do today stops working; new
+    // staff should be created as `support` and escalated deliberately.
+    platformRole: {
+      type: String,
+      enum: ['support', 'break_glass'],
+      default: 'support',
+    },
     isActive: { type: Boolean, default: true },
     // Set when the user deletes their own account (App Store 5.1.1(v) / Play's
     // account-deletion policy). Deliberately NOT the same thing as isActive:false:
@@ -54,6 +75,7 @@ userSchema.methods.toSafeJSON = function () {
     email: this.email,
     phone: this.phone,
     isSuperAdmin: !!this.isSuperAdmin,
+    platformRole: this.isSuperAdmin ? (this.platformRole || 'support') : null,
     isActive: this.isActive,
     deletedAt: this.deletedAt || null,
     mustChangePassword: !!this.mustChangePassword,

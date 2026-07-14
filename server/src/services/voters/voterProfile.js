@@ -110,19 +110,22 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
       })),
   ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-  // Shared-voter-DB ownership summary (drives the "managed by {org}" lock in the UI).
+  // The Person link, for this org only.
+  //
+  // This block used to resolve `ownerOrgName` — it looked up the OTHER customer organization that
+  // "managed" this person's identity and returned their NAME, which the voter page then rendered as
+  // "This person's identity is managed by {Acme Field Group}". One customer was being told, by name,
+  // that another customer had the same voter in their file. For firms whose competitors are also our
+  // customers, that is a disclosure they never agreed to.
+  //
+  // A Person now belongs to exactly one org (models/Person.js), so there is no other owner to name
+  // and nothing to look up. Everything a customer sees about a Person is now their own.
   let person = null;
   if (voter.personId) {
-    const p = await Person.findById(voter.personId, 'identityOwnerOrgId ownerProvisional').lean();
-    if (p) {
-      const ownerOrgId = p.identityOwnerOrgId ? String(p.identityOwnerOrgId) : null;
-      const managedByThisOrg = !!(ownerOrgId && orgId && ownerOrgId === String(orgId));
-      let ownerOrgName = null;
-      if (ownerOrgId && !managedByThisOrg) {
-        const o = await Organization.findById(ownerOrgId, 'name').lean();
-        ownerOrgName = o?.name || null;
-      }
-      person = { id: String(voter.personId), ownerOrgId, ownerProvisional: !!p.ownerProvisional, managedByThisOrg, ownerOrgName };
+    const p = await Person.findById(voter.personId, 'organizationId').lean();
+    // Defensive: a Person from another org should be unreachable, but never surface one if it is.
+    if (p && String(p.organizationId) === String(orgId)) {
+      person = { id: String(voter.personId) };
     }
   }
 

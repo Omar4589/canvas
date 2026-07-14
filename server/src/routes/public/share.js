@@ -27,6 +27,17 @@ async function loadShare(req, res, next) {
   try {
     const share = await ReportShareLink.findOne({ token: req.params.token, isActive: true });
     if (!share) return res.status(404).json({ error: 'This report link is not available.' });
+    // Expiry. A published report pins survey answers to street addresses, so a link that lives
+    // forever is a forever-liability: it outlives the campaign, the staffer who sent it, and the
+    // client relationship, and it keeps working from any inbox it was ever forwarded to.
+    // Legacy rows have expiresAt: null and are treated as unexpired — the migration sunsets them
+    // on notice rather than breaking a client's live URL without warning.
+    if (share.expiresAt && share.expiresAt <= new Date()) {
+      return res.status(410).json({
+        error: 'This report link has expired. Ask your campaign contact for a new one.',
+        code: 'SHARE_EXPIRED',
+      });
+    }
     // Billing: share links survive past_due but die with the org's access
     // (suspended/canceled) — the published report is the leverage.
     if (await shareLinksBlocked(share.organizationId)) {

@@ -43,10 +43,32 @@ const personSchema = new Schema(
     uidKeys: { type: [uidKeySchema], default: [] }, // (uidSource, uid) tuples
     svidKeys: { type: [svidKeySchema], default: [] }, // (registeredState, stateVoterId) tuples
 
-    // Shared identity (source of truth). Display/targeting fields only.
+    // ── The organization this Person belongs to. ─────────────────────────────────────────────
+    // This field did not exist. A Person was GLOBAL: one record per real human, shared by every
+    // customer org that had imported them. That made Doorline the arbiter of a canonical identity
+    // across its customers — deciding the true value, merging records between them, and (via
+    // propagateIdentity) writing one customer's correction into another customer's database
+    // without either one's instruction. That is controller behaviour, and our entire legal posture
+    // is that we are a PROCESSOR: each customer's data siloed, touched only on their instruction.
+    //
+    // Scoping the Person to an org restores that. Dedup still happens — inside one org, where the
+    // same human can legitimately appear twice under two state voter IDs — and the fan-out in
+    // propagateIdentity now cannot leave the org it started in.
+    //
+    // The audit that preceded this change found ZERO rows contaminated and ZERO Persons shared
+    // between orgs, so nothing was ever actually written across a boundary. This is forward-looking
+    // hardening: the path existed and was one admin edit away from being used.
+    organizationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: true,
+      index: true,
+    },
+
+    // Identity (source of truth for this org). Display/targeting fields only.
     // Districting (precinct/CD/SD/HD) is intentionally absent — it is
     // address-derived and stays per-org on Voter (propagating it would re-cut
-    // other orgs' turf via the org-blind cut recompute).
+    // turf via the org-blind cut recompute).
     firstName: { type: String, default: null, trim: true },
     lastName: { type: String, default: null, trim: true },
     fullName: { type: String, default: null, trim: true },
@@ -73,19 +95,26 @@ const personSchema = new Schema(
   { timestamps: true }
 );
 
-// Dedup invariant: no two (non-tombstoned) Persons may share a (uidSource, uid) or
-// a (registeredState, stateVoterId). Partial so empty key arrays never collide.
-// In production these are built ONLY by migratePersons after backfill dedup
-// (autoIndex is off in prod — see config/db.js).
+// Dedup invariant: WITHIN ONE ORGANIZATION, no two (non-tombstoned) Persons may share a
+// (uidSource, uid) or a (registeredState, stateVoterId). Partial so empty key arrays never collide.
+//
+// These used to be GLOBAL — unique across the whole platform, with no organizationId in the key.
+// That is what made one Person the shared record for the same human in two different customers'
+// databases, and it is what let propagateIdentity fan one customer's edit into another's rows. The
+// organizationId prefix is the fix: dedup still works exactly as before inside an org, and there is
+// no longer any such thing as a Person two orgs both point at.
+//
+// In production these are built ONLY by a migration (autoIndex is off — see config/db.js). The OLD
+// global indexes must be DROPPED, or they will reject the per-org copies the migration creates.
 personSchema.index(
-  { 'uidKeys.uidSource': 1, 'uidKeys.uid': 1 },
+  { organizationId: 1, 'uidKeys.uidSource': 1, 'uidKeys.uid': 1 },
   { unique: true, partialFilterExpression: { 'uidKeys.uid': { $type: 'string' } } }
 );
 personSchema.index(
-  { 'svidKeys.registeredState': 1, 'svidKeys.stateVoterId': 1 },
+  { organizationId: 1, 'svidKeys.registeredState': 1, 'svidKeys.stateVoterId': 1 },
   { unique: true, partialFilterExpression: { 'svidKeys.stateVoterId': { $type: 'string' } } }
 );
-personSchema.index({ lastName: 1, firstName: 1 }); // super-admin directory + candidate search
+personSchema.index({ organizationId: 1, lastName: 1, firstName: 1 }); // directory + candidate search
 personSchema.index({ mergedInto: 1 });
 
 export const Person = mongoose.model('Person', personSchema);

@@ -158,15 +158,38 @@ function shareRow(s) {
     token: s.token,
     label: s.label || '',
     hasPassword: !!s.passwordHash,
+    expiresAt: s.expiresAt || null,
+    // Flags a link created before password+expiry were required, so the UI can nag rather than
+    // silently break a client's live URL.
+    isLegacyOpen: !s.passwordHash || !s.expiresAt,
     isActive: s.isActive,
     lastAccessedAt: s.lastAccessedAt || null,
     createdAt: s.createdAt,
   };
 }
+
+// How long a new share link lives. 90 days comfortably outlasts a reporting cycle; rotating is one
+// click. Override per-link with `expiresInDays`.
+const SHARE_DEFAULT_DAYS = Number(process.env.SHARE_LINK_DEFAULT_DAYS || 90);
+const SHARE_MAX_DAYS = 365;
+
+// A readable, high-entropy password for the operator to hand the client. Generated when they don't
+// supply one, because "optional password" in practice meant "no password" — and the report behind
+// the link carries street addresses with survey answers attached.
+// ~62^12 ≈ 3e21 combinations; the ambiguous glyphs are dropped so it survives being read aloud.
+function generateSharePassword() {
+  const alphabet = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(12);
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
+}
+
 const shareCreateSchema = z.object({
   campaignId: z.string(),
   label: z.string().max(120).optional(),
+  // Still optional in the API — but the ROUTE now generates one when it's absent, rather than
+  // creating an open link. See generateSharePassword.
   password: z.string().min(1).max(200).optional(),
+  expiresInDays: z.number().int().min(1).max(SHARE_MAX_DAYS).optional(),
 });
 const shareUpdateSchema = z.object({
   label: z.string().max(120).optional(),
@@ -202,17 +225,62 @@ router.post('/shares', async (req, res, next) => {
     const campaign = await loadCampaignInOrg(orgId, data.campaignId);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found in this org' });
     if (!(await manages(req, res, campaign._id))) return;
+    // Every new link gets a password and an expiry. If the operator didn't set a password we mint
+    // one and return it ONCE, in the clear, in this response — it is bcrypt-hashed at rest and can
+    // never be shown again. Rotating the link is how you recover a lost one.
+    const generated = data.password ? null : generateSharePassword();
+    const password = data.password || generated;
+    const days = data.expiresInDays || SHARE_DEFAULT_DAYS;
+
     const share = await ReportShareLink.create({
       organizationId: orgId,
       campaignId: campaign._id,
       token: newShareToken(),
       label: data.label || '',
-      passwordHash: data.password ? await bcrypt.hash(data.password, 10) : null,
+      passwordHash: await bcrypt.hash(password, 10),
+      expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000),
       createdBy: req.user._id,
     });
-    res.status(201).json({ share: shareRow(share) });
+    res.status(201).json({
+      share: shareRow(share),
+      // Present only when WE generated it. Show it to the operator once, then it's gone.
+      ...(generated ? { generatedPassword: generated } : {}),
+    });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Kill every pre-existing OPEN link — no password, or no expiry — in one action.
+//
+// Deliberately NOT automatic. Auto-expiring links created before the rules changed would take a
+// client's live report offline with no warning, under their feet, from a deploy they didn't know
+// about. So legacy links keep working and are flagged `isLegacyOpen`; this is the operator's switch
+// to kill them once they've told their customers. The decision of WHEN is a business one.
+router.post('/shares/revoke-legacy', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const filter = {
+      organizationId: orgId,
+      isActive: true,
+      $or: [{ passwordHash: null }, { expiresAt: null }],
+    };
+    const doomed = await ReportShareLink.find(filter, 'label campaignId token').lean();
+
+    // Dry run unless explicitly confirmed — you should be able to see what you're about to break.
+    if (req.body?.confirm !== true) {
+      return res.json({
+        dryRun: true,
+        wouldRevoke: doomed.length,
+        links: doomed.map((s) => ({ id: String(s._id), label: s.label, campaignId: String(s.campaignId) })),
+      });
+    }
+
+    const r = await ReportShareLink.updateMany(filter, { $set: { isActive: false } });
+    res.json({ revoked: r.modifiedCount || 0 });
+  } catch (err) {
     next(err);
   }
 });
@@ -378,8 +446,34 @@ router.patch('/:id', async (req, res, next) => {
     if (data.visibility) {
       if (data.visibility.visibleQuestionKeys !== undefined)
         report.visibility.visibleQuestionKeys = data.visibility.visibleQuestionKeys;
-      if (data.visibility.mapAnswerKeys !== undefined)
+
+      // mapAnswerKeys pins an answer to a household's STREET ADDRESS on a public, unauthenticated
+      // link. A free-text answer there publishes whatever a canvasser typed, verbatim, next to
+      // somebody's home — so the map may only ever carry CHOICE answers, whose value set the
+      // operator picked in advance.
+      //
+      // The default already did the right thing (line ~297 seeds these from choiceQuestionKeys).
+      // The bug was that nothing enforced it on the WRITE path: the zod schema took
+      // `z.array(z.string())`, and buildFrozenMapPoints filters purely on key membership — so any
+      // key an operator sent, including a text question's, was published. Same helper, now used as
+      // the guard it should always have been.
+      if (data.visibility.mapAnswerKeys !== undefined) {
+        const campaign = await Campaign.findById(report.campaignId).lean();
+        const template = await resolveTemplate(activeOrgId(req), campaign);
+        const allowed = new Set(choiceQuestionKeys(template));
+        const rejected = data.visibility.mapAnswerKeys.filter((k) => !allowed.has(k));
+        if (rejected.length) {
+          return res.status(400).json({
+            error:
+              'The report map can only show multiple-choice answers. These are free-text (or unknown) ' +
+              `questions and cannot be pinned to an address: ${rejected.join(', ')}`,
+            code: 'MAP_ANSWER_KEYS_NOT_CHOICE',
+            rejected,
+          });
+        }
         report.visibility.mapAnswerKeys = data.visibility.mapAnswerKeys;
+      }
+
       if (data.visibility.showMap !== undefined) report.visibility.showMap = data.visibility.showMap;
     }
     if (data.supportQuestionKey !== undefined) {

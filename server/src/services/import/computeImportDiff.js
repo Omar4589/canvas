@@ -25,7 +25,16 @@ async function findInChunks(Model, field, values, projection, extraFilter = {}) 
 // Person already in the system (cross-org dedup payoff) vs would create a new Person. No
 // writes — mirrors the geocoding forecast. uidSource (the vendor namespace) lets uid-keyed
 // files forecast on uid; otherwise it forecasts on (state, stateVoterId).
-async function forecastPersons(validRows, uidSource) {
+// "N links to existing people · K adds new people" on the import preview.
+//
+// This used to query Person GLOBALLY. That made it a cross-customer presence oracle: upload a
+// one-row CSV and `existingPeople: 1` told you that some OTHER customer already had that named
+// voter in their file. For a firm whose competitors are also our customers, that is a real
+// disclosure — and it needed no permission beyond "can run an import".
+//
+// Scoped to the org, the number means what an operator actually wants: "how many of these are
+// already in MY file." Which is the useful reading anyway.
+async function forecastPersons(validRows, uidSource, orgId) {
   if (!validRows.length) return { enabled: true, voters: 0, existingPeople: 0, newPeople: 0 };
   const svidOf = (r) => {
     const state = String(r.voter.registeredState || r.household?.state || '').toUpperCase();
@@ -36,9 +45,10 @@ async function forecastPersons(validRows, uidSource) {
   const svidVals = [...new Set(validRows.map((r) => r.voter.stateVoterId).filter(Boolean))];
   const uidVals = uidSource ? [...new Set(validRows.map((r) => r.voter.uid).filter(Boolean))] : [];
   const proj = { uidKeys: 1, svidKeys: 1 };
+  const scope = { organizationId: orgId, mergedInto: null };
   const found = [
-    ...(svidVals.length ? await findInChunks(Person, 'svidKeys.stateVoterId', svidVals, proj, { mergedInto: null }) : []),
-    ...(uidVals.length ? await findInChunks(Person, 'uidKeys.uid', uidVals, proj, { mergedInto: null }) : []),
+    ...(svidVals.length ? await findInChunks(Person, 'svidKeys.stateVoterId', svidVals, proj, scope) : []),
+    ...(uidVals.length ? await findInChunks(Person, 'uidKeys.uid', uidVals, proj, scope) : []),
   ];
   const svidToPerson = new Map();
   const uidToPerson = new Map();
@@ -183,7 +193,7 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
   const geocoding = await geocodeForecast(householdMap);
 
   // Shared-voter-DB forecast (always-on): existing-person links vs new persons.
-  const persons = await forecastPersons(validRows, uidSource);
+  const persons = await forecastPersons(validRows, uidSource, orgId);
 
   return {
     geocoding,

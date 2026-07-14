@@ -52,17 +52,70 @@ off and your flags get eaten silently — the script runs in dry-run mode and yo
 > `server/`, and you're at the root. It'd be `node server/src/utils/whatever.js`. Prefer the npm scripts —
 > they're the ones we keep correct.
 
+## ⚠️ Entering a customer's account now needs a reason
+
+You can no longer switch into a customer organization silently. Doing so requires a **support access
+grant**: you type why, it lasts **4 hours**, and every voter record you open is written to an audit log
+against your name.
+
+This is not a restriction on what you can do — it is a record that you did it. *"I can read any
+customer's voter file and nobody, including me, could ever prove whether I did"* is not a position a
+data processor can defend, to a customer or in a dispute.
+
+- Start one: **Platform → Support access → Start session**, or `POST /api/super-admin/access/grants`.
+- See who looked at what: `GET /api/super-admin/access/log?organizationId=…`.
+
+There are two staff tiers now:
+
+| Role | Can | Cannot |
+| --- | --- | --- |
+| **`support`** (default for new staff) | Platform metadata dashboard. Customer voter content **via a grant**. | Delete an organization · promote staff · edit canonical voter identity. |
+| **`break_glass`** (you) | Everything. | Still needs a grant to enter a customer org, and is still logged. **No god mode = no *unlogged* mode.** |
+
+Existing super-admins are grandfathered to `break_glass` by `migrate:platform-roles`. **New staff should
+be created as `support`** — that split exists so that hiring someone doesn't mean handing them an
+omniscient login.
+
 ## Jobs that run themselves (set up once, then forget)
 
 **A "scheduled job" is a robot that runs a command for you on a timer.** You set it up once on Heroku's
 website and Heroku's own servers run it from then on — every day, forever. Your laptop can be closed. You
 can be on vacation. You never touch it again.
 
-There is currently **one** job:
+### These now run inside the app — delete the Heroku Scheduler entry
 
-| Job | How often | What it does |
+**The retention jobs moved into the worker dyno you already run.** They are BullMQ repeatable jobs in
+`services/retention/scheduler.js`, they record every run, and a test fails if anyone removes the
+schedule.
+
+That is the whole point. The purge *was* running — via a Heroku Scheduler entry you typed into a web
+form — but that entry was invisible to the code, uncovered by any test, and removable without a single
+thing failing. A published legal promise cannot be enforced by something nobody can see.
+
+> **Remove the old `purge:deleted-identities` Heroku Scheduler job after deploying.** Leaving it does
+> no harm (the purge is idempotent), but it is now redundant and misleading.
+
+| Job | When | What it does |
 | --- | --- | --- |
-| `npm run purge:deleted-identities -- --apply` | Daily | Finishes off accounts that people deleted more than 180 days ago |
+| `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago |
+| `retention-triggers` | Daily 04:41 UTC | **Deletes organizations**: wind-down, dormancy, and due deletion requests |
+
+**Check they're alive:** `GET /api/super-admin/access/health/retention`. It goes **RED** when the last
+successful run is >48h old — because a silently-dead scheduled job is indistinguishable from one that
+had nothing to do, unless something is counting.
+
+### The retention windows (yours to change, no deploy needed)
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `RETENTION_WIND_DOWN_DAYS` | **60** | After a subscription is canceled, the customer has this long to export. Then their data is deleted. |
+| `RETENTION_DORMANCY_MONTHS` | **24** | No canvassing activity for this long → the org is purged. A single knock resets the clock (the clock *is* the last knock). |
+| `RETENTION_DELETE_SLA_DAYS` | **30** | A deletion request is scheduled this far out — the window in which a mistaken or coerced request can be cancelled. |
+| `DELETED_IDENTITY_RETENTION_DAYS` | **180** | How long a deleted user's name is kept for fraud attribution. |
+| `SUPPORT_GRANT_HOURS` | **4** | How long a support access session lasts. |
+
+Orgs with subscription status **`internal`** (our demo/platform tenants) are **exempt from every
+auto-purge** — the App Review demo tenant must not evaporate because nobody knocked a door in it.
 
 ### Why that job exists
 

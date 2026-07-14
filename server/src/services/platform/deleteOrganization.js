@@ -11,6 +11,8 @@ import { FlagReview } from '../../models/FlagReview.js';
 import { Household } from '../../models/Household.js';
 import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js';
 import { ImportJob } from '../../models/ImportJob.js';
+import { DeletedUserRecord } from '../../models/DeletedUserRecord.js';
+import { deleteRawImport } from '../import/rawImportStore.js';
 import { ImportProfile } from '../../models/ImportProfile.js';
 import { Membership } from '../../models/Membership.js';
 import { Pass } from '../../models/Pass.js';
@@ -51,16 +53,16 @@ export const ORG_SCOPED = [
 // HARD-delete an organization and everything scoped to it. Irreversible — the
 // route in front of this demands the org's slug typed back as confirmation.
 //
+// This is what backs "a customer may request deletion of the information it
+// controls", so anything that survives it had better be something we can defend.
+//
 // What survives, deliberately:
 //   - User accounts (decision, Jul 2026): global identities are kept even when
 //     this was their only org — only their Membership rows are removed. A user
 //     who also belongs to another org keeps that access untouched.
-//   - Cross-org Persons that still have voters in OTHER orgs. If the deleted
-//     org OWNED such a person's identity, ownership is released to null
-//     (= super-admin-only canonical edits, per docs/PERSONS.md) rather than
-//     stranding a dead owner reference.
-// Persons left with no linked voter anywhere are purged along with their merge
-// candidates/logs and edit proposals (the deleteTestCampaigns pattern).
+//
+// Persons now belong to this org (they used to be global, shared across
+// customers) and are deleted with it — see the Person block below.
 export async function deleteOrganization(orgId) {
   const org = await Organization.findById(orgId).lean();
   if (!org) {
@@ -74,7 +76,29 @@ export async function deleteOrganization(orgId) {
     personId: { $ne: null },
   });
 
+  // The raw uploaded spreadsheets, BEFORE the ImportJob rows that name them are swept away.
+  //
+  // These were never deleted. The cascade below destroyed 30 collections — the voter file, the
+  // households, every knock — and left the ORIGINAL uploaded CSV/XLSX sitting in GridFS, complete,
+  // forever. A customer asking us to delete their data got the copies deleted and the source kept.
+  const jobIds = await ImportJob.find({ organizationId: org._id }).distinct('_id');
+  for (const id of jobIds) await deleteRawImport(id);
   const counts = {};
+  if (jobIds.length) counts.rawImportFiles = jobIds.length;
+
+  // DeletedUserRecord is NOT in ORG_SCOPED, and adding it there would not have worked: it stores
+  // `organizationIds` as an ARRAY (a user can belong to several orgs), so `deleteMany({
+  // organizationId })` matches nothing. The result was that a deleted user's name, email and phone
+  // outlived the deletion of the very organization they belonged to. Pull the org out of the array,
+  // and drop the record entirely once no org is left holding it.
+  const dur = await DeletedUserRecord.updateMany(
+    { organizationIds: org._id },
+    { $pull: { organizationIds: org._id } }
+  );
+  const durGone = await DeletedUserRecord.deleteMany({ organizationIds: { $size: 0 } });
+  if (dur.modifiedCount) counts.DeletedUserRecordDetached = dur.modifiedCount;
+  if (durGone.deletedCount) counts.DeletedUserRecord = durGone.deletedCount;
+
   for (const M of ORG_SCOPED) {
     const r = await M.deleteMany({ organizationId: org._id });
     if (r.deletedCount) counts[M.modelName] = r.deletedCount;
@@ -83,21 +107,28 @@ export async function deleteOrganization(orgId) {
   const proposals = await PersonEditProposal.deleteMany({ orgId: org._id });
   if (proposals.deletedCount) counts.PersonEditProposal = proposals.deletedCount;
 
-  // Cross-org Person hygiene.
+  // Persons belong to this org now, so they die with it — every one, unconditionally.
+  //
+  // This used to be "cross-org Person hygiene": a Person was global, shared by every customer that
+  // had imported the same human, so deleting an org could only remove the Persons nobody else was
+  // still linked to, and it had to RELEASE ownership of the rest rather than strand them. That was
+  // the right code for a shared identity graph — and the shared identity graph is exactly what we
+  // removed (models/Person.js). A customer asking us to delete their data should not leave a record
+  // of the humans in their voter file sitting in our database because someone else also has them.
   let personsPurged = 0;
   for (const pid of personIds) {
-    if ((await Voter.countDocuments({ personId: pid })) > 0) continue; // linked elsewhere — keep
     await Person.deleteOne({ _id: pid });
     await PersonMergeCandidate.deleteMany({ $or: [{ personIdA: pid }, { personIdB: pid }] });
     await PersonEditProposal.deleteMany({ personId: pid });
+    // PersonMergeLog holds a FULL pre-merge snapshot of both Person docs — identity PII. It goes
+    // with the org too; keeping it would be retaining exactly what we were asked to delete.
     await PersonMergeLog.deleteMany({ $or: [{ survivorId: pid }, { victimId: pid }] });
     personsPurged += 1;
   }
-  // Surviving persons this org owned: release ownership instead of stranding it.
-  const released = await Person.updateMany(
-    { identityOwnerOrgId: org._id },
-    { $set: { identityOwnerOrgId: null } }
-  );
+  // Belt and braces: anything still carrying this org's id (a Person created outside the voter
+  // link, say) goes as well.
+  const strays = await Person.deleteMany({ organizationId: org._id });
+  personsPurged += strays.deletedCount || 0;
 
   await Organization.deleteOne({ _id: org._id });
 
@@ -105,6 +136,5 @@ export async function deleteOrganization(orgId) {
     organization: { id: String(org._id), name: org.name, slug: org.slug },
     counts,
     personsPurged,
-    ownershipsReleased: released.modifiedCount,
   };
 }

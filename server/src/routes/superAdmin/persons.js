@@ -5,7 +5,7 @@ import { Voter } from '../../models/Voter.js';
 import { Organization } from '../../models/Organization.js';
 import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
-import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
+import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
 import { buildPersonOversight, serializePerson, PERSON_IDENTITY_FIELDS } from '../../services/person/personOversight.js';
 import { mergePersons, splitPerson } from '../../services/person/mergePersons.js';
 import { propagateIdentity } from '../../services/person/propagateIdentity.js';
@@ -226,7 +226,8 @@ router.get('/:personId', async (req, res, next) => {
 });
 
 // ── PATCH /super-admin/persons/:personId — canonical identity edit (propagates) ──
-router.patch('/:personId', async (req, res, next) => {
+// Break-glass only: this rewrites a voter's canonical identity in a customer's database.
+router.patch('/:personId', requireBreakGlass, async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.personId)) return res.status(400).json({ error: 'Invalid personId' });
     const person = await followMerged(await Person.findById(req.params.personId));

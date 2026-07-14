@@ -31,6 +31,27 @@ export function requireSuperAdmin(req, res, next) {
   next();
 }
 
+// The irreversible / authority-granting platform actions: deleting an organization, promoting staff,
+// editing canonical voter identity.
+//
+// `requireSuperAdmin` means "is Doorline staff". This means "is Doorline staff WITH break-glass
+// authority" — the distinction that exists so hiring a second person does not hand them an omniscient
+// login. A `support` operator can still do the job (metadata dashboard, and voter content through a
+// logged, time-boxed grant); they just cannot destroy a customer or make themselves more powerful.
+//
+// Existing super-admins default to break_glass, so nothing anyone can do today stops working.
+export function requireBreakGlass(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (!req.user.isSuperAdmin) return res.status(403).json({ error: 'Super admin only' });
+  if (req.user.platformRole !== 'break_glass') {
+    return res.status(403).json({
+      error: 'This action requires break-glass authority. Your account has support-level access.',
+      code: 'BREAK_GLASS_REQUIRED',
+    });
+  }
+  next();
+}
+
 export function requireOrgRole(...roles) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Not authenticated' });

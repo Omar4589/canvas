@@ -18,6 +18,7 @@ import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { ImportJob } from '../../models/ImportJob.js';
+import { deleteRawImport } from '../import/rawImportStore.js';
 import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js';
 import { Campaign } from '../../models/Campaign.js';
 
@@ -46,12 +47,21 @@ export async function deleteCampaignCascade(campaign) {
     CanvassActivity, SurveyResponse, ImportJob, HouseholdLocationChange,
   ];
   const counts = { voters: voters.deletedCount || 0 };
+
+  // The raw uploaded spreadsheets, FIRST — while we can still find the ImportJob rows that name
+  // them. This was called out here as "a minor storage orphan, not a correctness issue". It is not
+  // minor and it is not just storage: the orphan is the customer's original voter file, complete,
+  // with every name, address, date of birth and phone number in it. Deleting the campaign wiped the
+  // Voter rows and left the source spreadsheet sitting in GridFS forever — so "delete my data"
+  // deleted the copy and kept the original.
+  const jobIds = await ImportJob.find({ campaignId }).distinct('_id');
+  for (const id of jobIds) await deleteRawImport(id);
+  counts.rawImportFiles = jobIds.length;
+
   for (const Model of CAMPAIGN_SCOPED) {
     const res = await Model.deleteMany({ campaignId });
     counts[Model.modelName] = res.deletedCount || 0;
   }
-  // NOTE: ImportJob raw files live in GridFS and are not removed here — a minor
-  // storage orphan, not a correctness issue.
 
   await Campaign.deleteOne({ _id: campaignId });
   return counts;

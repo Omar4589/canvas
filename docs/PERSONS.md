@@ -1,9 +1,37 @@
-# Shared voter database (canonical People)
+# Voter identity (canonical People) — **per organization**
 
-One record per **real human**, deduplicated across organizations — so the same voter bought
-from a vendor by two different orgs is recognized as one person, while each org's canvassing
-stays private. This is the layer that turns isolated per-org voter lists into a shared
-identity graph with super-admin oversight.
+> ## ⚠️ This document described a CROSS-ORG shared identity graph. That is gone.
+>
+> **What changed (July 2026).** A `Person` used to be **global**: one record per real human, shared
+> by every customer org that had imported them. `propagateIdentity` then fanned an identity edit into
+> **every** org's Voter rows — so a *customer's own admin* correcting a phone number rewrote that
+> field in a **different customer's database**. A CSV import did the same.
+>
+> **Why it had to go.** That made Doorline the arbiter of a canonical identity *across its customers*
+> — deciding the true value, merging records between them, propagating one customer's edit to another
+> without either one's instruction. That is **controller** behaviour. Our entire legal posture, and
+> the privacy policy's *"it is not shared with other customer organizations"*, depends on being a
+> **processor**: each customer's data siloed, touched only on that customer's instruction.
+>
+> **What it is now.** `Person` carries a required `organizationId`. Dedup still happens — **inside one
+> org**, where the same human legitimately appears twice under two state voter IDs — and the fan-out
+> cannot leave the org it started in. Two orgs holding the same voter hold **two separate Persons**.
+>
+> **Nothing was ever actually leaked.** The audit run before the change
+> (`npm run audit:cross-org-identity`) found **zero** Persons shared across orgs and **zero**
+> contaminated rows. The path existed and was one admin edit away from being used; it was never used.
+>
+> **Gone with it:** the ownership state machine (`identityOwnerOrgId`, `ownerProvisional`), cross-org
+> edit proposals, the *"identity managed by {other org}"* banner, and the import preview's cross-org
+> "existing people" count. Inside a single org there is no other owner to arbitrate with.
+>
+> Locked by `test/orgIsolation.int.test.js` — **Org A edits a voter's phone; Org B's row must be
+> unchanged.** Sections below still describe the old cross-org model in places; treat this box as
+> authoritative until they are rewritten.
+
+One record per **real human within one organization** — so the same voter appearing twice in an org's
+file (a cross-state mover, a re-keyed row) is recognized as one person. Each org's identity records,
+and all of its canvassing, are its own.
 
 - **Part 1 — For everyone** is plain language: what a "Person" is, what's shared vs private,
   and what the super-admin can do.

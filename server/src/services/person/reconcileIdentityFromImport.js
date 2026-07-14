@@ -19,12 +19,16 @@ function identityOf(voter) {
 // find (paginated by _id, lean) + ONE bulkWrite per page, instead of a find + write per
 // person. Reuses buildVoterFanoutOp so locallyEditedFields + the identityBackup snapshot are
 // honored exactly as the per-person propagate path.
-async function fanOutVoters(fanOut, session) {
+async function fanOutVoters(fanOut, orgId, session) {
   const fieldsByPerson = new Map(fanOut.map((f) => [String(f.personId), f.fields]));
   const ids = fanOut.map((f) => f.personId);
   let lastId = null;
   for (;;) {
-    const q = { personId: { $in: ids } };
+    // `organizationId` is load-bearing. Without it this was `{ personId: { $in: ids } }` — every
+    // Voter row in EVERY org linked to these Persons — so a CSV import by one customer rewrote
+    // identity fields in another customer's database. Persons are org-scoped now, so this is a
+    // second lock on the same door. See models/Person.js.
+    const q = { personId: { $in: ids }, organizationId: orgId };
     if (lastId) q._id = { $gt: lastId };
     const voters = await Voter.find(q, VOTER_FANOUT_PROJ).sort({ _id: 1 }).limit(2000).lean().session(session || null);
     if (!voters.length) break;
@@ -73,7 +77,7 @@ export async function reconcileIdentityFromImport(validRows, { orgId, uidSource 
     },
     identity: row.voter,
   }));
-  const personByRow = await resolvePersonsBatch(batchRows, { source: 'import', session });
+  const personByRow = await resolvePersonsBatch(batchRows, { source: 'import', orgId, session });
 
   // 2. Stamp personId + uidSource on each voter; dedupe to one representative row/Person.
   const byPerson = new Map(); // personIdStr -> { personId, repRow }
@@ -187,7 +191,7 @@ export async function reconcileIdentityFromImport(validRows, { orgId, uidSource 
     }
     if (personOps.length) await Person.bulkWrite(personOps, { ordered: false, session: session || undefined });
     if (proposalOps.length) await PersonEditProposal.bulkWrite(proposalOps, { ordered: false, session: session || undefined });
-    if (fanOut.length) await fanOutVoters(fanOut, session);
+    if (fanOut.length) await fanOutVoters(fanOut, orgId, session);
   }
 
   return { linked: validRows.length, personsTouched: byPerson.size, proposals };

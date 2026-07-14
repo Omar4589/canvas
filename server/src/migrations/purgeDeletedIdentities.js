@@ -2,50 +2,54 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import { connectDb } from '../config/db.js';
 import { DeletedUserRecord } from '../models/DeletedUserRecord.js';
+import { purgeDeletedIdentities, retentionHealth } from '../services/retention/purgeDeletedIdentities.js';
 
-// The second half of account deletion.
+// MANUAL ESCAPE HATCH for the 180-day identity purge.
 //
-// When someone deletes their account we scrub the User row immediately, but we keep one copy
-// of their identity in DeletedUserRecord so the org can still attribute past field work —
-// above all the GPS/quality flags — to a real person. That retention is bounded and disclosed
-// (the in-app deletion sheet and the privacy policy both say so). This job is what makes the
-// bound real: once retentionUntil passes, the snapshot is scrubbed too and the person's past
-// work becomes permanently anonymous.
+// This used to be the ONLY way the purge ran — a dry-run-by-default CLI that nothing in the codebase
+// called, wired up solely by a Heroku Scheduler entry typed into a web dashboard. No test covered it.
+// If that add-on were ever removed or lost in a host migration, the purge would stop and NOTHING
+// would fail: we would keep holding deleted users' names while publicly promising a 180-day limit,
+// and we would not find out until someone asked.
 //
-// Without this running, "retained for a limited period" is a promise we don't keep — which is
-// exactly the kind of gap an App Review privacy complaint is made of. Run it on a schedule
-// (Heroku Scheduler daily is enough; the window is measured in months).
+// The purge is now a repeatable job on the worker dyno (services/retention/scheduler.js), recorded in
+// RetentionRun, and surfaced by a health check that goes red when it stops. This script remains for
+// running it by hand, and for checking the health from a console.
 //
-// Idempotent: only touches records whose window has lapsed and that aren't already purged.
-//
-// Usage: node src/migrations/purgeDeletedIdentities.js [--apply]
+//   npm run purge:deleted-identities            # dry run — what WOULD be purged, + health
+//   npm run purge:deleted-identities -- --apply # purge now (the worker does this daily anyway)
 const APPLY = process.argv.includes('--apply');
 
 async function main() {
   await connectDb(process.env.MONGODB_URI);
 
-  const now = new Date();
-  const filter = { retentionUntil: { $lte: now }, purgedAt: null };
-  const due = await DeletedUserRecord.find(filter).lean();
+  const health = await retentionHealth();
+  console.log('');
+  console.log(`retention: ${health.healthy ? 'HEALTHY' : '*** NOT HEALTHY ***'}`);
+  console.log(`  ${health.message}`);
+  if (health.lastSuccessAt) {
+    console.log(`  last success: ${new Date(health.lastSuccessAt).toISOString()} (purged ${health.lastSuccessPurged})`);
+  }
+  if (health.lastError) console.log(`  last error: ${health.lastError}`);
+  console.log('');
 
-  console.log(
-    `${due.length} deleted identities past their retention window · mode: ${APPLY ? 'APPLY' : 'DRY RUN'}`
-  );
+  const due = await DeletedUserRecord.find({ retentionUntil: { $lte: new Date() }, purgedAt: null }).lean();
+  console.log(`${due.length} deleted identit${due.length === 1 ? 'y' : 'ies'} past the retention window · mode: ${APPLY ? 'APPLY' : 'DRY RUN'}`);
   for (const r of due) {
-    const age = Math.floor((now - new Date(r.deletedAt)) / (24 * 60 * 60 * 1000));
+    const age = Math.floor((Date.now() - new Date(r.deletedAt)) / 86_400_000);
     console.log(`  · ${r.firstName} ${r.lastName} <${r.email}> — deleted ${age}d ago`);
   }
 
-  if (APPLY && due.length > 0) {
-    // Scrub the snapshot in place rather than dropping the row: the row itself is the record
-    // that a deletion happened and that we honoured the window, which is worth keeping.
-    const res = await DeletedUserRecord.updateMany(filter, {
-      $set: { firstName: '', lastName: '', email: '', phone: null, purgedAt: now },
-    });
-    console.log(`Purged ${res.modifiedCount} identities. Their past field work is now permanently anonymous.`);
-  } else if (!APPLY) {
-    console.log('Dry run — re-run with --apply.');
+  if (!APPLY) {
+    console.log('');
+    console.log('Dry run — re-run with --apply. (The worker dyno does this on a schedule regardless.)');
+    await mongoose.disconnect();
+    return;
   }
+
+  const res = await purgeDeletedIdentities({ apply: true });
+  console.log('');
+  console.log(`Purged ${res.purged} identit${res.purged === 1 ? 'y' : 'ies'}. Their past field work is now permanently anonymous.`);
 
   await mongoose.disconnect();
 }

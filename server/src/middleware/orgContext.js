@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { Membership } from '../models/Membership.js';
 import { Organization } from '../models/Organization.js';
+import { activeGrant } from '../services/access/supportAccess.js';
 
 /**
  * Reads X-Org-Id header and attaches:
@@ -32,8 +33,31 @@ export async function orgContext(req, res, next) {
       if (!org || !org.isActive) {
         return res.status(404).json({ error: 'Organization not found', code: 'ORG_CONTEXT' });
       }
+      // ── Platform staff entering a customer organization. ───────────────────────────────────────
+      //
+      // This used to be three lines: `if (req.user.isSuperAdmin) { req.activeOrg = org; return next(); }`
+      // — set the org, skip the membership check, and every /admin/* route downstream would happily
+      // scope its queries to it. Combined with an org switcher that listed every organization on the
+      // platform, that meant any staff member could read any customer's entire voter file, survey
+      // answers, notes and GPS trails, leaving no record anywhere that they had.
+      //
+      // Now it requires a live SupportAccessGrant: time-boxed, carrying a typed reason, and with every
+      // read of voter content written to AccessLog. The access is not removed — it is made
+      // attributable. "No god mode" means no *unlogged* mode.
       if (req.user.isSuperAdmin) {
+        const grant = await activeGrant(req.user._id, org._id);
+        if (!grant) {
+          return res.status(403).json({
+            error:
+              'Entering a customer organization requires a support access grant. Start one with a ' +
+              'reason — it is time-limited and every record you open is logged.',
+            code: 'SUPPORT_ACCESS_REQUIRED',
+            organizationId: String(org._id),
+            organizationName: org.name,
+          });
+        }
         req.activeOrg = org;
+        req.supportGrant = grant; // middleware/accessLog.js reads this
         return next();
       }
       const membership = await Membership.findOne({

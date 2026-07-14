@@ -6,6 +6,12 @@ import { createRedis } from './connection.js';
 export const QUEUE_NAMES = {
   IMPORT: 'import-queue',
   TURF: 'turf-queue',
+  // Scheduled housekeeping that must happen whether or not anyone remembers it — today, the
+  // 180-day identity purge that backs our published retention promise. It lives here, on the
+  // worker dyno we already run, rather than in a Heroku Scheduler add-on: a dashboard entry is
+  // invisible to the code, uncovered by any test, and can be removed or lost in a host migration
+  // without a single thing failing. See services/retention/.
+  MAINTENANCE: 'maintenance-queue',
   // Future: GEOCODE: 'geocode-queue', EXPORT: 'export-queue'
 };
 
