@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Modal, View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import Mapbox from '@rnmapbox/maps';
 import { getCurrentLocation } from '../lib/location';
+import { formatDistance } from '../lib/geo';
 import { recordLocationCorrection } from '../lib/recordAction';
 import { initMapbox } from '../lib/mapbox';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -70,7 +71,7 @@ export default function FixPinModal({ visible, household, qc, siblingCount = 0, 
     if (source === 'gps' && (accuracy == null || accuracy > 50)) {
       Alert.alert(
         'Weak GPS signal',
-        `Your GPS is only accurate to about ${accuracy == null ? '?' : Math.round(accuracy)} m. Use it anyway?`,
+        `Your GPS is only accurate to about ${accuracy == null ? '?' : formatDistance(accuracy)}. Use it anyway?`,
         [
           { text: 'Use anyway', onPress: withScope },
           { text: 'Cancel', style: 'cancel' },
@@ -131,7 +132,7 @@ export default function FixPinModal({ visible, household, qc, siblingCount = 0, 
           </Pressable>
           {source === 'gps' && accuracy != null && (
             <Text style={[styles.acc, { color: accuracy > 50 ? colors.warnFg : colors.textMuted }]}>
-              GPS accuracy ±{Math.round(accuracy)} m
+              GPS accuracy ±{formatDistance(accuracy)}
             </Text>
           )}
 

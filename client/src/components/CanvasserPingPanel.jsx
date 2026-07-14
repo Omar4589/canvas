@@ -1,6 +1,6 @@
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
-import { FAR_WARN_M } from '../lib/flags.js';
+import { FAR_WARN_M, formatDistanceImperial } from '../lib/flags.js';
 
 function formatDateTime(d, tz) {
   if (!d) return '—';
@@ -100,12 +100,12 @@ export default function CanvasserPingPanel({ activity, household, onOpenHousehol
           <div className="mt-1 text-fg-muted">unknown</div>
         ) : (
           <div className={'mt-1 font-medium ' + (distFar ? 'text-danger' : 'text-fg')}>
-            {Math.round(dist)} m from house{distFar ? ' — far' : ''}
+            {formatDistanceImperial(dist)} from house{distFar ? ' — far' : ''}
           </div>
         )}
         {activity.location?.accuracy != null && (
           <div className="text-xs text-fg-muted">
-            GPS accuracy ±{Math.round(activity.location.accuracy)} m
+            GPS accuracy ±{formatDistanceImperial(activity.location.accuracy)}
           </div>
         )}
       </div>

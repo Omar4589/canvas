@@ -15,7 +15,7 @@ Every time a canvasser marks a door, the app quietly records **where the phone w
 
 ## The four flags
 
-- **Far from house** — the phone was well away from the house pin. (A big distance from a *weak* signal reads as Weak GPS instead, so bad signal never looks like bad canvassing.)
+- **Far from house** — the phone was well away from the house pin. (A big distance from a *weak* signal reads as Weak GPS instead, so bad signal never looks like bad canvassing. And an honest correction — a canvasser fixing an earlier entry after walking away — shows as low severity, not a full flag; see below.)
 - **Rapid succession** — two different doors logged only seconds apart, too fast to have walked between.
 - **One spot** — different houses spread down the street, all logged from nearly the same point (a parked car). Many units logged at one apartment entrance is normal and does **not** trip this.
 - **Weak / missing GPS** — the location fix was poor, absent, or synced from offline, so it can't be trusted.
@@ -24,11 +24,13 @@ Each flag also carries a **severity** — low, medium, or high — so the worst 
 
 ## Where you review flags
 
-Two places, same data. The **Audit page** (inside a campaign, next to Timeline and [Map](maps)) opens on **Today** with KPI cards, a per-canvasser table sorted worst-first, and one card per flagged door — who, the address, the time, and the reason (*62 m from house*, *8 s after the previous door*). Filter by flag type, review status, walk list, or date. Or open the **map**, turn on **Show flagged entries**, and each flag becomes a colored dot with a line back to the house — the geography at a glance. Either way, click a flag to review it there.
+Two places, same data. The **Audit page** (inside a campaign, next to Timeline and [Map](maps)) opens on **Today** with KPI cards, a per-canvasser table sorted worst-first, and one card per flagged door — who, the address, the time, and the reason (*205 ft from house*, *8 s after the previous door*). Filter by flag type, review status, walk list, or date. Or open the **map**, turn on **Show flagged entries**, and each flag becomes a colored dot with a line back to the house — the geography at a glance. Either way, click a flag to review it there.
 
 ## Reviewing a flag
 
 Every flag starts **Open**. Mark it **Reviewed** (looked, it's fine), **Dismissed** (not a real problem), or **Confirmed issue** (worth following up). Add a note if you like — the app records who decided and when. You can always **reopen** a flag.
+
+**Corrections look different on purpose.** When a canvasser changes their answer at a door they already visited — say they tapped Restricted by mistake, walked off, then fixed it to Not home — the newer entry is recorded from where they *now* stand, which can look far from the house. The app remembers the entry they replaced, so a same-day correction after a genuine at-the-door visit appears as a **low**-severity Far flag with a line like *Replaced "Restricted" recorded 4 min earlier from 20 ft away*. Review it like any flag — it usually means an honest fix, not a phantom knock. A door rewritten from far away without a real earlier visit keeps its full flag.
 
 > Tip: The **flagged** count means *still open* — as you review, dismiss, or confirm flags, that number drops, so you can work a day's flags down to zero.
 

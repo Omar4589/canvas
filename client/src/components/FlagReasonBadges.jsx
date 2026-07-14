@@ -1,7 +1,7 @@
 import { reasonColor, reasonLabel, reasonDetailText } from '../lib/flags.js';
 
 // Renders an entry's flag reasons as colored pills with a human detail (e.g. "Far from
-// house · 62 m from house"). Shared by the Map flag panel and the Audit drill-in list.
+// house · 205 ft from house"). Shared by the Map flag panel and the Audit drill-in list.
 export default function FlagReasonBadges({ reasons = [] }) {
   if (!reasons.length) return null;
   return (

@@ -21,6 +21,7 @@ function mkRow(o) {
     timestamp: o.timestamp,
     location: 'location' in o ? o.location : { lat: 30, lng: -95, accuracy: 5 },
     distanceFromHouseMeters: 'distanceFromHouseMeters' in o ? o.distanceFromHouseMeters : null,
+    replaced: 'replaced' in o ? o.replaced : null,
     wasOfflineSubmission: o.wasOfflineSubmission || false,
   };
 }
@@ -126,6 +127,155 @@ test('one_spot: does NOT fire for an apartment (many units at one coordinate)', 
   const pins = new Map(rows.map((r) => [String(r.householdId), { lat: 30.5, lng: -95.5 }]));
   const { acc } = computeReasons(rows, pins, FLAG_THRESHOLDS);
   for (const r of rows) assert.equal(has(acc, r._id, 'one_spot'), false, `${r._id} must not fire (apartment)`);
+});
+
+// far correction downgrade: a far entry whose `replaced.nearest` proves a near visit within
+// FAR_CORRECTION_WINDOW_MIN drops to low (detail.downgraded); prior-entry context rides on
+// EVERY far correction. Rows are hours apart on distinct doors so rapid/one_spot can't fire.
+function correction({ _id, sec, dist, replaced }) {
+  return mkRow({
+    _id,
+    userId: `corr-${_id}`,
+    householdId: `h-${_id}`,
+    timestamp: at(sec),
+    location: { lat: 30, lng: -95, accuracy: 5 },
+    distanceFromHouseMeters: dist,
+    replaced,
+  });
+}
+function farDetail(acc, id) {
+  return reasonsOf(acc, id).find((r) => r.type === 'far')?.detail;
+}
+// nearest recorded `minAgo` minutes before the row it exonerates.
+function nearest(rowSec, minAgo, dist, accuracy = 5) {
+  return { distanceFromHouseMeters: dist, accuracy, timestamp: at(rowSec - minAgo * 60) };
+}
+
+test('far correction: near prior within the window downgrades to low with context', () => {
+  const rows = [
+    correction({
+      _id: 'DG',
+      sec: 600,
+      dist: 200,
+      replaced: {
+        actionType: 'restricted',
+        timestamp: at(0),
+        location: { lat: 30, lng: -95, accuracy: 5 },
+        distanceFromHouseMeters: 5,
+        nearest: nearest(600, 10, 5),
+      },
+    }),
+  ];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS);
+  assert.equal(sevOf(acc, 'DG', 'far'), 'low', 'near prior 10 min ago → downgraded');
+  const d = farDetail(acc, 'DG');
+  assert.equal(d.downgraded, true);
+  assert.equal(d.priorActionType, 'restricted');
+  assert.equal(d.priorMeters, 5);
+  assert.equal(d.minutesSincePrior, 10);
+  assert.equal(d.nearestMeters, 5);
+  assert.equal(d.minutesSinceNearest, 10);
+});
+
+test('far correction: outside the same-day window keeps full severity (context still present)', () => {
+  const thirteenHoursSec = 13 * 3600;
+  const rows = [
+    correction({
+      _id: 'LATE',
+      sec: thirteenHoursSec,
+      dist: 300,
+      replaced: {
+        actionType: 'not_home',
+        timestamp: at(0),
+        location: { lat: 30, lng: -95, accuracy: 5 },
+        distanceFromHouseMeters: 5,
+        nearest: nearest(thirteenHoursSec, 13 * 60, 5),
+      },
+    }),
+  ];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS);
+  assert.equal(sevOf(acc, 'LATE', 'far'), 'high', '13h later → no downgrade');
+  const d = farDetail(acc, 'LATE');
+  assert.equal(d.downgraded, undefined, 'not downgraded');
+  assert.equal(d.priorActionType, 'not_home', 'prior context still rides along');
+});
+
+test('far correction: a prior that was ALSO far never downgrades', () => {
+  const rows = [
+    correction({
+      _id: 'FARPRIOR',
+      sec: 600,
+      dist: 300,
+      replaced: {
+        actionType: 'refused',
+        timestamp: at(0),
+        location: { lat: 30, lng: -95, accuracy: 5 },
+        distanceFromHouseMeters: 200,
+        nearest: nearest(600, 10, 200),
+      },
+    }),
+  ];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS);
+  assert.equal(sevOf(acc, 'FARPRIOR', 'far'), 'high', 'prior 200m effective 195 > 75 → full severity');
+  assert.equal(farDetail(acc, 'FARPRIOR').downgraded, undefined);
+});
+
+test('far correction: accuracy is subtracted from the nearest evidence too', () => {
+  const rows = [
+    correction({
+      _id: 'ACC',
+      sec: 600,
+      dist: 200,
+      replaced: {
+        actionType: 'not_home',
+        timestamp: at(0),
+        location: { lat: 30, lng: -95, accuracy: 60 },
+        distanceFromHouseMeters: 90,
+        nearest: nearest(600, 10, 90, 60),
+      },
+    }),
+  ];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS);
+  assert.equal(sevOf(acc, 'ACC', 'far'), 'low', 'nearest 90m @ ±60 → effective 30 ≤ 75 → downgrades');
+});
+
+test('far correction: no nearest evidence / no snapshot / reversed clock never downgrade', () => {
+  const rows = [
+    correction({
+      _id: 'NONEAR',
+      sec: 600,
+      dist: 200,
+      replaced: {
+        actionType: 'not_home',
+        timestamp: at(0),
+        location: null,
+        distanceFromHouseMeters: null,
+        nearest: null,
+      },
+    }),
+    correction({ _id: 'LEGACY', sec: 4200, dist: 200, replaced: null }),
+    correction({
+      _id: 'SKEW',
+      sec: 7800,
+      dist: 200,
+      // nearest stamped AFTER the row (device clock skew) → the >=0 guard denies it.
+      replaced: {
+        actionType: 'not_home',
+        timestamp: at(9000),
+        location: { lat: 30, lng: -95, accuracy: 5 },
+        distanceFromHouseMeters: 5,
+        nearest: { distanceFromHouseMeters: 5, accuracy: 5, timestamp: at(9000) },
+      },
+    }),
+  ];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS);
+  assert.equal(sevOf(acc, 'NONEAR', 'far'), 'med', 'snapshot without distance can’t prove near');
+  assert.equal(farDetail(acc, 'NONEAR').priorActionType, 'not_home', 'context line still renders');
+  assert.equal(farDetail(acc, 'NONEAR').priorMeters, null);
+  assert.equal(sevOf(acc, 'LEGACY', 'far'), 'med', 'legacy row (no snapshot) behaves exactly as before');
+  assert.equal(farDetail(acc, 'LEGACY').priorActionType, undefined, 'no prior fields on legacy rows');
+  assert.equal(sevOf(acc, 'SKEW', 'far'), 'med', 'negative gap never downgrades');
+  assert.equal(farDetail(acc, 'SKEW').downgraded, undefined);
 });
 
 // summarize() count semantics: the prominent "flagged" number is OPEN-based, each status is

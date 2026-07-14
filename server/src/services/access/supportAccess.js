@@ -1,5 +1,6 @@
 import { SupportAccessGrant } from '../../models/SupportAccessGrant.js';
 import { AccessLog } from '../../models/AccessLog.js';
+import { Organization } from '../../models/Organization.js';
 
 // Vendor access to a customer's data: bounded, reasoned, recorded.
 //
@@ -46,29 +47,74 @@ export async function revokeGrant(grantId, actorUserId) {
   );
 }
 
-// Which routes hand back a customer's voter content? These are the ones worth logging — logging every
-// metadata read would bury the signal in noise, and the signal is the point.
+// FAIL CLOSED. Vendor access (a support grant) to ANY /admin or /mobile route is audited — UNLESS the
+// path is on the short allowlist below of routes that carry no customer voter content.
 //
-// Matched against the mounted path prefix. Deliberately broad: a route that returns households also
-// returns their addresses and GPS pings, and a report contains survey answers.
-const VOTER_CONTENT_ROUTES = [
-  ['/admin/voters', 'voters'],
-  ['/admin/households', 'map'],
-  ['/admin/reports', 'reports'],
-  ['/admin/activities', 'activity'],
-  ['/admin/notes', 'notes'],
-  ['/admin/surveys', 'surveys'],
-  ['/admin/client-reports', 'client-reports'],
-  ['/admin/turfs', 'turf'],
-  ['/admin/walklists', 'walklists'],
-  ['/mobile', 'mobile'],
+// The previous design did the exact opposite: it logged only paths that matched a hand-maintained list
+// of ten content prefixes. THREE of those ten were dead strings that could never match a real mount
+// (`/admin/turfs`, `/admin/walklists`, `/admin/notes` — the real mounts are nested under
+// `/admin/campaigns/:id/...` or don't exist), so the walk-list CSV export of names, addresses and phone
+// numbers wrote ZERO audit rows. A list you must remember to extend is a list that silently rots. This
+// one rots SAFE: a new or moved voter-data route is logged by default the day it ships; only an
+// explicit, reviewed exemption is ever unlogged. The structural test (test/accessLogCoverage.int.test.js)
+// exists to keep it that way.
+const AUDIT_EXEMPT = [
+  /^\/admin\/config(\/|$)/, // client feature flags / org config — no voter content
+  /\/setup-status(\/|$)/, // campaign-wizard progress booleans
+  /^\/admin\/campaigns\/[^/]+\/passes(\/|$)/, // round/pass structure — no voter content
 ];
 
-/** The resource class a path reads, or null if it isn't voter content. */
-export function voterContentResource(path) {
-  for (const [prefix, resource] of VOTER_CONTENT_ROUTES) {
-    if (path.startsWith(prefix)) return resource;
+// The audit list is served, per prefix, by the reasoning "a route that returns households also returns
+// their addresses and GPS pings, and a report contains survey answers." These labels are for the human
+// reading the log; an UNRECOGNIZED vendor route is still logged, classified 'other', because the failure
+// we cannot tolerate is an unlogged read, not a mislabeled one.
+const RESOURCE_LABELS = [
+  [/^\/admin\/voters/, 'voters'],
+  [/\/households/, 'map'],
+  [/^\/admin\/reports/, 'reports'],
+  [/^\/admin\/activities/, 'activity'],
+  [/^\/admin\/surveys/, 'surveys'],
+  [/^\/admin\/client-reports/, 'client-reports'],
+  [/\/walklists/, 'walklists'],
+  [/\/turfs/, 'turf'],
+  [/\/voted/, 'voted'],
+  [/^\/admin\/imports/, 'imports'],
+  [/^\/mobile/, 'mobile'],
+];
+
+/** True if a vendor request to this path need NOT be audited (metadata only). Everything else is. */
+export function isAuditExempt(path) {
+  return AUDIT_EXEMPT.some((rx) => rx.test(path));
+}
+
+/** Human label for the audit row. Never null — an unrecognized vendor route is logged as 'other'. */
+export function classifyResource(path) {
+  for (const [rx, label] of RESOURCE_LABELS) if (rx.test(path)) return label;
+  return 'other';
+}
+
+/**
+ * Require a live support grant for `organizationId`, or 403 with SUPPORT_ACCESS_REQUIRED (which the web
+ * client turns into the grant modal). Returns the grant on success, or null after sending the 403 — the
+ * caller must `return` when it gets null. Used by the platform person-identity console, which reaches
+ * customer PII outside the /admin routers and so is not covered by orgContext.
+ */
+export async function requirePersonOrgGrant(req, res, organizationId) {
+  if (!organizationId) {
+    res.status(409).json({ error: 'This identity record is not scoped to an organization.' });
+    return null;
   }
+  const grant = await activeGrant(req.user._id, organizationId);
+  if (grant) return grant;
+  const org = await Organization.findById(organizationId, 'name').lean();
+  res.status(403).json({
+    error:
+      'Viewing a voter identity record requires a support access grant for that customer. Start one ' +
+      'with a reason — it is time-limited and every record you open is logged.',
+    code: 'SUPPORT_ACCESS_REQUIRED',
+    organizationId: String(organizationId),
+    organizationName: org?.name || null,
+  });
   return null;
 }
 

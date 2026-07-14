@@ -57,21 +57,65 @@ export const REVIEW_STATUS_META = {
   confirmed: { label: 'Confirmed issue', chip: 'bg-danger-tint text-danger' },
 };
 
-// Human summary of an entry's reasons, e.g. "62 m from house · 8 s between doors".
+// Display formatter for distances. The server stores/compares meters; users see feet,
+// switching to miles once the distance reaches a mile. Mirrored in mobile/lib/geo.js
+// (formatDistance) — keep the two in sync.
+const FT_PER_M = 3.28084;
+const FT_PER_MI = 5280;
+export function formatDistanceImperial(meters) {
+  if (meters == null || !Number.isFinite(meters)) return '—';
+  const ft = meters * FT_PER_M;
+  if (ft < FT_PER_MI) return `${Math.round(ft).toLocaleString()} ft`;
+  const mi = ft / FT_PER_MI;
+  return `${mi >= 10 ? Math.round(mi) : mi.toFixed(1)} mi`;
+}
+
+// Human summary of an entry's reasons, e.g. "205 ft from house · 8 s between doors".
 export function reasonDetailText(reason) {
   const d = reason.detail || {};
   switch (reason.type) {
     case 'far':
-      return `${Math.round(d.meters)} m from house`;
+      return `${formatDistanceImperial(d.meters)} from house`;
     case 'rapid':
       return `${d.gapSec} s after the previous door`;
     case 'one_spot':
       return `${d.distinctHouseholds} doors from one spot${d.spanMin ? ` in ${d.spanMin} min` : ''}`;
     case 'weak_gps':
       if (d.missing) return 'no GPS captured';
-      if (d.accuracy != null) return `GPS ±${Math.round(d.accuracy)} m`;
+      if (d.accuracy != null) return `GPS ±${formatDistanceImperial(d.accuracy)}`;
       return d.offline ? 'offline submission' : 'weak GPS';
     default:
       return '';
   }
+}
+
+const ACTION_LABELS = {
+  not_home: 'Not home',
+  wrong_address: 'Wrong address',
+  refused: 'Refused',
+  survey_submitted: 'Survey submitted',
+  lit_dropped: 'Lit dropped',
+  restricted: 'Restricted',
+  note_added: 'Note added',
+};
+
+// "Replaced “Restricted” recorded 4 min earlier from 20 ft away" — context line under a
+// far flag whose row replaced the canvasser's own earlier entry at this door ("latest wins"
+// deleted that row; the server stamps its snapshot into the far reason's detail). Null when
+// the entry isn't a correction. Mirrored in mobile/lib/flags.js — keep the two in sync.
+export function correctionContextText(entry) {
+  const d = (entry?.reasons || []).find((r) => r.type === 'far')?.detail;
+  if (!d?.priorActionType) return null;
+  const label = ACTION_LABELS[d.priorActionType] || d.priorActionType;
+  const min = d.minutesSincePrior;
+  const when =
+    min == null || min < 0 ? '' : min < 90 ? ` recorded ${min} min earlier` : ` recorded ${Math.round(min / 60)} h earlier`;
+  const from = d.priorMeters == null ? ' (no GPS on the earlier entry)' : ` from ${formatDistanceImperial(d.priorMeters)} away`;
+  return `Replaced “${label}”${when}${from}`;
+}
+
+// True when the far flag was downgraded to low because the correction's chain proves the
+// canvasser was at the door recently (see server flagThresholds FAR_CORRECTION_WINDOW_MIN).
+export function isDowngradedCorrection(entry) {
+  return !!(entry?.reasons || []).find((r) => r.type === 'far')?.detail?.downgraded;
 }

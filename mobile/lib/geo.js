@@ -21,8 +21,15 @@ export function distanceToCoords(userCoords, coords) {
   return haversineMeters(userCoords[1], userCoords[0], coords[1], coords[0]);
 }
 
+// Takes meters (all storage/math is metric); users see feet, switching to miles once the
+// distance reaches a mile. Mirrors client/src/lib/flags.js formatDistanceImperial — keep
+// the two in sync.
+const FT_PER_M = 3.28084;
+const FT_PER_MI = 5280;
 export function formatDistance(m) {
   if (m == null || !Number.isFinite(m)) return '—';
-  if (m < 1000) return `${Math.round(m)} m`;
-  return `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`;
+  const ft = m * FT_PER_M;
+  if (ft < FT_PER_MI) return `${Math.round(ft).toLocaleString()} ft`;
+  const mi = ft / FT_PER_MI;
+  return `${mi >= 10 ? Math.round(mi) : mi.toFixed(1)} mi`;
 }

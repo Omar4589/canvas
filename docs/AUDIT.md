@@ -48,7 +48,19 @@ The audit turns those into four kinds of **flags** and shows you **how many**, *
 units is normal canvassing — those units share one map pin, so the app only flags a one-spot cluster
 when the **houses themselves are spread out** but the canvasser never moved.
 
-Each flag has a **severity** (low / medium / high) so the worst ones stand out.
+**Corrections don't punish honesty.** Changing your answer at a door you already visited — say you
+tapped Restricted by mistake, walked off, and fixed it to Not home from down the street — would
+otherwise look like a door marked from far away, because the newer entry (recorded where you now
+stand) replaces the original. The app keeps a snapshot of the entry you replaced, so a correction
+made **within the same canvassing day** of a genuine at-the-door visit shows as a **low**-severity
+Far flag with a context line like *Replaced "Restricted" recorded 4 min earlier from 20 ft away*.
+The reviewer still sees it (corrections are downgraded, never hidden) — but it reads as an honest
+fix, not a phantom knock. A door rewritten from far away **without** a real earlier visit, or long
+after it, keeps its full flag. Don't be surprised that these low flags still count in the Far KPI —
+that's deliberate; dismiss them as you review.
+
+Each flag has a **severity** (low / medium / high) so the worst ones stand out. Distances everywhere
+in the app display in **feet**, switching to **miles** once a distance reaches a mile.
 
 ## Where you review them — two places
 
@@ -58,7 +70,7 @@ Each flag has a **severity** (low / medium / high) so the worst ones stand out.
 - **A per-canvasser table**, worst-first: each canvasser's flag counts by type and their worst
   severity. Click a row to drill into just that person's flagged entries.
 - **The entries list** — one card per flagged door: who, the address, the time, the reason(s) with the
-  actual number (e.g. *62 m from house*, *8 s after the previous door*), and the review buttons. Each
+  actual number (e.g. *205 ft from house*, *8 s after the previous door*), and the review buttons. Each
   card has a **"View on map"** link that jumps to the map focused on that exact entry.
 
 Filter the list by flag type, by review status (Open / Reviewed / Dismissed / Confirmed), by walk
@@ -143,7 +155,7 @@ the numbers below are the defaults — tune them in that one file.
 
 | Flag | Rule | Guard |
 |---|---|---|
-| **far** | `distanceFromHouseMeters` (already stamped at record time) tiered on **`distance − accuracy`**: `> 250 m` → high, `> 75 m` → medium. | **Null distance is never far** (unknown ≠ far). Subtracting accuracy means a big distance from a *poor* fix reads as **weak_gps**, not far — so bad GPS can't masquerade as bad canvassing. |
+| **far** | `distanceFromHouseMeters` (already stamped at record time) tiered on **`distance − accuracy`**: `> 250 m` (~820 ft) → high, `> 75 m` (~250 ft) → medium. | **Null distance is never far** (unknown ≠ far). Subtracting accuracy means a big distance from a *poor* fix reads as **weak_gps**, not far — so bad GPS can't masquerade as bad canvassing. **Correction downgrade:** a far entry whose `replaced.nearest` proves a near visit (effective ≤ `FAR_WARN_M`) within `FAR_CORRECTION_WINDOW_MIN` (720 min) drops to **low** with `detail.downgraded` — see §B.5. |
 | **weak_gps** | Missing location → high; accuracy `> 250 m` → high, `> 100 m` → medium; else an offline submission → low. | A **null** accuracy alone is *not* flagged (unknown ≠ bad — it would flood on legacy rows). |
 | **rapid** | Per canvasser, walk consecutive **distinct-door** actions on the travel timeline; a gap `< 20 s` flags the later action (`< 8 s` → high). | Same-household consecutive actions (a correction) are skipped; notes are excluded; an **identical-timestamp offline pair** is suppressed (that's a sync artifact, not real behavior). |
 | **one_spot** | Per canvasser, greedily cluster GPS points within `20 m` over a `30 min` window; fire when a cluster covers **≥ 4 distinct households**. | **Apartment guard:** only fires if those households' **own pins span ≥ 60 m** — many units at one building coordinate (spread ≈ 0) never trip it; a whole street logged from one parked spot does. |
@@ -159,6 +171,48 @@ An entry can carry several reasons; its `maxSeverity` is the worst. `haversineMe
 `CanvasserPingPanel` "— far" label, all reference it (server) / its client mirror
 ([client/src/lib/flags.js](../client/src/lib/flags.js)) — resolving an old 50 m-server / 100 m-client
 split so "far" means one thing across the app.
+
+**Units:** storage, thresholds, and all detection math are **meters**; every user-facing string
+converts at display time to **feet, then miles at ≥ 1 mile** — web via `formatDistanceImperial`
+([client/src/lib/flags.js](../client/src/lib/flags.js)), mobile via `formatDistance`
+([mobile/lib/geo.js](../mobile/lib/geo.js)). Never render a raw meter value.
+
+### B.5 The `replaced` snapshot (correction downgrade)
+
+"Latest wins" for a re-recorded door is a **delete-then-create**
+([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) `REPLACEABLE_ACTIONS` +
+`deleteMany`), which used to destroy the prior entry's GPS evidence: an honest correction made after
+walking away kept only the far location and fired a med/high far flag, indistinguishable from a
+phantom knock — with the exonerating near reading deleted.
+
+Both write paths (dispositions **and** the survey route) now stamp the new row with a
+**server-computed** `replaced` snapshot, built by `buildReplacedSnapshot(mineRows)` from the same
+pre-read (`pairRows`) the stats delta already uses — **before** the `deleteMany`, never a re-query:
+
+```
+replaced: {
+  actionType, timestamp, location {lat,lng,accuracy}, distanceFromHouseMeters,  // the IMMEDIATE prior entry (UI context line)
+  nearest: { distanceFromHouseMeters, accuracy, timestamp },                     // best door-presence evidence in the CHAIN
+}
+```
+
+- **`nearest` carries the chain forward:** it's the min-**effective**-distance (`distance − accuracy`)
+  candidate among the prior row's own stamp and the prior row's `replaced.nearest`. So A (at door) →
+  B (correction from afar) → C (second correction from afar) still proves the A visit on C.
+- **Detection** ([flagDetection.js](../server/src/services/audit/flagDetection.js)): every far
+  correction gets `detail.priorActionType/priorMeters/priorAccuracy/minutesSincePrior` (the UI
+  context line renders on *every* correction, downgraded or not). The severity drops to **low** +
+  `detail.downgraded/nearestMeters/minutesSinceNearest` only when `nearest` is within `FAR_WARN_M`
+  effective **and** the correction landed within `FAR_CORRECTION_WINDOW_MIN` (720 min ≈ the same
+  canvassing day) of it; a negative gap (clock skew) never downgrades.
+- **`replaced` is never accepted from the request body** (the zod schemas don't know it) — a client
+  can't forge exoneration.
+- **Legacy rows lack `replaced`** → no special treatment, no migration, no new index. But the field
+  **must be in the detector's scan projection** (flagDetection.js) — dropping it from that string
+  silently disables the downgrade while everything else keeps passing.
+- The UI line ("Replaced "Restricted" recorded 4 min earlier from 20 ft away") is built by
+  `correctionContextText` in [client/src/lib/flags.js](../client/src/lib/flags.js) and its mobile
+  mirror [mobile/lib/flags.js](../mobile/lib/flags.js).
 
 ## C. Review persistence (`FlagReview`)
 
@@ -231,5 +285,13 @@ computed+joined list in memory and returns the pre-slice `total`.
   distinct households at one coordinate.
 - **`summary` is always the full scope**; the list filters (reason/status/severity/userId) narrow only
   the `entries` you review — so the KPI cards and per-canvasser table stay honest while you triage.
-- **Deploy the server first** (the endpoints must exist before the client calls them). **No mobile
-  change** — the GPS was already captured — so no OTA/native build, and `FlagReview` needs no migration.
+- **Corrections are downgraded, never suppressed.** A downgraded-low far still appears (and still
+  counts in `summary.totals.far` while open) — full suppression would let a canvasser who once
+  legitimately visited a door rewrite its status from anywhere, unflagged.
+- **The replace must never run without stamping the snapshot.** `buildReplacedSnapshot` reads the
+  pre-`deleteMany` rows; any new replace path (or a reorder that queries after the delete) silently
+  destroys the correction evidence again.
+- **Deploy the server first** (the endpoints must exist before the client calls them). `FlagReview`
+  and the `replaced` snapshot both need **no migration** (absence = open / no special treatment).
+  The correction context line + imperial units are display-only: web deploy + mobile **OTA** (no
+  native build — nothing native changed).

@@ -1,5 +1,6 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { radius, spacing } from '../lib/theme';
+import { formatDistance } from '../lib/geo';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import PinIcon from './PinIcon';
@@ -87,7 +88,7 @@ export default function ActivityRow({ activity, onPress, showDate = false }) {
                 a.distanceFromHouseMeters > 50 && styles.metaWarn,
               ]}
             >
-              📍 {Math.round(a.distanceFromHouseMeters)}m
+              📍 {formatDistance(a.distanceFromHouseMeters)}
             </Text>
           ) : null}
           {a.wasOfflineSubmission ? (

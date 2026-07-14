@@ -17,6 +17,7 @@ import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { useMapStyle } from '../../../lib/mapStyles';
+import { formatDistance } from '../../../lib/geo';
 import MapStyleControl from '../../../components/MapStyleControl';
 import CampaignChip from '../../../components/CampaignChip';
 import LiveStatus from '../../../components/LiveStatus';
@@ -1369,12 +1370,12 @@ export default function AdminMap() {
                       distFar && { color: colors.danger },
                     ]}
                   >
-                    {Math.round(dist)} m{distFar ? ' — far from house' : ''}
+                    {formatDistance(dist)}{distFar ? ' — far from house' : ''}
                   </Text>
                 )}
                 {a.location?.accuracy != null && (
                   <Text style={styles.pingMetaSub}>
-                    GPS accuracy ±{Math.round(a.location.accuracy)} m
+                    GPS accuracy ±{formatDistance(a.location.accuracy)}
                   </Text>
                 )}
               </View>

@@ -3,6 +3,7 @@
 // modules, so the values are duplicated; keep them in sync. Reason colors are literal hex
 // (theme-independent, like the door-status palette); review-status/severity carry a `tone` that
 // components resolve against the theme (colors.warnBg/danger/etc.).
+import { formatDistance } from './geo';
 
 export const FLAG_THRESHOLDS = {
   FAR_WARN_M: 75,
@@ -73,21 +74,52 @@ export function reviewToneColors(colors, tone) {
   }
 }
 
-// Human summary of a reason, e.g. "62 m from house".
+// Human summary of a reason, e.g. "205 ft from house".
 export function reasonDetailText(reason) {
   const d = reason.detail || {};
   switch (reason.type) {
     case 'far':
-      return `${Math.round(d.meters)} m from house`;
+      return `${formatDistance(d.meters)} from house`;
     case 'rapid':
       return `${d.gapSec} s after the previous door`;
     case 'one_spot':
       return `${d.distinctHouseholds} doors from one spot${d.spanMin ? ` in ${d.spanMin} min` : ''}`;
     case 'weak_gps':
       if (d.missing) return 'no GPS captured';
-      if (d.accuracy != null) return `GPS ±${Math.round(d.accuracy)} m`;
+      if (d.accuracy != null) return `GPS ±${formatDistance(d.accuracy)}`;
       return d.offline ? 'offline submission' : 'weak GPS';
     default:
       return '';
   }
+}
+
+const ACTION_LABELS = {
+  not_home: 'Not home',
+  wrong_address: 'Wrong address',
+  refused: 'Refused',
+  survey_submitted: 'Survey submitted',
+  lit_dropped: 'Lit dropped',
+  restricted: 'Restricted',
+  note_added: 'Note added',
+};
+
+// "Replaced “Restricted” recorded 4 min earlier from 20 ft away" — context line under a
+// far flag whose row replaced the canvasser's own earlier entry at this door ("latest wins"
+// deleted that row; the server stamps its snapshot into the far reason's detail). Null when
+// the entry isn't a correction. Mirrors client/src/lib/flags.js — keep the two in sync.
+export function correctionContextText(entry) {
+  const d = (entry?.reasons || []).find((r) => r.type === 'far')?.detail;
+  if (!d?.priorActionType) return null;
+  const label = ACTION_LABELS[d.priorActionType] || d.priorActionType;
+  const min = d.minutesSincePrior;
+  const when =
+    min == null || min < 0 ? '' : min < 90 ? ` recorded ${min} min earlier` : ` recorded ${Math.round(min / 60)} h earlier`;
+  const from = d.priorMeters == null ? ' (no GPS on the earlier entry)' : ` from ${formatDistance(d.priorMeters)} away`;
+  return `Replaced “${label}”${when}${from}`;
+}
+
+// True when the far flag was downgraded to low because the correction's chain proves the
+// canvasser was at the door recently (see server flagThresholds FAR_CORRECTION_WINDOW_MIN).
+export function isDowngradedCorrection(entry) {
+  return !!(entry?.reasons || []).find((r) => r.type === 'far')?.detail?.downgraded;
 }

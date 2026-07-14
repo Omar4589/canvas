@@ -5,14 +5,39 @@ import { Voter } from '../../models/Voter.js';
 import { Organization } from '../../models/Organization.js';
 import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
-import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
+import { requireAuth, requireBreakGlass } from '../../middleware/auth.js';
 import { buildPersonOversight, serializePerson, PERSON_IDENTITY_FIELDS } from '../../services/person/personOversight.js';
 import { mergePersons, splitPerson } from '../../services/person/mergePersons.js';
 import { propagateIdentity } from '../../services/person/propagateIdentity.js';
 import { followMerged } from '../../services/person/resolvePerson.js';
+import { requirePersonOrgGrant, recordAccess } from '../../services/access/supportAccess.js';
 
 const router = Router();
-router.use(requireAuth, requireSuperAdmin);
+
+// The platform identity console. Two gates, because it reaches customer voter PII from OUTSIDE the
+// /admin routers (so orgContext + the accessLog middleware never see it — that gap was a live hole:
+// any `support`-tier staffer could name-search and read every customer's identities, addresses and
+// DOBs across the whole platform, with no grant and no audit row).
+//
+//   1. requireBreakGlass — the least-privileged `support` tier cannot reach this console AT ALL.
+//   2. Per request, requirePersonOrgGrant(...) — reading or editing a specific person requires a live
+//      support grant for THAT person's organization, and writes an AccessLog row. Same grant, same
+//      audit, same "who looked at my data" answer as the /admin path. The cross-organization free-text
+//      name directory is gone: you browse one customer's people at a time, having entered that customer.
+router.use(requireAuth, requireBreakGlass);
+
+// Record a break-glass read/write of a specific customer's identity record. Reuses the same AccessLog
+// the /admin path writes, so "who at Doorline touched my data?" has one answer across both surfaces.
+function logPersonAccess(req, { organizationId, grantId, resource, route }) {
+  recordAccess({
+    actorUserId: req.user._id,
+    organizationId,
+    grantId,
+    method: req.method,
+    route,
+    resource: resource || 'person',
+  });
+}
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
@@ -27,14 +52,27 @@ const brief = (p) => ({
   svidKeys: (p.svidKeys || []).map((k) => ({ registeredState: k.registeredState, stateVoterId: k.stateVoterId })),
 });
 
-// ── GET /super-admin/persons — canonical directory (search + needsReview filter) ──
+// ── GET /super-admin/persons?organizationId=… — one customer's identity directory ──
+// Scoped to a single organization and gated by a live support grant for it. There is deliberately NO
+// cross-organization search: the old version filtered only `{ mergedInto: null }`, so a name query
+// returned matching people across every customer on the platform, unlogged. You now browse one
+// customer's people, having entered that customer under a reasoned, time-boxed, audited grant.
 router.get('/', async (req, res, next) => {
   try {
+    const orgIdParam = req.query.organizationId;
+    if (!orgIdParam || !mongoose.isValidObjectId(orgIdParam)) {
+      return res.status(400).json({
+        error: 'organizationId is required — the identity directory is scoped to one organization.',
+      });
+    }
+    const grant = await requirePersonOrgGrant(req, res, orgIdParam);
+    if (!grant) return;
+
     const limit = clamp(parseInt(req.query.limit, 10) || 25, 1, 100);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
     const q = (req.query.q || '').toString().trim();
 
-    const filter = { mergedInto: null };
+    const filter = { mergedInto: null, organizationId: oid(orgIdParam) };
     if (q) {
       const rx = new RegExp(escapeRegex(q), 'i');
       filter.$or = [
@@ -74,6 +112,7 @@ router.get('/', async (req, res, next) => {
     const hasProp = new Set(pendP.map((p) => String(p.personId)));
     const ownerName = new Map(ownerOrgs.map((o) => [String(o._id), o.name]));
 
+    logPersonAccess(req, { organizationId: oid(orgIdParam), grantId: grant._id, resource: 'person-directory', route: 'GET /super-admin/persons' });
     res.json({
       total, limit, skip,
       persons: persons.map((p) => ({
@@ -170,6 +209,9 @@ router.post('/edit-proposals/:proposalId/approve', async (req, res, next) => {
 
     const person = await followMerged(await Person.findById(prop.personId));
     if (!person) return res.status(404).json({ error: 'Person not found' });
+    const grant = await requirePersonOrgGrant(req, res, person.organizationId);
+    if (!grant) return;
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-edit', route: 'POST /super-admin/persons/edit-proposals/:proposalId/approve' });
 
     // A super-admin lock pins a field — a proposal can't override it until it's unlocked.
     const lockedHit = Object.keys(prop.fields || {}).filter((f) => (person.lockedFields || []).includes(f));
@@ -216,22 +258,34 @@ router.post('/edit-proposals/:proposalId/reject', async (req, res, next) => {
 });
 
 // ── GET /super-admin/persons/:personId — full oversight view ──
+// Requires a support grant for this person's organization (returns SUPPORT_ACCESS_REQUIRED → the web
+// client's grant modal), and writes an AccessLog row. This is the route that returns the person's DOB,
+// phone, party and HOME ADDRESSES — the exact PII the console used to hand out with no grant and no log.
 router.get('/:personId', async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.personId)) return res.status(400).json({ error: 'Invalid personId' });
-    const view = await buildPersonOversight(req.params.personId);
+    const person = await followMerged(await Person.findById(req.params.personId));
+    if (!person) return res.status(404).json({ error: 'Person not found' });
+    const grant = await requirePersonOrgGrant(req, res, person.organizationId);
+    if (!grant) return;
+    const view = await buildPersonOversight(person._id);
     if (!view) return res.status(404).json({ error: 'Person not found' });
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, route: 'GET /super-admin/persons/:personId' });
     res.json(view);
   } catch (err) { next(err); }
 });
 
 // ── PATCH /super-admin/persons/:personId — canonical identity edit (propagates) ──
-// Break-glass only: this rewrites a voter's canonical identity in a customer's database.
-router.patch('/:personId', requireBreakGlass, async (req, res, next) => {
+// Break-glass (router) + a support grant for the person's org: this rewrites a voter's canonical
+// identity in a customer's database, so it is both authorized and audited.
+router.patch('/:personId', async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.personId)) return res.status(400).json({ error: 'Invalid personId' });
     const person = await followMerged(await Person.findById(req.params.personId));
     if (!person) return res.status(404).json({ error: 'Person not found' });
+    const grant = await requirePersonOrgGrant(req, res, person.organizationId);
+    if (!grant) return;
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId' });
 
     const fields = {};
     for (const f of PERSON_IDENTITY_FIELDS) {
@@ -257,6 +311,9 @@ router.patch('/:personId/owner', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.personId)) return res.status(400).json({ error: 'Invalid personId' });
     const person = await followMerged(await Person.findById(req.params.personId));
     if (!person) return res.status(404).json({ error: 'Person not found' });
+    const grant = await requirePersonOrgGrant(req, res, person.organizationId);
+    if (!grant) return;
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId/owner' });
 
     const orgId = req.body.orgId || null;
     if (orgId) {
@@ -277,6 +334,9 @@ router.patch('/:personId/lock', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.personId)) return res.status(400).json({ error: 'Invalid personId' });
     const person = await Person.findById(req.params.personId);
     if (!person) return res.status(404).json({ error: 'Person not found' });
+    const grant = await requirePersonOrgGrant(req, res, person.organizationId);
+    if (!grant) return;
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId/lock' });
     const requested = Array.isArray(req.body.lockedFields) ? req.body.lockedFields : [];
     const invalid = requested.filter((f) => !PERSON_IDENTITY_FIELDS.includes(f));
     if (invalid.length) return res.status(400).json({ error: `Not lockable identity fields: ${invalid.join(', ')}` });
@@ -289,10 +349,15 @@ router.patch('/:personId/lock', async (req, res, next) => {
 router.post('/:personId/merge', async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.personId)) return res.status(400).json({ error: 'Invalid personId' });
+    const survivor = await followMerged(await Person.findById(req.params.personId));
+    if (!survivor) return res.status(404).json({ error: 'Person not found' });
+    const grant = await requirePersonOrgGrant(req, res, survivor.organizationId);
+    if (!grant) return;
+    logPersonAccess(req, { organizationId: survivor.organizationId, grantId: grant._id, resource: 'person-merge', route: 'POST /super-admin/persons/:personId/merge' });
     const { victimId, fieldDecisions } = req.body || {};
     if (!mongoose.isValidObjectId(victimId)) return res.status(400).json({ error: 'victimId is required' });
-    await mergePersons({ survivorId: req.params.personId, victimId, fieldDecisions: fieldDecisions || [], byUserId: req.user._id });
-    const view = await buildPersonOversight(req.params.personId);
+    await mergePersons({ survivorId: survivor._id, victimId, fieldDecisions: fieldDecisions || [], byUserId: req.user._id });
+    const view = await buildPersonOversight(survivor._id);
     res.json(view);
   } catch (err) {
     if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
@@ -304,6 +369,11 @@ router.post('/:personId/merge', async (req, res, next) => {
 router.post('/:personId/split', async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.personId)) return res.status(400).json({ error: 'Invalid personId' });
+    const person = await followMerged(await Person.findById(req.params.personId));
+    if (!person) return res.status(404).json({ error: 'Person not found' });
+    const grant = await requirePersonOrgGrant(req, res, person.organizationId);
+    if (!grant) return;
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-split', route: 'POST /super-admin/persons/:personId/split' });
     const { mergeLogId } = req.body || {};
     if (!mongoose.isValidObjectId(mergeLogId)) return res.status(400).json({ error: 'mergeLogId is required' });
     const result = await splitPerson({ mergeLogId, byUserId: req.user._id });

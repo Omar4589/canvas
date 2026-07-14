@@ -12,6 +12,13 @@ export const FLAG_THRESHOLDS = {
   FAR_WARN_M: 75, // med — worth a look (raised from the old 50 so rooftop-pin-vs-sidewalk isn't noise)
   FAR_CONFIRM_M: 250, // high — clearly the wrong house / down the block
 
+  // FAR correction downgrade — a far entry that REPLACED the canvasser's own earlier entry
+  // recorded AT the door (chain-best effective distance ≤ FAR_WARN_M) within this window is
+  // downgraded to low: an honest "changed my answer after walking away", not a phantom knock.
+  // Outside the window (or with no near prior evidence) the flag keeps full severity, so a
+  // door quietly rewritten from the couch days later still surfaces. Downgrade, never suppress.
+  FAR_CORRECTION_WINDOW_MIN: 720, // ~the same canvassing day (12 h)
+
   // WEAK / MISSING GPS — the fix itself is untrustworthy, so distance can't be judged.
   GPS_ACCURACY_WARN_M: 100, // fix worse than this = weak_gps (med)
   GPS_ACCURACY_BAD_M: 250, // weak_gps (high)

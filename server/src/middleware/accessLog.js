@@ -1,4 +1,4 @@
-import { voterContentResource, recordAccess } from '../services/access/supportAccess.js';
+import { classifyResource, isAuditExempt, recordAccess } from '../services/access/supportAccess.js';
 
 // Writes an AccessLog row whenever DOORLINE STAFF read a customer's voter content.
 //
@@ -18,36 +18,35 @@ import { voterContentResource, recordAccess } from '../services/access/supportAc
 // next route, and that gap would be silent — an unlogged path into customer data is precisely the
 // thing this exists to make impossible.
 export function accessLog(req, res, next) {
-  // originalUrl, NOT req.path. Express strips the mount prefix: mounted at ['/admin','/mobile'],
-  // `req.path` here is '/voters', not '/admin/voters', so a prefix match on req.path silently never
-  // fires and every access goes unlogged. That is a failure mode with no symptom — the app works
-  // perfectly and the audit trail is simply empty — which is exactly the class of bug this whole
-  // workstream exists to eliminate. Strip the /api mount and the query string.
-  const fullPath = req.originalUrl.split('?')[0].replace(/^\/api/, '');
-  const resource = voterContentResource(fullPath);
-  if (!resource) return next();
-
+  // Every decision is deferred to res.on('finish'): each admin router runs its OWN orgContext
+  // internally, so at mount time req.supportGrant / req.activeOrg are not set yet. By finish time they
+  // are, and we know exactly which org was entered and under which grant. We attach the hook to EVERY
+  // request and decide at the end — the old code decided up front whether a path "looked like" voter
+  // content and skipped the hook otherwise, which is how three dead prefixes silently disabled logging
+  // for the CSV export. Deciding at the end, defaulting to log, cannot rot the same way.
   res.on('finish', () => {
     // Keyed on the GRANT, not on `isSuperAdmin`. That distinction is load-bearing.
     //
-    // orgContext only issues a grant when the caller has NO membership in the org — which is the exact
-    // definition of vendor access. So `req.supportGrant` is present precisely when someone is reaching
+    // orgContext only issues a grant when the caller has NO membership in the org — the exact
+    // definition of vendor access. So req.supportGrant is present precisely when someone is reaching
     // into a customer's data from outside, and absent when they are a member doing their own work.
-    //
-    // Keying on `isSuperAdmin` instead would log a super-admin's ordinary work in their OWN
-    // organization as vendor intrusion. An audit trail that records normal work as snooping tells you
-    // nothing about actual snooping — it is worse than no trail, because it looks like one.
+    // Keying on isSuperAdmin instead would log a super-admin's ordinary work in their OWN org as vendor
+    // intrusion — a trail that records normal work as snooping tells you nothing about actual snooping.
     if (!req.supportGrant || !req.activeOrg) return;
-    // Only successful reads. A 403 (no grant) or a 404 is an attempt, not an access.
+    // Only successful requests. A 403 (no grant) or a 404 is an attempt, not an access.
     if (res.statusCode >= 400) return;
 
-    // The route TEMPLATE where we have it, so the audit log doesn't itself become a list of voter ids
-    // — the opposite of what an audit log should be. This middleware runs above the routers, so
-    // req.route is usually unset by finish time; fall back to the mount + the resource class rather
-    // than recording the raw id-bearing path.
-    const route = req.route?.path
-      ? (req.baseUrl || '') + req.route.path
-      : `${req.method} ${resource}`;
+    // FAIL CLOSED: log this vendor access unless the path is an explicit non-content exemption. Strip
+    // the /api mount and the query string first. originalUrl, NOT req.path — Express strips the mount
+    // prefix, so req.path would be '/voters', not '/admin/voters'.
+    const fullPath = req.originalUrl.split('?')[0].replace(/^\/api/, '');
+    if (isAuditExempt(fullPath)) return;
+    const resource = classifyResource(fullPath);
+
+    // The route TEMPLATE where we have it, so the audit log doesn't itself become a list of voter ids.
+    // This middleware runs above the routers, so req.route is usually unset by finish time; fall back
+    // to the method + resource class rather than recording the raw id-bearing path.
+    const route = req.route?.path ? (req.baseUrl || '') + req.route.path : `${req.method} ${resource}`;
 
     recordAccess({
       actorUserId: req.user._id,

@@ -9,6 +9,7 @@ Format: one question per line, optionally with a note on where the answer lives.
 ## Incoming
 
 - (add questions here)
+- "Why is a door flagged 'far from house' when the canvasser just corrected an earlier entry?" → covered in guides/audit.md (corrections show as low severity with a *Replaced …* context line)
 
 ## Triaged (answered — safe to delete)
 

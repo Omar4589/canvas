@@ -9,6 +9,28 @@ const locationSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Snapshot of the entry this row REPLACED ("latest wins" is a delete-then-create, which
+// would otherwise destroy the prior entry's GPS evidence). Stamped server-side at write
+// time only — never accepted from the request body, so a client can't forge exoneration.
+// `nearest` carries the best door-presence evidence across the whole replacement chain
+// (min effective distance among the prior row's own stamp and its replaced.nearest), so
+// a second correction from afar can't lose the proof the first one preserved. The GPS
+// audit downgrades an honest correction's "far" flag using `nearest` (flagDetection.js).
+const replacedSchema = new mongoose.Schema(
+  {
+    actionType: { type: String, default: null },
+    timestamp: { type: Date, default: null },
+    location: { type: locationSchema, default: null },
+    distanceFromHouseMeters: { type: Number, default: null },
+    nearest: {
+      distanceFromHouseMeters: { type: Number, default: null },
+      accuracy: { type: Number, default: null },
+      timestamp: { type: Date, default: null },
+    },
+  },
+  { _id: false }
+);
+
 const canvassActivitySchema = new mongoose.Schema(
   {
     organizationId: {
@@ -38,6 +60,8 @@ const canvassActivitySchema = new mongoose.Schema(
 
     location: { type: locationSchema, required: true },
     distanceFromHouseMeters: { type: Number, default: null },
+    // null = a first entry (replaced nothing); legacy rows also lack it.
+    replaced: { type: replacedSchema, default: null },
 
     timestamp: { type: Date, required: true, index: true },
     wasOfflineSubmission: { type: Boolean, default: false },

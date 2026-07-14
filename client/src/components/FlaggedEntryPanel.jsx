@@ -1,6 +1,13 @@
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
-import { FAR_WARN_M, primaryReason, reasonColor } from '../lib/flags.js';
+import {
+  FAR_WARN_M,
+  correctionContextText,
+  formatDistanceImperial,
+  isDowngradedCorrection,
+  primaryReason,
+  reasonColor,
+} from '../lib/flags.js';
 import FlagReasonBadges from './FlagReasonBadges.jsx';
 import FlagReviewControl from './FlagReviewControl.jsx';
 
@@ -91,11 +98,19 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
           <div className="mt-1 text-fg-muted">unknown</div>
         ) : (
           <div className={'mt-1 font-medium ' + (distFar ? 'text-danger' : 'text-fg')}>
-            {Math.round(dist)} m from house{distFar ? ' — far' : ''}
+            {formatDistanceImperial(dist)} from house{distFar ? ' — far' : ''}
           </div>
         )}
         {entry.location?.accuracy != null && (
-          <div className="text-xs text-fg-muted">GPS accuracy ±{Math.round(entry.location.accuracy)} m</div>
+          <div className="text-xs text-fg-muted">GPS accuracy ±{formatDistanceImperial(entry.location.accuracy)}</div>
+        )}
+        {correctionContextText(entry) && (
+          <div className="mt-1 text-xs text-fg-muted">{correctionContextText(entry)}</div>
+        )}
+        {isDowngradedCorrection(entry) && (
+          <div className="mt-1 text-xs text-fg-subtle">
+            The earlier entry was recorded at the door — this correction is flagged low for reference.
+          </div>
         )}
         {entry.wasOfflineSubmission && (
           <div className="mt-1 text-xs text-fg-subtle">Synced offline — timestamp is the device's record time.</div>

@@ -68,8 +68,13 @@ export function serializePerson(p, { ownerOrgName = null } = {}) {
  * (VoterNote.body) into memory. So the vendor sees THAT a person was surveyed three times and refused
  * twice — never what they said.
  *
- * The identity fields it does return are voter content, and reaching this route now requires the
- * caller to hold a SupportAccessGrant; every read is written to AccessLog.
+ * The identity fields it does return are voter content. The route that serves this
+ * (routes/superAdmin/persons.js) enforces the access rule: break-glass authority, PLUS a live
+ * SupportAccessGrant for the person's organization, with an AccessLog row written on every call. This
+ * function itself enforces nothing — it is a serializer — so do not cite this comment as the control;
+ * the control lives at the route. (An earlier version of this comment claimed the grant/audit was in
+ * force when it was NOT — the router had only requireSuperAdmin and no logging — which is exactly how a
+ * false reassurance ends up quoted in a privacy policy. The route now makes the claim true.)
  *
  * Returns null if the person doesn't exist.
  */

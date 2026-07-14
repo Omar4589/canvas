@@ -88,6 +88,36 @@ function distanceFromHouse(household, location) {
 
 const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'restricted'];
 
+// Snapshot of the entry a replace is about to delete, stamped onto the new row. "Latest
+// wins" is a delete-then-create, which would otherwise destroy the prior entry's GPS
+// evidence — an honest correction made after walking away from the door would then look
+// identical to a phantom knock in the GPS audit. `nearest` carries the best door-presence
+// evidence across the whole replacement chain (min effective distance = distance − accuracy),
+// so a second correction can't lose the proof the first one preserved. flagDetection.js
+// downgrades a far flag to low when `nearest` proves the canvasser was at the door recently.
+// MUST be built from the pre-read rows (before the deleteMany), never a re-query.
+function buildReplacedSnapshot(mineRows) {
+  if (!mineRows.length) return null;
+  const prior = [...mineRows].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+  const effective = (c) => Math.max(0, c.distanceFromHouseMeters - (c.accuracy ?? 0));
+  const candidates = [];
+  if (prior.distanceFromHouseMeters != null) {
+    candidates.push({
+      distanceFromHouseMeters: prior.distanceFromHouseMeters,
+      accuracy: prior.location?.accuracy ?? null,
+      timestamp: prior.timestamp ?? null,
+    });
+  }
+  if (prior.replaced?.nearest?.distanceFromHouseMeters != null) candidates.push(prior.replaced.nearest);
+  return {
+    actionType: prior.actionType,
+    timestamp: prior.timestamp ?? null,
+    location: prior.location ?? null,
+    distanceFromHouseMeters: prior.distanceFromHouseMeters ?? null,
+    nearest: candidates.length ? candidates.reduce((a, b) => (effective(b) < effective(a) ? b : a)) : null,
+  };
+}
+
 // Deterministic attribution: a door belongs to its book on one of the campaign's
 // ACTIVE rounds. Efforts are door-disjoint, so a household is in at most one
 // active round's books — no time-window guessing needed (works with several
@@ -132,9 +162,10 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // Must match the deleteMany filter's actionType set (REPLACEABLE_ACTIONS) exactly.
   const pairRows = await CanvassActivity.find(
     { householdId, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
-    'actionType userId'
+    'actionType userId timestamp location distanceFromHouseMeters replaced'
   ).lean();
   const mineRows = pairRows.filter((r) => String(r.userId) === String(userId));
+  const replaced = buildReplacedSnapshot(mineRows);
 
   // Replace this canvasser's prior action at this house for THIS pass.
   await CanvassActivity.deleteMany({
@@ -167,6 +198,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     note: data.note ?? null,
     location: data.location,
     distanceFromHouseMeters: distance,
+    replaced,
     timestamp: ts,
     wasOfflineSubmission: !!data.wasOfflineSubmission,
   });
@@ -401,9 +433,10 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // there): the pair's replaceable rows give before/after knock state + deleted counts.
     const pairRows = await CanvassActivity.find(
       { householdId: household._id, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
-      'actionType userId'
+      'actionType userId timestamp location distanceFromHouseMeters replaced'
     ).lean();
     const mineRows = pairRows.filter((r) => String(r.userId) === String(req.user._id));
+    const replaced = buildReplacedSnapshot(mineRows);
 
     // Normalize answers against the template (stable optionIds, retired-inclusive,
     // unknown ids/rows pruned) and drop ghost answers to questions hidden by the
@@ -488,6 +521,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       note: data.note ?? null,
       location: data.location,
       distanceFromHouseMeters: distance,
+      replaced,
       timestamp: ts,
       wasOfflineSubmission: !!data.wasOfflineSubmission,
     });

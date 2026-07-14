@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { formatInTz } from '../lib/datetime';
-import { REVIEW_STATUS_META, reviewToneColors, REASON_BY_KEY, reasonDetailText } from '../lib/flags';
+import {
+  REVIEW_STATUS_META,
+  reviewToneColors,
+  REASON_BY_KEY,
+  reasonDetailText,
+  correctionContextText,
+  isDowngradedCorrection,
+} from '../lib/flags';
 import FlagReviewControl from './FlagReviewControl';
 import { spacing, radius } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
@@ -29,6 +36,7 @@ export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, d
     true
   );
   const reasons = entry.reasons || [];
+  const correction = correctionContextText(entry);
 
   return (
     <View style={styles.card}>
@@ -61,6 +69,13 @@ export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, d
           );
         })}
       </View>
+
+      {correction ? (
+        <Text style={styles.correction}>
+          {correction}
+          {isDowngradedCorrection(entry) ? ' · counted as low severity' : ''}
+        </Text>
+      ) : null}
 
       {expanded ? (
         <View style={styles.expanded}>
@@ -107,6 +122,7 @@ function makeStyles(t) {
     badgeDot: { width: 8, height: 8, borderRadius: 4 },
     badgeText: { fontSize: 11, fontWeight: '700', color: colors.textPrimary },
     badgeDetail: { fontSize: 11, color: colors.textMuted },
+    correction: { fontSize: 11, color: colors.textMuted, marginTop: spacing.xs },
     expanded: { marginTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md },
     mapLink: { marginTop: spacing.sm, alignSelf: 'flex-start' },
     mapLinkText: { fontSize: 12, fontWeight: '700', color: colors.brand },

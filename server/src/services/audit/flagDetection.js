@@ -36,7 +36,7 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
 
   const rows = await CanvassActivity.find(
     scanFilter,
-    '_id userId householdId campaignId effortId passId actionType timestamp location distanceFromHouseMeters wasOfflineSubmission'
+    '_id userId householdId campaignId effortId passId actionType timestamp location distanceFromHouseMeters replaced wasOfflineSubmission'
   )
     .sort({ userId: 1, timestamp: 1 })
     .lean();
@@ -183,11 +183,33 @@ export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS) {
         if (effective > T.FAR_CONFIRM_M) farSev = 'high';
         else if (effective > T.FAR_WARN_M) farSev = 'med';
         if (farSev) {
-          addReason(r, {
-            type: 'far',
-            severity: farSev,
-            detail: { meters: d, effectiveMeters: Math.round(effective), accuracy: acc_m ?? null },
-          });
+          const detail = { meters: d, effectiveMeters: Math.round(effective), accuracy: acc_m ?? null };
+          if (r.replaced) {
+            // Correction context for the UI, on EVERY far correction (downgraded or not):
+            // the entry this one replaced ("latest wins" deleted its row — the snapshot is
+            // the only surviving record of where the canvasser stood the first time).
+            detail.priorActionType = r.replaced.actionType || null;
+            detail.priorMeters = r.replaced.distanceFromHouseMeters ?? null;
+            detail.priorAccuracy = r.replaced.location?.accuracy ?? null;
+            detail.minutesSincePrior = r.replaced.timestamp
+              ? Math.round((new Date(r.timestamp) - new Date(r.replaced.timestamp)) / 60000)
+              : null;
+            // Downgrade, don't suppress: the chain's best evidence (`nearest`) proves they
+            // were AT this door recently → an honest correction, not a phantom knock. The
+            // >= 0 guard denies the downgrade on reversed clocks (offline flush skew).
+            const near = r.replaced.nearest;
+            if (near && near.distanceFromHouseMeters != null && near.timestamp) {
+              const nearEff = Math.max(0, near.distanceFromHouseMeters - (near.accuracy ?? 0));
+              const sinceNearMin = (new Date(r.timestamp) - new Date(near.timestamp)) / 60000;
+              if (nearEff <= T.FAR_WARN_M && sinceNearMin >= 0 && sinceNearMin <= T.FAR_CORRECTION_WINDOW_MIN) {
+                farSev = 'low';
+                detail.downgraded = true;
+                detail.nearestMeters = near.distanceFromHouseMeters;
+                detail.minutesSinceNearest = Math.round(sinceNearMin);
+              }
+            }
+          }
+          addReason(r, { type: 'far', severity: farSev, detail });
         }
       }
     }

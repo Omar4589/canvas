@@ -16,6 +16,7 @@ import { MAPBOX_PUBLIC_TOKEN } from '../../../../../lib/config';
 import { initMapbox } from '../../../../../lib/mapbox';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { formatExact } from '../../../../../lib/datetime';
+import { formatDistance } from '../../../../../lib/geo';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
@@ -233,7 +234,7 @@ export default function MapScreen() {
                 <Text style={styles.detailMeta}>{formatExact(selected.timestamp, campaign?.timeZone)}</Text>
                 {selected.distanceFromHouseMeters != null ? (
                   <Text style={styles.detailMeta}>
-                    {Math.round(selected.distanceFromHouseMeters)}m from house
+                    {formatDistance(selected.distanceFromHouseMeters)} from house
                     {selected.wasOfflineSubmission ? ' · offline' : ''}
                   </Text>
                 ) : null}
