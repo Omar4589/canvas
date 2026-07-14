@@ -21,18 +21,33 @@ import { MAPBOX_PUBLIC_TOKEN } from './config';
 //
 // Map TILES still reach Mapbox (that is what a map is), and that is disclosed in the privacy policy
 // under service providers "providing maps and converting addresses into map coordinates". Telemetry
-// is the separable, opt-outable part — this kills exactly that.
+// is the separable, opt-outable part — this kills exactly that. (Mapbox still sends a session-
+// counting `appUserTurnstile` ping with telemetry off; "telemetry off" is not "no network calls".)
+//
+// THE ORDER BELOW IS LOAD-BEARING. It reads like a cosmetic line-swap; it is a process kill.
+// setTelemetryEnabled has no cheap native path on Android — RNMBXModule.kt builds a THROWAWAY
+// Mapbox MapView on the UI thread just to reach the telemetry flag. Mapbox v11 throws
+// MapboxConfigurationException ("Using MapView requires providing a valid access token when
+// inflating or creating the view") if a MapView is inflated before the token is set, and that throw
+// lands on the main Looper — RN's native-module exception handler never sees it and no JS try/catch
+// can catch it, so the process just dies with no red box. Calling telemetry first therefore hard-
+// crashed every Android map screen (iOS is immune: its impl is a one-line UserDefaults write that
+// touches no view). So: token first, ALWAYS, and telemetry only once it has actually landed.
 let initialized = false;
 
 export function initMapbox() {
   if (initialized) return;
   initialized = true;
 
-  Mapbox.setTelemetryEnabled(false);
+  // No token means no telemetry call either — the Android impl builds a MapView to make it, and a
+  // MapView without a token is the native crash described above.
+  if (!MAPBOX_PUBLIC_TOKEN) return;
 
-  if (MAPBOX_PUBLIC_TOKEN) {
-    Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
-  }
+  // setAccessToken's promise resolves from inside the native UI-thread runnable that sets the token,
+  // so chaining off it guarantees ordering rather than trusting the queue to stay FIFO.
+  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN)
+    .then(() => Mapbox.setTelemetryEnabled(false))
+    .catch((err) => console.warn('initMapbox failed', err));
 }
 
 export default Mapbox;

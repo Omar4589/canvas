@@ -371,7 +371,12 @@ constants). A small legend labels the two rings when they're shown.
     **require** us to ship a user-facing opt-out toggle. Turning it off deletes all three problems.
   - Map **tiles** still reach Mapbox — that is what a map is — and that is disclosed in the privacy
     policy under service providers *"providing maps and converting addresses into map coordinates."*
-    Telemetry is the separable, opt-outable part; that is what `initMapbox()` kills.
+    Telemetry is the separable, opt-outable part; that is what `initMapbox()` kills. (Mapbox still
+    sends a session-counting `appUserTurnstile` ping even with telemetry off — "telemetry off" is not
+    "no network calls".)
+  - **The order inside `initMapbox()` is load-bearing — see the invariant in §I.** The token is set
+    first and telemetry is chained off its promise. Reversing those two lines hard-crashes every
+    Android map screen.
 - **Mapbox token — web:** the server returns it via `GET /admin/config/mapbox-token` (env
   `MAPBOX_PUBLIC_TOKEN`, a `pk.*` token); `MapPage` sets `mapboxgl.accessToken`.
 - **Mapbox token — mobile:** `EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN` (public, bundled; the *download* token
@@ -384,6 +389,18 @@ constants). A small legend labels the two rings when they're shown.
 - **Coordinates are imported or geocoded (Geocodio), and can be corrected** (see §B); rows with no
   usable point never reach a map. A pin correction is deterministic (`updateHouseholdLocation`) and
   never re-cuts turf.
+- **Set the Mapbox access token BEFORE `setTelemetryEnabled()` — never the other way round.** On
+  Android `setTelemetryEnabled` has no cheap native path: `RNMBXModule.kt` builds a throwaway Mapbox
+  `MapView` on the UI thread just to reach the flag. Mapbox v11 throws `MapboxConfigurationException`
+  when a `MapView` is inflated before the token is set, and that throw lands on the **main Looper** —
+  React Native's native-module exception handler never sees it and **no JS `try/catch` can catch it**,
+  so the process dies with no red box. Calling telemetry first crashed every Android map screen
+  (Map, Books, canvasser Books) the instant the route module evaluated; iOS was immune because its
+  impl is a one-line `UserDefaults` write that touches no view.
+  [lib/mapbox.js](../mobile/lib/mapbox.js) therefore chains telemetry off `setAccessToken`'s promise,
+  and returns early when there is no token at all. **Never "fix" a telemetry crash with a `try/catch`**
+  — the throw is uncatchable from JS, and a *native* catch would swallow the failure and silently
+  leave telemetry **on**, quietly falsifying the privacy policy.
 - **Native symbol layers, not MarkerView; no clustering** — one GeoJSON feature collection per layer.
 - **Fully-voted doors drop off** the canvasser's bootstrap/map (see EARLY_VOTING.md).
 - **Pings are per-action GPS stamps**, not live tracking — there is no continuous location feed.

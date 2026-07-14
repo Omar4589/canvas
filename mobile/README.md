@@ -118,6 +118,63 @@ Same as preview but with `--profile production`. EAS auto-increments the version
 
 ---
 
+## Shipping an OTA (and why it might reach nobody)
+
+`npm run ota:production` pushes a new **JavaScript bundle** to phones that already have the app — no
+store review, no reinstall. It cannot ship native code. The rule:
+
+> **JS / assets only → OTA. Anything that touches a native input → new build + store release.**
+
+### The trap: `runtimeVersion`
+
+`app.json` sets `runtimeVersion: { policy: "fingerprint" }`. Every `eas update` is stamped with a
+fingerprint, and **a phone only downloads a bundle whose fingerprint exactly matches the one baked into
+its installed binary.** The fingerprint is a hash of your *native* inputs:
+
+`app.json` · `eas.json` · `package.json` · `patches/` · autolinked native modules — **but never your
+app JS**, which is the whole point.
+
+So editing *anything* in those files silently orphans every phone in the field. `eas update` still
+prints **"success"** — it just published a bundle nobody can download, and nothing tells you.
+
+This has already bitten us. Two examples, both of which changed the hash while changing **nothing** in
+the binary:
+
+- bumping `app.json` `version` `0.1.0 → 1.0.0` — inert, because `eas.json` sets
+  `appVersionSource: "remote"` (the store version comes from EAS, not this field);
+- adding `ascAppId` to `eas.json` — read only by `eas submit`, never compiled into anything.
+
+The cost was real: **Android build vc16 shipped with a fingerprint no update was ever published under,
+so it can never receive an OTA. Ever.** Its only exit is a store update.
+
+### Before every OTA
+
+```bash
+npm run ota:check        # fails loudly if the tree's fingerprint ≠ your latest build's
+npm run ota:production
+```
+
+To see exactly which sources diverged:
+
+```bash
+npx eas build:list --platform android --limit 3      # get the build id + its runtimeVersion
+npx eas fingerprint:compare --build-id <BUILD_ID>    # names the files/fields that moved
+```
+
+### Reading it off a phone
+
+**Profile → the build stamp at the bottom** prints `v<runtimeVersion> · <channel> · update <id> · <date>`,
+or `embedded build` if no OTA has ever landed. That one line tells you which binary a device has and
+whether it is receiving updates.
+
+### Applying it
+
+Default expo-updates behavior is **download in the background, apply on the *next* launch**. So after
+publishing: open the app, wait ~30s, force-quit, reopen. Relaunching once and seeing the old bundle
+proves nothing.
+
+---
+
 ## How the API URL gets wired up
 
 `mobile/lib/config.js` reads `EXPO_PUBLIC_API_BASE_URL` from `process.env` (set by EAS at build time per profile), falling back to `app.json` `extra.apiBaseUrl` for plain `expo start`. So each build profile points at a different backend without you touching code.
