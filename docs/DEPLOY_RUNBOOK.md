@@ -80,23 +80,74 @@ mongodump --uri="<MONGODB_URI>" --archive=$HOME/doorline-preflight.archive.gz --
 ./verify-backup.sh $HOME/doorline-preflight.archive.gz
 ```
 
-*It spins up a throwaway local mongod, actually restores the archive, and prints a census — including
-**"Persons with NO organizationId"**, which is precisely the number the irreversible migration touches.
-If it prints zero collections, or the restore fails: **stop.** You have no rollback.*
+*It spins up a throwaway local mongod, **actually restores the archive**, and then recomputes — from the
+backup, using the same aggregation the migration itself uses — **exactly what
+`migrate:persons-org-scope --apply` will do.** A missing collection is a hard failure, not a `0`.*
+
+**Result on 2026-07-13 — the one-way door turns out to destroy nothing:**
+
+| | |
+|---|---|
+| **STAMP** `organizationId` | **75,760** (all of them) |
+| **SPLIT** across orgs | **0** ✅ matches the cross-org audit |
+| **DELETE** orphan Persons | **0** |
+| **DELETE** pending proposals | **0** |
+| Voters with no `personId` | **0** — a clean 1:1 |
+
+*So step 4 is a pure stamping operation plus an index swap. **It deletes zero documents.** The backup is
+still the gate — but you now know what's behind the door.*
+
+> **Cross-check at step 4.** The migration prints these same three numbers in its own dry run. **If prod
+> disagrees with this backup, something WROTE to the database in between — stop.** That is precisely what
+> a still-running worker dyno looks like, which is the whole reason for the next step.
 
 ---
 
-# STEP 1 — Maintenance ON
+# STEP 0d — 🛑 Drain the queue, while you still can
 
-**Settings** → scroll to **Maintenance Mode** → toggle **ON**.
+**Open [`/admin/queues`](https://doorline.app/admin/queues) (Bull Board) NOW, before maintenance.**
+Confirm **`import-queue`** and **`turf-queue`** have **zero** active / waiting / delayed jobs.
 
-*This one toggle covers **both** hazards below. Atlas requires it too: "**halt write operations to your
-cluster for the duration of your scale operation.**" **The Run console keeps working** — that's the whole
-trick.*
+***Do this first because you cannot do it later.*** *Bull Board is mounted on the **web** dyno
+([`app.js:77`](../server/src/app.js#L77)) — the moment maintenance goes on, it serves the maintenance page
+like everything else.*
 
-*The migration hazard: between the deploy and the migrations, new code runs against the old schema.
-Existing `Person` docs have no `organizationId`, so the new matcher won't find them — an import in that
-window would either duplicate Persons or fail on the old unique index.*
+---
+
+# STEP 1 — Maintenance ON, **and the worker OFF**
+
+**Settings** → **Maintenance Mode** → **ON**.
+**Resources** → the **`worker`** dyno → toggle it **OFF**.
+
+> ### ⚠️ Maintenance mode does NOT stop the worker. Both toggles are required.
+> Heroku maintenance mode only 503s the **web** router. The `worker` dyno keeps draining BullMQ out of
+> Redis the entire time — **and the import hazard lives on the worker**
+> ([`importProcessor.js:155`](../server/src/services/import/importProcessor.js#L155) →
+> `reconcileIdentityFromImport` → **creates Person documents**).
+>
+> Any import job still sitting in Redis survives the maintenance toggle, survives the Atlas rebuild, and
+> executes the instant the STEP 2 deploy reboots the worker — new code, unstamped Persons, old global
+> unique indexes still in place. That is exactly the window this step exists to close.
+>
+> **And step 4 would then delete its work.** `migratePersonsOrgScope` snapshots the voter→person linkage
+> ([`:59-63`](../server/src/migrations/migratePersonsOrgScope.js#L59)) and then runs
+> `Person.deleteMany({_id: {$nin: linkedIds}})` ([`:148`](../server/src/migrations/migratePersonsOrgScope.js#L148)).
+> A Person created by a concurrent import **after** that snapshot isn't in `linkedIds` — so the
+> irreversible migration **deletes it**, stranding a freshly-imported Voter with a dangling `personId`.
+
+*Atlas requires the write freeze too: "**halt write operations to your cluster for the duration of your
+scale operation.**" **The Run console keeps working** — that's the whole trick.*
+
+*The migration hazard, stated plainly: between the deploy and the migrations, new code runs against the
+old schema. Existing `Person` docs have no `organizationId`, so the new matcher won't find them — an
+import in that window would duplicate Persons or fail on the old unique index.*
+
+> ### 📱 And tell the crews
+> **Run this window when nobody is knocking.** Heroku's maintenance page is a **503**, and until the
+> mobile fix in this release reaches phones over-the-air, a phone **with signal** that hits it gets
+> *"Action not saved"* and the pin reverts — **the knock is lost, not queued.** (A phone with **no**
+> signal queues fine; already-queued knocks are safe.) If crews must be out, tell them **airplane mode**
+> for the duration.
 
 ---
 
@@ -165,20 +216,9 @@ Watch the build log finish. **~3–5 minutes** — this is the long pole of the 
 
 ---
 
-# STEP 2b — ⚠️ Confirm the `worker` dyno is UP
-
-**Resources** tab → look at the dyno list. You must see **`worker`** with its toggle **ON**.
-
-If it's off, switch it on and **Confirm**.
-
-***Why this is not a formality.*** *The 180-day identity purge and the three retention triggers are now
-BullMQ repeatable jobs **on the worker dyno**. If it's at zero, they never fire — and **nothing fails**.
-No error, no alert, no red build. You'd be right back in the state this whole release exists to end: a
-published legal promise that silently isn't being kept.*
-
-*This repo has form here — deploying a branch whose Procfile lacked a `worker` line once scaled the dyno
-to 0 and Heroku never restored it. The `sharedVoters` Procfile does declare it, so a fresh deploy should
-bring it up. **Confirm it. Don't assume it.***
+> ### ⚠️ The deploy may switch the `worker` back ON. Check Resources — it must still be OFF.
+> Keep it off until **STEP 5b**. See STEP 1 for why: a queued import running against the half-migrated
+> schema is the one thing that can turn step 4's harmless stamping run into an irreversible deletion.
 
 ---
 
@@ -211,13 +251,33 @@ Dry run — **and actually read it**:
 npm run migrate:persons-org-scope
 ```
 
-**Expected: "0 split, N stamped."**
+It prints three numbers. **They must match what STEP 0c computed from your backup:**
 
-> 🛑 **If the dry run says it's about to SPLIT records or DELETE orphan Persons in any real number —
-> STOP.** That would mean your data is not what the audit said it was, and the next command is a one-way
+```
+  linked from exactly 1 org  : 75,760   → stamp organizationId
+  linked from ≥2 orgs        : 0        → SPLIT into one copy per org
+  linked from no voter at all: 0        → delete (nothing references them)
+```
+
+> ## 🛑 The one number that must be zero: **SPLIT.**
+> That is the number the cross-org audit actually predicts. It said zero. **If the dry run shows any
+> Persons linked from ≥2 orgs, the audit and your data disagree — STOP.** The next command is a one-way
 > door. Come back and we look at it together.
+>
+> ### 🛑 And if ANY number disagrees with your backup — STOP.
+> The backup said `75,760 / 0 / 0`. If prod now says something else, **something wrote to the database
+> after you took the dump.** That means the worker dyno is still draining its queue, and step 4 is about
+> to delete the Persons it just created. Go back to STEP 1 and turn the worker off.
+>
+> ### ⚠️ Orphans are NOT a stop condition — even though they're a deletion.
+> *I had this wrong.* Orphan Persons are produced by an ordinary, supported operation:
+> [`deleteCampaign.js:40`](../server/src/services/campaigns/deleteCampaign.js#L40) deletes a campaign's
+> Voters, and `Person` is **absent from its cascade list** — so every campaign you've ever deleted left
+> orphan Persons behind. The cross-org audit never measured orphans and makes **no prediction** about
+> them. On your data it's currently **0**. If it's ever non-zero, sanity-check that it's plausible for
+> the campaigns you've deleted, then proceed — nothing references them.
 
-If it matches expectation:
+If it matches:
 
 ```
 npm run migrate:persons-org-scope -- --apply
@@ -225,16 +285,58 @@ npm run migrate:persons-org-scope -- --apply
 
 ---
 
-# STEP 5 — Migration 3: build the new indexes
+# STEP 5 — Migration 3: build the new indexes. **This one is not optional.**
+
+> **Step 4 just dropped the legacy global unique indexes. Until this step runs, nothing enforces Person
+> uniqueness at all.** Skip it and you are — in your own rollback section's words — *"not corrupt, you are
+> unprotected."* `autoIndex` is off in production, so it **never self-heals**.
+
+Dry run:
 
 ```
 npm run migrate:build-indexes
+```
+
+Read it. Then apply — **separately**:
+
+```
 npm run migrate:build-indexes -- --apply
 ```
+
+**It must say: `Done — built missing indexes across N models.`**
+
+Now run the bare command **one more time**. It must now say:
+
+```
+All declared indexes are already present. Nothing to build.
+```
+
+***Don't skip that last re-run.*** *The Run console takes **one** command. If you paste both lines at
+once, only the dry run executes — and its output ("N declared index(es) not present. Re-run with --apply
+to build them.") reads like a perfectly normal success. Nothing downstream catches it: the verification
+below audits **data**, not indexes, and step 4 just made the data clean, so it prints a happy green result
+in exactly the broken state.*
 
 *Creates the org-scoped uniques plus the new `SupportAccessGrant` / `AccessLog` / `RetentionRun` /
 `OrgDeletionRequest` indexes. `--apply` uses `createIndexes()` — **additive, never drops.** That's why
 step 4 drops the legacy indexes itself, and why running this first wouldn't have helped.*
+
+---
+
+# STEP 5b — ✅ Turn the `worker` dyno back ON
+
+**Resources** tab → **`worker`** → toggle **ON** → **Confirm**.
+
+**This is where the worker comes back — not before.** The migrations are done, Persons are stamped, and
+the org-scoped uniques exist. Any import still queued in Redis can now run safely.
+
+***Why this isn't a formality.*** *The 180-day identity purge and the retention triggers are BullMQ
+repeatable jobs **on this dyno**. At zero, they never fire — and **nothing fails.** No error, no alert, no
+red build. You'd be right back in the state this whole release exists to end: a published legal promise
+that silently isn't being kept.*
+
+*This repo has form here — deploying a branch whose Procfile lacked a `worker` line once scaled the dyno
+to 0 and Heroku never restored it. **Confirm it's up. Don't assume it.***
 
 ---
 
@@ -306,10 +408,25 @@ Switch to an org where you hold a real membership. It must open **with no modal*
 not a vendor — and **must not** appear in the access log. *(This was the lockout bug fixed pre-deploy.
 Confirm it in prod.)*
 
-### C. Retention is wired
+### C. Retention is wired — **check it tomorrow, and know what green now means**
 
 **Platform → Support access** shows a retention banner. It will read **RED** right after deploy ("has
-NEVER run") — **that is correct.** It goes green after the first 03:17 UTC run. **Check it tomorrow.**
+NEVER run") — **that is correct.**
+
+It now watches **both** retention jobs and the worst one wins:
+
+| job | runs | what it does |
+|---|---|---|
+| `purge-deleted-identities` | 03:17 UTC | the 180-day identity purge |
+| `retention-triggers` | 04:41 UTC | **deletes organizations** — wind-down, dormancy, delete-on-request SLA |
+
+**It goes green only once both have run. Check it tomorrow, after 04:41 UTC (11:41pm CT).**
+
+*This was a real bug in the release, found by the pre-deploy audit and fixed before you deployed:
+`retentionHealth()` hardcoded the purge's job name, so the banner could only ever see one of the two.
+The triggers job — the one that honours **delete-on-request**, the promise with actual legal teeth —
+could have thrown every night while the banner stayed reassuringly green off the purge beside it. Its
+receipts were written and read by nothing. There is now a test that goes red on the old behaviour.*
 
 ### D. Nothing is unscoped
 

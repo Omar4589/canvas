@@ -143,6 +143,11 @@ export async function executeDueDeletionRequests({ apply = true } = {}) {
  * Wrapped exactly like the identity purge (services/retention/purgeDeletedIdentities.js) so the same
  * health check catches it going quiet. A retention trigger that stops firing is indistinguishable
  * from one that has nothing to do — unless something is counting.
+ *
+ * That was aspirational until it wasn't: retentionHealth() hardcoded the purge's job name, so these
+ * receipts were written and read by nothing. This sweep could have thrown every night — taking the
+ * delete-on-request SLA down with it — while the banner stayed green off the purge beside it. The
+ * health surface now asks about every job in scheduler.js's REPEATABLE_JOBS and lets the worst win.
  */
 export async function runRetentionTriggers({ apply = true } = {}) {
   const startedAt = new Date();

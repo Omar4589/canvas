@@ -8,6 +8,7 @@ import { Organization } from '../../models/Organization.js';
 import { User } from '../../models/User.js';
 import { createGrant, revokeGrant, activeGrant, DEFAULT_GRANT_HOURS, MAX_GRANT_HOURS } from '../../services/access/supportAccess.js';
 import { retentionHealth } from '../../services/retention/purgeDeletedIdentities.js';
+import { REPEATABLE_JOBS } from '../../services/retention/scheduler.js';
 
 // Support access: the front door into a customer organization, and the record of who used it.
 //
@@ -138,11 +139,25 @@ router.get('/log', async (req, res, next) => {
   }
 });
 
-// Is retention actually being enforced right now? Goes RED when the purge stops — which is what a
-// silently-dead scheduled job looks like from the outside. See services/retention/.
+// Is retention actually being enforced right now? Goes RED when ANY retention job stops — which is
+// what a silently-dead scheduled job looks like from the outside. See services/retention/.
+//
+// Worst job wins. This asks about every job in REPEATABLE_JOBS rather than just the identity purge,
+// because the two fail independently and the one that matters most legally — `retention-triggers`,
+// which deletes organizations and honours the delete-on-request SLA — is not the one the banner used
+// to watch. Green here has to mean every promise is being kept, or it means nothing.
 router.get('/health/retention', async (req, res, next) => {
   try {
-    res.json(await retentionHealth());
+    const jobs = await Promise.all(REPEATABLE_JOBS.map((j) => retentionHealth(j.name, j.label)));
+    const broken = jobs.filter((j) => !j.healthy);
+    res.json({
+      ...jobs[0], // the identity purge's detail fields, kept for the existing client contract
+      healthy: broken.length === 0,
+      message: broken.length
+        ? broken.map((j) => j.message).join(' ')
+        : 'Retention is being enforced.',
+      jobs,
+    });
   } catch (err) {
     next(err);
   }

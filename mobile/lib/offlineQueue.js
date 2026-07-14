@@ -136,16 +136,27 @@ export function flushQueue() {
 }
 
 /**
- * Try the action online. If it fails with a network-level error, queue it.
+ * Try the action online. If the failure is the server's fault, queue it.
  * Returns { ok, queued, response, error }.
+ *
+ * Queue on a transport error (no status) OR a 5xx — the same policy doFlush already applies above,
+ * where a 5xx breaks out to retry later and only a 4xx is dropped. The two halves used to disagree:
+ * intake queued transport errors only, so a 5xx was never enqueued at all, and the caller alerted
+ * "Action not saved" and reverted the pin. The knock had already happened — the canvasser walked to
+ * the door, spoke to a voter, and walked away — and it was gone. Billable work, unrecoverable.
+ *
+ * This bites hardest during a deploy: Heroku's maintenance page is a 503 with an HTML body, so a
+ * phone WITH signal lost every knock and survey while a phone with NO signal queued them perfectly.
+ *
+ * A 4xx still surfaces. That one means the submission itself is invalid, and retrying it forever
+ * would jam the queue behind a door that can never be recorded.
  */
 export async function submitOrQueue(path, body) {
   try {
     const response = await api(path, { method: 'POST', body });
     return { ok: true, queued: false, response };
   } catch (err) {
-    // Only queue on transport-level failures (no status). 4xx/5xx surface to UI.
-    if (!err.status) {
+    if (!err.status || err.status >= 500) {
       await enqueue(path, body);
       return { ok: false, queued: true, error: err };
     }

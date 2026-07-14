@@ -19,9 +19,15 @@ export const RETENTION_CRON = process.env.RETENTION_CRON || '17 3 * * *';
 // run that was mostly about something else.
 export const TRIGGERS_CRON = process.env.RETENTION_TRIGGERS_CRON || '41 4 * * *';
 
+// The `label` is not decoration: the health surface reports on every job in this list, and when one
+// goes quiet the operator needs to be told WHICH promise stopped being kept.
 export const REPEATABLE_JOBS = [
-  { name: JOB_NAME, cron: RETENTION_CRON },
-  { name: TRIGGER_JOB, cron: TRIGGERS_CRON },
+  { name: JOB_NAME, cron: RETENTION_CRON, label: 'The 180-day identity purge' },
+  {
+    name: TRIGGER_JOB,
+    cron: TRIGGERS_CRON,
+    label: 'The retention triggers (wind-down, dormancy, delete-on-request)',
+  },
 ];
 
 /** Producer side: declare the repeatable schedule. Idempotent — BullMQ dedupes on (name, cron). */

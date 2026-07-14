@@ -53,17 +53,27 @@ export async function purgeDeletedIdentities({ apply = true } = {}) {
 }
 
 /**
- * Is retention actually being enforced right now? Read by the super-admin health surface.
+ * Is a retention job actually running right now? Read by the super-admin health surface.
  * Returns red when the last SUCCESSFUL run is stale — which is what a silently-dead job looks like.
+ *
+ * Takes the job NAME because there is more than one retention job, and they fail independently.
+ * This used to hardcode JOB_NAME, which meant the health banner could only ever see the identity
+ * purge: the `retention-triggers` sweep — the job that actually DELETES ORGANIZATIONS, including the
+ * contractual delete-on-request SLA — could throw every single night and the banner stayed green,
+ * because the purge beside it kept succeeding. A health check that cannot go red for half the thing
+ * it reports on is worse than none, because it is believed. Callers should ask about every job in
+ * scheduler.js's REPEATABLE_JOBS and let the worst one win.
  */
-export async function retentionHealth() {
-  const last = await RetentionRun.findOne({ job: JOB_NAME, ok: true }).sort({ startedAt: -1 }).lean();
-  const lastFailure = await RetentionRun.findOne({ job: JOB_NAME, ok: false }).sort({ startedAt: -1 }).lean();
+export async function retentionHealth(job = JOB_NAME, label = 'The 180-day identity purge') {
+  const last = await RetentionRun.findOne({ job, ok: true }).sort({ startedAt: -1 }).lean();
+  const lastFailure = await RetentionRun.findOne({ job, ok: false }).sort({ startedAt: -1 }).lean();
 
   const ageHours = last ? (Date.now() - new Date(last.startedAt).getTime()) / 3_600_000 : Infinity;
   const stale = ageHours > STALE_AFTER_HOURS;
 
   return {
+    job,
+    label,
     healthy: !!last && !stale,
     lastSuccessAt: last?.startedAt || null,
     lastSuccessPurged: last?.purged ?? null,
@@ -73,9 +83,9 @@ export async function retentionHealth() {
     lastError: lastFailure?.error || null,
     // The message an operator should act on, in words rather than a boolean.
     message: !last
-      ? 'The identity purge has NEVER run. We are promising users a 180-day retention limit we are not enforcing.'
+      ? `${label} has NEVER run. We are promising a retention limit we are not enforcing.`
       : stale
-        ? `The identity purge has not succeeded for ${Math.round(ageHours)}h. The retention promise is not being kept.`
-        : 'Retention is being enforced.',
+        ? `${label} has not succeeded for ${Math.round(ageHours)}h. The retention promise is not being kept.`
+        : `${label} is running.`,
   };
 }

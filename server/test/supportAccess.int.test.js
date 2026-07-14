@@ -295,3 +295,44 @@ test('the audit log answers "did anyone at Doorline read my data?"', { skip }, a
   assert.strictEqual(e.organization, 'Acme Campaigns');
   assert.match(e.reason, /duplicate-import/, 'the WHY travels with the WHAT');
 });
+
+// The retention banner must go RED when the job that DELETES ORGANIZATIONS dies — even while the
+// identity purge beside it keeps succeeding.
+//
+// This is the bug that shipped: retentionHealth() hardcoded job:'purge-deleted-identities', so the
+// `retention-triggers` sweep — wind-down, dormancy, and the contractual delete-on-request SLA —
+// could throw every single night and the banner stayed green off the purge next to it. Its receipts
+// were written and read by nothing. On the old code this test returns healthy:true.
+test('the retention banner goes RED when the org-deletion triggers die, even if the purge is alive', async () => {
+  const { RetentionRun } = await import('../src/models/RetentionRun.js');
+  await RetentionRun.deleteMany({});
+
+  // The identity purge ran an hour ago and succeeded. On its own, that is a green banner.
+  await RetentionRun.create({
+    job: 'purge-deleted-identities',
+    startedAt: new Date(Date.now() - 60 * 60 * 1000),
+    ok: true,
+    purged: 0,
+    scanned: 0,
+  });
+  // The triggers job has never once succeeded. Nobody is enforcing wind-down or delete-on-request.
+
+  const res = await call('GET', '/super-admin/access/health/retention', { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(
+    res.json.healthy,
+    false,
+    'a green banner while the org-deletion job is dead is the exact silent failure this release exists to end'
+  );
+  assert.match(res.json.message, /retention triggers/i, 'the banner must name WHICH promise stopped being kept');
+  assert.strictEqual(res.json.jobs.length, 2, 'health must report on every repeatable retention job');
+
+  // And it goes green only once BOTH are alive.
+  await RetentionRun.create({
+    job: 'retention-triggers',
+    startedAt: new Date(Date.now() - 60 * 60 * 1000),
+    ok: true,
+  });
+  const ok = await call('GET', '/super-admin/access/health/retention', { token: ctx.owner.token });
+  assert.strictEqual(ok.json.healthy, true, 'both jobs alive → green');
+});
