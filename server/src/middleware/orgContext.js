@@ -44,6 +44,38 @@ export async function orgContext(req, res, next) {
       // Now it requires a live SupportAccessGrant: time-boxed, carrying a typed reason, and with every
       // read of voter content written to AccessLog. The access is not removed — it is made
       // attributable. "No god mode" means no *unlogged* mode.
+      // MEMBERSHIP IS CHECKED FIRST, AND THAT ORDER IS THE WHOLE POINT.
+      //
+      // "Vendor access" means reaching into an organization you are NOT a member of. A super-admin who
+      // is also the genuine admin of an org is not a vendor there — they are a member, doing their job.
+      //
+      // The first cut of this gate tested `isSuperAdmin` before looking for a membership, and returned
+      // unconditionally. So a platform super-admin who was also the admin of their own organization got
+      // a 403 on their OWN account, and would have had to grant themselves "support access", with a
+      // typed reason, to use it. Worse: their ordinary admin work would then have been written to
+      // AccessLog as vendor intrusion — poisoning the exact audit trail this exists to produce. A log
+      // that records normal work as snooping tells you nothing about actual snooping.
+      const membership = await Membership.findOne({
+        userId: req.user._id,
+        organizationId: org._id,
+        isActive: true,
+      });
+      if (membership) {
+        req.activeOrg = org;
+        req.activeMembership = membership;
+        return next(); // a member is a member — no grant, and nothing to audit
+      }
+
+      // No membership. If they are platform staff, THIS is vendor access, and it needs a grant.
+      //
+      // It used to be three lines: `if (req.user.isSuperAdmin) { req.activeOrg = org; return next(); }`
+      // — set the org, skip every check, and each /admin/* route downstream would happily scope its
+      // queries to it. Combined with an org switcher that listed every organization on the platform,
+      // any staff member could read any customer's entire voter file, survey answers, notes and GPS
+      // trails, leaving no record anywhere that they had.
+      //
+      // Now: time-boxed, carrying a typed reason, and every read of voter content written to AccessLog.
+      // The access is not removed — it is made attributable. "No god mode" means no *unlogged* mode.
       if (req.user.isSuperAdmin) {
         const grant = await activeGrant(req.user._id, org._id);
         if (!grant) {
@@ -57,27 +89,18 @@ export async function orgContext(req, res, next) {
           });
         }
         req.activeOrg = org;
-        req.supportGrant = grant; // middleware/accessLog.js reads this
+        req.supportGrant = grant; // middleware/accessLog.js keys off this
         return next();
       }
-      const membership = await Membership.findOne({
-        userId: req.user._id,
-        organizationId: org._id,
-        isActive: true,
-      });
-      if (!membership) {
-        // The caller sent an X-Org-Id for an org they're not (or are no longer) a member of.
-        // Tagged so BOTH clients self-heal identically: drop the stale activeOrgId and route
-        // to the org picker. mobile/lib/api.js already matches this case by its error STRING
-        // (ORG_CONTEXT_ERRORS); the code makes it explicit and lets the web client do the
-        // same without string-matching.
-        return res
-          .status(403)
-          .json({ error: 'Not a member of this organization', code: 'ORG_CONTEXT' });
-      }
-      req.activeOrg = org;
-      req.activeMembership = membership;
-      return next();
+
+      // Neither a member nor staff. The caller sent an X-Org-Id for an org they're not (or are no
+      // longer) in. Tagged so BOTH clients self-heal identically: drop the stale activeOrgId and route
+      // to the org picker. mobile/lib/api.js already matches this case by its error STRING
+      // (ORG_CONTEXT_ERRORS); the code makes it explicit and lets the web client do the same without
+      // string-matching.
+      return res
+        .status(403)
+        .json({ error: 'Not a member of this organization', code: 'ORG_CONTEXT' });
     }
 
     if (req.user.isSuperAdmin) {

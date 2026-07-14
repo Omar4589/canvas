@@ -11,6 +11,7 @@ export const SUPER_NAV = [
   { to: '/super-admin/users', label: 'All Users' },
   { to: '/super-admin/people', label: 'People' },
   { to: '/super-admin/imports', label: 'Imports' },
+  { to: '/super-admin/access', label: 'Support access' },
   { to: '/organizations', label: 'Organizations' },
   { to: '/queues', label: 'Jobs' },
 ];

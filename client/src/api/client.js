@@ -80,8 +80,26 @@ export async function api(
       setActiveOrgId(null);
       window.location.assign('/select-org');
     }
+    // Platform staff reached into a customer org they hold no membership in, without a live support
+    // access grant. Broadcast it so the app can offer the ONE thing that resolves it — a grant modal.
+    //
+    // Without this, the server's (correct, helpful) error told the operator to start a session with a
+    // reason, and the product gave them no way to do that: every org in the switcher was a dead end
+    // whose Retry button could never succeed. The lock had no handle.
+    //
+    // A window event rather than a per-page handler, because the 403 can surface from any query on any
+    // screen, and a per-page hook is one somebody forgets on the next page.
+    if (res.status === 403 && data?.code === 'SUPPORT_ACCESS_REQUIRED' && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('doorline:support-access-required', {
+          detail: { organizationId: data.organizationId, organizationName: data.organizationName },
+        })
+      );
+    }
+
     const err = new Error(data?.error || `Request failed: ${res.status}`);
     err.status = res.status;
+    err.code = data?.code || null; // so callers can branch without digging into err.data
     err.data = data;
     throw err;
   }

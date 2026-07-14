@@ -10,6 +10,7 @@ import { navIcon, IconSignOut, IconChevron, IconHelp } from './navIcons.jsx';
 import { IconSun, IconMoon } from './ui/icons.jsx';
 import IconButton from './ui/IconButton.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
+import SupportAccessGate from './SupportAccessGate.jsx';
 import BottomNav from './BottomNav.jsx';
 import AddedToOrgBanner from './AddedToOrgBanner.jsx';
 import BillingBanner from './BillingBanner.jsx';
@@ -275,6 +276,11 @@ export default function Layout() {
           </Suspense>
         </main>
       </div>
+
+      {/* Mounted ONCE, at the shell. A SUPPORT_ACCESS_REQUIRED 403 can surface from any query on any
+          screen — a per-page handler is one somebody forgets on the next page, and the gap would be a
+          dead end with no way out. api/client.js broadcasts the event; this is what answers it. */}
+      <SupportAccessGate />
 
       <BottomNav />
     </div>

@@ -75,11 +75,24 @@ before(async () => {
   });
   await Membership.create({ userId: custAdmin._id, organizationId: org._id, role: 'admin', isActive: true });
 
+  // A SUPER-ADMIN WHO IS ALSO A REAL MEMBER of an org. This is Omar's own shape in production (the
+  // multi-tenant migration and the promote toggle both produce it), and the first cut of this gate
+  // locked him out of his own account — see the ordering comment in middleware/orgContext.js.
+  const ownOrg = await Organization.create({ name: 'Doorline Ops', slug: 'doorline-ops', isActive: true });
+  await Subscription.create({ organizationId: ownOrg._id, status: 'active' });
+  const staffMember = await User.create({
+    firstName: 'Owen', lastName: 'Both', email: 'owen@doorline.app',
+    passwordHash: 'x', isActive: true, isSuperAdmin: true, platformRole: 'break_glass',
+  });
+  await Membership.create({ userId: staffMember._id, organizationId: ownOrg._id, role: 'admin', isActive: true });
+
   Object.assign(ctx, {
     org,
+    ownOrg,
     owner: { token: signUserToken(owner), orgId: org._id, _id: owner._id },
     support: { token: signUserToken(support), orgId: org._id, _id: support._id },
     customer: { token: signUserToken(custAdmin), orgId: org._id },
+    staffMember: { token: signUserToken(staffMember), orgId: ownOrg._id, _id: staffMember._id },
   });
 
   const app = createApp();
@@ -170,6 +183,35 @@ test('the customer\'s own admin is unaffected — and is NOT logged', { skip }, 
   assert.strictEqual(logs, 0, 'their own access is not vendor access — logging it would bury the signal');
 });
 
+test('A SUPER-ADMIN WHO IS A REAL MEMBER of an org needs NO grant — and is NOT logged', { skip }, async () => {
+  // The lockout bug. The first cut of this gate tested `isSuperAdmin` BEFORE looking for a membership
+  // and returned unconditionally, so a platform super-admin who was also the admin of their own
+  // organization got 403 on their OWN account and would have had to grant themselves "support access",
+  // with a typed reason, to use it.
+  //
+  // Vendor access means reaching into an org you are NOT a member of. A member is a member.
+  const res = await call('GET', '/admin/voters', ctx.staffMember);
+  assert.strictEqual(res.status, 200, 'a super-admin who is a genuine member of this org walks straight in');
+
+  await new Promise((r) => setTimeout(r, 120));
+  const logs = await AccessLog.countDocuments({ organizationId: ctx.ownOrg._id });
+  assert.strictEqual(
+    logs, 0,
+    'and their ordinary work is NOT recorded as vendor intrusion — an audit trail that logs normal ' +
+    'work as snooping tells you nothing about actual snooping'
+  );
+});
+
+test('the SAME super-admin still needs a grant for an org they are NOT a member of', { skip }, async () => {
+  // The other half. Being staff-and-a-member somewhere does not buy you free entry everywhere.
+  const res = await call('GET', '/admin/voters', {
+    token: ctx.staffMember.token,
+    orgId: ctx.org._id, // the CUSTOMER's org, where they hold no membership
+  });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.code, 'SUPPORT_ACCESS_REQUIRED');
+});
+
 test('support cannot delete an organization; break-glass can', { skip }, async () => {
   const denied = await call('DELETE', `/super-admin/organizations/${ctx.org._id}`, {
     token: ctx.support.token,
@@ -178,6 +220,63 @@ test('support cannot delete an organization; break-glass can', { skip }, async (
   assert.strictEqual(denied.status, 403, 'hiring someone must not mean handing them a god account');
   assert.strictEqual(denied.json.code, 'BREAK_GLASS_REQUIRED');
   assert.ok(await Organization.findById(ctx.org._id), 'the org survives');
+});
+
+test('THE UI PATH, end to end: grant → read → it shows up in the log and the sessions list', { skip }, async () => {
+  // This is the exact sequence the web console performs, in order, through the same endpoints:
+  //   1. a query 403s with SUPPORT_ACCESS_REQUIRED  → api/client.js broadcasts the event
+  //   2. SupportAccessGate posts the grant           → POST /super-admin/access/grants
+  //   3. queries refetch                             → GET /admin/voters (now 200)
+  //   4. SupportAccessPage renders                   → GET /grants?all=1  and  GET /log
+  //
+  // Worth testing as a sequence rather than as parts, because the audit trail in this subsystem has
+  // ALREADY silently recorded nothing once: the first accessLog mount matched req.path ('/voters')
+  // against '/admin/voters' and logged not one row, while the app worked perfectly.
+
+  // 1. The wall.
+  const blocked = await call('GET', '/admin/voters', ctx.support);
+  assert.strictEqual(blocked.status, 403);
+  assert.strictEqual(blocked.json.code, 'SUPPORT_ACCESS_REQUIRED');
+  assert.ok(blocked.json.organizationName, 'the modal needs the org name to render');
+  assert.ok(blocked.json.organizationId, 'and the id to POST the grant');
+
+  // 2. The modal.
+  const grant = await call('POST', '/super-admin/access/grants', {
+    token: ctx.support.token,
+    body: {
+      organizationId: blocked.json.organizationId,
+      reason: 'Customer says the Fall map is missing doors — checking their import (ticket 412).',
+      hours: 4,
+    },
+  });
+  assert.strictEqual(grant.status, 201);
+
+  // 3. The refetch.
+  const read = await call('GET', '/admin/voters', ctx.support);
+  assert.strictEqual(read.status, 200);
+
+  await new Promise((r) => setTimeout(r, 120));
+
+  // 4a. The sessions list the page renders (and the "End now" button reads from).
+  const sessions = await call('GET', '/super-admin/access/grants?all=1', { token: ctx.owner.token });
+  assert.strictEqual(sessions.status, 200);
+  const live = sessions.json.grants.find((g) => g.reason.includes('ticket 412'));
+  assert.ok(live, 'the open session is listed');
+  assert.strictEqual(live.actor, 'Sam Support');
+  assert.strictEqual(live.accessCount, 1, 'and it counts what was actually opened');
+
+  // 4b. The log the page renders.
+  const log = await call('GET', '/super-admin/access/log', { token: ctx.owner.token });
+  const entry = log.json.entries.find((e) => e.reason?.includes('ticket 412'));
+  assert.ok(entry, 'the read is in the log');
+  assert.match(entry.actor, /Sam Support/);
+  assert.strictEqual(entry.resource, 'voters');
+
+  // 5. "End now" — and the door shuts immediately.
+  const revoked = await call('DELETE', `/super-admin/access/grants/${live.id}`, { token: ctx.owner.token });
+  assert.strictEqual(revoked.status, 200);
+  const after = await call('GET', '/admin/voters', ctx.support);
+  assert.strictEqual(after.status, 403, 'revoking a session closes the door at once, not at expiry');
 });
 
 test('the audit log answers "did anyone at Doorline read my data?"', { skip }, async () => {

@@ -28,9 +28,16 @@ export function accessLog(req, res, next) {
   if (!resource) return next();
 
   res.on('finish', () => {
-    // Only STAFF. A customer's own admin reading their own voters is not vendor access, and logging
-    // it would bury the one signal this exists to produce.
-    if (!req.user?.isSuperAdmin || !req.activeOrg) return;
+    // Keyed on the GRANT, not on `isSuperAdmin`. That distinction is load-bearing.
+    //
+    // orgContext only issues a grant when the caller has NO membership in the org — which is the exact
+    // definition of vendor access. So `req.supportGrant` is present precisely when someone is reaching
+    // into a customer's data from outside, and absent when they are a member doing their own work.
+    //
+    // Keying on `isSuperAdmin` instead would log a super-admin's ordinary work in their OWN
+    // organization as vendor intrusion. An audit trail that records normal work as snooping tells you
+    // nothing about actual snooping — it is worse than no trail, because it looks like one.
+    if (!req.supportGrant || !req.activeOrg) return;
     // Only successful reads. A 403 (no grant) or a 404 is an attempt, not an access.
     if (res.statusCode >= 400) return;
 
@@ -45,7 +52,7 @@ export function accessLog(req, res, next) {
     recordAccess({
       actorUserId: req.user._id,
       organizationId: req.activeOrg._id,
-      grantId: req.supportGrant?._id || null,
+      grantId: req.supportGrant._id,
       method: req.method,
       route,
       resource,

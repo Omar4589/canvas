@@ -52,6 +52,7 @@ const SuperAdminHomePage = lazy(() => import('./pages/SuperAdminHomePage.jsx'));
 const SuperAdminUsersPage = lazy(() => import('./pages/SuperAdminUsersPage.jsx'));
 const SuperAdminPeoplePage = lazy(() => import('./pages/SuperAdminPeoplePage.jsx'));
 const SuperAdminImportsPage = lazy(() => import('./pages/SuperAdminImportsPage.jsx'));
+const SupportAccessPage = lazy(() => import('./pages/SupportAccessPage.jsx'));
 const PersonDetailPage = lazy(() => import('./pages/PersonDetailPage.jsx'));
 
 function PageFallback() {
@@ -204,6 +205,10 @@ export default function App() {
             <Route path="/super-admin/people" element={<SuperAdminPeoplePage />} />
             <Route path="/super-admin/people/:personId" element={<PersonDetailPage />} />
             <Route path="/super-admin/imports" element={<SuperAdminImportsPage />} />
+            {/* Who is inside a customer's data right now, who has been, and why. Platform-scoped
+                (no orgContext), so it stays reachable even when every org-scoped panel is 403ing
+                for want of a grant — which is exactly when you need it. */}
+            <Route path="/super-admin/access" element={<SupportAccessPage />} />
             <Route path="/organizations" element={<OrganizationsPage />} />
             {/* Jobs (Bull Board) is a PLATFORM page, not an org one: the server gates the
                 ticket on requireSuperAdmin with no orgContext, and it's only ever linked from
