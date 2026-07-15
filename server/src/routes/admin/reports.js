@@ -29,7 +29,7 @@ import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps } from '../../services/reports/overlaps.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import { detectFlags } from '../../services/audit/flagDetection.js';
-import { FLAG_THRESHOLDS, SEVERITY_RANK } from '../../services/audit/flagThresholds.js';
+import { FLAG_THRESHOLDS, SEVERITY_RANK, AUDIT_WINDOW_MAX_DAYS } from '../../services/audit/flagThresholds.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { VoterNote } from '../../models/VoterNote.js';
 
@@ -655,6 +655,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           stepsDone: setup.stepsDone,
           stepsTotal: setup.stepsTotal,
           nextStepKey: setup.nextStepKey,
+          openMockFlags: setup.openMockFlags || 0,
           households: c.households,
           homesKnocked: c.homesKnocked,
           knockedPct: c.households > 0 ? Math.round((c.homesKnocked / c.households) * 100) : 0,
@@ -1380,7 +1381,9 @@ router.get('/overlaps', async (req, res, next) => {
 // (= grandKnocks - billableKnocks) — exact in both modes. dayKnocks/daySurveys/dayLit
 // keep their names in both modes (they are the WINDOW totals; mobile only ever requests
 // one day). Reuses knocksPipeline + computeOverlaps. See docs/METRICS.md.
-const TIMELINE_MAX_DAYS = 62;
+// = AUDIT_WINDOW_MAX_DAYS so the flags/timeline range cap and the openMockFlags nudge
+// count (campaignSummaries.js) can never drift apart.
+const TIMELINE_MAX_DAYS = AUDIT_WINDOW_MAX_DAYS;
 
 function addDaysYmd(ymd, n) {
   const [y, m, d] = ymd.split('-').map(Number);

@@ -88,6 +88,24 @@ panel and each flag appears as a colored dot at the spot it was recorded, with a
 house — so you can *see* the geography (on the street? across the block? all from one corner?). The
 reason chips show the counts; clicking a flag opens a panel to review it right there.
 
+## How you're notified (the mock-GPS nudge)
+
+You don't have to go looking for the worst flag. When an **open Mock location flag** exists, the app
+tells you everywhere you'd naturally land:
+
+- **The campaign dashboard** shows a red **"Mock GPS detected"** alert at the top, with a
+  **Review in Audit** button that opens the Audit page *already filtered* — Mock chip lit, status
+  Open, and the full audit date window (so the flag can't hide behind the page's Today default).
+- **The sidebar** shows a red count badge on **Audit** (a red dot when the sidebar is collapsed;
+  on small screens, a dot on the **More** tab and the count in its sheet).
+- **The mobile admin app** shows matching red pills: on each campaign card on the Overview
+  landing, on the **GPS audit** quick-action tile, and on the More → **GPS audit** row (that one is
+  the total across every campaign you can see).
+
+The nudge counts **open mock-location flags only** — the one flag that is affirmative device
+evidence, never noise — over the audit's date window, and every badge drops the moment the flag is
+reviewed or dismissed. Other flag types don't nudge; they wait in the Audit page as usual.
+
 ## What "reviewing" does
 
 A flag starts **Open**. You mark it:
@@ -131,6 +149,7 @@ collection, no worker job — the GPS the detector reads has been captured on ev
 | Audit page | [client/src/pages/AuditPage.jsx](../client/src/pages/AuditPage.jsx) (+ `AuditSummaryTable`, `FlaggedEntryList`) |
 | Map overlay + panel | [client/src/lib/mapRender.js](../client/src/lib/mapRender.js), [MapFilters.jsx](../client/src/components/MapFilters.jsx), [FlaggedEntryPanel.jsx](../client/src/components/FlaggedEntryPanel.jsx) |
 | Shared review control / badges / client meta | [FlagReviewControl.jsx](../client/src/components/FlagReviewControl.jsx), [FlagReasonBadges.jsx](../client/src/components/FlagReasonBadges.jsx), [client/src/lib/flags.js](../client/src/lib/flags.js) |
+| Nudge count (`openMockFlags`) | [server/src/services/reports/campaignSummaries.js](../server/src/services/reports/campaignSummaries.js) (rides `GET /admin/campaigns` + the campaign-rollup; badges in `Layout.jsx`/`BottomNav.jsx`/`DashboardPage.jsx` + the mobile admin screens) |
 
 ## B. The detector
 
@@ -340,8 +359,20 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **The location gate lives BEFORE the optimistic patch.** A blocked tap must leave zero trace — if
   the gate ever moves after `writeBootstrap`/`markPendingHousehold`, a blocked knock would need
   rollback and could linger as a phantom recolor.
+- **`openMockFlags` window parity.** The nudge counts `AUDIT_WINDOW_MAX_DAYS − 1` days (a strict
+  subset of the flags endpoint's `TIMELINE_MAX_DAYS = AUDIT_WINDOW_MAX_DAYS` cap, which the
+  dashboard deep link seeds) so a badge can never point at an entry the Audit page won't show. It
+  excludes `via:'bulk'` (parity with the detector's scan filter), and open = no `FlagReview` row.
+  Served by the partial index `{campaignId, 'location.mocked'}` — **deliberately a distinct key
+  shape**: buildIndexes diffs by key shape only, so a partial index reusing an existing key would
+  silently never build.
+- **Reviewing a flag must invalidate the nudge sources.** All four review handlers (web
+  AuditPage/MapPage, mobile audit/map) invalidate `['admin','campaigns']` + the campaign-rollup
+  keys alongside the flags queries — miss one and a cleared flag leaves a stale badge.
 - **Deploy the server first** (the endpoints must exist before the client calls them). `FlagReview`,
   the `replaced` snapshot, and the `location.mocked`/`fixTimestamp` fields all need **no migration**
-  (absence = open / no special treatment / never flags). The location gate, banner, context line +
-  imperial units are JS-only: web deploy + mobile **OTA** (no native build — app.json untouched,
-  expo-location already installed).
+  (absence = open / no special treatment / never flags). The nudge's partial index DOES need the
+  index migration (prod autoIndex is off): run `node src/migrations/buildIndexes.js --apply` on
+  deploy (dry-run first). The location gate, banner, context line, nudge badges + imperial units
+  are JS-only: web deploy + mobile **OTA** (no native build — app.json untouched, expo-location
+  already installed).

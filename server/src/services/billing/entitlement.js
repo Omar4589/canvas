@@ -1,4 +1,5 @@
 import { Subscription } from '../../models/Subscription.js';
+import { windDownDeletionDate } from './windDown.js';
 
 // Pure effective-state resolution — no DB, no clock writes. The one computed
 // transition lives here: a `trial` past trialEndsAt IS suspended, resolved at
@@ -36,7 +37,16 @@ export function entitlementFor(sub, now = new Date()) {
     case 'suspended':
       return { effective: 'suspended', canWrite: false, canCanvass: false, banner: 'suspended', trialDaysLeft: null };
     case 'canceled':
-      return { effective: 'canceled', canWrite: false, canCanvass: false, banner: 'canceled', trialDaysLeft: null };
+      // windDownEndsAt is the SAME date the wind-down job deletes on (both call windDownDeletionDate),
+      // so the banner's warning is provably the deletion date. null if there's no cancellation anchor.
+      return {
+        effective: 'canceled',
+        canWrite: false,
+        canCanvass: false,
+        banner: 'canceled',
+        trialDaysLeft: null,
+        windDownEndsAt: windDownDeletionDate(sub.statusChangedAt),
+      };
     default:
       // Unknown status (a future enum value reaching an old server) — fail open.
       return { effective: 'active', canWrite: true, canCanvass: true, banner: null, trialDaysLeft: null };

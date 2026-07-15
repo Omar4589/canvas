@@ -404,7 +404,7 @@ export default function CampaignDetail() {
             <NavTileGrid
               items={[
                 { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
-                { label: 'GPS audit', subtitle: 'Review flagged entries', onPress: goAudit },
+                { label: 'GPS audit', subtitle: 'Review flagged entries', badge: campaign?.openMockFlags || 0, onPress: goAudit },
                 { label: 'Notes', subtitle: 'Door, survey & admin notes', onPress: goNotes },
                 { label: 'Users', subtitle: 'Manage people', onPress: () => router.push('/(app)/admin/users') },
                 { label: 'Assignments', subtitle: 'Books & canvassers', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },

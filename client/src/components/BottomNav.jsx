@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { NavLink, useMatch } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { ORG_NAV, CAMPAIGN_NAV, SUPER_NAV } from './navItems.js';
 import { navIcon } from './navIcons.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { api } from '../api/client.js';
 import Logo from './Logo.jsx';
 
 // Two-level mobile nav, mirroring the desktop sidebar (Layout.jsx): at the top level
@@ -46,6 +48,17 @@ export default function BottomNav() {
   const campaignMatch = useMatch('/campaigns/:campaignId/*');
   const inCampaign = !!campaignMatch;
   const campaignId = campaignMatch?.params.campaignId || '';
+
+  // Mock-GPS nudge: same cached query the desktop sidebar uses (shared cache entry — no
+  // extra fetch). Drives the red dot on the More tab + the pill on the Audit sheet item.
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+    staleTime: 60 * 1000,
+    enabled: inCampaign,
+  });
+  const openMockFlags =
+    (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId))?.openMockFlags || 0;
 
   function close() {
     setOpen(false);
@@ -94,7 +107,12 @@ export default function BottomNav() {
             open ? 'text-brand-accent' : 'text-fg-muted',
           ].join(' ')}
         >
-          <IconMore />
+          <span className="relative">
+            <IconMore />
+            {openMockFlags > 0 && (
+              <span className="absolute -right-1.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />
+            )}
+          </span>
           <span>More</span>
         </button>
       </nav>
@@ -129,7 +147,16 @@ export default function BottomNav() {
             <div className="space-y-1">
               {moreItems.map((it) => (
                 <NavLink key={it.key} to={it.to} end={it.end} className={sheetLinkClass} onClick={close}>
-                  {it.label}
+                  {it.key === 'audit' && openMockFlags > 0 ? (
+                    <span className="flex items-center">
+                      {it.label}
+                      <span className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-1 ring-white/60">
+                        {openMockFlags}
+                      </span>
+                    </span>
+                  ) : (
+                    it.label
+                  )}
                 </NavLink>
               ))}
             </div>

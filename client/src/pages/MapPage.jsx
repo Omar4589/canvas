@@ -92,11 +92,13 @@ export default function MapPage() {
     setFlagFlash(FLAG_FLASH_LABEL[status] || 'updated');
     clearTimeout(flagFlashTimer.current);
     flagFlashTimer.current = setTimeout(() => setFlagFlash(null), 2500);
-    // Refresh this surface + mark the Audit page's flags query stale (cross-surface sync).
+    // Refresh this surface + mark the Audit page's flags query AND the mock-GPS nudge
+    // counts (sidebar/BottomNav badge via ['admin','campaigns'], dashboard banner via
+    // the rollup) stale — reviewing a flag must clear the badges immediately.
     qc.invalidateQueries({
       predicate: (q) =>
-        (q.queryKey?.[0] === 'admin' && q.queryKey?.[1] === 'flags-map') ||
-        (q.queryKey?.[0] === 'reports' && q.queryKey?.[1] === 'flags'),
+        (q.queryKey?.[0] === 'admin' && (q.queryKey?.[1] === 'flags-map' || q.queryKey?.[1] === 'campaigns')) ||
+        (q.queryKey?.[0] === 'reports' && (q.queryKey?.[1] === 'flags' || q.queryKey?.[1] === 'campaign-rollup')),
     });
   }
   // A "View on map" deep-link from the Notes hub (?household=<id>) opens that household.

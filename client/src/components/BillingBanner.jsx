@@ -71,13 +71,28 @@ export default function BillingBanner() {
       </NextStepBanner>
     );
   }
-  // Canceled is now READ-ONLY (not a lockout), so GET /admin/billing answers 200 with this banner —
-  // the org's admins must still see that the subscription ended and that they can export during the
-  // wind-down before deletion.
+  // Canceled is now READ-ONLY (not a lockout), so GET /admin/billing answers 200 with this banner. Since
+  // there is no email anywhere in the product, THIS is the only warning a customer gets that their data
+  // is scheduled for deletion — so it states the actual date. Both the date and the days-left figure are
+  // derived from the SINGLE windDownEndsAt the server computed (the same value the deletion job acts on),
+  // so nothing here can drift from when the data actually goes.
   if (ent.banner === 'canceled') {
+    const endsAt = ent.windDownEndsAt ? new Date(ent.windDownEndsAt) : null;
+    const daysLeft = endsAt ? Math.max(0, Math.ceil((endsAt.getTime() - Date.now()) / 86_400_000)) : null;
+    const dateStr = endsAt
+      ? endsAt.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+      : null;
+    let body;
+    if (!endsAt) {
+      body = 'Your data is available to export during the wind-down period. Reach out to reactivate.';
+    } else if (daysLeft <= 0) {
+      body = `Your data is scheduled for permanent deletion (on or after ${dateStr}). Export it now, or reach out to reactivate.`;
+    } else {
+      body = `Export your data before ${dateStr} — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left. After that it is permanently deleted. Reach out to reactivate.`;
+    }
     return (
       <NextStepBanner tone="danger" title="This subscription has ended — read-only." className="mb-4" action={contact}>
-        Your data is available to export during the wind-down period. Reach out to reactivate.
+        {body}
       </NextStepBanner>
     );
   }

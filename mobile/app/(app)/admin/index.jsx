@@ -53,6 +53,11 @@ function CampaignCard({ campaign, onPress }) {
     <Pressable onPress={onPress} style={({ pressed }) => [styles.campaignCard, pressed && { opacity: 0.85 }]}>
       <View style={styles.campaignHead}>
         <Text style={styles.campaignName} numberOfLines={1}>{c.name}</Text>
+        {(c.openMockFlags || 0) > 0 && (
+          <View style={styles.mockPill}>
+            <Text style={styles.mockPillText}>{c.openMockFlags} mock GPS</Text>
+          </View>
+        )}
         <View style={[styles.typePill, isLitDrop ? styles.typePillLit : styles.typePillSurvey]}>
           <Text style={[styles.typePillText, isLitDrop ? styles.typePillTextLit : styles.typePillTextSurvey]}>
             {isLitDrop ? 'Lit drop' : 'Survey'}
@@ -344,6 +349,15 @@ function makeStyles(t) {
   },
   campaignName: { ...type.h3, fontSize: 15, flex: 1 },
   typePill: { borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  // Mock-GPS nudge pill (open mock-location flags, server-computed) — flagBadge tones.
+  mockPill: {
+    backgroundColor: colors.dangerBg,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    marginRight: spacing.xs,
+  },
+  mockPillText: { fontSize: 10, fontWeight: '700', color: colors.danger, textTransform: 'uppercase', letterSpacing: 0.5 },
   typePillSurvey: { backgroundColor: colors.infoBg },
   typePillLit: { backgroundColor: colors.accentPurpleBg },
   typePillText: { fontSize: 10, fontWeight: '700' },

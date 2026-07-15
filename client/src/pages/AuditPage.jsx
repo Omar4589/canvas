@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelector.jsx';
@@ -52,11 +52,28 @@ export default function AuditPage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
   const { homePath } = useAuth();
-  const [dateRange, setDateRange] = useState(null);
-  const rangeTouchedRef = useRef(false);
+  // Deep link from the dashboard's mock-GPS banner:
+  // ?reason=mock_gps&status=open&from=YYYY-MM-DD&to=YYYY-MM-DD — seeded ONCE via the
+  // state initializers (MapPage's ?flag=1/?focusActivityId pattern). Initializers don't
+  // re-run without a remount, which holds because the banner is the only param-carrying
+  // entry point (a different route → fresh mount); sidebar/BottomNav Audit links must
+  // stay parameterless.
+  const [searchParams] = useSearchParams();
+  const [dateRange, setDateRange] = useState(() => {
+    const from = searchParams.get('from');
+    if (!from) return null;
+    return { preset: 'custom', from, to: searchParams.get('to') || null };
+  });
+  const rangeTouchedRef = useRef(!!searchParams.get('from'));
   const [effortId, setEffortId] = useState('');
-  const [reasonFilter, setReasonFilter] = useState([]); // [] = all reasons
-  const [reviewStatus, setReviewStatus] = useState('open');
+  const [reasonFilter, setReasonFilter] = useState(() => {
+    const r = searchParams.get('reason');
+    return REASON_META.some((m) => m.key === r) ? [r] : []; // [] = all reasons
+  });
+  const [reviewStatus, setReviewStatus] = useState(() => {
+    const s = searchParams.get('status');
+    return REVIEW_STATUS.some((o) => o.value === s) ? s : 'open';
+  });
   const [userId, setUserId] = useState(''); // drill-in to one canvasser
 
   const qc = useQueryClient();
@@ -69,11 +86,13 @@ export default function AuditPage() {
     setFlagFlash(FLAG_FLASH_LABEL[status] || 'updated');
     clearTimeout(flagFlashTimer.current);
     flagFlashTimer.current = setTimeout(() => setFlagFlash(null), 2500);
-    // Refresh this page + mark the Map's flags query stale (cross-surface sync).
+    // Refresh this page + mark the Map's flags query AND the mock-GPS nudge counts
+    // (sidebar/BottomNav badge via ['admin','campaigns'], dashboard banner via the
+    // rollup) stale — reviewing a flag must clear the badges immediately.
     qc.invalidateQueries({
       predicate: (q) =>
-        (q.queryKey?.[0] === 'admin' && q.queryKey?.[1] === 'flags-map') ||
-        (q.queryKey?.[0] === 'reports' && q.queryKey?.[1] === 'flags'),
+        (q.queryKey?.[0] === 'admin' && (q.queryKey?.[1] === 'flags-map' || q.queryKey?.[1] === 'campaigns')) ||
+        (q.queryKey?.[0] === 'reports' && (q.queryKey?.[1] === 'flags' || q.queryKey?.[1] === 'campaign-rollup')),
     });
   }
 

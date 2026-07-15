@@ -102,6 +102,9 @@ export default function Layout() {
   });
   const campaigns = campaignsQ.data?.campaigns || [];
   const currentCampaign = campaigns.find((c) => String(c._id) === String(campaignId));
+  // Mock-GPS nudge: open mock-location flags for this campaign (61-day window, server-
+  // computed). Drives the red badge on the Audit nav item below.
+  const openMockFlags = currentCampaign?.openMockFlags || 0;
 
   const isFullBleed =
     location.pathname.endsWith('/map') || location.pathname.endsWith('/turfs') || location.pathname === '/queues';
@@ -191,10 +194,29 @@ export default function Layout() {
               {CAMPAIGN_NAV.map((n) => {
                 const Icon = navIcon(n.icon);
                 const to = `/campaigns/${campaignId}${n.slug ? '/' + n.slug : ''}`;
+                // Mock-GPS nudge on the Audit item: expanded = red count pill, collapsed = red dot.
+                const mockBadge = n.slug === 'audit' && openMockFlags > 0;
                 return (
-                  <NavLink key={n.slug || 'home'} to={to} end={!n.slug} title={collapsed ? n.label : undefined} className={navClass(collapsed)}>
+                  <NavLink
+                    key={n.slug || 'home'}
+                    to={to}
+                    end={!n.slug}
+                    title={collapsed ? n.label : mockBadge ? `${openMockFlags} open mock-GPS flag${openMockFlags === 1 ? '' : 's'}` : undefined}
+                    className={(s) => navClass(collapsed)(s) + (mockBadge ? ' relative' : '')}
+                  >
                     <Icon size={20} />
                     {!collapsed && <span>{n.label}</span>}
+                    {mockBadge && !collapsed && (
+                      <span
+                        aria-label={`${openMockFlags} open mock-GPS flags`}
+                        className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-1 ring-white/60"
+                      >
+                        {openMockFlags}
+                      </span>
+                    )}
+                    {mockBadge && collapsed && (
+                      <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-danger" />
+                    )}
                   </NavLink>
                 );
               })}

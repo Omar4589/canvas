@@ -5,7 +5,9 @@ import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { FlagReview } from '../../models/FlagReview.js';
 import { deriveSetupSteps } from './setupSteps.js';
+import { AUDIT_WINDOW_MAX_DAYS } from '../audit/flagThresholds.js';
 
 // One round-trip of cheap grouped counts for a set of campaigns, turned into the
 // per-campaign setup-progress + management state used by the campaigns list, the
@@ -14,14 +16,14 @@ import { deriveSetupSteps } from './setupSteps.js';
 //
 // `campaigns`: array of lean docs with at least { _id, type, surveyTemplateId, name }.
 // Returns Map<campaignIdStr, { setupComplete, stepsDone, stepsTotal, nextStepKey,
-//   hasCanvassed, deletable, canEditType }>.
+//   hasCanvassed, deletable, canEditType, openMockFlags }>.
 export async function campaignSummaries({ organizationId, campaigns }) {
   const ids = campaigns.map((c) => c._id);
   const out = new Map();
   if (!ids.length) return out;
 
   const group = { $group: { _id: '$campaignId', n: { $sum: 1 } } };
-  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs] =
+  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows] =
     await Promise.all([
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true } }, group]),
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true, effortId: { $ne: null } } }, group]),
@@ -36,6 +38,21 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       Campaign.find(
         { _id: { $in: ids } },
         { 'stats.activityCount': 1, 'stats.surveyCount': 1, 'stats.reconciledAt': 1 }
+      ).lean(),
+      // Open mock-GPS flags for the nudge badge. Window = AUDIT_WINDOW_MAX_DAYS − 1: a
+      // strict subset of the range the dashboard's "Review in Audit" deep link seeds, so
+      // the badge can never count an entry the clicked-through page doesn't show.
+      // via:'bulk' rows are invisible to the detector (flagDetection.js scanFilter), so
+      // they're excluded here too. Served by the partial {campaignId, 'location.mocked'}
+      // index (mocked-only rows); the timestamp bound filters the tiny matched set.
+      CanvassActivity.find(
+        {
+          campaignId: { $in: ids },
+          'location.mocked': true,
+          via: { $ne: 'bulk' },
+          timestamp: { $gte: new Date(Date.now() - (AUDIT_WINDOW_MAX_DAYS - 1) * 24 * 60 * 60 * 1000) },
+        },
+        '_id campaignId'
       ).lean(),
     ]);
 
@@ -57,6 +74,24 @@ export async function campaignSummaries({ organizationId, campaigns }) {
     ]);
     canvassedSet = new Set(canvassedIds.map(String));
     respondedSet = new Set(respondedIds.map(String));
+  }
+
+  // open = mocked rows with NO FlagReview decision (absence of a record IS 'open' — see
+  // models/FlagReview.js). actionModel is in the filter ON PURPOSE so the unique compound
+  // index {organizationId, actionModel, actionId} serves the lookup. Skipped entirely in
+  // the common case (honest orgs have zero mock rows).
+  const openMockBy = new Map();
+  if (mockRows.length) {
+    const reviews = await FlagReview.find(
+      { organizationId, actionModel: 'CanvassActivity', actionId: { $in: mockRows.map((r) => r._id) } },
+      'actionId'
+    ).lean();
+    const reviewedSet = new Set(reviews.map((r) => String(r.actionId)));
+    for (const r of mockRows) {
+      if (reviewedSet.has(String(r._id))) continue;
+      const k = String(r.campaignId);
+      openMockBy.set(k, (openMockBy.get(k) || 0) + 1);
+    }
   }
 
   const map = (agg) => new Map(agg.map((r) => [String(r._id), r.n]));
@@ -94,6 +129,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       hasCanvassed,
       deletable: !hasCanvassed,
       canEditType: !hasCanvassed,
+      openMockFlags: openMockBy.get(k) || 0,
     });
   }
   return out;

@@ -4,6 +4,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { OrgDeletionRequest } from '../../models/OrgDeletionRequest.js';
 import { RetentionRun } from '../../models/RetentionRun.js';
 import { deleteOrganization } from '../platform/deleteOrganization.js';
+import { windDownDeletionDate } from '../billing/windDown.js';
 
 // The three disclosed retention triggers. Each is a REAL purge — it calls the same irreversible
 // org-delete cascade a super-admin would — and each writes a RetentionRun so that a trigger which
@@ -22,7 +23,9 @@ import { deleteOrganization } from '../platform/deleteOrganization.js';
 // be something that HAPPENS, not something we say. Before this, nothing in the codebase ever deleted
 // voter data on a timer — a canceled customer's voter file sat in our database forever.
 
-export const WIND_DOWN_DAYS = Number(process.env.RETENTION_WIND_DOWN_DAYS || 60);
+// WIND_DOWN_DAYS + the deletion-date math live in one shared place so the customer-facing banner and
+// this deletion job cannot disagree. Re-exported here for the existing importers/tests.
+export { WIND_DOWN_DAYS } from '../billing/windDown.js';
 export const DORMANCY_MONTHS = Number(process.env.RETENTION_DORMANCY_MONTHS || 30);
 export const DELETE_REQUEST_SLA_DAYS = Number(process.env.RETENTION_DELETE_SLA_DAYS || 30);
 
@@ -48,14 +51,19 @@ async function isExempt(orgId) {
  * people we don't do.
  */
 export async function purgeWoundDownOrgs({ apply = true } = {}) {
-  const cutoff = new Date(Date.now() - WIND_DOWN_DAYS * DAY);
+  const now = Date.now();
   const subs = await Subscription.find(
-    { status: 'canceled', statusChangedAt: { $lte: cutoff } },
+    { status: 'canceled' },
     'organizationId statusChangedAt'
   ).lean();
 
   const due = [];
   for (const s of subs) {
+    // The due decision is windDownDeletionDate(statusChangedAt) <= now — the SAME function that computes
+    // the date shown on the customer's banner, so the banner date IS this boundary. Canceled orgs are
+    // few, so an indexed status query + an in-code check per row is fine and keeps the math in one place.
+    const deletionDate = windDownDeletionDate(s.statusChangedAt);
+    if (!deletionDate || deletionDate.getTime() > now) continue;
     if (await isExempt(s.organizationId)) continue;
     const org = await Organization.findById(s.organizationId, 'name slug').lean();
     if (org) due.push({ org, since: s.statusChangedAt });

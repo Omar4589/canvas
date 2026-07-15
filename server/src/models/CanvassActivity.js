@@ -110,5 +110,13 @@ canvassActivitySchema.index({ userId: 1, householdId: 1, passId: 1 }); // within
 // Org-wide, date-ranged reports (rollup/timeline/audit without a campaignId): without this they
 // fall back to the single-field organizationId index and scan the org's whole ledger by date.
 canvassActivitySchema.index({ organizationId: 1, timestamp: -1 });
+// Mock-GPS nudge (campaignSummaries.openMockFlags): tiny partial index containing ONLY
+// mocked rows (near-empty for honest orgs). DELIBERATE distinct key shape: buildIndexes.js
+// diffs indexes by key shape alone, so a partial index reusing {campaignId:1, timestamp:-1}
+// above would be reported as already-present and silently never built.
+canvassActivitySchema.index(
+  { campaignId: 1, 'location.mocked': 1 },
+  { partialFilterExpression: { 'location.mocked': true } }
+);
 
 export const CanvassActivity = mongoose.model('CanvassActivity', canvassActivitySchema);

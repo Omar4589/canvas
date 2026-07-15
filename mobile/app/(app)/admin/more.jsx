@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '../../../lib/api';
 import { signOut } from '../../../lib/authState';
 import {
   loadCurrentUser,
@@ -36,7 +37,7 @@ const WEB_NOTES = {
   },
 };
 
-function Row({ icon, label, sub, onPress, danger }) {
+function Row({ icon, label, sub, onPress, danger, badge }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   return (
@@ -49,6 +50,11 @@ function Row({ icon, label, sub, onPress, danger }) {
         <Text style={[styles.rowLabel, danger && { color: colors.danger }]}>{label}</Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
+      {badge > 0 ? (
+        <View style={styles.rowBadge}>
+          <Text style={styles.rowBadgeText}>{badge}</Text>
+        </View>
+      ) : null}
       <Text style={styles.rowChevron}>›</Text>
     </Pressable>
   );
@@ -63,6 +69,16 @@ export default function AdminMore() {
   // Team leads don't get the org Users admin (it's admin-only, and would 403). They
   // manage their crew's book assignments from the campaign-scoped Books tab instead.
   const [isLead, setIsLead] = useState(false);
+
+  // Mock-GPS nudge on the GPS-audit row: SUM of open mock flags across every campaign
+  // the viewer can see (the server lead-scopes the list). Shared cache with the campaign
+  // screens — no extra fetch when one of them already loaded it.
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+    staleTime: 60 * 1000,
+  });
+  const openMockTotal = (campaignsQ.data?.campaigns || []).reduce((n, c) => n + (c.openMockFlags || 0), 0);
 
   useEffect(() => {
     Promise.all([loadCurrentUser(), loadMemberships(), loadActiveOrgId()]).then(
@@ -126,7 +142,7 @@ export default function AdminMore() {
         <Text style={styles.sectionLabel}>Manage</Text>
         <View style={styles.group}>
           {!isLead && <Row icon="👥" label="Users" onPress={() => router.push('/(app)/admin/users')} />}
-          <Row icon="🚩" label="GPS audit" sub="Review flagged entries" onPress={() => router.push('/(app)/admin/audit')} />
+          <Row icon="🚩" label="GPS audit" sub="Review flagged entries" badge={openMockTotal} onPress={() => router.push('/(app)/admin/audit')} />
           <Row icon="📝" label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
           <Row icon="🔍" label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
           <Row icon="🚪" label="Switch to canvass mode" onPress={onCanvassMode} />
@@ -229,6 +245,15 @@ function makeStyles(t) {
     rowLabel: { ...t.type.bodyStrong, fontSize: 15 },
     rowSub: { ...t.type.caption, marginTop: 1 },
     rowChevron: { fontSize: 20, color: t.colors.textMuted },
+    // Mock-GPS nudge count on the GPS-audit row (flagBadge tones).
+    rowBadge: {
+      backgroundColor: t.colors.dangerBg,
+      borderRadius: radius.pill,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+      marginRight: spacing.sm,
+    },
+    rowBadgeText: { fontSize: 11, fontWeight: '700', color: t.colors.danger },
 
     noteBackdrop: {
       flex: 1,

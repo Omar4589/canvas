@@ -28,6 +28,8 @@ const {
   WIND_DOWN_DAYS, DORMANCY_MONTHS, DELETE_REQUEST_SLA_DAYS, TRIGGER_JOB,
 } = await import('../src/services/retention/triggers.js');
 const { REPEATABLE_JOBS } = await import('../src/services/retention/scheduler.js');
+const { entitlementFor } = await import('../src/services/billing/entitlement.js');
+const { windDownDeletionDate } = await import('../src/services/billing/windDown.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -98,6 +100,40 @@ test(`WIND-DOWN: a customer canceled >${WIND_DOWN_DAYS}d ago is purged; one canc
   assert.strictEqual(await votersOf(recent), 1);
   assert.ok(await Organization.findById(active._id), 'a PAYING customer must never be touched');
   assert.strictEqual(await votersOf(active), 1);
+});
+
+test('TIE: the banner date IS the wind-down deletion boundary — one shared helper, no drift', { skip }, async () => {
+  // The banner is the ONLY warning a customer gets before deletion (no email exists). If the banner said
+  // one date and the job deleted on another, that is the words-vs-code drift this project exists to kill.
+  // Both entitlementFor (the banner) and purgeWoundDownOrgs (the job) call windDownDeletionDate, and this
+  // test asserts the banner's date equals the job's selection boundary for the same org.
+  const now = Date.now();
+  const overdue = await makeOrg('Overdue', 'wd-due', 'canceled', new Date(now - (WIND_DOWN_DAYS + 1) * DAY));
+  const fresh = await makeOrg('Fresh cancel', 'wd-fresh', 'canceled', new Date(now - (WIND_DOWN_DAYS - 5) * DAY));
+
+  const dueSub = await Subscription.findOne({ organizationId: overdue._id }).lean();
+  const freshSub = await Subscription.findOne({ organizationId: fresh._id }).lean();
+
+  // 1. The banner's date is literally windDownDeletionDate(statusChangedAt) — the same function the job
+  //    uses to decide. Not two copies asserted equal; one function, so they cannot diverge.
+  assert.strictEqual(
+    entitlementFor(dueSub).windDownEndsAt.getTime(),
+    windDownDeletionDate(dueSub.statusChangedAt).getTime(),
+    'banner date == the shared deletion-date helper'
+  );
+
+  // 2. The job selects an org EXACTLY when its banner date is at/behind now.
+  const res = await purgeWoundDownOrgs({ apply: false });
+  assert.ok(res.orgs.includes('wd-due'), 'overdue org (banner date in the past) IS due for deletion');
+  assert.ok(!res.orgs.includes('wd-fresh'), 'fresh cancel (banner date in the future) is NOT yet due');
+
+  // 3. Cross-check the boundary directly against the banner value the customer would see.
+  assert.ok(entitlementFor(dueSub).windDownEndsAt.getTime() <= now, 'due: the date the customer sees is at/behind now');
+  assert.ok(entitlementFor(freshSub).windDownEndsAt.getTime() > now, 'fresh: the date the customer sees is in the future');
+
+  // 4. Non-canceled subscriptions have no wind-down date at all.
+  assert.strictEqual(entitlementFor({ status: 'active' }).windDownEndsAt ?? null, null);
+  assert.strictEqual(entitlementFor({ status: 'suspended' }).windDownEndsAt ?? null, null);
 });
 
 test(`DORMANCY: a NON-PAYING org with no activity for ${DORMANCY_MONTHS} months → purged; a recent knock saves it`, { skip }, async () => {

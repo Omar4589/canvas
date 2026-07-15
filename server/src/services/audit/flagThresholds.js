@@ -46,6 +46,13 @@ export const FLAG_THRESHOLDS = {
   ONE_SPOT_HOUSE_SPREAD_M: 60,
 };
 
+// Max audit window (days). Shared by the flags endpoint's range cap / default lower
+// bound (routes/admin/reports.js TIMELINE_MAX_DAYS) and the openMockFlags nudge count
+// (campaignSummaries.js), so the badge can never count an entry the Audit page can't
+// display. Lives here (not in reports.js) because a service importing a routes file
+// would be a circular import.
+export const AUDIT_WINDOW_MAX_DAYS = 62;
+
 // Severity ordering helper (low < med < high) for rolling up a canvasser's worst flag.
 export const SEVERITY_RANK = { low: 1, med: 2, high: 3 };
 

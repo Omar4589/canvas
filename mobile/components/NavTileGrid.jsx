@@ -3,8 +3,10 @@ import { spacing, radius } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
 
 // A text-only, two-column grid of tappable nav cards (bold label + a muted one-line
-// subtitle). Deliberately icon/emoji-free. 4 items -> a clean 2x2; 3 items -> 2 + 1 (the
-// last tile sits left-aligned). Used for the campaign-home and super-admin "Quick actions".
+// subtitle). Deliberately icon/emoji-free, with one exception: an optional numeric
+// `badge` per tile renders as a small danger count pill top-right (the mock-GPS nudge).
+// 4 items -> a clean 2x2; 3 items -> 2 + 1 (the last tile sits left-aligned). Used for
+// the campaign-home and super-admin "Quick actions".
 export default function NavTileGrid({ items = [] }) {
   const styles = useThemedStyles(makeStyles);
   return (
@@ -20,6 +22,11 @@ export default function NavTileGrid({ items = [] }) {
             pressed && !it.disabled && styles.tilePressed,
           ]}
         >
+          {it.badge > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{it.badge}</Text>
+            </View>
+          ) : null}
           <Text style={styles.tileLabel} numberOfLines={1}>
             {it.label}
           </Text>
@@ -56,5 +63,15 @@ function makeStyles(t) {
     tileDisabled: { opacity: 0.5 },
     tileLabel: { ...type.bodyStrong },
     tileSubtitle: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+    badge: {
+      position: 'absolute',
+      top: spacing.sm,
+      right: spacing.sm,
+      backgroundColor: colors.dangerBg,
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 1,
+      borderRadius: radius.sm,
+    },
+    badgeText: { color: colors.danger, fontSize: 10, fontWeight: '700' },
   });
 }

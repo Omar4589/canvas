@@ -116,7 +116,11 @@ export async function captureCampaignBeforeDelete(campaign) {
  * running twice yields the same result, and the `deleted` bucket is never touched). This is the backfill
  * body, and it doubles as the drift-corrector: any live increment ever missed is made exact here.
  */
-export async function recomputeLive({ stampBackfill = false } = {}) {
+/**
+ * The current live counts from real rows, excluding internal orgs. READ-ONLY — used both by the backfill
+ * dry run (to preview without writing) and by recomputeLive (to persist).
+ */
+export async function computeLiveCounts() {
   const internal = await internalOrgIds();
   const orgNin = internal.length ? { $nin: internal } : { $exists: true };
   const [organizations, campaigns, doorsKnocked, surveyResponses, votersProcessed] = await Promise.all([
@@ -126,7 +130,11 @@ export async function recomputeLive({ stampBackfill = false } = {}) {
     SurveyResponse.countDocuments({ organizationId: orgNin }),
     Voter.countDocuments({ organizationId: orgNin }),
   ]);
-  const live = { organizations, campaigns, doorsKnocked, surveyResponses, votersProcessed };
+  return { organizations, campaigns, doorsKnocked, surveyResponses, votersProcessed };
+}
+
+export async function recomputeLive({ stampBackfill = false } = {}) {
+  const live = await computeLiveCounts();
   const set = {};
   for (const m of PLATFORM_METRICS) set[`live.${m}`] = live[m];
   if (stampBackfill) set.backfilledAt = new Date();

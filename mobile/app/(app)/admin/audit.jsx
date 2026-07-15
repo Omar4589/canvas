@@ -125,10 +125,15 @@ export default function AdminAudit() {
     setFlash(`Flag ${FLASH_LABEL[review?.status] || 'updated'}`);
     clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(null), 2500);
+    // Also mark the mock-GPS nudge counts stale (campaign cards / audit tile / More row
+    // via ['admin','campaigns']; Overview pills via the campaign-rollup keys).
     qc.invalidateQueries({
       predicate: (query) =>
         query.queryKey?.[0] === 'admin' &&
-        (query.queryKey?.[1] === 'flags' || query.queryKey?.[1] === 'flags-map'),
+        (query.queryKey?.[1] === 'flags' ||
+          query.queryKey?.[1] === 'flags-map' ||
+          query.queryKey?.[1] === 'campaigns' ||
+          (query.queryKey?.[1] === 'reports' && query.queryKey?.[2] === 'campaign-rollup')),
     });
   }
 

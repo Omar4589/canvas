@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import { connectDb } from '../config/db.js';
-import { recomputeLive, getPlatformStats } from '../services/platform/platformStats.js';
+import { recomputeLive, computeLiveCounts, getPlatformStats } from '../services/platform/platformStats.js';
 
 // Seed the platform lifetime marketing counters from current data.
 //
@@ -26,9 +26,12 @@ async function main() {
   console.log(`Mode: ${APPLY ? 'APPLY' : 'DRY RUN'}`);
 
   if (!APPLY) {
-    // Show what live WOULD become without persisting. Recompute reads counts; to avoid writing on a dry
-    // run we just report that a re-sync will occur.
-    console.log('\nDry run — re-run with --apply to recompute the LIVE bucket from current rows.');
+    // Preview the exact numbers --apply would set, WITHOUT writing (computeLiveCounts is read-only).
+    const preview = await computeLiveCounts();
+    console.log('\nWould set the LIVE bucket to (from current non-internal rows):');
+    console.log(' ', preview);
+    console.log('  (deleted bucket is preserved; TOTAL would be live + deleted)');
+    console.log('\nDry run — re-run with --apply to persist this.');
     await mongoose.disconnect();
     return;
   }

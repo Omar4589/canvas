@@ -756,10 +756,15 @@ export default function AdminMap() {
     clearTimeout(flagFlashTimer.current);
     flagFlashTimer.current = setTimeout(() => setFlagFlash(null), 2500);
     setSelectedFlagId(null); // reviewed → no longer open → leaves the layer
+    // Also mark the mock-GPS nudge counts stale (campaign cards / audit tile / More row
+    // via ['admin','campaigns']; Overview pills via the campaign-rollup keys).
     qc.invalidateQueries({
       predicate: (query) =>
         query.queryKey?.[0] === 'admin' &&
-        (query.queryKey?.[1] === 'flags' || query.queryKey?.[1] === 'flags-map'),
+        (query.queryKey?.[1] === 'flags' ||
+          query.queryKey?.[1] === 'flags-map' ||
+          query.queryKey?.[1] === 'campaigns' ||
+          (query.queryKey?.[1] === 'reports' && query.queryKey?.[2] === 'campaign-rollup')),
     });
   }
 

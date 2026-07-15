@@ -16,7 +16,7 @@ import { rateAccent, ratePct } from '../lib/rates.js';
 import { livePollOptions } from '../lib/livePoll.js';
 import { daysUntil, earlyVotingState, formatDateLabel } from '../lib/electionDates.js';
 import { metricHelp } from '../lib/metricHelp.js';
-import { todayInTz } from '../lib/datePresets.js';
+import { todayInTz, shiftDays } from '../lib/datePresets.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 
 function buildQuery(params) {
@@ -211,6 +211,11 @@ export default function DashboardPage() {
   const canvass = overview.canvass || {};
   const rangeStats = rollupQ.data?.cumulative || {};
   const isLitDrop = selectedCampaign?.type === 'lit_drop';
+  // Mock-GPS nudge: prefer the 30s-polled rollup row (fresh) over the lazier campaigns
+  // list. The count is campaign-wide over the audit window, independent of the
+  // dashboard's selected date range.
+  const rollupRow = (rollupQ.data?.campaigns || []).find((r) => String(r.id) === String(campaignId));
+  const openMockFlags = rollupRow?.openMockFlags ?? current?.openMockFlags ?? 0;
 
   // Billing hint for the header: setup is free until the first knock. Derived from
   // metrics already loaded — the campaign-level "ever canvassed" flag, backstopped by
@@ -370,6 +375,24 @@ export default function DashboardPage() {
           action={{ label: 'Import voters', to: `/campaigns/${campaignId}/import` }}
         >
           Start with the checklist below — first up, import your voter file.
+        </NextStepBanner>
+      )}
+      {openMockFlags > 0 && (
+        <NextStepBanner
+          tone="danger"
+          title="Mock GPS detected."
+          className="mb-6"
+          action={{
+            label: 'Review in Audit',
+            // Deep link seeds the Audit page (reason chip, Open status, and the full
+            // audit window — it opens on Today by default, which could hide the flag).
+            to:
+              `/campaigns/${campaignId}/audit?reason=mock_gps&status=open` +
+              (tz ? `&from=${shiftDays(todayInTz(tz), -61)}&to=${todayInTz(tz)}` : ''),
+          }}
+        >
+          {openMockFlags.toLocaleString()} door {openMockFlags === 1 ? 'entry' : 'entries'} came from a
+          fake-GPS app and {openMockFlags === 1 ? "hasn't" : "haven't"} been reviewed.
         </NextStepBanner>
       )}
       {current && current.isActive !== false && (

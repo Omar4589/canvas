@@ -30,6 +30,7 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Subscription } = await import('../src/models/Subscription.js');
+const { FlagReview } = await import('../src/models/FlagReview.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -62,7 +63,7 @@ function hh(orgId, campaignId, effortId, n, pin) {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CampaignAssignment, Effort, Pass, Turf, TurfAssignment, Household, Voter, CanvassActivity, SurveyResponse, SurveyTemplate, Subscription]) {
+  for (const M of [Organization, User, Membership, Campaign, CampaignAssignment, Effort, Pass, Turf, TurfAssignment, Household, Voter, CanvassActivity, SurveyResponse, SurveyTemplate, Subscription, FlagReview]) {
     await M.deleteMany({});
   }
 
@@ -223,4 +224,38 @@ test('end-to-end: /flags surfaces mocked rows as high mock_gps (projection guard
   assert.strictEqual(mocked.length, 1, 'one mocked entry surfaced');
   assert.strictEqual(mocked[0].actionType, 'survey_submitted');
   assert.strictEqual(mocked[0].reasons.find((x) => x.type === 'mock_gps').severity, 'high');
+});
+
+test('mock-GPS nudge: openMockFlags rides both endpoints and tracks reviews', { skip }, async () => {
+  // One surviving mocked row (the survey on d2) → the badge count is 1.
+  // Lead scoping needs no assert here: both callers restrict the campaign list to
+  // managedCampaignIds BEFORE calling campaignSummaries (campaigns.js / reports.js).
+  const listRow = async () => {
+    const r = await call('GET', '/admin/campaigns', { token: ctx.adminTok, orgId: ctx.org._id });
+    assert.strictEqual(r.status, 200);
+    return r.json.campaigns.find((c) => String(c._id) === String(ctx.camp._id));
+  };
+  assert.strictEqual((await listRow()).openMockFlags, 1, 'GET /admin/campaigns carries the count');
+
+  const rollup = await call('GET', `/admin/reports/campaign-rollup?campaignId=${ctx.camp._id}`, {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+  });
+  assert.strictEqual(rollup.status, 200);
+  assert.strictEqual(rollup.json.campaigns[0].openMockFlags, 1, 'campaign-rollup carries the count');
+
+  // Reviewing the mocked entry clears the badge (open = no FlagReview row)...
+  const act = await CanvassActivity.findOne({ 'location.mocked': true }).lean();
+  const review = (status) =>
+    call('POST', '/admin/reports/flags/review', {
+      token: ctx.adminTok,
+      orgId: ctx.org._id,
+      body: { actionModel: 'CanvassActivity', actionId: String(act._id), status },
+    });
+  assert.strictEqual((await review('confirmed')).status, 200);
+  assert.strictEqual((await listRow()).openMockFlags, 0, 'a decision clears the badge');
+
+  // ...and reopening (deletes the FlagReview row) brings it back.
+  assert.strictEqual((await review('open')).status, 200);
+  assert.strictEqual((await listRow()).openMockFlags, 1, 'reopen restores the badge');
 });
