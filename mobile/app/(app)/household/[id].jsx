@@ -178,16 +178,28 @@ export default function HouseholdDetail() {
     );
   }
 
-  // Optimistic-first: recolor the pin and return to the map immediately; the GPS
-  // stamp + network write happen in the background (recordHouseholdAction). We do
-  // NOT await it — awaiting is exactly what made the pin lag behind the tap.
+  // Gate-then-optimistic: recordHouseholdAction first acquires the GPS stamp (no
+  // location = no knock), then recolors the pin and fires onAccepted — we navigate
+  // back there, not unconditionally. The network write stays in the background; we
+  // still never await the returned promise for navigation (that's what made the pin
+  // lag behind the tap). If the gate blocks, re-enable the buttons so the canvasser
+  // can fix location and tap again.
   function submitAction(action) {
     if (!canCanvass) return; // org paused — buttons are disabled, belt & braces
     if (firedRef.current) return; // double-tap: an action is already recording
     firedRef.current = true;
     setIsSubmitting(true);
-    recordHouseholdAction(qc, id, action, { note: note.trim() || null });
-    router.back();
+    recordHouseholdAction(qc, id, action, {
+      note: note.trim() || null,
+      onAccepted: () => router.back(),
+    })
+      .then((res) => {
+        if (res?.blocked) {
+          firedRef.current = false;
+          setIsSubmitting(false);
+        }
+      })
+      .catch(() => {});
   }
 
   const surveyedCount = voters.filter((v) => v.surveyStatus === 'surveyed').length;

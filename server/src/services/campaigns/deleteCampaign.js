@@ -21,6 +21,7 @@ import { ImportJob } from '../../models/ImportJob.js';
 import { deleteRawImport } from '../import/rawImportStore.js';
 import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js';
 import { Campaign } from '../../models/Campaign.js';
+import { captureCampaignBeforeDelete } from '../platform/platformStats.js';
 
 // Hard-delete a campaign and everything it owns. Mirrors the effort-delete cascade
 // ([efforts.js]) but campaign-wide. ONLY call after the caller has verified the
@@ -35,6 +36,11 @@ import { Campaign } from '../../models/Campaign.js';
 // Sequential (no transaction), matching the rest of the app. Returns delete counts.
 export async function deleteCampaignCascade(campaign) {
   const campaignId = campaign._id;
+
+  // Bank this campaign's lifetime contribution into the platform marketing counters BEFORE its rows
+  // are destroyed (no-op for internal orgs). A deletable campaign is never-walked, so this is mostly
+  // its campaign count and never-walked voters — but capturing keeps the numbers whole either way.
+  await captureCampaignBeforeDelete(campaign);
 
   const householdIds = await Household.find({ campaignId }).distinct('_id');
   const voters = await Voter.deleteMany({ householdId: { $in: householdIds } });

@@ -7,6 +7,7 @@ import { ImportJob } from '../../models/ImportJob.js';
 import { normalizeAddress } from '../../utils/normalizeAddress.js';
 import { DEFAULT_PROFILE_MAPPING } from './canonicalFields.js';
 import { parseUpload } from './parseUpload.js';
+import { bumpLive } from '../platform/platformStats.js';
 
 const trimOrNull = (v) => {
   if (v == null) return null;
@@ -425,6 +426,11 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
   const afterVoters = await Voter.countDocuments({ organizationId: orgId });
   const newHouseholds = Math.max(0, afterHouseholds - beforeHouseholds);
   const newVoters = Math.max(0, afterVoters - beforeVoters);
+
+  // Lifetime marketing counter: voters newly added to the platform this import (net new rows, so a
+  // re-import that only updates existing voters adds nothing). Resolves internal internally; no-op for
+  // demo orgs. Backfill recounts from rows as the source of truth.
+  await bumpLive('votersProcessed', newVoters, { orgId });
 
   return {
     uniqueVoters: validRows.length,

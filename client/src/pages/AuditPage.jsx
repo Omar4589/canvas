@@ -270,8 +270,9 @@ export default function AuditPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-7">
             <StatCard label="Open" value={(totals?.open || 0).toLocaleString()} hint="Need review" />
+            <StatCard label="Mock" value={(totals?.mockGps || 0).toLocaleString()} hint="Mock location app" />
             <StatCard label="Far" value={(totals?.far || 0).toLocaleString()} hint="Far from house" />
             <StatCard label="Rapid" value={(totals?.rapid || 0).toLocaleString()} hint="Too fast apart" />
             <StatCard label="One-spot" value={(totals?.oneSpot || 0).toLocaleString()} hint="From one place" />

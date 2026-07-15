@@ -1,5 +1,5 @@
-import { Alert } from 'react-native';
-import { getCurrentLocation } from './location';
+import { Alert, Linking, Platform } from 'react-native';
+import { getCurrentLocation, getCanvassLocation, promptEnableServices } from './location';
 import { submitOrQueue, flushQueue } from './offlineQueue';
 import { saveBootstrap } from './cache';
 
@@ -124,59 +124,145 @@ export function reconcilePendingLocations(households) {
 // call + benign duplicate activity row. Cleared when the submit settles.
 const inFlightPaths = new Set();
 
-// Optimistic-first submit — the heart of the "recolor instantly" fix.
+// Per-code "you're blocked" alert for a failed location gate. Cancel resolves the
+// caller's blocked result; Try again re-enters the same submit. Deliberately NO copy
+// for mock locations — mock detection is recorded silently server-side, never shown here.
+function locationBlockedAlert(err, { onCancel, onRetry }) {
+  const code = err?.code || 'NO_FIX';
+  const cancel = { text: 'Cancel', style: 'cancel', onPress: onCancel };
+  const retry = { text: 'Try again', onPress: onRetry };
+  const openSettings = {
+    text: 'Open Settings',
+    onPress: () => {
+      Linking.openSettings().catch(() => {});
+      onCancel();
+    },
+  };
+
+  if (code === 'PERMISSION_DENIED') {
+    const canAskAgain = err.canAskAgain !== false;
+    Alert.alert(
+      'Location needed to canvass',
+      'Doorline records a GPS stamp with every door so your work can be verified. Allow location access to record this door.' +
+        (canAskAgain ? '' : ' Enable it for Doorline in Settings, then try again.'),
+      canAskAgain ? [cancel, retry] : [cancel, openSettings, retry]
+    );
+  } else if (code === 'SERVICES_OFF') {
+    const enable =
+      Platform.OS === 'android'
+        ? { text: 'Turn on', onPress: () => promptEnableServices().then(onRetry, onCancel) }
+        : openSettings;
+    Alert.alert(
+      'Location is off',
+      "Turn on your phone's location to record this door. Nothing was recorded.",
+      [cancel, enable, retry]
+    );
+  } else if (code === 'PRECISE_OFF') {
+    Alert.alert(
+      'Precise location required',
+      'Doorline only has your approximate location. In Settings, turn on Precise Location for Doorline, then try again.',
+      [cancel, openSettings, retry]
+    );
+  } else {
+    Alert.alert(
+      'No GPS signal',
+      "Couldn't get a location fix. Step away from buildings and try again — nothing was recorded.",
+      [cancel, retry]
+    );
+  }
+}
+
+// Gate-then-optimistic submit.
 //
-//   1. Patch the bootstrap cache SYNCHRONOUSLY (the visible feedback: the pin /
-//      unit dot recolors and the client-computed building aggregate updates this
-//      frame, before any GPS or network work happens).
-//   2. In the background (never awaited by the UI): capture an accurate GPS fix
-//      for the audit stamp, then submit — or queue — the action. On a successful
-//      online write, reconcile the cache with the server's authoritative result
-//      (e.g. a normalized status). A network failure is queued and retried by
-//      flushQueue, so the optimistic state simply stands until it syncs. A hard
-//      (4xx/5xx) failure won't be retried, so we re-sync to server truth and tell
-//      the user.
+//   1. HARD GATE (requireFix, the default): acquire a fresh GPS stamp via
+//      getCanvassLocation BEFORE anything visible happens. No location = no knock —
+//      a blocked tap shows a typed alert (with retry) and records NOTHING: no
+//      recolor, no queue, no rollback needed. The Mapbox puck keeps the fix cache
+//      warm while the map is open, so the gate costs ~no latency in the common case.
+//   2. Patch the bootstrap cache SYNCHRONOUSLY (the visible feedback: the pin /
+//      unit dot recolors this frame) and fire onAccepted — callers navigate there.
+//   3. In the background: submit — or queue — the action with the stamp from step 1.
+//      On a successful online write, reconcile the cache with the server's
+//      authoritative result. A network failure is queued and retried by flushQueue.
+//      A hard (4xx/5xx) failure won't be retried, so we re-sync to server truth and
+//      tell the user.
 //
-// Returns the background promise; callers fire-and-forget it (navigate away
-// immediately) — they must NOT await it, or the delay comes right back.
-export function optimisticSubmit(qc, {
-  path,
-  body = {},
-  optimisticPatch,
-  reconcile,
-  pending = [],
-  // Query keys to invalidate once the server CONFIRMS the write (result.ok). Opt-in per
-  // caller because this helper also powers pin corrections, which don't change these. Used
-  // to refresh the canvasser's daily stats (['mobile','me']) so the Today's Progress counter
-  // updates the moment a knock/survey lands, not just on the slow poll / manual refresh.
-  invalidateKeys = [],
-  hardFailTitle = 'Not saved',
-  hardFailMessage = 'Please try again.',
-}) {
+// Returns the promise; callers fire-and-forget it — they must NOT await it before
+// navigating (that's what onAccepted is for), or the tap-to-feedback delay comes back.
+export function optimisticSubmit(qc, opts) {
+  const {
+    path,
+    body = {},
+    optimisticPatch,
+    reconcile,
+    pending = [],
+    // Query keys to invalidate once the server CONFIRMS the write (result.ok). Opt-in per
+    // caller because this helper also powers pin corrections, which don't change these. Used
+    // to refresh the canvasser's daily stats (['mobile','me']) so the Today's Progress counter
+    // updates the moment a knock/survey lands, not just on the slow poll / manual refresh.
+    invalidateKeys = [],
+    hardFailTitle = 'Not saved',
+    hardFailMessage = 'Please try again.',
+    // false = best-effort stamp (pin corrections): the write is not location-gated.
+    requireFix = true,
+    // Fired synchronously right after the optimistic patch lands — i.e. once the action
+    // is definitely happening. Callers navigate here instead of unconditionally.
+    onAccepted,
+  } = opts;
+
   // If a submit to this exact path is already in flight, ignore the duplicate outright — the
   // first call already patched the cache; a second would just race to create another row.
   if (inFlightPaths.has(path)) return Promise.resolve(null);
   inFlightPaths.add(path);
-
-  // Register the unconfirmed status(es) BEFORE the patch so any concurrent or
-  // subsequent server-sourced write is overlaid (see reconcilePendingHouseholds).
-  for (const p of pending) markPendingHousehold(p.id, p.status);
-
-  writeBootstrap(qc, optimisticPatch);
-
-  // Discard any bootstrap refetch that is in flight RIGHT NOW (e.g. a manual
-  // pull-to-refresh). revert:false keeps the optimistic data we just wrote instead
-  // of rolling the query back to its pre-fetch state. (The pending overlay covers
-  // refetches that fire later; this just avoids a wasted in-flight one.)
-  qc.cancelQueries({ queryKey: ['bootstrap'] }, { revert: false });
+  // Single-release guard: a blocked gate releases the lock so "Try again" can re-enter
+  // optimisticSubmit (which re-acquires it) — the outer finally must not free the
+  // retry's lock out from under it.
+  let released = false;
+  const release = () => {
+    if (!released) {
+      released = true;
+      inFlightPaths.delete(path);
+    }
+  };
 
   const submitPromise = (async () => {
+    // Step 1 — the location gate, BEFORE the optimistic patch: a blocked tap must
+    // leave zero trace (nothing recorded, nothing queued, nothing recolored).
     let location = null;
-    try {
-      location = await getCurrentLocation();
-    } catch {
-      location = null; // permission/availability issue — record without a stamp
+    if (requireFix) {
+      try {
+        location = await getCanvassLocation();
+      } catch (err) {
+        release();
+        return new Promise((resolve) => {
+          locationBlockedAlert(err, {
+            onCancel: () => resolve({ ok: false, queued: false, blocked: err.code || 'NO_FIX' }),
+            onRetry: () => resolve(optimisticSubmit(qc, opts)),
+          });
+        });
+      }
+    } else {
+      try {
+        location = await getCurrentLocation();
+      } catch {
+        location = null; // pin fixes: best-effort stamp, never blocked
+      }
     }
+
+    // Step 2 — gate passed: register the unconfirmed status(es) BEFORE the patch so any
+    // concurrent or subsequent server-sourced write is overlaid (reconcilePendingHouseholds).
+    for (const p of pending) markPendingHousehold(p.id, p.status);
+
+    writeBootstrap(qc, optimisticPatch);
+
+    // Discard any bootstrap refetch that is in flight RIGHT NOW (e.g. a manual
+    // pull-to-refresh). revert:false keeps the optimistic data we just wrote instead
+    // of rolling the query back to its pre-fetch state. (The pending overlay covers
+    // refetches that fire later; this just avoids a wasted in-flight one.)
+    qc.cancelQueries({ queryKey: ['bootstrap'] }, { revert: false });
+
+    if (onAccepted) onAccepted();
+
     const result = await submitOrQueue(path, {
       ...body,
       location,
@@ -202,22 +288,30 @@ export function optimisticSubmit(qc, {
       // drop the optimistic claim and pull server truth back so it can't linger.
       for (const p of pending) clearPendingHousehold(p.id);
       qc.invalidateQueries({ queryKey: ['bootstrap'] });
-      Alert.alert(hardFailTitle, result.error?.message || hardFailMessage);
+      if (result.error?.data?.code === 'LOCATION_REQUIRED') {
+        // The server backstop for the gate above (an old client, or a gate bypass).
+        Alert.alert(
+          'Location required',
+          'This door needs a GPS stamp. Make sure location is on, then record it again.'
+        );
+      } else {
+        Alert.alert(hardFailTitle, result.error?.message || hardFailMessage);
+      }
     }
     // result.queued: keep the pending overlay; it clears once the flushed write
     // syncs and a later server fetch returns the matching status.
     flushQueue().catch(() => {});
     return result;
   })();
-  // Clear the in-flight lock once the submit settles (success, queued, or error).
-  submitPromise.finally(() => inFlightPaths.delete(path));
+  // Clear the in-flight lock once the submit settles (success, queued, blocked, or error).
+  submitPromise.finally(release);
   return submitPromise;
 }
 
 // Record a single-household action (not_home / wrong_address / lit_dropped),
 // optimistically recoloring its pin (and the client-computed building aggregate)
 // before the network call. Fire-and-forget: callers don't await it.
-export function recordHouseholdAction(qc, householdId, action, { note = null } = {}) {
+export function recordHouseholdAction(qc, householdId, action, { note = null, onAccepted } = {}) {
   const path = ACTION_PATHS[action];
   if (!path) throw new Error(`Unknown action: ${action}`);
   return optimisticSubmit(qc, {
@@ -233,6 +327,7 @@ export function recordHouseholdAction(qc, householdId, action, { note = null } =
     invalidateKeys: [['mobile', 'me']],
     hardFailTitle: 'Action not saved',
     hardFailMessage: 'Could not record this action. Please try again.',
+    onAccepted,
   });
 }
 
@@ -252,6 +347,9 @@ export function recordLocationCorrection(qc, householdId, { lat, lng, source, ac
     pending: [], // location overlay is handled by pendingLocations, not the status overlay
     hardFailTitle: 'Pin not saved',
     hardFailMessage: 'Could not move this pin. Please try again.',
+    // The moved coordinate comes from the map drag — the GPS stamp here is best-effort
+    // provenance, so pin fixes are never location-gated (map hygiene must stay possible).
+    requireFix: false,
   });
   // On a hard reject (not queued), drop the optimistic move so the invalidate that
   // optimisticSubmit fires restores the server's real (un-moved) coordinate.

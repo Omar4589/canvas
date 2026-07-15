@@ -23,7 +23,7 @@ import { deleteOrganization } from '../platform/deleteOrganization.js';
 // voter data on a timer — a canceled customer's voter file sat in our database forever.
 
 export const WIND_DOWN_DAYS = Number(process.env.RETENTION_WIND_DOWN_DAYS || 60);
-export const DORMANCY_MONTHS = Number(process.env.RETENTION_DORMANCY_MONTHS || 24);
+export const DORMANCY_MONTHS = Number(process.env.RETENTION_DORMANCY_MONTHS || 30);
 export const DELETE_REQUEST_SLA_DAYS = Number(process.env.RETENTION_DELETE_SLA_DAYS || 30);
 
 export const TRIGGER_JOB = 'retention-triggers';

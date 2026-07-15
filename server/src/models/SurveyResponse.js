@@ -21,6 +21,10 @@ const locationSchema = new mongoose.Schema(
     lat: { type: Number, required: true },
     lng: { type: Number, required: true },
     accuracy: { type: Number, default: null },
+    // GPS-audit provenance — kept in lockstep with CanvassActivity's locationSchema so
+    // the two ledgers can't drift (audits read CanvassActivity; this is the survey copy).
+    mocked: { type: Boolean, default: null },
+    fixTimestamp: { type: Date, default: null },
   },
   { _id: false }
 );

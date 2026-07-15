@@ -129,6 +129,66 @@ test('one_spot: does NOT fire for an apartment (many units at one coordinate)', 
   for (const r of rows) assert.equal(has(acc, r._id, 'one_spot'), false, `${r._id} must not fire (apartment)`);
 });
 
+test('mock_gps: only an affirmative mocked=true flags, always high', () => {
+  const rows = [
+    mkRow({ _id: 'M1', userId: 'mock', householdId: 'hA', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: 5, mocked: true } }),
+    mkRow({ _id: 'M2', userId: 'mock', householdId: 'hB', timestamp: at(3600), location: { lat: 31, lng: -95, accuracy: 5, mocked: false } }),
+    mkRow({ _id: 'M3', userId: 'mock', householdId: 'hC', timestamp: at(7200), location: { lat: 32, lng: -95, accuracy: 5, mocked: null } }),
+    mkRow({ _id: 'M4', userId: 'mock', householdId: 'hD', timestamp: at(10800), location: { lat: 33, lng: -95, accuracy: 5 } }),
+  ];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS);
+  assert.equal(sevOf(acc, 'M1', 'mock_gps'), 'high', 'mocked:true → high, always');
+  assert.equal(has(acc, 'M2', 'mock_gps'), false, 'mocked:false never flags');
+  assert.equal(has(acc, 'M3', 'mock_gps'), false, 'mocked:null (unknown/iOS) never flags');
+  assert.equal(has(acc, 'M4', 'mock_gps'), false, 'absent mocked (legacy rows) never flags');
+});
+
+// stale fix: the OS fix time (location.fixTimestamp) far behind the tap escalates weak_gps.
+// The client caps reused fixes at 2 min, so these can only be bypassed/old clients.
+function staleRow(id, sec, fixAgeSec) {
+  return mkRow({
+    _id: id,
+    userId: `stale-${id}`,
+    householdId: `h-${id}`,
+    timestamp: at(sec),
+    location: {
+      lat: 30, lng: -95, accuracy: 5,
+      fixTimestamp: fixAgeSec == null ? undefined : at(sec - fixAgeSec),
+    },
+  });
+}
+
+test('stale fix: escalates weak_gps; fresh/absent/negative never flag', () => {
+  const rows = [
+    staleRow('S1', 0, 600), // fix 10 min before the tap → med
+    staleRow('S2', 3600, 2400), // 40 min → high
+    staleRow('S3', 7200, 30), // 30s → fine
+    staleRow('S4', 10800, null), // no fixTimestamp (legacy/old client) → fine
+    staleRow('S5', 14400, -300), // fix stamped AFTER the tap (clock skew) → fine
+  ];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS);
+  assert.equal(sevOf(acc, 'S1', 'weak_gps'), 'med', '10 min stale → weak_gps med');
+  const d1 = reasonsOf(acc, 'S1').find((r) => r.type === 'weak_gps').detail;
+  assert.equal(d1.stale, true);
+  assert.equal(d1.fixAgeSec, 600);
+  assert.equal(sevOf(acc, 'S2', 'weak_gps'), 'high', '40 min stale → weak_gps high');
+  assert.equal(has(acc, 'S3', 'weak_gps'), false, 'a 30s-old fix is normal');
+  assert.equal(has(acc, 'S4', 'weak_gps'), false, 'absent fixTimestamp never flags');
+  assert.equal(has(acc, 'S5', 'weak_gps'), false, 'negative age (clock skew) never flags');
+});
+
+test('stale fix: takes the WORSE of accuracy-weak and staleness', () => {
+  // ±150 accuracy alone = med; 40 min stale alone = high → high wins.
+  const rows = [
+    mkRow({
+      _id: 'SW', userId: 'sw', householdId: 'hSW', timestamp: at(0),
+      location: { lat: 30, lng: -95, accuracy: 150, fixTimestamp: at(-2400) },
+    }),
+  ];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS);
+  assert.equal(sevOf(acc, 'SW', 'weak_gps'), 'high', 'maxSeverity(med accuracy, high stale) = high');
+});
+
 // far correction downgrade: a far entry whose `replaced.nearest` proves a near visit within
 // FAR_CORRECTION_WINDOW_MIN drops to low (detail.downgraded); prior-entry context rides on
 // EVERY far correction. Rows are hours apart on distinct doors so rapid/one_spot can't fire.
@@ -315,4 +375,14 @@ test('summarize: open-based totals, no double-count, per-reason open-only', () =
   const u2 = byCanvasser.find((u) => u.userId === 'u2');
   assert.equal(u2.flaggedActions, 3, 'u2 has 3 flags total');
   assert.equal(u2.openCount, 1, 'u2 has 1 open flag');
+});
+
+test('summarize: mockGps counts open-only, like every other reason', () => {
+  const entries = [
+    sEntry({ userId: 'u1', reasons: ['mock_gps'] }), // open
+    sEntry({ userId: 'u1', reasons: ['mock_gps'], status: 'dismissed' }),
+  ];
+  const { totals, byCanvasser } = summarize(entries, new Map([['u1', []]]), (id) => id);
+  assert.equal(totals.mockGps, 1, 'only the open mock flag counts');
+  assert.equal(byCanvasser.find((u) => u.userId === 'u1').mockGps, 1);
 });

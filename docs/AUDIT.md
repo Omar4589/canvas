@@ -3,13 +3,16 @@
 How an admin catches bad canvassing from the **GPS trail** every knock already leaves. Each recorded
 door carries the canvasser's location, so the app can flag the ones that look wrong — a door marked
 from far away, a burst of doors logged too fast to have walked between them, a cluster of doors all
-logged from one spot (sat in the car), or an entry whose GPS was too weak to trust — then let a
-reviewer **triage** each one and keep a record of the decision.
+logged from one spot (sat in the car), an entry whose GPS was too weak to trust, or a fix that came
+from a **fake-GPS app** — then let a reviewer **triage** each one and keep a record of the decision.
+Recording is also **location-gated**: a canvasser cannot record a door at all unless the app captures
+a fresh GPS fix (see §B.6).
 
 - **Part 1 — For everyone** is plain language: what gets flagged and why, the two places you review
   them (a dedicated Audit page and the map), and what "reviewing" a flag does.
-- **Part 2 — Technical reference** is for developers (and Claude): the live detector + its four
-  algorithms, the thresholds, the review model (open = no record), the endpoints, and the frontend.
+- **Part 2 — Technical reference** is for developers (and Claude): the live detector + its five
+  algorithms, the thresholds, the review model (open = no record), the location-required gate, the
+  endpoints, and the frontend.
 
 Related: [MAPS.md](MAPS.md) (the admin map this overlays — pins, pings, and the "far from house"
 distance a ping already shows), [METRICS.md](METRICS.md) (the overlap/duplicate-survey audits, a
@@ -30,19 +33,23 @@ other door action, even though it isn't a billable knock). That trail answers th
 - Did they mark a house they never actually walked to?
 - Were they entering everything from **one spot** — sitting in a car, never getting out?
 - Did they log a **run of doors far too fast** to have walked between them?
-- Or was the GPS just **bad** on that entry, so you shouldn't trust the location at all?
+- Was the GPS just **bad** on that entry, so you shouldn't trust the location at all?
+- Or did the location come from a **fake-GPS app** — spoofed outright?
 
-The audit turns those into four kinds of **flags** and shows you **how many**, **who** they belong to,
-**why** each one is flagged, and gives you a way to **review** each one.
+The audit turns those into five kinds of **flags** and shows you **how many**, **who** they belong to,
+**why** each one is flagged, and gives you a way to **review** each one. And the app won't record a
+door at all without a live location: a canvasser with location off (or denied, or set to approximate)
+is blocked at the tap with a clear message — so "no GPS trail" is not an option, on purpose.
 
-## The four flags
+## The five flags
 
 | Flag | Plain meaning |
 |---|---|
+| **Mock location** | The phone reported that the fix came from a **mock-location (fake GPS) app** — the strongest fraud signal there is. The canvasser is never told this was detected; the flag simply appears for you. Always high severity. |
 | **Far from house** | The canvasser's GPS was well away from the house pin when they recorded — a door they may not have walked to. (Accounts for GPS wobble — a big distance caused by a *weak* fix is treated as Weak GPS, not Far.) |
 | **Rapid succession** | Two different doors logged only seconds apart — too fast to have walked between them (a sign of arm-chairing a block). |
 | **One spot** | A run of *different* doors all logged from nearly the **same** GPS point, while those houses are actually spread down the street — i.e. entered from one place (a parked car), not walked. |
-| **Weak / missing GPS** | The location fix was poor (or absent, or synced from offline) — the entry's location can't be trusted either way. |
+| **Weak / missing GPS** | The location fix was poor (or absent, or synced from offline), or the fix was computed **long before the door was recorded** (a stale, reheated location) — either way the entry's location can't be trusted. |
 
 **On purpose, an apartment building doesn't trip "One spot."** Standing at one entrance to log ten
 units is normal canvassing — those units share one map pin, so the app only flags a one-spot cluster
@@ -66,7 +73,7 @@ in the app display in **feet**, switching to **miles** once a distance reaches a
 
 **1) The Audit page** (inside a campaign, next to Timeline and Map). It opens on **Today** and shows:
 
-- **KPI cards** — total flagged, and a count for each of the four flags, plus how many are still open.
+- **KPI cards** — total flagged, and a count for each of the five flags, plus how many are still open.
 - **A per-canvasser table**, worst-first: each canvasser's flag counts by type and their worst
   severity. Click a row to drill into just that person's flagged entries.
 - **The entries list** — one card per flagged door: who, the address, the time, the reason(s) with the
@@ -134,7 +141,7 @@ surfaces. It:
 
 1. Loads the window's `CanvassActivity` rows (sorted by `userId, timestamp`) and the involved
    households' pins/addresses (one query each), then groups rows into a **per-canvasser timeline**.
-2. Runs the four detectors (below) into a per-action reason map.
+2. Runs the five detectors (below) into a per-action reason map.
 3. Left-joins `FlagReview` by `actionId` (absent → `status:'open'`) and resolves canvasser/reviewer
    names, then returns `{ entries, summary, windowActionCount }`.
 
@@ -148,7 +155,7 @@ The pure detection core is exported as **`computeReasons(rows, pinMap, threshold
 unit-tested in [server/test/flagDetection.test.js](../server/test/flagDetection.test.js) (each flag
 type + every guard).
 
-### The four algorithms
+### The five algorithms
 
 All thresholds live in [flagThresholds.js](../server/src/services/audit/flagThresholds.js) (`FLAG_THRESHOLDS`);
 the numbers below are the defaults — tune them in that one file.
@@ -156,7 +163,8 @@ the numbers below are the defaults — tune them in that one file.
 | Flag | Rule | Guard |
 |---|---|---|
 | **far** | `distanceFromHouseMeters` (already stamped at record time) tiered on **`distance − accuracy`**: `> 250 m` (~820 ft) → high, `> 75 m` (~250 ft) → medium. | **Null distance is never far** (unknown ≠ far). Subtracting accuracy means a big distance from a *poor* fix reads as **weak_gps**, not far — so bad GPS can't masquerade as bad canvassing. **Correction downgrade:** a far entry whose `replaced.nearest` proves a near visit (effective ≤ `FAR_WARN_M`) within `FAR_CORRECTION_WINDOW_MIN` (720 min) drops to **low** with `detail.downgraded` — see §B.5. |
-| **weak_gps** | Missing location → high; accuracy `> 250 m` → high, `> 100 m` → medium; else an offline submission → low. | A **null** accuracy alone is *not* flagged (unknown ≠ bad — it would flood on legacy rows). |
+| **weak_gps** | Missing location → high; accuracy `> 250 m` → high, `> 100 m` → medium; else an offline submission → low. **Stale-fix escalation:** when `location.fixTimestamp` is present and the fix predates the tap by `> STALE_FIX_HIGH_SEC` (30 min) → high, `> STALE_FIX_MED_SEC` (5 min) → med (`detail.stale` + `fixAgeSec`); the client caps reused fixes at 2 min, so an honest new client can never trip this — it catches bypassed/old clients and forged payloads. | A **null** accuracy alone is *not* flagged (unknown ≠ bad — it would flood on legacy rows). Absent `fixTimestamp` (legacy rows, old clients) and negative gaps (clock skew) never flag. |
+| **mock_gps** | `location.mocked === true` (Android's `isFromMockProvider`, captured on every fix by the app) → **high**, always. | `false`/`null`/absent (iOS, legacy rows, old clients) never flags. Detection is **silent by design**: the canvasser app never blocks or hints on a mocked fix, so the evidence accumulates instead of tipping the cheater off to switch methods. |
 | **rapid** | Per canvasser, walk consecutive **distinct-door** actions on the travel timeline; a gap `< 20 s` flags the later action (`< 8 s` → high). | Same-household consecutive actions (a correction) are skipped; notes are excluded; an **identical-timestamp offline pair** is suppressed (that's a sync artifact, not real behavior). |
 | **one_spot** | Per canvasser, greedily cluster GPS points within `20 m` over a `30 min` window; fire when a cluster covers **≥ 4 distinct households**. | **Apartment guard:** only fires if those households' **own pins span ≥ 60 m** — many units at one building coordinate (spread ≈ 0) never trip it; a whole street logged from one parked spot does. |
 
@@ -213,6 +221,38 @@ replaced: {
 - The UI line ("Replaced "Restricted" recorded 4 min earlier from 20 ft away") is built by
   `correctionContextText` in [client/src/lib/flags.js](../client/src/lib/flags.js) and its mobile
   mirror [mobile/lib/flags.js](../mobile/lib/flags.js).
+
+### B.6 Location-required enforcement (no location = no knock)
+
+Recording a disposition or survey **requires a live GPS fix**, enforced twice:
+
+- **Client hard gate** — `getCanvassLocation()` in [mobile/lib/location.js](../mobile/lib/location.js)
+  runs inside `optimisticSubmit` ([mobile/lib/recordAction.js](../mobile/lib/recordAction.js))
+  **before the optimistic recolor**: device location services on (`hasServicesEnabledAsync`), app
+  permission granted, precise (Android `coarse` grants and iOS reduced-accuracy fixes — inferred via
+  accuracy > 1 km, expo-location v19 exposes no real API — both throw `PRECISE_OFF`), then a fix:
+  cached ≤ 15 s/≤ 20 m → fresh high-accuracy read (6 s race) → last-known **capped at 2 minutes**
+  (the old any-age fallback was a stale-fix spoofing loophole). A typed failure
+  (`SERVICES_OFF | PERMISSION_DENIED | PRECISE_OFF | NO_FIX`) shows a per-code alert with retry —
+  nothing is recorded, recolored, or queued. The map shows a persistent advisory banner
+  ([mobile/components/LocationBlockedBanner.jsx](../mobile/components/LocationBlockedBanner.jsx)).
+  Pin corrections (`recordLocationCorrection`) are deliberately **not** gated (`requireFix: false`) —
+  the moved coordinate comes from the map drag, and map hygiene must stay possible.
+- **Server backstop** — [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) rejects a
+  missing/degenerate `location` on both write paths with `400 { error, code: 'LOCATION_REQUIRED' }`
+  **before** zod (so clients get the typed message, not a zod dump). This replaces the accidental
+  blocking the old zod schema provided, and catches bypassed or old clients.
+
+Every stamp now carries provenance, nested in `location`: **`mocked`** (Android
+`isFromMockProvider`; null = unknown/iOS) and **`fixTimestamp`** (when the OS computed the fix, vs
+`timestamp`, the tap). Nesting is deliberate — the `replaced` correction snapshot (§B.5) embeds the
+same sub-schema, so snapshots carry provenance for free, and the detector's scan projection already
+covers `location`. `SurveyResponse.location` mirrors the fields so the two ledgers can't drift.
+
+**Offline is unaffected**: GPS is satellite-based (no cell signal needed), and the stamp is captured
+at tap time — only the POST queues. Old-client rollout note: a pre-gate client that fails GPS still
+sends `location: null` and gets the 400 (now with a readable message); if such an item was queued
+offline, the flush's pre-existing 4xx policy drops it (offlineQueue.js doFlush) — unchanged behavior.
 
 ## C. Review persistence (`FlagReview`)
 
@@ -291,7 +331,17 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **The replace must never run without stamping the snapshot.** `buildReplacedSnapshot` reads the
   pre-`deleteMany` rows; any new replace path (or a reorder that queries after the delete) silently
   destroys the correction evidence again.
-- **Deploy the server first** (the endpoints must exist before the client calls them). `FlagReview`
-  and the `replaced` snapshot both need **no migration** (absence = open / no special treatment).
-  The correction context line + imperial units are display-only: web deploy + mobile **OTA** (no
-  native build — nothing native changed).
+- **Absent provenance never flags.** `location.mocked` `false`/`null`/absent and a missing
+  `location.fixTimestamp` (legacy rows, old clients, iOS for `mocked`) must never produce a
+  `mock_gps` or stale-fix flag — only affirmative evidence flags.
+- **Mock detection stays invisible in the canvasser app.** No alert, no block, no copy anywhere in
+  `mobile/` mentions mock locations — blocking would tell the cheater exactly what got detected;
+  silent flags accumulate evidence instead. Keep it that way.
+- **The location gate lives BEFORE the optimistic patch.** A blocked tap must leave zero trace — if
+  the gate ever moves after `writeBootstrap`/`markPendingHousehold`, a blocked knock would need
+  rollback and could linger as a phantom recolor.
+- **Deploy the server first** (the endpoints must exist before the client calls them). `FlagReview`,
+  the `replaced` snapshot, and the `location.mocked`/`fixTimestamp` fields all need **no migration**
+  (absence = open / no special treatment / never flags). The location gate, banner, context line +
+  imperial units are JS-only: web deploy + mobile **OTA** (no native build — app.json untouched,
+  expo-location already installed).

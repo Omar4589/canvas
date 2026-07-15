@@ -10,10 +10,13 @@ export const FLAG_THRESHOLDS = {
 
 export const FAR_WARN_M = FLAG_THRESHOLDS.FAR_WARN_M;
 
-// The four flag reasons, in display order. `color` drives the map layer + badges; `short`
+// The five flag reasons, in display order. `color` drives the map layer + badges; `short`
 // is for chips/columns, `label` for panels.
 // `countKey` maps to the server summary.totals field (which is camelCase).
+// mock_gps is FIRST on purpose: display order is primaryReason's tie-break, and a mock
+// fix is the strongest signal (always high severity) — a mock+far entry colors as mock.
 export const REASON_META = [
+  { key: 'mock_gps', countKey: 'mockGps', short: 'Mock', label: 'Mock location', color: '#db2777', hint: 'Fix came from a mock-location app' },
   { key: 'far', countKey: 'far', short: 'Far', label: 'Far from house', color: '#ef4444', hint: 'Recorded far from the house pin' },
   { key: 'rapid', countKey: 'rapid', short: 'Rapid', label: 'Rapid succession', color: '#f97316', hint: 'Doors marked impossibly fast apart' },
   { key: 'one_spot', countKey: 'oneSpot', short: 'One-spot', label: 'One spot', color: '#8b5cf6', hint: 'Many doors from a single GPS spot' },
@@ -82,8 +85,11 @@ export function reasonDetailText(reason) {
       return `${d.distinctHouseholds} doors from one spot${d.spanMin ? ` in ${d.spanMin} min` : ''}`;
     case 'weak_gps':
       if (d.missing) return 'no GPS captured';
+      if (d.stale && d.fixAgeSec != null) return `GPS fix ${Math.round(d.fixAgeSec / 60)} min before recording`;
       if (d.accuracy != null) return `GPS ±${formatDistanceImperial(d.accuracy)}`;
       return d.offline ? 'offline submission' : 'weak GPS';
+    case 'mock_gps':
+      return 'mock location provider';
     default:
       return '';
   }

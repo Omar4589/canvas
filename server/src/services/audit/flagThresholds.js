@@ -23,6 +23,14 @@ export const FLAG_THRESHOLDS = {
   GPS_ACCURACY_WARN_M: 100, // fix worse than this = weak_gps (med)
   GPS_ACCURACY_BAD_M: 250, // weak_gps (high)
 
+  // STALE FIX — the OS fix time (location.fixTimestamp) vs the action's tap time. The
+  // client caps reused fixes at 2 min, so honest new clients can't exceed these; a stamp
+  // minutes older than its tap means a bypassed/old client or a forged payload. Escalates
+  // weak_gps (same admin question — "this stamp can't be trusted") rather than adding a
+  // reason. Absent fixTimestamp (legacy rows, old clients) never flags.
+  STALE_FIX_MED_SEC: 300, // > 5 min → weak_gps med
+  STALE_FIX_HIGH_SEC: 1800, // > 30 min → weak_gps high
+
   // RAPID succession — two consecutive DISTINCT-door actions by one canvasser this close
   // in time (too fast to physically walk between doors).
   RAPID_GAP_SEC: 20, // med

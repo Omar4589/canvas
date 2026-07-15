@@ -19,6 +19,8 @@ Tap **Open** to go into the house and take a survey. The voters read exactly the
 
 The map stays in sync with your book automatically. Small changes an admin makes — a corrected pin, a door's status — patch in on their own within about half a minute. Bigger changes, like being handed a new book, come in when you **pull down to refresh** (or reopen the campaign).
 
+If a **red notice** appears at the top of the map saying location is required, your phone's location is off (or Doorline doesn't have permission). Tap the notice to fix it — recording doors is paused until location is back on, because every door needs a GPS stamp. See [Why does Doorline need my location?](why-location-required).
+
 > Tip: If your supervisor tells you they moved some houses to you, pull-to-refresh so your map picks them up.
 
 If a house's detail reads **Approximate location**, its spot was placed by looking up the address rather than from an exact coordinate, so it can sit a little off. When it's in the wrong place, you can [fix its location](canvasser-fix-pin).

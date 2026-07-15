@@ -166,12 +166,40 @@ export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS) {
       else if (acc_m != null && acc_m > T.GPS_ACCURACY_BAD_M) weakSev = 'high';
       else if (acc_m != null && acc_m > T.GPS_ACCURACY_WARN_M) weakSev = 'med';
       else if (r.wasOfflineSubmission) weakSev = 'low';
+
+      // Stale fix — the OS computed this fix long before the tap that used it (location.
+      // fixTimestamp vs r.timestamp). The client caps reused fixes at 2 min, so a big gap
+      // means a bypassed/old client or a forged payload. Escalates weak_gps — same admin
+      // question, "this stamp can't be trusted". Absent fixTimestamp (legacy rows, old
+      // clients) and negative gaps (clock skew) never flag.
+      let fixAgeSec = null;
+      if (!missing && r.location?.fixTimestamp) {
+        fixAgeSec = (new Date(r.timestamp) - new Date(r.location.fixTimestamp)) / 1000;
+        let staleSev = null;
+        if (fixAgeSec > T.STALE_FIX_HIGH_SEC) staleSev = 'high';
+        else if (fixAgeSec > T.STALE_FIX_MED_SEC) staleSev = 'med';
+        if (staleSev) weakSev = maxSeverity(weakSev, staleSev);
+      }
+      const stale = fixAgeSec != null && fixAgeSec > T.STALE_FIX_MED_SEC;
       if (weakSev) {
         addReason(r, {
           type: 'weak_gps',
           severity: weakSev,
-          detail: { accuracy: acc_m ?? null, missing, offline: !!r.wasOfflineSubmission },
+          detail: {
+            accuracy: acc_m ?? null,
+            missing,
+            offline: !!r.wasOfflineSubmission,
+            ...(stale ? { stale: true, fixAgeSec: Math.round(fixAgeSec) } : {}),
+          },
         });
+      }
+
+      // mock_gps — Android marked the fix as coming from a mock-location provider (a
+      // fake-GPS app). Captured silently — the canvasser app never blocks or hints, so
+      // the evidence accumulates instead of tipping the cheater off. false/null/absent
+      // (iOS, legacy rows, old clients) never flag.
+      if (r.location?.mocked === true) {
+        addReason(r, { type: 'mock_gps', severity: 'high', detail: {} });
       }
 
       // far — distance MINUS accuracy (a big distance from a poor fix reads as weak_gps, not
@@ -307,15 +335,15 @@ function pinLngLat(h) {
 
 function emptySummary() {
   return {
-    totals: { flaggedActions: 0, far: 0, rapid: 0, oneSpot: 0, weakGps: 0, open: 0, reviewed: 0, dismissed: 0, confirmed: 0 },
+    totals: { flaggedActions: 0, far: 0, rapid: 0, oneSpot: 0, weakGps: 0, mockGps: 0, open: 0, reviewed: 0, dismissed: 0, confirmed: 0 },
     byCanvasser: [],
   };
 }
 
-const REASON_KEY = { far: 'far', rapid: 'rapid', one_spot: 'oneSpot', weak_gps: 'weakGps' };
+const REASON_KEY = { far: 'far', rapid: 'rapid', one_spot: 'oneSpot', weak_gps: 'weakGps', mock_gps: 'mockGps' };
 
 export function summarize(entries, byUser, nameOf) {
-  const totals = { flaggedActions: 0, far: 0, rapid: 0, oneSpot: 0, weakGps: 0, open: 0, reviewed: 0, dismissed: 0, confirmed: 0 };
+  const totals = { flaggedActions: 0, far: 0, rapid: 0, oneSpot: 0, weakGps: 0, mockGps: 0, open: 0, reviewed: 0, dismissed: 0, confirmed: 0 };
   const perUser = new Map();
   for (const [uid, timeline] of byUser.entries()) {
     perUser.set(uid, {
@@ -327,6 +355,7 @@ export function summarize(entries, byUser, nameOf) {
       rapid: 0,
       oneSpot: 0,
       weakGps: 0,
+      mockGps: 0,
       openCount: 0,
       worstSeverity: null,
     });

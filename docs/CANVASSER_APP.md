@@ -142,6 +142,21 @@ porch. It's still on the voter's full profile under **Voters**.)
 Any door button recolors the pin and drops you back on the map the instant you tap — you're never
 waiting on the network.
 
+### Location is required (no location = no knock)
+
+Every door you record carries a GPS stamp — it's how your work is verified — so **the app won't
+record a door without one**. If your phone's location is off, permission is denied, or the app only
+has your approximate location (iOS "Precise Location" off), the tap is blocked with a clear message
+telling you exactly what to turn on, with a shortcut to Settings and a **Try again** button. Nothing
+is recorded until location works — the pin doesn't change, and nothing is saved or queued. A red
+notice also appears at the top of the map whenever location is off, so you know before you walk a
+block.
+
+**Offline still works exactly as before.** GPS comes from satellites, not cell signal — airplane
+mode or a dead zone doesn't stop it, as long as the Location toggle itself is on. Your knocks record
+with a real GPS stamp and sync when you're back in signal. The only thing that blocks recording is
+location itself being off.
+
 ### Refused (someone answered, but said no)
 
 **Refused** is for when a person comes to the door but declines to participate — different from **Not
@@ -371,9 +386,16 @@ branch the action area:
 - **Both branches** then render **Restricted access** (`submitAction('restricted')`,
   `colors.status.restricted`, slate) *outside* the type branch — it's offered on every campaign type.
 
-All route through `submitAction`, which fires `recordHouseholdAction(qc, id, action, …)` and
-`router.back()`s without awaiting — `firedRef` blocks a double-tap synchronously, `isSubmitting`
-disables the buttons.
+All route through `submitAction`, which fires `recordHouseholdAction(qc, id, action, …)` —
+`firedRef` blocks a double-tap synchronously, `isSubmitting` disables the buttons. Recording is
+**location-gated**: `optimisticSubmit` acquires a fresh GPS stamp *before* the optimistic recolor
+(no location = no knock — see [AUDIT.md](AUDIT.md) §B.6), so navigation happens via `onAccepted`
+(`router.back()` once the gate passes and the pin recolors), and a blocked gate resets
+`firedRef`/`isSubmitting` so the canvasser can fix location and tap again. The at-door survey
+(`voter/[id]/survey.jsx`) follows the same pattern with `router.replace('/(app)/map')` in its
+`onAccepted`. The map mounts a persistent
+[LocationBlockedBanner](../mobile/components/LocationBlockedBanner.jsx) (below the entitlement
+banner) that warns when services/permission/precise location are off.
 
 ### The voter identity line (one component, both door surfaces)
 

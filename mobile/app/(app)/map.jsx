@@ -46,6 +46,7 @@ import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import MapContextCard from '../../components/MapContextCard';
 import EntitlementBanner from '../../components/EntitlementBanner';
+import LocationBlockedBanner from '../../components/LocationBlockedBanner';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { useMapStyle } from '../../lib/mapStyles';
@@ -986,6 +987,10 @@ export default function MapScreen() {
 
         {/* Billing entitlement notice (trial ending / paused) — map + list mode. */}
         <EntitlementBanner entitlement={data?.entitlement} />
+
+        {/* Location-gate notice (permission/services/precise off) — map + list mode.
+            Advisory; the hard block is the tap-time gate in recordAction.js. */}
+        <LocationBlockedBanner />
 
         {/* Map/List toggle (left) shares one row with the houses filter + sort (right). */}
         <View style={styles.controlRow}>

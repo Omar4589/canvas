@@ -13,12 +13,15 @@ tags: audit, gps, quality, flags, review, canvassing
 
 Every time a canvasser marks a door, the app quietly records **where the phone was**. The audit reads that trail and flags the doors that look wrong — the bad canvassing raw knock counts would hide: a house marked from far away, doors logged too fast to have walked between, or a whole street entered from one parked spot.
 
-## The four flags
+## The five flags
 
+- **Mock location** — the phone itself reported that the fix came from a **fake-GPS app**. This is the strongest fraud signal there is, and it's always high severity. The canvasser is never told it was detected — the flag quietly appears for you, so the evidence accumulates instead of tipping them off.
 - **Far from house** — the phone was well away from the house pin. (A big distance from a *weak* signal reads as Weak GPS instead, so bad signal never looks like bad canvassing. And an honest correction — a canvasser fixing an earlier entry after walking away — shows as low severity, not a full flag; see below.)
 - **Rapid succession** — two different doors logged only seconds apart, too fast to have walked between.
 - **One spot** — different houses spread down the street, all logged from nearly the same point (a parked car). Many units logged at one apartment entrance is normal and does **not** trip this.
-- **Weak / missing GPS** — the location fix was poor, absent, or synced from offline, so it can't be trusted.
+- **Weak / missing GPS** — the location fix was poor, absent, synced from offline, or **computed long before the door was recorded** (a stale, reheated location), so it can't be trusted.
+
+The app also refuses to record a door **without** a location: a canvasser with location off, denied, or set to approximate is blocked at the tap with instructions to fix it. So "no GPS trail at all" isn't something you'll see — entries either carry a stamp or don't exist.
 
 Each flag also carries a **severity** — low, medium, or high — so the worst ones stand out.
 

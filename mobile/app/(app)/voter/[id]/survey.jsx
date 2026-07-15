@@ -241,9 +241,10 @@ export default function VoterSurvey() {
   const percent =
     totalQuestions === 0 ? 100 : Math.round((answeredCount / totalQuestions) * 100);
 
-  // Optimistic-first: mark the voter surveyed + recolor the household, then jump
-  // straight back to the map. The GPS stamp + network write run in the background
-  // (optimisticSubmit) so the canvasser never waits on them.
+  // Gate-then-optimistic: optimisticSubmit first acquires the GPS stamp (no location =
+  // no survey), then marks the voter surveyed + recolors the household and fires
+  // onAccepted — where we jump back to the map. The network write stays in the
+  // background so the canvasser never waits on it.
   function onSubmit() {
     const err = validate();
     if (err) {
@@ -306,9 +307,17 @@ export default function VoterSurvey() {
       },
       hardFailTitle: 'Survey not saved',
       hardFailMessage: 'Could not save this survey. Please try again.',
-    });
-
-    router.replace('/(app)/map');
+      // Navigate only once the location gate passes and the optimistic patch lands;
+      // a blocked gate keeps the canvasser here with the form intact.
+      onAccepted: () => router.replace('/(app)/map'),
+    })
+      .then((res) => {
+        if (res?.blocked) {
+          firedRef.current = false;
+          setIsSubmitting(false);
+        }
+      })
+      .catch(() => {});
   }
 
   return (

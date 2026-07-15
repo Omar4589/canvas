@@ -134,6 +134,7 @@ export default function AdminAudit() {
 
   const kpiTiles = [
     { label: 'Open', value: (totals.open || 0).toLocaleString(), sub: 'Need review', level: totals.open > 0 ? 'caution' : undefined },
+    { label: 'Mock GPS', value: (totals.mockGps || 0).toLocaleString(), sub: 'Mock provider' },
     { label: 'Far', value: (totals.far || 0).toLocaleString(), sub: 'From house' },
     { label: 'Rapid', value: (totals.rapid || 0).toLocaleString(), sub: 'Too fast' },
     { label: 'One-spot', value: (totals.oneSpot || 0).toLocaleString(), sub: 'One place' },

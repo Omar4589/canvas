@@ -3242,7 +3242,7 @@ router.get('/canvassers/:userId/export.csv', async (req, res, next) => {
 // (services/audit/flagDetection.js); only reviewer decisions are persisted (FlagReview).
 // `summary` is the full picture for the scope (campaign/effort/date/userId in the match);
 // reasonType/reviewStatus/severity narrow the paginated `entries` drill-in list.
-const REASON_TYPES = ['far', 'rapid', 'one_spot', 'weak_gps'];
+const REASON_TYPES = ['far', 'rapid', 'one_spot', 'weak_gps', 'mock_gps'];
 
 router.get('/flags', async (req, res, next) => {
   try {

@@ -11,6 +11,10 @@ tags: canvasser, disposition, not home, refused, restricted
 
 When you tap a house, you record what happened. Your pin recolors instantly so you always know what's done.
 
+## The app needs your location
+
+Every door you record carries a GPS stamp — it's how your work gets verified — so **the app won't record a door without one**. If your phone's location is off, or Doorline doesn't have permission (or only has your *approximate* location on iPhone), the tap is blocked with a message telling you exactly what to turn on, plus a shortcut to Settings and a **Try again** button. Nothing is saved until location works. A red notice also shows at the top of the map whenever location is off, so you'll know before you start walking. See [Why does Doorline need my location?](why-location-required) for the details.
+
 ## The outcomes
 
 - **Survey / talked to them** — you reached someone and (on a survey campaign) took the survey. This is the goal.

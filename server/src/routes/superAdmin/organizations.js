@@ -12,6 +12,7 @@ import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
 import { createOrgMember, MemberError } from '../../services/memberships/createMember.js';
+import { bumpLive } from '../../services/platform/platformStats.js';
 import { deleteOrganization } from '../../services/platform/deleteOrganization.js';
 
 const router = Router();
@@ -124,6 +125,10 @@ router.post('/', async (req, res, next) => {
       toStatus: 'trial',
       reason: `Organization created — ${trialDays}-day trial started`,
     });
+
+    // Lifetime marketing counter: a real customer org was created (new orgs start on a trial, never
+    // 'internal', so this is always a countable org).
+    await bumpLive('organizations', 1, { isInternal: false });
 
     // Optionally seat the first admin in the same step (closes the chicken-and-egg
     // gap: POST /admin/memberships needs an existing org admin). Temp password is

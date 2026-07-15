@@ -13,6 +13,7 @@ import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
 import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { deleteCampaignCascade } from '../../services/campaigns/deleteCampaign.js';
+import { bumpLive } from '../../services/platform/platformStats.js';
 
 const router = Router();
 // Team leads reach this router too, but scoped: the list returns only campaigns
@@ -170,6 +171,9 @@ router.post('/', async (req, res, next) => {
       datesNote: data.datesNote ?? '',
       createdBy: req.user._id,
     });
+    // Lifetime marketing counter. req.subscription is attached by the entitlement middleware, so the
+    // internal-org check is free here.
+    await bumpLive('campaigns', 1, { isInternal: req.subscription?.status === 'internal' });
     res.status(201).json({ campaign });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });

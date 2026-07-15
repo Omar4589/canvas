@@ -5,6 +5,12 @@ const locationSchema = new mongoose.Schema(
     lat: { type: Number, required: true },
     lng: { type: Number, required: true },
     accuracy: { type: Number, default: null },
+    // GPS-audit provenance, nested here ON PURPOSE: the `replaced` snapshot below embeds
+    // this schema, so correction snapshots carry it for free, and the flag detector's
+    // scan projection already includes `location`. null = unknown (legacy rows, iOS for
+    // mocked, old clients) — absence must never flag.
+    mocked: { type: Boolean, default: null }, // Android isFromMockProvider (fake-GPS apps)
+    fixTimestamp: { type: Date, default: null }, // when the OS computed the fix (vs `timestamp`, the tap)
   },
   { _id: false }
 );

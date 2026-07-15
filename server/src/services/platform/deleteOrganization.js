@@ -35,6 +35,7 @@ import { VotedUpload } from '../../models/VotedUpload.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { Voter } from '../../models/Voter.js';
 import { VoterNote } from '../../models/VoterNote.js';
+import { captureOrgBeforeDelete } from './platformStats.js';
 
 // Every collection that carries organizationId. Voter is deleted LAST in this
 // list's order-independent sweep but its personIds are collected FIRST — the
@@ -70,6 +71,12 @@ export async function deleteOrganization(orgId) {
     err.status = 404;
     throw err;
   }
+
+  // BEFORE destroying anything: bank this org's lifetime contribution into the platform marketing
+  // counters, so "N doors knocked" survives the customer being deleted. No-op for internal orgs. Safe
+  // on a retry — captureOrgBeforeDelete recounts actual rows each time, and a second run over an
+  // already-emptied org captures zeros. See services/platform/platformStats.js.
+  await captureOrgBeforeDelete(org._id);
 
   // The org's Persons, from BOTH the Voter links AND Person.organizationId directly. The direct read is
   // what makes a RETRY safe: if a prior partial run already deleted this org's Voters, the Voter-derived

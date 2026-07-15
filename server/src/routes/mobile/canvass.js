@@ -19,6 +19,8 @@ import { canvasserHouseholdScope } from '../../services/canvass/canvasserScope.j
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
+import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
+import { bumpLive } from '../../services/platform/platformStats.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -71,7 +73,32 @@ const locationSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   accuracy: z.number().nullable().optional(),
+  // Provenance for the GPS audit (new clients send these; old clients omit them):
+  // mocked = Android's isFromMockProvider (fake-GPS apps; null = unknown/iOS),
+  // fixTimestamp = when the OS computed the fix (vs `timestamp`, the tap).
+  mocked: z.boolean().nullable().optional(),
+  fixTimestamp: z.string().datetime().nullable().optional(),
 });
+
+// No location = no knock. The mobile app hard-gates recording on a fresh GPS fix; this
+// is the server backstop for bypassed or old clients. Machine-readable `code` follows
+// the ORG_CONTEXT convention (mobile api.js parses it; recordAction.js maps it to a
+// specific alert). Checked BEFORE zod so the client gets this message, not a zod dump.
+function missingLocation(body) {
+  const loc = body?.location;
+  return !loc || typeof loc.lat !== 'number' || typeof loc.lng !== 'number';
+}
+const LOCATION_REQUIRED = {
+  status: 400,
+  code: 'LOCATION_REQUIRED',
+  message: 'A GPS location is required to record canvassing. Turn on location and try again.',
+};
+
+function sendRouteError(res, error) {
+  const body = { error: error.message };
+  if (error.code) body.code = error.code;
+  return res.status(error.status).json(body);
+}
 
 const baseActionSchema = z.object({
   note: z.string().max(2000).optional().nullable(),
@@ -151,6 +178,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     return { error: { status: 400, message: `Action not valid for campaign type "${campaign.type}".` } };
   }
 
+  if (missingLocation(body)) return { error: LOCATION_REQUIRED };
   const data = baseActionSchema.parse(body);
   const ts = data.timestamp ? new Date(data.timestamp) : new Date();
   const distance = distanceFromHouse(household, data.location);
@@ -202,6 +230,13 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     timestamp: ts,
     wasOfflineSubmission: !!data.wasOfflineSubmission,
   });
+
+  // Lifetime marketing counter: a real door knocked (KNOCK_ACTIONS only — excludes note_added /
+  // restricted). req.subscription is attached by the entitlement middleware, so the internal check is
+  // free. Backfill recounts from rows, so a rare miss here self-heals.
+  if (KNOCK_ACTIONS.includes(actionType)) {
+    await bumpLive('doorsKnocked', 1, { isInternal: req.subscription?.status === 'internal' });
+  }
 
   await recomputeHouseholdStatus(household, campaign.type);
   household.lastActionAt = ts;
@@ -285,7 +320,7 @@ router.post('/households/:householdId/not-home', async (req, res, next) => {
       body: req.body,
       requireCampaignType: 'survey',
     });
-    if (result.error) return res.status(result.error.status).json({ error: result.error.message });
+    if (result.error) return sendRouteError(res, result.error);
     res.status(201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -303,7 +338,7 @@ router.post('/households/:householdId/wrong-address', async (req, res, next) => 
       body: req.body,
       requireCampaignType: 'survey',
     });
-    if (result.error) return res.status(result.error.status).json({ error: result.error.message });
+    if (result.error) return sendRouteError(res, result.error);
     res.status(201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -321,7 +356,7 @@ router.post('/households/:householdId/refused', async (req, res, next) => {
       body: req.body,
       requireCampaignType: 'survey',
     });
-    if (result.error) return res.status(result.error.status).json({ error: result.error.message });
+    if (result.error) return sendRouteError(res, result.error);
     res.status(201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -339,7 +374,7 @@ router.post('/households/:householdId/lit-drop', async (req, res, next) => {
       body: req.body,
       requireCampaignType: 'lit_drop',
     });
-    if (result.error) return res.status(result.error.status).json({ error: result.error.message });
+    if (result.error) return sendRouteError(res, result.error);
     res.status(201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -360,7 +395,7 @@ router.post('/households/:householdId/restricted', async (req, res, next) => {
       status: 'restricted',
       body: req.body,
     });
-    if (result.error) return res.status(result.error.status).json({ error: result.error.message });
+    if (result.error) return sendRouteError(res, result.error);
     res.status(201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -389,6 +424,7 @@ const surveySchema = z.object({
 
 router.post('/voters/:voterId/survey', async (req, res, next) => {
   try {
+    if (missingLocation(req.body)) return sendRouteError(res, LOCATION_REQUIRED);
     const data = surveySchema.parse(req.body);
     const voter = await Voter.findById(req.params.voterId);
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
@@ -528,6 +564,15 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
 
     voter.surveyStatus = 'surveyed';
     await voter.save();
+
+    // Lifetime marketing counters: a genuinely-new survey is one new door knocked (the survey_submitted
+    // activity) and one survey response. Guarded on surveyInserted so a re-submission (which deletes and
+    // recreates the same row) doesn't double-count. Backfill recounts from rows as the source of truth.
+    if (surveyInserted) {
+      const isInternal = req.subscription?.status === 'internal';
+      await bumpLive('doorsKnocked', 1, { isInternal });
+      await bumpLive('surveyResponses', 1, { isInternal });
+    }
 
     await recomputeHouseholdStatus(household, campaign.type);
     household.lastActionAt = ts;
