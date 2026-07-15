@@ -55,7 +55,9 @@ export default function UpdateGate() {
 
   async function openStore() {
     try {
-      await Linking.openURL(STORE_URL);
+      // Server override first: during the TestFlight-only era the public App Store page
+      // doesn't exist yet, so the server can point iOS at TestFlight instead.
+      await Linking.openURL(data.storeUrl || STORE_URL);
     } catch {
       // No store app — nothing more we can do here.
     }

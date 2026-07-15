@@ -29,6 +29,8 @@ const ENV_KEYS = [
   'MOBILE_CURRENT_RUNTIME_IOS',
   'MOBILE_UPDATE_MODE',
   'MOBILE_UPDATE_NOTE',
+  'MOBILE_STORE_URL_ANDROID',
+  'MOBILE_STORE_URL_IOS',
 ];
 
 let server;
@@ -71,10 +73,10 @@ test('matching runtimeVersion reads ok', { skip }, async () => {
   assert.deepEqual(body, { status: 'ok' });
 });
 
-test('superseded runtimeVersion reads outdated, soft by default, no note', { skip }, async () => {
+test('superseded runtimeVersion reads outdated, soft by default, no note/storeUrl', { skip }, async () => {
   process.env.MOBILE_CURRENT_RUNTIME_ANDROID = ANDROID_RV;
   const body = await check({ platform: 'android', runtimeVersion: OLD_RV });
-  assert.deepEqual(body, { status: 'outdated', mode: 'soft', note: null });
+  assert.deepEqual(body, { status: 'outdated', mode: 'soft', note: null, storeUrl: null });
 });
 
 test('hard mode and note come from env; mode tolerates case and whitespace', { skip }, async () => {
@@ -86,12 +88,26 @@ test('hard mode and note come from env; mode tolerates case and whitespace', { s
     status: 'outdated',
     mode: 'hard',
     note: 'Old versions stop working Friday.',
+    storeUrl: null,
   });
 
   // Any unrecognized mode string degrades to the safe one.
   process.env.MOBILE_UPDATE_MODE = 'blocking';
   const soft = await check({ platform: 'android', runtimeVersion: OLD_RV });
   assert.equal(soft.mode, 'soft');
+});
+
+test('storeUrl override is per-platform (TestFlight era: iOS only)', { skip }, async () => {
+  process.env.MOBILE_CURRENT_RUNTIME_ANDROID = ANDROID_RV;
+  process.env.MOBILE_CURRENT_RUNTIME_IOS = IOS_RV;
+  process.env.MOBILE_STORE_URL_IOS = 'https://beta.itunes.apple.com/v1/app/6764581850';
+
+  const ios = await check({ platform: 'ios', runtimeVersion: OLD_RV });
+  assert.equal(ios.storeUrl, 'https://beta.itunes.apple.com/v1/app/6764581850');
+
+  // Android keeps its built-in URL — the override must not bleed across platforms.
+  const android = await check({ platform: 'android', runtimeVersion: OLD_RV });
+  assert.equal(android.storeUrl, null);
 });
 
 test('comma-separated list: every listed build is current (staged rollout)', { skip }, async () => {

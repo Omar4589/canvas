@@ -344,7 +344,10 @@ Two mechanisms steer people to newer versions, and they answer different questio
   again" refetch as the ops escape valve.
 
 Shared invariants: both surfaces link to the same `STORE_URL` (single copy in
-[lib/config.js](../mobile/lib/config.js)); the nag **fails open** on every error path (no
+[lib/config.js](../mobile/lib/config.js)) — though the nag prefers a server-supplied
+`storeUrl` when the response carries one (`MOBILE_STORE_URL_IOS`/`_ANDROID`; exists because the
+baked-in URL is the public store page, which iOS doesn't have until public release — the
+TestFlight era needs a TestFlight link instead); the nag **fails open** on every error path (no
 runtimeVersion in dev, timeout, 429, malformed response → render nothing — a wrong wall would lock
 the fleet out of a working app); and enforcement is UI-only — no server middleware rejects old
 builds, because a 4xx mid-sync is exactly the offline-queue-eating failure the queue was hardened

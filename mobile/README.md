@@ -186,6 +186,7 @@ Unset = feature off. To flip it, set Heroku config vars — Dashboard → your A
 | `MOBILE_CURRENT_RUNTIME_IOS` | same for iOS — each platform is independent |
 | `MOBILE_UPDATE_MODE` | `soft` (default) = dismissible banner · `hard` = blocking "Update Doorline" wall |
 | `MOBILE_UPDATE_NOTE` | optional one-line custom message shown on the nag |
+| `MOBILE_STORE_URL_IOS` / `_ANDROID` | optional override of where the Update button goes. Needed for iOS **until the app is publicly released**: the baked-in URL is the public App Store page, which doesn't exist during the TestFlight-only era — point it at TestFlight (e.g. `https://beta.itunes.apple.com/v1/app/6764581850`, or your TestFlight public invite link), then delete it at launch. Play needs no override — internal-testing releases serve through the normal store page. |
 
 Builds whose runtimeVersion isn't listed show the nag; everyone else sees nothing. Everything
 fails open — server unreachable, endpoint erroring, var typo'd to nonsense → **no nag**, never a

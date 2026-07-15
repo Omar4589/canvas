@@ -68,7 +68,16 @@ router.get('/', limiter, (req, res) => {
   const mode =
     String(process.env.MOBILE_UPDATE_MODE || '').trim().toLowerCase() === 'hard' ? 'hard' : 'soft';
   const note = String(process.env.MOBILE_UPDATE_NOTE || '').trim() || null;
-  res.json({ status: 'outdated', mode, note });
+  // Optional per-platform override of where the Update button sends people. Exists because the
+  // app's baked-in URL is the PUBLIC store page, which doesn't exist until the app is publicly
+  // released — during the TestFlight-only era, iOS "Update" must point at TestFlight instead
+  // (Play has no such gap: internal-testing releases serve through the normal store page).
+  // Absent → null → the client falls back to its built-in STORE_URL.
+  const storeUrl =
+    String(
+      process.env[platform === 'ios' ? 'MOBILE_STORE_URL_IOS' : 'MOBILE_STORE_URL_ANDROID'] || ''
+    ).trim() || null;
+  res.json({ status: 'outdated', mode, note, storeUrl });
 });
 
 export default router;
