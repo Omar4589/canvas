@@ -39,6 +39,7 @@ import mobileMeRouter from './mobile/me.js';
 import mobileVotersRouter from './mobile/voters.js';
 import adminClientReportsRouter from './admin/clientReports.js';
 import shareRouter from './public/share.js';
+import buildStatusRouter from './public/buildStatus.js';
 import helpRouter from './help.js';
 
 const router = Router();
@@ -51,6 +52,11 @@ router.use('/auth', authRouter);
 
 // Public report sharing (no login) — capability token in the URL. Mounted BEFORE the auth gate.
 router.use('/share', shareRouter);
+
+// Mobile build currency (no login) — a phone asks "is my installed build current?" and the
+// client draws a nag/wall from the answer. Mounted BEFORE the auth gate so the wall can cover
+// the login screen; env-driven, see routes/public/buildStatus.js.
+router.use('/build-status', buildStatusRouter);
 
 // Help Center content — self-gated (any logged-in member) and intentionally outside the
 // password/entitlement gates below, so help is always readable (incl. suspended orgs).

@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 // EAS Build bakes `EXPO_PUBLIC_*` env vars into the JS bundle at build time,
@@ -19,3 +20,10 @@ export const MAPBOX_PUBLIC_TOKEN =
 // (This is the forward-looking half of the Android stale-bundle fix — it can't
 // help a bundle that predates it, but it protects every future mismatch.)
 export const CLIENT_API_VERSION = 1;
+
+// Where "get the update" sends people. One copy, used by both update surfaces
+// (the /update-required contract wall and the UpdateGate build nag).
+export const STORE_URL = Platform.select({
+  android: 'https://play.google.com/store/apps/details?id=com.canvassapp.mobile',
+  ios: 'https://apps.apple.com/app/doorline/id6764581850',
+});

@@ -1,6 +1,7 @@
-import { View, Text, Pressable, Linking, Platform, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Linking, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { signOut } from '../lib/authState';
+import { STORE_URL } from '../lib/config';
 import Logo from '../components/Logo';
 import { radius, spacing } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
@@ -9,10 +10,6 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // index.jsx). A blocking wall is intentional: an out-of-date bundle can't talk to
 // the new API contract, so we steer the user to update rather than let them hit
 // cryptic 4xx errors deeper in the app.
-const STORE_URL = Platform.select({
-  android: 'https://play.google.com/store/apps/details?id=com.canvassapp.mobile',
-  ios: 'https://apps.apple.com/app/doorline/id6764581850',
-});
 
 export default function UpdateRequired() {
   const styles = useThemedStyles(makeStyles);
