@@ -81,6 +81,26 @@ get. Two things this is NOT: it is unrelated to the build-currency nag / `MOBILE
 "is your *binary* the newest?"; this asks "can your *code* talk to my API?"), and the **web** console
 needs no gate — it reloads fresh on every deploy.
 
+## After EVERY mobile build + submit: update the build-currency vars.
+
+**A new native build is not "done" when it's submitted — you MUST re-point the build-currency vars at it,
+or it silently breaks.** Until you do, the vars still name the *previous* build as current, so the brand-new
+build nags **itself** ("update available") while the superseded build reads "ok" — exactly backwards. This
+is the build-currency nag (Gate B); it is env-driven, so no deploy is needed.
+
+Every time you `eas build` + `eas submit` a new mobile build:
+
+1. Grab the new build's **runtime version** per platform (expo.dev build page, or `eas build:list`).
+2. In the **Heroku dashboard → Config Vars**, set **`MOBILE_CURRENT_RUNTIME_ANDROID`** and
+   **`MOBILE_CURRENT_RUNTIME_IOS`** to the new hashes (comma-separate to keep older builds "current" too).
+3. **Wait until the store actually serves the new build** (Play Internal live / TestFlight processed) before
+   flipping, so an old-build user who taps **Update** gets something installable.
+
+Verify by hitting `GET /api/build-status?platform=…&runtimeVersion=…`: the new build must read `ok`, an
+older one `outdated`. Anyone reading this after the user says they built/submitted: remind them of this
+step. (Related knobs: `MOBILE_UPDATE_MODE` soft|hard, `MOBILE_UPDATE_NOTE`, `MOBILE_STORE_URL_IOS` for the
+TestFlight-era Update button — see [`mobile/README.md`](mobile/README.md).)
+
 ## Help Center content, at a glance
 
 Each article is a markdown file under `server/src/content/help/` (subfolder = `kind`) with a small

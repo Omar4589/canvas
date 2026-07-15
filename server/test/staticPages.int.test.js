@@ -187,3 +187,24 @@ test('the committed legal documents carry the load-bearing sentences and no scri
   assert.match(nf, /name="robots" content="noindex"/);
   assert.doesNotMatch(nf, /<script/i);
 });
+
+test('every static page carries the brand chrome — logo, header nav, footer cross-links', { skip }, () => {
+  const read = (f) => fs.readFileSync(path.join(PUBLIC_DIR, f), 'utf8');
+  // The Doorline pin — the exact path from client/src/components/Logo.jsx. If the brand mark
+  // changes there, change it here and in the four static pages together.
+  const LOGO_PATH = 'M18 0 C8.06 0 0 8.06 0 18';
+  for (const f of ['privacy.html', 'terms.html', 'delete-account.html', '404.html']) {
+    const html = read(f);
+    assert.ok(html.includes(LOGO_PATH), `${f}: logo mark present`);
+    assert.match(html, /class="site-header"/, `${f}: header present`);
+    assert.match(html, /class="signin" href="\/login"/, `${f}: Sign in`);
+    assert.match(html, /class="site-footer"/, `${f}: footer present`);
+    assert.match(html, /© 2026 Doorline LLC/, `${f}: copyright line`);
+    // Cross-links: each page's footer must reach the other legal pages (its own entry renders
+    // as unlinked text, so only require the two/three OTHER hrefs).
+    for (const target of ['/privacy', '/terms', '/delete-account']) {
+      const isSelf = f === `${target.slice(1)}.html`;
+      if (!isSelf) assert.ok(html.includes(`href="${target}"`), `${f}: links ${target}`);
+    }
+  }
+});

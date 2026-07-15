@@ -24,8 +24,27 @@
   <style>
     :root{color-scheme:light}
     *{margin:0;padding:0;box-sizing:border-box}
-    body{background:#f9fafb;color:#111827;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:2.5rem 1rem}
+    body{background:#f9fafb;color:#111827;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;min-height:100vh}
+    .site-header{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border-bottom:1px solid #e5e7eb}
+    .site-header .bar{max-width:72rem;margin:0 auto;padding:0 1rem;height:4rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+    .brand{display:flex;align-items:center;gap:.5rem;text-decoration:none}
+    .brand span{font-weight:700;font-size:1.35rem;letter-spacing:-.5px;color:#111827}
+    .site-nav{display:none;align-items:center;gap:2rem}
+    @media(min-width:768px){.site-nav{display:flex}}
+    .site-nav a{font-size:.875rem;color:#4b5563;text-decoration:none;font-weight:400}
+    .site-nav a:hover{color:#111827}
+    .signin{border:1px solid #d1d5db;background:#fff;border-radius:.375rem;padding:.6rem 1rem;font-size:.875rem;font-weight:600;color:#111827;text-decoration:none;box-shadow:0 1px 2px 0 rgb(0 0 0/.05);white-space:nowrap}
+    .signin:hover{background:#f9fafb}
+    .content{flex:1;width:100%;padding:2.5rem 1rem}
     main{max-width:46rem;margin:0 auto;background:#fff;border-radius:.5rem;box-shadow:0 1px 2px 0 rgb(0 0 0/.05);padding:2rem}
+    .site-footer{border-top:1px solid #e5e7eb;background:#fff;margin-top:2.5rem}
+    .site-footer .inner{max-width:72rem;margin:0 auto;padding:2rem 1rem}
+    .site-footer .brand span{font-size:1.05rem}
+    .site-footer nav{display:flex;flex-wrap:wrap;gap:1.25rem;margin-top:1rem}
+    .site-footer nav a{font-size:.875rem;color:#57534e;text-decoration:none;font-weight:400}
+    .site-footer nav a:hover{color:#1c1917}
+    .site-footer .here{font-size:.875rem;color:#a8a29e}
+    .site-footer .copyright{display:block;margin-top:1.75rem;font-size:.75rem;color:#78716c}
     h1{font-size:1.875rem;font-weight:600;letter-spacing:-.01em}
     .updated{margin-top:.25rem;font-size:.875rem;color:#6b7280}
     h2{margin-top:2rem;font-size:1.125rem;font-weight:600}
@@ -34,10 +53,30 @@
     li{margin-top:.25rem}
     strong{color:#111827}
     a{color:#dc2626;font-weight:500}
-    footer{margin-top:2.5rem;border-top:1px solid #e5e7eb;padding-top:1.5rem;font-size:.875rem;color:#6b7280}
+    main footer{margin-top:2.5rem;border-top:1px solid #e5e7eb;padding-top:1.5rem;font-size:.875rem;color:#6b7280}
   </style>
 </head>
 <body>
+<!-- Static port of the marketing site's chrome (MarketingNav/MarketingFooter) — pure HTML/CSS,
+     deliberately no hamburger and no auth-aware button, because this page must stay zero-JS
+     and reachable without a login (Google Play requirement). -->
+<header class="site-header">
+  <div class="bar">
+    <a class="brand" href="/" aria-label="Doorline home">
+      <svg width="28" height="34" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M18 0 C8.06 0 0 8.06 0 18 C0 29.5 12 36.5 17 43.2 C17.5 43.9 18.5 43.9 19 43.2 C24 36.5 36 29.5 36 18 C36 8.06 27.94 0 18 0 Z" fill="#DC2626"/><path d="M12 11 L12 26 L24 26 L24 11 C24 8.79 22.21 7 20 7 L16 7 C13.79 7 12 8.79 12 11 Z" fill="#ffffff"/><rect x="20.4" y="17.2" width="1.8" height="1.8" rx="0.9" fill="#DC2626"/></svg>
+      <span>Doorline</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/#turf">Turf</a>
+      <a href="/#field">Field app</a>
+      <a href="/#oversight">Oversight</a>
+      <a href="/#reports">Reports</a>
+      <a href="/#how">How it works</a>
+    </nav>
+    <a class="signin" href="/login">Sign in</a>
+  </div>
+</header>
+<div class="content">
 <main>
   <h1>Delete your Doorline account</h1>
   <p class="updated">Doorline LLC — canvassing software for field campaigns</p>
@@ -72,5 +111,22 @@
     See our <a href="/privacy">Privacy Policy</a> for the full picture of what we collect and how long we keep it.
   </footer>
 </main>
+</div>
+<footer class="site-footer">
+  <div class="inner">
+    <a class="brand" href="/" aria-label="Doorline home">
+      <svg width="22" height="27" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M18 0 C8.06 0 0 8.06 0 18 C0 29.5 12 36.5 17 43.2 C17.5 43.9 18.5 43.9 19 43.2 C24 36.5 36 29.5 36 18 C36 8.06 27.94 0 18 0 Z" fill="#DC2626"/><path d="M12 11 L12 26 L24 26 L24 11 C24 8.79 22.21 7 20 7 L16 7 C13.79 7 12 8.79 12 11 Z" fill="#ffffff"/><rect x="20.4" y="17.2" width="1.8" height="1.8" rx="0.9" fill="#DC2626"/></svg>
+      <span>Doorline</span>
+    </a>
+    <nav aria-label="Legal">
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <span class="here">Delete account</span>
+      <a href="mailto:hello@doorline.app">Contact</a>
+      <a href="/">Home</a>
+    </nav>
+    <small class="copyright">© 2026 Doorline LLC</small>
+  </div>
+</footer>
 </body>
 </html>
