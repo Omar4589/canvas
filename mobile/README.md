@@ -147,19 +147,50 @@ the binary:
 The cost was real: **Android build vc16 shipped with a fingerprint no update was ever published under,
 so it can never receive an OTA. Ever.** Its only exit is a store update.
 
-### Before every OTA
+### The guard: `ota:check` (automatic)
 
-```bash
-npm run ota:check        # fails loudly if the tree's fingerprint ≠ your latest build's
-npm run ota:production
-```
-
-To see exactly which sources diverged:
+`npm run ota:production` now refuses to publish into the void: it runs `scripts/ota-check.mjs`
+first, which compares the tree's fingerprint against the newest finished production build per
+platform and **exits non-zero on a mismatch** — before `eas update` ever runs. To see exactly
+which sources diverged:
 
 ```bash
 npx eas build:list --platform android --limit 3      # get the build id + its runtimeVersion
 npx eas fingerprint:compare --build-id <BUILD_ID>    # names the files/fields that moved
 ```
+
+Deliberate override (e.g. you just cut a build and EAS hasn't listed it as finished yet):
+`OTA_ALLOW_MISMATCH=1 npm run ota:production` — it warns loudly and proceeds.
+
+### The tamed inputs: `fingerprint.config.js`
+
+Two inert edits used to strand the fleet, and no longer move the fingerprint:
+
+- **`app.json` `version`** — skipped via `ExpoConfigVersions` (it's inert here because
+  `appVersionSource: "remote"` means the store version comes from EAS, not that field);
+- **`eas.json`'s `submit` block** (ascAppId, appleId, Play track) — stripped from the hash by a
+  file transform before hashing; **build profiles still count** (channel/env reach the binary).
+
+**Editing `fingerprint.config.js` itself changes every fingerprint** — only touch it in a commit
+that ships a native build. `ota:check` catches it loudly if you forget.
+
+### Telling old builds to update (the nag)
+
+Phones ask `GET /api/build-status` (public, env-driven) whether their **binary** is current.
+Unset = feature off. To flip it, set Heroku config vars — Dashboard → your API app → Settings →
+**Reveal Config Vars** (changing one restarts the dyno; takes effect in seconds):
+
+| Var | Value |
+|---|---|
+| `MOBILE_CURRENT_RUNTIME_ANDROID` | the current Android build's **Runtime Version** (from `eas build:list`, or the expo.dev build page); comma-separate to allow several |
+| `MOBILE_CURRENT_RUNTIME_IOS` | same for iOS — each platform is independent |
+| `MOBILE_UPDATE_MODE` | `soft` (default) = dismissible banner · `hard` = blocking "Update Doorline" wall |
+| `MOBILE_UPDATE_NOTE` | optional one-line custom message shown on the nag |
+
+Builds whose runtimeVersion isn't listed show the nag; everyone else sees nothing. Everything
+fails open — server unreachable, endpoint erroring, var typo'd to nonsense → **no nag**, never a
+wrong wall. Don't flip `hard` until you've eyeballed the wall once on a real device: it blocks
+the entire app (login included) until the store update is installed.
 
 ### Reading it off a phone
 

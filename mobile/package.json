@@ -8,7 +8,8 @@
     "ios": "expo run:ios",
     "android": "expo run:android",
     "prebuild": "expo prebuild",
-    "ota:production": "eas update --branch production --environment production",
+    "ota:check": "node scripts/ota-check.mjs",
+    "ota:production": "node scripts/ota-check.mjs && eas update --branch production --environment production",
     "ota:preview": "eas update --branch preview --environment preview"
   },
   "dependencies": {

@@ -209,6 +209,21 @@ Tapping a voter opens their survey. A few things make the script feel like a rea
 Saving the survey marks that voter surveyed and turns the house green on the map right away, the same
 optimistic, never-wait-on-the-network behavior as the door buttons.
 
+## When the app asks you to update
+
+Most improvements arrive silently — the app refreshes itself in the background and you never notice.
+Once in a while, though, a change needs a genuinely new version from the **App Store** or **Google
+Play**, and the app will tell you in one of two ways:
+
+- **A banner at the top of the screen** saying a new version is available. It's a heads-up, not a
+  stop sign: tap **Update** to go to the store, or **Later** to keep working — it'll remind you again
+  next time you open the app.
+- **A full "Update Doorline" screen** that won't go away. The version on your phone is too old to
+  keep using safely; tap **Get the update**, install it, and reopen the app.
+
+Either way, updating never costs you work — every door you've knocked and every survey you've saved
+is already on the server (or safely queued on the phone).
+
 ---
 
 # Part 2 — Technical reference
@@ -306,6 +321,34 @@ positioning:
   it above the "Enter book" button when a book is selected. Follow is wired via the `Camera`'s
   `followUserLocation`, and a real pan/zoom gesture (`onCameraChanged`) drops follow — same as the
   houses map.
+
+## The update surfaces (two gates, two different questions)
+
+Two mechanisms steer people to newer versions, and they answer different questions on purpose:
+
+- **The contract gate** — "is this **JS bundle** too old for the API?" `CLIENT_API_VERSION`
+  ([lib/config.js](../mobile/lib/config.js)) vs the server's `minClientApiVersion`
+  ([server/src/config/clientVersion.js](../server/src/config/clientVersion.js), reported on
+  login//auth/me); when behind, [index.jsx](../mobile/app/index.jsx) redirects to
+  [update-required.jsx](../mobile/app/update-required.jsx). OTA-fixable; bumping the floor
+  requires a server deploy.
+- **The build nag** — "is this **native binary** superseded?" An OTA can never fix that: under the
+  fingerprint runtimeVersion policy a superseded binary silently stops receiving updates (EAS gives
+  it the same "no update" answer a current build gets), so the server must be the one to say so.
+  [UpdateGate.jsx](../mobile/components/UpdateGate.jsx), mounted in the root layout above the whole
+  `<Stack>` (login included), sends `Updates.runtimeVersion` + platform to the public
+  `GET /api/build-status` ([server/src/routes/public/buildStatus.js](../server/src/routes/public/buildStatus.js),
+  env-driven — see [mobile/README.md](../mobile/README.md) for the ops runbook). `soft` → dismissible
+  banner (session-scoped dismissal); `hard` → an opaque wall drawn **above the navigator**, not a
+  route — nothing to navigate around, no redirect loop possible, with an "I've updated — check
+  again" refetch as the ops escape valve.
+
+Shared invariants: both surfaces link to the same `STORE_URL` (single copy in
+[lib/config.js](../mobile/lib/config.js)); the nag **fails open** on every error path (no
+runtimeVersion in dev, timeout, 429, malformed response → render nothing — a wrong wall would lock
+the fleet out of a working app); and enforcement is UI-only — no server middleware rejects old
+builds, because a 4xx mid-sync is exactly the offline-queue-eating failure the queue was hardened
+against.
 
 ## The profile screen
 
