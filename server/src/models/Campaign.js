@@ -44,6 +44,10 @@ const campaignSchema = new mongoose.Schema(
     // (services/billing/statement.js). Legacy archived campaigns have null —
     // migrate:billing backfills updatedAt.
     archivedAt: { type: Date, default: null },
+    // Set once, atomically, when this campaign's contribution has been banked into the platform
+    // marketing counters (services/platform/platformStats.js), so a RETRIED hard-delete can't capture
+    // its counts twice into the permanent `deleted` bucket. Deleted with the campaign.
+    platformStatsCaptured: { type: Boolean, default: false },
     // Denormalized ALL-TIME ledger counters, maintained by services/reports/campaignCounters.js
     // so the no-date-window dashboards (rollup "All time", campaigns list) read the campaign doc
     // instead of re-aggregating the whole CanvassActivity/SurveyResponse ledgers on every load.

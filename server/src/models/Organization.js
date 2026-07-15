@@ -12,6 +12,11 @@ const organizationSchema = new mongoose.Schema(
     // refuse to render until this is set: deploy order is not a safeguard, a gate is.
     teamAttributionReadyAt: { type: Date, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Set once, atomically, when this org's lifetime contribution has been banked into the platform
+    // marketing counters (services/platform/platformStats.js), so a RETRIED deletion — the retention
+    // sweep re-runs a partially-failed delete — can't capture the same org's counts twice. Deleted with
+    // the org, so it never lingers.
+    platformStatsCaptured: { type: Boolean, default: false },
     // Anchor timezone for ORG-WIDE rollups (multi-campaign), where a single campaign's
     // zone doesn't apply. Per-campaign views use Campaign.timeZone. Overridable in the UI.
     timeZone: { type: String, default: 'America/New_York' },

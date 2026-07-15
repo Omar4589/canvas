@@ -64,6 +64,14 @@ async function moveLiveToDeleted(captured) {
  * which is excluded). Counts actual rows — the source of truth — never a running tally.
  */
 export async function captureOrgBeforeDelete(orgId) {
+  // Atomically claim the capture. deleteOrganization is retried by the retention sweep, and this add is
+  // not idempotent on its own (organizations += 1 every call) — so we mark the org exactly once and skip
+  // on any re-entry. `platformStatsCaptured` dies with the org, so it never lingers.
+  const claimed = await Organization.findOneAndUpdate(
+    { _id: orgId, platformStatsCaptured: { $ne: true } },
+    { $set: { platformStatsCaptured: true } }
+  );
+  if (!claimed) return null; // already captured on a prior (failed) attempt, or the org is gone
   if (await isInternalOrg(orgId)) return null;
   const [campaigns, doorsKnocked, surveyResponses, votersProcessed] = await Promise.all([
     Campaign.countDocuments({ organizationId: orgId }),
@@ -82,6 +90,14 @@ export async function captureOrgBeforeDelete(orgId) {
  * row is destroyed by exactly one of the two cascades.) `organizations` is 0 here — the org lives on.
  */
 export async function captureCampaignBeforeDelete(campaign) {
+  // Atomically claim the capture — deleteCampaignCascade is sequential and non-transactional, so a
+  // partial failure + admin retry would otherwise re-add campaigns:1 and the surviving voters into the
+  // permanent `deleted` bucket (which the backfill never recomputes). Same guard as the org path.
+  const claimed = await Campaign.findOneAndUpdate(
+    { _id: campaign._id, platformStatsCaptured: { $ne: true } },
+    { $set: { platformStatsCaptured: true } }
+  );
+  if (!claimed) return null; // already captured on a prior (failed) attempt
   if (await isInternalOrg(campaign.organizationId)) return null;
   const campaignId = campaign._id;
   const householdIds = await Household.find({ campaignId }).distinct('_id');

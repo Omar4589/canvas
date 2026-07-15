@@ -10,6 +10,8 @@ import { createGrant, revokeGrant, activeGrant, DEFAULT_GRANT_HOURS, MAX_GRANT_H
 import { retentionHealth } from '../../services/retention/purgeDeletedIdentities.js';
 import { deletionRequestHealth } from '../../services/retention/triggers.js';
 import { requestOrgDeletion, cancelOrgDeletion, listDeletionRequests, DeletionRequestError } from '../../services/retention/deletionRequests.js';
+import { idleZeroDollarOrgs } from '../../services/billing/idleOrgs.js';
+import { getPlatformStats } from '../../services/platform/platformStats.js';
 import { REPEATABLE_JOBS } from '../../services/retention/scheduler.js';
 
 // Support access: the front door into a customer organization, and the record of who used it.
@@ -171,6 +173,25 @@ router.get('/health/retention', async (req, res, next) => {
       jobs,
       deletionRequests: delReq,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Zombie watch: $0 idle orgs the retention sweep will never catch, for a human to decide on. ──
+router.get('/idle-orgs', async (req, res, next) => {
+  try {
+    const months = Number(req.query.months) || undefined;
+    res.json(await idleZeroDollarOrgs({ months }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Platform lifetime marketing counters (total = live + captured-from-deleted; internal excluded). ──
+router.get('/platform-stats', async (req, res, next) => {
+  try {
+    res.json(await getPlatformStats());
   } catch (err) {
     next(err);
   }

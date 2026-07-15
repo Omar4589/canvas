@@ -71,5 +71,15 @@ export default function BillingBanner() {
       </NextStepBanner>
     );
   }
+  // Canceled is now READ-ONLY (not a lockout), so GET /admin/billing answers 200 with this banner —
+  // the org's admins must still see that the subscription ended and that they can export during the
+  // wind-down before deletion.
+  if (ent.banner === 'canceled') {
+    return (
+      <NextStepBanner tone="danger" title="This subscription has ended — read-only." className="mb-4" action={contact}>
+        Your data is available to export during the wind-down period. Reach out to reactivate.
+      </NextStepBanner>
+    );
+  }
   return null;
 }

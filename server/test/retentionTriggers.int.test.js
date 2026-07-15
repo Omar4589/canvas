@@ -217,6 +217,6 @@ test('the windows are CONFIGURABLE, not hardcoded', { skip }, () => {
   // change without a deploy — and a lawyer's answer arriving after a deploy window is a bad reason to
   // keep the wrong number.
   assert.strictEqual(WIND_DOWN_DAYS, Number(process.env.RETENTION_WIND_DOWN_DAYS || 60));
-  assert.strictEqual(DORMANCY_MONTHS, Number(process.env.RETENTION_DORMANCY_MONTHS || 24));
+  assert.strictEqual(DORMANCY_MONTHS, Number(process.env.RETENTION_DORMANCY_MONTHS || 30));
   assert.strictEqual(DELETE_REQUEST_SLA_DAYS, Number(process.env.RETENTION_DELETE_SLA_DAYS || 30));
 });

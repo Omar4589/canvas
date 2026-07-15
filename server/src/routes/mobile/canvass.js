@@ -231,13 +231,6 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     wasOfflineSubmission: !!data.wasOfflineSubmission,
   });
 
-  // Lifetime marketing counter: a real door knocked (KNOCK_ACTIONS only — excludes note_added /
-  // restricted). req.subscription is attached by the entitlement middleware, so the internal check is
-  // free. Backfill recounts from rows, so a rare miss here self-heals.
-  if (KNOCK_ACTIONS.includes(actionType)) {
-    await bumpLive('doorsKnocked', 1, { isInternal: req.subscription?.status === 'internal' });
-  }
-
   await recomputeHouseholdStatus(household, campaign.type);
   household.lastActionAt = ts;
   household.lastActionBy = userId;
@@ -256,6 +249,18 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     at: ts,
     userId,
   });
+
+  // Lifetime marketing counters, as ROW deltas mirroring the Campaign.stats deltas above (what the
+  // backfill recomputes): net new knock rows for this disposition, minus any surveys it removed
+  // (re-dispositioning a surveyed door to not_home deletes its SurveyResponse). Never bulk here.
+  {
+    const isInternal = req.subscription?.status === 'internal';
+    const knockRowDelta =
+      (KNOCK_ACTIONS.includes(actionType) ? 1 : 0) -
+      mineRows.filter((r) => KNOCK_ACTIONS.includes(r.actionType)).length;
+    await bumpLive('doorsKnocked', knockRowDelta, { isInternal });
+    if (priorSurveys.length) await bumpLive('surveyResponses', -priorSurveys.length, { isInternal });
+  }
 
   return { household, activity };
 }
@@ -565,13 +570,16 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     voter.surveyStatus = 'surveyed';
     await voter.save();
 
-    // Lifetime marketing counters: a genuinely-new survey is one new door knocked (the survey_submitted
-    // activity) and one survey response. Guarded on surveyInserted so a re-submission (which deletes and
-    // recreates the same row) doesn't double-count. Backfill recounts from rows as the source of truth.
-    if (surveyInserted) {
+    // Lifetime marketing counters. Mirror the Campaign.stats deltas below, as ROW deltas (what the
+    // backfill recomputes): doorsKnocked moves by the NET new knock rows — +1 for the survey_submitted,
+    // minus any of this canvasser's prior knock rows this submit replaced — so re-dispositioning a door
+    // (e.g. not_home → surveyed) doesn't count the door twice; surveyResponses moves only when a genuinely
+    // new SurveyResponse row was inserted. A rare miss self-heals on the next backfill.
+    {
       const isInternal = req.subscription?.status === 'internal';
-      await bumpLive('doorsKnocked', 1, { isInternal });
-      await bumpLive('surveyResponses', 1, { isInternal });
+      const knockRowDelta = 1 - mineRows.filter((r) => KNOCK_ACTIONS.includes(r.actionType)).length;
+      await bumpLive('doorsKnocked', knockRowDelta, { isInternal });
+      if (surveyInserted) await bumpLive('surveyResponses', 1, { isInternal });
     }
 
     await recomputeHouseholdStatus(household, campaign.type);

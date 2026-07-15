@@ -5,8 +5,8 @@ import mongoose from 'mongoose';
 
 // Billing/entitlement matrix over the REAL Express app + a throwaway mongod:
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/billing_test node --test test/billing.int.test.js
-// Covers: the status × method gate (reads pass when suspended, writes 402;
-// canceled closes reads too), computed trial expiry, super-admin bypass, the
+// Covers: the status × method gate (reads pass when suspended OR canceled — both
+// are read-only — while writes 402), computed trial expiry, super-admin bypass, the
 // mobile sync-boundary grace, entitlementFor's pure rules, and the monthly
 // statement's first-knock → archive-month billing window.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-billing';
@@ -143,10 +143,19 @@ test('expired trial acts suspended; live trial writes fine', { skip }, async () 
   assert.strictEqual(ok.status, 200);
 });
 
-test('canceled org: even reads are closed', { skip }, async () => {
+test('canceled org: READ-ONLY (reads/exports pass, writes 402) — the wind-down export window', { skip }, async () => {
+  // Changed: canceled used to close reads too. It is now read-only like suspended, so a terminated
+  // customer can still log in and EXPORT their data during the 60-day wind-down before deletion.
   await setStatus('canceled');
   const read = await call('GET', '/admin/campaigns', { token: ctx.adminTok, orgId: ctx.org._id });
-  assert.strictEqual(read.status, 402);
+  assert.strictEqual(read.status, 200, 'a canceled org can still read/export its own data');
+  const write = await call('PATCH', `/admin/campaigns/${ctx.camp._id}`, {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+    body: { name: 'Nope' },
+  });
+  assert.strictEqual(write.status, 402, 'but writes are blocked');
+  assert.strictEqual(write.json?.code, 'subscription-inactive');
 });
 
 test('internal org: never gated', { skip }, async () => {
