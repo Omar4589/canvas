@@ -48,8 +48,18 @@ export async function computeSurveyBreakdowns({ surveyScopeMatch, template, supp
       { $group: { _id: '$_answerKeys', count: { $sum: 1 } } },
     ]);
     const merged = mergeOptionRows(q, agg);
-    const questionTotal = merged.reduce((s, o) => s + o.count, 0);
-    const options = merged.map((o) => ({
+    // PUBLIC-SURFACE RULE (the breakdown-table twin of publicPointAnswer): only the template's
+    // canonical option labels may appear on a client report. mergeOptionRows keys leftover rows
+    // by their RAW answer text, and for a legacy pre-option-id "Other: ___" response that text
+    // is whatever the canvasser typed — so every unmatched bucket (id:null, which also covers
+    // the synthetic '__other__' id) collapses into one 'Other' row here. Counts are preserved
+    // exactly — only the label is withheld. Admin analytics keep the raw buckets; this function
+    // is client-report-only (sole caller: computeWindowStats).
+    const canonical = merged.filter((o) => o.id != null);
+    const otherCount = merged.filter((o) => o.id == null).reduce((s, o) => s + o.count, 0);
+    if (otherCount > 0) canonical.push({ id: null, text: 'Other', retired: false, count: otherCount });
+    const questionTotal = canonical.reduce((s, o) => s + o.count, 0);
+    const options = canonical.map((o) => ({
       option: o.text,
       id: o.id,
       retired: o.retired,

@@ -4,12 +4,13 @@ import { RetentionRun } from '../../models/RetentionRun.js';
 // The 180-day identity purge, as a function the app can call — not a script a human must remember.
 //
 // When someone deletes their account we scrub the User row immediately but keep ONE copy of their
-// name/email/phone in DeletedUserRecord, so the organization can still attribute past field work
-// (above all the GPS quality flags) to a real person. We tell the user that, at the moment they
-// delete, and we tell them it lasts a bounded period. This is the code that makes the bound real.
+// NAME in DeletedUserRecord (name only — email and phone die with the account, immediately), so
+// the organization can still attribute past field work (above all the GPS quality flags) to a
+// real person. We tell the user that, at the moment they delete, and we tell them it lasts a
+// bounded period. This is the code that makes the bound real.
 //
-// It is deliberately boring: find the records whose window has lapsed, blank the four identity
-// fields, stamp purgedAt. The ROW stays — it is the evidence that a deletion happened and that we
+// It is deliberately boring: find the records whose window has lapsed, blank the name, sweep any
+// legacy email/phone, stamp purgedAt. The ROW stays — it is the evidence that a deletion happened and that we
 // honoured the window.
 //
 // Called by the repeatable worker job (services/retention/scheduler.js) and by the CLI

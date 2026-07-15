@@ -794,6 +794,14 @@ Also permanently retained and never inventoried: `Voter.identityBackup` (a Mixed
 
 ### 4. Backups. There is a full-PII copy of the production database on an operator's personal laptop, and nothing deletes it. **VERIFIED.**
 
+> **RESOLVED 2026-07-15 — do not re-open from this text.** The 2026-07-13 preflight archive was
+> destroyed after the M10 Atlas snapshot was verified restorable (operator-attested), and
+> `DEPLOY_RUNBOOK.md` now carries a custody rule: any future local dump requires a
+> FileVault-encrypted destination, a named owner, and a destruction date (≤14 days). The
+> DO-NOT-WRITE warning below therefore no longer applies to the current policy drafts, whose
+> backup sentence is written against the M10 rotation (longest tier 12 months, Atlas-console
+> confirmed). The original finding is retained below as history.
+
 - **`docs/DEPLOY_RUNBOOK.md:74`** instructs: `mongodump --uri="<MONGODB_URI>" --archive=$HOME/doorline-preflight.archive.gz --gzip` — **a full dump of production to the operator's home directory.**
 - **`docs/DEPLOY_RUNBOOK.md:87-95` records that this was actually run against production on 2026-07-13** (75,760 Persons).
 - `verify-backup.sh:49-57` restores it into a throwaway mongod to prove it works; `scripts/census.mjs:31-41` enumerates the collections it must contain: **people, voters, households, canvassactivities, surveyresponses, users, memberships, campaigns, organizations** — the full PII corpus.

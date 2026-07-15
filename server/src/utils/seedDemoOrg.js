@@ -517,14 +517,35 @@ async function publishClientReport({ campaign, template, adminId }) {
 }
 
 async function ensureShareLink({ campaign, adminId }) {
+  // The demo link follows the same rules as every real link — password + expiry — because the
+  // privacy policy speaks about links as a CLASS ('report links are protected by a password'),
+  // and this seeder was the one remaining code path that minted an open, never-expiring link.
+  // The data behind it is synthetic, but a class statement admits no exceptions. Password comes
+  // from SEED_DEMO_SHARE_PASSWORD (so reviewers/demos get a stable one) or is generated and
+  // printed once. Expiry refreshes on every demo reset, so the link never dies mid-demo.
+  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
   let share = await ReportShareLink.findOne({ campaignId: campaign._id, isActive: true });
-  if (share) return share;
+  if (share) {
+    const patch = { expiresAt };
+    if (!share.passwordHash) {
+      const pw = process.env.SEED_DEMO_SHARE_PASSWORD || randomBytes(9).toString('base64url');
+      patch.passwordHash = await bcrypt.hash(pw, 10);
+      console.log(`  · demo share link upgraded: password ${process.env.SEED_DEMO_SHARE_PASSWORD ? 'from SEED_DEMO_SHARE_PASSWORD' : `generated → ${pw} (save it now — it is not shown again)`}`);
+    }
+    await ReportShareLink.updateOne({ _id: share._id }, { $set: patch });
+    return share;
+  }
+  const pw = process.env.SEED_DEMO_SHARE_PASSWORD || randomBytes(9).toString('base64url');
+  if (!process.env.SEED_DEMO_SHARE_PASSWORD) {
+    console.log(`  · demo share link password generated → ${pw} (save it now — it is not shown again)`);
+  }
   share = await ReportShareLink.create({
     organizationId: campaign.organizationId,
     campaignId: campaign._id,
     token: process.env.SEED_DEMO_SHARE_TOKEN || randomBytes(24).toString('base64url'),
     label: 'Client demo link',
-    passwordHash: null,
+    passwordHash: await bcrypt.hash(pw, 10),
+    expiresAt,
     createdBy: adminId,
   });
   return share;

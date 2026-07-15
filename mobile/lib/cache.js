@@ -132,11 +132,14 @@ export function loadBootstrap() {
 }
 
 // Swallows errors: logout runs this inside a Promise.all that must not abort.
-// Deletes the legacy Documents copy too — sign-out must leave voter data in NEITHER location.
+// Deletes the legacy Documents copy AND the tmp file too — sign-out must leave voter data in
+// NO location, and a crash between writeAsStringAsync and moveAsync can strand a full roster
+// copy in the tmp path that nothing else would ever clean up.
 export function clearBootstrap() {
   return withBootstrapLock(async () => {
     try {
       await FileSystem.deleteAsync(BOOTSTRAP_FILE, { idempotent: true });
+      await FileSystem.deleteAsync(BOOTSTRAP_TMP, { idempotent: true });
       await FileSystem.deleteAsync(LEGACY_BOOTSTRAP_FILE, { idempotent: true });
     } catch (err) {
       console.warn('clearBootstrap failed', err);

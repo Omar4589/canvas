@@ -17,6 +17,24 @@ A change isn't "done" when the code works. Every user-facing feature change also
    users.** New recurring question? Triage it via
    [`server/src/content/help/faq/_INBOX.md`](server/src/content/help/faq/_INBOX.md).
 
+## Breaking server change? Bump the client-version gate.
+
+**If you change the server in a way an already-released mobile app can't handle** (removing or changing
+the shape of an endpoint/field the shipped app depends on), you MUST raise the client-version gate, or
+old phones hit cryptic 4xx errors instead of a clean "Update required" wall:
+
+1. Bump **`CLIENT_API_VERSION`** in [`mobile/lib/config.js`](mobile/lib/config.js) (the number the new
+   app bundle declares it speaks).
+2. Set **`MIN_CLIENT_API_VERSION`** in
+   [`server/src/config/clientVersion.js`](server/src/config/clientVersion.js) to that same new number
+   (the server then walls anything older — `app/index.jsx` redirects to `/update-required`).
+
+Only bump on a genuine breaking change — a *backward-compatible* addition needs neither. Ship the new
+client (OTA or build) **before/with** raising the server floor, so the people you wall have an update to
+get. Two things this is NOT: it is unrelated to the build-currency nag / `MOBILE_UPDATE_MODE` (that asks
+"is your *binary* the newest?"; this asks "can your *code* talk to my API?"), and the **web** console
+needs no gate — it reloads fresh on every deploy.
+
 ## Help Center content, at a glance
 
 Each article is a markdown file under `server/src/content/help/` (subfolder = `kind`) with a small

@@ -276,6 +276,18 @@ test('publish path: canvasser-typed Other text NEVER reaches the public map poin
 
   const dump = JSON.stringify(await ClientReportMapPoint.find({ clientReportId: draft._id }).lean());
   assert.ok(!dump.includes(TYPED_OTHER) && !dump.includes(TYPED_LEGACY), 'no typed string survives anywhere in the frozen points');
+
+  // The BREAKDOWN TABLES are the map's twin: legacy pre-option-id rows group on their raw
+  // answer text, which for an Other write-in is whatever the canvasser typed. The public
+  // breakdown may only carry canonical labels + one merged 'Other' bucket — counts intact.
+  const published = await ClientReport.findById(draft._id).lean();
+  const support = (published.stats?.cumulative?.surveyBreakdowns || []).find((b) => b.questionKey === 'support');
+  assert.ok(support, 'the support breakdown exists');
+  const byLabel = new Map(support.options.map((o) => [o.option, o.count]));
+  assert.strictEqual(byLabel.get('Yes'), 1, 'canonical label kept with its exact count');
+  assert.strictEqual(byLabel.get('Other'), 2, 'the __other__ pick and the typed legacy row merge into one Other bucket');
+  const reportDump = JSON.stringify(published.stats);
+  assert.ok(!reportDump.includes(TYPED_OTHER) && !reportDump.includes(TYPED_LEGACY), 'no typed string in any breakdown');
   ctx.publishedReport = draft;
 });
 

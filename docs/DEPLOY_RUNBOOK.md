@@ -83,9 +83,12 @@ mongodump --uri="<MONGODB_URI>" --archive=$HOME/doorline-preflight.archive.gz --
 > **CUSTODY RULE — every local dump gets an owner and a destruction date, at creation time.**
 > A production dump is a full-PII copy of the database sitting outside every retention control we
 > ship, and the privacy policy's backup sentence does not cover operator laptops. Before you run
-> `mongodump`, write down: **who holds the archive** (a named person), **why**, and **the date it
-> will be destroyed** — normally the day the Atlas snapshot it was guarding against is verified
-> restorable, and never more than 14 days out. Destroy it with `rm -P` (and empty the trash), note
+> `mongodump`, verify the destination volume is **FileVault-encrypted** (System Settings →
+> Privacy & Security — `mongodump --gzip` compresses, it does not encrypt, and the policy's word
+> "encrypted" has to be true of every copy that exists). Then write down: **who holds the
+> archive** (a named person), **why**, and **the date it will be destroyed** — normally the day
+> the Atlas snapshot it was guarding against is verified restorable, and never more than 14 days
+> out. Destroy it with `rm -P` (and empty the trash), note
 > the destruction in the deploy log, and delete any throwaway restore left behind by
 > `verify-backup.sh`. The 2026-07-13 preflight archive followed this rule and was destroyed after
 > the M10 snapshot was verified.

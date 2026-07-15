@@ -37,7 +37,8 @@ async function main() {
   console.log(`${due.length} deleted identit${due.length === 1 ? 'y' : 'ies'} past the retention window · mode: ${APPLY ? 'APPLY' : 'DRY RUN'}`);
   for (const r of due) {
     const age = Math.floor((Date.now() - new Date(r.deletedAt)) / 86_400_000);
-    console.log(`  · ${r.firstName} ${r.lastName} <${r.email}> — deleted ${age}d ago`);
+    // Snapshots are name-only (email/phone were never written or have been stripped).
+    console.log(`  · ${r.firstName} ${r.lastName} — deleted ${age}d ago`);
   }
 
   if (!APPLY) {
@@ -49,7 +50,7 @@ async function main() {
 
   const res = await purgeDeletedIdentities({ apply: true });
   console.log('');
-  console.log(`Purged ${res.purged} identit${res.purged === 1 ? 'y' : 'ies'}. Their past field work is now permanently anonymous.`);
+  console.log(`Purged ${res.purged} identit${res.purged === 1 ? 'y' : 'ies'}. Their past field work no longer directly identifies them.`);
 
   await mongoose.disconnect();
 }
