@@ -130,7 +130,8 @@ leaderboard, the canvassers CSV, and the canvasser timeline — but it enters **
 tapped-book sheet has a **⋯** button beside its ✕ close — opening it shows **Mark book restricted…**
 (or **Unmark restricted (N)** once bulk-marked), kept off the roster's scroll path so it can't be
 tapped by accident; List view reaches the same action via the **⋯** in the book detail screen's
-header. Select mode's action bar has **Restrict…** for several books at once, and the web Turf Cutting
+header. Either **⋯** menu closes by tapping anywhere off it (or re-tapping the **⋯**), and it never
+carries over to the next book you open. Select mode's action bar has **Restrict…** for several books at once, and the web Turf Cutting
 page has the same action on the selected-books panel. Every eligible door gets a restricted mark in
 one go — canvassers see the slate doors immediately, doors already completed this round keep their
 result, and **Unmark restricted (N)** reverses it (field-recorded

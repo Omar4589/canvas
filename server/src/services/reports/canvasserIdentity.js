@@ -50,12 +50,13 @@ export async function hydrateCanvassers(userIds, orgId, { fields = '' } = {}) {
   // Self-deletion scrubs the User row to "Deleted user" (App Store 5.1.1(v) requires a real delete),
   // but the org's record of the WORK survives — and a knock ledger you can't attach to a person is
   // useless for an audit or for telling a client who walked their district. DeletedUserRecord
-  // snapshots the identity for exactly this, and resolveDeletedIdentities() reads it. It was built,
-  // tested, and never wired in — so every report has been rendering "Deleted user". Wire it here,
-  // once, in the shared hydrator, so every canvasser surface gets it and none can drift.
+  // snapshots the NAME for exactly this, and resolveDeletedIdentities() reads it. Name ONLY:
+  // the published deletion promise is that contact details are removed immediately, so a deleted
+  // user's email is blanked here — never the snapshot's (which no longer has one) and never the
+  // tombstone address (which embeds the account id and would leak into the canvasser CSV).
   //
-  // After the retention window lapses the snapshot is purged and the person is permanently
-  // anonymous. That is the intended end state, not a bug.
+  // After the retention window lapses the snapshot is purged and the records no longer directly
+  // identify the person. That is the intended end state, not a bug.
   const deletedIds = users.filter((u) => u.deletedAt).map((u) => u._id);
   const restored = deletedIds.length
     ? await resolveDeletedIdentities(deletedIds, { organizationId: orgId })
@@ -68,8 +69,8 @@ export async function hydrateCanvassers(userIds, orgId, { fields = '' } = {}) {
     out.set(id, {
       firstName: snap?.firstName || u?.firstName || '',
       lastName: snap?.lastName || u?.lastName || '',
-      email: snap?.email || u?.email || '',
-      phone: u?.phone || null,
+      email: u?.deletedAt ? '' : u?.email || '',
+      phone: u?.deletedAt ? null : u?.phone || null,
       status,
       isActive: status === 'active',
     });

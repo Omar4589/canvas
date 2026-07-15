@@ -121,9 +121,11 @@ function ShareRow({ s, url, copied, onCopy, patchM, rotateM, deleteM }) {
     patchM.mutate({ id: s.id, body: { label: next } });
   };
   const savePassword = () => {
-    if (!pw && s.hasPassword && !window.confirm('Remove the password from this link?')) return;
+    // A password can be replaced but never removed — the server refuses removal
+    // (SHARE_PASSWORD_REQUIRED) so a protected link can't quietly become an open one.
+    if (!pw.trim()) return;
     patchM.mutate(
-      { id: s.id, body: { password: pw || null } },
+      { id: s.id, body: { password: pw.trim() } },
       {
         onSuccess: () => {
           setPwOpen(false);
@@ -167,7 +169,7 @@ function ShareRow({ s, url, copied, onCopy, patchM, rotateM, deleteM }) {
             <PasswordInput
               value={pw}
               onChange={(e) => setPw(e.target.value)}
-              placeholder={s.hasPassword ? 'New password (blank removes it)' : 'Set a password'}
+              placeholder={s.hasPassword ? 'New password (replaces the current one)' : 'Set a password'}
               autoComplete="new-password"
             />
           </div>
@@ -191,15 +193,6 @@ function ShareRow({ s, url, copied, onCopy, patchM, rotateM, deleteM }) {
         <button type="button" className="text-brand-accent hover:underline" onClick={() => setPwOpen((v) => !v)}>
           {s.hasPassword ? 'Change password' : 'Set password'}
         </button>
-        {s.hasPassword && (
-          <button
-            type="button"
-            className="text-fg-muted hover:underline"
-            onClick={() => patchM.mutate({ id: s.id, body: { password: null } })}
-          >
-            Remove password
-          </button>
-        )}
         <button
           type="button"
           className="text-fg-muted hover:underline"

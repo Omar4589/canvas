@@ -249,8 +249,9 @@ month still reconciles today. See [METRICS.md](METRICS.md#teams-coordinators--th
 person's name on reports. **Self-deletion is the exception**: the account is scrubbed (the App Store
 requires a real delete), but the org's record of the *work* survives, and a snapshot of the identity
 is kept for a **retention window** so an audit can still say who walked which doors. Once that window
-lapses the snapshot is purged and their past work is permanently anonymous — that is the intended end
-state, not a bug.
+lapses the snapshot is purged and their past work no longer directly identifies them (it stays keyed to
+an internal account id — de-identified, not anonymous) — that is the intended end state, not a bug.
+The snapshot is **name-only**: email and phone die with the account, immediately, on every surface.
 
 **Their books come back.** Whatever they were *holding* is handed back so someone else can take it:
 
@@ -285,13 +286,15 @@ the Timeline and the canvassers CSV** still show their real name — those three
 the retained snapshot ([`hydrateCanvassers`](../server/src/services/reports/canvasserIdentity.js)), which
 is the whole point of keeping it. **Other surfaces — the map, the GPS audit, the per-canvasser
 drill-downs — read the scrubbed account row and show "Deleted user".** Once the window lapses and the
-snapshot is purged, everything shows "Deleted user" and their past work is permanently anonymous.
+snapshot is purged, everything shows "Deleted user" and their past work no longer directly identifies
+them (the records remain keyed to the internal account id).
 
 **Their name is kept for a while, on purpose.** Alongside those records we hold their name for **180 days**
 so the organization can still check *who* did which field work — canvassing records include the location
 each door was logged at, and a GPS audit is worthless if you can't attach it to a person. This is stated
 plainly to the user before they delete, and it means **nobody can delete their way out of a quality audit**.
-After 180 days the name is removed for good and the old records become anonymous.
+After 180 days the name is removed for good; the old records stay with the campaign but no longer
+directly identify the person.
 
 **Four things will stop a deletion**, and the app says which:
 

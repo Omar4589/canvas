@@ -175,9 +175,12 @@ Voters ship only for survey campaigns, scoped to those doors
   AsyncStorage row; Android's SQLite-backed AsyncStorage can't read rows past ~2MB (CursorWindow)
   and defaults to a ~6MB total DB, which crashed exactly this case in July 2026 (a canvasser
   assigned all 16k homes hit "Row too big" + SQLITE_FULL at "loading houses"; iOS is file-based
-  and was unaffected). **Fixed:** the bootstrap now lives in a documents-directory file
+  and was unaffected). **Fixed:** the bootstrap now lives in a **cache-directory** file
   (`canvass.bootstrap.json` via `expo-file-system/legacy`,
-  [mobile/lib/cache.js](../mobile/lib/cache.js)) with no row/DB size limits on either platform;
+  [mobile/lib/cache.js](../mobile/lib/cache.js)) with no row/DB size limits on either platform.
+  The cache directory (not Documents) is deliberate: both OSes exclude it from device backups, so
+  the voter roster never rides into a canvasser's personal iCloud/Google backup — see the privacy
+  note in cache.js before ever moving it. Startup migrates the old Documents copy across;
   startup migrates a readable legacy AsyncStorage row into the file (an oversized Android row
   throws on read, lands in the catch, and is deleted unread — removeItem never reads, which is
   what frees the 6MB DB); saves are atomic (temp file + rename, so a mid-write kill can't corrupt

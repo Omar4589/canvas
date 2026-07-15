@@ -83,7 +83,10 @@ On the campaign's **Client Reports** tab, use the **Share link** panel:
 
 - **+ New link** creates a public link to this campaign's published reports. **Copy** it and send it to
   anyone — they don't need an account. Give each link a **label** (e.g. *Candidate*, *Internal*) inline.
-- **Set / Change password** is an **inline field** (no browser prompt); leaving it blank removes it.
+- **Set / Change password** is an **inline field** (no browser prompt). A password can be **replaced
+  but never removed** — the server refuses removal (`SHARE_PASSWORD_REQUIRED`) so a protected link
+  can't quietly become an open one; rotate the link if a password is lost. (A legacy open link can
+  still have a password *added* — that's the one permitted direction.)
 - **Rotate** issues a fresh URL and **instantly kills the old one** (use it if a link leaked).
 - **Disable / Enable** turns a link off without deleting it; **Delete** removes it for good. Each row
   shows when the link was **last opened**.

@@ -23,9 +23,10 @@ changes a campaign's numbers. On reports and on the map you'll simply appear as 
 then on.
 
 Your name is also kept alongside those records for **180 days**, so your organization can still verify who
-did which field work, and then it's removed for good. Canvassing records include the location where each
-door was logged, and an organization has to be able to check that work against a real person. You'll see
-this explained in the app before you confirm.
+did which field work, and then it's removed for good — the records stay with the campaign, but they no
+longer directly identify you. Canvassing records include the location where each door was logged, and an
+organization has to be able to check that work against a real person. You'll see this explained in the app
+before you confirm.
 
 ## Things that will stop the deletion
 

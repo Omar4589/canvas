@@ -193,7 +193,11 @@ const shareCreateSchema = z.object({
 });
 const shareUpdateSchema = z.object({
   label: z.string().max(120).optional(),
-  // password: a string sets/replaces it; null or '' clears it; omitted = unchanged.
+  // password: a non-empty string sets/replaces it; omitted = unchanged. REMOVAL IS NOT SUPPORTED:
+  // the published privacy policy says report links "are protected by a password", and a link that
+  // can be quietly un-passworded after creation would falsify that sentence. Rotate the password
+  // (or the whole link) instead. Null is still accepted by the schema so the guard below can
+  // return a specific error rather than a generic zod 400.
   password: z.string().max(200).nullable().optional(),
   isActive: z.boolean().optional(),
 });
@@ -308,7 +312,13 @@ router.patch('/shares/:id', async (req, res, next) => {
     if (data.label !== undefined) share.label = data.label;
     if (data.isActive !== undefined) share.isActive = data.isActive;
     if (data.password !== undefined) {
-      share.passwordHash = data.password ? await bcrypt.hash(data.password, 10) : null;
+      if (!data.password) {
+        return res.status(400).json({
+          error: 'A password cannot be removed from a link — replace it, or rotate the link.',
+          code: 'SHARE_PASSWORD_REQUIRED',
+        });
+      }
+      share.passwordHash = await bcrypt.hash(data.password, 10);
     }
     await share.save();
     res.json({ share: shareRow(share) });
@@ -538,9 +548,11 @@ router.get('/:id/preview/map', async (req, res, next) => {
     if (!(await manages(req, res, report.campaignId))) return;
     const campaign = await loadCampaignInOrg(orgId, report.campaignId);
     if (!campaign) return res.status(400).json({ error: 'Campaign no longer exists' });
+    const template = await resolveTemplate(orgId, campaign);
     const { points } = await buildFrozenMapPoints({
       report,
       campaign,
+      template,
       mapAnswerKeys: report.visibility?.mapAnswerKeys || [],
     });
     res.json({ households: shapeMapPoints(points), total: points.length });
@@ -570,6 +582,7 @@ router.post('/:id/publish', async (req, res, next) => {
     const { points, coverage, count } = await buildFrozenMapPoints({
       report,
       campaign,
+      template,
       mapAnswerKeys: report.visibility?.mapAnswerKeys || [],
     });
     await ClientReportMapPoint.deleteMany({ clientReportId: report._id });

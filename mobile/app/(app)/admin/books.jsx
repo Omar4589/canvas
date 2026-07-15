@@ -897,6 +897,13 @@ export default function AdminBooks() {
                 </Pressable>
               </View>
               {sheetMenuOpen && (
+                <Pressable
+                  style={styles.sheetMenuBackdrop}
+                  onPress={() => setSheetMenuOpen(false)}
+                  accessibilityLabel="Close menu"
+                />
+              )}
+              {sheetMenuOpen && (
                 <View style={styles.sheetMenu}>
                   <Pressable
                     disabled={restrictPending}
@@ -1334,6 +1341,9 @@ function makeStyles(t) {
 
     // promoted-book sheet chrome now comes from components/PullableSheet.jsx;
     // the ⋯ actions menu anchors under the header row.
+    // Transparent tap-catcher over the sheet: tapping the sheet body (or re-tapping ⋯) dismisses
+    // the menu. Above the roster/content, below the menu itself (zIndex 10).
+    sheetMenuBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 9 },
     sheetMenu: {
       position: 'absolute',
       top: 34,

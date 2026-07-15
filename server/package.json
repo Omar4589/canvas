@@ -33,6 +33,8 @@
     "migrate:build-indexes": "node src/migrations/buildIndexes.js",
     "migrate:strip-geocode-raw": "node src/migrations/stripGeocodeRaw.js",
     "migrate:geocode-lastused": "node src/migrations/backfillGeocodeLastUsed.js",
+    "migrate:scrub-map-points": "node src/migrations/scrubMapPointAnswers.js",
+    "migrate:deletion-snapshots": "node src/migrations/migrateDeletionSnapshots.js",
     "migrate:platform-stats": "node src/migrations/backfillPlatformStats.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",

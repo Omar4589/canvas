@@ -198,9 +198,10 @@ before recoloring, which made doors feel unrecorded on weak signal — the bare 
 1. **Instant (synchronous).** The tapped action patches the `['bootstrap']` React Query cache —
    `household.status` (and the client-computed building aggregate) recolor this same frame — via the
    shared helper [lib/recordAction.js](../mobile/lib/recordAction.js) (`recordHouseholdAction` /
-   `optimisticSubmit`). The cache is mirrored to a documents-directory file
+   `optimisticSubmit`). The cache is mirrored to a cache-directory file
    (`canvass.bootstrap.json` via [lib/cache.js](../mobile/lib/cache.js) — formerly AsyncStorage,
-   whose Android SQLite limits broke large turfs) so it survives a cold start. The screen
+   whose Android SQLite limits broke large turfs; the cache directory is backup-excluded on both
+   OSes, which the privacy policy's device-storage disclosure relies on) so it survives a cold start. The screen
    returns to the map immediately; it never `await`s the network.
 2. **Background — GPS.** [lib/location.js](../mobile/lib/location.js) `getCurrentLocation()` captures
    one fix (not continuous GPS): a warm recent OS fix when fresh/accurate, else a fresh high-accuracy

@@ -20,7 +20,8 @@ all still there with the right numbers — just without a name attached.
 **You can still audit them.** This is the important one. Their GPS trail stays intact, and for **180 days**
 you can still resolve those records back to the real person. **Nobody can delete their way out of a quality
 audit** — if you flagged their doors, the flags and the coordinates survive, and you can still see whose
-they were. After 180 days their name is permanently removed and the records become anonymous.
+they were. After 180 days their name is removed for good; the records stay in your campaign history
+but no longer directly identify them.
 
 **Their books came back to you.** Any walk lists or books they were holding are automatically **unassigned**
 when they delete, so no doors are stranded with someone who's gone. Reassign them to someone else as normal.

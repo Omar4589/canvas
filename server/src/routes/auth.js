@@ -218,7 +218,10 @@ router.get('/account/deletion-check', requireAuth, async (req, res, next) => {
       retained: {
         days: Number(process.env.DELETED_IDENTITY_RETENTION_DAYS || 180),
         summary:
-          "The doors you knocked and the survey answers you recorded stay with the campaign — they're the organization's records, not yours. Your name is kept alongside them for a limited period so your organization can verify past field work, then permanently anonymized.",
+          // Wording is aligned with the privacy policy's "Deleting your account" section — say
+          // "no longer directly identify you", never "anonymized": the records stay keyed to an
+          // internal account id after the name is removed (de-identified, not anonymous).
+          "The doors you knocked and the survey answers you recorded stay with the campaign — they're the organization's records, not yours. Your name is kept alongside them for a limited period so your organization can verify past field work, then removed so those records no longer directly identify you.",
       },
     });
   } catch (err) {

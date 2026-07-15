@@ -238,6 +238,12 @@ export default function AdminBookDetail() {
   // confirms as the Books screen; invalidates the Books screens too so pins,
   // tallies, and counts recolor after back-navigation.
   const [menuOpen, setMenuOpen] = useState(false);
+  // This screen is a single reused tab instance (admin/_layout.jsx registers book/[turfId] once),
+  // so opening a different book swaps turfId without remounting — the menu-open flag would survive
+  // and the next book would appear with its ⋯ menu already down. Reset it whenever the book changes.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [turfId]);
   const invalidateRestrict = () => {
     invalidate();
     qc.invalidateQueries({ queryKey: ['admin', 'book-households'] });
@@ -328,6 +334,13 @@ export default function AdminBookDetail() {
           ) : null
         }
       />
+      {menuOpen && (
+        <Pressable
+          style={styles.menuBackdrop}
+          onPress={() => setMenuOpen(false)}
+          accessibilityLabel="Close menu"
+        />
+      )}
       {menuOpen && (
         <View style={styles.bookMenu}>
           <Pressable
@@ -572,6 +585,10 @@ function makeStyles(t) {
     back: { color: colors.brand, fontWeight: '700', fontSize: 16 },
     // ⋯ book-actions menu (bulk restrict), anchored under the header's right side.
     menuDots: { color: colors.textSecondary, fontWeight: '800', fontSize: 22, paddingHorizontal: spacing.sm },
+    // Transparent full-screen tap-catcher: any tap off the menu (the map included) dismisses it.
+    // Sits above the map but below the menu (zIndex 20 / elevation 6), so the menu item still
+    // takes its own tap.
+    menuBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 15, elevation: 5 },
     bookMenu: {
       position: 'absolute',
       top: 52,

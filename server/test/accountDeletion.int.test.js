@@ -215,9 +215,13 @@ test('a canvasser deletes their account: identity is scrubbed, the ledger is unt
   assert.strictEqual(rows, 2, 'the ledger rows still point at the tombstoned id');
 
   // --- the org can still attribute the work (no fraud-audit escape hatch) ---
-  const snap = await DeletedUserRecord.findOne({ userId: ctx.cara.userId });
+  // NAME ONLY: attribution needs a name, not a mailbox. The published deletion promise is
+  // that contact details are removed immediately — the snapshot must not contradict it.
+  const snap = await DeletedUserRecord.findOne({ userId: ctx.cara.userId }).lean();
   assert.ok(snap, 'identity snapshot exists');
-  assert.strictEqual(snap.email, 'cara@t.co', 'the org can still say WHO knocked those doors');
+  assert.strictEqual(snap.firstName, 'Cara', 'the org can still say WHO knocked those doors');
+  assert.ok(!('email' in snap) || snap.email == null, 'the snapshot holds NO email');
+  assert.ok(!('phone' in snap) || snap.phone == null, 'the snapshot holds NO phone');
   assert.ok(snap.retentionUntil > snap.deletedAt, 'retention is bounded, not forever');
 
   // --- the book was handed back ---
@@ -278,10 +282,21 @@ test('a canvasser cannot delete their way out of a GPS audit', { skip }, async (
   assert.strictEqual(withGps.length, 2);
   assert.ok(withGps.every((a) => a.location?.lat && a.location?.lng), 'coordinates survived');
 
-  // And the org can put a name back on them, for as long as the disclosed window lasts.
+  // And the org can put a NAME back on them, for as long as the disclosed window lasts —
+  // a name only. Contact details died with the account, on every surface including the
+  // canvasser CSV (whose Email column must never show the snapshot's or the tombstone's).
   const { resolveDeletedIdentities } = await import('../src/services/users/deleteAccount.js');
   const found = await resolveDeletedIdentities([ctx.cara.userId], { organizationId: ctx.org._id });
-  assert.strictEqual(found.get(String(ctx.cara.userId))?.email, 'cara@t.co');
+  assert.strictEqual(found.get(String(ctx.cara.userId))?.firstName, 'Cara');
+  assert.ok(!found.get(String(ctx.cara.userId))?.email, 'the resolver carries no email');
+
+  const { hydrateCanvassers } = await import('../src/services/reports/canvasserIdentity.js');
+  const hydrated = await hydrateCanvassers([ctx.cara.userId], ctx.org._id);
+  const row = hydrated.get(String(ctx.cara.userId));
+  assert.strictEqual(row.firstName, 'Cara', 'reports still show the name during the window');
+  assert.strictEqual(row.email, '', 'reports and the CSV show NO email for a deleted user');
+  assert.strictEqual(row.phone, null);
+  assert.strictEqual(row.status, 'deleted');
 });
 
 test('the freed email can be used for a brand-new account', { skip }, async () => {

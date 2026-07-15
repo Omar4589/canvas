@@ -10,7 +10,16 @@ import * as FileSystem from 'expo-file-system/legacy';
 // turf's bootstrap crashed with "Row too big" / SQLITE_FULL. Files have
 // neither limit; iOS was always file-backed and unaffected.
 const KEY = 'canvass.bootstrap';
-const BOOTSTRAP_FILE = `${FileSystem.documentDirectory}canvass.bootstrap.json`;
+// The bootstrap lives in the OS CACHE directory, deliberately: iOS excludes Library/Caches
+// from iCloud/device backups, and Android's auto-backup rules exclude cache/ — so the voter
+// roster (names, addresses, coordinates, party) never rides into a canvasser's PERSONAL
+// cloud backup. Documents/ — the old home — is backed up by default on both platforms, which
+// put voter PII in iCloud/Google accounts we don't control. The trade-off is that the OS may
+// evict caches under severe disk pressure; that's acceptable because this file is a cache of
+// server state and the app re-bootstraps on the next online session. Do NOT move it back to
+// documentDirectory — the privacy policy's device-storage disclosure depends on this.
+const LEGACY_BOOTSTRAP_FILE = `${FileSystem.documentDirectory}canvass.bootstrap.json`;
+const BOOTSTRAP_FILE = `${FileSystem.cacheDirectory}canvass.bootstrap.json`;
 // writeAsStringAsync truncates the target in place, so a process kill mid-write
 // would leave a corrupt file where SQLite's row write was transactional. Saves
 // write here first, then moveAsync (a rename) over the real file — the cache is
@@ -39,6 +48,24 @@ const THEME_KEY = 'canvass.themePreference';
 // in the catch, and are deleted unread — removeItem never reads the row, so
 // it can't throw, and it's what frees Android's 6MB AsyncStorage DB.
 let bootstrapChain = (async () => {
+  // Migration 2: the file used to live in Documents/, which both platforms back up to the
+  // canvasser's personal cloud account. Move it into Caches/ (excluded from backups) so
+  // nobody loses their offline roster on update — and so the Documents copy stops existing.
+  try {
+    const old = await FileSystem.getInfoAsync(LEGACY_BOOTSTRAP_FILE);
+    if (old.exists) {
+      const current = await FileSystem.getInfoAsync(BOOTSTRAP_FILE);
+      if (!current.exists) {
+        await FileSystem.moveAsync({ from: LEGACY_BOOTSTRAP_FILE, to: BOOTSTRAP_FILE });
+      } else {
+        await FileSystem.deleteAsync(LEGACY_BOOTSTRAP_FILE, { idempotent: true });
+      }
+    }
+  } catch {
+    // Best-effort — worst case the next save writes the new location and the stale
+    // Documents copy is deleted by the retry below on the following launch.
+  }
+  // Migration 1: the even older AsyncStorage row (see the CursorWindow note above).
   try {
     const legacy = await AsyncStorage.getItem(KEY);
     if (legacy) {
@@ -105,10 +132,12 @@ export function loadBootstrap() {
 }
 
 // Swallows errors: logout runs this inside a Promise.all that must not abort.
+// Deletes the legacy Documents copy too — sign-out must leave voter data in NEITHER location.
 export function clearBootstrap() {
   return withBootstrapLock(async () => {
     try {
       await FileSystem.deleteAsync(BOOTSTRAP_FILE, { idempotent: true });
+      await FileSystem.deleteAsync(LEGACY_BOOTSTRAP_FILE, { idempotent: true });
     } catch (err) {
       console.warn('clearBootstrap failed', err);
     }

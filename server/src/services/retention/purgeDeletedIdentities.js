@@ -31,8 +31,11 @@ export async function purgeDeletedIdentities({ apply = true } = {}) {
 
     let purged = 0;
     if (apply && scanned > 0) {
+      // New snapshots are name-only; the $unset still sweeps email/phone off any legacy row
+      // that predates migrate:deletion-snapshots, so the purge is complete either way.
       const res = await DeletedUserRecord.updateMany(filter, {
-        $set: { firstName: '', lastName: '', email: '', phone: null, purgedAt: startedAt },
+        $set: { firstName: '', lastName: '', purgedAt: startedAt },
+        $unset: { email: 1, phone: 1 },
       });
       purged = res.modifiedCount || 0;
     }

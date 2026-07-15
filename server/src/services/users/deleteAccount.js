@@ -187,18 +187,22 @@ export async function deleteAccount(userId, { reason = 'self' } = {}) {
 
   // Snapshot the identity BEFORE the scrub — this is the only thing standing between a
   // deleted canvasser and an unattributable GPS trail. See models/DeletedUserRecord.js.
+  // NAME ONLY: attribution needs a name, not a mailbox. The published deletion promise is
+  // that email, phone and password are removed immediately — a snapshot that kept them
+  // would quietly falsify it. ($unset covers a re-delete over a legacy full snapshot.)
   const retentionUntil = new Date(now.getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000);
   await DeletedUserRecord.findOneAndUpdate(
     { userId: user._id },
     {
-      userId: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email,
-      phone: user.phone,
-      organizationIds: orgIds,
-      deletedAt: now,
-      retentionUntil,
+      $set: {
+        userId: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        organizationIds: orgIds,
+        deletedAt: now,
+        retentionUntil,
+      },
+      $unset: { email: 1, phone: 1 },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
@@ -295,8 +299,9 @@ export async function releaseAssignedWork(
 
 /**
  * The identity behind a deleted user, for the org's own audit surfaces. Returns null once
- * the retention window has lapsed and the snapshot has been purged — at which point the
- * person's past work is permanently anonymous, which is the intended end state.
+ * the retention window has lapsed and the snapshot has been purged — after which the
+ * records no longer directly identify the person (they stay keyed to the account id, so
+ * the end state is de-identified, not anonymous — same wording as the privacy policy).
  */
 export async function resolveDeletedIdentities(userIds, { organizationId = null } = {}) {
   const ids = (userIds || []).filter((id) => mongoose.isValidObjectId(id));

@@ -138,12 +138,40 @@ export async function computeWindowStats({
   return { totals, contactBreakdown: events, coverage: {}, surveyBreakdowns };
 }
 
+// A public map point may carry the CHOICE VALUE only — never anything a canvasser typed. A
+// choice question can have an "Other: ___" write-in whose typed text lands verbatim in the
+// response's answer snapshot, and canvasser-typed text pinned to a street address on an
+// unauthenticated page can be anything, including a voter's name. So the public answer is
+// rebuilt from option ids against the template's canonical labels ('__other__' → the literal
+// 'Other'); rows with no option ids (pre-option-id responses) keep only snapshot values that
+// exactly match a canonical label. Also reused by migrations/scrubMapPointAnswers.js, whose
+// stored rows have no optionIds and therefore always take the snapshot-matching branch.
+export function publicPointAnswer(question, row) {
+  if (!question || question.type === 'text') return null; // text questions never reach the map
+  const labelById = new Map((question.options || []).map((o) => [o.id, o.text]));
+  const ids = Array.isArray(row.optionIds) ? row.optionIds : [];
+  let values;
+  if (ids.length) {
+    values = ids
+      .map((id) => (id === '__other__' ? 'Other' : labelById.get(id)))
+      .filter((v) => v != null);
+  } else {
+    const allowed = new Set(labelById.values());
+    const texts = row.answer == null ? [] : Array.isArray(row.answer) ? row.answer : [row.answer];
+    values = texts.map((t) => (allowed.has(t) ? t : 'Other'));
+  }
+  values = [...new Set(values)];
+  if (!values.length) return null;
+  return question.type === 'multiple_choice' ? values : values[0];
+}
+
 // Build the FROZEN map points for a published report: every in-scope household with
 // coordinates, its status AS OF rangeEndUtc (resolveStatus over activities < that instant —
 // identical to how the live app derives status, but point-in-time), and the operator-
-// whitelisted survey answers (latest response per household). No canvasser identity is
-// included. Returns the point docs + a cumulative coverage tally derived from them.
-export async function buildFrozenMapPoints({ report, campaign, mapAnswerKeys = [] }) {
+// whitelisted survey answers (latest response per household), sanitized to canonical choice
+// values via publicPointAnswer. No canvasser identity is included. Returns the point docs +
+// a cumulative coverage tally derived from them.
+export async function buildFrozenMapPoints({ report, campaign, template = null, mapAnswerKeys = [] }) {
   const orgId = report.organizationId;
   const campaignId = report.campaignId;
   const before = report.rangeEndUtc;
@@ -172,8 +200,11 @@ export async function buildFrozenMapPoints({ report, campaign, mapAnswerKeys = [
 
   // Whitelisted survey answers — latest response per household wins (ascending sort, last
   // write per household sticks). Empty whitelist = no answers stored (map shows status only).
+  // Every emitted answer passes through publicPointAnswer: a missing template question (or a
+  // template that can't be resolved) drops the row rather than passing typed text through.
   const answersByHh = new Map();
   if (mapAnswerKeys.length) {
+    const questionByKey = new Map(((template && template.questions) || []).map((q) => [q.key, q]));
     const responses = await SurveyResponse.find(
       { organizationId: orgId, campaignId, submittedAt: { $lt: before } },
       { householdId: 1, submittedAt: 1, answers: 1 }
@@ -183,7 +214,11 @@ export async function buildFrozenMapPoints({ report, campaign, mapAnswerKeys = [
     for (const r of responses) {
       const picked = (r.answers || [])
         .filter((a) => mapAnswerKeys.includes(a.questionKey))
-        .map((a) => ({ questionKey: a.questionKey, answer: a.answer }));
+        .map((a) => ({
+          questionKey: a.questionKey,
+          answer: publicPointAnswer(questionByKey.get(a.questionKey), a),
+        }))
+        .filter((a) => a.answer != null);
       if (picked.length) answersByHh.set(String(r.householdId), picked);
     }
   }

@@ -221,7 +221,13 @@ router.post('/generate', async (req, res, next) => {
 router.get('/jobs/:jobId', async (req, res, next) => {
   try {
     const job = await getQueue(QUEUE_NAMES.TURF).getJob(req.params.jobId);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
+    // The queue is platform-wide and job ids are sequential integers — without the ownership
+    // check, any org's admin could walk other orgs' job ids and read their progress/result
+    // metadata. The campaign gate above only proves the CALLER owns a campaign; this proves
+    // the JOB belongs to it.
+    if (!job || String(job.data?.campaignId) !== String(req.campaign._id)) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
     const state = await job.getState();
     res.json({
       jobId: String(job.id),

@@ -58,8 +58,10 @@ test('a lapsed identity is purged; one still inside its window is not', { skip }
 
   const l = await DeletedUserRecord.findById(lapsed._id).lean();
   assert.strictEqual(l.firstName, '', 'name blanked');
-  assert.strictEqual(l.email, '', 'email blanked');
-  assert.strictEqual(l.phone, null);
+  // makeDeleted writes a LEGACY-shaped snapshot (email+phone) on purpose: new snapshots are
+  // name-only, and the purge $unsets both fields so even unmigrated legacy rows end up clean.
+  assert.ok(!('email' in l), 'email stripped — not blanked, gone');
+  assert.ok(!('phone' in l), 'phone stripped — not blanked, gone');
   assert.ok(l.purgedAt, 'purgedAt stamped');
   // The ROW survives on purpose — it is the evidence that a deletion happened and the window was
   // honoured. Deleting it would destroy the only proof we kept our word.

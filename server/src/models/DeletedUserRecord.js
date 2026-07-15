@@ -18,7 +18,8 @@ import mongoose from 'mongoose';
 //
 // Readable by admins of the orgs the person belonged to, and by super-admins. Nothing else
 // joins it. purgeDeletedIdentities.js scrubs the snapshot once retentionUntil passes, after
-// which attribution is permanently anonymous.
+// which the field records no longer directly identify the person (they remain keyed to the
+// account id — de-identified, not anonymous; keep this wording in sync with the policy).
 const deletedUserRecordSchema = new mongoose.Schema(
   {
     userId: {
@@ -27,12 +28,15 @@ const deletedUserRecordSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
-    // Identity as it stood at the moment of deletion. The User row no longer carries any
-    // of it — this is the only copy.
+    // Identity as it stood at the moment of deletion — NAME ONLY. Attribution needs a name,
+    // not a mailbox: the published deletion promise is that contact details (email, phone,
+    // password) are removed immediately, so the snapshot never carries them.
     firstName: { type: String, default: '' },
     lastName: { type: String, default: '' },
-    email: { type: String, default: '' },
-    phone: { type: String, default: null },
+    // LEGACY ONLY — never written since the name-only change. Declared so the purge's $unset
+    // and migrate:deletion-snapshots can strip them from rows that predate it.
+    email: { type: String, default: undefined },
+    phone: { type: String, default: undefined },
     // Every org that might need to attribute this person's work. A User is global across
     // orgs, so one delete tap pulls them out of all of them at once.
     organizationIds: [

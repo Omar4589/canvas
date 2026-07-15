@@ -14,7 +14,19 @@ import { loadRoleContext } from '../lib/role';
 // for these; trial + past_due (full-access nags) are admin-only.
 const PAUSED = new Set(['trial_expired', 'suspended', 'canceled']);
 
-const PAUSED_COPY = 'This account is paused — canvassing is disabled. Your recorded work is safe.';
+// "Your recorded work is safe" is TRUE for suspended/expired orgs (nothing deletes them until
+// long-dormancy) and FALSE for canceled ones, whose data is scheduled for deletion at the end
+// of the wind-down — never say it there.
+const pausedCopy = (banner) =>
+  banner === 'canceled'
+    ? 'This account is closed — canvassing is disabled.'
+    : 'This account is paused — canvassing is disabled. Your recorded work is safe.';
+
+function formatDate(iso) {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
 
 // Fixed soft tints (light grounds, dark text) so they read fine in both themes.
 const TONES = {
@@ -35,8 +47,16 @@ function adminCopy(entitlement) {
     case 'past_due':
       return 'An invoice is past due — please contact Doorline to keep access.';
     case 'suspended':
-    case 'canceled':
       return 'This account is paused — canvassing is disabled. Your recorded work is safe.';
+    case 'canceled': {
+      // Mirrors the web BillingBanner: the date shown is the SAME windDownEndsAt the deletion
+      // job acts on (both derive from windDownDeletionDate on the server). This banner is the
+      // only wind-down warning an admin gets on mobile — it must name the date, not reassure.
+      const when = formatDate(entitlement.windDownEndsAt);
+      return when
+        ? `This account is closed — canvassing is disabled. Your data stays exportable until ${when}, when it is scheduled for permanent deletion.`
+        : 'This account is closed — canvassing is disabled. Your data will be permanently deleted after the wind-down period.';
+    }
     default:
       return null;
   }
@@ -69,7 +89,7 @@ export default function EntitlementBanner({ entitlement }) {
     return null;
   }
 
-  const text = isAdmin ? adminCopy(entitlement) : PAUSED_COPY;
+  const text = isAdmin ? adminCopy(entitlement) : pausedCopy(banner);
   if (!text) return null;
   const tone = TONES[banner] || TONES.suspended;
 

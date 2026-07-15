@@ -18,6 +18,7 @@
     },
     "android": {
       "package": "com.canvassapp.mobile",
+      "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/AppIcons/adaptive-foreground.png",
         "monochromeImage": "./assets/AppIcons/adaptive-monochrome.png",

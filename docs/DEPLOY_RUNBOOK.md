@@ -80,6 +80,16 @@ mongodump --uri="<MONGODB_URI>" --archive=$HOME/doorline-preflight.archive.gz --
 ./verify-backup.sh $HOME/doorline-preflight.archive.gz
 ```
 
+> **CUSTODY RULE — every local dump gets an owner and a destruction date, at creation time.**
+> A production dump is a full-PII copy of the database sitting outside every retention control we
+> ship, and the privacy policy's backup sentence does not cover operator laptops. Before you run
+> `mongodump`, write down: **who holds the archive** (a named person), **why**, and **the date it
+> will be destroyed** — normally the day the Atlas snapshot it was guarding against is verified
+> restorable, and never more than 14 days out. Destroy it with `rm -P` (and empty the trash), note
+> the destruction in the deploy log, and delete any throwaway restore left behind by
+> `verify-backup.sh`. The 2026-07-13 preflight archive followed this rule and was destroyed after
+> the M10 snapshot was verified.
+
 *It spins up a throwaway local mongod, **actually restores the archive**, and then recomputes — from the
 backup, using the same aggregation the migration itself uses — **exactly what
 `migrate:persons-org-scope --apply` will do.** A missing collection is a hard failure, not a `0`.*
@@ -323,6 +333,29 @@ step 4 drops the legacy indexes itself, and why running this first wouldn't have
 
 ---
 
+# STEP 5a.1 — Privacy-release migrations (each: dry-run, read it, then `--apply`)
+
+Three data migrations ship with the privacy/legal-pages release. All are **safe and idempotent**;
+run each without flags first and read the counts.
+
+```
+npm run migrate:geocode-lastused          # then: npm run migrate:geocode-lastused -- --apply
+npm run migrate:scrub-map-points          # then: npm run migrate:scrub-map-points -- --apply
+npm run migrate:deletion-snapshots        # then: npm run migrate:deletion-snapshots -- --apply
+```
+
+- **`geocode-lastused`** stamps `lastUsedAt` on pre-TTL GeocodeCache rows so the 18-month expiry
+  the privacy policy promises actually governs the old corpus. Run **after** `migrate:build-indexes`
+  (which builds the TTL index). *This step was missing from the original runbook — the policy's
+  cached-address sentence is false without it.*
+- **`scrub-map-points`** rewrites already-published client-report map points so canvasser-typed
+  "Other: ___" text can no longer appear on a public page — same rule the publish path now applies
+  (canonical choice labels kept, anything typed → `Other`, unverifiable rows dropped).
+- **`deletion-snapshots`** strips email/phone off pre-name-only `DeletedUserRecord` rows, making the
+  deletion promise ("contact details are removed immediately") true for the whole corpus.
+
+---
+
 # STEP 5b — ✅ Turn the `worker` dyno back ON
 
 **Resources** tab → **`worker`** → toggle **ON** → **Confirm**.
@@ -454,6 +487,9 @@ at a maintenance page.*
 | `migrate:platform-roles` | **Yes.** Sets a field. Nothing destroyed. |
 | `migrate:persons-org-scope` | **NO. ONE-WAY.** Drops indexes, deletes orphan Persons, deletes pending edit proposals. **The Atlas snapshot (1d) is your only rollback.** |
 | `migrate:build-indexes` | **Yes.** Additive. Safe to re-run. |
+| `migrate:geocode-lastused` | **Yes.** Stamps a date field. Safe to re-run. |
+| `migrate:scrub-map-points` | **One-way for the scrubbed text** (that's the point — it removes typed write-ins from public points), but idempotent and rebuildable: republishing a report regenerates its points from the ledger. |
+| `migrate:deletion-snapshots` | **One-way** ($unsets email/phone off deletion snapshots) — deliberately: retaining them is what the policy forbids. |
 
 **If step 4 succeeds and step 5 fails** — the realistic bad case:
 - Persons are stamped; the legacy indexes are **gone**; the new uniques are **not built**.
