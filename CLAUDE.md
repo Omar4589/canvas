@@ -17,6 +17,52 @@ A change isn't "done" when the code works. Every user-facing feature change also
    users.** New recurring question? Triage it via
    [`server/src/content/help/faq/_INBOX.md`](server/src/content/help/faq/_INBOX.md).
 
+## The second invariant: privacy & terms
+
+Some changes don't just need docs — they change what we promise people **legally**. Our **Privacy
+Policy**, **Terms of Service**, and the signed **Data Processing Addendum** ([`docs/DPA.md`](docs/DPA.md))
+make specific claims about what we collect, how long we keep it, who can see it, and who we share it with.
+**Code that drifts from those claims is a false legal statement, not just a bug** — the exact drift the
+2026 privacy remediation exists to prevent recurring.
+
+**A change is privacy-affecting — STOP and flag it — if it touches any of:**
+
+- **What we collect** — a new field holding personal data (name, DOB, phone, address, precise location, a
+  free-text note about a person), or a new source of it.
+- **Retention or deletion** — how long anything is kept; what account/org deletion removes or leaves; a
+  TTL, purge, cascade, or backup.
+- **Who can access customer data** — staff access, grants, roles, tenant isolation, a route that returns
+  PII, an audit log.
+- **Sharing / subprocessors** — a new or replaced third-party service or external API that receives
+  customer data (hosting, database, maps, geocoding, email, SMS, analytics, error tracking, storage).
+  **This one is special — it is a contractual event, not just a disclosure. See the callout below.**
+- **What we expose** — reports, exports (CSV/PDF), public/share links — anything that puts customer data
+  in front of someone new.
+
+**When triggered:**
+
+1. **Say so out loud** in the change: "this affects what our Privacy Policy / ToS / DPA claims about X."
+2. **Reconcile with [`docs/PRIVACY_VERIFICATION.md`](docs/PRIVACY_VERIFICATION.md)** — the code-verified
+   record of what we *actually* do — and update it so it stays true.
+3. **Flag whether the published Privacy Policy, ToS, or DPA text needs to change.** The static legal pages
+   and [`docs/DPA.md`](docs/DPA.md) are edited deliberately by the owner, never as a side effect of code.
+4. If you're unsure whether a change is privacy-affecting, treat it as if it is.
+
+> ### 🛑 Adding or replacing a subprocessor is a CONTRACTUAL NOTICE event — not just a disclosure edit
+> A new third party that processes personal information (a new host, database, geocoder, email/SMS
+> provider, analytics, error tracker, storage bucket — anything customer data flows to) triggers the
+> signed DPA's subprocessor clause ([`docs/DPA.md`](docs/DPA.md) §6): we must **give customers notice
+> BEFORE the change takes effect**, and they may object. So before wiring one up:
+> 1. Update the subprocessor list in **`docs/DPA.md` §6** *and* the **Privacy Policy's service-providers
+>    paragraph**.
+> 2. **The owner sends customer notice** (per DPA §6) before it goes live — this is a gate, not a
+>    follow-up.
+>
+> **Never route customer data to a new third party ahead of that notice.**
+
+**Never ship a change that makes a published policy sentence false.** The policy is a promise; the code is
+whether we keep it.
+
 ## Breaking server change? Bump the client-version gate.
 
 **If you change the server in a way an already-released mobile app can't handle** (removing or changing

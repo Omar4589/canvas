@@ -12,9 +12,12 @@ import { useAuthCta } from './useAuthCta.js';
 // badges once the apps are publicly listed.
 const IPHONE_BETA_URL = 'https://testflight.apple.com/join/8ZHW2nXH';
 const ANDROID_BETA_URL = 'https://play.google.com/apps/internaltest/4700118043777481693';
+// Privacy and Terms are static documents served by Express (client/public/*.html), not React
+// routes — they must be full-page loads (href), never client-side <Link> navigations, so every
+// visitor gets the same zero-JS artifact with its own canonical tag.
 const LINKS = [
-  { to: '/privacy', label: 'Privacy' },
-  { to: '/terms', label: 'Terms' },
+  { href: '/privacy', label: 'Privacy' },
+  { href: '/terms', label: 'Terms' },
 ];
 
 export default function MarketingFooter() {
@@ -56,14 +59,23 @@ export default function MarketingFooter() {
 
           <nav aria-label="Footer">
             <ul className="flex items-center gap-6">
-              {links.map(({ to, label }) => (
-                <li key={to}>
-                  <Link
-                    to={to}
-                    className="rounded text-sm text-stone-600 transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                  >
-                    {label}
-                  </Link>
+              {links.map(({ to, href, label }) => (
+                <li key={href || to}>
+                  {href ? (
+                    <a
+                      href={href}
+                      className="rounded text-sm text-stone-600 transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                    >
+                      {label}
+                    </a>
+                  ) : (
+                    <Link
+                      to={to}
+                      className="rounded text-sm text-stone-600 transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                    >
+                      {label}
+                    </Link>
+                  )}
                 </li>
               ))}
               <li>

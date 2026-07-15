@@ -10,11 +10,31 @@ import routes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { loginIpLimiter, loginEmailLimiter } from './middleware/loginRateLimit.js';
 import { requireBullBoardAuth, createBullBoardRouter } from './queues/bullBoard.js';
+import { WEB_SEGMENTS } from './webRoutes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Resolves to <repo>/client/dist when running from server/src/.
-const CLIENT_DIST = path.resolve(__dirname, '../../client/dist');
+// Resolves to <repo>/client/dist when running from server/src/. Overridable so the static +
+// 404 routing can be exercised against a fixture dist in tests without a real client build.
+const CLIENT_DIST = process.env.CLIENT_DIST
+  ? path.resolve(process.env.CLIENT_DIST)
+  : path.resolve(__dirname, '../../client/dist');
 const HAS_CLIENT_DIST = fs.existsSync(path.join(CLIENT_DIST, 'index.html'));
+
+// The committed static legal documents (client/public/*.html, copied into dist by the client
+// build). Served at clean URLs ahead of the SPA fallback: a legal notice must render for curl,
+// store-review bots and crawlers with ZERO JavaScript — the SPA shell used to answer /privacy
+// with the homepage's markup and canonical tag. Checked once at boot (dist is immutable for the
+// life of a dyno); a missing file falls through to the fallback rather than 500ing.
+const STATIC_PAGES = [
+  ['/privacy', 'privacy.html'],
+  ['/terms', 'terms.html'],
+  ['/delete-account', 'delete-account.html'],
+];
+// The zero-JS 404 document. If a stale dist lacks it, serve the SPA shell WITH a 404 status —
+// App.jsx's catch-all renders its NotFoundPage, so the status code stays honest either way.
+const NOT_FOUND_DOC = fs.existsSync(path.join(CLIENT_DIST, '404.html'))
+  ? path.join(CLIENT_DIST, '404.html')
+  : path.join(CLIENT_DIST, 'index.html');
 
 export function createApp() {
   const app = express();
@@ -79,11 +99,40 @@ export function createApp() {
   // Serve the built React admin dashboard from the same origin in production.
   // Heroku's heroku-postbuild produces client/dist before the server boots.
   if (isProd && HAS_CLIENT_DIST) {
+    // The clean URL is canonical for the static legal documents. Registered BEFORE
+    // express.static, which would otherwise serve the .html twin at a duplicate, crawlable URL.
+    app.get(['/privacy.html', '/terms.html', '/delete-account.html'], (req, res) => {
+      res.redirect(301, req.path.replace(/\.html$/i, ''));
+    });
+
     app.use(express.static(CLIENT_DIST));
-    // Unknown /api paths still 404; everything else falls back to the SPA.
+
+    // The static legal pages at their clean URLs: real text, zero JS, self-canonical. Express's
+    // default routing (non-strict, case-insensitive) makes one route cover /privacy, /privacy/
+    // and /Privacy; app.get() also answers HEAD. maxAge 0 + ETag so a policy edit is visible on
+    // the next request — these documents must never be cached past a deploy.
+    for (const [route, file] of STATIC_PAGES) {
+      const abs = path.join(CLIENT_DIST, file);
+      if (!fs.existsSync(abs)) continue; // stale dist → fall through to the SPA fallback below
+      app.get(route, (req, res, next) => {
+        res.sendFile(abs, { maxAge: 0 }, (err) => (err ? next(err) : undefined));
+      });
+    }
+
+    // Unknown /api paths still get the JSON 404.
     app.use('/api', notFound);
-    app.get(/^(?!\/api).*/, (req, res) => {
-      res.sendFile(path.join(CLIENT_DIST, 'index.html'));
+
+    // Everything else: the SPA shell for a known client route, a REAL 404 for anything else.
+    // Unknown paths used to return the shell with a 200 and bounce to "/" client-side — a soft
+    // 404. React Router matches case-insensitively, so the segment is lowercased to match.
+    app.get(/^(?!\/api).*/, (req, res, next) => {
+      const segment = (req.path.split('/')[1] || '').toLowerCase();
+      const known = WEB_SEGMENTS.has(segment);
+      res
+        .status(known ? 200 : 404)
+        .sendFile(known ? path.join(CLIENT_DIST, 'index.html') : NOT_FOUND_DOC, (err) =>
+          err ? next(err) : undefined
+        );
     });
   } else {
     app.use(notFound);

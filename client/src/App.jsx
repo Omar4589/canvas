@@ -9,7 +9,6 @@ import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
 // Lazy so the marketing chunk (screenshot webps + section components) never loads
 // for signed-in users heading straight to the console.
 const LandingPage = lazy(() => import('./pages/LandingPage.jsx'));
-const TermsPage = lazy(() => import('./pages/TermsPage.jsx'));
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
@@ -44,8 +43,7 @@ const PassesPage = lazy(() => import('./pages/PassesPage.jsx'));
 const EffortsPage = lazy(() => import('./pages/EffortsPage.jsx'));
 const WalkListsPage = lazy(() => import('./pages/WalkListsPage.jsx'));
 const QueuesPage = lazy(() => import('./pages/QueuesPage.jsx'));
-const PrivacyPolicyPage = lazy(() => import('./pages/PrivacyPolicyPage.jsx'));
-const DeleteAccountPage = lazy(() => import('./pages/DeleteAccountPage.jsx'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage.jsx'));
 const SelectOrgPage = lazy(() => import('./pages/SelectOrgPage.jsx'));
 const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage.jsx'));
 const SuperAdminHomePage = lazy(() => import('./pages/SuperAdminHomePage.jsx'));
@@ -87,12 +85,11 @@ export default function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/privacy" element={<PrivacyPolicyPage />} />
-        <Route path="/terms" element={<TermsPage />} />
-        {/* Google Play requires a deletion request page reachable WITHOUT a login — someone who
-            already uninstalled the app has to be able to get here. Declared in Play Console under
-            App content → Data safety → Data deletion. Keep it public. */}
-        <Route path="/delete-account" element={<DeleteAccountPage />} />
+        {/* /privacy, /terms and /delete-account are NOT React routes anymore. They are committed
+            static documents (client/public/*.html) served by Express at the clean URLs, ahead of
+            the SPA fallback — a legal notice must render for curl, store-review bots and crawlers
+            with zero JavaScript. Google Play's deletion page + the /privacy#delete-account anchor
+            live there now. Links to them must be plain <a href>, never <Link>. */}
         {/* Public shared report hub — no login. */}
         <Route element={<PublicReportLayout />}>
           <Route path="/r/:token" element={<PublicReportListPage />} />
@@ -218,7 +215,10 @@ export default function App() {
             <Route path="/queues" element={<QueuesPage />} />
           </Route>
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* In-app junk paths render a real not-found page instead of silently bouncing to the
+            homepage (a soft 404). Unknown TOP-LEVEL paths never get this far — the server's
+            segment allowlist (server/src/webRoutes.js) answers them with HTTP 404 + 404.html. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </Suspense>
   );
