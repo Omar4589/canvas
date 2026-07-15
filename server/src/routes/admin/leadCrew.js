@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
+import { requireAuth, requireCampaignManager, denyVendorPrivilegeWrite } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Membership } from '../../models/Membership.js';
@@ -76,7 +76,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // Create a brand-new canvasser and put them on this campaign in one step.
-router.post('/', async (req, res, next) => {
+router.post('/', denyVendorPrivilegeWrite, async (req, res, next) => {
   try {
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
@@ -127,7 +127,7 @@ router.post('/', async (req, res, next) => {
 
 // Set (or clear) a crew member's coordinator. Scoped to this campaign's roster so a
 // lead can only reorganize their own crew, not arbitrary org members.
-router.patch('/:userId/coordinator', async (req, res, next) => {
+router.patch('/:userId/coordinator', denyVendorPrivilegeWrite, async (req, res, next) => {
   try {
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });

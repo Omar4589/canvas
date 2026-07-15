@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import mapboxgl from 'mapbox-gl';
+import mapboxgl from '../lib/mapboxInit.js';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
 import MapFilters from './MapFilters.jsx';

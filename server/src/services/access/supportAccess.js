@@ -60,7 +60,8 @@ export async function revokeGrant(grantId, actorUserId) {
 // exists to keep it that way.
 const AUDIT_EXEMPT = [
   /^\/admin\/config(\/|$)/, // client feature flags / org config — no voter content
-  /\/setup-status(\/|$)/, // campaign-wizard progress booleans
+  /^\/admin\/campaigns\/[^/]+\/setup-status(\/|$)/, // campaign-wizard progress booleans — ANCHORED to
+  //   the real mount, not a bare /setup-status substring that could match a future host path elsewhere
   /^\/admin\/campaigns\/[^/]+\/passes(\/|$)/, // round/pass structure — no voter content
 ];
 

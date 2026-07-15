@@ -1,5 +1,9 @@
 User-agent: *
 Allow: /
 Disallow: /api
+# Public shared report pages carry per-address canvass data behind an unguessable token. They are for
+# the recipient of the link, not for search engines — keep them out of the index. (Legacy open links
+# stay reachable until revoked; this ensures they are at least never crawled.)
+Disallow: /r/
 
 Sitemap: https://doorline.app/sitemap.xml

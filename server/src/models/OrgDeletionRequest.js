@@ -42,6 +42,12 @@ const orgDeletionRequestSchema = new mongoose.Schema(
     // A deletion that failed must be loud. Silence here would mean a customer believing their data
     // was gone when it was not.
     error: { type: String, default: null },
+    // Retry accounting. A due request that errors is NOT abandoned in 'failed' after one try — the
+    // sweep re-attempts it each night, incrementing `attempts`, and only escalates to the terminal
+    // 'failed' state (which the retention health surface reports RED) after MAX_ATTEMPTS. So a
+    // transient blip self-heals, and a persistent failure becomes visible instead of a false 'done'.
+    attempts: { type: Number, default: 0 },
+    lastAttemptAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

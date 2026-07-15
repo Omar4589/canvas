@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 const LIMIT = 25;
 
@@ -23,19 +24,26 @@ function KeyChips({ uidKeys, svidKeys }) {
 
 export default function SuperAdminPeoplePage() {
   const navigate = useNavigate();
+  const { activeOrgId } = useAuth();
   const [searchText, setSearchText] = useState('');
   const [q, setQ] = useState('');
   const [needsReview, setNeedsReview] = useState(false);
   const [skip, setSkip] = useState(0);
 
+  // The identity directory is scoped to one organization now — you browse the people of the customer
+  // you have entered, under a support grant, not a platform-wide name search. Pass the active org; if
+  // none is selected, prompt to pick one. Reading a person still trips the grant modal (api/client.js)
+  // the first time, exactly like the /admin surfaces.
   const params = new URLSearchParams({ limit: String(LIMIT), skip: String(skip) });
+  if (activeOrgId) params.set('organizationId', activeOrgId);
   if (q) params.set('q', q);
   if (needsReview) params.set('needsReview', 'true');
 
   const peopleQ = useQuery({
-    queryKey: ['super-admin', 'persons', q, needsReview, skip],
+    queryKey: ['super-admin', 'persons', activeOrgId, q, needsReview, skip],
     queryFn: () => api(`/super-admin/persons?${params.toString()}`),
     placeholderData: keepPreviousData,
+    enabled: !!activeOrgId,
   });
 
   const data = peopleQ.data;
@@ -52,8 +60,16 @@ export default function SuperAdminPeoplePage() {
     <div className="max-w-6xl">
       <h1 className="text-2xl font-semibold text-fg">People</h1>
       <p className="mt-1 text-sm text-fg-muted">
-        The canonical cross-org person directory. Each row is one real human, deduped across organizations.
+        A customer's canonical identity directory — one row per real person. Scoped to the organization
+        you have entered; opening a record requires a support grant and is logged.
       </p>
+
+      {!activeOrgId && (
+        <div className="mt-4 rounded border border-border bg-card px-4 py-3 text-sm text-fg-muted">
+          Select an organization from the switcher to browse its people. There is no platform-wide name
+          search — you view one customer's records at a time, under a reasoned, time-boxed, audited grant.
+        </div>
+      )}
 
       <form onSubmit={submitSearch} className="mt-4 flex flex-wrap items-center gap-2">
         <input

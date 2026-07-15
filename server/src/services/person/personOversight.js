@@ -84,7 +84,9 @@ export async function buildPersonOversight(personId) {
   const person = await followMerged(raw); // resolve tombstones to the live survivor
   const isTombstone = String(person._id) !== String(personId);
 
-  // Orgs that touched this person come from Voter (Person holds no organizationId).
+  // Orgs that touched this person, derived from Voter. (A Person now carries its own organizationId —
+  // Person.js makes it required — but a Person is single-org post-remediation, so the Voter-derived set
+  // is the same one org, plus it surfaces the linked-voter detail this view needs anyway.)
   const orgIds = await Voter.distinct('organizationId', { personId: person._id });
   const ownerId = person.identityOwnerOrgId ? String(person.identityOwnerOrgId) : null;
   const orgLookupIds = [...new Set([...orgIds.map(String), ...(ownerId ? [ownerId] : [])])];

@@ -1,4 +1,90 @@
-# COUNSEL BRIEF — Doorline
+# COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
+
+> **Read this v2 section first. It supersedes the v1 verdict below.** The v1 brief (which follows,
+> retained for its detailed per-question analysis) audited the code *before* nine fixes landed. This v2
+> section records what is true *after* those fixes, each verified by an independent adversarial re-audit
+> against the code — not the comments. Where an answer below is unchanged from v1, the v1 detail still
+> stands; where it changed, this section governs.
+
+## Verdict (v2)
+
+Nine fixes landed. **Eight are code-closed and independently re-verified; one (Mapbox) cannot be closed
+in code and is a disclosure obligation instead.** Tests: 179 integration + 25 unit, green.
+
+**The load-bearing sentence is now TRUE, with one carve-out:** *"Doorline staff cannot read a customer's
+voter data without a time-limited support grant that names a reason, and every such access is recorded in
+an audit log."* Every bypass v1 found is closed: the identity-console triage lists are now grant-gated and
+logged (F1), the audit logger fails closed across `/admin` + `/mobile` (F2), the `leadCrew` self-mint is
+blocked (F3). **The carve-out to state honestly:** the audit *write* is best-effort — if the audit store
+itself is down, a staff read still completes and simply isn't recorded (it is not blocked). So: *"every
+such access is recorded"* is true in normal operation; it is not a hard guarantee under an audit-store
+outage. Prefer *"...is designed to be recorded in an audit log"* if you want to be unimpeachable.
+
+## Fix status (v2)
+
+| Fix | Status | The honest policy sentence it now supports |
+|---|---|---|
+| **F1** identity console | ✅ **closed** (re-verified) | Opening/editing/merging any voter identity record — and the review queues — requires a per-org grant and is logged. |
+| **F2** fail-closed audit | ✅ **closed** | Every staff read of `/admin`/`/mobile` voter data under a grant is logged unless it is a named metadata route; a new route logs by default. |
+| **F3** vendor self-mint | ✅ **closed** (re-verified) | A support operator cannot create accounts or grant roles in a customer org; only a member-admin can. |
+| **F4** merge org-scope | ✅ **closed** | Identity records are never merged across organizations. |
+| **F5** dormancy shield | ✅ **closed** | An active/paying account is never auto-deleted for inactivity — only a canceled/suspended one is. |
+| **F6** deletion completeness | ✅ **closed** (retry-safe) | Deleting an organization removes its identity records and their merge-history PII, even on a retried deletion. |
+| **F7** GeocodeCache TTL | ✅ **closed in code** | Cached addresses (coordinate-only, no name) expire after ~18 months of disuse. **Contingent on running `migrate:build-indexes` + `migrate:geocode-lastused` in prod.** |
+| **F8** Mapbox telemetry | ⚠️ **DISCLOSURE, not code** | **Do NOT claim "no third-party analytics."** Mapbox receives viewer IP + viewport (and fires telemetry) on any page with a map. Disclose Mapbox as a mapping subprocessor. |
+
+## Deploy note (v2)
+
+This remediation is a **separate, not-yet-deployed** release from the WS0–WS3 deploy already in prod.
+Server + web deploy together as before. New/changed migrations to run **after** deploy:
+`migrate:build-indexes --apply` (builds the GeocodeCache TTL index + the new indexes) and
+`migrate:geocode-lastused --apply` (activates the TTL on existing rows). No destructive/irreversible
+migration this time. New operator tool: `request:org-deletion <slug> --apply`.
+
+## Regression check (v2)
+
+The re-audit found one HIGH regression in an earlier draft of these fixes — a multi-org password-reset
+block that would have locked out multi-org users (no self-serve reset exists) and cited a non-existent
+"Forgot Password." **It was reverted.** The re-audit confirms no remaining regression: member-admins pass
+every new guard; the guards bite only vendors (grant-holders). *(Separately, the dev-only
+`migratePersons.js` backfill tool calls `resolvePerson` without an org and is inoperative under the
+prior deploy's org-scoping — a broken maintenance script, not a runtime path. Flagged, not fixed here.)*
+
+## Remaining honest gaps (v2) — what the policy still cannot promise
+
+These survive the remediation and are the list to take to counsel:
+
+1. **Voter-facing rights: none.** The ~75,760 members of the public in the database (name, home address,
+   DOB, party, and — via surveys — political opinions, which are GDPR Art. 9 special-category data) have
+   **no account and no mechanism** to see, correct, delete, or opt out of their record. Every such
+   request is a manual, untooled admin process. **This is the single largest gap and is untouched by any
+   of the nine fixes.**
+2. **Deletion is TTL/timer-based, not instant, and never warned.** There is **no email or SMS capability
+   at all**, so no customer is warned before a wind-down or dormancy deletion. Write *"we aim to delete
+   within…"*, never *"is deleted after…"*.
+3. **Deletion is not total.** Cached addresses age out (≤18 months, coordinate-only); `AccessLog` /
+   `SupportAccessGrant` / deletion-receipt rows are retained by design (they are the proof the deletion
+   happened); **Atlas backups retain deleted data for their retention window** (daily 7d / weekly 4w /
+   monthly 12m + the on-demand snapshot + continuous-oplog PITR — this exists because backups were just
+   enabled, and it interacts with every deletion promise). The operator's preflight `mongodump` on a
+   laptop is outside all of this.
+4. **The deletion end-state is pseudonymous, not anonymous.** After the 180-day identity purge, the GPS
+   trail, timestamps, notes and survey submissions remain linked to a stable `userId`, and the tombstoned
+   `User` row persists. Do not say "anonymized"; say "de-identified / pseudonymized."
+5. **Passwords are per-user, not per-org (item 14).** One admin resetting a multi-org member's password
+   affects that person's login everywhere; mitigated (not eliminated) by forced-change-on-next-login,
+   which makes misuse visible rather than silent. Architectural; needs per-org credentials or email to
+   fully close.
+6. **The audit write is best-effort.** See the carve-out above.
+7. **Legacy `/r/` report links** created before the password/expiry change remain open and non-expiring
+   until an operator revokes them (now at least `noindex` + robots-disallowed).
+8. **The currently-published `PrivacyPolicyPage.jsx` still contains statements this brief shows are false**
+   (notably "no third-party analytics/tracking" and the aggregate-only report description). It was left
+   **untouched by instruction** — correcting it is the policy-rewrite pass, not this code remediation.
+
+---
+
+# COUNSEL BRIEF v1 — Doorline (pre-remediation; retained for detail)
 
 **Prepared for:** counsel drafting a Privacy Policy and Terms of Service
 **Basis:** the source tree at `/Users/omarzumaya/Desktop/canvass-app`, branch `sharedVoters`, as shipped. Read-only inspection. No code executed, no production database queried, no network traffic observed.

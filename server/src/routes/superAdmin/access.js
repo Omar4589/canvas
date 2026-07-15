@@ -8,6 +8,8 @@ import { Organization } from '../../models/Organization.js';
 import { User } from '../../models/User.js';
 import { createGrant, revokeGrant, activeGrant, DEFAULT_GRANT_HOURS, MAX_GRANT_HOURS } from '../../services/access/supportAccess.js';
 import { retentionHealth } from '../../services/retention/purgeDeletedIdentities.js';
+import { deletionRequestHealth } from '../../services/retention/triggers.js';
+import { requestOrgDeletion, cancelOrgDeletion, listDeletionRequests, DeletionRequestError } from '../../services/retention/deletionRequests.js';
 import { REPEATABLE_JOBS } from '../../services/retention/scheduler.js';
 
 // Support access: the front door into a customer organization, and the record of who used it.
@@ -148,17 +150,96 @@ router.get('/log', async (req, res, next) => {
 // to watch. Green here has to mean every promise is being kept, or it means nothing.
 router.get('/health/retention', async (req, res, next) => {
   try {
-    const jobs = await Promise.all(REPEATABLE_JOBS.map((j) => retentionHealth(j.name, j.label)));
+    const [jobs, delReq] = await Promise.all([
+      Promise.all(REPEATABLE_JOBS.map((j) => retentionHealth(j.name, j.label))),
+      deletionRequestHealth(),
+    ]);
     const broken = jobs.filter((j) => !j.healthy);
+    // The banner is red if a retention JOB has gone quiet OR a customer's deletion request is stuck /
+    // failed. A green "job ran fine" is not the whole promise — a request that ran and errored, or is
+    // overdue, is exactly the silent failure a customer would be harmed by.
+    const delMsgs = [];
+    if (delReq.failed) delMsgs.push(`${delReq.failed} deletion request(s) FAILED and need a human.`);
+    if (delReq.stuck) delMsgs.push(`${delReq.stuck} deletion request(s) are overdue and not yet completed.`);
+    const healthy = broken.length === 0 && delReq.healthy;
     res.json({
       ...jobs[0], // the identity purge's detail fields, kept for the existing client contract
-      healthy: broken.length === 0,
-      message: broken.length
-        ? broken.map((j) => j.message).join(' ')
-        : 'Retention is being enforced.',
+      healthy,
+      message: healthy
+        ? 'Retention is being enforced.'
+        : [...broken.map((j) => j.message), ...delMsgs].join(' '),
       jobs,
+      deletionRequests: delReq,
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+// ── Deletion requests: the intake behind "you may request deletion of your data." ──
+// Creating one SCHEDULES the org's deletion for now + SLA (default 30 days); the retention sweep
+// executes it. Cancellable until it fires. This is the producer the executor was missing.
+router.get('/deletion-requests', async (req, res, next) => {
+  try {
+    const rows = await listDeletionRequests({ limit: 200 });
+    res.json({
+      requests: rows.map((r) => ({
+        id: String(r._id),
+        organization: r.organizationId ? { id: String(r.organizationId._id), name: r.organizationId.name, slug: r.organizationId.slug } : null,
+        status: r.status,
+        note: r.note || null,
+        requestedByEmail: r.requestedByEmail || null,
+        requestedAt: r.requestedAt,
+        scheduledFor: r.scheduledFor,
+        completedAt: r.completedAt,
+        cancelledAt: r.cancelledAt,
+        attempts: r.attempts || 0,
+        error: r.error || null,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const deletionRequestSchema = z.object({
+  organizationId: z.string(),
+  note: z.string().max(2000).optional(),
+  requestedByEmail: z.string().email().optional(),
+});
+
+router.post('/deletion-requests', async (req, res, next) => {
+  try {
+    const body = deletionRequestSchema.parse(req.body);
+    if (!mongoose.isValidObjectId(body.organizationId)) return res.status(400).json({ error: 'Invalid organizationId' });
+    const { request, org, alreadyScheduled } = await requestOrgDeletion({
+      organizationId: body.organizationId,
+      requestedBy: req.user._id,
+      requestedByEmail: body.requestedByEmail || null,
+      note: body.note || '',
+    });
+    res.status(alreadyScheduled ? 200 : 201).json({
+      alreadyScheduled,
+      request: { id: String(request._id), status: request.status, scheduledFor: request.scheduledFor },
+      organization: { id: String(org._id), name: org.name, slug: org.slug },
+      notice: alreadyScheduled
+        ? 'This organization already has a deletion scheduled.'
+        : `Deletion scheduled for ${new Date(request.scheduledFor).toISOString().slice(0, 10)}. Cancellable until then.`,
+    });
+  } catch (err) {
+    if (err instanceof DeletionRequestError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+router.post('/deletion-requests/:requestId/cancel', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.requestId)) return res.status(400).json({ error: 'Invalid requestId' });
+    const request = await cancelOrgDeletion({ requestId: req.params.requestId, cancelledBy: req.user._id });
+    res.json({ ok: true, request: { id: String(request._id), status: request.status } });
+  } catch (err) {
+    if (err instanceof DeletionRequestError) return res.status(err.status).json({ error: err.message, code: err.code });
     next(err);
   }
 });

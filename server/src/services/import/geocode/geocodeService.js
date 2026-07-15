@@ -150,6 +150,15 @@ export async function resolve(householdMap, opts = {}) {
     for (const r of rows) cacheByKey.set(r.cacheKey, r);
   }
 
+  // Sliding-TTL touch: reading an entry keeps it alive (see GeocodeCache.lastUsedAt). Best-effort and
+  // fire-and-forget — a cache-retention bump must never slow down or fail an import.
+  if (cacheByKey.size) {
+    GeocodeCache.updateMany(
+      { provider: 'geocodio', cacheKey: { $in: [...cacheByKey.keys()] } },
+      { $set: { lastUsedAt: new Date() } }
+    ).catch(() => {});
+  }
+
   const fillFrom = (h, entry) => {
     const [lng, lat] = entry.location.coordinates;
     h.longitude = lng; h.latitude = lat;

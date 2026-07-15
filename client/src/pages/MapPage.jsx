@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import mapboxgl from 'mapbox-gl';
+import mapboxgl from '../lib/mapboxInit.js';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';

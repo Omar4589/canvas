@@ -131,15 +131,37 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── GET /super-admin/persons/candidates — open merge candidates ──
+// ── GET /super-admin/persons/candidates?organizationId=… — one org's open merge candidates ──
+// Scoped + grant-gated + logged, like the rest of the console. It used to return names, UIDs and state
+// voter IDs for merge candidates across EVERY customer to any break-glass user, with no grant and no
+// audit row — a cross-org PII read that fed the console's landing screen. Now you see one customer's
+// review queue, under a grant, recorded.
 router.get('/candidates', async (req, res, next) => {
   try {
-    const cands = await PersonMergeCandidate.find({ status: 'open' }).sort({ createdAt: -1 }).limit(200).lean();
+    const orgIdParam = req.query.organizationId;
+    if (!orgIdParam || !mongoose.isValidObjectId(orgIdParam)) {
+      return res.status(400).json({ error: 'organizationId is required — merge candidates are scoped to one organization.' });
+    }
+    const grant = await requirePersonOrgGrant(req, res, orgIdParam);
+    if (!grant) return;
+
+    // A candidate belongs to an org iff its persons do (Persons are org-scoped). Keep only this org's.
+    const orgPersonIds = await Person.find({ organizationId: oid(orgIdParam) }, '_id').lean();
+    const inOrg = new Set(orgPersonIds.map((p) => String(p._id)));
+    const raw = await PersonMergeCandidate.find({ status: 'open' }).sort({ createdAt: -1 }).limit(500).lean();
+    const cands = raw.filter((c) => inOrg.has(String(c.personIdA)) || (c.personIdB && inOrg.has(String(c.personIdB)))).slice(0, 200);
+
     const pids = [...new Set(cands.flatMap((c) => [c.personIdA, c.personIdB].filter(Boolean)).map(String))];
     const persons = pids.length
       ? await Person.find({ _id: { $in: pids.map(oid) } }, 'firstName lastName fullName uidKeys svidKeys').lean()
       : [];
     const pm = new Map(persons.map((p) => [String(p._id), brief(p)]));
+    // Defense in depth: emit a person's identity ONLY if that person is in the granted org. A candidate
+    // pairs two persons, and today the creation code only ever pairs same-org persons — but rather than
+    // trust that invariant, we drop any paired person that isn't this org's, so a future manual or
+    // migrated cross-org candidate can never leak the other org's name/uid/svid through this grant.
+    const inGrantedOrg = (pid) => (inOrg.has(String(pid)) ? pm.get(String(pid)) || null : null);
+    logPersonAccess(req, { organizationId: oid(orgIdParam), grantId: grant._id, resource: 'person-candidates', route: 'GET /super-admin/persons/candidates' });
     res.json({
       candidates: cands.map((c) => ({
         id: String(c._id),
@@ -149,8 +171,8 @@ router.get('/candidates', async (req, res, next) => {
         sampleSvid: c.sampleSvid || null,
         sampleState: c.sampleState || null,
         createdAt: c.createdAt,
-        personA: pm.get(String(c.personIdA)) || null,
-        personB: c.personIdB ? pm.get(String(c.personIdB)) || null : null,
+        personA: inGrantedOrg(c.personIdA),
+        personB: c.personIdB ? inGrantedOrg(c.personIdB) : null,
       })),
     });
   } catch (err) { next(err); }
@@ -162,6 +184,12 @@ router.post('/candidates/:candidateId/dismiss', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.candidateId)) return res.status(400).json({ error: 'Invalid candidateId' });
     const c = await PersonMergeCandidate.findById(req.params.candidateId);
     if (!c) return res.status(404).json({ error: 'Candidate not found' });
+    // Derive the org from the candidate's person, then require a grant for it and log the write — this
+    // used to be an unaudited cross-org state change any break-glass user could make.
+    const person = await Person.findById(c.personIdA, 'organizationId').lean();
+    const grant = await requirePersonOrgGrant(req, res, person?.organizationId);
+    if (!grant) return;
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-candidate-dismiss', route: 'POST /super-admin/persons/candidates/:candidateId/dismiss' });
     c.status = 'dismissed';
     c.resolvedBy = req.user._id;
     c.resolvedAt = new Date();
@@ -170,10 +198,20 @@ router.post('/candidates/:candidateId/dismiss', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── GET /super-admin/persons/edit-proposals — pending identity proposals ──
+// ── GET /super-admin/persons/edit-proposals?organizationId=… — one org's pending identity proposals ──
+// Scoped + grant-gated + logged. It used to return, across EVERY customer, the proposed and canonical
+// dateOfBirth, phone, cellPhone, party and names on every pending proposal, to any break-glass user,
+// unlogged — proposed-PII the console showed on its default screen. Now it is one org, under a grant.
 router.get('/edit-proposals', async (req, res, next) => {
   try {
-    const props = await PersonEditProposal.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(200).lean();
+    const orgIdParam = req.query.organizationId;
+    if (!orgIdParam || !mongoose.isValidObjectId(orgIdParam)) {
+      return res.status(400).json({ error: 'organizationId is required — edit proposals are scoped to one organization.' });
+    }
+    const grant = await requirePersonOrgGrant(req, res, orgIdParam);
+    if (!grant) return;
+
+    const props = await PersonEditProposal.find({ status: 'pending', orgId: oid(orgIdParam) }).sort({ createdAt: -1 }).limit(200).lean();
     const pids = [...new Set(props.map((p) => String(p.personId)))];
     const orgIds = [...new Set(props.map((p) => String(p.orgId)))];
     const [persons, orgs] = await Promise.all([
@@ -182,6 +220,7 @@ router.get('/edit-proposals', async (req, res, next) => {
     ]);
     const pm = new Map(persons.map((p) => [String(p._id), brief(p)]));
     const om = new Map(orgs.map((o) => [String(o._id), o.name]));
+    logPersonAccess(req, { organizationId: oid(orgIdParam), grantId: grant._id, resource: 'person-proposals', route: 'GET /super-admin/persons/edit-proposals' });
     res.json({
       proposals: props.map((p) => ({
         id: String(p._id),
@@ -244,6 +283,11 @@ router.post('/edit-proposals/:proposalId/approve', async (req, res, next) => {
 router.post('/edit-proposals/:proposalId/reject', async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.proposalId)) return res.status(400).json({ error: 'Invalid proposalId' });
+    const prop = await PersonEditProposal.findById(req.params.proposalId, 'orgId').lean();
+    if (!prop) return res.status(404).json({ error: 'Proposal not found' });
+    const grant = await requirePersonOrgGrant(req, res, prop.orgId);
+    if (!grant) return;
+    logPersonAccess(req, { organizationId: prop.orgId, grantId: grant._id, resource: 'person-proposal-reject', route: 'POST /super-admin/persons/edit-proposals/:proposalId/reject' });
     const claimed = await PersonEditProposal.findOneAndUpdate(
       { _id: req.params.proposalId, status: 'pending' },
       { $set: { status: 'rejected', resolvedBy: req.user._id, resolvedAt: new Date() } },

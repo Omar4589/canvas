@@ -31,11 +31,28 @@ const geocodeCacheSchema = new mongoose.Schema(
     // read (every read projects it out), and the useful signal (accuracyType/accuracy/confidence)
     // is already promoted to the fields above. Dropping it cuts each entry ~5-6×. A one-time
     // migration ($unset raw) reclaims it on existing docs. See migrations/stripGeocodeRaw.js.
+
+    // Sliding retention. This cache is intentionally org-agnostic (an address→coordinate is universal
+    // and shared across every customer, so org-attributing it would defeat the dedup and force paying
+    // to re-geocode the same address). But "shared forever" is its own problem: it would otherwise hold
+    // every street address the platform has ever imported, indefinitely, including for deleted
+    // customers. `lastUsedAt` is refreshed every time an import reads the entry, and the TTL index below
+    // deletes entries untouched for the window — so the cache retains only addresses still in active
+    // use, not a permanent record of everywhere anyone ever canvassed. It carries no name or person
+    // link — only address→coordinate — so this is the least identifying address copy in the system.
+    lastUsedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
 geocodeCacheSchema.index({ cacheKey: 1, provider: 1 }, { unique: true });
 geocodeCacheSchema.index({ status: 1, updatedAt: 1 }); // negative-cache staleness sweep
+// TTL: expire entries not used within the window (default 18 months — a full election cycle plus
+// slack). Refreshed on every cache hit (see geocodeService), so hot addresses never expire and
+// abandoned ones age out on their own. autoIndex is off in prod: build via migrate:build-indexes.
+geocodeCacheSchema.index(
+  { lastUsedAt: 1 },
+  { expireAfterSeconds: Number(process.env.GEOCODE_CACHE_TTL_DAYS || 540) * 86_400 }
+);
 
 export const GeocodeCache = mongoose.model('GeocodeCache', geocodeCacheSchema);

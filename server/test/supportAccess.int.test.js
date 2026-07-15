@@ -303,7 +303,7 @@ test('the audit log answers "did anyone at Doorline read my data?"', { skip }, a
 // `retention-triggers` sweep — wind-down, dormancy, and the contractual delete-on-request SLA —
 // could throw every single night and the banner stayed green off the purge next to it. Its receipts
 // were written and read by nothing. On the old code this test returns healthy:true.
-test('the retention banner goes RED when the org-deletion triggers die, even if the purge is alive', async () => {
+test('the retention banner goes RED when the org-deletion triggers die, even if the purge is alive', { skip }, async () => {
   const { RetentionRun } = await import('../src/models/RetentionRun.js');
   await RetentionRun.deleteMany({});
 

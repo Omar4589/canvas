@@ -36,6 +36,8 @@
     "migrate:billing-access": "npm --prefix server run migrate:billing-access --",
     "migrate:campaign-stats": "npm --prefix server run migrate:campaign-stats --",
     "migrate:strip-geocode-raw": "npm --prefix server run migrate:strip-geocode-raw --",
+    "migrate:geocode-lastused": "npm --prefix server run migrate:geocode-lastused --",
+    "request:org-deletion": "npm --prefix server run request:org-deletion --",
     "migrate:voter-scope": "npm --prefix server run migrate:voter-scope --",
     "migrate:cut-attributes": "npm --prefix server run migrate:cut-attributes --",
     "migrate:activity-turf-tags": "npm --prefix server run migrate:activity-turf-tags --",

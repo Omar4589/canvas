@@ -71,10 +71,18 @@ export async function deleteOrganization(orgId) {
     throw err;
   }
 
-  const personIds = await Voter.distinct('personId', {
-    organizationId: org._id,
-    personId: { $ne: null },
-  });
+  // The org's Persons, from BOTH the Voter links AND Person.organizationId directly. The direct read is
+  // what makes a RETRY safe: if a prior partial run already deleted this org's Voters, the Voter-derived
+  // set would come back empty and the identity records (and their PII-bearing merge logs) would be
+  // stranded. Persons carry their own organizationId now, so we find them either way.
+  const [voterPersonIds, orgPersons] = await Promise.all([
+    Voter.distinct('personId', { organizationId: org._id, personId: { $ne: null } }),
+    Person.find({ organizationId: org._id }, '_id').lean(),
+  ]);
+  const personIdSet = new Map();
+  for (const pid of voterPersonIds) personIdSet.set(String(pid), pid);
+  for (const p of orgPersons) personIdSet.set(String(p._id), p._id);
+  const personIds = [...personIdSet.values()];
 
   // The raw uploaded spreadsheets, BEFORE the ImportJob rows that name them are swept away.
   //
@@ -117,18 +125,29 @@ export async function deleteOrganization(orgId) {
   // of the humans in their voter file sitting in our database because someone else also has them.
   let personsPurged = 0;
   for (const pid of personIds) {
-    await Person.deleteOne({ _id: pid });
+    // Delete the PII-bearing satellites BEFORE the Person itself. PersonMergeLog holds a FULL pre-merge
+    // snapshot of both Person docs (name, DOB, phone); PersonMergeCandidate/PersonEditProposal carry
+    // identity too. If this loop dies mid-iteration, deleting the Person LAST means a retry still finds
+    // it (Person.organizationId) and re-runs the cleanup idempotently — the Person is never removed
+    // while its identity snapshots survive. Keeping any of these would retain exactly what a customer
+    // asked us to delete.
     await PersonMergeCandidate.deleteMany({ $or: [{ personIdA: pid }, { personIdB: pid }] });
     await PersonEditProposal.deleteMany({ personId: pid });
-    // PersonMergeLog holds a FULL pre-merge snapshot of both Person docs — identity PII. It goes
-    // with the org too; keeping it would be retaining exactly what we were asked to delete.
     await PersonMergeLog.deleteMany({ $or: [{ survivorId: pid }, { victimId: pid }] });
+    await Person.deleteOne({ _id: pid });
     personsPurged += 1;
   }
-  // Belt and braces: anything still carrying this org's id (a Person created outside the voter
-  // link, say) goes as well.
-  const strays = await Person.deleteMany({ organizationId: org._id });
-  personsPurged += strays.deletedCount || 0;
+  // Belt and braces: any Person still carrying this org's id that the loop above didn't cover (e.g. one
+  // created by a concurrent import racing this delete, after the line-~80 snapshot). Clean its identity
+  // satellites too, same order as the loop, so a stray can't strand a merge-log PII snapshot either.
+  const strays = await Person.find({ organizationId: org._id }, '_id').lean();
+  for (const s of strays) {
+    await PersonMergeCandidate.deleteMany({ $or: [{ personIdA: s._id }, { personIdB: s._id }] });
+    await PersonEditProposal.deleteMany({ personId: s._id });
+    await PersonMergeLog.deleteMany({ $or: [{ survivorId: s._id }, { victimId: s._id }] });
+    await Person.deleteOne({ _id: s._id });
+    personsPurged += 1;
+  }
 
   await Organization.deleteOne({ _id: org._id });
 

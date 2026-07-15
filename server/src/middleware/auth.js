@@ -70,6 +70,27 @@ export function requireOrgRole(...roles) {
   };
 }
 
+// Block a vendor (a platform staffer holding a support GRANT, i.e. no membership in this org) from
+// privilege-granting writes — creating/linking a Membership or a campaign-management grant. This is the
+// self-mint escalation: requireOrgRole('admin') / requireCampaignManager both pass any super-admin
+// unconditionally, so without this a grant-holder could add THEMSELVES as a member and, once a
+// membership exists, orgContext stops treating them as a vendor — their access goes permanently
+// unlogged. A grant buys read access to help a customer; it never buys the power to make yourself a
+// permanent member. Applied at every route that mints a membership (there are three; two are reachable
+// under a grant). NOTE: this is intentionally narrow — a support operator may still perform ordinary
+// writes for a customer (they are logged); only account/role creation is off-limits.
+export function denyVendorPrivilegeWrite(req, res, next) {
+  if (req.supportGrant) {
+    return res.status(403).json({
+      error:
+        'Support access cannot create or link accounts or grant roles in a customer organization. ' +
+        'That must be done by an administrator who is a member of it.',
+      code: 'VENDOR_READ_ONLY',
+    });
+  }
+  next();
+}
+
 export function requireOrgMember(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   if (req.user.isSuperAdmin) return next();

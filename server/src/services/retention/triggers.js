@@ -13,7 +13,9 @@ import { deleteOrganization } from '../platform/deleteOrganization.js';
 // service file is a business decision nobody can change without a deploy.
 //
 //   WIND-DOWN            a terminated customer gets a grace period to export, then their data goes.
-//   DORMANCY             an account nobody has touched in two years goes, after a warning.
+//   DORMANCY             a NON-PAYING account (canceled/suspended) untouched for two years goes. There
+//                        is NO warning email — the server has no email/SMS capability at all — which is
+//                        exactly why this is gated to accounts that already stopped being customers.
 //   DELETE-ON-REQUEST    a customer asks; we have an SLA and we keep it.
 //
 // The point of all three: "we keep your data as long as you're a customer, and then we don't" has to
@@ -75,6 +77,12 @@ export async function purgeWoundDownOrgs({ apply = true } = {}) {
  * "Reactivation resets the clock" is not a special case — the clock IS the most recent activity, so a
  * single knock un-dormants an org for another two years by construction. There is nothing to reset.
  */
+// A paying/active organization is NEVER dormancy-deleted, no matter how long it has been since the last
+// knock. Dormancy is a backstop for accounts that are no longer customers — not a guillotine for a live,
+// subscribed org that is simply between election cycles. These statuses mean "still a customer": we do
+// not auto-delete them for inactivity.
+const DORMANCY_PROTECTED_STATUSES = new Set(['active', 'trial', 'past_due', 'internal']);
+
 export async function purgeDormantOrgs({ apply = true } = {}) {
   const cutoff = new Date(Date.now() - DORMANCY_MONTHS * 30 * DAY);
   const orgs = await Organization.find({ createdAt: { $lte: cutoff } }, 'name slug createdAt').lean();
@@ -82,6 +90,15 @@ export async function purgeDormantOrgs({ apply = true } = {}) {
   const due = [];
   for (const org of orgs) {
     if (await isExempt(org._id)) continue;
+    // Gate on subscription status, not knock recency alone. Deleting a paying customer because they
+    // did not canvass for two years would be catastrophic — and we have NO email or SMS capability, so
+    // we cannot warn anyone first. That makes "only delete an account that is no longer a customer" a
+    // hard requirement: dormancy may only ever touch a canceled or suspended org (one that has already
+    // stopped paying), never an active, trialing, or past-due one. An org with no subscription record
+    // at all is treated as protected (fail safe) rather than deleted.
+    const sub = await Subscription.findOne({ organizationId: org._id }, 'status').lean();
+    if (!sub || DORMANCY_PROTECTED_STATUSES.has(sub.status)) continue;
+
     const last = await CanvassActivity.findOne({ organizationId: org._id }, 'timestamp')
       .sort({ timestamp: -1 })
       .lean();
@@ -108,6 +125,12 @@ export async function purgeDormantOrgs({ apply = true } = {}) {
  * coerced request a window to be cancelled, and it gives the customer time to export. The request is
  * `scheduledFor = requestedAt + SLA`, and cancelling is a first-class action until it fires.
  */
+// A due request that errors is re-attempted on subsequent sweeps rather than abandoned after one try.
+// Only after this many failed attempts does it escalate to the terminal 'failed' state, which the
+// retention health surface reports RED. A transient error (a Mongo blip, a lock) self-heals; a real,
+// persistent failure becomes loudly visible — never a silent 'completed' the customer would trust.
+const MAX_DELETION_ATTEMPTS = Number(process.env.RETENTION_DELETE_MAX_ATTEMPTS || 5);
+
 export async function executeDueDeletionRequests({ apply = true } = {}) {
   const now = new Date();
   const due = await OrgDeletionRequest.find({
@@ -115,26 +138,54 @@ export async function executeDueDeletionRequests({ apply = true } = {}) {
     scheduledFor: { $lte: now },
   }).lean();
 
-  if (!apply) return { due: due.length, purged: 0 };
+  if (!apply) return { due: due.length, purged: 0, failed: 0 };
 
   let purged = 0;
+  let failed = 0;
   for (const r of due) {
     try {
       await deleteOrganization(r.organizationId);
       await OrgDeletionRequest.updateOne(
         { _id: r._id },
-        { $set: { status: 'completed', completedAt: new Date() } }
+        { $set: { status: 'completed', completedAt: new Date(), error: null }, $inc: { attempts: 1 } }
       );
       purged += 1;
     } catch (err) {
-      // A failed deletion must SHOUT, not be retried silently forever.
+      const attempts = (r.attempts || 0) + 1;
+      const giveUp = attempts >= MAX_DELETION_ATTEMPTS;
+      // Keep it 'scheduled' (so the next sweep retries) until we've exhausted the budget; only then
+      // mark 'failed'. Either way, record the error and the attempt so it is never a silent success.
       await OrgDeletionRequest.updateOne(
         { _id: r._id },
-        { $set: { status: 'failed', error: String(err?.message || err) } }
+        {
+          $set: {
+            status: giveUp ? 'failed' : 'scheduled',
+            error: String(err?.message || err),
+            lastAttemptAt: new Date(),
+          },
+          $inc: { attempts: 1 },
+        }
       );
+      if (giveUp) failed += 1;
     }
   }
-  return { due: due.length, purged };
+  return { due: due.length, purged, failed };
+}
+
+/**
+ * How healthy is the delete-on-request SLA right now? Distinct from "did the job run": a request can
+ * be stuck (past its date, still not completed) even while the sweep runs nightly. `stuck` counts
+ * requests overdue by more than a day; `failed` counts terminal failures. Either being non-zero means
+ * a customer's deletion promise is not being kept, and the retention banner must say so.
+ */
+export async function deletionRequestHealth() {
+  const now = Date.now();
+  const overdueCutoff = new Date(now - DAY); // a day's grace past the scheduled date
+  const [stuck, failed] = await Promise.all([
+    OrgDeletionRequest.countDocuments({ status: 'scheduled', scheduledFor: { $lte: overdueCutoff } }),
+    OrgDeletionRequest.countDocuments({ status: 'failed' }),
+  ]);
+  return { healthy: stuck === 0 && failed === 0, stuck, failed };
 }
 
 /**

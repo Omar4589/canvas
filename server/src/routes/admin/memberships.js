@@ -23,6 +23,25 @@ import { phoneSchema, nameSchema, emailSchema, passwordSchema as passwordField }
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
 
+// A support-grant holder is a VENDOR in this organization, not a member — orgContext set req.supportGrant
+// precisely because they have no membership here. They may READ team data to do support, but they must
+// not create accounts, change roles, grant billing, or reset passwords in a customer's org. That path is
+// the membership self-mint escalation: requireOrgRole('admin') passes any super-admin unconditionally
+// (auth.js), so without this a grant-holder could POST a Membership for THEMSELVES, at which point
+// orgContext takes the member branch forever after and their access stops being logged. A grant buys
+// read access to help; it does not buy the power to make yourself a permanent, unaudited member.
+router.use((req, res, next) => {
+  if (req.supportGrant && req.method !== 'GET') {
+    return res.status(403).json({
+      error:
+        'Support access is read-only for team management. Creating or changing accounts, roles, or ' +
+        'passwords must be done by an administrator who is a member of this organization.',
+      code: 'VENDOR_READ_ONLY',
+    });
+  }
+  next();
+});
+
 const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 
 const addSchema = z.object({
@@ -401,6 +420,16 @@ router.patch('/:userId/password', async (req, res, next) => {
     if (!target) return res.status(404).json({ error: 'User not found' });
     if (target.deletedAt) return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
 
+    // NOTE (item 14 — cross-org link-and-reset): passwords are per-USER, not per-org (one User row, one
+    // passwordHash, shared across every org the person belongs to), and admin-assisted reset is the ONLY
+    // password-recovery mechanism in the product — there is no self-serve "forgot password" flow and the
+    // server has no email capability. So an admin of one org resetting a multi-org member's password
+    // does affect that person's login everywhere. We do NOT block it, because blocking it would leave a
+    // multi-org user who forgets their password with NO way back in at all. The existing mitigation
+    // stands: the new password is TEMPORARY (mustChangePassword forces a change at next login), so misuse
+    // is not silent — the legitimate user is locked out visibly the moment their old password stops
+    // working. Truly closing this needs per-org credentials or an email-based self-serve reset; both are
+    // out of scope here and are flagged for counsel in docs/PRIVACY_VERIFICATION.md.
     const { password } = passwordSchema.parse(req.body);
     const passwordHash = await User.hashPassword(password);
     // This is a TEMPORARY password: the user is forced to choose a new one at

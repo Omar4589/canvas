@@ -32,6 +32,7 @@
     "migrate:billing-access": "node src/migrations/migrateBillingAccess.js",
     "migrate:build-indexes": "node src/migrations/buildIndexes.js",
     "migrate:strip-geocode-raw": "node src/migrations/stripGeocodeRaw.js",
+    "migrate:geocode-lastused": "node src/migrations/backfillGeocodeLastUsed.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
     "migrate:activity-coordinator": "node src/migrations/migrateActivityCoordinator.js",
@@ -40,6 +41,7 @@
     "purge:deleted-identities": "node src/migrations/purgeDeletedIdentities.js",
     "lock:account": "node src/utils/lockAccountDeletion.js",
     "delete:account": "node src/utils/deleteAccountByEmail.js",
+    "request:org-deletion": "node src/utils/requestOrgDeletion.js",
     "audit:cross-org-identity": "node src/utils/auditCrossOrgIdentity.js",
     "migrate:persons-org-scope": "node src/migrations/migratePersonsOrgScope.js",
     "migrate:platform-roles": "node src/migrations/migratePlatformRoles.js"

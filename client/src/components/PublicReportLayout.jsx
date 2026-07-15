@@ -27,6 +27,14 @@ export default function PublicReportLayout() {
 
   useEffect(() => {
     document.title = 'Campaign Reports';
+    // Belt-and-suspenders with robots.txt: inject a noindex/nofollow meta while a shared report page is
+    // mounted, so a crawler that fetches the URL directly (or ignores robots) still won't index the
+    // per-address canvass data behind the link. Removed on unmount so the rest of the SPA is unaffected.
+    const tag = document.createElement('meta');
+    tag.name = 'robots';
+    tag.content = 'noindex, nofollow';
+    document.head.appendChild(tag);
+    return () => { document.head.removeChild(tag); };
   }, []);
 
   const metaQ = useQuery({

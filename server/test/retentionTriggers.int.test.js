@@ -100,14 +100,16 @@ test(`WIND-DOWN: a customer canceled >${WIND_DOWN_DAYS}d ago is purged; one canc
   assert.strictEqual(await votersOf(active), 1);
 });
 
-test(`DORMANCY: no activity for ${DORMANCY_MONTHS} months → purged; a single recent knock saves it`, { skip }, async () => {
+test(`DORMANCY: a NON-PAYING org with no activity for ${DORMANCY_MONTHS} months → purged; a recent knock saves it`, { skip }, async () => {
   const stale = new Date(Date.now() - (DORMANCY_MONTHS * 30 + 40) * DAY);
 
-  const dormant = await makeOrg('Ghost Town', 'ghost', 'active');
+  // Dormancy only ever touches an org that has stopped being a customer. This one canceled long ago
+  // (and somehow escaped the 60-day wind-down) and has been silent for two years.
+  const dormant = await makeOrg('Ghost Town', 'ghost', 'canceled');
   await ageOrg(dormant, stale);
   await seedData(dormant, stale); // last knock: long ago
 
-  const revived = await makeOrg('Came Back', 'revived', 'active');
+  const revived = await makeOrg('Came Back', 'revived', 'canceled');
   await ageOrg(revived, stale);
   await seedData(revived, new Date()); // knocked a door today
 
@@ -115,21 +117,35 @@ test(`DORMANCY: no activity for ${DORMANCY_MONTHS} months → purged; a single r
   assert.strictEqual(res.purged, 1);
   assert.strictEqual(await Organization.countDocuments({ _id: dormant._id }), 0);
 
-  // "Reactivation resets the clock" is not a special case — the clock IS the last knock. One door
-  // knocked today buys another two years, by construction.
+  // The clock IS the last knock. One door knocked today buys another two years, by construction.
   assert.ok(await Organization.findById(revived._id), 'a single recent knock resets the clock');
   assert.strictEqual(await votersOf(revived), 1);
 });
 
-test('DORMANCY: a brand-new customer who has not canvassed yet is NOT dormant', { skip }, async () => {
+test('DORMANCY: a PAYING customer is NEVER purged for inactivity, however long', { skip }, async () => {
+  // The load-bearing guarantee. An active, paid-up organization that simply has not canvassed between
+  // election cycles must not be auto-deleted — we have no way to warn them, and they are a customer.
+  const stale = new Date(Date.now() - (DORMANCY_MONTHS * 30 + 400) * DAY);
+  for (const status of ['active', 'trial', 'past_due']) {
+    const org = await makeOrg(`Paying ${status}`, `paying-${status}`, status);
+    await ageOrg(org, stale);
+    await seedData(org, stale); // dormant for years
+    const res = await purgeDormantOrgs({ apply: true });
+    assert.strictEqual(res.purged, 0, `a '${status}' org must never be dormancy-purged`);
+    assert.ok(await Organization.findById(org._id), `a '${status}' org survives dormancy`);
+  }
+});
+
+test('DORMANCY: a brand-new (non-paying) org that has not canvassed yet is NOT dormant', { skip }, async () => {
   // The trap: an org with zero CanvassActivity looks infinitely dormant if you measure from "last
-  // knock". A customer who signs up on Friday would be purged on Monday. Measure from createdAt.
-  const fresh = await makeOrg('Signed Up Today', 'fresh', 'trial');
+  // knock". Measure from createdAt so a just-signed-up account is not purged. (Use a non-paying status
+  // so the createdAt logic — not the paying-customer shield — is what protects it here.)
+  const fresh = await makeOrg('Signed Up Today', 'fresh', 'suspended');
   await seedData(fresh); // imported their file, hasn't knocked yet
 
   const res = await purgeDormantOrgs({ apply: true });
   assert.strictEqual(res.purged, 0);
-  assert.ok(await Organization.findById(fresh._id), 'a new customer who has not started is not dormant');
+  assert.ok(await Organization.findById(fresh._id), 'a new account measured from createdAt is not dormant');
 });
 
 test('INTERNAL orgs are exempt — the demo tenant does not evaporate', { skip }, async () => {
