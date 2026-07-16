@@ -13,7 +13,7 @@ const ITEMS = [
   },
   {
     q: "How do you catch canvassers who don't actually knock?",
-    a: "Every knock is GPS-stamped, so Doorline flags the ones that don't add up — recorded far from the house, logged too fast to have walked between doors, or all entered from one spot. You review each flag and mark it resolved, so bad data never quietly lands in a client report.",
+    a: "Every knock is GPS-stamped, so Doorline flags the ones that don't add up — recorded far from the house, logged too fast to have walked between doors, or all entered from one spot. Every flag lands on your Audit dashboard the moment it happens — including a dedicated alert when a knock comes from a fake-GPS app — and Doorline warns you about unreviewed mock-location flags before you publish a client report.",
   },
   {
     q: 'What shows up in a shared report?',

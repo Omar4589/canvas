@@ -11,6 +11,7 @@ import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import Segmented from '../components/ui/Segmented.jsx';
 import AuditSummaryTable from '../components/AuditSummaryTable.jsx';
 import FlaggedEntryList from '../components/FlaggedEntryList.jsx';
+import FlagLegend from '../components/FlagLegend.jsx';
 import { REASON_META } from '../lib/flags.js';
 
 function buildQuery(params) {
@@ -263,6 +264,7 @@ export default function AuditPage() {
                 </button>
               );
             })}
+            <FlagLegend className="ml-0.5 self-center" />
           </div>
           <Segmented value={reviewStatus} onChange={setReviewStatus} options={REVIEW_STATUS} />
         </div>

@@ -8,7 +8,7 @@ function formatDateTime(d, tz) {
     formatInTz(
       d,
       tz,
-      { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+      { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' },
       true
     ) || '—'
   );

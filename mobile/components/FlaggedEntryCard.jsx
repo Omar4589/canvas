@@ -32,7 +32,7 @@ export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, d
   const when = formatInTz(
     entry.timestamp,
     tz,
-    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' },
     true
   );
   const reasons = entry.reasons || [];

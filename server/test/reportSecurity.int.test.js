@@ -39,6 +39,7 @@ const { Household } = await import('../src/models/Household.js');
 const { Voter } = await import('../src/models/Voter.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
+const { FlagReview } = await import('../src/models/FlagReview.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -65,7 +66,7 @@ async function call(method, path, { token, orgId, body } = {}) {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, SurveyTemplate, ClientReport, ClientReportMapPoint, ReportShareLink, Subscription, Household, Voter, CanvassActivity, SurveyResponse]) {
+  for (const M of [Organization, User, Membership, Campaign, SurveyTemplate, ClientReport, ClientReportMapPoint, ReportShareLink, Subscription, Household, Voter, CanvassActivity, SurveyResponse, FlagReview]) {
     await M.deleteMany({});
   }
 
@@ -327,4 +328,68 @@ test('migration path: already-frozen points from before the fix are scrubbed in 
     { cwd: serverRoot, env: { ...process.env, MONGODB_URI: URI }, encoding: 'utf8' }
   );
   assert.match(again, /: 0 rewritten/, again);
+});
+
+// ── The mock-GPS soft publish gate. Reviewing a flag is a recorded decision, never a data
+// edit — so the builder must WARN (openMockFlags on GET, openMockFlagsAtPublish stamped at
+// freeze) without ever blocking, and neither field may leak into the client-facing shape.
+
+test('publish gate: openMockFlags warns, stamps at publish, tracks reviews, never leaks', { skip }, async () => {
+  const admin = await User.findOne({ email: 'ada@t.co' });
+  const hh = await Household.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, isActive: true,
+    addressLine1: '77 Mock Ln', city: 'Tampa', state: 'FL', zipCode: '33601',
+    normalizedAddress: '77 MOCK LN|TAMPA|FL|33601',
+    location: { type: 'Point', coordinates: [-82.45, 27.94] },
+  });
+  // One field-recorded mocked knock inside the window, plus a bulk-authored mocked row —
+  // the bulk row is invisible to the detector and must be invisible to the gate too.
+  const mocked = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, householdId: hh._id,
+    userId: admin._id, actionType: 'not_home',
+    location: { lat: 27.94, lng: -82.45, accuracy: 5, mocked: true },
+    timestamp: new Date('2026-07-09T18:00:00Z'),
+  });
+  await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, householdId: hh._id,
+    userId: admin._id, actionType: 'restricted', via: 'bulk',
+    location: { lat: 27.94, lng: -82.45, mocked: true },
+    timestamp: new Date('2026-07-09T18:05:00Z'),
+  });
+
+  const draft = await ClientReport.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id,
+    title: 'Week 3', status: 'draft',
+    weekStart: '2026-07-06', weekEnd: '2026-07-12', timeZone: 'America/Chicago',
+    rangeStartUtc: new Date('2026-07-06T05:00:00Z'), rangeEndUtc: new Date('2026-07-13T05:00:00Z'),
+    visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: [], showMap: true },
+  });
+
+  const get1 = await call('GET', `/admin/client-reports/${draft._id}`, { ...ctx.admin });
+  assert.strictEqual(get1.status, 200);
+  assert.strictEqual(get1.json.openMockFlags, 1, 'the field-recorded mocked knock counts; the bulk row does not');
+
+  const pub = await call('POST', `/admin/client-reports/${draft._id}/publish`, { ...ctx.admin });
+  assert.strictEqual(pub.status, 200, 'publish is never blocked by open flags');
+  const frozen = await ClientReport.findById(draft._id).lean();
+  assert.strictEqual(frozen.openMockFlagsAtPublish, 1, 'the count is stamped at freeze time');
+
+  // Leak guard: the client-facing shape must carry neither field (one prefix covers both).
+  const preview = await call('GET', `/admin/client-reports/${draft._id}/preview`, { ...ctx.admin });
+  assert.strictEqual(preview.status, 200);
+  assert.ok(!JSON.stringify(preview.json).includes('openMockFlags'), 'nothing mock-related in the client shape');
+
+  // A review (any decision) closes the flag: the warning clears and a republish stamps 0.
+  await FlagReview.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id,
+    actionModel: 'CanvassActivity', actionId: mocked._id,
+    status: 'reviewed', reviewedBy: admin._id, reviewedAt: new Date(),
+  });
+  const get2 = await call('GET', `/admin/client-reports/${draft._id}`, { ...ctx.admin });
+  assert.strictEqual(get2.json.openMockFlags, 0, 'reviewing clears the warning');
+  await call('POST', `/admin/client-reports/${draft._id}/unpublish`, { ...ctx.admin });
+  const repub = await call('POST', `/admin/client-reports/${draft._id}/publish`, { ...ctx.admin });
+  assert.strictEqual(repub.status, 200);
+  const refrozen = await ClientReport.findById(draft._id).lean();
+  assert.strictEqual(refrozen.openMockFlagsAtPublish, 0, 'the republish stamp reflects the review');
 });

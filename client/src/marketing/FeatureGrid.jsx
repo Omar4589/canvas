@@ -66,7 +66,7 @@ const FEATURES = [
     Icon: IconAlertShield,
     title: 'Flagged entries',
     blurb:
-      'Doors marked far from the house, logged too fast to have walked, or all from one spot get flagged for you to review — and clear before you publish.',
+      'Doors marked far from the house, logged too fast to have walked, or all from one spot get flagged for you to review — with a warning at publish time if mock-GPS flags are still open.',
   },
 ];
 

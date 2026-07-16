@@ -42,10 +42,13 @@ export default function AuditSummaryTable({ rows = [], selectedUserId = '', onSe
               >
                 <td className="px-3 py-2 font-medium text-fg">{r.name || 'Canvasser'}</td>
                 <td className="px-3 py-2 text-right font-semibold tabular-nums text-fg">{r.flaggedActions}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{r.far || 0}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{r.rapid || 0}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{r.oneSpot || 0}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{r.weakGps || 0}</td>
+                {/* Same REASON_META the headers map over — header/value can never desync
+                    (the old hardcoded 4-cell list shifted every column when mock_gps landed). */}
+                {REASON_META.map((m) => (
+                  <td key={m.key} className="px-3 py-2 text-right tabular-nums text-fg-muted">
+                    {r[m.countKey] || 0}
+                  </td>
+                ))}
                 <td className="px-3 py-2 text-right tabular-nums text-fg-muted">{r.openCount || 0}</td>
                 <td className="px-3 py-2 text-right">
                   {sev ? (

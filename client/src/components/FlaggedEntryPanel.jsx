@@ -10,6 +10,7 @@ import {
 } from '../lib/flags.js';
 import FlagReasonBadges from './FlagReasonBadges.jsx';
 import FlagReviewControl from './FlagReviewControl.jsx';
+import FlagLegend from './FlagLegend.jsx';
 
 function actionLabel(t) {
   switch (t) {
@@ -60,7 +61,7 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
             {formatInTz(
               entry.timestamp,
               zone,
-              { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+              { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' },
               true
             ) || '—'}
           </div>
@@ -78,7 +79,9 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
       </div>
 
       <div className="border-b border-border px-4 py-3">
-        <div className="mb-2 text-xs uppercase tracking-wide text-fg-muted">Why it's flagged</div>
+        <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-fg-muted">
+          Why it's flagged <FlagLegend />
+        </div>
         <FlagReasonBadges reasons={entry.reasons} />
       </div>
 

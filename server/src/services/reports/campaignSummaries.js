@@ -134,3 +134,26 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   }
   return out;
 }
+
+// Open (unreviewed) mock-GPS flags for ONE campaign over an explicit timestamp filter —
+// the single-campaign sibling of the openMockFlags nudge above, used by the client-report
+// soft publish gate (routes/admin/clientReports.js: the report's cumulative window,
+// { $lt: rangeEndUtc }). Same contract: mocked rows, via ≠ bulk (invisible to the
+// detector), open = no FlagReview row. Served by the partial {campaignId,
+// 'location.mocked'} index, so the unbounded lower edge stays cheap. Note the gate
+// counts the FULL window while the Audit deep link can only seed 62 days — a >62-day-old
+// unreviewed mock flag is counted here but won't show on the linked page (it was nudged
+// in prior weeks); bound the $gte here if that ever bites.
+export async function countOpenMockFlags({ organizationId, campaignId, timestamp }) {
+  const rows = await CanvassActivity.find(
+    { campaignId, 'location.mocked': true, via: { $ne: 'bulk' }, ...(timestamp ? { timestamp } : {}) },
+    '_id'
+  ).lean();
+  if (!rows.length) return 0;
+  const reviews = await FlagReview.find(
+    { organizationId, actionModel: 'CanvassActivity', actionId: { $in: rows.map((r) => r._id) } },
+    'actionId'
+  ).lean();
+  const reviewed = new Set(reviews.map((r) => String(r.actionId)));
+  return rows.filter((r) => !reviewed.has(String(r._id))).length;
+}

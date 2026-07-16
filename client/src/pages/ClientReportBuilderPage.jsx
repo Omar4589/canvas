@@ -5,7 +5,8 @@ import { api } from '../api/client.js';
 import { Button, Badge, Card, Modal, Segmented } from '../components/ui/index.js';
 import ClientReportView from '../components/ClientReportView.jsx';
 import ClientReportMap from '../components/ClientReportMap.jsx';
-import { formatWeekRange } from '../lib/datePresets.js';
+import NextStepBanner from '../components/NextStepBanner.jsx';
+import { formatWeekRange, shiftDays } from '../lib/datePresets.js';
 import { formatDateInTz } from '../lib/datetime.js';
 
 const STATUS_VARIANT = { draft: 'neutral', published: 'success', archived: 'warning' };
@@ -121,6 +122,14 @@ export default function ClientReportBuilderPage() {
 
   const isDraft = report.status === 'draft';
   const questions = report.stats?.cumulative?.surveyBreakdowns || [];
+
+  // Soft publish gate: unreviewed mock-GPS flags inside this report's window (server-
+  // computed on GET). The deep link seeds the Audit page with the widest range the
+  // server accepts (62 days), ending at the report's week end.
+  const openMockFlags = reportQ.data?.openMockFlags || 0;
+  const mockAuditHref =
+    `/campaigns/${report.campaignId}/audit?reason=mock_gps&status=open` +
+    `&from=${shiftDays(report.weekEnd, -61)}&to=${report.weekEnd}`;
 
   // Unsaved-changes indicator + the "what the client sees" recap/validation.
   const dirty = isDraft && editableSnapshot(draft) !== editableSnapshot(report);
@@ -252,6 +261,18 @@ export default function ClientReportBuilderPage() {
           )}
         </div>
       </div>
+
+      {openMockFlags > 0 && (
+        <NextStepBanner
+          tone="danger"
+          title="Mock GPS in this report's window."
+          action={{ label: 'Review mock flags', to: mockAuditHref }}
+        >
+          {openMockFlags.toLocaleString()} unreviewed mock-location flag{openMockFlags === 1 ? '' : 's'} fall
+          {openMockFlags === 1 ? 's' : ''} inside this report's numbers. You can still publish — flags can be
+          false alarms — but review them first.
+        </NextStepBanner>
+      )}
 
       <Segmented
         options={[
@@ -485,6 +506,12 @@ export default function ClientReportBuilderPage() {
             </>
           }
         >
+          {openMockFlags > 0 && (
+            <div className="mb-3 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger-fg">
+              {openMockFlags.toLocaleString()} unreviewed mock-location flag{openMockFlags === 1 ? ' is' : 's are'} in
+              this report's window — those entries are included in the numbers you're about to freeze.
+            </div>
+          )}
           <ul className="list-disc space-y-1.5 pl-5 text-sm text-fg-muted">
             <li>The cumulative and weekly numbers are frozen exactly as they are now.</li>
             <li>The coverage map is snapshotted (door statuses as of the week's end).</li>

@@ -167,7 +167,8 @@ export default function ProductTour() {
           lays out knocks per canvasser, hour by hour — and when two walkers hit the same door,
           the overlap is caught so your coverage numbers stay honest. And Doorline flags the knocks
           that don't add up — far from the house, logged too fast to have walked, a whole block
-          entered from one spot — for you to clear before the numbers go in a report.
+          entered from one spot — for you to review, with a warning at publish time if mock-GPS
+          flags are still open.
         </TourRow>
       </div>
     </section>

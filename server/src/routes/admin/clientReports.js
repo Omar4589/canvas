@@ -13,6 +13,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 import { computeWindowStats, buildFrozenMapPoints } from '../../services/reports/computeReport.js';
+import { countOpenMockFlags } from '../../services/reports/campaignSummaries.js';
 import {
   shapeReportForClient,
   shapeMapPoints,
@@ -433,7 +434,16 @@ router.get('/:id', async (req, res, next) => {
     if (!(await manages(req, res, report.campaignId))) return;
     // Campaign + org names let the builder's PDF export carry the same header the client sees.
     const campaign = await Campaign.findById(report.campaignId, { name: 1 }).lean();
-    res.json({ report, campaignName: campaign?.name || '', orgName: req.activeOrg?.name || '' });
+    // Soft publish gate: unreviewed mock-GPS flags inside this report's CUMULATIVE window.
+    // A response sibling on purpose — a live count stored on the doc would go stale; the
+    // only persisted copy is openMockFlagsAtPublish, stamped at freeze time. Never shaped
+    // into the client view (shapeReportForClient enumerates its fields).
+    const openMockFlags = await countOpenMockFlags({
+      organizationId: activeOrgId(req),
+      campaignId: report.campaignId,
+      timestamp: { $lt: report.rangeEndUtc },
+    });
+    res.json({ report, campaignName: campaign?.name || '', orgName: req.activeOrg?.name || '', openMockFlags });
   } catch (err) {
     next(err);
   }
@@ -578,6 +588,15 @@ router.post('/:id/publish', async (req, res, next) => {
     report.campaignType = campaign.type; // backfill on (re)publish for older drafts
     await computeBothWindows(report, campaign, template);
     reflagSupport(report);
+
+    // Soft gate audit trail: how many unreviewed mock-GPS flags sat inside this report's
+    // cumulative window at the moment of freeze. Publish is never blocked — a mock flag
+    // can be a false alarm (QA phone, dev mode) — but the number is recorded.
+    report.openMockFlagsAtPublish = await countOpenMockFlags({
+      organizationId: orgId,
+      campaignId: report.campaignId,
+      timestamp: { $lt: report.rangeEndUtc },
+    });
 
     const { points, coverage, count } = await buildFrozenMapPoints({
       report,

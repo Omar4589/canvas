@@ -88,6 +88,10 @@ panel and each flag appears as a colored dot at the spot it was recorded, with a
 house — so you can *see* the geography (on the street? across the block? all from one corner?). The
 reason chips show the counts; clicking a flag opens a panel to review it right there.
 
+Each surface carries a small **(i)** legend (web `FlagLegend.jsx`, mobile audit header) explaining
+all five flag types, the four weak-GPS sub-kinds, and what the severities mean — copy centralized in
+`FLAG_LEGEND` in the two `flags.js` mirrors.
+
 ## How you're notified (the mock-GPS nudge)
 
 You don't have to go looking for the worst flag. When an **open Mock location flag** exists, the app
@@ -117,6 +121,12 @@ A flag starts **Open**. You mark it:
 You can add a note, and the app records **who** decided and **when**. Your decision sticks to that
 entry, so an open flag never quietly disappears and the team can see what's already been checked. You
 can always **reopen** a flag to set it back to Open.
+
+**Reviewing is a recorded decision, not a data edit.** It never deletes the entry or removes it from
+any report's numbers — a confirmed-issue knock still counts everywhere. What a review drives is the
+**open-flag counts**: the badges, the mock-GPS nudge, and the client-report builder's publish-time
+warning when open mock-location flags fall inside a report's window (the count at the moment of
+publish is stamped on the report as `openMockFlagsAtPublish`, operator-visible only).
 
 One deliberate blind spot: **admin bulk-restrict marks** (`via: 'bulk'` — marking a whole book
 restricted) are invisible to flag detection. A hundred same-second marks by one admin would flood
@@ -150,6 +160,7 @@ collection, no worker job — the GPS the detector reads has been captured on ev
 | Map overlay + panel | [client/src/lib/mapRender.js](../client/src/lib/mapRender.js), [MapFilters.jsx](../client/src/components/MapFilters.jsx), [FlaggedEntryPanel.jsx](../client/src/components/FlaggedEntryPanel.jsx) |
 | Shared review control / badges / client meta | [FlagReviewControl.jsx](../client/src/components/FlagReviewControl.jsx), [FlagReasonBadges.jsx](../client/src/components/FlagReasonBadges.jsx), [client/src/lib/flags.js](../client/src/lib/flags.js) |
 | Nudge count (`openMockFlags`) | [server/src/services/reports/campaignSummaries.js](../server/src/services/reports/campaignSummaries.js) (rides `GET /admin/campaigns` + the campaign-rollup; badges in `Layout.jsx`/`BottomNav.jsx`/`DashboardPage.jsx` + the mobile admin screens) |
+| Client-report publish gate (`countOpenMockFlags`) | [campaignSummaries.js](../server/src/services/reports/campaignSummaries.js) + [routes/admin/clientReports.js](../server/src/routes/admin/clientReports.js) (`GET /:id` sibling + `openMockFlagsAtPublish` stamp; warning UI in `ClientReportBuilderPage.jsx`) |
 
 ## B. The detector
 

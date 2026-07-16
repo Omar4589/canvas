@@ -42,7 +42,7 @@ export default function FlaggedEntryList({ entries = [], tz, campaignId, dateFro
                   {formatInTz(
                     e.timestamp,
                     tz,
-                    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+                    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' },
                     true
                   ) || '—'}
                 </div>

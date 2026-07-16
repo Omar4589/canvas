@@ -1,4 +1,5 @@
 import { REASON_META } from '../lib/flags.js';
+import FlagLegend from './FlagLegend.jsx';
 
 const DEFAULT_STATUSES = ['surveyed', 'refused', 'restricted', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
 
@@ -36,7 +37,7 @@ function StatusChip({ status, active, count, onClick, color, label }) {
 
 function SectionLabel({ children }) {
   return (
-    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">
+    <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">
       {children}
     </div>
   );
@@ -124,7 +125,9 @@ export default function MapFilters({
 
       {!hideCanvassers && (
         <div>
-          <SectionLabel>GPS audit</SectionLabel>
+          <SectionLabel>
+            GPS audit <FlagLegend />
+          </SectionLabel>
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"

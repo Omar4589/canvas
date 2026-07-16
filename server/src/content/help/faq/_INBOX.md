@@ -13,6 +13,7 @@ Format: one question per line, optionally with a note on where the answer lives.
 - "The app says location is required — why won't it record my door?" → answered in faq/why-location-required.md
 - "Does canvassing still work with no signal / location off?" → signal yes, location no — guides/canvasser-offline.md + faq/why-location-required.md
 - "What does the 'Mock location' flag on the Audit page mean?" → covered in guides/audit.md (fake-GPS app detected by the phone; always high severity; silent to the canvasser)
+- "Does reviewing or dismissing a flag remove that door from client reports?" → no — a review is a recorded decision only; covered in guides/audit.md + guides/client-reports.md (mock flags warn at publish time)
 
 ## Triaged (answered — safe to delete)
 

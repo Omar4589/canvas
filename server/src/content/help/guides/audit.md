@@ -35,6 +35,10 @@ Two places, same data. The **Audit page** (inside a campaign, next to Timeline a
 
 Every flag starts **Open**. Mark it **Reviewed** (looked, it's fine), **Dismissed** (not a real problem), or **Confirmed issue** (worth following up). Add a note if you like — the app records who decided and when. You can always **reopen** a flag.
 
+Reviewing records a decision — it never deletes the entry or changes any report numbers. What it clears is the **open** counts: badges drop as you review, and open mock-location flags also trigger a warning when you publish a [client report](client-reports).
+
+> Tip: The little **(i)** next to the flag filters (on the Audit page, the map's GPS-audit section, and the flag panel) opens a plain-language key to all five flag types and their severities — including the four different things "Weak / missing GPS" can mean.
+
 **Corrections look different on purpose.** When a canvasser changes their answer at a door they already visited — say they tapped Restricted by mistake, walked off, then fixed it to Not home — the newer entry is recorded from where they *now* stand, which can look far from the house. The app remembers the entry they replaced, so a same-day correction after a genuine at-the-door visit appears as a **low**-severity Far flag with a line like *Replaced "Restricted" recorded 4 min earlier from 20 ft away*. Review it like any flag — it usually means an honest fix, not a phantom knock. A door rewritten from far away without a real earlier visit keeps its full flag.
 
 > Tip: The **flagged** count means *still open* — as you review, dismiss, or confirm flags, that number drops, so you can work a day's flags down to zero.

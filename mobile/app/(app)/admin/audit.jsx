@@ -16,6 +16,18 @@ import KpiGrid from '../../../components/KpiGrid';
 import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
+import InfoHint from '../../../components/InfoHint';
+import { FLAG_LEGEND, FLAG_LEGEND_FOOTER, REASON_BY_KEY } from '../../../lib/flags';
+
+// Flag-type legend for the header (i): one item per reason (weak-GPS sub-kinds folded
+// into bullet lines), plus the severity/count explainer. Copy lives in lib/flags.js.
+const LEGEND_ITEMS = [
+  ...FLAG_LEGEND.map((l) => ({
+    label: REASON_BY_KEY[l.key].label,
+    text: l.kinds ? `${l.text}\n${l.kinds.map((k) => `• ${k.label} — ${k.text}`).join('\n')}` : l.text,
+  })),
+  { label: 'Severity & counts', text: FLAG_LEGEND_FOOTER },
+];
 
 const AUDIT_MAX_DAYS = 62;
 const AUDIT_PRESETS = PRESETS.filter((p) => p.key !== 'all');
@@ -159,7 +171,11 @@ export default function AdminAudit() {
           <Text style={styles.back}>‹ Admin</Text>
         </Pressable>
         <Text style={styles.headerTitle}>GPS audit</Text>
-        <View style={{ width: 80 }} />
+        {/* Same width as the back button so the title stays centered; the (i) opens the
+            flag-type legend. */}
+        <View style={{ width: 80, alignItems: 'flex-end' }}>
+          <InfoHint title="Flag types" items={LEGEND_ITEMS} />
+        </View>
       </View>
       <View style={styles.chipWrap}>
         <CampaignChip value={campaign} onChange={setCampaign} />

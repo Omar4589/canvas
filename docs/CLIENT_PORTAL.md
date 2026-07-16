@@ -71,7 +71,11 @@ In the builder you:
   saved** indicator, and **Preview** (instant — it's prefetched) shows exactly what the recipient will
   see, including a **Download PDF** button.
 - **Publish** — a confirm dialog spells out the freeze (numbers + map snapshot locked, link goes live);
-  confirming freezes the report.
+  confirming freezes the report. If **unreviewed mock-location flags** fall inside the report's window,
+  the builder shows a red warning with a link to review them in the Audit page, and the confirm dialog
+  repeats it — publish is **never blocked** (a mock flag can be a false alarm), but the count at the
+  moment of freeze is stamped on the report as `openMockFlagsAtPublish` (operator-visible only, never
+  in the public shapers).
 
 A published report is locked; click **Unpublish to edit** to make changes, then republish. The header
 also shows whether the client has opened it yet (**Viewed N× · last …**). You can delete a draft or a
@@ -116,6 +120,8 @@ publish appear automatically — so you share it once. Recipients only ever see 
 - `supportQuestionKey`, `campaignType`, and `visibility: { visibleQuestionKeys[], mapAnswerKeys[],
   showMap }`.
 - `mapPointCount`, `publishedAt`, `publishedBy`, `createdBy`.
+- `openMockFlagsAtPublish` — unreviewed mock-GPS flags inside the cumulative window at freeze time
+  (the soft publish gate's audit trail; `null` on pre-feature reports, operator-only).
 - `viewCount`, `lastViewedAt` — a best-effort per-report counter of genuine client opens (defaults
   `0`/`null`; missing on old reports, so no migration — `$inc` treats absent as 0). Surfaced to admins
   only, never in the public shapers.

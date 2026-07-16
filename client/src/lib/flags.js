@@ -25,6 +25,41 @@ export const REASON_META = [
 
 export const REASON_BY_KEY = Object.fromEntries(REASON_META.map((r) => [r.key, r]));
 
+// Plain-language legend for the (i) affordances on the audit surfaces. Labels come from
+// REASON_META (REASON_BY_KEY[key].label); distances in FEET to match the rest of the UI
+// (feet values derive from the server thresholds: 75 m ≈ 250 ft, 100 m ≈ 330 ft,
+// 250 m ≈ 820 ft). Mirrored in mobile/lib/flags.js — keep the two in sync.
+export const FLAG_LEGEND = [
+  {
+    key: 'mock_gps',
+    text: 'The phone itself reported that the location came from a fake-GPS app. Always high severity. Only Android reports this signal — an iPhone entry never carries it.',
+  },
+  {
+    key: 'far',
+    text: 'Recorded ~250 ft or more from the house pin after allowing for GPS accuracy; ~820 ft or more is high. An honest same-day correction of an entry made at the door shows as low.',
+  },
+  {
+    key: 'rapid',
+    text: 'Two different doors recorded under 20 s apart — too fast to have walked between them. Under 8 s is high.',
+  },
+  {
+    key: 'one_spot',
+    text: "4 or more different houses logged from one point while the houses themselves are spread out. Apartment buildings — many units at one spot — deliberately don't trip this.",
+  },
+  {
+    key: 'weak_gps',
+    text: "The location reading itself can't be trusted, for one of four reasons:",
+    kinds: [
+      { label: 'No location', text: 'older entries recorded before the app required location — recording now requires it.' },
+      { label: 'Poor accuracy', text: 'the GPS fix was worse than ~330 ft (medium) or ~820 ft (high).' },
+      { label: 'Stale fix', text: 'the GPS reading was taken well before the door was recorded — 5+ min is medium, 30+ min is high.' },
+      { label: 'Synced offline', text: 'low severity — the phone had no signal at tap time. Location was on and the stamp is real; only the timestamp is device-reported.' },
+    ],
+  },
+];
+export const FLAG_LEGEND_FOOTER =
+  'Severity: low is context worth a glance, medium is worth a look, high is a strong signal. Counts show OPEN flags — reviewing, dismissing, or confirming clears them from the count, never the data.';
+
 export const SEV_RANK = { low: 1, med: 2, high: 3 };
 
 // The worst reason on a flagged entry (highest severity, tie-broken by display order) —
@@ -86,8 +121,13 @@ export function reasonDetailText(reason) {
     case 'weak_gps':
       if (d.missing) return 'no GPS captured';
       if (d.stale && d.fixAgeSec != null) return `GPS fix ${Math.round(d.fixAgeSec / 60)} min before recording`;
-      if (d.accuracy != null) return `GPS ±${formatDistanceImperial(d.accuracy)}`;
-      return d.offline ? 'offline submission' : 'weak GPS';
+      // Accuracy is only the story when it's the actual problem — the server stamps a
+      // non-null accuracy on ANY fix, so an offline-only flag with a perfect fix must
+      // read as offline, not as if its (good) accuracy were suspect.
+      if (d.accuracy != null && d.accuracy > FLAG_THRESHOLDS.GPS_ACCURACY_WARN_M)
+        return `GPS ±${formatDistanceImperial(d.accuracy)}`;
+      if (d.offline) return 'offline submission';
+      return 'weak GPS';
     case 'mock_gps':
       return 'mock location provider';
     default:

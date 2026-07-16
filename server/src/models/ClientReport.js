@@ -124,6 +124,10 @@ const clientReportSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     publishedAt: { type: Date, default: null },
     publishedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Unreviewed mock-location flags inside the report's cumulative window when it was
+    // published — audit trail for the soft publish gate (the builder warns, never blocks).
+    // Operator-facing only; never shaped into the public view (see clientReportView.js).
+    openMockFlagsAtPublish: { type: Number, default: null },
   },
   { timestamps: true }
 );

@@ -45,7 +45,7 @@ export default function FlagReviewControl({ entry, tz, onReviewed, compact = fal
     current !== 'open' && entry.review?.reviewedByName
       ? `${REVIEW_STATUS_META[current]?.label || current} by ${entry.review.reviewedByName}` +
         (entry.review.reviewedAt
-          ? ` · ${formatInTz(entry.review.reviewedAt, tz, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true) || ''}`
+          ? ` · ${formatInTz(entry.review.reviewedAt, tz, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' }, true) || ''}`
           : '')
       : null;
 

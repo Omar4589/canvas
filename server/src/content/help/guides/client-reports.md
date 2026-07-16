@@ -24,6 +24,8 @@ Whoever you share the link with sees a clean hub with that campaign's reports, n
 
 > Heads up: Publishing freezes the numbers and takes a snapshot of the map. A published report never changes, even as the team keeps knocking — next week's report picks up the new activity at the same link. Need an edit? Click **Unpublish to edit**, then republish.
 
+If any **mock-location flags** are still open in the report's window, the builder shows a red warning with a link to review them in the [GPS audit](audit). You can still publish — flags can be false alarms — but check them first so questionable knocks don't go into the numbers you freeze.
+
 The report header shows whether the client has opened it yet, and every report offers a one-click **Download PDF** (the map is left out of the PDF).
 
 ## Share it
