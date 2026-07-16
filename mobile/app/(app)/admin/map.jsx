@@ -23,6 +23,7 @@ import CampaignChip from '../../../components/CampaignChip';
 import LiveStatus from '../../../components/LiveStatus';
 import DateRangePickerModal from '../../../components/DateRangePickerModal';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
+import FlagLegendHint from '../../../components/FlagLegendHint';
 import { primaryReason, reasonColor } from '../../../lib/flags';
 import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
@@ -1284,7 +1285,10 @@ export default function AdminMap() {
         <SafeAreaView edges={['bottom']} style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <View style={styles.flagSheetHeaderRow}>
-            <Text style={styles.flagSheetTitle}>Flagged entry</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+              <Text style={styles.flagSheetTitle}>Flagged entry</Text>
+              <FlagLegendHint />
+            </View>
             <Pressable onPress={() => setSelectedFlagId(null)} hitSlop={8}>
               <Text style={styles.flagSheetClose}>Close</Text>
             </Pressable>
