@@ -33,6 +33,6 @@ export const WEB_URL = 'https://doorline.app';
 // first-INSTALL links live in server/src/config/storeLinks.js and go in the invite email. They
 // converge at public launch.
 export const STORE_URL = Platform.select({
-  android: 'https://play.google.com/store/apps/details?id=com.canvassapp.mobile',
+  android: 'https://play.google.com/store/apps/details?id=com.doorline.app',
   ios: 'https://apps.apple.com/app/doorline/id6764581850',
 });

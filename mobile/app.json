@@ -12,12 +12,12 @@
       "supportsTablet": false,
       "icon": "./assets/AppIcons/appstore.png",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Doorline needs your location to log when you knock on a door, so admins can verify field activity.",
+        "NSLocationWhenInUseUsageDescription": "Doorline records your location only at the moment you log a knock or submit a survey — so your team can verify field visits. It is never tracked continuously or in the background.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.canvassapp.mobile",
+      "package": "com.doorline.app",
       "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/AppIcons/adaptive-foreground.png",
@@ -35,7 +35,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Doorline needs your location to log when you knock on a door, so admins can verify field activity.",
+          "locationWhenInUsePermission": "Doorline records your location only at the moment you log a knock or submit a survey — so your team can verify field visits. It is never tracked continuously or in the background.",
           "locationAlwaysAndWhenInUsePermission": false,
           "locationAlwaysPermission": false
         }
