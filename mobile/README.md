@@ -174,6 +174,87 @@ Two inert edits used to strand the fleet, and no longer move the fingerprint:
 **Editing `fingerprint.config.js` itself changes every fingerprint** — only touch it in a commit
 that ships a native build. `ota:check` catches it loudly if you forget.
 
+### The two-store window (Play relaunch)
+
+We are relaunching on a new Google Play organization account, which needs a **new Android
+applicationId** (`com.doorline.app`, permanent once uploaded). The rename is a native change (new
+fingerprint), so it lives on branch **`play-org-launch`** — not here.
+
+> **Field hotfixes ship from `sharedVoters`. `play-org-launch` exists ONLY to build for the new
+> store account. Merge it into `sharedVoters` at cutover, and only after all canvassers have
+> migrated to the new store app.**
+
+**`play-org-launch` = `sharedVoters` + exactly one commit** (the id + `lib/config.js` Android
+store URL + a `playorg` build profile in `eas.json` + the at-action-only location copy). Keep it
+current by rebasing the single commit forward:
+
+```bash
+git fetch origin
+git checkout sharedVoters && git merge --ff-only origin/sharedVoters
+git rebase sharedVoters play-org-launch
+git push --force-with-lease origin play-org-launch
+```
+
+> **Hazard:** every rebase that pulls a hashed input from `sharedVoters` (anything in `app.json`,
+> `eas.json`, `package.json` scripts, native deps) **silently moves the branch fingerprint and
+> strands the already-cut `playorg` test build** — `eas update --branch playorg` is ungated and
+> reaches nobody with no error. **After any such rebase, cut a fresh `playorg` build.**
+
+**Internal-testing loop for the new store app** (from `play-org-launch`):
+
+1. Build once — first run is interactive (EAS mints a new Android keystore for the new id):
+   `eas build --platform android --profile playorg`
+2. Upload that first AAB **manually** in the new org's Play Console (internal track). `eas submit`
+   works only after the app exists there and the org's service account is wired.
+3. Iterate JS onto testers, gated against the `playorg` builds (not the fleet):
+   `npm run ota:check -- --build-profile=playorg --platform=android && eas update --branch playorg --environment production`
+4. Add the `playorg` build's Runtime Version to `MOBILE_CURRENT_RUNTIME_ANDROID` (comma-separated)
+   so testers don't get nagged.
+
+**The gate protects the fleet by construction:** `ota:production` from `sharedVoters` compares
+against the newest **production-profile** build (the fleet) and passes; from `play-org-launch` it
+**fails loudly** (`FINGERPRINT MISMATCH — reach NOBODY`) and refuses to publish. This holds ONLY
+while new-store builds use `--profile playorg` — **never build the new app with `--profile
+production` before cutover**, or it becomes `ota:check`'s comparison target and breaks the fleet gate.
+
+**Cutover** (once the fleet has migrated off the old app):
+
+1. Final rebase, then `git checkout sharedVoters && git merge --ff-only play-org-launch`.
+2. Build **Android AND iOS** under `--profile production` from merged HEAD — **iOS is mandatory**:
+   the per-platform fingerprint hashes the whole config, so the Android rename moved iOS's
+   fingerprint too, and iOS OTAs strand without a fresh build.
+3. Submit/upload both; re-point `MOBILE_CURRENT_RUNTIME_ANDROID`/`_IOS` (see the nag section below).
+4. Set `MOBILE_STORE_URL_ANDROID` to the new listing so the nag walks stragglers to the new app
+   (`soft`, later `hard`). Optional: `eas channel:edit playorg --branch production` so lingering
+   test builds keep receiving production updates.
+5. Same fingerprint-rollover commit is the free moment to harden: add `'PackageJsonScriptsAll'` to
+   `fingerprint.config.js` (stops future script edits from being native-grade changes), and update
+   the stale old-id references: `client/src/marketing/MarketingFooter.jsx` Android beta URL and
+   `PROJECT_BRIEF.md`.
+
+### The migration-window dual publish (do this NOW, until the fleet updates)
+
+Independent of the relaunch: the newest finished **production** builds are the `allowBackup`
+builds (19/23-era), so a plain `npm run ota:production` from `sharedVoters` reaches only phones
+that already installed them — **un-updated vc18/vc22 phones receive nothing, silently** (the gate
+validates against the newest build, not the installed base). Until that population drains, a fleet
+hotfix needs **two** publishes:
+
+1. On clean `sharedVoters` HEAD, delete the single line `"allowBackup": false,` from `app.json`
+   (**working tree only — never commit**). This restores the 18/22 fingerprint exactly (verified:
+   it is the only hashed-input change since those builds).
+2. Confirm: `npx expo-updates fingerprint:generate --platform android` equals build 18's Runtime
+   Version (and iOS vs 22) — get those from `eas build:list -p android --build-profile production
+   --status finished --limit 5 --json --non-interactive`.
+3. Publish to the old fleet with the loud override (the gate correctly sees a mismatch vs 19/23):
+   `OTA_ALLOW_MISMATCH=1 npm run ota:production`
+4. `git checkout -- mobile/app.json`, then plain `npm run ota:production` to publish the same JS
+   under the new fingerprint for 19/23 installers. Order doesn't matter — updates coexist per
+   runtimeVersion on the branch.
+
+Retire this once the build stamps / `MOBILE_CURRENT_RUNTIME_*` monitoring show the 18/22
+population at ≈ zero.
+
 ### Telling old builds to update (the nag)
 
 Phones ask `GET /api/build-status` (public, env-driven) whether their **binary** is current.

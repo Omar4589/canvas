@@ -101,6 +101,12 @@ older one `outdated`. Anyone reading this after the user says they built/submitt
 step. (Related knobs: `MOBILE_UPDATE_MODE` soft|hard, `MOBILE_UPDATE_NOTE`, `MOBILE_STORE_URL_IOS` for the
 TestFlight-era Update button — see [`mobile/README.md`](mobile/README.md).)
 
+**During the Google Play relaunch (new org account / new applicationId):** the rename lives on branch
+`play-org-launch`, field hotfixes still ship from `sharedVoters`, and cutover re-points BOTH runtime vars
+(the rename moves the iOS fingerprint too, so cutover ships an iOS build as well). Full procedure — the
+two-store window, the dual-publish compat step for un-migrated phones, and the cutover checklist — is in
+[`mobile/README.md`](mobile/README.md) → **The two-store window (Play relaunch)**.
+
 ## Help Center content, at a glance
 
 Each article is a markdown file under `server/src/content/help/` (subfolder = `kind`) with a small

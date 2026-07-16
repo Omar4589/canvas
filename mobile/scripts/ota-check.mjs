@@ -1,5 +1,9 @@
 // Refuses to publish an OTA that no phone can download.
-// Run with: node scripts/ota-check.mjs [--platform android,ios] (from mobile/).
+// Run with: node scripts/ota-check.mjs [--platform=android,ios] [--build-profile=<name>] (from mobile/).
+//   --platform       default android,ios
+//   --build-profile  which build profile's newest finished build to compare against; default
+//                    production (the fielded fleet). The two-store Play relaunch uses
+//                    --build-profile=playorg to gate updates to the new store account's testers.
 //
 // app.json sets runtimeVersion: { policy: "fingerprint" }. A phone only downloads an update whose
 // fingerprint EXACTLY matches the one baked into its installed binary, and that fingerprint hashes
@@ -20,6 +24,10 @@ const PLATFORMS = (process.argv.find((a) => a.startsWith('--platform='))?.split(
   .map((p) => p.trim())
   .filter(Boolean);
 
+// Which build profile's newest finished build we compare the tree against. Default 'production'
+// keeps `ota:production` (which passes no flag) behaving exactly as before.
+const BUILD_PROFILE = process.argv.find((a) => a.startsWith('--build-profile='))?.split('=')[1] ?? 'production';
+
 const run = (args) => execFileSync('npx', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 
 // The tree's fingerprint, from the same resolver EAS uses (so it honors fingerprint.config.js).
@@ -35,7 +43,7 @@ function latestBuild(platform) {
   const out = run([
     'eas', 'build:list',
     '--platform', platform,
-    '--build-profile', 'production',
+    '--build-profile', BUILD_PROFILE,
     '--status', 'finished',
     '--limit', '1',
     '--json', '--non-interactive',
@@ -51,7 +59,7 @@ for (const platform of PLATFORMS) {
   const build = latestBuild(platform);
 
   if (!build) {
-    console.error(`✖ ${platform}: no finished production build found — nothing to publish to.`);
+    console.error(`✖ ${platform}: no finished ${BUILD_PROFILE} build found — nothing to publish to.`);
     failed = true;
     continue;
   }
