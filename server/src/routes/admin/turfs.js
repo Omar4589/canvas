@@ -22,6 +22,7 @@ import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLoc
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
 import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
+import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -101,7 +102,7 @@ router.post('/assign-bulk', async (req, res, next) => {
         allHhIds.length
           ? (
               await Household.find(
-                { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
+                { _id: { $in: allHhIds }, ...KNOCKABLE_DOOR_FILTER },
                 { _id: 1 }
               ).lean()
             ).map((h) => String(h._id))
@@ -480,7 +481,7 @@ router.get('/', async (req, res, next) => {
       allHhIds.length
         ? (
             await Household.find(
-              { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
+              { _id: { $in: allHhIds }, ...KNOCKABLE_DOOR_FILTER },
               { _id: 1 }
             ).lean()
           ).map((h) => String(h._id))
@@ -505,9 +506,13 @@ router.get('/', async (req, res, next) => {
       eligibleDoorCount: (t.householdIds || []).filter((id) => eligible.has(String(id))).length,
       bulkRestrictedCount: bulkByTurf.get(String(t._id)) || 0,
     }));
-    // Already-voted owned doors for this pass's effort — skipped by the cut. Surfaced
-    // on the page as "N door(s) already voted — skipped" so a smaller book total makes sense.
+    // Owned doors this pass's cut skipped, by reason — surfaced on the page as
+    // "N door(s) already voted — skipped" / "N do-not-contact" so a smaller book total makes
+    // sense. A door that is BOTH fully-voted and fully-DNC counts once, as DNC (matching the
+    // coverage bucket precedence: permanent suppression outranks cycle suppression), so the
+    // skip-lines always sum.
     let votedDoorCount = 0;
+    let dncDoorCount = 0;
     let excludedApartmentCount = 0;
     let knockCount = 0;
     if (filter.passId) {
@@ -519,14 +524,15 @@ router.get('/', async (req, res, next) => {
           isActive: true,
           'location.coordinates': { $exists: true, $ne: null },
         };
-        [votedDoorCount, excludedApartmentCount, knockCount] = await Promise.all([
-          Household.countDocuments({ ...base, fullyVoted: true }),
+        [votedDoorCount, dncDoorCount, excludedApartmentCount, knockCount] = await Promise.all([
+          Household.countDocuments({ ...base, fullyVoted: true, fullyDnc: { $ne: true } }),
+          Household.countDocuments({ ...base, fullyDnc: true }),
           Household.countDocuments({ ...base, excludedFromTurf: true }),
           CanvassActivity.countDocuments({ passId: filter.passId }),
         ]);
       }
     }
-    res.json({ turfs: withCounts, votedDoorCount, excludedApartmentCount, knockCount });
+    res.json({ turfs: withCounts, votedDoorCount, dncDoorCount, excludedApartmentCount, knockCount });
   } catch (err) {
     next(err);
   }
@@ -598,9 +604,7 @@ router.post('/manual-preview', async (req, res, next) => {
     const base = {
       campaignId: req.campaign._id,
       effortId: pass.effortId,
-      isActive: true,
-      fullyVoted: { $ne: true },
-      excludedFromTurf: { $ne: true },
+      ...KNOCKABLE_DOOR_FILTER,
       'location.coordinates': { $exists: true, $ne: null },
     };
     const areas = [];
@@ -638,7 +642,7 @@ router.post('/target-preview', async (req, res, next) => {
     const cuttable = householdIds.length
       ? (
           await Household.find(
-            { _id: { $in: householdIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
+            { _id: { $in: householdIds }, ...KNOCKABLE_DOOR_FILTER },
             { _id: 1 }
           ).lean()
         ).map((h) => h._id)
@@ -667,9 +671,7 @@ router.get('/attribute-preview', async (req, res, next) => {
         $match: {
           campaignId: req.campaign._id,
           effortId: pass.effortId,
-          isActive: true,
-          fullyVoted: { $ne: true },
-          excludedFromTurf: { $ne: true },
+          ...KNOCKABLE_DOOR_FILTER,
           'location.coordinates': { $exists: true, $ne: null },
         },
       },
@@ -727,9 +729,7 @@ router.post('/restrict-bulk', async (req, res, next) => {
       const eligibleDoors = await Household.find(
         {
           _id: { $in: hhIds },
-          isActive: true,
-          fullyVoted: { $ne: true },
-          excludedFromTurf: { $ne: true },
+          ...KNOCKABLE_DOOR_FILTER,
           'location.coordinates': { $exists: true, $ne: null },
         },
         { location: 1, effortId: 1, organizationId: 1, campaignId: 1 }
@@ -845,9 +845,7 @@ router.get('/doors', async (req, res, next) => {
     const filter = {
       campaignId: req.campaign._id,
       effortId: pass.effortId, // only the round's effort's doors (mirror the cut base filter)
-      isActive: true,
-      fullyVoted: { $ne: true }, // exclude already-voted doors — they aren't cut/knocked
-      excludedFromTurf: { $ne: true }, // and admin-excluded (apartments)
+      ...KNOCKABLE_DOOR_FILTER, // voted / DNC / excluded doors aren't cut or knocked
       'location.coordinates': { $exists: true, $ne: null },
     };
     if (pass.walkListId) {
@@ -940,7 +938,7 @@ router.get('/:turfId/households', async (req, res, next) => {
     const ids = (turf.householdIds || []).map(String);
     const households = ids.length
       ? await Household.find(
-          { _id: { $in: ids }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
+          { _id: { $in: ids }, ...KNOCKABLE_DOOR_FILTER },
           { location: 1, addressLine1: 1, city: 1, state: 1 }
         ).lean()
       : [];
@@ -1015,7 +1013,7 @@ router.get('/progress', async (req, res, next) => {
       allHhIds.length
         ? (
             await Household.find(
-              { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
+              { _id: { $in: allHhIds }, ...KNOCKABLE_DOOR_FILTER },
               { _id: 1 }
             ).lean()
           ).map((h) => String(h._id))

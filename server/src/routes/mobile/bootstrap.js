@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
 import { Campaign } from '../../models/Campaign.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { Household } from '../../models/Household.js';
@@ -34,8 +35,11 @@ router.use(requireAuth, orgContext, requireOrgMember);
 // Keep the `dateOfBirth: 1` in the Mongo projections above: we need it HERE to compute the age. It
 // just must not survive into the response.
 function toWireVoter(v, voted) {
-  const { dateOfBirth, ...rest } = v;
-  return { ...rest, age: ageFromDob(dateOfBirth), voted };
+  const { dateOfBirth, doNotContact, ...rest } = v;
+  // Do-not-contact ships as a bare boolean — the reason/who/when stamp never reaches the phone's
+  // offline cache (same principle as the DOB: the strongest protection is not sending it). The
+  // badge and the disabled survey CTA only need true/false.
+  return { ...rest, age: ageFromDob(dateOfBirth), voted, dnc: doNotContact?.flagged === true };
 }
 
 function ageFromDob(dob) {
@@ -105,7 +109,7 @@ async function canvasserBooks(req, campaign) {
   const eligible = new Set(
     (
       await Household.find(
-        { _id: { $in: allHhIds }, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } },
+        { _id: { $in: allHhIds }, ...KNOCKABLE_DOOR_FILTER },
         { _id: 1 }
       ).lean()
     ).map((h) => String(h._id))
@@ -220,9 +224,8 @@ router.get('/bootstrap', async (req, res, next) => {
     const householdFilter = {
       campaignId: campaign._id,
       organizationId: orgId,
-      isActive: true,
-      fullyVoted: { $ne: true }, // drop doors where everyone has already voted
-      excludedFromTurf: { $ne: true }, // and admin-excluded (apartments)
+      // Drops fully-voted, fully-DNC, and admin-excluded doors — the phone never sees them.
+      ...KNOCKABLE_DOOR_FILTER,
       'location.coordinates': { $exists: true, $ne: null },
     };
     const { scope, doorPass } = await canvasserScopeWithPasses(req, campaign);
@@ -268,6 +271,7 @@ router.get('/bootstrap', async (req, res, next) => {
               gender: 1,
               dateOfBirth: 1,
               surveyStatus: 1,
+              'doNotContact.flagged': 1, // → toWireVoter's `dnc` boolean; never the reason
             }
           ).lean()
         : Promise.resolve([]),
@@ -365,6 +369,7 @@ router.get('/changes', async (req, res, next) => {
       lastActionAt: 1,
       isActive: 1,
       fullyVoted: 1, // client drops doors where everyone has now voted
+      fullyDnc: 1, // client drops doors where everyone is do-not-contact
       location: 1, // so an admin pin-move (or another canvasser's fix) reflects live
       coordSource: 1,
       coordConfidence: 1,
@@ -391,7 +396,7 @@ router.get('/changes', async (req, res, next) => {
         // Identity-cache fields (match the bootstrap projection) so propagated Person
         // identity reaches an already-bootstrapped client via the delta poll, not only a
         // full re-bootstrap.
-        { _id: 1, householdId: 1, surveyStatus: 1, fullName: 1, firstName: 1, lastName: 1, party: 1, gender: 1, dateOfBirth: 1 }
+        { _id: 1, householdId: 1, surveyStatus: 1, fullName: 1, firstName: 1, lastName: 1, party: 1, gender: 1, dateOfBirth: 1, 'doNotContact.flagged': 1 }
       ).lean();
       const votedRecs = await VotedVoter.find(
         { campaignId: cId, voterId: { $in: raw.map((v) => v._id) } },

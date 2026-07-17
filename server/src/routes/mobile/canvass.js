@@ -93,6 +93,14 @@ const LOCATION_REQUIRED = {
   code: 'LOCATION_REQUIRED',
   message: 'A GPS location is required to record canvassing. Turn on location and try again.',
 };
+// The authoritative do-not-contact block. The client disables the survey CTA and walls the survey
+// screen, but this is what catches a stale cache, a deep link, or an offline-queued submission
+// flushed after the voter was flagged. recordAction.js maps the code to its own alert.
+const DO_NOT_CONTACT = {
+  status: 403,
+  code: 'DO_NOT_CONTACT',
+  message: 'This voter has asked not to be contacted. The survey was not saved.',
+};
 
 function sendRouteError(res, error) {
   const body = { error: error.message };
@@ -439,6 +447,11 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
 
     const access = await assertHouseholdAccess(req, household);
     if (access.error) return res.status(access.error.status).json({ error: access.error.message });
+
+    // After the access check (keeps the 404-for-wrong-org concealment) and before ANY write —
+    // everything below this line until the SurveyResponse upsert is read-only, so a blocked
+    // submission leaves zero trace.
+    if (voter.doNotContact?.flagged) return sendRouteError(res, DO_NOT_CONTACT);
 
     const campaign = await Campaign.findById(household.campaignId).lean();
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });

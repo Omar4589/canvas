@@ -250,6 +250,8 @@ function OptionDrill({
     option,
     from: dateRange?.from,
     to: dateRange?.to,
+    // All time has no bounds — mark it, or the explorer defaults the link to Today.
+    range: dateRange && !dateRange.from && !dateRange.to ? 'all' : '',
     userId,
     effortId,
   })}`;
@@ -349,6 +351,8 @@ function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, tz, 
     survey: surveyTemplateId,
     from: dateRange?.from,
     to: dateRange?.to,
+    // All time has no bounds — mark it, or the explorer defaults the link to Today.
+    range: dateRange && !dateRange.from && !dateRange.to ? 'all' : '',
     userId,
     effortId,
   })}`;

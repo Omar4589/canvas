@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   TextInput,
+  Alert,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -73,6 +74,9 @@ function VoterCard({ voter, onPress }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const surveyed = voter.surveyStatus === 'surveyed';
+  // Do-not-contact wins over surveyed in every visual branch — the card must
+  // read "skip this person", not "done with this person".
+  const dnc = !!voter.dnc;
   return (
     <Pressable
       onPress={onPress}
@@ -80,18 +84,21 @@ function VoterCard({ voter, onPress }) {
         styles.voterCard,
         pressed && { opacity: 0.85 },
         surveyed && styles.voterCardSurveyed,
+        dnc && styles.voterCardDnc,
       ]}
     >
       <View
         style={[
           styles.voterAvatar,
           surveyed && { backgroundColor: colors.successBg },
+          dnc && { backgroundColor: colors.dangerBg },
         ]}
       >
         <Text
           style={[
             styles.voterAvatarText,
             surveyed && { color: colors.success },
+            dnc && { color: colors.danger },
           ]}
         >
           {initials(voter.fullName)}
@@ -100,36 +107,58 @@ function VoterCard({ voter, onPress }) {
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text style={styles.voterName}>{voter.fullName}</Text>
-          {voter.voted && (
+          {dnc ? (
+            <View style={styles.dncPill}>
+              <Text style={styles.dncPillText}>⛔ Do not contact</Text>
+            </View>
+          ) : voter.voted ? (
             <View style={styles.votedPill}>
               <Text style={styles.votedPillText}>✓ Voted</Text>
             </View>
-          )}
+          ) : null}
         </View>
         <VoterMeta voter={voter} style={styles.voterMeta} />
         <View style={styles.voterStatusRow}>
           <View
             style={[
               styles.voterStatusDot,
-              { backgroundColor: surveyed ? colors.success : colors.textMuted },
+              {
+                backgroundColor: dnc
+                  ? colors.danger
+                  : surveyed
+                  ? colors.success
+                  : colors.textMuted,
+              },
             ]}
           />
           <Text
             style={[
               styles.voterStatusText,
-              { color: surveyed ? colors.success : colors.textSecondary },
+              {
+                color: dnc
+                  ? colors.danger
+                  : surveyed
+                  ? colors.success
+                  : colors.textSecondary,
+              },
             ]}
           >
-            {surveyed ? 'Surveyed' : 'Not surveyed'}
+            {dnc ? 'Do not contact' : surveyed ? 'Surveyed' : 'Not surveyed'}
           </Text>
         </View>
       </View>
-      <View style={styles.voterCta}>
-        <Text style={styles.voterCtaText}>
-          {surveyed ? 'Re-survey' : 'Take survey'}
-        </Text>
-        <Text style={styles.voterCtaChevron}>›</Text>
-      </View>
+      {dnc ? (
+        <View style={styles.voterCtaDnc}>
+          <Text style={styles.voterCtaDncText}>No contact</Text>
+        </View>
+      ) : (
+        <View style={styles.voterCta}>
+          <Text style={styles.voterCtaText}>
+            {surveyed ? 'Re-survey' : 'Take survey'}
+          </Text>
+          <Text style={styles.voterCtaChevron}>›</Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -202,7 +231,11 @@ export default function HouseholdDetail() {
       .catch(() => {});
   }
 
-  const surveyedCount = voters.filter((v) => v.surveyStatus === 'surveyed').length;
+  // DNC voters can't be surveyed, so they're excluded from BOTH sides of the
+  // N/M counter. A door where everyone is flagged shows no counter — transient:
+  // the server drops fully-DNC doors via the delta.
+  const contactable = voters.filter((v) => !v.dnc);
+  const surveyedCount = contactable.filter((v) => v.surveyStatus === 'surveyed').length;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -276,9 +309,9 @@ export default function HouseholdDetail() {
           <>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Voters at this address</Text>
-              {voters.length > 0 && (
+              {contactable.length > 0 && (
                 <Text style={styles.sectionCount}>
-                  {surveyedCount}/{voters.length} surveyed
+                  {surveyedCount}/{contactable.length} surveyed
                 </Text>
               )}
             </View>
@@ -293,7 +326,14 @@ export default function HouseholdDetail() {
               <VoterCard
                 key={v._id}
                 voter={v}
-                onPress={() => guardedPush(router, `/(app)/voter/${v._id}/survey`)}
+                onPress={() =>
+                  v.dnc
+                    ? Alert.alert(
+                        'Do not contact',
+                        'This voter has asked not to be contacted. Please skip them — this applies across all campaigns.'
+                      )
+                    : guardedPush(router, `/(app)/voter/${v._id}/survey`)
+                }
               />
             ))}
           </>
@@ -493,6 +533,9 @@ function makeStyles(t) {
   voterCardSurveyed: {
     borderColor: colors.successBorder,
   },
+  voterCardDnc: {
+    borderColor: colors.dangerBorder,
+  },
   voterAvatar: {
     width: 48,
     height: 48,
@@ -514,6 +557,15 @@ function makeStyles(t) {
     paddingVertical: 1,
   },
   votedPillText: { fontSize: 10, fontWeight: '700', color: colors.success },
+  dncPill: {
+    backgroundColor: colors.dangerBg,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 1,
+  },
+  dncPillText: { fontSize: 10, fontWeight: '700', color: colors.danger },
   voterMeta: { ...type.caption, marginTop: 2 },
   voterStatusRow: {
     flexDirection: 'row',
@@ -550,6 +602,18 @@ function makeStyles(t) {
     fontWeight: '700',
     fontSize: 16,
     marginLeft: 4,
+  },
+  // Deliberately not a CTA — a DNC voter has nothing to tap through to.
+  voterCtaDnc: {
+    backgroundColor: colors.sunken,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+  },
+  voterCtaDncText: {
+    color: colors.textMuted,
+    fontWeight: '700',
+    fontSize: 13,
   },
 
   noteInput: {

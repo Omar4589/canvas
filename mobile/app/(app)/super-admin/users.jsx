@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,13 @@ import {
   TextInput,
   ActivityIndicator,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { useInfinitePaged } from '../../../lib/useInfinitePaged';
 import { loadCurrentUser } from '../../../lib/cache';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -30,43 +32,65 @@ function formatRelative(d) {
   return `${day}d ago`;
 }
 
+// Filter pills → server query params: the phone no longer downloads the whole user table.
+const FILTERS = [
+  { v: 'all', l: 'All', params: {} },
+  { v: 'super', l: 'Super admins', params: { super: '1' } },
+  { v: 'active', l: 'Active', params: { active: '1' } },
+  { v: 'inactive', l: 'Inactive', params: { active: '0' } },
+  { v: 'deleted', l: 'Deleted', params: { deleted: '1' } },
+];
+
 export default function SuperAdminUsersScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
   const [me, setMe] = useState(null);
+  const [clearedId, setClearedId] = useState(null);
 
   useEffect(() => {
     loadCurrentUser().then((u) => setMe(u));
   }, []);
 
-  const usersQ = useQuery({
-    queryKey: ['super-admin', 'users'],
-    queryFn: () => api('/super-admin/users'),
-  });
+  // Debounced server search — the query param, not a client filter over a full download.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const usersQ = useInfinitePaged(
+    ['super-admin', 'users', 'list', q, filter],
+    '/super-admin/users',
+    { q, ...(FILTERS.find((f) => f.v === filter)?.params || {}) },
+    { limit: 50, itemsKey: 'users' }
+  );
 
   const promoteMut = useMutation({
     mutationFn: (userId) => api(`/super-admin/users/${userId}/promote`, { method: 'POST' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['super-admin', 'users'] }),
+    // Surface refusals (break-glass required, last-break-glass guard) instead of swallowing them.
+    onError: (err) => Alert.alert('Could not change super-admin', err.message),
   });
 
-  const users = usersQ.data?.users || [];
-  const visible = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return users.filter((u) => {
-      if (filter === 'super' && !u.isSuperAdmin) return false;
-      if (filter === 'active' && !u.isActive) return false;
-      if (filter === 'inactive' && u.isActive) return false;
-      if (term) {
-        const hay = `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase();
-        if (!hay.includes(term)) return false;
-      }
-      return true;
-    });
-  }, [users, search, filter]);
+  const clearLockoutMut = useMutation({
+    mutationFn: (userId) => api(`/super-admin/users/${userId}/clear-lockout`, { method: 'POST' }),
+    onSuccess: (_data, userId) => {
+      setClearedId(userId);
+      setTimeout(() => setClearedId((id) => (id === userId ? null : id)), 2500);
+    },
+    onError: (err) => Alert.alert('Could not clear lockout', err.message),
+  });
+
+  const visible = usersQ.items;
+  const lastPage = usersQ.data?.pages?.[usersQ.data.pages.length - 1];
+  const deletedCount = lastPage?.deletedCount || 0;
+  // Promote is break-glass-gated server-side; hide it from support-tier supers (an older cached
+  // profile may predate platformRole — then the button stays and the server still refuses).
+  const canPromote = me?.platformRole !== 'support';
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -89,12 +113,7 @@ export default function SuperAdminUsersScreen() {
           style={styles.search}
         />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          {[
-            { v: 'all', l: 'All' },
-            { v: 'super', l: 'Super admins' },
-            { v: 'active', l: 'Active' },
-            { v: 'inactive', l: 'Inactive' },
-          ].map((opt) => {
+          {FILTERS.map((opt) => {
             const active = filter === opt.v;
             return (
               <Pressable
@@ -112,6 +131,14 @@ export default function SuperAdminUsersScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
+        {!usersQ.isLoading && (
+          <Text style={styles.countLine}>
+            {/* Deleted tombstones counted apart so they never inflate the headline. */}
+            {filter === 'deleted'
+              ? `${usersQ.total} deleted account${usersQ.total === 1 ? '' : 's'}`
+              : `${(usersQ.total - deletedCount).toLocaleString()} account${usersQ.total - deletedCount === 1 ? '' : 's'}${deletedCount ? ` · ${deletedCount} deleted` : ''}`}
+          </Text>
+        )}
         {usersQ.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : visible.length === 0 ? (
@@ -128,33 +155,37 @@ export default function SuperAdminUsersScreen() {
                     <Text style={styles.userName}>
                       {u.firstName} {u.lastName}
                       {u.isSuperAdmin && (
-                        <Text style={styles.superTag}>  super</Text>
+                        <Text style={styles.superTag}>  {u.platformRole === 'break_glass' ? 'break-glass' : 'support'}</Text>
                       )}
+                      {u.deletedAt && <Text style={styles.deletedTag}>  deleted</Text>}
                     </Text>
                     <Text style={styles.userEmail}>{u.email}</Text>
                     <Text style={styles.userMeta}>
-                      Last seen {formatRelative(u.lastLoginAt)}
+                      Last login {formatRelative(u.lastLoginAt)}
+                      {u.lastActivityAt ? ` · canvassed ${formatRelative(u.lastActivityAt)}` : ''}
                       {!u.isActive && ' · inactive'}
                     </Text>
                   </View>
-                  <Pressable
-                    onPress={() => promoteMut.mutate(u.id)}
-                    disabled={isSelf || promoteMut.isPending}
-                    style={[
-                      styles.promoteBtn,
-                      u.isSuperAdmin ? styles.promoteBtnRemove : styles.promoteBtnAdd,
-                      isSelf && { opacity: 0.4 },
-                    ]}
-                  >
-                    <Text
+                  {canPromote && !u.deletedAt && (
+                    <Pressable
+                      onPress={() => promoteMut.mutate(u.id)}
+                      disabled={isSelf || promoteMut.isPending}
                       style={[
-                        styles.promoteBtnText,
-                        u.isSuperAdmin ? styles.promoteBtnTextRemove : styles.promoteBtnTextAdd,
+                        styles.promoteBtn,
+                        u.isSuperAdmin ? styles.promoteBtnRemove : styles.promoteBtnAdd,
+                        isSelf && { opacity: 0.4 },
                       ]}
                     >
-                      {u.isSuperAdmin ? 'Remove super' : 'Make super'}
-                    </Text>
-                  </Pressable>
+                      <Text
+                        style={[
+                          styles.promoteBtnText,
+                          u.isSuperAdmin ? styles.promoteBtnTextRemove : styles.promoteBtnTextAdd,
+                        ]}
+                      >
+                        {u.isSuperAdmin ? 'Remove super' : 'Make super'}
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
                 {u.memberships?.length ? (
                   <View style={styles.membershipsRow}>
@@ -180,9 +211,32 @@ export default function SuperAdminUsersScreen() {
                 ) : (
                   <Text style={styles.noMemberships}>No org memberships</Text>
                 )}
+                {!u.deletedAt && (
+                  <Pressable
+                    onPress={() => clearLockoutMut.mutate(u.id)}
+                    disabled={clearLockoutMut.isPending}
+                    style={styles.lockoutBtn}
+                    hitSlop={6}
+                  >
+                    <Text style={styles.lockoutBtnText}>
+                      {clearedId === u.id ? 'Lockout cleared ✓' : 'Clear login lockout'}
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             );
           })
+        )}
+        {usersQ.hasNextPage && (
+          <Pressable
+            onPress={() => usersQ.fetchNextPage()}
+            disabled={usersQ.isFetchingNextPage}
+            style={styles.loadMore}
+          >
+            <Text style={styles.loadMoreText}>
+              {usersQ.isFetchingNextPage ? 'Loading…' : `Load more (${visible.length} of ${usersQ.total})`}
+            </Text>
+          </Pressable>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -292,5 +346,26 @@ function makeStyles(t) {
   membershipPillTextAdmin: { color: colors.brand },
   membershipPillTextCanvasser: { color: colors.textSecondary },
   noMemberships: { ...type.caption, fontSize: 11, marginTop: spacing.sm, fontStyle: 'italic' },
+
+  countLine: { fontSize: 11, color: colors.textMuted, marginBottom: spacing.sm },
+  deletedTag: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  lockoutBtn: { marginTop: spacing.sm, alignSelf: 'flex-start' },
+  lockoutBtnText: { fontSize: 11, fontWeight: '700', color: colors.brand },
+  loadMore: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+    marginTop: spacing.xs,
+  },
+  loadMoreText: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
   });
 }

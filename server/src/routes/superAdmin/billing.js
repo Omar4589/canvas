@@ -69,16 +69,25 @@ router.get('/', async (req, res, next) => {
     const loaded = await loadOrgSub(req, res);
     if (!loaded) return;
     const { org, sub } = loaded;
-    const events = await SubscriptionEvent.find({ organizationId: org._id })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .populate('byUserId', 'firstName lastName')
-      .lean();
+    // History is paged (eventsSkip/eventsLimit + exact eventsTotal) so a busy org's older audit
+    // events stay reachable; the parameterless call keeps the original newest-50 shape.
+    const eventsLimit = Math.min(Math.max(Number(req.query.eventsLimit) || 50, 1), 200);
+    const eventsSkip = Math.max(Number(req.query.eventsSkip) || 0, 0);
+    const [eventsTotal, events] = await Promise.all([
+      SubscriptionEvent.countDocuments({ organizationId: org._id }),
+      SubscriptionEvent.find({ organizationId: org._id })
+        .sort({ createdAt: -1 })
+        .skip(eventsSkip)
+        .limit(eventsLimit)
+        .populate('byUserId', 'firstName lastName')
+        .lean(),
+    ]);
     res.json({
       organization: { id: String(org._id), name: org.name, slug: org.slug, isActive: org.isActive },
       subscription: sub.toObject(),
       entitlement: entitlementFor(sub),
       events,
+      eventsTotal,
     });
   } catch (err) {
     next(err);

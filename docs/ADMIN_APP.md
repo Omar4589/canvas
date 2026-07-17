@@ -26,7 +26,9 @@ An admin lands on the **bottom-tab** app (super admins get here by tapping an or
 dashboard). Five tabs:
 
 - **Overview** — the org dashboard: active campaigns, cumulative knocks/surveys/connection, coverage.
-- **Insights** — the numbers per canvasser (performance, compare, overlap warnings).
+- **Timeline** — the live per-canvasser dashboard: hourly knock grid, leaderboard tools
+  (search/sort/compare/CSV), overlap warnings. (Replaced the old **Insights** tab; its
+  leaderboard folded in here.)
 - **Map** — live household status + optional canvasser pings.
 - **Books** — **assign/unassign books** (turf) to canvassers for the active round (see below).
 - **More** — everything else (a hub).
@@ -122,7 +124,7 @@ in its own amber bucket (color `#F59E0B` everywhere). Where it shows up for an a
 - **Client reports** — the door-outcome breakdown labels it **"Declined to participate."**
 
 > The Refused metric math (`refusedKnocks`, `contactRate`) and the field-app button live in
-> [METRICS.md](METRICS.md) and [CANVASSER_APP.md](CANVASSER_APP.md). The mobile admin Overview/Insights
+> [METRICS.md](METRICS.md) and [CANVASSER_APP.md](CANVASSER_APP.md). The mobile admin Overview/Timeline
 > tabs render the coverage bar (so the Refused segment shows there too) but currently surface the rate
 > set as Knocks / Surveys / Surveyed voters / Connection rate — the dedicated "Reached a person" card
 > is not on those tiles today.
@@ -154,7 +156,7 @@ marks are never touched). Bulk marks never appear in per-canvasser stats or the 
 
 ## Navigation
 [app/(app)/admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) is a `Tabs` navigator: visible
-tabs `index` (Overview), `canvassers` (labeled **Insights** — route unchanged), `map`, `books`, `more`;
+tabs `index` (Overview), `timeline` (Timeline), `map`, `books`, `more`;
 all detail screens are `href:null` (pushed). The router gate sends `isConsoleRole(role) || isSuperAdmin`
 to `/(app)/admin` — i.e. admins **and team leads** (see [ROLES.md](ROLES.md)) — so super admins share
 these screens in-org. `isConsoleRole` lives in [lib/role.js](../mobile/lib/role.js) alongside the

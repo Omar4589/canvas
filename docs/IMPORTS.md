@@ -274,9 +274,16 @@ client**: it's derived on read as `geocodedNew / 1000 × GEOCODE_COST_PER_1000_C
 rate constant in `geocodeService.js`, ~$1/1k). The super-admin **Imports** page
 (`GET /super-admin/imports`, [server/src/routes/superAdmin/imports.js](../server/src/routes/superAdmin/imports.js))
 aggregates this across every org — totals + a per-import table (with-coords vs. needed-geocoding,
-new/cached, cost) — so the platform owner can review costs. Legacy rows with no
-`householdsWithFileCoords` fall back to `uniqueHouseholds − geocodedNew − geocodedCached` (flagged
-approximate). Nothing in the admin import UI shows any cost.
+new/cached, cost) — so the platform owner can review costs. Built for reconciling the Geocodio
+invoice: the endpoint takes opt-in `skip`/`limit` paging (parameterless keeps the legacy newest-500
+window), server-side `q` search (file/uploader/org), an `orgId` filter, `sort=cost`,
+`excludeUndone=1` (a reversed import still incurred its lookups, but it's flagged `undone` and can
+be dropped from the math), and `groupBy=month|org` rollups; `geocodeFailed` (transient provider
+errors) now rides along so a half-geocoded run doesn't look clean. The page adds a cache-savings
+card (lookups avoided × the rate, plus hit rate), prints the assumed rate on screen, and exports
+the current view to CSV. Legacy rows with no `householdsWithFileCoords` fall back to
+`uniqueHouseholds − geocodedNew − geocodedCached` (flagged approximate). Nothing in the admin
+import UI shows any cost.
 
 **Batching:** 1000 addresses/request with a 180s timeout by default (`GEOCODE_BATCH_SIZE` /
 `GEOCODE_BATCH_TIMEOUT_MS`) — Geocodio's hard cap is 10000, but smaller batches stay within the

@@ -14,6 +14,7 @@ const SEGMENTS = [
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'restricted', label: 'Restricted' },
   { key: 'voted', label: 'Voted' },
+  { key: 'dnc', label: 'No contact' },
   { key: 'unknocked', label: 'Unknocked' },
 ];
 

@@ -262,7 +262,10 @@ router.get('/:id/export.csv', async (req, res, next) => {
 
     const [voters, households] = await Promise.all([
       Voter.find(
-        { _id: { $in: walkList.voterIds || [] } },
+        // The DNC exclusion joins LIVE state at export time, deliberately: the frozen voterIds
+        // predate any later flag, and this file is a contact list by purpose (phone bank, mail
+        // house) — a do-not-contact voter must never appear in it, however old the saved list.
+        { _id: { $in: walkList.voterIds || [] }, 'doNotContact.flagged': { $ne: true } },
         'stateVoterId firstName lastName party phone dateOfBirth precinct householdId'
       ).lean(),
       Household.find(

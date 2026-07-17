@@ -7,10 +7,11 @@ import {
   ActivityIndicator,
   RefreshControl,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
@@ -125,15 +126,49 @@ export default function SuperAdminHome() {
     refetchInterval: live ? 30_000 : false,
     ...useFocusedPoll(),
   });
+  // The support glance: who is inside a customer's data right now, and is retention healthy —
+  // the off-hours phone check. Ending a session is the one action worth having here.
+  const grantsQ = useQuery({
+    queryKey: ['support-grants'],
+    queryFn: () => api('/super-admin/access/grants?all=1'),
+    refetchInterval: live ? 30_000 : false,
+    ...useFocusedPoll(),
+  });
+  const healthQ = useQuery({
+    queryKey: ['retention-health'],
+    queryFn: () => api('/super-admin/access/health/retention'),
+    refetchInterval: live ? 30_000 : false,
+    ...useFocusedPoll(),
+  });
 
-  const { refreshing, onRefresh } = useRefresh([overviewQ.refetch, feedQ.refetch, statsQ.refetch, idleQ.refetch]);
+  const revokeMut = useMutation({
+    mutationFn: (id) => api(`/super-admin/access/grants/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['support-grants'] }),
+  });
+
+  function confirmEnd(g) {
+    Alert.alert(
+      'End this session?',
+      `${g.actor || 'This session'} loses access to ${g.organization?.name || 'the organization'} immediately.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'End now', style: 'destructive', onPress: () => revokeMut.mutate(g.id) },
+      ]
+    );
+  }
+
+  const { refreshing, onRefresh } = useRefresh([
+    overviewQ.refetch, feedQ.refetch, statsQ.refetch, idleQ.refetch, grantsQ.refetch, healthQ.refetch,
+  ]);
   // One pill for all polls: freshest of them, fetching if any is, refresh all.
   const liveUpdatedAt =
     Math.max(
       overviewQ.dataUpdatedAt || 0,
       feedQ.dataUpdatedAt || 0,
       statsQ.dataUpdatedAt || 0,
-      idleQ.dataUpdatedAt || 0
+      idleQ.dataUpdatedAt || 0,
+      grantsQ.dataUpdatedAt || 0,
+      healthQ.dataUpdatedAt || 0
     ) || undefined;
 
   async function pickOrg(orgId) {
@@ -168,13 +203,18 @@ export default function SuperAdminHome() {
         <LiveStatus
           live={live}
           onToggle={() => setLive((v) => !v)}
-          isFetching={overviewQ.isFetching || feedQ.isFetching || statsQ.isFetching || idleQ.isFetching}
+          isFetching={
+            overviewQ.isFetching || feedQ.isFetching || statsQ.isFetching || idleQ.isFetching
+            || grantsQ.isFetching || healthQ.isFetching
+          }
           updatedAt={liveUpdatedAt}
           onRefresh={() => {
             overviewQ.refetch();
             feedQ.refetch();
             statsQ.refetch();
             idleQ.refetch();
+            grantsQ.refetch();
+            healthQ.refetch();
           }}
         />
       </View>
@@ -195,26 +235,40 @@ export default function SuperAdminHome() {
           Platform control room. Active-now = activity in the last 15 min.
         </Text>
 
-        {/* Top stats */}
-        <View style={styles.statsRow}>
-          <StatTile
-            value={totals?.orgs?.total?.toLocaleString()}
-            label="Orgs"
-            sub={`${totals?.orgs?.active ?? 0} active`}
-            help={OVERVIEW_HELP.orgs}
-          />
-          <StatTile
-            value={totals?.users?.total?.toLocaleString()}
-            label="Users"
-            sub={`${totals?.users?.superAdmins ?? 0} super`}
-            help={OVERVIEW_HELP.users}
-          />
-          <StatTile
-            value={totals?.activeNow?.count?.toLocaleString()}
-            label="Active now"
-            sub={totals?.activeNow?.threshold || '15m'}
-            help={OVERVIEW_HELP.activeNow}
-          />
+        {/* Top stats — 2×2 so Campaigns fits without squeezing (statTile is flex:1). */}
+        <View style={styles.statsRowWrap}>
+          <View style={styles.halfTile}>
+            <StatTile
+              value={totals?.orgs?.total?.toLocaleString()}
+              label="Orgs"
+              sub={`${totals?.orgs?.active ?? 0} active`}
+              help={OVERVIEW_HELP.orgs}
+            />
+          </View>
+          <View style={styles.halfTile}>
+            <StatTile
+              value={totals?.users?.total?.toLocaleString()}
+              label="Users"
+              sub={`${totals?.users?.superAdmins ?? 0} super`}
+              help={OVERVIEW_HELP.users}
+            />
+          </View>
+          <View style={styles.halfTile}>
+            <StatTile
+              value={totals?.campaigns?.total?.toLocaleString()}
+              label="Campaigns"
+              sub={`${totals?.campaigns?.active ?? 0} active`}
+              help={OVERVIEW_HELP.campaigns}
+            />
+          </View>
+          <View style={styles.halfTile}>
+            <StatTile
+              value={totals?.activeNow?.count?.toLocaleString()}
+              label="Active now"
+              sub={totals?.activeNow?.threshold || '15m'}
+              help={OVERVIEW_HELP.activeNow}
+            />
+          </View>
         </View>
 
         <View style={styles.todayCard}>
@@ -241,8 +295,43 @@ export default function SuperAdminHome() {
               </Text>
               <Text style={styles.todayCellLabel}>Lit drops</Text>
             </View>
+            {/* A separate tally on purpose — restricted marks are never knocks. */}
+            <View style={styles.todayCell}>
+              <Text style={styles.todayValue}>
+                {totals?.today?.restricted?.toLocaleString() ?? '—'}
+              </Text>
+              <Text style={styles.todayCellLabel}>Restricted</Text>
+            </View>
           </View>
         </View>
+
+        {/* Billing needs attention — the same trigger set as the web strip (past due, suspended,
+            trial inside its last 2 days). The data was already in platform-overview; actions stay
+            on the web console. */}
+        {orgs.some(
+          (o) =>
+            ['past_due', 'suspended'].includes(o.billing?.effective) ||
+            (o.billing?.effective === 'trial' && o.billing?.trialDaysLeft != null && o.billing.trialDaysLeft <= 2)
+        ) && (
+          <View style={styles.warnCard}>
+            <Text style={styles.warnTitle}>Billing needs attention</Text>
+            {orgs
+              .filter(
+                (o) =>
+                  ['past_due', 'suspended'].includes(o.billing?.effective) ||
+                  (o.billing?.effective === 'trial' && o.billing?.trialDaysLeft != null && o.billing.trialDaysLeft <= 2)
+              )
+              .map((o) => (
+                <Text key={o.id} style={styles.warnText}>
+                  {o.name} —{' '}
+                  {o.billing.effective === 'trial'
+                    ? `trial ends in ${o.billing.trialDaysLeft}d`
+                    : o.billing.effective.replace('_', ' ')}
+                </Text>
+              ))}
+            <Text style={styles.warnCaption}>Manage from the web console → Organizations.</Text>
+          </View>
+        )}
 
         {/* Idle organizations — the needs-a-human queue no sweep can ever resolve. */}
         <View style={styles.statLabelRow}>
@@ -268,6 +357,52 @@ export default function SuperAdminHome() {
             ))}
             <Text style={styles.caption}>{IDLE_ORGS_MOBILE_NOTE}</Text>
           </>
+        )}
+
+        {/* Support access glance — is anyone inside a customer's data, is retention healthy.
+            End-now is the one action worth having on the phone; everything else is web. */}
+        <Text style={styles.sectionLabel}>
+          {grantsQ.data?.scope === 'all' ? 'Support access' : 'Support access (your sessions)'}
+        </Text>
+        {healthQ.data && (
+          <View style={[styles.healthChip, healthQ.data.healthy ? styles.healthOk : styles.healthBad]}>
+            <Text style={healthQ.data.healthy ? styles.healthOkText : styles.healthBadText}>
+              {healthQ.data.healthy ? '● Retention enforced' : '▲ Retention NOT ENFORCED'}
+            </Text>
+            {!healthQ.data.healthy && <Text style={styles.healthBadText}>{healthQ.data.message}</Text>}
+          </View>
+        )}
+        {(grantsQ.data?.grants || []).length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>
+              {grantsQ.data?.scope === 'all'
+                ? 'Nobody is inside a customer organization right now.'
+                : 'You are not inside any customer organization right now.'}
+            </Text>
+          </View>
+        ) : (
+          grantsQ.data.grants.map((g) => (
+            <View key={g.id} style={styles.idleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.idleName}>
+                  {g.actor} → {g.organization?.name}
+                </Text>
+                <Text style={styles.idleMeta} numberOfLines={1}>{g.reason}</Text>
+                <Text style={styles.idleMeta}>
+                  expires {new Date(g.expiresAt).toLocaleString()} · {g.read?.requests ?? g.accessCount} request
+                  {(g.read?.requests ?? g.accessCount) === 1 ? '' : 's'}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => confirmEnd(g)}
+                disabled={revokeMut.isPending}
+                hitSlop={8}
+                style={styles.endBtn}
+              >
+                <Text style={styles.endBtnText}>End now</Text>
+              </Pressable>
+            </View>
+          ))
         )}
 
         {/* Quick actions */}
@@ -389,7 +524,8 @@ export default function SuperAdminHome() {
                   {e.canvasser
                     ? `${e.canvasser.firstName} ${e.canvasser.lastName}`
                     : 'Unknown'}
-                  {e.household?.addressLine1 ? ` · ${e.household.addressLine1}` : ''}
+                  {/* City/state only — street addresses left this feed on purpose (server route). */}
+                  {e.household?.city ? ` · ${e.household.city}${e.household.state ? `, ${e.household.state}` : ''}` : ''}
                 </Text>
               </View>
               <Text style={styles.activityTime}>{formatRelative(e.timestamp)}</Text>
@@ -451,7 +587,41 @@ function makeStyles(t) {
     marginBottom: spacing.sm,
   },
   totalsTile: { width: '31%', flexGrow: 1 },
+  halfTile: { width: '48%', flexGrow: 1 },
   caption: { fontSize: 11, color: colors.textMuted, marginBottom: spacing.md },
+
+  warnCard: {
+    backgroundColor: colors.warnBg,
+    borderColor: colors.warnBorder,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  warnTitle: { fontSize: 12, fontWeight: '700', color: colors.warnFg, marginBottom: 2 },
+  warnText: { fontSize: 12, color: colors.warnFg },
+  warnCaption: { fontSize: 10, color: colors.textMuted, marginTop: spacing.xs },
+
+  healthChip: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  healthOk: { backgroundColor: colors.successBg, borderColor: colors.successBorder },
+  healthBad: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
+  healthOkText: { fontSize: 12, fontWeight: '700', color: colors.success },
+  healthBadText: { fontSize: 12, fontWeight: '700', color: colors.danger },
+
+  endBtn: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  endBtnText: { fontSize: 11, fontWeight: '700', color: colors.danger },
   idleRow: {
     flexDirection: 'row',
     alignItems: 'center',

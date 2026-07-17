@@ -565,7 +565,7 @@ async function resetActivityLayer(campaign) {
   await ClientReport.deleteMany({ campaignId });
   await Household.updateMany(
     { campaignId },
-    { $set: { status: 'unknocked', fullyVoted: false, lastActionAt: null, lastActionBy: null } }
+    { $set: { status: 'unknocked', fullyVoted: false, fullyDnc: false, lastActionAt: null, lastActionBy: null } }
   );
   const voterIds = await Voter.distinct('_id', { organizationId: campaign.organizationId });
   await Voter.updateMany({ _id: { $in: voterIds } }, { $set: { surveyStatus: 'not_surveyed' } });

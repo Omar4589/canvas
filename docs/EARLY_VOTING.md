@@ -29,6 +29,9 @@ These are two different things:
 
 - A **voted voter** is one person marked as already voted. At a door that still has someone left
   to talk to, voted residents simply show a green **✓ Voted** badge — the door stays on the map.
+- (Sibling mechanism: **fully-voted** has a permanent, org-wide twin — the **fully-do-not-contact
+  door**, where every resident asked never to be contacted. Same suppression machinery, different
+  lifetime and its own `dnc` coverage segment. See [VOTERS.md](VOTERS.md).)
 - A **fully-voted door** is a household where **every** voter has voted. Only then does the door
   **drop off** the canvasser's map and books.
 

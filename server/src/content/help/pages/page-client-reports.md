@@ -3,7 +3,7 @@ slug: page-client-reports
 title: The Client Reports page
 audience: lead
 kind: page
-order: 112
+order: 113
 sourceDoc: CLIENT_PORTAL.md
 summary: Build and publish reports to share with a client via a public link.
 tags: client reports, share, page

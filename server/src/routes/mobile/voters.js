@@ -120,6 +120,7 @@ router.get('/voters', async (req, res, next) => {
           fullName: v.fullName,
           party: v.party || null,
           surveyStatus: v.surveyStatus,
+          dnc: !!v.doNotContact?.flagged,
           voted: votedSet.has(String(v._id)),
           household: h ? { addressLine1: h.addressLine1, city: h.city, state: h.state } : null,
         };

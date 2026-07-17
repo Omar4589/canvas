@@ -14,6 +14,7 @@ import { recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
+import { recomputeFullyDnc } from '../../services/dnc/recomputeFullyDnc.js';
 import { Person } from '../../models/Person.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
 import { propagateIdentity } from '../../services/person/propagateIdentity.js';
@@ -48,6 +49,10 @@ router.get('/', async (req, res, next) => {
     if (req.query.party) filter.party = req.query.party;
     if (req.query.surveyStatus) filter.surveyStatus = req.query.surveyStatus;
     if (req.query.precinct) filter.precinct = req.query.precinct;
+    // Do-not-contact filter — org-wide by nature (the flag lives on the org-scoped Voter, no
+    // campaign gymnastics like `voted` needs below).
+    if (req.query.dnc === 'true') filter['doNotContact.flagged'] = true;
+    else if (req.query.dnc === 'false') filter['doNotContact.flagged'] = { $ne: true };
 
     const campaignId =
       req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
@@ -125,6 +130,7 @@ router.get('/', async (req, res, next) => {
         stateVoterId: v.stateVoterId,
         party: v.party || null,
         surveyStatus: v.surveyStatus,
+        dnc: !!v.doNotContact?.flagged,
         voted: hcamp ? !!votedByVoter.get(String(v._id))?.has(hcamp) : false,
         household: h
           ? {
@@ -310,6 +316,111 @@ router.delete('/:voterId/notes/:noteId', async (req, res, next) => {
     });
     if (!r.deletedCount) return res.status(404).json({ error: 'Note not found' });
     res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Do-not-contact (org-wide; see docs/VOTERS.md) ────────────────────────────
+// The flag lives on the org-scoped Voter, so setting it here covers every campaign the voter is
+// ever housed in. Admins only (this router's gate) — leads see the flag but cannot change it.
+// Both transitions stamp who/when on the subdoc and write a VoterNote, so the durable history
+// lives in the notes trail the profile and Notes hub already render.
+
+router.post('/:voterId/dnc', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.voterId)) return res.status(400).json({ error: 'Invalid voterId' });
+    const voter = await Voter.findOne(
+      { _id: req.params.voterId, organizationId: activeOrgId(req) },
+      '_id householdId doNotContact'
+    ).lean();
+    if (!voter) return res.status(404).json({ error: 'Voter not found' });
+
+    const reason = z
+      .string({ required_error: 'A reason is required — it becomes the record of why.' })
+      .trim()
+      .min(3, 'A reason is required — it becomes the record of why.')
+      .max(2000)
+      .parse(req.body?.reason);
+
+    // Idempotent, and deliberately NOT restamped: the original at/byUserId/uploadId attribution
+    // is what an upload's undo keys on — a second admin click must not steal it.
+    if (voter.doNotContact?.flagged) {
+      return res.json({ ok: true, alreadyFlagged: true });
+    }
+
+    await Voter.updateOne(
+      { _id: voter._id },
+      {
+        $set: {
+          doNotContact: {
+            flagged: true,
+            at: new Date(),
+            byUserId: req.user._id,
+            reason,
+            source: 'admin',
+            uploadId: null,
+          },
+        },
+      }
+    );
+    await VoterNote.create({
+      organizationId: activeOrgId(req),
+      voterId: voter._id,
+      authorId: req.user._id,
+      body: `Marked do-not-contact: ${reason}`,
+    });
+    // Recompute the door (may suppress it) — also bumps Household.updatedAt, which is what
+    // pushes the change to already-bootstrapped phones via the /changes delta.
+    await recomputeFullyDnc([String(voter.householdId)]);
+
+    res.json(await buildVoterProfile(voter._id, { orgId: activeOrgId(req) }));
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.issues[0]?.message || 'A reason is required.' });
+    next(err);
+  }
+});
+
+router.delete('/:voterId/dnc', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.voterId)) return res.status(400).json({ error: 'Invalid voterId' });
+    const voter = await Voter.findOne(
+      { _id: req.params.voterId, organizationId: activeOrgId(req) },
+      '_id householdId doNotContact'
+    ).lean();
+    if (!voter) return res.status(404).json({ error: 'Voter not found' });
+
+    if (!voter.doNotContact?.flagged) {
+      return res.json({ ok: true, alreadyClear: true });
+    }
+
+    // The subdoc records the last transition in either direction; the notes trail keeps history.
+    await Voter.updateOne(
+      { _id: voter._id },
+      {
+        $set: {
+          doNotContact: {
+            flagged: false,
+            at: new Date(),
+            byUserId: req.user._id,
+            reason: null,
+            source: 'admin',
+            uploadId: null,
+          },
+        },
+      }
+    );
+    await VoterNote.create({
+      organizationId: activeOrgId(req),
+      voterId: voter._id,
+      authorId: req.user._id,
+      body: 'Do-not-contact flag removed.',
+    });
+    await recomputeFullyDnc([String(voter.householdId)]); // door may reopen
+
+    res.json(await buildVoterProfile(voter._id, { orgId: activeOrgId(req) }));
   } catch (err) {
     next(err);
   }

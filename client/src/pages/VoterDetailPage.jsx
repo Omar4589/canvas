@@ -133,6 +133,56 @@ function Detail({ label, value, mono }) {
   );
 }
 
+function DncSection({ dnc, onFlag, onUnflag, busy, tz }) {
+  const [reason, setReason] = useState('');
+
+  if (!dnc?.flagged) {
+    return (
+      <Section title="Do not contact">
+        <p className="mb-3 text-sm text-fg-muted">
+          Excluded from walk-list exports and surveys across all campaigns; the door drops off books
+          once everyone there is flagged.
+        </p>
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={2}
+          placeholder="Reason (required) — why should this voter not be contacted?"
+          className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none"
+        />
+        <button
+          onClick={() => onFlag(reason.trim())}
+          disabled={reason.trim().length < 3 || busy}
+          className="mt-2 rounded-md bg-danger px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50"
+        >
+          {busy ? 'Marking…' : 'Mark do-not-contact'}
+        </button>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Do not contact">
+      <div className="rounded border border-danger/30 bg-danger-tint p-4 text-sm">
+        <p className="font-medium text-danger">
+          ⛔ Flagged do-not-contact{dnc.source === 'upload' ? ' via list upload' : ''}
+        </p>
+        <p className="mt-1 text-fg">{dnc.reason}</p>
+        <p className="mt-1 text-xs text-fg-muted">
+          {dnc.by ? `${dnc.by.name} · ` : ''}{fmtDate(dnc.at, tz)}
+        </p>
+        <button
+          onClick={onUnflag}
+          disabled={busy}
+          className="mt-3 text-xs font-semibold text-danger hover:underline disabled:opacity-50"
+        >
+          {busy ? 'Removing…' : 'Remove flag'}
+        </button>
+      </div>
+    </Section>
+  );
+}
+
 function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
   const [edit, setEdit] = useState(false);
   const [vals, setVals] = useState({});
@@ -297,6 +347,14 @@ export default function VoterDetailPage() {
     mutationFn: (responseId) => api(`/admin/voters/${voterId}/surveys/${responseId}`, { method: 'DELETE' }),
     onSuccess: invalidate, onError: onErr,
   });
+  const flagDnc = useMutation({
+    mutationFn: (reason) => api(`/admin/voters/${voterId}/dnc`, { method: 'POST', body: { reason } }),
+    onSuccess: () => { setErr(''); invalidate(); }, onError: onErr,
+  });
+  const unflagDnc = useMutation({
+    mutationFn: () => api(`/admin/voters/${voterId}/dnc`, { method: 'DELETE' }),
+    onSuccess: () => { setErr(''); invalidate(); }, onError: onErr,
+  });
 
   if (profileQ.isLoading) return <div className="p-6 text-sm text-fg-muted">Loading…</div>;
   if (profileQ.error) return <div className="p-6 text-sm text-danger">Error: {profileQ.error.message}</div>;
@@ -321,6 +379,7 @@ export default function VoterDetailPage() {
           {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
         </span>
         {p.voted?.isVoted && <span className="rounded-full bg-teal-500/15 px-2 py-0.5 text-xs font-medium text-teal-600">✓ Voted</span>}
+        {v.doNotContact?.flagged && <span className="rounded-full bg-danger-tint px-2 py-0.5 text-xs font-medium text-danger">⛔ Do not contact</span>}
       </div>
 
       {err && <div className="mb-4 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{err}</div>}
@@ -333,6 +392,14 @@ export default function VoterDetailPage() {
         tz={orgTz}
       />
 
+      <DncSection
+        dnc={v.doNotContact}
+        busy={flagDnc.isPending || unflagDnc.isPending}
+        onFlag={(reason) => flagDnc.mutate(reason)}
+        onUnflag={() => { if (window.confirm('Remove the do-not-contact flag from this voter?')) unflagDnc.mutate(); }}
+        tz={orgTz}
+      />
+
       <Section title="Household & campaign">
         {h ? (
           <div className="text-sm text-fg-muted">
@@ -341,6 +408,7 @@ export default function VoterDetailPage() {
             <p className="mt-1 text-fg-muted">
               Campaign: {h.campaign ? <Link to={`/campaigns/${h.campaign.id}`} className="text-brand-accent hover:underline">{h.campaign.name}</Link> : '—'}
               {h.fullyVoted && <span className="ml-2 text-teal-600">· fully voted</span>}
+              {h.fullyDnc && <span className="ml-2 text-danger">· fully do-not-contact</span>}
             </p>
             {h.members.length > 0 && (
               <div className="mt-3">
@@ -350,6 +418,7 @@ export default function VoterDetailPage() {
                     <li key={m.id}>
                       <Link to={`/voters/${m.id}`} className="text-brand-accent hover:underline">{m.fullName}</Link>
                       <span className="text-fg-subtle"> · {m.surveyStatus === 'surveyed' ? 'surveyed' : 'not surveyed'}{m.voted ? ' · voted' : ''}</span>
+                      {m.dnc && <span className="text-danger"> · do not contact</span>}
                     </li>
                   ))}
                 </ul>

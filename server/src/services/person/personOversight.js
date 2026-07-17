@@ -60,7 +60,9 @@ export function serializePerson(p, { ownerOrgName = null } = {}) {
  * The old comment here claimed this returns "counts / dates / booleans / status tallies only." THAT
  * WAS FALSE, and a false comment about a privacy boundary is worse than no comment — it is what a
  * reviewer reads instead of the code. This function returns the person's full name, date of birth,
- * party, phone, state voter ID, and their HOME ADDRESSES.
+ * party, and phone. (It USED to also ship street addresses, zip/county, the stateVoterId list, and
+ * full pre-merge identity snapshots that the UI never rendered — trimmed July 2026 to city/state +
+ * counts; see the inline notes below.)
  *
  * What IS true, and is worth keeping: the CANVASSING side really is structural. Every survey/activity/
  * note figure is an aggregation $group/$count, and this never reads a survey answer
@@ -136,14 +138,14 @@ export async function buildPersonOversight(personId) {
       organizationId: String(orgId),
       organizationName: orgNameById.get(String(orgId)) || null,
       voterCount: voters.length,
-      voterIds: voters.map((v) => v.stateVoterId),
+      // City/state ONLY — data-minimized July 2026. This payload used to ship the full street
+      // addresses, zip, county, and the linked stateVoterId list to the browser while the UI
+      // rendered only "City, ST". PII that crosses the wire with no rendering purpose is exposure
+      // for nothing; if a future view needs the street, add it deliberately (it is voter content —
+      // grant-gated + logged at the route) rather than resurrecting the blanket dump.
       addresses: households.map((h) => ({
-        addressLine1: h.addressLine1,
-        addressLine2: h.addressLine2 || null,
         city: h.city,
         state: h.state,
-        zipCode: h.zipCode,
-        county: h.county || null,
       })),
       surveyStatus,
       surveyCount: surv?.count || 0,
@@ -180,6 +182,16 @@ export async function buildPersonOversight(personId) {
     orgs,
     candidates: candidates.map((c) => ({ ...c, _id: String(c._id) })),
     proposals: proposals.map((p) => ({ ...p, _id: String(p._id), orgName: orgNameById.get(String(p.orgId)) || null })),
-    mergeLog: mergeLog.map((l) => ({ ...l, _id: String(l._id) })),
+    // Explicit shape, not a spread: the raw log rows carry full pre-merge identity snapshots
+    // (survivorSnapshot/victimSnapshot — name, DOB, party) that exist for split-reversal, not for
+    // display. They stay server-side; the UI shows action/date/count/ids only.
+    mergeLog: mergeLog.map((l) => ({
+      _id: String(l._id),
+      action: l.action,
+      survivorId: String(l.survivorId),
+      victimId: l.victimId ? String(l.victimId) : null,
+      movedVoterCount: (l.movedVoterIds || []).length,
+      createdAt: l.createdAt,
+    })),
   };
 }

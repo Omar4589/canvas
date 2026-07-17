@@ -92,6 +92,7 @@ export default function VotersSearch() {
                 <Text style={styles.meta}>
                   {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
                   {v.voted ? ' · ✓ Voted' : ''}
+                  {v.dnc ? <Text style={styles.dncMark}> · DNC</Text> : null}
                 </Text>
               </View>
               <Text style={styles.chev}>›</Text>
@@ -143,6 +144,7 @@ function makeStyles(t) {
   party: { color: colors.textSecondary, fontWeight: '400' },
   address: { ...type.caption, marginTop: 2 },
   meta: { ...type.caption, color: colors.textMuted, marginTop: 3 },
+  dncMark: { color: colors.danger, fontWeight: '700' },
   chev: { color: colors.textMuted, fontSize: 22, fontWeight: '700' },
   });
 }

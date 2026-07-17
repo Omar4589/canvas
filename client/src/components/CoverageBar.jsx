@@ -11,6 +11,7 @@ const SEGMENTS = [
   { key: 'wrong_address', label: 'Wrong address', color: 'bg-red-500' },
   { key: 'restricted', label: 'Restricted', color: 'bg-slate-600' },
   { key: 'voted', label: 'Voted', color: 'bg-teal-500' },
+  { key: 'dnc', label: 'Do not contact', color: 'bg-rose-800' },
   { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-400' },
 ];
 

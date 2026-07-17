@@ -88,10 +88,23 @@ test('BEHAVIORAL: a vendor read of /admin/imports — never on the old content l
   const read = await call('GET', '/admin/imports', ctx.support);
   assert.ok(read.status < 400, `expected a successful read, got ${read.status}`);
 
-  const logs = await AccessLog.find({ organizationId: ctx.org._id }).lean();
+  // recordAccess is fire-and-forget from the res 'finish' listener (an audit write must never
+  // block the request it audits), so the row is EVENTUALLY visible — not synchronously with the
+  // response. Poll briefly instead of asserting an instant read; under full-suite load the write
+  // can land a few ms after the HTTP call returns.
+  let logs = [];
+  for (const deadline = Date.now() + 3000; Date.now() < deadline; ) {
+    logs = await AccessLog.find({ organizationId: ctx.org._id }).lean();
+    if (logs.length) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
   assert.strictEqual(logs.length, 1, 'the import-history read must produce exactly one audit row');
   assert.strictEqual(String(logs[0].actorUserId), String(ctx.support._id));
   assert.strictEqual(logs[0].resource, 'imports');
+  // Magnitude capture: the res wraps count the payload as it leaves, so every logged row carries
+  // how MUCH was read — a peek and a bulk export must no longer look identical in the audit trail.
+  assert.ok(typeof logs[0].bytes === 'number' && logs[0].bytes > 0, 'the row must carry the payload size');
+  assert.ok(logs[0].rows === null || typeof logs[0].rows === 'number', 'rows is a count or null (unknown)');
 });
 
 // No DB needed — pure classifier assertions, so this runs in CI even without a throwaway mongod.

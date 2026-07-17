@@ -152,12 +152,15 @@ the round** keep their result (skipped), already-restricted doors are skipped (i
 
 ### Coverage funnel (the colored bar)
 Each household sits in exactly one bucket — `surveyed`, `lit_dropped`, `refused`, `restricted`,
-`not_home`, `wrong_address`, `voted`, or `unknocked` — so the bar sums to the total number of
-households. `unknocked` = houses not yet knocked at all; `restricted` = homes a canvasser couldn't
-physically reach (its own segment — counted in the household total but not among the "knocked");
-`voted` = early-voting doors that dropped off the canvasser's list (pulled out of `unknocked`, see
-early-voting doc). This is a coverage lens, separate from Knocks (activity). Field: `canvass` /
-`coverage`.
+`not_home`, `wrong_address`, `voted`, `dnc`, or `unknocked` — so the bar sums to the total number
+of households. `unknocked` = houses not yet knocked at all; `restricted` = homes a canvasser
+couldn't physically reach (its own segment — counted in the household total but not among the
+"knocked"); `voted` = early-voting doors that dropped off the canvasser's list (pulled out of
+`unknocked`, see early-voting doc); `dnc` = doors where **every** resident is marked do-not-contact
+(also pulled out of `unknocked` — they will never be knocked; see [VOTERS.md](VOTERS.md)).
+**Precedence:** a door that is both fully-voted and fully-DNC buckets as `dnc` — the permanent
+request outranks this election's early voting, so the segments always sum. This is a coverage
+lens, separate from Knocks (activity). Field: `canvass` / `coverage`.
 
 ## Coverage vs. Knocks — worked example
 
@@ -649,9 +652,13 @@ computed the same way the timeline and the CSV do; **clients must not re-derive 
   object is a separate volume lens (e.g. lit-drop volume). See [CLIENT_PORTAL.md](CLIENT_PORTAL.md).
 - **Early-voting doors get their own "Voted" coverage segment.** A household marked `fullyVoted`
   drops off the *canvasser's* map/books and, in reports, is pulled out of `unknocked` into a
-  dedicated **`voted`** coverage bucket (`coverageBucketExpr` in reports.js). It still counts in
+  dedicated **`voted`** coverage bucket (`coverageBucketExpr` in aggregations.js — now a `$switch`
+  with the **`dnc` branch first**: a fully-do-not-contact door buckets as `dnc` even if also
+  fully-voted, so the two synthetic segments never double-count). It still counts in
   **Households**; `homesKnocked`/knocks are unaffected. Only otherwise-`unknocked` doors move — a
-  door knocked before it went fully-voted keeps its knocked status. See [docs/EARLY_VOTING.md](EARLY_VOTING.md).
+  door knocked before it went fully-voted keeps its knocked status. See [docs/EARLY_VOTING.md](EARLY_VOTING.md)
+  and, for `Household.fullyDnc`/`Voter.doNotContact`, [docs/VOTERS.md](VOTERS.md). DNC changes NO
+  knock/billing number — flags are forward-looking only, the ledger is never rewritten.
 
 ## G. Frontend mapping
 
@@ -680,7 +687,6 @@ for all of them — see the gotcha in §F).
 | [index.jsx](../mobile/app/(app)/admin/index.jsx) | Org Overview. `DateRangeBar` → `/campaign-rollup`. Cumulative card: `CoverageBar` + two stat rows (Knocks/Surveys/Surveyed; Connection/Lit/Canvassers). `CampaignCard`: full `CoverageBar` + coverage line + inline (knocks/surveys/voters/conn/canv); archived rows show knocks. |
 | [campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | **Activity** tiles (Knocks, Surveys/Lit, Surveyed voters, Connection rate via `rateFromPct`) from rollup; **Coverage** (all-time) from overview; Top canvassers from `/canvassers`; "Timeline" quick-link. |
 | [timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) + [components/LiveStatus.jsx](../mobile/components/LiveStatus.jsx) | **Timeline** (`/canvasser-timeline`): live performance dashboard at web parity — KPI tiles (`KpiGrid`: Doors, Surveys, Connection rate via `rateFromPct`, Doors/hr, Knocking N of M), per-canvasser cards (coordinator, `dayKnocks/daySurveys/connectionRate`, `hoursOnDoors`·doors/hr, `formatRange` shift line; tap → canvasser detail), `DateRangeBar` presets **incl. 'all'** (campaign-to-date: `?totals=1`, grid hidden) + single-day stepper, walk-list + coordinator `TabSwitcher` crew filters (the coordinator filter is **server-side** `?coordinatorId`, same as web; the option list is a union of the roster and the coordinators actually stamped on the ledger, so a departed canvasser's team still appears; overlaps stay campaign-wide with a note). **No by-team breakdown table** — that surface is web-only, Knocks/Surveys toggle, frozen-name-column heatmap grid (hour columns single-day, day columns for a range — `data.mode` guarded), reconciliation + overlap cards (`overlapCount` true total), `LiveStatus` pill (20s poll while the range includes today, pause/refresh) + `useFocusedPoll`. Reloads the campaign on focus + accepts a `campaignId` param. |
-| [canvassers.jsx](../mobile/app/(app)/admin/canvassers.jsx) | Leaderboard. `rowDerived` uses `r.knocks` + `r.connectionRate`; totals use `knocks` + `completionKnocks`; overlap banner. |
 | [overlaps.jsx](../mobile/app/(app)/admin/overlaps.jsx) | Renders `overlaps[].passes[]` grouped by `roundLabel`. |
 | [canvasser/[id]/index.jsx](../mobile/app/(app)/admin/canvasser/[id]/index.jsx), [compare.jsx](../mobile/app/(app)/admin/canvasser/compare.jsx), [[id]/days.jsx](../mobile/app/(app)/admin/canvasser/[id]/days.jsx), [[id]/day/[date].jsx](../mobile/app/(app)/admin/canvasser/[id]/day/[date].jsx) | Per-canvasser drilldowns; `kpi.homesKnocked` (= knocks) + `connectionRatePct`. |
 | [components/CoverageBar.jsx](../mobile/components/CoverageBar.jsx) | Bar + legend; `compact` hides the legend. |

@@ -11,14 +11,15 @@ import { retentionHealth } from '../../services/retention/purgeDeletedIdentities
 import { deletionRequestHealth } from '../../services/retention/triggers.js';
 import { requestOrgDeletion, cancelOrgDeletion, listDeletionRequests, DeletionRequestError } from '../../services/retention/deletionRequests.js';
 import { idleZeroDollarOrgs } from '../../services/billing/idleOrgs.js';
-import { getPlatformStats } from '../../services/platform/platformStats.js';
+import { getPlatformStats, recomputeLive } from '../../services/platform/platformStats.js';
 import { REPEATABLE_JOBS } from '../../services/retention/scheduler.js';
 
 // Support access: the front door into a customer organization, and the record of who used it.
 //
 // Entering a customer org used to be free and invisible — set an X-Org-Id header and you were their
-// admin. Now it costs a typed reason and expires on its own, and every voter record you open is
-// written to AccessLog. See models/SupportAccessGrant.js.
+// admin. Now it costs a typed reason and expires on its own, and every request that touches voter
+// data is written to AccessLog. (Request-level, deliberately: the log stores route templates and
+// resource classes, never record ids — see models/AccessLog.js.) See models/SupportAccessGrant.js.
 const router = Router();
 router.use(requireAuth, requireSuperAdmin);
 
@@ -59,7 +60,7 @@ router.post('/grants', async (req, res, next) => {
         expiresAt: grant.expiresAt,
       },
       // Say it out loud. An operator should never be surprised later that this was recorded.
-      notice: `Access to ${org.name} is open until ${grant.expiresAt.toISOString()}. Every voter record you open is logged against your name.`,
+      notice: `Access to ${org.name} is open until ${grant.expiresAt.toISOString()}. Every request you make that touches voter data is logged against your name.`,
     });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: err.issues[0]?.message || 'Invalid input', issues: err.issues });
@@ -67,28 +68,51 @@ router.post('/grants', async (req, res, next) => {
   }
 });
 
-// My live grants (what am I currently inside?).
+// My live grants (what am I currently inside?). `all=1` widens to everyone's grants, but only for
+// break-glass operators — the response says which view it actually is via `scope`, so the UI can
+// label itself honestly instead of showing a support-tier operator "nobody is inside" while
+// colleagues are.
 router.get('/grants', async (req, res, next) => {
   try {
-    const mine = req.query.all === '1' && req.user.platformRole === 'break_glass'
-      ? {}
-      : { actorUserId: req.user._id };
+    const allScope = req.query.all === '1' && req.user.platformRole === 'break_glass';
+    const mine = allScope ? {} : { actorUserId: req.user._id };
     const grants = await SupportAccessGrant.find({ ...mine, revokedAt: null, expiresAt: { $gt: new Date() } })
       .populate('organizationId', 'name slug')
       .populate('actorUserId', 'firstName lastName email')
       .sort({ expiresAt: -1 })
       .lean();
+    // How much was actually read under each grant — the middleware stores per-request rows/bytes;
+    // summed here they separate a one-voter peek from a bulk export at a glance.
+    const readAgg = grants.length
+      ? await AccessLog.aggregate([
+        { $match: { grantId: { $in: grants.map((g) => g._id) } } },
+        {
+          $group: {
+            _id: '$grantId',
+            requests: { $sum: 1 },
+            rows: { $sum: { $ifNull: ['$rows', 0] } },
+            bytes: { $sum: { $ifNull: ['$bytes', 0] } },
+          },
+        },
+      ])
+      : [];
+    const readByGrant = new Map(readAgg.map((t) => [String(t._id), t]));
     res.json({
-      grants: grants.map((g) => ({
-        id: String(g._id),
-        organization: g.organizationId ? { id: String(g.organizationId._id), name: g.organizationId.name } : null,
-        actor: g.actorUserId ? `${g.actorUserId.firstName} ${g.actorUserId.lastName}` : null,
-        reason: g.reason,
-        kind: g.kind,
-        expiresAt: g.expiresAt,
-        accessCount: g.accessCount,
-        lastAccessAt: g.lastAccessAt,
-      })),
+      scope: allScope ? 'all' : 'mine',
+      grants: grants.map((g) => {
+        const read = readByGrant.get(String(g._id));
+        return {
+          id: String(g._id),
+          organization: g.organizationId ? { id: String(g.organizationId._id), name: g.organizationId.name } : null,
+          actor: g.actorUserId ? `${g.actorUserId.firstName} ${g.actorUserId.lastName}` : null,
+          reason: g.reason,
+          kind: g.kind,
+          expiresAt: g.expiresAt,
+          accessCount: g.accessCount,
+          lastAccessAt: g.lastAccessAt,
+          read: { requests: read?.requests || 0, rows: read?.rows || 0, bytes: read?.bytes || 0 },
+        };
+      }),
       defaultHours: DEFAULT_GRANT_HOURS,
     });
   } catch (err) {
@@ -107,8 +131,17 @@ router.delete('/grants/:id', async (req, res, next) => {
   }
 });
 
+// A bare YYYY-MM-DD is a UTC day (start or end); anything longer is parsed as given.
+function parseDayBound(value, endOfDay) {
+  if (!value) return null;
+  const s = String(value);
+  const d = new Date(s.length === 10 ? `${s}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z` : s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 // The audit trail. Answers "did anyone at Doorline read this customer's data?" — a question we
-// previously could not answer at all.
+// previously could not answer at all. Paged (skip/limit + exact total) so history past the first
+// page stays reachable, and filterable by org, actor, grant, and date window.
 router.get('/log', async (req, res, next) => {
   try {
     const q = {};
@@ -118,14 +151,29 @@ router.get('/log', async (req, res, next) => {
     if (req.query.actorUserId && mongoose.isValidObjectId(req.query.actorUserId)) {
       q.actorUserId = req.query.actorUserId;
     }
+    if (req.query.grantId && mongoose.isValidObjectId(req.query.grantId)) {
+      q.grantId = req.query.grantId;
+    }
+    const from = parseDayBound(req.query.from, false);
+    const to = parseDayBound(req.query.to, true);
+    if (from || to) {
+      q.at = {};
+      if (from) q.at.$gte = from;
+      if (to) q.at.$lte = to;
+    }
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
-    const rows = await AccessLog.find(q)
-      .populate('actorUserId', 'firstName lastName email')
-      .populate('organizationId', 'name slug')
-      .populate('grantId', 'reason kind')
-      .sort({ at: -1 })
-      .limit(limit)
-      .lean();
+    const skip = Math.max(Number(req.query.skip) || 0, 0);
+    const [total, rows] = await Promise.all([
+      AccessLog.countDocuments(q),
+      AccessLog.find(q)
+        .populate('actorUserId', 'firstName lastName email')
+        .populate('organizationId', 'name slug')
+        .populate('grantId', 'reason kind')
+        .sort({ at: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
 
     res.json({
       entries: rows.map((r) => ({
@@ -136,7 +184,40 @@ router.get('/log', async (req, res, next) => {
         route: r.route,
         resource: r.resource,
         reason: r.grantId?.reason || null,
+        // Read magnitude: rows = payload list length (null = unknown/single record), bytes =
+        // uncompressed payload size. These are request-rows, NOT distinct voters.
+        rows: r.rows ?? null,
+        bytes: r.bytes ?? null,
       })),
+      total,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Filter options for the log (every actor/org that appears in it), plus the log's true extent —
+// total row count and oldest entry — so the visible page is never mistaken for the whole history.
+router.get('/log-facets', async (req, res, next) => {
+  try {
+    const [actorIds, orgIds, logTotal, oldest] = await Promise.all([
+      AccessLog.distinct('actorUserId'),
+      AccessLog.distinct('organizationId'),
+      AccessLog.estimatedDocumentCount(),
+      AccessLog.findOne({}, 'at').sort({ at: 1 }).lean(),
+    ]);
+    const [actors, orgs] = await Promise.all([
+      User.find({ _id: { $in: actorIds } }, 'firstName lastName email').lean(),
+      Organization.find({ _id: { $in: orgIds } }, 'name').lean(),
+    ]);
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    res.json({
+      actors: actors
+        .map((u) => ({ id: String(u._id), name: `${u.firstName} ${u.lastName}`, email: u.email }))
+        .sort(byName),
+      organizations: orgs.map((o) => ({ id: String(o._id), name: o.name })).sort(byName),
+      logTotal,
+      oldestAt: oldest?.at || null,
     });
   } catch (err) {
     next(err);
@@ -197,12 +278,30 @@ router.get('/platform-stats', async (req, res, next) => {
   }
 });
 
+// Manual "Reconcile now" — the same recompute the nightly job runs (idempotent: live bucket is
+// re-derived from real rows; the deleted bank is never touched), for when the operator is looking
+// at a stale "last reconciled" and doesn't want to wait for 03:47 UTC.
+router.post('/platform-stats/reconcile', async (req, res, next) => {
+  try {
+    const live = await recomputeLive({ stampBackfill: true });
+    res.json({ ok: true, live, stats: await getPlatformStats() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── Deletion requests: the intake behind "you may request deletion of your data." ──
 // Creating one SCHEDULES the org's deletion for now + SLA (default 30 days); the retention sweep
 // executes it. Cancellable until it fires. This is the producer the executor was missing.
 router.get('/deletion-requests', async (req, res, next) => {
   try {
-    const rows = await listDeletionRequests({ limit: 200 });
+    const status = ['scheduled', 'completed', 'cancelled', 'failed'].includes(req.query.status)
+      ? req.query.status
+      : null;
+    const limit = Math.min(Number(req.query.limit) || 200, 200);
+    const skip = Math.max(Number(req.query.skip) || 0, 0);
+    const { rows, total } = await listDeletionRequests({ status, skip, limit });
+    const now = Date.now();
     res.json({
       requests: rows.map((r) => ({
         id: String(r._id),
@@ -216,7 +315,10 @@ router.get('/deletion-requests', async (req, res, next) => {
         cancelledAt: r.cancelledAt,
         attempts: r.attempts || 0,
         error: r.error || null,
+        // Still scheduled past its own deadline = the SLA is being missed right now.
+        overdue: r.status === 'scheduled' && r.scheduledFor && new Date(r.scheduledFor).getTime() < now,
       })),
+      total,
     });
   } catch (err) {
     next(err);

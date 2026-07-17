@@ -111,7 +111,7 @@ export async function requirePersonOrgGrant(req, res, organizationId) {
   res.status(403).json({
     error:
       'Viewing a voter identity record requires a support access grant for that customer. Start one ' +
-      'with a reason — it is time-limited and every record you open is logged.',
+      'with a reason — it is time-limited and every request that touches voter data is logged.',
     code: 'SUPPORT_ACCESS_REQUIRED',
     organizationId: String(organizationId),
     organizationName: org?.name || null,
@@ -123,9 +123,13 @@ export async function requirePersonOrgGrant(req, res, organizationId) {
  * Record one staff read of customer voter content. Best-effort: an audit write must never take down
  * the request it is auditing — but it must also never silently vanish, so a failure is logged loudly.
  */
-export async function recordAccess({ actorUserId, organizationId, grantId, method, route, resource }) {
+export async function recordAccess({ actorUserId, organizationId, grantId, method, route, resource, rows = null, bytes = null }) {
   try {
-    await AccessLog.create({ actorUserId, organizationId, grantId, method, route, resource });
+    await AccessLog.create({
+      actorUserId, organizationId, grantId, method, route, resource,
+      ...(rows != null ? { rows } : {}),
+      ...(bytes != null ? { bytes } : {}),
+    });
     if (grantId) {
       await SupportAccessGrant.updateOne(
         { _id: grantId },

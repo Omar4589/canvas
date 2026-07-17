@@ -19,6 +19,10 @@ Every house is a pin colored by its current status — gray (unknocked), blue (n
 
 Turn pings on and each dot marks **where a canvasser stood** when they logged a knock, with a faint line back to the house. Filter to a **single canvasser** and the map rings two of their doors — a **Start** ring on their first knock and a **Latest** ring on their most recent — so you can trace their day. To flag GPS that looks off, see [Audit](audit).
 
+## Arriving pre-filtered from a drill
+
+You don't always have to set the map's filters by hand. Drill into a survey answer — from the campaign Home or the [Survey Explorer](page-survey-explorer) — and **Open in Map** lands here with the same answer, canvasser, and date range already applied, so the pins are exactly the doors behind the number you were looking at. Each entry in those lists also has its own **Map** link that jumps straight to that one door. The same works on your phone: **View on map** from an answer's voter list pre-filters the mobile admin map.
+
 ## Fixing an off-spot pin
 
 Some pins are looked up from the address, not read from your file, so they can land a house or two off. The web map draws a faint **amber ring** around these and the door reads *"Approximate location."* To fix one, drag the pin to the right spot and Save — the ring disappears and it reads *"Pin corrected."* Canvassers pick up the fix on their next sync, and moving a pin never re-cuts your books.

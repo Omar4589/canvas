@@ -515,7 +515,7 @@ export default function MapScreen() {
                 .map((h) => {
                   const c = hMap.get(String(h._id));
                   if (!c) return h;
-                  if (c.isActive === false || c.fullyVoted === true) return null; // archived or everyone voted — drop
+                  if (c.isActive === false || c.fullyVoted === true || c.fullyDnc === true) return null; // archived, everyone voted, or all DNC — drop
                   return {
                     ...h,
                     status: c.status,
@@ -528,7 +528,7 @@ export default function MapScreen() {
           ),
           voters: prev.voters.map((v) => {
             const c = vMap.get(String(v._id));
-            return c ? { ...v, surveyStatus: c.surveyStatus, voted: c.voted ?? v.voted } : v;
+            return c ? { ...v, surveyStatus: c.surveyStatus, voted: c.voted ?? v.voted, dnc: c.dnc ?? v.dnc } : v;
           }),
         };
         saveBootstrap(next);

@@ -10,6 +10,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { canvasserScopeWithPasses } from '../../services/canvass/canvasserScope.js';
 import { statusesFromDoorPass } from '../../services/passes/passStatus.js';
+import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -235,9 +236,7 @@ router.get('/today', async (req, res, next) => {
     const remBase = {
       campaignId: cId,
       organizationId: orgId,
-      isActive: true,
-      fullyVoted: { $ne: true },
-      excludedFromTurf: { $ne: true },
+      ...KNOCKABLE_DOOR_FILTER,
     };
     const { scope, doorPass } = await canvasserScopeWithPasses(req, access.campaign);
 

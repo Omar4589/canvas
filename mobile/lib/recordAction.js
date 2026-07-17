@@ -294,6 +294,13 @@ export function optimisticSubmit(qc, opts) {
           'Location required',
           'This door needs a GPS stamp. Make sure location is on, then record it again.'
         );
+      } else if (result.error?.data?.code === 'DO_NOT_CONTACT') {
+        // The voter was flagged after this client's bootstrap — the invalidate
+        // above pulls the flag down, so the card reads DNC from here on.
+        Alert.alert(
+          'Do not contact',
+          'This voter has asked not to be contacted, so this survey was not saved. The voter is now marked on your list.'
+        );
       } else {
         Alert.alert(hardFailTitle, result.error?.message || hardFailMessage);
       }

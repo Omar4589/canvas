@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useNavigationType } from 'react-router-dom';
 import { api, getToken, getActiveOrgId } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
@@ -70,15 +70,19 @@ export default function SurveyExplorerPage() {
   const tz = current?.timeZone || orgTz;
   const tzReady = !campaignsQ.isLoading;
 
-  // Range: seeded from a deep-link (?from/&to) or defaulted to the campaign's "today"
-  // once its tz is known (DashboardPage's tz-ready seeding).
+  // Range: seeded from a deep-link (?from/&to, or ?range=all — All time has NO bounds, so
+  // absence alone can't encode it; a bare URL means "no deep link" and defaults to Today)
+  // or defaulted to the campaign's "today" once its tz is known (DashboardPage's seeding).
   const [dateRange, setDateRange] = useState(() => {
     const f = searchParams.get('from');
     const t = searchParams.get('to');
     if (f || t) return { preset: 'custom', from: f || null, to: t || null };
+    if (searchParams.get('range') === 'all') return defaultRange('all', orgTz);
     return null;
   });
-  const rangeTouchedRef = useRef(!!(searchParams.get('from') || searchParams.get('to')));
+  const rangeTouchedRef = useRef(
+    !!(searchParams.get('from') || searchParams.get('to') || searchParams.get('range') === 'all')
+  );
   useEffect(() => {
     if (rangeTouchedRef.current || !tzReady) return;
     setDateRange(defaultRange('today', tz));
@@ -86,7 +90,11 @@ export default function SurveyExplorerPage() {
   function onRangeChange(next) {
     rangeTouchedRef.current = true;
     setDateRange(next);
-    updateParams({ from: next.from || '', to: next.to || '' });
+    updateParams({
+      from: next.from || '',
+      to: next.to || '',
+      range: !next.from && !next.to ? 'all' : '',
+    });
   }
 
   const [page, setPage] = useState(0);
@@ -94,17 +102,31 @@ export default function SurveyExplorerPage() {
 
   // The sidebar campaign switcher re-renders this SAME mounted page with a new
   // :campaignId — clear campaign A's drill (template/question/option ids would
-  // query empty in campaign B) and reseed the range.
+  // query empty in campaign B) and reseed the range. EXCEPT on back/forward: a
+  // popstate restores a URL whose params belong to the destination campaign's own
+  // drill — honor them (and reseed the range FROM them) instead of wiping the
+  // restored history entry.
+  const navigationType = useNavigationType();
   const prevCampaignRef = useRef(campaignId);
   useEffect(() => {
     if (prevCampaignRef.current === campaignId) return;
     prevCampaignRef.current = campaignId;
-    rangeTouchedRef.current = false;
-    setDateRange(tzReady ? defaultRange('today', tz) : null);
     setPage(0);
     setDetailId(null);
+    if (navigationType === 'POP') {
+      const f = searchParams.get('from');
+      const t = searchParams.get('to');
+      const all = searchParams.get('range') === 'all';
+      rangeTouchedRef.current = !!(f || t || all);
+      if (f || t) setDateRange({ preset: 'custom', from: f || null, to: t || null });
+      else if (all) setDateRange(defaultRange('all', tz));
+      else setDateRange(tzReady ? defaultRange('today', tz) : null);
+      return;
+    }
+    rangeTouchedRef.current = false;
+    setDateRange(tzReady ? defaultRange('today', tz) : null);
     setSearchParams(new URLSearchParams(), { replace: true });
-  }, [campaignId, tz, tzReady, setSearchParams]);
+  }, [campaignId, tz, tzReady, setSearchParams, navigationType, searchParams]);
 
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
@@ -183,9 +205,13 @@ export default function SurveyExplorerPage() {
     : [];
   const optionPct = optionIdx >= 0 ? percents[optionIdx] : 0;
 
-  // Tag mode requires a template id on the wire; fall back to the loaded (current) survey.
-  const tagTemplateId = survey || (template ? template.id : '');
-  const drillActive = tag ? !!tagTemplateId : hasOption;
+  // EVERY drill must be template-scoped exactly like the headline: /survey-results resolves
+  // the campaign's current template server-side when none is passed, but voters-by-answer /
+  // answer-canvassers / the CSV do NOT — and question keys / option ids are label slugs
+  // unique only WITHIN one template, so an unscoped drill on a multi-survey campaign would
+  // silently count another survey's same-named option and stop summing to the headline.
+  const resolvedTemplateId = survey || (template ? template.id : '');
+  const drillActive = tag ? !!resolvedTemplateId : hasOption && !!resolvedTemplateId;
 
   // Per-canvasser breakdown — powers the "Canvassers" stat AND the By-canvasser table.
   // Deliberately NOT userId-filtered: the table lists everyone so a row click can TOGGLE
@@ -198,7 +224,7 @@ export default function SurveyExplorerPage() {
       q,
       optionId,
       option,
-      survey,
+      resolvedTemplateId,
       effortId,
       dateRange?.from,
       dateRange?.to,
@@ -209,21 +235,21 @@ export default function SurveyExplorerPage() {
           questionKey: q,
           optionId,
           option,
-          surveyTemplateId: survey,
+          surveyTemplateId: resolvedTemplateId,
           campaignId,
           effortId,
           from: dateRange?.from,
           to: dateRange?.to,
         })}`
       ),
-    enabled: !!campaignId && !!dateRange && !tag && hasOption,
+    enabled: !!campaignId && !!dateRange && !tag && hasOption && !!resolvedTemplateId,
   });
   const canvasserRows = canvassersQ.data?.rows || [];
 
   const listFilters = tag
     ? {
         tag,
-        surveyTemplateId: tagTemplateId,
+        surveyTemplateId: resolvedTemplateId,
         campaignId,
         userId,
         effortId,
@@ -234,7 +260,7 @@ export default function SurveyExplorerPage() {
         questionKey: q,
         optionId,
         option,
-        surveyTemplateId: survey,
+        surveyTemplateId: resolvedTemplateId,
         campaignId,
         userId,
         effortId,
@@ -257,7 +283,7 @@ export default function SurveyExplorerPage() {
       optionId,
       option,
       tag,
-      survey,
+      resolvedTemplateId,
       userId,
       effortId,
       dateRange?.from,
@@ -379,7 +405,7 @@ export default function SurveyExplorerPage() {
               ))}
             </select>
           )}
-          {canvasserOptions.length > 0 && (
+          {(canvasserOptions.length > 0 || userId) && (
             <select
               value={userId}
               onChange={(e) => updateParams({ userId: e.target.value })}
@@ -387,6 +413,17 @@ export default function SurveyExplorerPage() {
               className={SELECT_CLS}
             >
               <option value="">Any canvasser</option>
+              {/* A table-row click or deep link can select someone off the roster (removed
+                  from the org) — the filter must stay visible and clearable, not silent. */}
+              {userId && !canvasserOptions.some((c) => c.id === userId) && (
+                <option value={userId}>
+                  {(() => {
+                    const r = canvasserRows.find((x) => String(x.userId) === userId);
+                    const name = r ? `${r.firstName} ${r.lastName}`.trim() : '';
+                    return name ? `${name} (departed)` : 'Departed canvasser';
+                  })()}
+                </option>
+              )}
               {canvasserOptions.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}

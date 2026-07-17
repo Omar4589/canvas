@@ -109,14 +109,25 @@ export function contactRate({ knocks = 0, surveyedKnocks = 0, refusedKnocks = 0 
   return Math.round(((surveyedKnocks + refusedKnocks) / knocks) * 100);
 }
 
-// Coverage-funnel bucket. Doors that are fully early-voted AND otherwise unknocked are pulled
-// out of `unknocked` into their own `voted` segment, so early voting doesn't inflate "unknocked"
+// Coverage-funnel bucket. Doors that are suppressed AND otherwise unknocked are pulled out of
+// `unknocked` into their own synthetic segment, so suppression doesn't inflate "unknocked"
 // (those doors dropped off the canvasser's list and will never be knocked). Knocked doors keep
-// their real status. Used by the status group-by in /overview and /campaign-rollup.
+// their real status. Two synthetic segments, in precedence order: `dnc` (every resident asked
+// not to be contacted — permanent) outranks `voted` (this election's early voting — cyclical),
+// so a door that is both buckets once, as dnc, and segment totals always sum to the universe.
+// Used by the status group-by in /overview and /campaign-rollup.
 export const coverageBucketExpr = {
-  $cond: [
-    { $and: [{ $eq: ['$fullyVoted', true] }, { $eq: ['$status', 'unknocked'] }] },
-    'voted',
-    '$status',
-  ],
+  $switch: {
+    branches: [
+      {
+        case: { $and: [{ $eq: ['$fullyDnc', true] }, { $eq: ['$status', 'unknocked'] }] },
+        then: 'dnc',
+      },
+      {
+        case: { $and: [{ $eq: ['$fullyVoted', true] }, { $eq: ['$status', 'unknocked'] }] },
+        then: 'voted',
+      },
+    ],
+    default: '$status',
+  },
 };

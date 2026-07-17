@@ -82,7 +82,7 @@ export async function orgContext(req, res, next) {
           return res.status(403).json({
             error:
               'Entering a customer organization requires a support access grant. Start one with a ' +
-              'reason — it is time-limited and every record you open is logged.',
+              'reason — it is time-limited and every request that touches voter data is logged.',
             code: 'SUPPORT_ACCESS_REQUIRED',
             organizationId: String(org._id),
             organizationName: org.name,

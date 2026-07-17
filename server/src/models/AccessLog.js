@@ -42,6 +42,13 @@ const accessLogSchema = new mongoose.Schema(
     route: { type: String, required: true },
     // What class of thing was read, in words a non-engineer can audit.
     resource: { type: String, default: null }, // 'voters' | 'map' | 'reports' | 'surveys' | 'notes' | …
+    // Magnitude. The log is request-level (one row per request, never record ids), so these are what
+    // distinguish a one-voter peek from a 4,000-row export: rows = list length of the JSON/CSV payload
+    // (null = unknown or single-record), bytes = uncompressed payload size. Captured centrally by the
+    // res wraps in middleware/accessLog.js; null on rows written by direct recordAccess callers that
+    // don't measure (persons.js).
+    rows: { type: Number, default: null },
+    bytes: { type: Number, default: null },
     at: { type: Date, default: Date.now, index: true },
   },
   { timestamps: false } // `at` is the timestamp; a createdAt would be noise

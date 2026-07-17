@@ -7,11 +7,9 @@ import { suggestMapping } from './canonicalFields.js';
 // stays small; the admin downloads these to fix and re-upload.
 export const NOT_FOUND_CAP = 10000;
 
-// Parse the CSV, find the voter-id column, and resolve which of this campaign's
-// voters it matches. Voters are matched org-wide by stateVoterId (indexed) then
-// filtered to those living in THIS campaign's households.
-// Shared by early voting (voted.js) and "walk list from CSV" (walklists.js).
-export async function parseAndMatch(campaign, fileBuffer, idColumn) {
+// Shared first half: parse the CSV, find the voter-id column, and match the ids ORG-WIDE by
+// stateVoterId. Campaign filtering (or not) is the callers' business.
+async function parseIdsAndFindOrgVoters(organizationId, fileBuffer, idColumn, projection) {
   const csv = fileBuffer.toString('utf8');
   const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() });
   const columns = parsed.meta?.fields || [];
@@ -32,10 +30,21 @@ export async function parseAndMatch(campaign, fileBuffer, idColumn) {
   const ids = [...csvIds];
   const voters = ids.length
     ? await Voter.find(
-        { organizationId: campaign.organizationId, stateVoterId: { $in: ids } },
-        { _id: 1, stateVoterId: 1, householdId: 1 }
+        { organizationId, stateVoterId: { $in: ids } },
+        projection || { _id: 1, stateVoterId: 1, householdId: 1 }
       ).lean()
     : [];
+  return { columns, col, totalRows: parsed.data.length, csvCount: csvIds.size, ids, voters };
+}
+
+// Parse the CSV, find the voter-id column, and resolve which of this campaign's
+// voters it matches. Voters are matched org-wide by stateVoterId (indexed) then
+// filtered to those living in THIS campaign's households.
+// Shared by early voting (voted.js) and "walk list from CSV" (walklists.js).
+export async function parseAndMatch(campaign, fileBuffer, idColumn) {
+  const base = await parseIdsAndFindOrgVoters(campaign.organizationId, fileBuffer, idColumn);
+  if (base.error) return base;
+  const { columns, col, totalRows, csvCount, ids, voters } = base;
   const hhIds = [...new Set(voters.map((v) => String(v.householdId)))];
   const inCampaignHh = new Set(
     (await Household.find({ _id: { $in: hhIds }, campaignId: campaign._id }, { _id: 1 }).lean()).map((h) => String(h._id))
@@ -46,9 +55,34 @@ export async function parseAndMatch(campaign, fileBuffer, idColumn) {
   return {
     columns,
     col,
-    totalRows: parsed.data.length,
-    csvCount: csvIds.size,
+    totalRows,
+    csvCount,
     inCampaign,
+    notFound: notFoundIds.length,
+    notFoundIds,
+  };
+}
+
+// The org-wide variant: no campaign filter at all. Used by do-not-contact list uploads, where the
+// flag is an org-level fact about the voter (routes/admin/dnc.js) — a match anywhere in the org
+// counts, and `notFoundIds` means "no voter row anywhere in the org" (those become DncPendingIds).
+export async function parseAndMatchOrg(organizationId, fileBuffer, idColumn) {
+  const base = await parseIdsAndFindOrgVoters(organizationId, fileBuffer, idColumn, {
+    _id: 1,
+    stateVoterId: 1,
+    householdId: 1,
+    'doNotContact.flagged': 1,
+  });
+  if (base.error) return base;
+  const { columns, col, totalRows, csvCount, ids, voters } = base;
+  const matchedSvids = new Set(voters.map((v) => v.stateVoterId));
+  const notFoundIds = ids.filter((id) => !matchedSvids.has(id));
+  return {
+    columns,
+    col,
+    totalRows,
+    csvCount,
+    matched: voters,
     notFound: notFoundIds.length,
     notFoundIds,
   };

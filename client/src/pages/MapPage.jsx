@@ -122,11 +122,21 @@ export default function MapPage() {
   // filtering would otherwise hide an untouched household), so it opens on all-time.
   const [dateRange, setDateRange] = useState(() => {
     const f = searchParams.get('from');
-    if (f) return { preset: 'custom', from: f, to: searchParams.get('to') || null };
+    const t = searchParams.get('to');
+    if (f || t) return { preset: 'custom', from: f || null, to: t || null };
     if (searchParams.get('household')) return defaultRange('all', orgTz);
+    // An answer-drill deep-link (Survey Explorer "Open in Map") with NO window means the
+    // drill itself was all-time — defaulting to Today would show a different door set
+    // than the list the admin just came from.
+    if (searchParams.get('questionKey')) return defaultRange('all', orgTz);
     return defaultRange('today', orgTz);
   });
-  const rangeTouchedRef = useRef(!!searchParams.get('from') || !!searchParams.get('household'));
+  const rangeTouchedRef = useRef(
+    !!searchParams.get('from') ||
+      !!searchParams.get('to') ||
+      !!searchParams.get('household') ||
+      !!searchParams.get('questionKey')
+  );
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState(searchParams.get('userId') || '');
   // A Survey Explorer "Open in Map" deep-link carries the answer drill

@@ -72,10 +72,35 @@ field. Full mechanics live in [EARLY_VOTING.md](EARLY_VOTING.md); the `audit:vot
 ([server/src/utils/auditVotedDoors.js](../server/src/utils/auditVotedDoors.js)) can prove this
 against live data.
 
+## Do not contact: a third independent status
+
+A voter can be marked **Do not contact** — "never knock on this person's door again." It's for
+the real thing that happens at doors: someone asks, firmly, to be left alone. Unlike the two
+statuses above it isn't about what happened; it's a standing request:
+
+- It's **org-wide and permanent**: it follows the person into every future campaign (a vote resets
+  each election; this doesn't), and it applies to **every campaign type — lit drop included**.
+  "Never come to my door" covers literature.
+- **Only an org admin can set or clear it**, always with a written reason. Both actions are
+  recorded as a note on the voter, so the history lives in the profile and the Notes hub. You can
+  also upload a whole **do-not-contact list** (a CSV of Voter IDs) from the Voters page — it works
+  like the Early Voting upload, with a preview, per-upload undo, and "sticky" ids that flag voters
+  who enter your universe later.
+- **What it does**: the voter drops out of every walk-list voter set and **walk-list CSV export**
+  (even lists saved before the flag), canvassers see a "Do not contact" badge on the voter and the
+  survey is disabled for them (the server refuses one regardless), and once **every** voter at a
+  door is flagged, the whole door drops off cutting, books, and canvasser maps — and shows up as
+  its own **"Do not contact" segment** in the coverage bar instead of inflating "unknocked."
+- **What it doesn't do**: nothing historical changes. Knocks already billed stay billed, past
+  surveys stay in reports (marked, so an export can't be reused as a call list), and a mixed door —
+  one flagged voter, one not — stays fully knockable for the housemates.
+- A new resident moving into a fully-flagged door **reopens** it automatically on the next import.
+
 ## What you can change (web admin)
 
 - **Edit voter info** — fix/maintain contact, party, gender, registration, districts, and name.
   The Voter ID, household link, and org are locked (they tie back to the source data).
+- **Mark / unmark Do not contact** — on the voter profile, with a required reason (see above).
 - **Edit a survey response in place** — correct answers or the note. Edits are **audited**: we
   record who changed it and when, and keep the voter's "surveyed" status in sync. You can also
   delete a response.
@@ -105,7 +130,9 @@ by different endpoints; it is no longer in the map/door bootstrap payload at all
 
 | Model | File | Notes |
 |---|---|---|
-| `Voter` | [models/Voter.js](../server/src/models/Voter.js) | Org-scoped (unique `{organizationId, stateVoterId}`). New: `lastEditedBy`/`lastEditedAt` (admin edit stamp) + index `{organizationId, lastName, firstName}` for the directory. |
+| `Voter` | [models/Voter.js](../server/src/models/Voter.js) | Org-scoped (unique `{organizationId, stateVoterId}`). New: `lastEditedBy`/`lastEditedAt` (admin edit stamp) + index `{organizationId, lastName, firstName}` for the directory. **`doNotContact`** typed subdoc `{flagged, at, byUserId, reason, source: 'admin'\|'upload', uploadId}` + partial index `{organizationId, 'doNotContact.flagged'}` (flagged rows only — needs `migrate:build-indexes --apply`). Import-safe **by omission**: never in csvImporter's `row.voter`, so the re-import `$set` can't touch it (the `surveyStatus` mechanism). |
+| `Household.fullyDnc` | [models/Household.js](../server/src/models/Household.js) | Derived: true when **every** voter at the door is flagged (≥1-voter guard — a voter-less door is never fullyDnc). Written ONLY by [services/dnc/recomputeFullyDnc.js](../server/src/services/dnc/recomputeFullyDnc.js), whose unconditional bulkWrite `$set` bumps `updatedAt` — the mobile `/changes` delta depends on that bump. Filtered via the shared [`KNOCKABLE_DOOR_FILTER`](../server/src/services/canvass/knockableDoorFilter.js) at every cut/serve/count site. |
+| `DncUpload` / `DncPendingId` | [models/DncUpload.js](../server/src/models/DncUpload.js), [models/DncPendingId.js](../server/src/models/DncPendingId.js) | Org-level (no campaignId) audit + sticky-pending stores for DNC list uploads; pendings graduate on later imports via [services/dnc/reapplyDncLists.js](../server/src/services/dnc/reapplyDncLists.js), hooked in importProcessor beside the voted reapply. |
 | `VoterNote` | [models/VoterNote.js](../server/src/models/VoterNote.js) | **New, org-level** admin/canvasser note that follows the person: `{ organizationId, voterId, authorId, body, editedBy, editedAt, timestamps }`. Index `{voterId, createdAt:-1}`. |
 | `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | New: `editedBy`/`editedAt` audit fields for in-place edits. `answers` = `[{questionKey, questionLabel, answer}]`. |
 | `CanvassActivity` / `SurveyResponse` notes | — | Field notes shown read-only on the profile (no dedicated voter-note before this feature). |
@@ -124,7 +151,9 @@ guarded by `requireAuth, orgContext, requireOrgRole('admin')`:
 
 | Method · path | Purpose |
 |---|---|
-| `GET /admin/voters` | Directory: server-paginated (`limit`/`offset`/`total`); search (name/Voter ID/address) + filters (`campaignId`, `party`, `surveyStatus`, `voted`, `precinct`). |
+| `GET /admin/voters` | Directory: server-paginated (`limit`/`offset`/`total`); search (name/Voter ID/address) + filters (`campaignId`, `party`, `surveyStatus`, `voted`, `precinct`, `dnc`). Rows carry a `dnc` boolean. |
+| `POST /admin/voters/:voterId/dnc` | Flag do-not-contact (body `{reason}`, required, min 3 chars). Idempotent — a re-flag never restamps (upload-undo attribution). Writes the subdoc + a VoterNote, then `recomputeFullyDnc` for the door. Returns the profile. |
+| `DELETE /admin/voters/:voterId/dnc` | Clear the flag (stamps the transition + VoterNote + recompute; door may reopen). |
 | `GET /admin/voters/:voterId` | Full profile (`buildVoterProfile`). |
 | `PATCH /admin/voters/:voterId` | Edit allowed fields (Zod). Locks `stateVoterId`/`householdId`/`organizationId`; stamps `lastEditedBy/At`; recomputes `fullName`. |
 | `POST/PATCH/DELETE /admin/voters/:voterId/notes[/:noteId]` | Admin voter-note CRUD. |
@@ -137,9 +166,16 @@ Canvassers are restricted to households in their **assigned books on the active 
 
 | Method · path | Purpose |
 |---|---|
-| `GET /mobile/voters?campaignId=&search=` | Campaign-scoped search (≤50). |
+| `GET /mobile/voters?campaignId=&search=` | Campaign-scoped search (≤50). Rows carry `dnc`. |
 | `GET /mobile/voters/:voterId?campaignId=` | Read profile (403 if the voter isn't in the canvasser's books). |
 | `POST /mobile/voters/:voterId/notes` | Add a `VoterNote` (`{campaignId, body}`). |
+
+**DNC list upload** (`/admin/dnc`, [routes/admin/dnc.js](../server/src/routes/admin/dnc.js)) —
+**org-level and org-admins-only** on purpose (the campaign-nested voted router's
+`requireCampaignManager` gate admits leads; this one must not): `POST /preview` (dry run, incl.
+`dropsByCampaign`), `POST /import` (flag + recompute; skip-already-flagged lives in the bulk op
+filter so undo attribution stays clean), `POST /undo` (reverts only rows carrying this upload's
+`uploadId` — admin-set flags are never touched), `GET /` (history + org totals).
 
 ## D. Invariants
 - **`recomputeSurveyStatus`** ([status.js](../server/src/services/canvass/status.js)) runs after any
@@ -149,6 +185,15 @@ Canvassers are restricted to households in their **assigned books on the active 
   (identity/source integrity). Changing a household = a re-import concern, not a profile edit.
 - **Scoping:** admin is org-wide; mobile is the active campaign and (for non-admins) the canvasser's
   assigned books.
+- **Do-not-contact enforcement is layered** — no single gate is trusted alone: walk-list resolution
+  excludes flagged voters unconditionally ([resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js) —
+  applied after every filter, not a checkbox); the walk-list CSV export re-checks LIVE flag state
+  (frozen lists predate flags); the mobile wire ships only a `dnc` **boolean** (the reason never
+  reaches a phone's offline cache); the door UI disables the survey; and the server survey route
+  403s `DO_NOT_CONTACT` regardless ([canvass.js](../server/src/routes/mobile/canvass.js)) — the
+  authoritative backstop that also catches offline-queued submits flushed after a flag.
+- **History is never rewritten:** flagging changes nothing already recorded — billed knocks stay
+  billed, past survey responses stay in reports (marked "Do not contact", never deleted).
 
 ## E. Frontend mapping
 

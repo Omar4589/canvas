@@ -49,7 +49,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
       .sort({ timestamp: -1 })
       .lean(),
     household
-      ? Voter.find({ householdId: voter.householdId }, 'fullName surveyStatus').lean()
+      ? Voter.find({ householdId: voter.householdId }, 'fullName surveyStatus doNotContact.flagged').lean()
       : [],
     VoterNote.find({ voterId: voter._id }).sort({ createdAt: -1 }).lean(),
   ]);
@@ -75,6 +75,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   const userIds = new Set();
   const add = (id) => id && userIds.add(String(id));
   add(voter.lastEditedBy);
+  add(voter.doNotContact?.byUserId);
   for (const a of activity) add(a.userId);
   for (const n of voterNotesRaw) add(n.userId);
   for (const s of surveys) { add(s.userId); add(s.editedBy); }
@@ -151,6 +152,17 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
       stateHouseDistrict: voter.stateHouseDistrict || null,
       precinct: voter.precinct || null,
       surveyStatus: voter.surveyStatus,
+      // The reason is visible here (an online, scoped read — same exposure class as the admin
+      // notes below); the offline bootstrap cache carries only a boolean, never the reason.
+      doNotContact: voter.doNotContact?.flagged
+        ? {
+            flagged: true,
+            at: voter.doNotContact.at || null,
+            reason: voter.doNotContact.reason || null,
+            source: voter.doNotContact.source || 'admin',
+            by: who(voter.doNotContact.byUserId),
+          }
+        : { flagged: false },
       lastEditedAt: voter.lastEditedAt || null,
       lastEditedBy: who(voter.lastEditedBy),
     },
@@ -165,6 +177,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
           county: household.county || null,
           status: household.status,
           fullyVoted: !!household.fullyVoted,
+          fullyDnc: !!household.fullyDnc,
           turfId: household.turfId ? String(household.turfId) : null,
           location: household.location || null,
           campaign: campaign
@@ -176,6 +189,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
               id: String(m._id),
               fullName: m.fullName,
               surveyStatus: m.surveyStatus,
+              dnc: !!m.doNotContact?.flagged,
               voted: memberVoted.has(String(m._id)),
             })),
         }

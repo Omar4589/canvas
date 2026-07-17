@@ -3,7 +3,7 @@ slug: page-early-voting
 title: The Early Voting page
 audience: lead
 kind: page
-order: 111
+order: 112
 sourceDoc: EARLY_VOTING.md
 summary: Upload voters who already voted so their doors drop off canvassers' books.
 tags: early voting, voted, page

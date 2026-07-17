@@ -63,7 +63,6 @@ export default function AnswerVoters() {
   const [canvasserMenuOpen, setCanvasserMenuOpen] = useState(false);
   const [skip, setSkip] = useState(0);
   const [items, setItems] = useState([]);
-  const loadedSkips = useRef(new Set());
 
   // This is a Tabs screen that never unmounts, and expo-router reuses the same
   // instance when navigated to with different params — reset the accumulator
@@ -84,7 +83,6 @@ export default function AnswerVoters() {
     setPrevKey(identityKey);
     setSkip(0);
     setItems([]);
-    loadedSkips.current = new Set();
   }
 
   // Campaign object (tz for exact times; saveActiveCampaign for "View on map") —
@@ -139,11 +137,16 @@ export default function AnswerVoters() {
   });
   const canvasserRows = canvassersQ.data?.rows || [];
 
+  // Web VoterList semantics: the first page REPLACES (so a refetch after returning to a
+  // cached drill shows fresh rows, not the stale cache-then-discard), later pages dedup
+  // by responseId (a new submission shifts the desc-sorted pages, re-serving a row).
   useEffect(() => {
     if (!q.data?.voters) return;
-    if (loadedSkips.current.has(skip)) return;
-    loadedSkips.current.add(skip);
-    setItems((prev) => [...prev, ...q.data.voters]);
+    setItems((prev) => {
+      if (skip === 0) return q.data.voters;
+      const seen = new Set(prev.map((v) => v.responseId));
+      return [...prev, ...q.data.voters.filter((v) => !seen.has(v.responseId))];
+    });
   }, [q.data, skip]);
 
   const total = q.data?.total ?? 0;
@@ -191,8 +194,11 @@ export default function AnswerVoters() {
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
         <Text style={styles.title} numberOfLines={2}>{label || 'Responses'}</Text>
+        {/* "entries", not "voters" — this is response-unit (a voter re-surveyed in a
+            later round appears once per round), same wording as the web explorer. */}
         <Text style={styles.subtitle}>
-          “{option}” · {total.toLocaleString()} {total === 1 ? 'voter' : 'voters'}
+          “{option}” ·{' '}
+          {q.error && !q.data ? '—' : `${total.toLocaleString()} ${total === 1 ? 'entry' : 'entries'}`}
         </Text>
 
         {/* Negative margin cancels the content padding — TabSwitcher carries its own. */}
@@ -255,6 +261,9 @@ export default function AnswerVoters() {
 
             {q.isLoading && items.length === 0 ? (
               <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
+            ) : q.error && items.length === 0 ? (
+              // An error must never render as an authoritative zero on an audit surface.
+              <Text style={styles.muted}>{q.error.message}</Text>
             ) : items.length === 0 ? (
               <Text style={styles.muted}>No voters for this answer.</Text>
             ) : items.length < total ? (

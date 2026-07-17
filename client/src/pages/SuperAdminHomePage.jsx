@@ -64,6 +64,42 @@ export default function SuperAdminHomePage() {
     queryFn: () => api('/super-admin/access/idle-orgs'),
     ...livePollOptions(live, true, 30_000),
   });
+  // The ops-health strip: is anything on fire, who is inside customer data, is a deletion SLA
+  // slipping. Same keys the Support access page uses, so the caches are shared.
+  const healthQ = useQuery({
+    queryKey: ['retention-health'],
+    queryFn: () => api('/super-admin/access/health/retention'),
+    ...livePollOptions(live, true, 30_000),
+  });
+  const grantsQ = useQuery({
+    queryKey: ['support-grants'],
+    queryFn: () => api('/super-admin/access/grants?all=1'),
+    ...livePollOptions(live, true, 30_000),
+  });
+  const deletionsQ = useQuery({
+    queryKey: ['deletion-requests', 'summary'],
+    queryFn: () => api('/super-admin/access/deletion-requests?status=scheduled&limit=1'),
+    ...livePollOptions(live, true, 30_000),
+  });
+  // One at-risk definition, shared with the Organizations page (trials expiring, past due,
+  // suspended, wind-downs; the idle zombies it also returns render in their own table below).
+  const atRiskQ = useQuery({
+    queryKey: ['super-admin', 'organizations', 'at-risk'],
+    queryFn: () => api('/super-admin/organizations/at-risk'),
+    ...livePollOptions(live, true, 30_000),
+  });
+
+  // Manual "Reconcile now" — the same idempotent recompute the 03:47 UTC job runs.
+  const [reconcileMsg, setReconcileMsg] = useState(null);
+  const reconcileMut = useMutation({
+    mutationFn: () => api('/super-admin/access/platform-stats/reconcile', { method: 'POST' }),
+    onSuccess: () => {
+      setReconcileMsg('Recomputed from live rows.');
+      setTimeout(() => setReconcileMsg(null), 4000);
+      qc.invalidateQueries({ queryKey: ['super-admin', 'platform-stats'] });
+    },
+    onError: (err) => setReconcileMsg(err.message),
+  });
 
   function pickOrg(orgId) {
     switchOrg(orgId);
@@ -83,7 +119,10 @@ export default function SuperAdminHomePage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <h1 className="text-2xl font-semibold text-fg">Platform control room</h1>
             <LiveStatus
-              {...liveStatusProps([overviewQ, statsQ, idleQ], { live, onToggle: () => setLive((v) => !v) })}
+              {...liveStatusProps([overviewQ, statsQ, idleQ, healthQ, grantsQ, deletionsQ, atRiskQ], {
+                live,
+                onToggle: () => setLive((v) => !v),
+              })}
             />
           </div>
           <p className="text-sm text-fg-muted">
@@ -125,34 +164,81 @@ export default function SuperAdminHomePage() {
           />
         </div>
 
-        {orgs.some(
-          (o) =>
-            ['past_due', 'suspended'].includes(o.billing?.effective) ||
-            (o.billing?.effective === 'trial' && o.billing?.trialDaysLeft != null && o.billing.trialDaysLeft <= 2)
-        ) && (
+        {/* Ops health at a glance — the landing page's "is anything on fire" row. Each chip links
+            to the Support access page, where the detail lives. */}
+        <div className="flex flex-wrap gap-2 text-xs">
+          <button
+            onClick={() => navigate('/super-admin/access')}
+            className={`rounded-full px-3 py-1 font-semibold ${
+              healthQ.data
+                ? healthQ.data.healthy
+                  ? 'bg-success/10 text-success'
+                  : 'bg-danger/10 text-danger'
+                : 'bg-sunken text-fg-muted'
+            }`}
+            title={healthQ.data?.message || 'Retention health'}
+          >
+            {healthQ.data ? (healthQ.data.healthy ? '● Retention enforced' : '▲ Retention NOT ENFORCED') : 'Retention…'}
+          </button>
+          <button
+            onClick={() => navigate('/super-admin/access')}
+            className={`rounded-full px-3 py-1 font-semibold ${
+              (grantsQ.data?.grants?.length || 0) > 0 ? 'bg-warning-tint text-warning-fg' : 'bg-sunken text-fg-muted'
+            }`}
+            title="Open support sessions — staff currently inside customer organizations"
+          >
+            {grantsQ.data
+              ? grantsQ.data.scope === 'all'
+                ? `${grantsQ.data.grants.length} staff inside customer orgs`
+                : `${grantsQ.data.grants.length} of your sessions open`
+              : 'Sessions…'}
+          </button>
+          <button
+            onClick={() => navigate('/super-admin/access')}
+            className={`rounded-full px-3 py-1 font-semibold ${
+              (healthQ.data?.deletionRequests?.stuck || 0) + (healthQ.data?.deletionRequests?.failed || 0) > 0
+                ? 'bg-danger/10 text-danger'
+                : (deletionsQ.data?.total || 0) > 0
+                  ? 'bg-warning-tint text-warning-fg'
+                  : 'bg-sunken text-fg-muted'
+            }`}
+            title="Scheduled org deletions (the delete-on-request SLA)"
+          >
+            {deletionsQ.data
+              ? `${deletionsQ.data.total} deletion${deletionsQ.data.total === 1 ? '' : 's'} scheduled${
+                (healthQ.data?.deletionRequests?.stuck || 0) + (healthQ.data?.deletionRequests?.failed || 0) > 0
+                  ? ` · ${(healthQ.data.deletionRequests.stuck || 0) + (healthQ.data.deletionRequests.failed || 0)} need a human`
+                  : ''
+              }`
+              : 'Deletions…'}
+          </button>
+        </div>
+
+        {(atRiskQ.data?.items || []).some((it) => it.type !== 'idle') && (
           <div className="rounded-md border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
             <span className="font-semibold">Billing needs attention: </span>
-            {orgs
-              .filter(
-                (o) =>
-                  ['past_due', 'suspended'].includes(o.billing?.effective) ||
-                  (o.billing?.effective === 'trial' && o.billing?.trialDaysLeft != null && o.billing.trialDaysLeft <= 2)
-              )
-              .map(
-                (o) =>
-                  `${o.name} (${
-                    o.billing.effective === 'trial'
-                      ? `trial ends in ${o.billing.trialDaysLeft}d`
-                      : o.billing.effective.replace('_', ' ')
-                  })`
-              )
-              .join(' · ')}{' '}
-            <button
-              onClick={() => navigate('/organizations')}
-              className="font-semibold underline underline-offset-2 hover:opacity-80"
-            >
-              Manage →
-            </button>
+            {atRiskQ.data.items
+              .filter((it) => it.type !== 'idle')
+              .map((it, i, arr) => (
+                <span key={`${it.organizationId}-${it.type}`}>
+                  <button
+                    onClick={() => navigate(`/organizations?billing=${it.organizationId}`)}
+                    className="font-semibold underline underline-offset-2 hover:opacity-80"
+                  >
+                    {it.name}
+                  </button>
+                  {' ('}
+                  {it.type === 'trial_expiring'
+                    ? it.trialDaysLeft === 0
+                      ? 'trial expired'
+                      : `trial ends in ${it.trialDaysLeft}d`
+                    : it.type === 'wind_down'
+                      ? `deletes ${new Date(it.windDownEndsAt).toLocaleDateString()}`
+                      : it.type.replace('_', ' ')}
+                  {')'}
+                  {i < arr.length - 1 ? ' · ' : ''}
+                </span>
+              ))}
           </div>
         )}
 
@@ -330,9 +416,20 @@ export default function SuperAdminHomePage() {
               />
             ))}
           </div>
-          <p className="mt-2 text-xs text-fg-subtle">
-            Recomputed nightly · last reconciled{' '}
-            {statsQ.data?.backfilledAt ? new Date(statsQ.data.backfilledAt).toLocaleString() : 'never'}
+          <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-fg-subtle">
+            <span>
+              Recomputed nightly · last reconciled{' '}
+              {statsQ.data?.backfilledAt ? new Date(statsQ.data.backfilledAt).toLocaleString() : 'never'}
+            </span>
+            <button
+              onClick={() => reconcileMut.mutate()}
+              disabled={reconcileMut.isPending}
+              title="Recompute the live tallies from real rows right now (same as the nightly job; the deleted bank is untouched)"
+              className="font-semibold text-brand-accent hover:underline disabled:opacity-60"
+            >
+              {reconcileMut.isPending ? 'Reconciling…' : 'Reconcile now'}
+            </button>
+            {reconcileMsg && <span className="text-fg-muted">{reconcileMsg}</span>}
           </p>
         </div>
       </div>

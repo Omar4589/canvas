@@ -89,6 +89,9 @@ export default function VoterProfile() {
       ) : !p ? null : (
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
           <View style={styles.badges}>
+            {v.doNotContact?.flagged ? (
+              <Text style={[styles.badge, styles.badgeDanger]}>Do not contact</Text>
+            ) : null}
             {v.party ? <Text style={styles.badge}>{v.party}</Text> : null}
             <Text style={[styles.badge, v.surveyStatus === 'surveyed' && styles.badgeGreen]}>
               {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
@@ -220,6 +223,7 @@ function makeStyles(t) {
   },
   badgeGreen: { backgroundColor: colors.successBg, color: colors.success, borderColor: colors.successBg },
   badgeTeal: { backgroundColor: colors.tealBg, color: colors.teal, borderColor: colors.tealBg },
+  badgeDanger: { backgroundColor: colors.dangerBg, color: colors.danger, borderColor: colors.dangerBg },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

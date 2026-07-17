@@ -1,20 +1,33 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import OrgBillingPanel from '../components/OrgBillingPanel.jsx';
-import { BillingPill } from '../lib/billingStatus.jsx';
+import Pager from '../components/Pager.jsx';
+import { BillingPill, fmtUsd } from '../lib/billingStatus.jsx';
 import { isValidEmail, tempPasswordProblem } from '../lib/validators.js';
 
 const fieldCls =
   'mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
 
-// Which orgs the account manager should look at first: paused/past-due states
-// and trials inside their last 2 days.
-function needsAttention(o) {
-  const b = o.billing || {};
-  if (['past_due', 'suspended'].includes(b.effective)) return true;
-  return b.effective === 'trial' && b.trialDaysLeft != null && b.trialDaysLeft <= 2;
+const LIMIT = 25;
+
+// One line per at-risk item — the server (organizations.js /at-risk) owns the definition.
+function atRiskLabel(it) {
+  switch (it.type) {
+    case 'trial_expiring':
+      return it.trialDaysLeft === 0 ? 'trial expired' : `trial ends in ${it.trialDaysLeft}d`;
+    case 'past_due':
+      return `past due since ${new Date(it.since).toLocaleDateString()}`;
+    case 'suspended':
+      return `suspended since ${new Date(it.since).toLocaleDateString()}`;
+    case 'wind_down':
+      return `canceled — deletes ${new Date(it.windDownEndsAt).toLocaleDateString()}`;
+    case 'idle':
+      return `idle ${it.monthsIdle} mo at $0`;
+    default:
+      return it.type;
+  }
 }
 
 export default function OrganizationsPage() {
@@ -36,23 +49,50 @@ export default function OrganizationsPage() {
   const [deleteOrg, setDeleteOrg] = useState(null); // { id, name, slug } — confirm target
   const [confirmSlug, setConfirmSlug] = useState('');
   const [deleteMsg, setDeleteMsg] = useState(null);
+  // Server-driven table state (q searches name/slug; sort: created | name | trialEnds).
+  const [searchText, setSearchText] = useState('');
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState('created');
+  const [skip, setSkip] = useState(0);
 
+  // The paged table. Keyed under the ['super-admin','organizations'] prefix so every existing
+  // invalidation (create / toggle / delete / billing panel) refreshes it too.
+  const tableParams = new URLSearchParams({ limit: String(LIMIT), skip: String(skip) });
+  if (q) tableParams.set('q', q);
+  if (sort !== 'created') tableParams.set('sort', sort);
   const orgsQ = useQuery({
-    queryKey: ['super-admin', 'organizations'],
-    queryFn: () => api('/super-admin/organizations'),
+    queryKey: ['super-admin', 'organizations', 'table', q, sort, skip],
+    queryFn: () => api(`/super-admin/organizations?${tableParams.toString()}`),
+    placeholderData: keepPreviousData,
   });
 
-  // Deep link from the Control Room's idle queue: /organizations?billing=<orgId> opens
-  // that org's billing panel once the list is in (the panel header needs the name), then
-  // consumes the param so closing the panel doesn't reopen it.
+  // This month's revenue across all customer orgs (internal excluded) — the header rollup and the
+  // per-row "This month" column. One statement walk per org server-side; refreshed with the list.
+  const rollupQ = useQuery({
+    queryKey: ['super-admin', 'organizations', 'billing-rollup'],
+    queryFn: () => api('/super-admin/organizations/billing-rollup'),
+  });
+
+  // The lifecycle triage list — one server-side definition (trials expiring, past due, suspended,
+  // wind-downs, idle $0 zombies), shared with the Control Room.
+  const atRiskQ = useQuery({
+    queryKey: ['super-admin', 'organizations', 'at-risk'],
+    queryFn: () => api('/super-admin/organizations/at-risk'),
+  });
+
+  // Deep link from the Control Room: /organizations?billing=<orgId> opens that org's billing panel,
+  // then consumes the param so closing the panel doesn't reopen it. The name resolves from whichever
+  // list already has it; the panel falls back to its own fetched org name otherwise.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const target = searchParams.get('billing');
-    if (!target || !orgsQ.data) return;
-    const o = orgsQ.data.organizations?.find((x) => x.id === target);
-    if (o) setBillingOrg({ id: o.id, name: o.name });
+    if (!target) return;
+    if (!orgsQ.data && !rollupQ.data) return;
+    const o = orgsQ.data?.organizations?.find((x) => x.id === target)
+      || rollupQ.data?.organizations?.find((x) => x.organizationId === target);
+    setBillingOrg({ id: target, name: o?.name || '' });
     setSearchParams({}, { replace: true });
-  }, [orgsQ.data, searchParams, setSearchParams]);
+  }, [orgsQ.data, rollupQ.data, searchParams, setSearchParams]);
 
   const createMut = useMutation({
     mutationFn: (data) => api('/super-admin/organizations', { method: 'POST', body: data }),
@@ -311,19 +351,63 @@ export default function OrganizationsPage() {
         </div>
       )}
 
-      {(orgsQ.data?.organizations || []).some(needsAttention) && (
+      {/* This month's revenue across every customer org — the aggregate the per-org panels can't
+          answer. "Billable" = statement lines with billable === true (first knock before month end,
+          not archived before month start); internal orgs are excluded entirely. */}
+      {rollupQ.data && (
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="text-sm text-fg-muted">
+              <span className="text-lg font-semibold text-fg">{fmtUsd(rollupQ.data.totalCents)}</span>{' '}
+              this month ({rollupQ.data.month}) · {rollupQ.data.billableCampaigns} billable campaign
+              {rollupQ.data.billableCampaigns === 1 ? '' : 's'}
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              {Object.entries(rollupQ.data.byStatus).map(([s, n]) => (
+                <span key={s} className="rounded-full bg-sunken px-2 py-0.5 font-medium text-fg-muted">
+                  {n} {s.replace('_', ' ')}
+                </span>
+              ))}
+            </div>
+          </div>
+          {rollupQ.data.organizations.some((r) => r.totalCents > 0) && (
+            <div className="mt-2 text-xs text-fg-muted">
+              Top:{' '}
+              {rollupQ.data.organizations
+                .filter((r) => r.totalCents > 0)
+                .slice(0, 3)
+                .map((r, i, arr) => (
+                  <span key={r.organizationId}>
+                    <button
+                      onClick={() => setBillingOrg({ id: r.organizationId, name: r.name })}
+                      className="font-semibold text-fg underline decoration-dotted underline-offset-2 hover:opacity-80"
+                    >
+                      {r.name}
+                    </button>{' '}
+                    ({fmtUsd(r.totalCents)}){i < arr.length - 1 ? ' · ' : ''}
+                  </span>
+                ))}
+            </div>
+          )}
+          <p className="mt-1 text-xs text-fg-subtle">
+            Billable = first knock before the month ended and not archived before it began. Internal orgs excluded.
+          </p>
+        </div>
+      )}
+
+      {(atRiskQ.data?.items?.length || 0) > 0 && (
         <div className="rounded-md border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
           <span className="font-semibold">Needs attention: </span>
-          {(orgsQ.data?.organizations || []).filter(needsAttention).map((o, i, arr) => (
-            <span key={o.id}>
+          {atRiskQ.data.items.map((it, i, arr) => (
+            <span key={`${it.organizationId}-${it.type}`}>
               <button
-                onClick={() => setBillingOrg({ id: o.id, name: o.name })}
+                onClick={() => setBillingOrg({ id: it.organizationId, name: it.name })}
                 className="font-semibold underline underline-offset-2 hover:opacity-80"
               >
-                {o.name}
+                {it.name}
               </button>
               {' ('}
-              {o.billing.effective === 'trial' ? `trial ends in ${o.billing.trialDaysLeft}d` : o.billing.effective.replace('_', ' ')}
+              {atRiskLabel(it)}
               {')'}
               {i < arr.length - 1 ? ' · ' : ''}
             </span>
@@ -331,88 +415,149 @@ export default function OrganizationsPage() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setSkip(0);
+          setQ(searchText.trim());
+        }}
+        className="flex flex-wrap items-center gap-2"
+      >
+        <input
+          type="search"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          placeholder="Search name or slug…"
+          className="flex-1 min-w-[220px] rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+        />
+        <button type="submit" className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+          Search
+        </button>
+      </form>
+
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <table className="min-w-full divide-y divide-border text-sm">
           <thead className="bg-sunken text-left text-xs font-semibold uppercase tracking-wide text-fg-muted">
             <tr>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Slug</th>
-              <th className="px-4 py-3">Members</th>
-              <th className="px-4 py-3">Campaigns</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Billing</th>
-              <th className="px-4 py-3"></th>
+              {[
+                { key: 'name', label: 'Name', sortable: true },
+                // Members counts ACTIVE memberships; campaigns are split so the bases are labeled.
+                { key: 'members', label: 'Active members' },
+                { key: 'campaigns', label: 'Campaigns' },
+                { key: 'created', label: 'Created', sortable: true },
+                { key: 'trialEnds', label: 'Trial ends', sortable: true },
+                { key: 'rate', label: 'Rate' },
+                { key: 'month', label: 'This month' },
+                { key: 'billing', label: 'Billing' },
+                { key: 'actions', label: '' },
+              ].map((c) => (
+                <th key={c.key} className="px-3 py-3">
+                  {c.sortable ? (
+                    <button
+                      onClick={() => { setSkip(0); setSort(c.key); }}
+                      className={`uppercase tracking-wide hover:text-fg ${sort === c.key ? 'text-fg' : ''}`}
+                    >
+                      {c.label}
+                      {sort === c.key && ' ▾'}
+                    </button>
+                  ) : (
+                    c.label
+                  )}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {orgsQ.isLoading && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-fg-muted">
+                <td colSpan={9} className="px-3 py-6 text-center text-fg-muted">
                   Loading…
                 </td>
               </tr>
             )}
-            {orgsQ.data?.organizations?.map((o) => (
-              <tr key={o.id}>
-                <td className="px-4 py-3 font-medium text-fg">{o.name}</td>
-                <td className="px-4 py-3 text-fg-muted">{o.slug}</td>
-                <td className="px-4 py-3 text-fg-muted">{o.memberCount}</td>
-                <td className="px-4 py-3 text-fg-muted">{o.campaignCount}</td>
-                <td className="px-4 py-3">
-                  <span
-                    className={
-                      o.isActive
-                        ? 'inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700'
-                        : 'inline-flex rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted'
-                    }
-                  >
-                    {o.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <button
-                    onClick={() => setBillingOrg({ id: o.id, name: o.name })}
-                    className="inline-flex items-center gap-1.5"
-                    title="Manage billing"
-                  >
-                    <BillingPill effective={o.billing?.effective} />
-                    <span className="text-xs font-semibold text-brand-accent hover:opacity-80">Manage</span>
-                  </button>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex flex-col items-end gap-1">
+            {orgsQ.data?.organizations?.map((o) => {
+              const money = rollupQ.data?.organizations?.find((r) => r.organizationId === o.id);
+              return (
+                <tr key={o.id}>
+                  <td className="px-3 py-3">
+                    <div className="font-medium text-fg">
+                      {o.name}
+                      {!o.isActive && (
+                        <span className="ml-2 inline-flex rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted">
+                          Inactive
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-fg-subtle">{o.slug}</div>
+                  </td>
+                  <td className="px-3 py-3 text-fg-muted">{o.memberCount}</td>
+                  <td className="px-3 py-3 text-fg-muted">
+                    {o.campaignsActive}
+                    {o.campaignsArchived > 0 && (
+                      <span className="text-fg-subtle"> · {o.campaignsArchived} archived</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-fg-muted">
+                    {o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '—'}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-fg-muted">
+                    {o.billing?.trialEndsAt ? new Date(o.billing.trialEndsAt).toLocaleDateString() : '—'}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-fg-muted">
+                    {money ? `${fmtUsd(money.rateCents)}/cmp` : '—'}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-fg-muted">
+                    {money ? fmtUsd(money.totalCents) : '—'}
+                  </td>
+                  <td className="px-3 py-3">
                     <button
-                      onClick={() =>
-                        toggleActiveMut.mutate({ id: o.id, isActive: !o.isActive })
-                      }
-                      className="text-xs font-semibold text-brand-accent hover:text-brand-accent"
+                      onClick={() => setBillingOrg({ id: o.id, name: o.name })}
+                      className="inline-flex items-center gap-1.5"
+                      title="Manage billing"
                     >
-                      {o.isActive ? 'Deactivate' : 'Reactivate'}
+                      <BillingPill effective={o.billing?.effective} />
+                      <span className="text-xs font-semibold text-brand-accent hover:opacity-80">Manage</span>
                     </button>
-                    <button
-                      onClick={() => {
-                        setDeleteMsg(null);
-                        setConfirmSlug('');
-                        setDeleteOrg({ id: o.id, name: o.name, slug: o.slug });
-                      }}
-                      className="text-xs font-semibold text-danger hover:opacity-80"
-                    >
-                      Delete…
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="flex flex-col items-end gap-1">
+                      <button
+                        onClick={() =>
+                          toggleActiveMut.mutate({ id: o.id, isActive: !o.isActive })
+                        }
+                        className="text-xs font-semibold text-brand-accent hover:text-brand-accent"
+                      >
+                        {o.isActive ? 'Deactivate' : 'Reactivate'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDeleteMsg(null);
+                          setConfirmSlug('');
+                          setDeleteOrg({ id: o.id, name: o.name, slug: o.slug });
+                        }}
+                        className="text-xs font-semibold text-danger hover:opacity-80"
+                      >
+                        Delete…
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             {orgsQ.data?.organizations?.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-fg-muted">
-                  No organizations yet.
+                <td colSpan={9} className="px-3 py-6 text-center text-fg-muted">
+                  {q ? 'No organizations match.' : 'No organizations yet.'}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {(orgsQ.data?.total || 0) > LIMIT && (
+        <Pager skip={skip} limit={LIMIT} total={orgsQ.data.total} onChange={setSkip} />
+      )}
 
       {billingOrg && (
         <OrgBillingPanel orgId={billingOrg.id} orgName={billingOrg.name} onClose={() => setBillingOrg(null)} />

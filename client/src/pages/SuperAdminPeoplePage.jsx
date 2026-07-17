@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import Pager from '../components/Pager.jsx';
 
 const LIMIT = 25;
 
@@ -147,27 +148,7 @@ export default function SuperAdminPeoplePage() {
         </table>
       </div>
 
-      <div className="mt-3 flex items-center justify-between text-sm text-fg-muted">
-        <span>
-          {total === 0 ? '0' : `${skip + 1}–${Math.min(skip + LIMIT, total)}`} of {total}
-        </span>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setSkip(Math.max(0, skip - LIMIT))}
-            disabled={skip === 0}
-            className="rounded-md border border-border-strong px-3 py-1.5 disabled:opacity-50"
-          >
-            ‹ Prev
-          </button>
-          <button
-            onClick={() => setSkip(skip + LIMIT)}
-            disabled={skip + LIMIT >= total}
-            className="rounded-md border border-border-strong px-3 py-1.5 disabled:opacity-50"
-          >
-            Next ›
-          </button>
-        </div>
-      </div>
+      <Pager skip={skip} limit={LIMIT} total={total} onChange={setSkip} className="mt-3" />
     </div>
   );
 }

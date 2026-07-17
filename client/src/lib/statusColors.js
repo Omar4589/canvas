@@ -12,6 +12,7 @@ export const STATUS_COLORS = {
   lit_dropped: '#a855f7', // purple-500
   restricted: '#475569', // slate-600 — inaccessible/blocked home
   voted: '#14b8a6', // teal-500
+  dnc: '#9f1239', // rose-800 — do not contact
 };
 
 export const STATUS_LABELS = {
@@ -23,6 +24,7 @@ export const STATUS_LABELS = {
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
   voted: 'Voted',
+  dnc: 'Do not contact',
 };
 
 // On a dark basemap the unknocked gray (#9ca3af) is too low-contrast; lighten it.

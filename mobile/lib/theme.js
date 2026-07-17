@@ -38,6 +38,7 @@ const status = {
   lit_dropped: '#A855F7',
   restricted: '#475569', // slate — inaccessible/blocked home; distinct from grey unknocked
   voted: '#14B8A6',
+  dnc: '#9F1239', // deep rose — do-not-contact; distinct from wrong_address red
 };
 const statusLabels = {
   unknocked: 'Unknocked',
@@ -48,6 +49,7 @@ const statusLabels = {
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
   voted: 'Voted',
+  dnc: 'Do not contact',
 };
 
 // Shadows. Black drop shadows read poorly on dark surfaces, so dark UIs lean on

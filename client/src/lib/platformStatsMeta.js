@@ -46,6 +46,8 @@ export const OVERVIEW_HELP = {
     'Distinct canvassers who logged a door action in the past 15 minutes on an active campaign. Admin bulk marks don’t count. Includes the demo org — it lights up after “Refresh demo day”.',
   today:
     'Door actions since midnight UTC (not your local midnight), on active campaigns across all orgs: not-home, wrong address, refused, surveys, lit drops. Includes admin bulk marks; “restricted” doors are tallied separately, never as knocks.',
+  campaigns:
+    'Every campaign across every organization — archived ones included in the total, with the currently-active count alongside. Same population as the Orgs card (internal/demo orgs included), so the two can be read together.',
 };
 
 export const TOTALS_INTRO =

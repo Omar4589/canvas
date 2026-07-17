@@ -192,6 +192,14 @@ router.get('/activity-feed', async (req, res, next) => {
       const sinceMs = Date.parse(req.query.since);
       if (Number.isFinite(sinceMs)) filter.timestamp = { $gt: new Date(sinceMs) };
     }
+    // `before` is `since`'s mirror: page BACKWARD into history ("Load older"), which the
+    // newer-only cursor could never reach.
+    if (req.query.before) {
+      const beforeMs = Date.parse(req.query.before);
+      if (Number.isFinite(beforeMs)) {
+        filter.timestamp = { ...(filter.timestamp || {}), $lt: new Date(beforeMs) };
+      }
+    }
 
     const events = await CanvassActivity.find(filter)
       .sort({ timestamp: -1 })

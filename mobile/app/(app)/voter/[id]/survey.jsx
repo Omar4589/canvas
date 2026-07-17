@@ -181,6 +181,25 @@ export default function VoterSurvey() {
     return survey.questions.filter((q) => !q.retired && vis.has(q.key));
   }, [answers, otherTexts, survey]);
 
+  // Do-not-contact wall: the server 403s the submit anyway — this is the
+  // courteous version, before any answers get typed. After the hooks above so
+  // the hook order stays stable.
+  if (voter?.dnc) {
+    return (
+      <SafeAreaView style={styles.center} edges={['top']}>
+        <Text style={[type.h2, { color: colors.danger }]}>Do not contact</Text>
+        <Text style={[type.body, { marginTop: spacing.sm, textAlign: 'center' }]}>
+          This voter has asked not to be contacted.{'\n'}The survey is disabled
+          for them. If everyone at this address is flagged, the door will drop
+          off your list automatically.
+        </Text>
+        <Pressable onPress={() => router.back()} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Back</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+
   if (!voter || !survey) {
     return (
       <SafeAreaView style={styles.center} edges={['top']}>

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { BillingPill, BILLING_STATUS_META, fmtUsd, currentMonthStr } from '../lib/billingStatus.jsx';
+import Pager from './Pager.jsx';
 
 const STATUSES = ['trial', 'active', 'past_due', 'suspended', 'canceled', 'internal'];
 const inputCls =
@@ -11,6 +12,27 @@ const btnCls =
 
 function fmtDate(d) {
   return d ? new Date(d).toLocaleDateString() : '—';
+}
+
+const EVENTS_LIMIT = 25;
+
+// Render a changes-only event from its stored before/after values instead of a bare "X updated" —
+// the numbers were always in SubscriptionEvent.changes, just never shown.
+function changeText(ch) {
+  const parts = [];
+  if (ch.pricePerCampaignCents) {
+    parts.push(`rate ${fmtUsd(ch.pricePerCampaignCents.from ?? 30000)} → ${fmtUsd(ch.pricePerCampaignCents.to)}`);
+  }
+  if (ch.billingContact) {
+    const to = ch.billingContact.to || {};
+    parts.push(`contact → ${[to.name, to.email].filter(Boolean).join(' · ') || '(cleared)'}`);
+  }
+  if (ch.trialEndsAt) parts.push(`trial end ${fmtDate(ch.trialEndsAt.from)} → ${fmtDate(ch.trialEndsAt.to)}`);
+  if (ch.notes) parts.push('notes updated');
+  const known = ['pricePerCampaignCents', 'billingContact', 'trialEndsAt', 'notes'];
+  const rest = Object.keys(ch).filter((k) => !known.includes(k));
+  if (rest.length) parts.push(`${rest.join(', ')} updated`);
+  return parts.join(' · ');
 }
 
 // The account-manager Billing panel for one org (rendered by OrganizationsPage).
@@ -29,11 +51,18 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
   const [extendDays, setExtendDays] = useState('7');
   const [trialUntil, setTrialUntil] = useState('');
   const [error, setError] = useState(null);
+  const [eventsSkip, setEventsSkip] = useState(0);
+  // Rename / re-slug (PATCH /super-admin/organizations/:orgId — it always supported name+slug;
+  // this is the first UI for it).
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [nameEdit, setNameEdit] = useState('');
+  const [slugEdit, setSlugEdit] = useState('');
 
   const key = ['super-admin', 'billing', orgId];
   const billingQ = useQuery({
-    queryKey: key,
-    queryFn: () => api(`/super-admin/organizations/${orgId}/billing`),
+    queryKey: [...key, 'events', eventsSkip],
+    queryFn: () => api(`/super-admin/organizations/${orgId}/billing?eventsSkip=${eventsSkip}&eventsLimit=${EVENTS_LIMIT}`),
+    placeholderData: keepPreviousData,
   });
   const statementQ = useQuery({
     queryKey: [...key, 'statement', month],
@@ -89,6 +118,15 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
     },
     onError: onErr,
   });
+  const renameMut = useMutation({
+    mutationFn: (body) => api(`/super-admin/organizations/${orgId}`, { method: 'PATCH', body }),
+    onSuccess: () => {
+      setRenameOpen(false);
+      setError(null);
+      refetchAll();
+    },
+    onError: onErr,
+  });
 
   const ent = billingQ.data?.entitlement;
   const needsReason = ['suspended', 'canceled'].includes(statusTo);
@@ -115,16 +153,19 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${orgName.replaceAll(/\s+/g, '-').toLowerCase()}-statement-${month}.csv`;
+    a.download = `${(displayName || 'org').replaceAll(/\s+/g, '-').toLowerCase()}-statement-${month}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  const orgInfo = billingQ.data?.organization;
+  const displayName = orgInfo?.name || orgName;
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-fg">Billing — {orgName}</h2>
+          <h2 className="text-base font-semibold text-fg">Billing — {displayName}</h2>
           {sub && (
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-fg-muted">
               <BillingPill effective={ent?.effective} />
@@ -132,14 +173,68 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
                 since {fmtDate(sub.statusChangedAt)}
                 {sub.status === 'trial' && ` · trial ends ${fmtDate(sub.trialEndsAt)}`}
                 {ent?.banner === 'trial_expired' && ' · EXPIRED'}
+                {/* A canceled org's wind-down date IS its deletion date (entitlement.js). */}
+                {ent?.effective === 'canceled' && ent?.windDownEndsAt && (
+                  <span className="font-semibold text-danger"> · deletes {fmtDate(ent.windDownEndsAt)}</span>
+                )}
+                {/* Whether this status was set by a human or a Stripe webhook. */}
+                {' · '}set {sub.source === 'stripe' ? 'by Stripe' : 'manually'}
+                {sub.stripeCustomerId && ` · ${sub.stripeCustomerId}`}
               </span>
             </div>
           )}
         </div>
-        <button onClick={onClose} className="text-xs font-semibold text-fg-muted hover:text-fg">
-          Close ✕
-        </button>
+        <div className="flex shrink-0 items-center gap-3">
+          <button
+            onClick={() => {
+              setRenameOpen((v) => !v);
+              setNameEdit(orgInfo?.name || orgName || '');
+              setSlugEdit(orgInfo?.slug || '');
+            }}
+            className="text-xs font-semibold text-fg-muted hover:text-fg"
+          >
+            Rename…
+          </button>
+          <button onClick={onClose} className="text-xs font-semibold text-fg-muted hover:text-fg">
+            Close ✕
+          </button>
+        </div>
       </div>
+
+      {renameOpen && (
+        <div className="mt-3 rounded-lg border border-border bg-surface p-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Rename organization</h3>
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted">Name</label>
+              <input value={nameEdit} onChange={(e) => setNameEdit(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted">Slug</label>
+              <input value={slugEdit} onChange={(e) => setSlugEdit(e.target.value)} className={inputCls} />
+            </div>
+          </div>
+          {slugEdit.trim().toLowerCase() !== (orgInfo?.slug || '') && (
+            <p className="mt-2 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
+              The slug is the org&apos;s identity across the platform — the org switcher, provisioning, and the
+              demo seed lock all reference it. Change it only if you mean to; anything pointing at the old
+              slug stops matching.
+            </p>
+          )}
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() => renameMut.mutate({ name: nameEdit.trim(), slug: slugEdit.trim().toLowerCase() })}
+              disabled={renameMut.isPending || !nameEdit.trim() || !slugEdit.trim()}
+              className={btnCls}
+            >
+              {renameMut.isPending ? 'Saving…' : 'Save name & slug'}
+            </button>
+            <button onClick={() => setRenameOpen(false)} className="text-xs font-semibold text-fg-muted hover:text-fg">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mt-3 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</div>
@@ -342,8 +437,8 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
         )}
       </div>
 
-      {/* History */}
-      {billingQ.data?.events?.length > 0 && (
+      {/* History — paged; before/after values come from SubscriptionEvent.changes. */}
+      {(billingQ.data?.events?.length > 0 || eventsSkip > 0) && (
         <div className="mt-4 rounded-lg border border-border bg-surface p-3">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">History</h3>
           <ul className="mt-2 space-y-1 text-sm text-fg-muted">
@@ -352,12 +447,21 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
                 <span className="text-fg-subtle">{new Date(ev.createdAt).toLocaleDateString()}</span>{' '}
                 {ev.fromStatus || ev.toStatus
                   ? `${ev.fromStatus ? `${ev.fromStatus} → ` : ''}${ev.toStatus || ''}`
-                  : Object.keys(ev.changes || {}).join(', ') + ' updated'}
+                  : changeText(ev.changes || {})}
                 {ev.byUserId && ` · ${[ev.byUserId.firstName, ev.byUserId.lastName].filter(Boolean).join(' ')}`}
                 {ev.reason && ` · “${ev.reason}”`}
               </li>
             ))}
           </ul>
+          {(billingQ.data?.eventsTotal || 0) > EVENTS_LIMIT && (
+            <Pager
+              skip={eventsSkip}
+              limit={EVENTS_LIMIT}
+              total={billingQ.data.eventsTotal}
+              onChange={setEventsSkip}
+              className="mt-2"
+            />
+          )}
         </div>
       )}
     </div>

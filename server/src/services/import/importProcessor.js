@@ -12,6 +12,8 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
 import { reapplyVotedLists } from '../voted/reapplyVotedLists.js';
+import { recomputeFullyDnc } from '../dnc/recomputeFullyDnc.js';
+import { reapplyDncLists } from '../dnc/reapplyDncLists.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 import { collectRevisitHomes } from './collectRevisitHomes.js';
 
@@ -223,6 +225,15 @@ export async function processImportJob(job) {
     const droppedDoors = await Household.find({ campaignId: campaign._id, fullyVoted: true }).distinct('_id');
     const toRecompute = [...new Set([...droppedDoors.map(String), ...reappliedHh])];
     if (toRecompute.length) await recomputeFullyVoted(campaign._id, toRecompute);
+
+    // Do-not-contact (sticky): the same reopen mechanics, org-wide. Graduate prior DNC-list ids
+    // onto voters that have only now been imported, then recompute fullyDnc for those doors plus
+    // any currently-suppressed door in this campaign — a genuinely-new contactable resident
+    // re-opens an all-DNC door; a resident who was on a DNC list stays flagged.
+    const { householdIds: reappliedDncHh } = await reapplyDncLists(orgId);
+    const dncDropped = await Household.find({ campaignId: campaign._id, fullyDnc: true }).distinct('_id');
+    const dncRecompute = [...new Set([...dncDropped.map(String), ...reappliedDncHh])];
+    if (dncRecompute.length) await recomputeFullyDnc(dncRecompute);
 
     // Re-house cleanup: count voters that changed doors, then deactivate doors this
     // import emptied (and reactivate any refilled) — bounded to the touched households.

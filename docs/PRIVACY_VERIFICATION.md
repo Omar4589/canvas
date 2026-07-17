@@ -82,11 +82,25 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
 - Backups *"up to 12 months"* — an **Atlas console setting, not code**; verify against the console.
 - Geocode cache *"expire automatically after 18 months of disuse"* — the TTL index, inert until built.
 - The 180-day name retention on deletion records — still cron-kept on the worker dyno.
+- *(2026-07-17)* Do-not-contact enforcement: *"a flagged voter is excluded from walk-list exports
+  and new surveys, and a fully-flagged door drops from every campaign type."* True only while the
+  `KNOCKABLE_DOOR_FILTER` spread covers every knockable-door site, the export's live-state join
+  stays in `walklists.js` export.csv, and the `DO_NOT_CONTACT` backstop stays mounted in
+  `routes/mobile/canvass.js`. If the policy ever names do-not-contact in its category list or
+  rights section, that sentence anchors HERE.
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
-1. **Voter-facing rights: none.** Unchanged, still the single largest gap. Every DSAR is a manual,
-   untooled process; there is no do-not-contact mechanism.
+1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact
+   mechanism now exists**: `Voter.doNotContact` (org-wide, reasoned, audited via VoterNote),
+   `Household.fullyDnc` door suppression through the shared `KNOCKABLE_DOOR_FILTER`, exclusion
+   from walk-list voter sets and CSV exports (live-checked at export, so pre-flag frozen lists
+   comply), a canvasser-facing badge + disabled survey, a server `DO_NOT_CONTACT` 403 backstop,
+   and a bulk-list upload with per-upload undo (`routes/admin/dnc.js`). What remains open — and
+   still the largest gap: the mechanism is **admin-operated, not voter-initiated**. A voter still
+   has no account, no access/correction/deletion route; a DSAR is still a manual process that an
+   admin tools through the console. The flag is per-org (dies with the org's data — a
+   platform-sticky DNC would be a new cross-org retention promise; deliberately out).
 2. **Grants are self-issued.** No approver, no customer notification; `break_glass` can list all live
    grants (visibility, not approval). The policy carefully does not claim otherwise — keep it that way.
 3. **The audit log is request-level.** No record ids; *"was MY record accessed?"* is unanswerable. The
@@ -337,11 +351,11 @@ Restoration is **org-scoped and membership-scoped**: only orgs where the person'
 
 **Not every surface restores it.** At least six identity-rendering paths bypass the hydrator and show the tombstone even during the window — including, ironically, the GPS/quality audit that `DeletedUserRecord`'s own model comment names as its reason for existing (`server/src/services/audit/flagDetection.js:72`; also `reports.js:1474`, `:1903`, `:2010`, `:2350`, `:3507`).
 
-**Exportable.** An org admin **or a team lead** can download that restored name and email in a CSV file that then lives outside the application entirely (`GET /admin/reports/canvassers.csv`, `reports.js:2069`). Once downloaded, it is beyond the reach of any purge. *(The phone column is always blank for a deleted user — the CSV requests `phone` but the hydrator never reads the snapshot's phone field.)*
+**Exportable.** An org admin **or a team lead** can download that restored name and email in a CSV file that then lives outside the application entirely (`GET /admin/reports/canvassers.csv`, `reports.js:2267`). Once downloaded, it is beyond the reach of any purge. *(The phone column is always blank for a deleted user — the CSV requests `phone` but the hydrator never reads the snapshot's phone field.)*
 
 **Records with no retention limit at all (VERIFIED):**
 
-- **`AccessLog`** — contains no data about deleted canvassers or customer users. Its `actorUserId` is always Doorline platform staff. It records method, the **route template** (deliberately not the filled path, so no voter ids land in it), a resource class, organizationId, grantId and a timestamp (`server/src/models/AccessLog.js:15-48`). **It is append-only. There is no purge, no TTL, no retention job for it anywhere.** It is also **not** in `ORG_SCOPED` (`deleteOrganization.js:44-51`), so `AccessLog` and `SupportAccessGrant` rows **survive the hard deletion of the customer organization they refer to.**
+- **`AccessLog`** — contains no data about deleted canvassers or customer users. Its `actorUserId` is always Doorline platform staff. It records method, the **route template** (deliberately not the filled path, so no voter ids land in it), a resource class, organizationId, grantId and a timestamp (`server/src/models/AccessLog.js:15-48`). **It is append-only. There is no purge, no TTL, no retention job for it anywhere.** It is also **not** in `ORG_SCOPED` (`deleteOrganization.js:44-51`), so `AccessLog` and `SupportAccessGrant` rows **survive the hard deletion of the customer organization they refer to.** *[v3.1 2026-07-17: still true, and now deliberate-and-visible rather than accidental — the console shows the log's total row count and oldest entry (`GET /log-facets`), and the per-request `rows`/`bytes` magnitude now surfaces in the UI. Whether audit rows get a retention window is an owner policy decision, explicitly deferred; it must never arrive as a code side effect.]*
 - **`RetentionRun`** — one row per purge run: job name, startedAt, finishedAt, ok, purged count, scanned count, error string (`models/RetentionRun.js:20-32`). No user identity. Retained indefinitely. *Note the `error` field is unbounded free text captured from a thrown exception (`purgeDeletedIdentities.js:49`), so an identifier appearing there cannot be categorically ruled out.*
 
 **Backups — see "THINGS YOU DID NOT ASK ABOUT," item 4.** This is a material residual-copy problem and it is not in Atlas.
@@ -449,6 +463,13 @@ Any `Subscription` with `status: 'canceled'` whose `statusChangedAt` is older th
 > super-admin API (`POST/GET /super-admin/access/deletion-requests` + a `/cancel` route), both through
 > a shared producer with a 30-day SLA and one-open-request-per-org dedup. The policy's *"we aim to
 > complete verified deletion requests within 30 days"* is now backable.
+>
+> **[v3.1 2026-07-17: the intake has an operator UI.]** The Support access page now lists deletion
+> requests (paged, status-filterable, with **overdue** flagged per row when a `scheduled` request is
+> past its own `scheduledFor`), files one (org + requester email + note), and cancels a scheduled one
+> — no more endpoints-only. The Control Room's ops-health strip surfaces the scheduled count and a
+> "need a human" count (stuck + failed) at a glance. No policy sentence changes: this is the same
+> subsystem gaining a surface.
 
 `executeDueDeletionRequests()` (`triggers.js:111-138`) finds `OrgDeletionRequest` rows with `status: 'scheduled'` and `scheduledFor <= now` and purges them. **But nothing in production code ever creates an `OrgDeletionRequest`.** I grepped the entire repository:
 
@@ -508,13 +529,16 @@ if (!WRITE_METHODS.has(req.method)) return next();            // entitlement.js:
 
 **VERIFIED.** There is **no full-account export**. A repo-wide grep for `exportOrg|fullExport|dataExport|exportAll` returns nothing.
 
-**Exactly three server-side CSV endpoints exist, all under `/admin`:**
+**Exactly four server-side CSV endpoints exist, all under `/admin`:**
 
 | Endpoint | Contents | Gate |
 |---|---|---|
 | `GET /admin/campaigns/:id/walklists/:id/export.csv` (`server/src/routes/admin/walklists.js:254`) | **Voter ID, First Name, Last Name, Party, Age (derived from DOB), Phone, Precinct, Address, City, State, ZIP** — one row per voter (`headers :275`, projections `:266`, `:270`) | admin **or lead** (`walklists.js:19`) |
-| `GET /admin/reports/canvassers.csv` (`reports.js:2069`) | Per-canvasser **First name, Last name, Email, Phone, Status** + aggregate counts. **Restores deleted users' names and emails** (A4). | admin or lead (`reports.js:37`) |
-| `GET /admin/reports/canvassers/:userId/export.csv` (`reports.js:3185`) | **Timestamp, Action, Address, City, State, Zip, Voter name, Party, Latitude, Longitude, GPS Accuracy, Distance from house, Offline flag, free-text Note** (`headers :3208-3212`) | admin or lead |
+| `GET /admin/reports/canvassers.csv` (`reports.js:2267`) | Per-canvasser **First name, Last name, Email, Phone, Status** + aggregate counts. **Restores deleted users' names and emails** (A4). | admin or lead (`reports.js:37`) |
+| `GET /admin/reports/canvassers/:userId/export.csv` (`reports.js:3383`) | **Timestamp, Action, Address, City, State, Zip, Voter name, Party, Latitude, Longitude, GPS Accuracy, Distance from house, Offline flag, free-text Note** (`headers :3406-3410`) | admin or lead |
+| `GET /admin/reports/voters-by-answer.csv` (`reports.js:1303`) | The survey **answer drill-in** export ("everyone who answered X", optionally one canvasser's entries, or a tag): per response — **Submitted timestamp (ISO + campaign-tz date/time), Voter name, Party, Address, City, State, Zip, Canvasser first/last name, the drilled Question/Answer snapshots, the response's free-text Note, offline flag, response id** (`headers :1353-1358`). Capped at **50,000 rows** (`EXPORT_CAP`, `:1309`); no pagination. | admin or lead (`reports.js:37`); a lead additionally **must pass a `campaignId` they manage** (the reports-router scope middleware, `reports.js:47-60`) — the same gate as the JSON drill it mirrors (`buildVotersByAnswerFilter` is shared, `:1214`) |
+
+**The fourth (voters-by-answer.csv) is a same-audience exposure, not a new recipient class.** It downloads exactly what the same caller could already page through on `GET /admin/reports/voters-by-answer` (same filter builder, same role + lead-campaign gate) — voter identity/address, canvasser identity, the chosen answer, and the door note were all already readable by that audience in-app, and the walk-list CSV above already put voter name/party/address in a file for the same roles. No new party receives data and no new category of data leaves the system, **so no Privacy Policy / ToS / DPA text change is required for it.** Staff (grant-based) access to it is covered by the fail-closed central access log (E13 — the finish-listener middleware logs unless explicitly exempted; this route has no exemption).
 
 **The first one is effectively a bulk export of the entire campaign voter file, and this is a two-click product feature, not an edge case.** A walk list can be saved with an **empty filter** — `filter` is optional on `POST /admin/campaigns/:id/walklists` (`walklists.js:74-92`), and an empty filter resolves to `baseSet` = **every active geocoded household in the campaign and every voter in them** (`server/src/services/walklist/resolveWalkList.js:48-53`, `:131-132`). The web UI enables Save on a name alone (`client/src/pages/WalkListsPage.jsx:416`, `:27-47`) and puts an "Export CSV" button on every saved list (`:534-537`). **No row cap. No pagination. No size guard.**
 
@@ -522,7 +546,7 @@ if (!WRITE_METHODS.has(req.method)) return next();            // entitlement.js:
 
 **Client-side (browser-generated) downloads not counted above:** a jsPDF client-report PDF (`client/src/lib/reportPdf.js:33`), unmatched-voter-ID CSVs (`WalkListsPage.jsx:227-231`, `EarlyVotingPage.jsx:84-88`), and a billing-statement CSV (`client/src/components/OrgBillingPanel.jsx:99-118` — **platform-staff only**, rendered solely from the super-admin Organizations page).
 
-**Not exportable by any route:** SurveyResponse documents themselves, `VoterNote` bodies, tags, turf/book definitions, flag reviews, import history. **The original uploaded voter file cannot be re-downloaded** — `loadRawImport()` is called only by the background import worker (`services/import/importProcessor.js:56`) and is exposed by no route.
+**Not exportable by any route:** full `SurveyResponse` documents (the voters-by-answer CSV carries only the **drilled** question's snapshot answer(s) — or the tag's matching entries — plus the response's door note, never the response's whole answer set), `VoterNote` bodies, tags, turf/book definitions, flag reviews, import history. **The original uploaded voter file cannot be re-downloaded** — `loadRawImport()` is called only by the background import worker (`services/import/importProcessor.js:56`) and is exposed by no route.
 
 ---
 
@@ -590,7 +614,7 @@ Coordinates are removed only by: (i) hard deletion of the whole organization (wh
 
 1. **GPS quality / canvassing-fraud audit** — `far`, `weak_gps`, `rapid`, `one_spot` flags computed **live** from the ledger (`server/src/services/audit/flagDetection.js:1-60`). Only the reviewer's **decision** is persisted (`FlagReview`).
 2. **A canvasser BREADCRUMB / PATH MAP.** `GET /admin/reports/canvassers/:userId/path` (`reports.js:2995-3047`) returns a **time-ordered array of raw `{lat, lng, accuracy, timestamp, actionType, household address}` points, up to 5,000 per request**, rendered as a map of that person's movements (`mobile/app/(app)/admin/canvasser/[id]/map.jsx:110`; `.../day/[date].jsx:95`).
-3. **A raw-coordinate CSV export** — `Latitude`, `Longitude`, `Accuracy (m)` columns per action, alongside address, voter name, party and note (`reports.js:3185-3234`).
+3. **A raw-coordinate CSV export** — `Latitude`, `Longitude`, `Accuracy (m)` columns per action, alongside address, voter name, party and note (`reports.js:3383-3432`).
 4. **A per-canvasser quality report** — average distance, far-door counts, distance histogram (`reports.js:3050+`).
 5. **An activity feed** returning the full location object per action (`reports.js:2689`, `:2733`; `admin/activities.js:51-52`).
 6. **A distance-walked metric** shown to the canvasser themselves (`routes/mobile/me.js:100-106`, `:381-389`).
@@ -716,6 +740,14 @@ I traced the mount chain myself.
 
 **What it returns.** `GET /super-admin/persons/:personId` (`persons.js:219`) → `buildPersonOversight` → `serializePerson` (`services/person/personOversight.js:28-55`): **firstName, lastName, fullName, phone, phoneType, cellPhone, party, gender, dateOfBirth, registrationStatus, uid keys, state voter IDs** — plus, per organization, **full home addresses**: addressLine1, addressLine2, city, state, zipCode, county (`personOversight.js:96-105`, `:133-140`).
 
+> **[v3.1 2026-07-17: the payload was data-minimized to what the UI renders.]** Per-org addresses now
+> ship **city/state only** (street, zip, county trimmed); the per-org `voterIds` (stateVoterId) list
+> was removed; and the merge log is an explicit shape (action/ids/count/date) instead of a spread —
+> the full pre-merge identity snapshots (`survivorSnapshot`/`victimSnapshot`) stay server-side for
+> split-reversal. The person's own `svidKeys` remain (the UI renders them as key chips). Verified in
+> `personOversight.js` (the trim is commented at the source, with a warning not to resurrect the
+> blanket dump).
+
 **`GET /super-admin/persons`** (`persons.js:31-93`) is a **regex-searchable, paginated, cross-organization directory**. Its filter is `{ mergedInto: null }` — **no organization scope at all** (`:37`). Free-text name search across every Person on the platform.
 
 **It is live in the product UI**: `/super-admin/people` and `/super-admin/people/:personId` (`client/src/App.jsx:205-206`; `SuperAdminPeoplePage.jsx:37`; `PersonDetailPage.jsx:129`, which renders phone, party, gender and date of birth).
@@ -739,7 +771,7 @@ I traced the mount chain myself.
 
 **⚠️ THE CODE COMMENT AT `services/person/personOversight.js:71-73` ASSERTS THE OPPOSITE:** *"reaching this route now requires the caller to hold a SupportAccessGrant; every read is written to AccessLog."* **That statement is FALSE against the code as shipped.** Do not let it be cited as evidence of a control, and do not let it become a privacy-policy sentence.
 
-*Two mitigating facts, both real and both worth stating:* (1) the **canvassing** side of the person view is genuinely aggregate-only — survey/activity/note figures are `$group`/`$count`, and the code never reads `SurveyResponse.answers`, `CanvassActivity.note` or `VoterNote.body` (`personOversight.js:113-126`); staff see **that** a person was surveyed, not what they said. (2) The UI list renders only city/state (`PersonDetailPage.jsx:329`) — **but the JSON response contains the full street address** and is trivially visible in a browser network tab.
+*Two mitigating facts, both real and both worth stating:* (1) the **canvassing** side of the person view is genuinely aggregate-only — survey/activity/note figures are `$group`/`$count`, and the code never reads `SurveyResponse.answers`, `CanvassActivity.note` or `VoterNote.body` (`personOversight.js:113-126`); staff see **that** a person was surveyed, not what they said. (2) The UI list renders only city/state (`PersonDetailPage.jsx:329`) — **but the JSON response contains the full street address** and is trivially visible in a browser network tab. *[v3.1 2026-07-17: (2) is fixed — the response now carries city/state only; see the trim stamp above.]*
 
 ### HOLE 2 — Voter content read under a valid grant that produces NO audit row. **VERIFIED.**
 
@@ -954,7 +986,7 @@ The fraud/quality audit makes **four machine-generated assertions about named wo
 This is an **employee-monitoring / worker-privacy** exposure, not just a consumer-privacy one, and it needs its own treatment in the ToS and in whatever notice canvassers receive at onboarding.
 
 ### (d) VOTERS HAVE NO RIGHTS MECHANISM AT ALL. **VERIFIED.**
-There is **no voter account, no voter role** (Membership roles are `['admin','lead','canvasser']` only — `models/Membership.js:21`), and **no voter-facing route**. A grep across server, client and mobile for do-not-contact / opt-out / unsubscribe / DSAR / data-subject / right-to-erasure returns **no implementation**. There is no `DELETE /admin/voters/:voterId` and no delete route on the Person router.
+There is **no voter account, no voter role** (Membership roles are `['admin','lead','canvasser']` only — `models/Membership.js:21`), and **no voter-facing route**. A grep across server, client and mobile for do-not-contact / opt-out / unsubscribe / DSAR / data-subject / right-to-erasure returns **no implementation**. There is no `DELETE /admin/voters/:voterId` and no delete route on the Person router. *[v3 update 2026-07-17: the grep result is now stale in one respect — an admin-operated **do-not-contact** mechanism exists (`Voter.doNotContact`, `routes/admin/dnc.js`, enforcement layers per docs/VOTERS.md §D). The voter-INITIATED absence stands: no account, no self-serve route, DSARs still manual.]*
 
 **What DOES exist:** an org admin can **correct** a voter's identity fields (`routes/admin/voters.js:186`), **delete a voter's survey response** (`:371`), and **delete a voter note** (`:303`). And a household can be marked `'restricted'` and excluded from future books via an admin `excludeRestricted` toggle (`models/Household.js:47-52`; `services/turf/generateTurf.js:49`, `:205`) — **door-level, admin-controlled, not voter-initiated,** and framed in the help copy as "couldn't physically reach the door," not as suppression.
 
@@ -1109,4 +1141,4 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 19. **Doorline cannot answer "was MY record accessed?"** — `AccessLog` stores a route template and a resource class, never a record id. **Do not offer record-level access transparency.** (E12)
 20. **After the 180-day purge, the field data is PSEUDONYMOUS, not anonymous.** The GPS trail, timestamps, notes and survey submissions remain permanently linked to a stable identifier, and the tombstoned `User` row still exists carrying that identifier and `lastLoginAt`. **Two code comments call this "permanently anonymous." They are wrong, and one of them is already user-facing copy.** (A3)
 21. **`User` accounts have no retention limit at all.** A volunteer who canvassed for one weekend in 2024 still has a live row — name, email, phone, bcrypt hash, `lastLoginAt` — indefinitely, unless they personally delete their account **from the mobile app** (there is no web deletion, and the operator CLI cannot delete a sole admin, sole billing admin, sole super-admin, or a `deletionLocked` account). (A1, B5)
-22. **Voters — the actual data subjects, who never consented to anything — have no account, no access, no correction, no deletion, no opt-out, and no do-not-contact mechanism.** Every request from a voter is a manual process with no tooling behind it. **This is the largest structural gap in the product from a privacy-law standpoint, and no sentence you write can paper over it.** (H16(d))
+22. **Voters — the actual data subjects, who never consented to anything — have no account, no access, no correction, no deletion, no opt-out, and no do-not-contact mechanism.** Every request from a voter is a manual process with no tooling behind it. **This is the largest structural gap in the product from a privacy-law standpoint, and no sentence you write can paper over it.** (H16(d)) *[v3 2026-07-17: narrowed — do-not-contact is now admin-tooled (see v3 gap 1); the voter-initiated half of this finding is unchanged.]*

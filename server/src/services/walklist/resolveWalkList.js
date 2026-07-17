@@ -143,6 +143,10 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
   const householdIds = [...finalSet];
   const voterQuery = { organizationId: orgId, householdId: { $in: householdIds.map(oid) } };
   if (vq) Object.assign(voterQuery, vq);
+  // Always-on, not a filter option: do-not-contact voters never enter a walk list's voter set.
+  // The DOOR stays (a non-flagged housemate keeps it targetable) — only the flagged individual
+  // drops. Applied here, after vq, so no filter combination can override it.
+  voterQuery['doNotContact.flagged'] = { $ne: true };
   const voters = await Voter.find(voterQuery, { _id: 1 }).lean();
   const voterIds = voters.map((v) => v._id);
 

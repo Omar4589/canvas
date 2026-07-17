@@ -356,6 +356,7 @@ router.get('/overview', async (req, res, next) => {
       lit_dropped: 0,
       restricted: 0, // inaccessible homes — its own coverage segment, not "knocked"
       voted: 0,
+      dnc: 0, // fully do-not-contact doors — suppressed, never to be knocked
     };
     for (const r of statusAgg) canvass[r._id] = r.count;
 
@@ -573,6 +574,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
           lit_dropped: 0,
           restricted: 0,
           voted: 0,
+          dnc: 0,
         },
         surveysSubmitted: 0,
         surveyedVoters: 0,
@@ -1255,7 +1257,7 @@ router.get('/voters-by-answer', async (req, res, next) => {
         .sort({ submittedAt: -1 })
         .skip(skip)
         .limit(limit)
-        .populate('voterId', 'fullName party')
+        .populate('voterId', 'fullName party doNotContact.flagged')
         .populate('householdId', 'addressLine1 city state')
         .populate('userId', 'firstName lastName')
         .lean(),
@@ -1271,6 +1273,9 @@ router.get('/voters-by-answer', async (req, res, next) => {
               id: String(r.voterId._id),
               fullName: r.voterId.fullName,
               party: r.voterId.party || null,
+              // Historical record of past contact — DNC voters stay listed, MARKED, so the
+              // drill-in can't be repurposed as a contact list.
+              dnc: !!r.voterId.doNotContact?.flagged,
             }
           : null,
         household: r.householdId
@@ -1312,7 +1317,7 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
     const responses = await SurveyResponse.find(filter)
       .sort({ submittedAt: -1 })
       .limit(EXPORT_CAP)
-      .populate('voterId', 'fullName party')
+      .populate('voterId', 'fullName party doNotContact.flagged')
       .populate('householdId', 'addressLine1 addressLine2 city state zipCode')
       .populate('userId', 'firstName lastName')
       .lean();
@@ -1338,7 +1343,10 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
     };
     const answerText = (a) => {
       const base = Array.isArray(a.answer) ? a.answer.join('; ') : a.answer ?? '';
-      return a.otherText ? `${base} — ${a.otherText}` : base;
+      // The capture flow embeds the Other free text INTO the answer snapshot itself;
+      // only append otherText when it isn't already there (legacy belt-and-braces).
+      const embedded = Array.isArray(a.answer) ? a.answer.includes(a.otherText) : a.answer === a.otherText;
+      return a.otherText && !embedded ? `${base} — ${a.otherText}` : base;
     };
 
     const dateFmt = new Intl.DateTimeFormat('en-CA', {
@@ -1350,7 +1358,7 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
 
     const headers = [
       'Submitted (ISO)', 'Date', `Time (${tzAbbrev(tz) || tz})`,
-      'Voter', 'Party', 'Address', 'City', 'State', 'Zip',
+      'Voter', 'Party', 'Do not contact', 'Address', 'City', 'State', 'Zip',
       'Canvasser first name', 'Canvasser last name',
       'Question', 'Answer', 'Note', 'Offline submission', 'Response id',
     ];
@@ -1363,6 +1371,9 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
         r.submittedAt ? timeFmt.format(new Date(r.submittedAt)) : '',
         r.voterId?.fullName || '',
         r.voterId?.party || '',
+        // Record of past contact, so the row stays — but marked, so the file can't be reused
+        // as a call list against the voter's request.
+        r.voterId?.doNotContact?.flagged ? 'yes' : '',
         h ? `${h.addressLine1 || ''}${h.addressLine2 ? `, ${h.addressLine2}` : ''}` : '',
         h?.city || '',
         h?.state || '',
@@ -3397,11 +3408,11 @@ router.get('/canvassers/:userId/export.csv', async (req, res, next) => {
     })
       .sort({ timestamp: 1 })
       .populate('householdId', 'addressLine1 addressLine2 city state zipCode')
-      .populate('voterId', 'fullName party')
+      .populate('voterId', 'fullName party doNotContact.flagged')
       .lean();
 
     const headers = [
-      'Timestamp', 'Action', 'Address', 'City', 'State', 'Zip', 'Voter', 'Party',
+      'Timestamp', 'Action', 'Address', 'City', 'State', 'Zip', 'Voter', 'Party', 'Do not contact',
       'Latitude', 'Longitude', 'Accuracy (m)', 'Distance from house (m)',
       'Offline submission', 'Note',
     ];
@@ -3414,6 +3425,7 @@ router.get('/canvassers/:userId/export.csv', async (req, res, next) => {
       a.householdId?.zipCode || '',
       a.voterId?.fullName || '',
       a.voterId?.party || '',
+      a.voterId?.doNotContact?.flagged ? 'yes' : '',
       a.location?.lat ?? '',
       a.location?.lng ?? '',
       a.location?.accuracy ?? '',

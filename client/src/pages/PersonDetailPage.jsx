@@ -427,7 +427,7 @@ export default function PersonDetailPage() {
                 <div className="text-fg-muted">
                   <span className="font-medium text-fg capitalize">{l.action}</span>
                   {' · '}{fmtDate(l.createdAt, true)}
-                  <span className="text-fg-subtle"> · {(l.movedVoterIds || []).length} voter(s)</span>
+                  <span className="text-fg-subtle"> · {l.movedVoterCount ?? 0} voter(s)</span>
                   {l.action === 'merge' && <span className="font-mono text-xs text-fg-subtle"> · victim {String(l.victimId).slice(-6)}</span>}
                 </div>
                 {l.action === 'merge' && String(l.survivorId) === String(p.id) && (

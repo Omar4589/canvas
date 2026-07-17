@@ -9,6 +9,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { activePassIds } from '../passes/activePasses.js';
+import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
 import { DEMO_ORG_SLUG } from '../../utils/demoData/namePools.js';
 import { stageDemoActivity, persistDemoActivity } from './demoActivity.js';
 
@@ -95,9 +96,9 @@ export async function refreshDemoDay() {
     throw err;
   }
 
-  // Skip fully-voted / excluded doors — the field app never shows them either.
+  // Skip fully-voted / DNC / excluded doors — the field app never shows them either.
   const households = await Household.find(
-    { campaignId: campaign._id, isActive: true, fullyVoted: { $ne: true }, excludedFromTurf: { $ne: true } }
+    { campaignId: campaign._id, ...KNOCKABLE_DOOR_FILTER }
   ).lean();
   const hhById = new Map(households.map((h) => [String(h._id), h]));
   const votersByHousehold = new Map();

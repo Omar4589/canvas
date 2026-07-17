@@ -28,7 +28,7 @@ router.use(requireAuth, requireBreakGlass);
 
 // Record a break-glass read/write of a specific customer's identity record. Reuses the same AccessLog
 // the /admin path writes, so "who at Doorline touched my data?" has one answer across both surfaces.
-function logPersonAccess(req, { organizationId, grantId, resource, route }) {
+function logPersonAccess(req, { organizationId, grantId, resource, route, rows = null }) {
   recordAccess({
     actorUserId: req.user._id,
     organizationId,
@@ -36,6 +36,9 @@ function logPersonAccess(req, { organizationId, grantId, resource, route }) {
     method: req.method,
     route,
     resource: resource || 'person',
+    // These direct calls bypass the /admin res wraps, so magnitude is passed explicitly where the
+    // handler knows it (the directory list); null elsewhere means single-record.
+    rows,
   });
 }
 
@@ -112,7 +115,7 @@ router.get('/', async (req, res, next) => {
     const hasProp = new Set(pendP.map((p) => String(p.personId)));
     const ownerName = new Map(ownerOrgs.map((o) => [String(o._id), o.name]));
 
-    logPersonAccess(req, { organizationId: oid(orgIdParam), grantId: grant._id, resource: 'person-directory', route: 'GET /super-admin/persons' });
+    logPersonAccess(req, { organizationId: oid(orgIdParam), grantId: grant._id, resource: 'person-directory', route: 'GET /super-admin/persons', rows: persons.length });
     res.json({
       total, limit, skip,
       persons: persons.map((p) => ({

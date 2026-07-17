@@ -65,7 +65,34 @@ export default function ActivityScreen() {
 
   const { refreshing, onRefresh } = useRefresh([feedQ.refetch]);
 
-  const events = feedQ.data?.events || [];
+  // "Load older" pages accumulate below the live window (`before` mirrors the feed's `since`).
+  // The live page keeps polling; older pages are static history, deduped where the windows meet.
+  const [older, setOlder] = useState([]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [exhausted, setExhausted] = useState(false);
+
+  const liveEvents = feedQ.data?.events || [];
+  const liveIds = new Set(liveEvents.map((e) => e.id));
+  const events = [...liveEvents, ...older.filter((e) => !liveIds.has(e.id))];
+
+  async function loadOlder() {
+    const oldest = events[events.length - 1];
+    if (!oldest) return;
+    setLoadingOlder(true);
+    try {
+      const res = await api(
+        `/super-admin/activity-feed?limit=50&before=${encodeURIComponent(oldest.timestamp)}`
+      );
+      const page = res?.events || [];
+      if (page.length === 0) setExhausted(true);
+      setOlder((cur) => {
+        const have = new Set([...cur.map((e) => e.id), ...liveIds]);
+        return [...cur, ...page.filter((e) => !have.has(e.id))];
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -123,10 +150,9 @@ export default function ActivityScreen() {
                   {e.canvasser
                     ? `${e.canvasser.firstName} ${e.canvasser.lastName}`
                     : 'Unknown'}
-                  {e.household?.addressLine1
-                    ? ` · ${e.household.addressLine1}${
-                        e.household.city ? `, ${e.household.city}` : ''
-                      }`
+                  {/* City/state only — street addresses left this feed on purpose (server route). */}
+                  {e.household?.city
+                    ? ` · ${e.household.city}${e.household.state ? `, ${e.household.state}` : ''}`
                     : ''}
                   {e.campaign?.name ? ` · ${e.campaign.name}` : ''}
                 </Text>
@@ -134,6 +160,15 @@ export default function ActivityScreen() {
               <Text style={styles.time}>{formatRelative(e.timestamp)}</Text>
             </View>
           ))
+        )}
+        {events.length > 0 && (
+          exhausted ? (
+            <Text style={styles.endText}>Beginning of the feed.</Text>
+          ) : (
+            <Pressable onPress={loadOlder} disabled={loadingOlder} style={styles.loadMore}>
+              <Text style={styles.loadMoreText}>{loadingOlder ? 'Loading…' : 'Load older'}</Text>
+            </Pressable>
+          )
         )}
       </ScrollView>
     </SafeAreaView>
@@ -188,5 +223,17 @@ function makeStyles(t) {
   org: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
   sub: { ...type.caption, fontSize: 11, marginTop: 1 },
   time: { fontSize: 11, color: colors.textMuted },
+
+  loadMore: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+    marginTop: spacing.xs,
+  },
+  loadMoreText: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
+  endText: { fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
   });
 }

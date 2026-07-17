@@ -336,3 +336,180 @@ test('the retention banner goes RED when the org-deletion triggers die, even if 
   const ok = await call('GET', '/super-admin/access/health/retention', { token: ctx.owner.token });
   assert.strictEqual(ok.json.healthy, true, 'both jobs alive → green');
 });
+
+// ── Batch 2: the log is paged, filterable, and reports magnitude — history stays reachable. ──
+
+async function seedLogRows(grantId = null) {
+  // Ten deterministic rows: alternating actors, a known date spread, and one bulk-export-sized row.
+  const days = (n) => new Date(Date.now() - n * 86_400_000);
+  const rows = [];
+  for (let i = 0; i < 10; i++) {
+    rows.push({
+      actorUserId: i % 2 === 0 ? ctx.owner._id : ctx.support._id,
+      organizationId: ctx.org._id,
+      grantId: i === 0 ? grantId : null,
+      method: 'GET',
+      route: '/admin/voters',
+      resource: 'voters',
+      rows: i === 0 ? 4000 : null, // the export among the peeks
+      bytes: i === 0 ? 2_000_000 : 512,
+      at: days(i),
+    });
+  }
+  await AccessLog.insertMany(rows);
+}
+
+test('the access log pages with an exact total — rows past the first page stay reachable', { skip }, async () => {
+  await seedLogRows();
+
+  const page1 = await call('GET', '/super-admin/access/log?limit=4&skip=0', { token: ctx.owner.token });
+  assert.strictEqual(page1.status, 200);
+  assert.strictEqual(page1.json.total, 10, 'total is the exact filtered count, not the page length');
+  assert.strictEqual(page1.json.entries.length, 4);
+
+  const page3 = await call('GET', '/super-admin/access/log?limit=4&skip=8', { token: ctx.owner.token });
+  assert.strictEqual(page3.json.entries.length, 2, 'the last page holds the remainder');
+
+  // Legacy shape: a parameterless call still returns the newest-N window (old clients unaffected).
+  const legacy = await call('GET', '/super-admin/access/log', { token: ctx.owner.token });
+  assert.strictEqual(legacy.json.entries.length, 10);
+  assert.ok(Array.isArray(legacy.json.entries), 'entries key unchanged');
+});
+
+test('the log reports read magnitude — a 4,000-row export is distinguishable from a peek', { skip }, async () => {
+  await seedLogRows();
+  const res = await call('GET', '/super-admin/access/log?limit=1&skip=0', { token: ctx.owner.token });
+  const newest = res.json.entries[0];
+  assert.strictEqual(newest.rows, 4000, 'rows travels to the UI');
+  assert.strictEqual(newest.bytes, 2_000_000, 'and so does payload size');
+  assert.ok(newest.route, 'the route template is included');
+});
+
+test('the log filters by actor, date window, and grant', { skip }, async () => {
+  const grant = await SupportAccessGrant.create({
+    actorUserId: ctx.owner._id,
+    organizationId: ctx.org._id,
+    reason: 'magnitude test session',
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+  await seedLogRows(grant._id);
+
+  const byActor = await call(
+    'GET', `/super-admin/access/log?actorUserId=${ctx.support._id}`, { token: ctx.owner.token }
+  );
+  assert.strictEqual(byActor.json.total, 5, 'five of the ten rows are Sam’s');
+
+  // Rows at days 0..3 back → from=3 days ago (UTC day) catches rows 0..3.
+  const fromDay = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10);
+  const byDate = await call('GET', `/super-admin/access/log?from=${fromDay}`, { token: ctx.owner.token });
+  assert.ok(byDate.json.total >= 3 && byDate.json.total <= 4, `a from-window narrows history (got ${byDate.json.total})`);
+
+  const byGrant = await call('GET', `/super-admin/access/log?grantId=${grant._id}`, { token: ctx.owner.token });
+  assert.strictEqual(byGrant.json.total, 1, 'a session’s "N requests" link filters to exactly its rows');
+});
+
+test('log-facets reports the log’s true extent and its filter options', { skip }, async () => {
+  await seedLogRows();
+  const res = await call('GET', '/super-admin/access/log-facets', { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.logTotal, 10, 'the operator sees how big the log actually is');
+  assert.ok(res.json.oldestAt, 'and how far back it goes');
+  assert.strictEqual(res.json.organizations.length, 1);
+  assert.strictEqual(res.json.actors.length, 2, 'both staff actors appear as filter options');
+});
+
+test('grants declare their scope honestly — support-tier sees "mine", break-glass sees "all"', { skip }, async () => {
+  await SupportAccessGrant.create({
+    actorUserId: ctx.owner._id,
+    organizationId: ctx.org._id,
+    reason: 'owner session for the scope test',
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+
+  const asOwner = await call('GET', '/super-admin/access/grants?all=1', { token: ctx.owner.token });
+  assert.strictEqual(asOwner.json.scope, 'all');
+  assert.strictEqual(asOwner.json.grants.length, 1);
+
+  // The silent gap this fixes: a support-tier super asking for all=1 got their own grants back with
+  // no indication — the page read "Nobody is inside" while a colleague was.
+  const asSupport = await call('GET', '/super-admin/access/grants?all=1', { token: ctx.support.token });
+  assert.strictEqual(asSupport.json.scope, 'mine', 'the response says which view it actually is');
+  assert.strictEqual(asSupport.json.grants.length, 0, 'their own grants only');
+});
+
+test('each open session totals what was read under it', { skip }, async () => {
+  const grant = await SupportAccessGrant.create({
+    actorUserId: ctx.owner._id,
+    organizationId: ctx.org._id,
+    reason: 'read-totals session',
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+  await AccessLog.insertMany([
+    { actorUserId: ctx.owner._id, organizationId: ctx.org._id, grantId: grant._id, method: 'GET', route: '/admin/voters', resource: 'voters', rows: 100, bytes: 5000 },
+    { actorUserId: ctx.owner._id, organizationId: ctx.org._id, grantId: grant._id, method: 'GET', route: '/admin/voters.csv', resource: 'voters', rows: 4000, bytes: 900_000 },
+  ]);
+
+  const res = await call('GET', '/super-admin/access/grants?all=1', { token: ctx.owner.token });
+  const g = res.json.grants.find((x) => x.reason === 'read-totals session');
+  assert.strictEqual(g.read.requests, 2, 'requests, not "records" — one row per request');
+  assert.strictEqual(g.read.rows, 4100);
+  assert.strictEqual(g.read.bytes, 905_000);
+});
+
+// ── Batch 2: the deletion-request subsystem finally has an operator surface. ──
+
+test('deletion requests: file → list (paged, status-filtered, overdue-flagged) → cancel', { skip }, async () => {
+  const { OrgDeletionRequest } = await import('../src/models/OrgDeletionRequest.js');
+  await OrgDeletionRequest.deleteMany({});
+
+  // File one through the endpoint (schedules now + SLA).
+  const filed = await call('POST', '/super-admin/access/deletion-requests', {
+    token: ctx.owner.token,
+    body: {
+      organizationId: String(ctx.org._id),
+      note: 'Emailed request from the org owner.',
+      requestedByEmail: 'owner@acme.com',
+    },
+  });
+  assert.strictEqual(filed.status, 201);
+  assert.strictEqual(filed.json.request.status, 'scheduled');
+
+  // An OVERDUE one: still scheduled, deadline already past. Seeded directly (different org so the
+  // one-scheduled-per-org rule doesn't collide).
+  await OrgDeletionRequest.create({
+    organizationId: ctx.ownOrg._id,
+    requestedBy: ctx.owner._id,
+    requestedAt: new Date(Date.now() - 40 * 86_400_000),
+    scheduledFor: new Date(Date.now() - 10 * 86_400_000),
+    status: 'scheduled',
+  });
+
+  const list = await call('GET', '/super-admin/access/deletion-requests?status=scheduled&limit=1&skip=0', {
+    token: ctx.owner.token,
+  });
+  assert.strictEqual(list.status, 200);
+  assert.strictEqual(list.json.total, 2, 'exact total even when the page holds one');
+  assert.strictEqual(list.json.requests.length, 1);
+
+  const all = await call('GET', '/super-admin/access/deletion-requests', { token: ctx.owner.token });
+  const overdue = all.json.requests.find((r) => r.organization?.id === String(ctx.ownOrg._id));
+  assert.strictEqual(overdue.overdue, true, 'past its own deadline and still scheduled = the SLA is being missed');
+  const fresh = all.json.requests.find((r) => r.organization?.id === String(ctx.org._id));
+  assert.strictEqual(fresh.overdue, false);
+
+  // Cancel the fresh one.
+  const cancelled = await call('POST', `/super-admin/access/deletion-requests/${fresh.id}/cancel`, {
+    token: ctx.owner.token,
+  });
+  assert.strictEqual(cancelled.status, 200);
+  assert.strictEqual(cancelled.json.request.status, 'cancelled');
+
+  await OrgDeletionRequest.deleteMany({});
+});
+
+test('POST /platform-stats/reconcile recomputes on demand', { skip }, async () => {
+  const res = await call('POST', '/super-admin/access/platform-stats/reconcile', { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.ok, true);
+  assert.ok(res.json.stats?.total, 'returns the refreshed stats the UI invalidates into');
+});

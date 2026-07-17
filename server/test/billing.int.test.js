@@ -296,3 +296,122 @@ test('statement: bills from first-knock month through archive month', { skip }, 
   assert.deepStrictEqual(await byMonth('2026-04'), { billable: false, total: 0 });
   await assert.rejects(() => monthlyStatement(org2._id, 'not-a-month'), /YYYY-MM/);
 });
+
+// ── Batch 2: the cross-org revenue answers. ──
+
+test('billing-rollup: exact aggregate math, ranked rows, internal orgs excluded', { skip }, async () => {
+  // An internal org must never appear in a revenue view.
+  const internal = await Organization.create({ name: 'Doorline Internal', slug: 'dl-internal', isActive: true });
+  await Subscription.create({ organizationId: internal._id, status: 'internal', statusChangedAt: new Date() });
+
+  const res = await call('GET', '/super-admin/organizations/billing-rollup', { token: ctx.superTok });
+  assert.strictEqual(res.status, 200);
+  assert.match(res.json.month, /^\d{4}-\d{2}$/);
+
+  const rows = res.json.organizations;
+  assert.ok(!rows.some((r) => r.name === 'Doorline Internal'), 'internal orgs are not revenue');
+
+  // The header is exactly the sum of its rows — never an independent estimate.
+  const sumCents = rows.reduce((s, r) => s + r.totalCents, 0);
+  assert.strictEqual(res.json.totalCents, sumCents);
+  const sumCampaigns = rows.reduce((s, r) => s + r.billableCampaigns, 0);
+  assert.strictEqual(res.json.billableCampaigns, sumCampaigns);
+
+  // Ranked by revenue, and byStatus accounts for every row.
+  for (let i = 1; i < rows.length; i++) {
+    assert.ok(rows[i - 1].totalCents >= rows[i].totalCents, 'sorted top-payer first');
+  }
+  const statusSum = Object.values(res.json.byStatus).reduce((s, n) => s + n, 0);
+  assert.strictEqual(statusSum, rows.length);
+
+  // org2 ('Windowed', first knock Feb 2026, never archived) is billing this month at the default rate.
+  const windowed = rows.find((r) => r.name === 'Stmt Org 2');
+  if (windowed) {
+    assert.strictEqual(windowed.billableCampaigns >= 1, true, 'a started, unarchived campaign bills');
+  }
+});
+
+test('at-risk: expiring trials, past-due, wind-downs — with the far-off trial NOT flagged', { skip }, async () => {
+  const mk = async (name, slug, subFields) => {
+    const o = await Organization.create({ name, slug, isActive: true });
+    await Subscription.create({ organizationId: o._id, statusChangedAt: new Date(), ...subFields });
+    return o;
+  };
+  await mk('Trial Soon', 'trial-soon', { status: 'trial', trialEndsAt: new Date(Date.now() + 2 * 86_400_000) });
+  await mk('Trial Far', 'trial-far', { status: 'trial', trialEndsAt: new Date(Date.now() + 20 * 86_400_000) });
+  await mk('Past Due Org', 'past-due-org', { status: 'past_due' });
+  await mk('Canceled Org', 'canceled-org', { status: 'canceled' });
+
+  const res = await call('GET', '/super-admin/organizations/at-risk', { token: ctx.superTok });
+  assert.strictEqual(res.status, 200);
+  const items = res.json.items;
+  const byName = (n) => items.find((i) => i.name === n);
+
+  const soon = byName('Trial Soon');
+  assert.strictEqual(soon?.type, 'trial_expiring');
+  assert.ok(soon.trialDaysLeft <= 7);
+
+  assert.strictEqual(byName('Trial Far'), undefined, 'a 20-day trial is not "at risk" at the default window');
+  assert.strictEqual(byName('Past Due Org')?.type, 'past_due');
+
+  const canceled = byName('Canceled Org');
+  assert.strictEqual(canceled?.type, 'wind_down');
+  assert.ok(canceled.windDownEndsAt, 'the wind-down item carries its deletion date');
+
+  assert.ok(!byName('Doorline Internal'), 'internal orgs never appear');
+});
+
+test('billing history is paged with an exact total; the before/after values travel', { skip }, async () => {
+  const o = await Organization.create({ name: 'History Org', slug: 'history-org', isActive: true });
+  await Subscription.create({ organizationId: o._id, status: 'active', statusChangedAt: new Date() });
+  for (let i = 0; i < 3; i++) {
+    await SubscriptionEvent.create({
+      organizationId: o._id,
+      byUserId: ctx.superId,
+      changes: { pricePerCampaignCents: { from: 30000 + i, to: 30001 + i } },
+    });
+  }
+
+  const page = await call('GET', `/super-admin/organizations/${o._id}/billing?eventsSkip=1&eventsLimit=1`, {
+    token: ctx.superTok,
+  });
+  assert.strictEqual(page.status, 200);
+  assert.strictEqual(page.json.eventsTotal, 3, 'exact total, not the page length');
+  assert.strictEqual(page.json.events.length, 1);
+  assert.ok(page.json.events[0].changes?.pricePerCampaignCents?.from, 'the stored from/to values are in the payload');
+
+  // Legacy shape: parameterless call keeps the newest-50 window.
+  const legacy = await call('GET', `/super-admin/organizations/${o._id}/billing`, { token: ctx.superTok });
+  assert.strictEqual(legacy.json.events.length, 3);
+  assert.ok(legacy.json.subscription, 'subscription/entitlement contract unchanged');
+});
+
+test('the orgs list pages, searches, and splits campaign counts by active/archived', { skip }, async () => {
+  // Legacy: parameterless returns everything, with the new count fields additive.
+  const legacy = await call('GET', '/super-admin/organizations', { token: ctx.superTok });
+  assert.strictEqual(legacy.status, 200);
+  assert.ok(legacy.json.organizations.length >= 5, 'full list on the legacy path');
+  const row = legacy.json.organizations.find((r) => r.name === 'Billing Org');
+  assert.ok('campaignsActive' in row && 'campaignsArchived' in row, 'the two campaign bases are split');
+  assert.strictEqual(row.campaignsActive + row.campaignsArchived, row.campaignCount, 'and they sum to the legacy count');
+
+  // Paged + searched.
+  const paged = await call('GET', '/super-admin/organizations?q=history&limit=1&skip=0', { token: ctx.superTok });
+  assert.strictEqual(paged.json.total, 1, 'q hits name/slug server-side');
+  assert.strictEqual(paged.json.organizations[0].name, 'History Org');
+
+  // Sort by trial end: ascending among dated orgs (soonest expiry first), null-dated last.
+  const byTrial = await call('GET', '/super-admin/organizations?sort=trialEnds', { token: ctx.superTok });
+  const names = byTrial.json.organizations.map((o) => o.name);
+  assert.ok(
+    names.indexOf('Trial Soon') < names.indexOf('Trial Far'),
+    'the sooner-expiring trial sorts ahead of the later one'
+  );
+  const dated = byTrial.json.organizations.filter((o) => o.billing.trialEndsAt);
+  for (let i = 1; i < dated.length; i++) {
+    assert.ok(
+      new Date(dated[i - 1].billing.trialEndsAt) <= new Date(dated[i].billing.trialEndsAt),
+      'dated rows ascend'
+    );
+  }
+});

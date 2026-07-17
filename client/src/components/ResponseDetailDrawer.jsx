@@ -151,7 +151,14 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
                       <div className="text-xs text-fg-muted">{a.questionLabel || a.questionKey}</div>
                       <div className="text-sm text-fg">
                         {Array.isArray(a.answer) ? a.answer.join(', ') : String(a.answer ?? '—')}
-                        {a.otherText && <span className="text-fg-muted"> — {a.otherText}</span>}
+                        {/* The capture flow embeds the Other free text INTO the answer
+                            snapshot; only show otherText when it isn't already there. */}
+                        {a.otherText &&
+                          !(Array.isArray(a.answer)
+                            ? a.answer.includes(a.otherText)
+                            : a.answer === a.otherText) && (
+                            <span className="text-fg-muted"> — {a.otherText}</span>
+                          )}
                       </div>
                     </div>
                   ))

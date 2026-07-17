@@ -79,6 +79,12 @@ const householdSchema = new mongoose.Schema(
     // the door drops off the canvasser's map/books (recomputed on voted-import).
     fullyVoted: { type: Boolean, default: false, index: true },
 
+    // Do-not-contact: true when EVERY voter at this address is flagged do-not-contact, so the
+    // door drops off cutting/books/maps for ALL campaign types (lit drop included — "never come
+    // to my door" covers literature). Derived ONLY by services/dnc/recomputeFullyDnc.js; a
+    // voter-less door is never fullyDnc (the ≥1-voter guard).
+    fullyDnc: { type: Boolean, default: false, index: true },
+
     // Admin-excluded from turf (e.g. "remove apartments"): like fullyVoted, these
     // doors are skipped from cutting, the map, door counts, and the canvasser list.
     excludedFromTurf: { type: Boolean, default: false, index: true },

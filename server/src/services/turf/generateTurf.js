@@ -8,6 +8,7 @@ import { geometricCut } from './geometricCut.js';
 import { resolveWalkList } from '../walklist/resolveWalkList.js';
 import { computeBoundary, computeCentroid, computeTerritories } from './boundary.js';
 import { computeWalkOrder } from './walkOrder.js';
+import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
 
 const CUT_COLUMNS = {
   location: 1,
@@ -38,10 +39,8 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
   // so including them would balance books on dead doors. Mirrors the canvasser list.
   const baseFilter = {
     campaignId,
-    isActive: true,
     effortId: pass.effortId,
-    fullyVoted: { $ne: true },
-    excludedFromTurf: { $ne: true },
+    ...KNOCKABLE_DOOR_FILTER,
     'location.coordinates': { $exists: true, $ne: null },
     // Admin-reviewed second-pass removal: when set, this cut skips inaccessible homes
     // (Household.status === 'restricted'). Non-destructive — the homes stay in the
@@ -51,7 +50,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   // Targeted follow-up round: restrict the universe to the effort's doors matching
   // a walk-list-shaped filter (knock status + survey answers). The existing
-  // fullyVoted/excludedFromTurf/coords exclusions still apply (intersection).
+  // fullyVoted/fullyDnc/excludedFromTurf/coords exclusions still apply (intersection).
   const isActiveFilter = (f) =>
     !!f &&
     Object.entries(f).some(([k, v]) => {
@@ -196,11 +195,9 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
   // Skip fully-voted doors (not knockable), same as the main cut.
   const baseFilter = {
     campaignId,
-    isActive: true,
     effortId: pass.effortId,
     turfId: null,
-    fullyVoted: { $ne: true },
-    excludedFromTurf: { $ne: true },
+    ...KNOCKABLE_DOOR_FILTER,
     'location.coordinates': { $exists: true, $ne: null },
     ...(excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
   };

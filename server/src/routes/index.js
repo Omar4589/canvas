@@ -20,6 +20,7 @@ import adminTurfsRouter from './admin/turfs.js';
 import adminWalkListsRouter from './admin/walklists.js';
 import adminVotedRouter from './admin/voted.js';
 import adminVotersRouter from './admin/voters.js';
+import adminDncRouter from './admin/dnc.js';
 import adminPassesRouter from './admin/passes.js';
 import adminEffortsRouter from './admin/efforts.js';
 import adminSetupStatusRouter from './admin/setupStatus.js';
@@ -95,6 +96,9 @@ router.use('/admin/tags', adminTagsRouter);
 router.use('/admin/config', adminConfigRouter);
 router.use('/admin/households', adminHouseholdsRouter);
 router.use('/admin/voters', adminVotersRouter);
+// Org-level (not campaign-nested): DNC is an org-wide fact on the Voter, and this router is
+// admins-only — the campaign-nested voted.js gate (requireCampaignManager) would admit leads.
+router.use('/admin/dnc', adminDncRouter);
 router.use('/admin/campaigns', adminCampaignsRouter);
 router.use('/admin/campaigns/:campaignId/assignments', adminAssignmentsRouter);
 router.use('/admin/campaigns/:campaignId/households', adminCampaignHouseholdsRouter);

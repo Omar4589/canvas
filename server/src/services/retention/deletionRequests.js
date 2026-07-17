@@ -56,11 +56,16 @@ export async function cancelOrgDeletion({ requestId, cancelledBy = null } = {}) 
 }
 
 /** Open + recently-resolved requests, for the platform ops surface. */
-export async function listDeletionRequests({ limit = 100 } = {}) {
-  const rows = await OrgDeletionRequest.find({})
-    .sort({ status: 1, scheduledFor: 1 })
-    .limit(limit)
-    .populate('organizationId', 'name slug')
-    .lean();
-  return rows;
+export async function listDeletionRequests({ status = null, skip = 0, limit = 100 } = {}) {
+  const filter = status ? { status } : {};
+  const [total, rows] = await Promise.all([
+    OrgDeletionRequest.countDocuments(filter),
+    OrgDeletionRequest.find(filter)
+      .sort({ status: 1, scheduledFor: 1 })
+      .skip(Math.max(skip, 0))
+      .limit(limit)
+      .populate('organizationId', 'name slug')
+      .lean(),
+  ]);
+  return { rows, total };
 }

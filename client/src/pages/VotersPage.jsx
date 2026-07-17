@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useDebouncedValue } from '../lib/useDebouncedValue.js';
 
@@ -36,6 +36,7 @@ export default function VotersPage() {
   const [party, setParty] = useState('');
   const [surveyStatus, setSurveyStatus] = useState('');
   const [voted, setVoted] = useState('');
+  const [dnc, setDnc] = useState('');
   const [offset, setOffset] = useState(0);
 
   const campaignsQ = useQuery({
@@ -69,11 +70,12 @@ export default function VotersPage() {
     party,
     surveyStatus,
     voted,
+    dnc,
     limit: PAGE_SIZE,
     offset,
   });
   const votersQ = useQuery({
-    queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, offset }],
+    queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, dnc, offset }],
     queryFn: ({ signal }) => api(`/admin/voters${query}`, { signal }),
     placeholderData: keepPreviousData,
   });
@@ -86,15 +88,20 @@ export default function VotersPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-fg">Voters</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          Everyone in your organization's voter database. Click a voter to see their full profile.
-          (For canvassers — the people you assign books to — see <strong>Users</strong>.)
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-fg">Voters</h1>
+          <p className="mt-1 text-sm text-fg-muted">
+            Everyone in your organization's voter database. Click a voter to see their full profile.
+            (For canvassers — the people you assign books to — see <strong>Users</strong>.)
+          </p>
+        </div>
+        <Link to="/voters/dnc" className="shrink-0 text-sm font-medium text-brand-accent hover:underline">
+          Do-not-contact list →
+        </Link>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -128,6 +135,15 @@ export default function VotersPage() {
           <option value="">Any voted status</option>
           <option value="true">Voted</option>
           <option value="false">Not voted</option>
+        </select>
+        <select
+          value={dnc}
+          onChange={(e) => onFilter(setDnc)(e.target.value)}
+          className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none"
+        >
+          <option value="">Any contact status</option>
+          <option value="true">Do not contact</option>
+          <option value="false">Contactable</option>
         </select>
         <input
           value={party}
@@ -176,7 +192,14 @@ export default function VotersPage() {
                       {v.household ? `${v.household.addressLine1}, ${v.household.city} ${v.household.state}` : '—'}
                     </td>
                     <td className="px-4 py-2 text-fg-muted">{v.household?.campaignName || '—'}</td>
-                    <td className="px-4 py-2"><StatusPill status={v.surveyStatus} /></td>
+                    <td className="px-4 py-2">
+                      <span className="inline-flex items-center gap-1.5">
+                        <StatusPill status={v.surveyStatus} />
+                        {v.dnc && (
+                          <span className="rounded-full bg-danger-tint px-2 py-0.5 text-xs font-medium text-danger">DNC</span>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-4 py-2 text-center">
                       {v.voted ? <span className="text-teal-600" title="Voted">✓</span> : ''}
                     </td>
