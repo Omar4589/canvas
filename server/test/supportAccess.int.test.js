@@ -512,4 +512,109 @@ test('POST /platform-stats/reconcile recomputes on demand', { skip }, async () =
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.json.ok, true);
   assert.ok(res.json.stats?.total, 'returns the refreshed stats the UI invalidates into');
+  assert.ok(res.json.daily, 'and now also rebuilds the daily trend series');
+});
+
+// ── Batch 3: the trend series endpoint — ends at yesterday, zero-fills, clamps. ──
+
+test('platform-trends: partial today is never served, missing days are zeros, days clamps', { skip }, async () => {
+  const { PlatformDaily } = await import('../src/models/PlatformDaily.js');
+  await PlatformDaily.deleteMany({});
+  const dayStr = (n) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+  await PlatformDaily.create([
+    { day: dayStr(0), doorsKnocked: 99 }, // today's PARTIAL bucket (a mid-day reconcile writes it)
+    { day: dayStr(1), doorsKnocked: 4 },
+    { day: dayStr(5), doorsKnocked: 2 },
+  ]);
+
+  const res = await call('GET', '/super-admin/access/platform-trends?days=30', { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.tz, 'UTC');
+  assert.strictEqual(res.json.days.length, 30, 'exactly the window, zero-filled');
+  const last = res.json.days[res.json.days.length - 1];
+  assert.strictEqual(last.day, dayStr(1), 'the series ends at YESTERDAY — the last complete UTC day');
+  assert.ok(!res.json.days.some((d) => d.day === dayStr(0)), 'today’s partial bucket is never served');
+  assert.strictEqual(last.doorsKnocked, 4);
+  assert.strictEqual(res.json.days.find((d) => d.day === dayStr(5))?.doorsKnocked, 2);
+  assert.strictEqual(res.json.days.find((d) => d.day === dayStr(3))?.doorsKnocked, 0, 'a quiet day is a 0, not a hole');
+  assert.ok(res.json.undated, 'the undated counts ride along for the ⓘ');
+
+  const clamped = await call('GET', '/super-admin/access/platform-trends?days=7', { token: ctx.owner.token });
+  assert.strictEqual(clamped.json.days.length, 30, 'only 30/90/365 are valid windows; anything else falls back');
+  await PlatformDaily.deleteMany({});
+});
+
+// ── Batch 3: the org-scoped candidates endpoint + the persons search the merge picker reuses. ──
+
+test('merge candidates are org-scoped IN THE DB with an exact total; tombstones stay out of the picker search', { skip }, async () => {
+  const { Person } = await import('../src/models/Person.js');
+  const { PersonMergeCandidate } = await import('../src/models/PersonMergeCandidate.js');
+  await Person.deleteMany({});
+  await PersonMergeCandidate.deleteMany({});
+
+  const pa = await Person.create({ organizationId: ctx.org._id, firstName: 'A', lastName: 'One', fullName: 'A One' });
+  const pb = await Person.create({ organizationId: ctx.org._id, firstName: 'B', lastName: 'Two', fullName: 'B Two' });
+  await PersonMergeCandidate.create({ organizationId: ctx.org._id, personIdA: pa._id, personIdB: pb._id, reason: 'uid_svid_conflict', status: 'open' });
+  // Another org's candidate — must never appear in Acme's queue (the old shape could hide Acme's
+  // own rows behind 500 fresher foreign ones; now the filter is a DB predicate).
+  const px = await Person.create({ organizationId: ctx.ownOrg._id, firstName: 'X', lastName: 'Elsewhere', fullName: 'X Elsewhere' });
+  await PersonMergeCandidate.create({ organizationId: ctx.ownOrg._id, personIdA: px._id, personIdB: null, reason: 'uid_svid_conflict', status: 'open' });
+  // A tombstone in Acme — the picker's search must not offer it as a merge victim.
+  await Person.create({ organizationId: ctx.org._id, firstName: 'T', lastName: 'Stone', fullName: 'T Stone', mergedInto: pa._id });
+
+  // The persons console needs break-glass + a live grant for the org.
+  await call('POST', '/super-admin/access/grants', {
+    token: ctx.owner.token,
+    body: { organizationId: String(ctx.org._id), reason: 'Reviewing merge candidates for the queue test.' },
+  });
+
+  const cands = await call('GET', `/super-admin/persons/candidates?organizationId=${ctx.org._id}&limit=10&skip=0`, { token: ctx.owner.token });
+  assert.strictEqual(cands.status, 200);
+  assert.strictEqual(cands.json.total, 1, 'exact org-scoped total — the foreign candidate is invisible');
+  assert.strictEqual(cands.json.candidates.length, 1);
+  assert.strictEqual(cands.json.candidates[0].personA?.fullName, 'A One');
+  assert.strictEqual(cands.json.candidates[0].personB?.fullName, 'B Two');
+
+  const search = await call('GET', `/super-admin/persons?organizationId=${ctx.org._id}&q=Stone&limit=10&skip=0`, { token: ctx.owner.token });
+  assert.strictEqual(search.json.total, 0, 'a merged tombstone never surfaces in the picker search');
+
+  await Person.deleteMany({});
+  await PersonMergeCandidate.deleteMany({});
+});
+
+// ── Batch 3: the `owns` hardening — an org's own owner-less Person edit applies canonically. ──
+
+test('editing your own owner-less Person applies canonically instead of filing a ghost proposal', { skip }, async () => {
+  const { Person } = await import('../src/models/Person.js');
+  const { Voter } = await import('../src/models/Voter.js');
+  const { Household } = await import('../src/models/Household.js');
+  const { PersonEditProposal } = await import('../src/models/PersonEditProposal.js');
+  await PersonEditProposal.deleteMany({});
+
+  // The dormant trap: a Person created with NO identityOwnerOrgId (resolvePerson.createPerson never
+  // sets one). The old `owns` check compared identityOwnerOrgId only, so the org's own admin edit
+  // was silently shunted into a proposal queue no UI shows — while the Voter row updated, so it
+  // LOOKED applied.
+  const person = await Person.create({ organizationId: ctx.org._id, firstName: 'Old', lastName: 'Name' });
+  const hh = await Household.create({
+    organizationId: ctx.org._id, campaignId: new mongoose.Types.ObjectId(),
+    addressLine1: '9 Owns St', city: 'Springfield', state: 'IL', zipCode: '62704',
+    normalizedAddress: '9 owns st|springfield|il|62704',
+  });
+  const voter = await Voter.create({
+    organizationId: ctx.org._id, householdId: hh._id, personId: person._id,
+    firstName: 'Old', lastName: 'Name', fullName: 'Old Name', stateVoterId: 'OWNS-1',
+  });
+
+  const res = await call('PATCH', `/admin/voters/${voter._id}`, {
+    token: ctx.customer.token, orgId: ctx.org._id, body: { firstName: 'New' },
+  });
+  assert.strictEqual(res.status, 200);
+  const p2 = await Person.findById(person._id).lean();
+  assert.strictEqual(p2.firstName, 'New', 'the canonical Person updated — the org owns its own record');
+  assert.strictEqual(await PersonEditProposal.countDocuments({}), 0, 'no ghost proposal was filed');
+
+  await Person.deleteMany({});
+  await Voter.deleteMany({});
+  await Household.deleteMany({});
 });

@@ -415,3 +415,29 @@ test('the orgs list pages, searches, and splits campaign counts by active/archiv
     );
   }
 });
+
+// ── Batch 3: the slim org detail composite — metadata without a grant, exemption made legible. ──
+
+test('org detail: roster + campaigns as plain metadata (no grant, no audit row), internal flag surfaced', { skip }, async () => {
+  const { AccessLog } = await import('../src/models/AccessLog.js');
+  await AccessLog.deleteMany({});
+
+  // ctx.org has Ada as its admin and one campaign; superTok is a SUPPORT-tier super (default
+  // platformRole) — exactly who this surface must serve without a grant.
+  const res = await call('GET', `/super-admin/organizations/${ctx.org._id}`, { token: ctx.superTok });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.organization.name, 'Billing Org');
+  assert.strictEqual(res.json.billing.internal, false);
+  const ada = res.json.members.find((m) => m.email === 'badmin@t.co');
+  assert.ok(ada, 'the roster is finally readable without entering the org');
+  assert.strictEqual(ada.role, 'admin');
+  assert.ok(res.json.campaigns.some((c) => c.name === 'Camp'));
+
+  // The retention-exemption consequence, surfaced where the status is seen.
+  const internal = await Organization.findOne({ slug: 'dl-internal' });
+  const res2 = await call('GET', `/super-admin/organizations/${internal._id}`, { token: ctx.superTok });
+  assert.strictEqual(res2.json.billing.internal, true, 'internal = exempt-from-retention is legible');
+
+  await new Promise((r) => setTimeout(r, 120));
+  assert.strictEqual(await AccessLog.countDocuments({}), 0, 'reading org METADATA writes no audit row');
+});

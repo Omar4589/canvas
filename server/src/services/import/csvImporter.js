@@ -8,6 +8,7 @@ import { normalizeAddress } from '../../utils/normalizeAddress.js';
 import { DEFAULT_PROFILE_MAPPING } from './canonicalFields.js';
 import { parseUpload } from './parseUpload.js';
 import { bumpLive } from '../platform/platformStats.js';
+import { IDENTITY_FIELDS, identityEq } from '../person/propagateIdentity.js';
 
 const trimOrNull = (v) => {
   if (v == null) return null;
@@ -334,7 +335,7 @@ export async function buildImportRows(buffer, filename, mapping, { explode = tru
  * import never touches another org's voters (decision 13). Counts are computed
  * by countDocuments diff so they're correct even if the job is retried.
  */
-export async function applyImport({ campaign, orgId, validRows, householdMap, batchSize = 2000, onProgress }) {
+export async function applyImport({ campaign, orgId, validRows, householdMap, batchSize = 2000, overwriteHandEdits = false, onProgress }) {
   const campaignId = campaign._id;
   const beforeHouseholds = await Household.countDocuments({ campaignId });
   const beforeVoters = await Voter.countDocuments({ organizationId: orgId });
@@ -395,16 +396,67 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
     for (const h of houses) addressToId.set(h.normalizedAddress, h._id);
   }
 
-  // 3. Voters (org-scoped upsert).
+  // 2.5. Hand-edit shield: fetch this org's ARMED voters among the incoming ids. An admin's
+  // hand edit (routes/admin/voters.js PATCH) arms the edited identity fields in
+  // locallyEditedFields — and the blind $set below used to be the one writer that ignored it,
+  // silently reverting door-confirmed corrections on every re-import. The 'locallyEditedFields.0'
+  // filter keeps this tiny (only armed voters return, typically a handful even on a 100k file);
+  // it rides the unique {organizationId, stateVoterId} index. Fetched here, not threaded in from
+  // the caller, so the runImport CLI entry gets the same protection as the worker path.
+  const SHIELD_PROJ = { stateVoterId: 1, locallyEditedFields: 1 };
+  for (const f of IDENTITY_FIELDS) SHIELD_PROJ[f] = 1;
+  const shieldBySvid = new Map();
+  const allSvids = validRows.map((r) => r.voter.stateVoterId);
+  for (let i = 0; i < allSvids.length; i += batchSize) {
+    const docs = await Voter.find(
+      {
+        organizationId: orgId,
+        stateVoterId: { $in: allSvids.slice(i, i + batchSize) },
+        'locallyEditedFields.0': { $exists: true },
+      },
+      SHIELD_PROJ
+    ).lean();
+    for (const d of docs) shieldBySvid.set(d.stateVoterId, d);
+  }
+
+  // 3. Voters (org-scoped upsert). For armed rows the admin's decision governs: default keeps the
+  // hand-edited values (the file's values are moved to $setOnInsert — never written over an
+  // existing row, but a row deleted between the prefetch and this write still inserts complete);
+  // overwriteHandEdits writes the file AND disarms exactly the shielded fields so a later import
+  // updates them normally. Counts are (voter, field) instances where the values actually differed
+  // — the same definition the preview's handEditConflicts uses, so preview ≈ outcome.
+  let keptHandEdits = 0;
+  let overwrittenHandEdits = 0;
   const voterOps = validRows.map((row) => {
     const householdId = addressToId.get(normalizeAddress(row.household));
+    const set = { ...row.voter, householdId, organizationId: orgId };
+    const setOnInsert = { surveyStatus: 'not_surveyed' };
+    const update = { $set: set, $setOnInsert: setOnInsert };
+    const prior = shieldBySvid.get(row.voter.stateVoterId);
+    if (prior) {
+      const shielded = (prior.locallyEditedFields || []).filter((f) => IDENTITY_FIELDS.includes(f));
+      if (shielded.length && overwriteHandEdits) {
+        for (const f of shielded) if (!identityEq(set[f], prior[f])) overwrittenHandEdits += 1;
+        update.$pull = { locallyEditedFields: { $in: shielded } };
+      } else if (shielded.length) {
+        for (const f of shielded) {
+          if (!identityEq(set[f], prior[f])) keptHandEdits += 1;
+          setOnInsert[f] = set[f];
+          delete set[f];
+        }
+        // fullName coherence for legacy rows armed on a name part but not fullName: never emit a
+        // fullName stitched from a kept first name and a file last name (or vice versa).
+        if (('firstName' in setOnInsert || 'lastName' in setOnInsert) && 'fullName' in set) {
+          set.fullName = [set.firstName ?? prior.firstName, set.lastName ?? prior.lastName]
+            .filter(Boolean)
+            .join(' ');
+        }
+      }
+    }
     return {
       updateOne: {
         filter: { organizationId: orgId, stateVoterId: row.voter.stateVoterId },
-        update: {
-          $set: { ...row.voter, householdId, organizationId: orgId },
-          $setOnInsert: { surveyStatus: 'not_surveyed' },
-        },
+        update,
         upsert: true,
       },
     };
@@ -438,6 +490,9 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
     newHouseholds,
     newVoters,
     updatedVoters: Math.max(0, validRows.length - newVoters),
+    // Hand-edit outcome: (voter, field) instances where the file disagreed with an armed edit.
+    keptHandEdits,
+    overwrittenHandEdits,
     // Exact docs inserted this run (for "undo import"). Empty on an idempotent retry.
     insertedHouseholdIds,
     insertedVoterIds,
@@ -448,7 +503,7 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
  * Synchronous, in-process import. Retained for CLI/tests; the HTTP path enqueues
  * a job and the worker calls parseAndValidate + applyImport instead.
  */
-export async function runImport({ buffer, filename, userId, campaignId, organizationId, mapping = DEFAULT_PROFILE_MAPPING }) {
+export async function runImport({ buffer, filename, userId, campaignId, organizationId, mapping = DEFAULT_PROFILE_MAPPING, overwriteHandEdits = false }) {
   if (!campaignId || !mongoose.isValidObjectId(campaignId)) throw new Error('campaignId is required');
   const campaignFilter = { _id: campaignId };
   if (organizationId) campaignFilter.organizationId = organizationId;
@@ -469,7 +524,7 @@ export async function runImport({ buffer, filename, userId, campaignId, organiza
   try {
     const csv = buffer.toString('utf8');
     const { totalRows, errors, validRows, householdMap, dupSvids } = parseAndValidate(csv, mapping);
-    const counts = await applyImport({ campaign, orgId, validRows, householdMap });
+    const counts = await applyImport({ campaign, orgId, validRows, householdMap, overwriteHandEdits });
 
     job.status = 'completed';
     job.totalRows = totalRows;
@@ -478,6 +533,8 @@ export async function runImport({ buffer, filename, userId, campaignId, organiza
     job.newVoters = counts.newVoters;
     job.updatedVoters = counts.updatedVoters;
     job.newHouseholds = counts.newHouseholds;
+    job.keptHandEdits = counts.keptHandEdits;
+    job.overwrittenHandEdits = counts.overwrittenHandEdits;
     job.duplicateStateVoterIds = Array.from(dupSvids);
     job.errors = errors.slice(0, 100);
     job.errorCount = errors.length;

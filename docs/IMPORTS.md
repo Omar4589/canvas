@@ -299,5 +299,7 @@ geocoding is off) per-row.
 (+ `uidSource`) onto each row so the upsert carries them; `computeImportDiff` adds a read-only
 `persons` forecast (`existingPeople`/`newPeople`). The **vendor namespace** (`uidSource`) is
 resolved at upload (inline or from the `ImportProfile`), stored on the `ImportJob`, and threaded
-into matching. Full design — the canonical Person model, the ownership state machine, and
+into matching. It is **per-org matching only** — Persons are org-scoped, and the import screen's
+copy says so (the old "matched across orgs" wording described the pre-July-2026 behavior that was
+removed). Full design — the canonical Person model, the ownership state machine, and
 super-admin oversight — is in [PERSONS.md](PERSONS.md).

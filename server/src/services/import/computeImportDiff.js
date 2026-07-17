@@ -4,6 +4,7 @@ import { Voter } from '../../models/Voter.js';
 import { Person } from '../../models/Person.js';
 import { normalizeAddress, looseAddressKey } from '../../utils/normalizeAddress.js';
 import { forecast as geocodeForecast } from './geocode/geocodeService.js';
+import { IDENTITY_FIELDS, identityEq } from '../person/propagateIdentity.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const SAMPLE_CAP = 100;
@@ -184,6 +185,45 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
     }
   }
 
+  // Hand-edit conflicts: fields an admin corrected by hand (Voter.locallyEditedFields) where this
+  // file carries a DIFFERENT value. Surfaced so the admin can choose keep-or-overwrite at apply
+  // time — by default applyImport keeps the hand edit. A second TARGETED query rather than
+  // fattening the main existing-voters projection above: that one is held fully in memory on
+  // 100k-row files, while armed voters are typically a handful ('locallyEditedFields.0' exists).
+  const ARMED_PROJ = { stateVoterId: 1, fullName: 1, locallyEditedFields: 1 };
+  for (const f of IDENTITY_FIELDS) ARMED_PROJ[f] = 1;
+  const armedVoters = await findInChunks(
+    Voter, 'stateVoterId', svids, ARMED_PROJ,
+    { organizationId: orgId, 'locallyEditedFields.0': { $exists: true } }
+  );
+  const armedBySvid = new Map(armedVoters.map((v) => [v.stateVoterId, v]));
+  const handEditSamples = [];
+  const handEditByField = {};
+  const handEditVoterSet = new Set();
+  let handEditFieldCount = 0;
+  if (armedBySvid.size) {
+    for (const row of validRows) {
+      const armed = armedBySvid.get(row.voter.stateVoterId);
+      if (!armed) continue;
+      for (const f of armed.locallyEditedFields || []) {
+        if (!IDENTITY_FIELDS.includes(f)) continue;
+        if (identityEq(row.voter[f], armed[f])) continue;
+        handEditFieldCount += 1;
+        handEditByField[f] = (handEditByField[f] || 0) + 1;
+        handEditVoterSet.add(row.voter.stateVoterId);
+        if (handEditSamples.length < SAMPLE_CAP) {
+          handEditSamples.push({
+            stateVoterId: row.voter.stateVoterId,
+            name: armed.fullName || row.voter.fullName || null,
+            field: f,
+            keptValue: armed[f] ?? null,
+            fileValue: row.voter[f] ?? null,
+          });
+        }
+      }
+    }
+  }
+
   const missingRequired = errors.filter((e) => e.code === 'missing_required').length;
   const noCoordinates = errors.filter((e) => e.code === 'bad_coords').length;
   const duplicateInFile = dupSvids ? dupSvids.size : 0;
@@ -198,6 +238,12 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
   return {
     geocoding,
     persons,
+    handEditConflicts: {
+      voters: handEditVoterSet.size,
+      fields: handEditFieldCount,
+      byField: handEditByField,
+      sample: handEditSamples,
+    },
     totals: {
       totalRows,
       validCount: validRows.length,

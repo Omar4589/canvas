@@ -6,6 +6,7 @@ import { Organization } from '../../models/Organization.js';
 import { Membership } from '../../models/Membership.js';
 import { User } from '../../models/User.js';
 import { Campaign } from '../../models/Campaign.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
 import { slugSchema, emailSchema, nameSchema, passwordSchema } from '../../utils/validators.js';
 import { Subscription } from '../../models/Subscription.js';
@@ -218,6 +219,86 @@ router.get('/at-risk', async (req, res, next) => {
       });
     }
     res.json({ days, idleMonths: idle.months, items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── The slim org detail composite: header + roster + campaigns, all METADATA. ──
+// No support grant and no AccessLog row — the whole point is that reading who's IN an org should
+// not require entering the org (switching in costs a grant + audit rows, correctly, because it
+// opens voter content; a roster is account metadata, the same tier as the All Users list).
+// NOTE: registered AFTER the /billing-rollup and /at-risk literals — a '/:orgId' above them would
+// swallow both paths.
+router.get('/:orgId', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.orgId)) {
+      return res.status(400).json({ error: 'Invalid orgId' });
+    }
+    const org = await Organization.findById(req.params.orgId).lean();
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+    const [sub, memberships, campaigns, lastActivity] = await Promise.all([
+      Subscription.findOne({ organizationId: org._id }).lean(),
+      // ALL memberships, deactivated included — the roster the list views can't show.
+      Membership.find({ organizationId: org._id })
+        .populate({ path: 'userId', select: 'firstName lastName email isActive deletedAt' })
+        .populate({ path: 'coordinatorId', select: 'firstName lastName' })
+        .sort({ role: 1, createdAt: 1 })
+        .lean(),
+      Campaign.find({ organizationId: org._id }, 'name isActive archivedAt createdAt').sort({ createdAt: -1 }).lean(),
+      CanvassActivity.findOne({ organizationId: org._id }, 'timestamp').sort({ timestamp: -1 }).lean(),
+    ]);
+    // Per-campaign last knock: one indexed point-read each ({campaignId, timestamp: -1}).
+    const lastByCampaign = await Promise.all(
+      campaigns.map((c) => CanvassActivity.findOne({ campaignId: c._id }, 'timestamp').sort({ timestamp: -1 }).lean())
+    );
+
+    const ent = entitlementFor(sub);
+    res.json({
+      organization: {
+        id: String(org._id),
+        name: org.name,
+        slug: org.slug,
+        isActive: org.isActive,
+        createdAt: org.createdAt,
+      },
+      billing: {
+        status: sub?.status ?? null,
+        effective: ent.effective,
+        trialEndsAt: sub?.trialEndsAt ?? null,
+        trialDaysLeft: ent.trialDaysLeft,
+        windDownEndsAt: ent.windDownEndsAt ?? null,
+        // 'internal' silently exempts an org from BOTH retention sweeps (triggers.js isExempt +
+        // DORMANCY_PROTECTED_STATUSES) — surfaced so the consequence is legible, not folklore.
+        internal: sub?.status === 'internal',
+      },
+      lastActivityAt: lastActivity?.timestamp || null,
+      members: memberships
+        .filter((m) => m.userId)
+        .map((m) => ({
+          userId: String(m.userId._id),
+          name: `${m.userId.firstName || ''} ${m.userId.lastName || ''}`.trim(),
+          email: m.userId.email,
+          accountActive: m.userId.isActive,
+          accountDeleted: !!m.userId.deletedAt,
+          role: m.role,
+          isActive: m.isActive,
+          billingAccess: !!m.billingAccess,
+          coordinator: m.coordinatorId
+            ? `${m.coordinatorId.firstName || ''} ${m.coordinatorId.lastName || ''}`.trim() || null
+            : null,
+          joinedAt: m.createdAt || null,
+        })),
+      campaigns: campaigns.map((c, i) => ({
+        id: String(c._id),
+        name: c.name,
+        isActive: c.isActive,
+        archivedAt: c.archivedAt || null,
+        createdAt: c.createdAt,
+        lastActivityAt: lastByCampaign[i]?.timestamp || null,
+      })),
+    });
   } catch (err) {
     next(err);
   }

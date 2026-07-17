@@ -33,6 +33,7 @@ const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SavedSearch } = await import('../src/models/SavedSearch.js');
 const { recomputeFullyDnc } = await import('../src/services/dnc/recomputeFullyDnc.js');
+const { recomputeHouseholdStatusesByIds } = await import('../src/services/canvass/status.js');
 const { resolveWalkList } = await import('../src/services/walklist/resolveWalkList.js');
 
 const URI = process.env.MONGODB_URI_TEST;
@@ -113,7 +114,7 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
-    org, camp, template, admin, lead, canv, hhA, hhB, v1, v2, v3,
+    org, camp, template, admin, lead, canv, hhA, hhB, v1, v2, v3, effort, pass,
     adminTok: signUserToken(admin), leadTok: signUserToken(lead), canvTok: signUserToken(canv),
   });
 });
@@ -351,4 +352,79 @@ test('8. walk lists + export: flagged voters drop from CSV and resolution; the D
   assert.ok(voterIds.includes(String(ctx.v2._id)), 'housemate targeted');
   const hhIds = r.householdIds.map(String);
   assert.ok(hhIds.includes(String(ctx.hhA._id)), 'the mixed DOOR stays targetable');
+});
+
+// THE COUNTING GUARD. Do-not-contact answers "where may we go NEXT" — it must never rewrite
+// "what did we DO". A knocked door that later goes fully-DNC keeps its real coverage bucket and
+// stays counted/billed, because coverageBucketExpr's dnc branch is $and-gated on
+// status === 'unknocked' (services/reports/aggregations.js). That single conjunct is the only
+// thing standing between an admin's privacy action and silently re-writing delivered coverage —
+// and because the segments would still sum perfectly, no reconciliation check could ever catch
+// it. If this test fails, do not "fix" the test.
+test('9. counting guard: flagging a KNOCKED door never moves coverage, homesKnocked, or knocks', { skip }, async () => {
+  await resetFlags();
+
+  // Knock HH-B for real: a survey_submitted ledger row + the resolved door status.
+  await CanvassActivity.create({
+    organizationId: ctx.org._id,
+    campaignId: ctx.camp._id,
+    effortId: ctx.effort._id,
+    passId: ctx.pass._id,
+    householdId: ctx.hhB._id,
+    voterId: ctx.v3._id,
+    userId: ctx.canv._id,
+    actionType: 'survey_submitted',
+    location: { ...near(D2), accuracy: 5 },
+    timestamp: new Date(),
+  });
+  await recomputeHouseholdStatusesByIds([ctx.hhB._id], ctx.camp.type);
+  assert.strictEqual(
+    (await Household.findById(ctx.hhB._id).lean()).status,
+    'surveyed',
+    'precondition: the door really is knocked'
+  );
+
+  const q = `?campaignId=${ctx.camp._id}&range=all`;
+  const before = await call('GET', `/admin/reports/overview${q}`, asAdmin());
+  assert.strictEqual(before.status, 200);
+
+  // Flag its ONLY resident → the door is now fully-DNC and will never be walked again.
+  const flag = await call('POST', `/admin/voters/${ctx.v3._id}/dnc`, {
+    ...asAdmin(), body: { reason: 'Told the canvasser never to come back' },
+  });
+  assert.strictEqual(flag.status, 200);
+  assert.strictEqual((await Household.findById(ctx.hhB._id).lean()).fullyDnc, true, 'door is suppressed going forward');
+
+  const after = await call('GET', `/admin/reports/overview${q}`, asAdmin());
+  assert.strictEqual(after.status, 200);
+
+  // The door keeps its REAL bucket: still 'surveyed', never reclassified as 'dnc'.
+  assert.strictEqual(after.json.canvass.surveyed, before.json.canvass.surveyed, 'surveyed coverage is untouched');
+  assert.strictEqual(after.json.canvass.dnc, 0, 'a KNOCKED door never enters the dnc segment');
+  assert.strictEqual(after.json.canvass.unknocked, before.json.canvass.unknocked, 'unknocked is untouched');
+
+  // The work stays counted and billed.
+  assert.strictEqual(after.json.totals.homesKnocked, before.json.totals.homesKnocked, 'homesKnocked unchanged');
+  assert.strictEqual(after.json.totals.knocks, before.json.totals.knocks, 'billable knocks unchanged');
+  assert.strictEqual(after.json.totals.surveyedKnocks, before.json.totals.surveyedKnocks, 'survey doors unchanged');
+  assert.strictEqual(after.json.totals.households, before.json.totals.households, 'the door stays in the universe');
+  assert.strictEqual(after.json.totals.surveysSubmitted, before.json.totals.surveysSubmitted, 'the recorded answer stays');
+
+  // And the funnel still sums to the universe — the invariant a bad edit here would preserve
+  // while corrupting the buckets, so assert it explicitly rather than trusting it.
+  const sum = Object.values(after.json.canvass).reduce((a, b) => a + b, 0);
+  assert.strictEqual(sum, after.json.totals.households, 'coverage segments sum to Households');
+
+  // The contrast case, in one line: an UNKNOCKED door that goes fully-DNC DOES move — out of
+  // `unknocked` into `dnc` (that's the segment's whole purpose), and still bills nothing.
+  await call('POST', `/admin/voters/${ctx.v1._id}/dnc`, { ...asAdmin(), body: { reason: 'Whole household asked' } });
+  await call('POST', `/admin/voters/${ctx.v2._id}/dnc`, { ...asAdmin(), body: { reason: 'Whole household asked' } });
+  const unknockedFlagged = await call('GET', `/admin/reports/overview${q}`, asAdmin());
+  assert.strictEqual(unknockedFlagged.json.canvass.dnc, 1, 'the never-knocked door moves to the dnc segment');
+  assert.strictEqual(
+    unknockedFlagged.json.canvass.unknocked,
+    before.json.canvass.unknocked - 1,
+    'and leaves unknocked, so suppression never inflates it'
+  );
+  assert.strictEqual(unknockedFlagged.json.totals.knocks, before.json.totals.knocks, 'still bills nothing');
 });

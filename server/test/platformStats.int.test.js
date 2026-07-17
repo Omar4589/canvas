@@ -14,8 +14,9 @@ const { Household } = await import('../src/models/Household.js');
 const { Voter } = await import('../src/models/Voter.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
-const { PlatformStats } = await import('../src/models/PlatformStats.js');
-const { recomputeLive, captureOrgBeforeDelete, captureCampaignBeforeDelete, getPlatformStats, STATS_JOB } = await import('../src/services/platform/platformStats.js');
+const { PlatformStats, PLATFORM_METRICS } = await import('../src/models/PlatformStats.js');
+const { PlatformDaily } = await import('../src/models/PlatformDaily.js');
+const { recomputeLive, recomputeDaily, computeLiveCounts, captureOrgBeforeDelete, captureCampaignBeforeDelete, getPlatformStats, STATS_JOB } = await import('../src/services/platform/platformStats.js');
 const { deleteOrganization } = await import('../src/services/platform/deleteOrganization.js');
 const { idleZeroDollarOrgs } = await import('../src/services/billing/idleOrgs.js');
 // Safe to import (bullmq never connects until registerMaintenanceJobs) — retentionTriggers.int
@@ -68,10 +69,13 @@ after(async () => {
 });
 beforeEach(async () => {
   if (!URI) return;
-  for (const M of [Organization, Subscription, Campaign, Household, Voter, CanvassActivity, SurveyResponse, PlatformStats]) {
+  for (const M of [Organization, Subscription, Campaign, Household, Voter, CanvassActivity, SurveyResponse, PlatformStats, PlatformDaily]) {
     await M.deleteMany({});
   }
 });
+
+const daysAgo = (n) => new Date(Date.now() - n * 86_400_000);
+const dayStr = (n) => daysAgo(n).toISOString().slice(0, 10);
 
 test('backfill recomputes LIVE from real rows, excluding bulk marks and internal orgs', { skip }, async () => {
   await seedOrg({ slug: 'real', status: 'active', knocks: 5, bulk: 3, surveys: 2, voters: 4 });
@@ -188,6 +192,90 @@ test('the nightly reconcile is scheduled OUTSIDE the retention list, and its han
   assert.strictEqual(s.live.doorsKnocked, 5, 'live re-synced from real rows (bulk excluded)');
   assert.strictEqual(s.deleted.doorsKnocked, 100, 'deleted bank untouched');
   assert.ok(s.backfilledAt, 'backfilledAt stamped — the Control Room "last reconciled" line');
+  // Batch 3: the same job now also rebuilds the daily trend series from the same rows.
+  assert.ok(await PlatformDaily.countDocuments({}) > 0, 'the nightly job rebuilds the daily series too');
+});
+
+// ── Batch 3: the per-day trend series and its reconciliation invariant. ──
+
+test('THE TREND INVARIANT: Σ(daily series) + undated === live, per metric, exactly', { skip }, async () => {
+  // Knocks spread over three known UTC days, plus the two exclusions that must not leak into the
+  // series any more than they leak into the live bucket: bulk marks and internal-org activity.
+  const { org, camp } = await seedOrg({ slug: 'real', status: 'active', surveys: 0, voters: 3 });
+  const hh = await Household.findOne({ organizationId: org._id });
+  for (const [n, count] of [[3, 2], [2, 1], [1, 4]]) {
+    for (let i = 0; i < count; i++) {
+      await CanvassActivity.create({
+        organizationId: org._id, campaignId: camp._id, householdId: hh._id, userId: oid(),
+        actionType: 'not_home', location: LOC, timestamp: daysAgo(n),
+      });
+    }
+  }
+  await CanvassActivity.create({
+    organizationId: org._id, campaignId: camp._id, householdId: hh._id, userId: oid(),
+    actionType: 'refused', via: 'bulk', location: LOC, timestamp: daysAgo(2),
+  });
+  await SurveyResponse.create({
+    organizationId: org._id, campaignId: camp._id, voterId: oid(), householdId: hh._id, userId: oid(),
+    surveyTemplateId: oid(), surveyTemplateVersion: 1, location: LOC, answers: [], submittedAt: daysAgo(2),
+  });
+  await seedOrg({ slug: 'demo', status: 'internal', knocks: 9, surveys: 9, voters: 9 }); // must NOT appear
+
+  await recomputeLive();
+  const { undated } = await recomputeDaily();
+
+  // Exact day buckets, exclusions applied.
+  const rows = await PlatformDaily.find({}).lean();
+  const byDay = new Map(rows.map((r) => [r.day, r]));
+  assert.strictEqual(byDay.get(dayStr(3))?.doorsKnocked, 2);
+  assert.strictEqual(byDay.get(dayStr(2))?.doorsKnocked, 1, 'the bulk mark on day-2 is NOT in the series');
+  assert.strictEqual(byDay.get(dayStr(1))?.doorsKnocked, 4);
+  assert.strictEqual(byDay.get(dayStr(2))?.surveyResponses, 1);
+
+  // The invariant itself — the chart is PROVABLE against the number it sits under.
+  const live = await computeLiveCounts();
+  for (const m of PLATFORM_METRICS) {
+    const sum = rows.reduce((s, r) => s + (r[m] || 0), 0);
+    assert.strictEqual(sum + undated[m], live[m], `Σ(series.${m}) + undated.${m} === live.${m}`);
+  }
+
+  // Idempotent: run again, identical rows.
+  const before = JSON.stringify(rows.map((r) => ({ day: r.day, d: r.doorsKnocked })).sort((a, b) => (a.day < b.day ? -1 : 1)));
+  await recomputeDaily();
+  const again = await PlatformDaily.find({}).lean();
+  const after = JSON.stringify(again.map((r) => ({ day: r.day, d: r.doorsKnocked })).sort((a, b) => (a.day < b.day ? -1 : 1)));
+  assert.strictEqual(after, before, 'recomputeDaily is idempotent');
+});
+
+test('a dateless row lands in `undated` — measured independently, never silently dropped', { skip }, async () => {
+  await seedOrg({ slug: 'real', status: 'active', voters: 1 });
+  // A pre-`timestamps: true` row: raw insert bypasses Mongoose, so NO createdAt exists. It counts
+  // toward live (countDocuments) but no day bucket can hold it.
+  await Organization.collection.insertOne({ name: 'Ancient Org', slug: 'ancient', isActive: true });
+
+  await recomputeLive();
+  const { undated } = await recomputeDaily();
+  assert.strictEqual(undated.organizations, 1, 'the dateless org is counted, not lost');
+
+  const live = await computeLiveCounts();
+  const rows = await PlatformDaily.find({}).lean();
+  const sum = rows.reduce((s, r) => s + (r.organizations || 0), 0);
+  assert.strictEqual(sum + undated.organizations, live.organizations, 'the three-way identity still holds');
+  const stats = await getPlatformStats();
+  assert.strictEqual(stats.undated.organizations, 1, 'and it is stamped on the singleton for the UI');
+});
+
+test('history shrinks retroactively when rows vanish — full-replacement semantics', { skip }, async () => {
+  const { org } = await seedOrg({ slug: 'doomed', status: 'active', knocks: 3, voters: 2 });
+  await recomputeDaily();
+  assert.ok((await PlatformDaily.find({}).lean()).some((r) => r.doorsKnocked > 0), 'series has the knocks');
+
+  // Hard-delete destroys the rows; the next recompute must drop their bars (the deleted bank —
+  // tested elsewhere — preserves the lifetime total).
+  await deleteOrganization(org._id);
+  await recomputeDaily();
+  const rows = await PlatformDaily.find({}).lean();
+  assert.ok(!rows.some((r) => r.doorsKnocked > 0), 'the deleted org’s bars are gone from the series');
 });
 
 test('idle-org watch surfaces an abandoned $0 active org, and only that one', { skip }, async () => {

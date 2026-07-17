@@ -17,7 +17,7 @@ import { buildVoterProfile } from '../../services/voters/voterProfile.js';
 import { recomputeFullyDnc } from '../../services/dnc/recomputeFullyDnc.js';
 import { Person } from '../../models/Person.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
-import { propagateIdentity } from '../../services/person/propagateIdentity.js';
+import { propagateIdentity, identityEq } from '../../services/person/propagateIdentity.js';
 import { followMerged } from '../../services/person/resolvePerson.js';
 
 const router = Router();
@@ -43,7 +43,9 @@ router.get('/', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
-    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    // `skip` — the house paging param (this was the last route saying `offset`; the web client is
+    // the only caller and ships with the server, so the rename has no compat window).
+    const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
     const filter = { organizationId: orgId };
     if (req.query.party) filter.party = req.query.party;
@@ -90,7 +92,7 @@ router.get('/', async (req, res, next) => {
     const [rows, total] = await Promise.all([
       Voter.find(filter)
         .sort({ lastName: 1, firstName: 1 })
-        .skip(offset)
+        .skip(skip)
         .limit(limit)
         .lean(),
       Voter.countDocuments(filter),
@@ -145,7 +147,7 @@ router.get('/', async (req, res, next) => {
       };
     });
 
-    res.json({ voters, total, limit, offset });
+    res.json({ voters, total, limit, skip });
   } catch (err) {
     next(err);
   }
@@ -213,13 +215,23 @@ router.patch('/:voterId', async (req, res, next) => {
 
     if (Object.keys(identity).length) {
       const person = voter.personId ? await followMerged(await Person.findById(voter.personId)) : null;
-      const owns = !!req.user.isSuperAdmin || (person && String(person.identityOwnerOrgId) === String(orgId));
+      // Persons are org-scoped: an org editing ITS OWN Person is always the owner in the sense that
+      // matters. The identityOwnerOrgId comparison alone was a dormant trap — resolvePerson creates
+      // Persons with no owner set, and an owner-less Person would silently shunt the org's own edit
+      // into a proposal queue no UI shows (the Voter row updates, so it LOOKS applied).
+      const owns = !!req.user.isSuperAdmin
+        || (person && String(person.organizationId) === String(orgId))
+        || (person && String(person.identityOwnerOrgId) === String(orgId));
+      // Which identity fields did this edit ACTUALLY change? The profile form submits every
+      // field on save, so diffing against the stored values is load-bearing: arming unchanged
+      // fields would freeze the whole record against voter-file updates forever.
+      const changed = Object.keys(identity).filter((f) => !identityEq(identity[f], voter[f]));
       if (person && !owns) {
-        const changed = Object.keys(identity);
+        const proposed = Object.keys(identity);
         // Snapshot exactly the proposed fields (which may include the derived fullName), so
         // the super-admin drift check compares like-for-like instead of always superseding.
         const canonicalSnapshot = {};
-        for (const f of changed) canonicalSnapshot[f] = person[f] ?? null;
+        for (const f of proposed) canonicalSnapshot[f] = person[f] ?? null;
         await PersonEditProposal.updateOne(
           { personId: person._id, orgId, source: 'admin_edit', status: 'pending' },
           { $set: { fields: identity, canonicalSnapshot, baseIdentityVersion: person.identityVersion, userId: req.user._id } },
@@ -227,18 +239,36 @@ router.patch('/:voterId', async (req, res, next) => {
         );
         await Voter.updateOne(
           { _id: voter._id },
-          { $set: { ...directSet, ...identity }, $addToSet: { locallyEditedFields: { $each: changed } } }
+          {
+            $set: { ...directSet, ...identity },
+            ...(changed.length ? { $addToSet: { locallyEditedFields: { $each: changed } } } : {}),
+          }
         );
       } else if (person) {
-        // Owner / super-admin: this edit IS the new canonical → clear any local-divergence
-        // flags on this voter, then propagate (updates the Person + fans to every cache).
-        await Voter.updateOne({ _id: voter._id }, { $pull: { locallyEditedFields: { $in: Object.keys(identity) } } });
+        // Owner / super-admin: this edit is the new canonical AND a hand edit this org wants to
+        // survive the next voter-file import — so ARM the changed fields (they were previously
+        // $pull'ed here, which is why door-confirmed corrections silently reverted on re-import).
+        // Arm-before-propagate ordering is deliberate: the fan-out honors locallyEditedFields, so
+        // it will skip the just-armed fields on this row — the values are $set directly in the
+        // same update. Canonical still updates via propagateIdentity (provenance + sibling rows).
+        await Voter.updateOne(
+          { _id: voter._id },
+          {
+            $set: { ...directSet, ...identity },
+            ...(changed.length ? { $addToSet: { locallyEditedFields: { $each: changed } } } : {}),
+          }
+        );
         await propagateIdentity(person._id, identity, {
           orgId, source: req.user.isSuperAdmin ? 'super_admin' : 'admin_edit', userId: req.user._id,
         });
-        await Voter.updateOne({ _id: voter._id }, { $set: directSet });
       } else {
-        await Voter.updateOne({ _id: voter._id }, { $set: { ...directSet, ...identity } });
+        await Voter.updateOne(
+          { _id: voter._id },
+          {
+            $set: { ...directSet, ...identity },
+            ...(changed.length ? { $addToSet: { locallyEditedFields: { $each: changed } } } : {}),
+          }
+        );
       }
     } else {
       await Voter.updateOne({ _id: voter._id }, { $set: directSet });

@@ -80,6 +80,12 @@ const importJobSchema = new mongoose.Schema(
     revisitNewVoters: { type: Boolean, default: false },
     revisitSavedSearchId: { type: mongoose.Schema.Types.ObjectId, ref: 'SavedSearch', default: null },
     revisitHouseholdCount: { type: Number, default: 0 },
+    // Hand-edit conflicts: the admin's per-import "keep or overwrite" decision, plus the outcome —
+    // (voter, field) instances where the file disagreed with an armed hand edit (kept by default;
+    // overwritten + disarmed when the admin opted in on the preview panel).
+    overwriteHandEdits: { type: Boolean, default: false },
+    keptHandEdits: { type: Number, default: 0 },
+    overwrittenHandEdits: { type: Number, default: 0 },
     // 'apply' = the real import (default; old docs read as apply). 'preview' = a
     // read-only diff run on the worker for large files (stores `diff`, no writes).
     kind: { type: String, enum: ['preview', 'apply', 'geocode_check'], default: 'apply', index: true },

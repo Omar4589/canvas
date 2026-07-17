@@ -7,7 +7,6 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
-import { PersonEditProposal } from '../../models/PersonEditProposal.js';
 import { PersonMergeLog } from '../../models/PersonMergeLog.js';
 import { followMerged } from './resolvePerson.js';
 
@@ -29,6 +28,8 @@ export function serializePerson(p, { ownerOrgName = null } = {}) {
   if (!p) return null;
   return {
     id: String(p._id),
+    // The person's own org (Persons are org-scoped) — the merge picker searches within it.
+    organizationId: p.organizationId ? String(p.organizationId) : null,
     firstName: p.firstName || null,
     lastName: p.lastName || null,
     fullName: p.fullName || null,
@@ -157,22 +158,15 @@ export async function buildPersonOversight(personId) {
   }
   orgs.sort((a, b) => (a.organizationName || '').localeCompare(b.organizationName || ''));
 
-  const [candidates, proposals, mergeLog] = await Promise.all([
+  // Edit proposals no longer ship here: the mechanism is vestigial post-per-org (the importing org
+  // owns its Person, so nothing files them; batch-3 also fixed the owner-less `owns` check that
+  // could). The pending-proposal UI block was removed with it. The writer/routes stay intact.
+  const [candidates, mergeLog] = await Promise.all([
     PersonMergeCandidate.find({ $or: [{ personIdA: person._id }, { personIdB: person._id }] })
       .sort({ status: 1, createdAt: -1 }).lean(),
-    PersonEditProposal.find({ personId: person._id }).sort({ createdAt: -1 }).lean(),
     PersonMergeLog.find({ $or: [{ survivorId: person._id }, { victimId: person._id }] })
       .sort({ createdAt: -1 }).lean(),
   ]);
-
-  // A proposal's org may not be among the orgs that currently have a linked voter (e.g. it
-  // undid its import but another org keeps the person alive). Resolve those names too so the
-  // client never has to fall back to a raw ObjectId.
-  const propOrgIds = [...new Set(proposals.map((p) => String(p.orgId)).filter((id) => !orgNameById.has(id)))];
-  if (propOrgIds.length) {
-    const extra = await Organization.find({ _id: { $in: propOrgIds } }, 'name').lean();
-    for (const o of extra) orgNameById.set(String(o._id), o.name);
-  }
 
   return {
     person: serializePerson(person, { ownerOrgName: ownerId ? orgNameById.get(ownerId) || null : null }),
@@ -181,7 +175,6 @@ export async function buildPersonOversight(personId) {
     orgCount: orgs.length,
     orgs,
     candidates: candidates.map((c) => ({ ...c, _id: String(c._id) })),
-    proposals: proposals.map((p) => ({ ...p, _id: String(p._id), orgName: orgNameById.get(String(p.orgId)) || null })),
     // Explicit shape, not a spread: the raw log rows carry full pre-merge identity snapshots
     // (survivorSnapshot/victimSnapshot — name, DOB, party) that exist for split-reversal, not for
     // display. They stay server-side; the UI shows action/date/count/ids only.

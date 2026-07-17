@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import { connectDb } from '../config/db.js';
-import { recomputeLive, computeLiveCounts, getPlatformStats } from '../services/platform/platformStats.js';
+import { recomputeLive, recomputeDaily, computeLiveCounts, getPlatformStats } from '../services/platform/platformStats.js';
 
 // Seed the platform lifetime marketing counters from current data.
 //
@@ -37,10 +37,14 @@ async function main() {
   }
 
   const live = await recomputeLive({ stampBackfill: true });
+  // The daily trend series rebuilds from the same rows — this is also its history backfill: every
+  // surviving row's date lands in its UTC day bucket, so the sparklines have real history on day one.
+  const daily = await recomputeDaily();
   const after = await getPlatformStats();
   console.log('\nRecomputed LIVE bucket from current non-internal rows:');
   console.log('  live :', live);
   console.log('  TOTAL:', after.total, '(live + deleted)');
+  console.log(`  Daily trend series rebuilt: ${daily.days} day row(s); undated:`, daily.undated);
   console.log('Backfill complete. Safe to re-run — it is idempotent.');
 
   await mongoose.disconnect();

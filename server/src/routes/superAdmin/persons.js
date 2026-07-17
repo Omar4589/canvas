@@ -84,9 +84,11 @@ router.get('/', async (req, res, next) => {
       ];
     }
     if (req.query.needsReview === 'true') {
+      // Org-scoped in the DB (candidates carry organizationId now; proposals always had orgId) —
+      // this used to load EVERY open candidate and pending proposal platform-wide to build the $in.
       const [cands, props] = await Promise.all([
-        PersonMergeCandidate.find({ status: 'open' }, 'personIdA personIdB').lean(),
-        PersonEditProposal.find({ status: 'pending' }, 'personId').lean(),
+        PersonMergeCandidate.find({ organizationId: oid(orgIdParam), status: 'open' }, 'personIdA personIdB').lean(),
+        PersonEditProposal.find({ orgId: oid(orgIdParam), status: 'pending' }, 'personId').lean(),
       ]);
       const ids = new Set();
       for (const c of cands) { ids.add(String(c.personIdA)); if (c.personIdB) ids.add(String(c.personIdB)); }
@@ -148,22 +150,33 @@ router.get('/candidates', async (req, res, next) => {
     const grant = await requirePersonOrgGrant(req, res, orgIdParam);
     if (!grant) return;
 
-    // A candidate belongs to an org iff its persons do (Persons are org-scoped). Keep only this org's.
-    const orgPersonIds = await Person.find({ organizationId: oid(orgIdParam) }, '_id').lean();
-    const inOrg = new Set(orgPersonIds.map((p) => String(p._id)));
-    const raw = await PersonMergeCandidate.find({ status: 'open' }).sort({ createdAt: -1 }).limit(500).lean();
-    const cands = raw.filter((c) => inOrg.has(String(c.personIdA)) || (c.personIdB && inOrg.has(String(c.personIdB)))).slice(0, 200);
+    // Org-scoped IN THE DATABASE (candidates carry organizationId; backfilled by
+    // migrate:candidate-orgs), on the batch-2 paging contract: clamped skip/limit + an exact
+    // countDocuments total. The old shape fetched the 500 newest candidates PLATFORM-WIDE and
+    // filtered in JS — an org's queue could read empty purely because 500 newer candidates existed
+    // in other orgs, and it loaded every one of the org's person ids into memory to do it.
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+    const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+    const status = ['open', 'resolved', 'dismissed'].includes(req.query.status) ? req.query.status : 'open';
+    const candFilter = { organizationId: oid(orgIdParam), status };
+    const [total, cands] = await Promise.all([
+      PersonMergeCandidate.countDocuments(candFilter),
+      PersonMergeCandidate.find(candFilter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    ]);
 
     const pids = [...new Set(cands.flatMap((c) => [c.personIdA, c.personIdB].filter(Boolean)).map(String))];
     const persons = pids.length
-      ? await Person.find({ _id: { $in: pids.map(oid) } }, 'firstName lastName fullName uidKeys svidKeys').lean()
+      ? await Person.find(
+        { _id: { $in: pids.map(oid) }, organizationId: oid(orgIdParam) },
+        'firstName lastName fullName uidKeys svidKeys'
+      ).lean()
       : [];
     const pm = new Map(persons.map((p) => [String(p._id), brief(p)]));
-    // Defense in depth: emit a person's identity ONLY if that person is in the granted org. A candidate
-    // pairs two persons, and today the creation code only ever pairs same-org persons — but rather than
-    // trust that invariant, we drop any paired person that isn't this org's, so a future manual or
-    // migrated cross-org candidate can never leak the other org's name/uid/svid through this grant.
-    const inGrantedOrg = (pid) => (inOrg.has(String(pid)) ? pm.get(String(pid)) || null : null);
+    // Defense in depth: emit a person's identity ONLY if that person is in the granted org (the
+    // person lookup above is org-filtered, so a person outside it resolves to null). The creation
+    // code only ever pairs same-org persons — but rather than trust that invariant, a future manual
+    // or migrated cross-org candidate can never leak the other org's name/uid/svid through this grant.
+    const inGrantedOrg = (pid) => pm.get(String(pid)) || null;
     logPersonAccess(req, { organizationId: oid(orgIdParam), grantId: grant._id, resource: 'person-candidates', route: 'GET /super-admin/persons/candidates' });
     res.json({
       candidates: cands.map((c) => ({
@@ -177,6 +190,7 @@ router.get('/candidates', async (req, res, next) => {
         personA: inGrantedOrg(c.personIdA),
         personB: c.personIdB ? inGrantedOrg(c.personIdB) : null,
       })),
+      total,
     });
   } catch (err) { next(err); }
 });

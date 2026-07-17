@@ -47,7 +47,10 @@ export async function followMerged(person, session) {
   return p;
 }
 
-async function raiseCandidate(aId, bId, reason, k, session) {
+// `orgId` is stamped on the candidate so the review endpoint can filter/page in the DB. Both sides
+// of a pair are provably same-org (every matcher query above/below is org-prefixed), so one org id
+// describes the whole candidate.
+async function raiseCandidate(orgId, aId, bId, reason, k, session) {
   let A = aId;
   let B = bId ?? null;
   if (B && String(A) > String(B)) { const t = A; A = B; B = t; }
@@ -55,7 +58,7 @@ async function raiseCandidate(aId, bId, reason, k, session) {
     { personIdA: A, personIdB: B, reason },
     {
       $setOnInsert: {
-        personIdA: A, personIdB: B, reason, status: 'open',
+        organizationId: orgId, personIdA: A, personIdB: B, reason, status: 'open',
         sampleUid: k.uid ?? null, sampleSvid: k.stateVoterId ?? null, sampleState: k.registeredState ?? null,
       },
     },
@@ -114,7 +117,9 @@ async function promote(person, field, entry, present, k, session) {
         : { organizationId: person.organizationId, svidKeys: { $elemMatch: { registeredState: k.registeredState, stateVoterId: k.stateVoterId } }, mergedInto: null };
       const other = await Person.findOne(q).session(sess(session));
       if (other && !sameId(other, person)) {
-        await raiseCandidate(person._id, other._id, 'uid_svid_conflict', k, session);
+        // NOTE: no `orgId` variable exists in promote()'s scope — person.organizationId is the org
+        // (and provably `other`'s too: the lookup above filters on it).
+        await raiseCandidate(person.organizationId, person._id, other._id, 'uid_svid_conflict', k, session);
       }
     } else throw err;
   }
@@ -138,7 +143,7 @@ export async function resolvePerson(rawKeys, identity = {}, opts = {}) {
   // No usable key → isolated Person + review flag; never cross-link.
   if (!hasUid && !hasSvid) {
     const person = await createPerson({}, identity, { matchConfidence: null, orgId, session });
-    await raiseCandidate(person._id, null, k.stateVoterId ? 'state_missing' : 'keyless', k, session);
+    await raiseCandidate(orgId, person._id, null, k.stateVoterId ? 'state_missing' : 'keyless', k, session);
     return { person, matched: false };
   }
 
@@ -157,7 +162,7 @@ export async function resolvePerson(rawKeys, identity = {}, opts = {}) {
     if (byUid && bySvid) {
       if (sameId(byUid, bySvid)) return { person: byUid, matched: true };
       // uid and svid point at different humans → review, never auto-merge.
-      await raiseCandidate(byUid._id, bySvid._id, 'uid_svid_conflict', k, session);
+      await raiseCandidate(orgId, byUid._id, bySvid._id, 'uid_svid_conflict', k, session);
       return { person: byUid, matched: true }; // link to the uid match (authoritative)
     }
     if (byUid) {

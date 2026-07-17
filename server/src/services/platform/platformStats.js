@@ -1,4 +1,5 @@
 import { PlatformStats, PLATFORM_METRICS } from '../../models/PlatformStats.js';
+import { PlatformDaily } from '../../models/PlatformDaily.js';
 import { Subscription } from '../../models/Subscription.js';
 import { Organization } from '../../models/Organization.js';
 import { Campaign } from '../../models/Campaign.js';
@@ -147,12 +148,112 @@ export async function recomputeLive({ stampBackfill = false } = {}) {
   return live;
 }
 
+// ── The per-day trend series (PlatformDaily) ─────────────────────────────────────────────────────
+
+// The date field each metric buckets by. CanvassActivity.timestamp and SurveyResponse.submittedAt
+// are `required: true`; Organization/Campaign/Voter only have createdAt via `timestamps: true`,
+// which Mongoose stamps on WRITE — a pre-existing row may have none. That is exactly why `undated`
+// below is counted independently instead of assumed zero.
+const DAILY_SOURCES = {
+  organizations: { dateField: 'createdAt' },
+  campaigns: { dateField: 'createdAt' },
+  doorsKnocked: { dateField: 'timestamp' },
+  surveyResponses: { dateField: 'submittedAt' },
+  votersProcessed: { dateField: 'createdAt' },
+};
+
+/**
+ * The full per-day series from real rows, plus the per-metric count of rows that carry NO date
+ * (and so can never appear in any bucket). READ-ONLY — same role computeLiveCounts plays for the
+ * live bucket, over the SAME filter set (internal orgs excluded; knocks = KNOCK_ACTIONS, never
+ * via:'bulk'), so `Σ(days[m]) + undated[m] === computeLiveCounts()[m]` when the data is quiescent.
+ * Days are UTC ('%Y-%m-%d' with no timezone) — a platform series has no campaign anchor tz.
+ */
+export async function computeDailySeries() {
+  const internal = await internalOrgIds();
+  const orgNin = internal.length ? { $nin: internal } : { $exists: true };
+  const matches = {
+    organizations: [Organization, { _id: orgNin }],
+    campaigns: [Campaign, { organizationId: orgNin }],
+    doorsKnocked: [CanvassActivity, { organizationId: orgNin, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }],
+    surveyResponses: [SurveyResponse, { organizationId: orgNin }],
+    votersProcessed: [Voter, { organizationId: orgNin }],
+  };
+
+  const byDay = new Map();
+  const undated = {};
+  for (const metric of PLATFORM_METRICS) {
+    const [Model, match] = matches[metric];
+    const { dateField } = DAILY_SOURCES[metric];
+    const [buckets, missing] = await Promise.all([
+      // $dateToString throws on a null/missing date, so bucket only real dates …
+      Model.aggregate([
+        { $match: { ...match, [dateField]: { $type: 'date' } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: `$${dateField}` } }, n: { $sum: 1 } } },
+      ]),
+      // … and count the dateless rows SEPARATELY (not as a residual), so the trend invariant is a
+      // real cross-check of this bucketing rather than true by definition.
+      Model.countDocuments({ ...match, $or: [{ [dateField]: null }, { [dateField]: { $exists: false } }] }),
+    ]);
+    undated[metric] = missing;
+    for (const b of buckets) {
+      const row = byDay.get(b._id) || {};
+      row[metric] = b.n;
+      byDay.set(b._id, row);
+    }
+  }
+
+  const days = [...byDay.entries()]
+    .map(([day, metrics]) => {
+      const row = { day };
+      for (const m of PLATFORM_METRICS) row[m] = metrics[m] || 0;
+      return row;
+    })
+    .sort((a, b) => (a.day < b.day ? -1 : 1));
+  return { days, undated };
+}
+
+/**
+ * Rebuild the PlatformDaily collection in FULL from computeDailySeries() and stamp the `undated`
+ * counts on the singleton. Full replacement (upsert every computed day, delete the rest) is the
+ * point: after an org hard-delete its rows vanish, so its bars must drop out of history — the
+ * `deleted` bank preserves the total while this series stays exactly what surviving rows support.
+ * Idempotent and self-healing, like recomputeLive. Runs nightly in the same STATS_JOB, from the
+ * manual backfill, and from the Control Room's "Reconcile now".
+ */
+export async function recomputeDaily() {
+  const { days, undated } = await computeDailySeries();
+  if (days.length) {
+    await PlatformDaily.bulkWrite(
+      days.map((d) => ({ updateOne: { filter: { day: d.day }, update: { $set: d }, upsert: true } })),
+      { ordered: false }
+    );
+  }
+  await PlatformDaily.deleteMany({ day: { $nin: days.map((d) => d.day) } });
+  const set = {};
+  for (const m of PLATFORM_METRICS) set[`undated.${m}`] = undated[m];
+  await PlatformStats.updateOne(KEY, { $set: set }, { upsert: true });
+  const undatedTotal = PLATFORM_METRICS.reduce((s, m) => s + undated[m], 0);
+  if (undatedTotal > 0) {
+    // Loud on purpose: dateless rows mean the trend charts under-draw by exactly these counts.
+    console.warn(`[platform-stats] ${undatedTotal} row(s) have no date and cannot appear in the trend series:`, undated);
+  }
+  return { days: days.length, undated };
+}
+
 /** The public marketing view: total (live + deleted) per metric, plus the raw buckets for auditing. */
 export async function getPlatformStats() {
   const doc = (await PlatformStats.findOne(KEY).lean()) || {};
   const live = doc.live || {};
   const deleted = doc.deleted || {};
+  const undated = doc.undated || {};
   const total = {};
   for (const m of PLATFORM_METRICS) total[m] = (live[m] || 0) + (deleted[m] || 0);
-  return { total, live, deleted, backfilledAt: doc.backfilledAt || null };
+  return {
+    total,
+    live,
+    deleted,
+    undated: Object.fromEntries(PLATFORM_METRICS.map((m) => [m, undated[m] || 0])),
+    backfilledAt: doc.backfilledAt || null,
+  };
 }

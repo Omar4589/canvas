@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import Pager from '../components/Pager.jsx';
@@ -67,6 +68,17 @@ export default function SupportAccessPage() {
   // Access-log filters. grantId is set by an open session's "view its log →" link.
   const [logFilters, setLogFilters] = useState({ organizationId: '', actorUserId: '', from: '', to: '', grantId: '' });
   const [logSkip, setLogSkip] = useState(0);
+
+  // Deep link from the org detail page: ?organizationId=<id> pre-fills the log's org filter, then
+  // consumes the param (same consume-once pattern as OrganizationsPage's ?billing=).
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const target = searchParams.get('organizationId');
+    if (!target) return;
+    setLogSkip(0);
+    setLogFilters((f) => ({ ...f, organizationId: target }));
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
   const [delStatus, setDelStatus] = useState('');
   const [delSkip, setDelSkip] = useState(0);
   const [startOrg, setStartOrg] = useState(null); // { id, name } | null

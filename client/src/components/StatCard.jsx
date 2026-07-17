@@ -16,8 +16,9 @@ const ACCENT = {
 // left rail) and `delta`/`deltaTone` (a "+N this week" pill instead of the plain hint). `compact`
 // shortens the card (tighter padding + xl value) for dense KPI rows like the Overview. All extra
 // props are additive — omitting them renders exactly as before. `help` adds an "(i)" tooltip next
-// to the label explaining what the number counts (used by the client report).
-export default function StatCard({ label, value, hint, accent, delta, deltaTone, prominent = false, compact = false, help }) {
+// to the label explaining what the number counts (used by the client report). `children` is a
+// footer slot below the value/hint (the Control Room drops a trend sparkline in it).
+export default function StatCard({ label, value, hint, accent, delta, deltaTone, prominent = false, compact = false, help, children }) {
   const a = ACCENT[accent] || {};
   const valueSize = prominent ? 'text-3xl' : compact ? 'text-xl' : 'text-2xl';
   return (
@@ -46,6 +47,7 @@ export default function StatCard({ label, value, hint, accent, delta, deltaTone,
       ) : (
         hint && <div className="mt-1 text-xs text-fg-muted">{hint}</div>
       )}
+      {children && <div className="mt-2">{children}</div>}
     </Card>
   );
 }

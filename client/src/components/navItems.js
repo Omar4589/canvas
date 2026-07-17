@@ -9,7 +9,9 @@
 export const SUPER_NAV = [
   { to: '/super-admin', label: 'Control Room' },
   { to: '/super-admin/users', label: 'All Users' },
-  { to: '/super-admin/people', label: 'People' },
+  // People is break-glass-only server-side (the whole persons router is requireBreakGlass) — don't
+  // advertise a nav item that walls a support-tier super with a 403.
+  { to: '/super-admin/people', label: 'People', breakGlassOnly: true },
   { to: '/super-admin/imports', label: 'Imports' },
   { to: '/super-admin/access', label: 'Support access' },
   { to: '/organizations', label: 'Organizations' },

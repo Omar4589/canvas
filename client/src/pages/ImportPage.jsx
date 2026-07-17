@@ -141,6 +141,100 @@ function ReviewPanel({ diff }) {
   );
 }
 
+// Fields whose hand edits are protected from imports — field key → user-facing label.
+const HAND_EDIT_FIELD_LABELS = {
+  firstName: 'First name',
+  lastName: 'Last name',
+  fullName: 'Full name',
+  phone: 'Phone',
+  phoneType: 'Phone type',
+  cellPhone: 'Cell phone',
+  party: 'Party',
+  gender: 'Gender',
+  dateOfBirth: 'Date of birth',
+  registrationStatus: 'Registration status',
+};
+const handEditFieldLabel = (f) => HAND_EDIT_FIELD_LABELS[f] || f;
+
+function fmtHandEditValue(field, v) {
+  if (v == null || v === '') return '—';
+  if (field === 'dateOfBirth') {
+    const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/); // ISO date — render date-only, no timezone shift
+    if (m) return `${Number(m[2])}/${Number(m[3])}/${m[1]}`;
+  }
+  return String(v);
+}
+const quoteHandEditValue = (field, v) => {
+  const t = fmtHandEditValue(field, v);
+  return t === '—' ? t : `“${t}”`;
+};
+
+function HandEditConflictsPanel({ conflicts, overwrite, onToggle }) {
+  if (!conflicts?.fields) return null;
+  const { voters, fields, byField = {}, sample = [] } = conflicts;
+  const chipFields = [
+    ...Object.keys(HAND_EDIT_FIELD_LABELS).filter((f) => byField[f] > 0),
+    ...Object.keys(byField).filter((f) => !(f in HAND_EDIT_FIELD_LABELS) && byField[f] > 0),
+  ];
+  return (
+    <div className={`mb-4 rounded border p-4 ${overwrite ? 'border-danger/30 bg-danger-tint' : 'border-warning/30 bg-warning-tint'}`}>
+      <h3 className={`mb-2 text-sm font-medium ${overwrite ? 'text-danger' : 'text-warning-fg'}`}>
+        Hand-edited voter info differs from this file
+      </h3>
+      <p className="text-sm text-fg-muted">
+        Your team hand-corrected <strong className="text-fg">{fmt(fields)}</strong> value{fields === 1 ? '' : 's'} on{' '}
+        <strong className="text-fg">{fmt(voters)}</strong> voter{voters === 1 ? '' : 's'} — for example a phone number
+        confirmed at the door. This file has different values for them. By default your edits are kept and everything
+        else imports normally.
+      </p>
+      {chipFields.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {chipFields.map((f) => (
+            <span
+              key={f}
+              className={`rounded border bg-card px-2 py-0.5 text-xs text-fg ${overwrite ? 'border-danger/30' : 'border-warning/30'}`}
+            >
+              {handEditFieldLabel(f)} ×{fmt(byField[f])}
+            </span>
+          ))}
+        </div>
+      )}
+      {sample.length > 0 && (
+        <div className="mt-3">
+          <SampleList title="Hand-edited values that differ" count={fields}>
+            <ul className="space-y-1">
+              {sample.map((s, i) => (
+                <li key={i}>
+                  <span className="font-medium">{s.name || s.stateVoterId}</span> — {handEditFieldLabel(s.field)}:
+                  keeps {quoteHandEditValue(s.field, s.keptValue)} · file has {quoteHandEditValue(s.field, s.fileValue)}
+                </li>
+              ))}
+              {fields > sample.length && (
+                <li className="text-fg-subtle">+{fmt(fields - sample.length)} more</li>
+              )}
+            </ul>
+          </SampleList>
+        </div>
+      )}
+      <label className="mt-3 flex items-start gap-2 rounded border border-border bg-card p-3 text-sm">
+        <input
+          type="checkbox"
+          checked={overwrite}
+          onChange={(e) => onToggle(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="font-medium text-fg">Overwrite these hand edits with the file&apos;s values</span>
+          <span className="mt-0.5 block text-xs text-fg-muted">
+            Replaces every value shown above and clears its protection, so future imports update these fields again.
+            This cannot be undone — Undo import never reverts changes to existing voters.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 function DetectionPanel({ detection, explode, onToggleExplode, busy }) {
   if (!detection) return null;
   const { multiMember, warnings = [], format } = detection;
@@ -245,6 +339,7 @@ export default function ImportPage() {
   const [geocodeCheckJobId, setGeocodeCheckJobId] = useState(null); // opt-in "See exact placement" job
   const [uidSource, setUidSource] = useState(''); // per-vendor namespace for cross-org uid matching
   const [revisitNewVoters, setRevisitNewVoters] = useState(false); // collect already-worked homes that gain a new voter into a revisit walk list
+  const [overwriteHandEdits, setOverwriteHandEdits] = useState(false); // let this file replace values the team hand-corrected (default: keep the edits)
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -376,6 +471,7 @@ export default function ImportPage() {
       fd.append('uidSource', uidSource || '');
       fd.append('explode', String(explode !== false));
       fd.append('revisitNewVoters', String(revisitNewVoters));
+      fd.append('overwriteHandEdits', String(overwriteHandEdits));
       return api('/admin/imports/csv', { method: 'POST', formData: fd });
     },
     onSuccess: (_data, variables) => {
@@ -413,6 +509,7 @@ export default function ImportPage() {
     setGeocodeCheckJobId(null);
     setUidSource('');
     setRevisitNewVoters(false);
+    setOverwriteHandEdits(false);
     previewDiff.reset();
     enqueuePreview.reset();
   }
@@ -610,8 +707,8 @@ export default function ImportPage() {
               <input
                 value={uidSource}
                 onChange={(e) => setUidSource(e.target.value)}
-                placeholder="Vendor for cross-org matching (e.g. i360) — optional"
-                title="If this vendor's file has a universal person ID (uid), name the vendor so the same person is matched across orgs. Leave blank to match on voter ID only."
+                placeholder="Vendor uid namespace (e.g. i360) — optional"
+                title="If this vendor's file has a universal person ID (uid), name the vendor so re-imports match the same person within your organization even when the voter ID changes. Leave blank to match on voter ID only. Records are never matched or shared across organizations."
                 className="rounded border border-border-strong bg-card text-fg placeholder:text-fg-subtle px-2 py-1 text-xs"
               />
               <input
@@ -643,6 +740,14 @@ export default function ImportPage() {
           />
         )}
         {step === 'review' && diff && <ReviewPanel diff={diff} />}
+
+        {step === 'review' && diff && (
+          <HandEditConflictsPanel
+            conflicts={diff.handEditConflicts}
+            overwrite={overwriteHandEdits}
+            onToggle={setOverwriteHandEdits}
+          />
+        )}
 
         {step === 'review' && diff && (
           <label className="flex items-start gap-2 rounded border border-border bg-card p-3 text-sm">
@@ -791,6 +896,16 @@ export default function ImportPage() {
                             </button>
                           </>
                         )}
+                      </div>
+                    )}
+                    {j.keptHandEdits > 0 && (
+                      <div className="mt-0.5 text-xs text-fg-muted">
+                        {fmt(j.keptHandEdits)} hand-edited value{j.keptHandEdits === 1 ? '' : 's'} kept
+                      </div>
+                    )}
+                    {j.overwrittenHandEdits > 0 && (
+                      <div className="mt-0.5 text-xs text-fg-muted">
+                        {fmt(j.overwrittenHandEdits)} hand-edited value{j.overwrittenHandEdits === 1 ? '' : 's'} replaced by the file
                       </div>
                     )}
                   </td>

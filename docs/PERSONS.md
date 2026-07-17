@@ -95,14 +95,22 @@ super-admin unlocks it.
 
 The **People** directory (Platform nav → People) is the cross-org view:
 
-- **Search** the whole canonical directory by name, vendor ID, or state voter ID; filter to
-  records that **need review**.
+- **Search** one organization's canonical directory by name, vendor ID, or state voter ID; filter
+  to records that **need review**.
 - A **Person page** shows the canonical identity, its identity keys, and a **per-org activity
   summary** — counts and dates only (how many surveys, last activity, voted) with **no survey
   answers or notes** ever exposed across orgs.
 - **Edit** the canonical identity (propagates everywhere), **assign/clear the owner**, **lock
-  fields**, **approve/reject** pending edit proposals, and **merge** two records that are the
-  same human (or **split** a merge back apart — it's reversible).
+  fields**, and **merge** two records that are the same human (or **split** a merge back apart —
+  it's reversible). Merging starts from a **search picker** — find the other record by name /
+  vendor uid / state voter ID; tombstones never surface as candidates — with a collapsed
+  merge-by-record-ID fallback for power users.
+- **Edit proposals are retired from the UI.** Post-per-org, the importing organization owns its
+  own Person, so the code path that filed proposals is unreachable in practice; the review block
+  was removed rather than kept as a queue for a mechanism that can't fire (the model, writer and
+  approve/reject routes remain server-side, inert). The related dormant bug — an owner-less
+  Person silently shunting the org's OWN admin edit into that invisible queue — was fixed: an org
+  editing its own Person always applies canonically now.
 
 ---
 
@@ -153,6 +161,25 @@ drift-checked at approval), `PersonMergeLog` (full pre-merge snapshots of both p
 
 ## B. Matching & dedup — [resolvePerson.js](../server/src/services/person/resolvePerson.js)
 
+> **⚠️ TOOLING TRAP — use `grep -a` in this directory.** `resolvePerson.js` and `mergePersons.js`
+> contain NUL bytes (deliberate separators in composite map keys, e.g.
+> `` `u:${k.uidSource}\0${k.uid}` ``). macOS/BSD `grep` classifies the files as binary and **skips
+> them silently — no match, no warning**. A plain `grep -r` audit of this layer will wrongly
+> conclude the matching engine doesn't exist (this happened, and produced a false "candidates are
+> never generated" audit conclusion). `grep -a` treats them as text.
+
+**What actually raises merge candidates in practice:** only `uid_svid_conflict` — and only when an
+import maps a `uid` column **and** names a `uidSource` on the import screen. The `keyless` /
+`state_missing` branches are **unreachable on the live import path**: the CSV validator
+([csvImporter.js](../server/src/services/import/csvImporter.js)) hard-requires State Voter ID and
+State on every row and drops failures before reconciliation runs, so `hasSvid` is always true. A
+first clean import raises nothing even with uids; conflicts arise on **re-imports where the
+vendor's uid↔svid pairing shifted between files**. This deployment has never used `uidSource`, so
+the candidate collection is empty — which is why there is no dedicated review-queue page (the
+per-person Merge review block + `GET /candidates`, now org-scoped and paged, cover the day that
+changes). Candidates carry `organizationId`, stamped at raise time and backfilled by
+`migrate:candidate-orgs`.
+
 `resolvePerson(rawKeys, identity, opts) → { person, matched }` and the batched
 `resolvePersonsBatch(rows, opts) → Map<rowKey, personId>`. Keys are normalized through
 [normalizePersonKeys.js](../server/src/services/person/normalizePersonKeys.js) on **every**
@@ -183,7 +210,12 @@ cache. `propagateIdentity(personId, identity, { orgId, source, userId, session }
    `personId`, `surveyStatus`, `householdId`, or a district field.
 3. **Per-Voter fan-out** across all orgs, honoring each Voter's `locallyEditedFields` (a
    door-confirmed phone survives an owner import) and snapshotting `identityBackup` once before
-   the first overwrite.
+   the first overwrite. **End-to-end since 2026-07-17:** `applyImport`'s direct upsert honors the
+   shield too (it used to run after this fan-out and blindly clobber the very fields the fan-out
+   preserved — the sentence above was true of the fan-out but false of the whole pipeline). The
+   import strips shielded identity fields from its `$set` by default; the admin can opt in to
+   `overwriteHandEdits` per import, which writes the file's values AND disarms exactly those
+   fields.
 4. **Field locks:** when `source` is **not** `super_admin`/`merge` (i.e. an import or a
    non-super-admin owner edit), fields in the Person's `lockedFields` are stripped before both
    the canonical write and the fan-out — a locked name component also pins the derived
@@ -210,9 +242,17 @@ Person:
 
 The **admin edit path** ([admin/voters.js](../server/src/routes/admin/voters.js) `PATCH
 /:voterId`) mirrors this: owner/super-admin → propagate; non-owner → proposal + apply to this
-org's cache + flag `locallyEditedFields`. Districts stay org-local. Mobile reach: the
-`/mobile/changes` projection ships the identity-cache fields so propagated edits reach an
-already-bootstrapped app.
+org's cache + flag `locallyEditedFields`. **Since 2026-07-17, the owner path ARMS the shield
+too**: every hand edit `$addToSet`s the identity fields whose values actually changed (diffed via
+`identityEq` — the form submits every field, so only real changes arm) instead of `$pull`ing them
+as it used to. That is what makes a door-confirmed correction durable: canonical still updates via
+`propagateIdentity`, but the org's Voter cache keeps the hand value through subsequent imports
+(the sanctioned divergence `locallyEditedFields` was always documented to provide). The import
+preview surfaces any **hand-edit conflicts** (file value ≠ armed value: totals, per-field counts,
+capped samples) so the admin decides keep (default) or overwrite per import; choosing overwrite
+`$pull`s the affected flags so future files update those fields normally. Districts stay
+org-local. Mobile reach: the `/mobile/changes` projection ships the identity-cache fields so
+propagated edits reach an already-bootstrapped app.
 
 ## E. Super-admin API — [routes/superAdmin/persons.js](../server/src/routes/superAdmin/persons.js)
 

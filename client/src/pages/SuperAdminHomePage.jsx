@@ -9,7 +9,14 @@ import StatCard from '../components/StatCard.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { BillingPill } from '../lib/billingStatus.jsx';
-import { PLATFORM_TOTALS, OVERVIEW_HELP, TOTALS_INTRO, IDLE_ORGS_HELP } from '../lib/platformStatsMeta.js';
+import { PLATFORM_TOTALS, OVERVIEW_HELP, TOTALS_INTRO, IDLE_ORGS_HELP, trendCaveat } from '../lib/platformStatsMeta.js';
+import { Sparkline } from '../components/charts/index.jsx';
+
+const TREND_RANGES = [
+  { days: 30, label: '30d' },
+  { days: 90, label: '90d' },
+  { days: 365, label: '1y' },
+];
 
 function formatRelative(d) {
   if (!d) return 'No activity';
@@ -54,6 +61,14 @@ export default function SuperAdminHomePage() {
   const statsQ = useQuery({
     queryKey: ['super-admin', 'platform-stats'],
     queryFn: () => api('/super-admin/access/platform-stats'),
+    ...livePollOptions(live, true, 30_000),
+  });
+  // The per-day trend series behind the totals' sparklines (~N tiny rows; rebuilt nightly and by
+  // Reconcile-now). Ends at yesterday — the last complete UTC day — by server contract.
+  const [trendDays, setTrendDays] = useState(90);
+  const trendsQ = useQuery({
+    queryKey: ['super-admin', 'platform-trends', trendDays],
+    queryFn: () => api(`/super-admin/access/platform-trends?days=${trendDays}`),
     ...livePollOptions(live, true, 30_000),
   });
   // Cost note: idle-orgs walks every active org (2 queries each). Cheap at platform scale,
@@ -119,7 +134,7 @@ export default function SuperAdminHomePage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <h1 className="text-2xl font-semibold text-fg">Platform control room</h1>
             <LiveStatus
-              {...liveStatusProps([overviewQ, statsQ, idleQ, healthQ, grantsQ, deletionsQ, atRiskQ], {
+              {...liveStatusProps([overviewQ, statsQ, trendsQ, idleQ, healthQ, grantsQ, deletionsQ, atRiskQ], {
                 live,
                 onToggle: () => setLive((v) => !v),
               })}
@@ -337,10 +352,18 @@ export default function SuperAdminHomePage() {
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {orgs.map((o) => (
+                <div key={o.id} className="relative">
+                  {/* A sibling positioned over the card, not nested in the button (invalid HTML). */}
+                  <button
+                    onClick={() => navigate(`/organizations/${o.id}`)}
+                    title="Open this organization's detail page (roster, campaigns, access log)"
+                    className="absolute bottom-3 right-3 z-10 rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted hover:text-fg"
+                  >
+                    Details
+                  </button>
                 <button
-                  key={o.id}
                   onClick={() => pickOrg(o.id)}
-                  className={`group rounded-xl border p-4 text-left shadow-sm transition-colors ${
+                  className={`group w-full rounded-xl border p-4 text-left shadow-sm transition-colors ${
                     o.isActive
                       ? 'border-border bg-card hover:border-brand-accent/40 hover:bg-brand-tint'
                       : 'border-border bg-sunken'
@@ -393,17 +416,34 @@ export default function SuperAdminHomePage() {
                     Switch into this org →
                   </div>
                 </button>
+                </div>
               ))}
             </div>
           )}
         </div>
 
         {/* Lifetime marketing numbers — below the operational content on purpose. Every card
-            explains itself via the shared ⓘ copy (lib/platformStatsMeta.js). */}
+            explains itself via the shared ⓘ copy (lib/platformStatsMeta.js), including the trend
+            line's exact population (live orgs only + the deleted/undated gaps, count-truth rule). */}
         <div>
-          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-fg-muted">
-            Platform totals
-          </h2>
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">
+              Platform totals
+            </h2>
+            <div className="flex gap-1">
+              {TREND_RANGES.map((r) => (
+                <button
+                  key={r.days}
+                  onClick={() => setTrendDays(r.days)}
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    trendDays === r.days ? 'bg-brand-accent text-white' : 'bg-sunken text-fg-muted hover:text-fg'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <p className="mb-3 max-w-2xl text-sm text-fg-subtle">{TOTALS_INTRO}</p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {PLATFORM_TOTALS.map(({ key, label, help }) => (
@@ -412,8 +452,18 @@ export default function SuperAdminHomePage() {
                 label={label}
                 value={(statsQ.data?.total?.[key] ?? 0).toLocaleString()}
                 compact
-                help={help}
-              />
+                help={
+                  help +
+                  trendCaveat({
+                    deletedCount: trendsQ.data?.deleted?.[key] ?? 0,
+                    undatedCount: trendsQ.data?.undated?.[key] ?? 0,
+                  })
+                }
+              >
+                {trendsQ.data?.days?.length > 0 && (
+                  <Sparkline data={trendsQ.data.days.map((d) => d[key] ?? 0)} height={36} />
+                )}
+              </StatCard>
             ))}
           </div>
           <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-fg-subtle">

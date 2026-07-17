@@ -36,6 +36,7 @@
     "migrate:scrub-map-points": "node src/migrations/scrubMapPointAnswers.js",
     "migrate:deletion-snapshots": "node src/migrations/migrateDeletionSnapshots.js",
     "migrate:platform-stats": "node src/migrations/backfillPlatformStats.js",
+    "migrate:candidate-orgs": "node src/migrations/backfillCandidateOrgs.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
     "migrate:activity-coordinator": "node src/migrations/migrateActivityCoordinator.js",

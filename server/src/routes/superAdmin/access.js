@@ -11,7 +11,9 @@ import { retentionHealth } from '../../services/retention/purgeDeletedIdentities
 import { deletionRequestHealth } from '../../services/retention/triggers.js';
 import { requestOrgDeletion, cancelOrgDeletion, listDeletionRequests, DeletionRequestError } from '../../services/retention/deletionRequests.js';
 import { idleZeroDollarOrgs } from '../../services/billing/idleOrgs.js';
-import { getPlatformStats, recomputeLive } from '../../services/platform/platformStats.js';
+import { getPlatformStats, recomputeLive, recomputeDaily } from '../../services/platform/platformStats.js';
+import { PLATFORM_METRICS } from '../../models/PlatformStats.js';
+import { PlatformDaily } from '../../models/PlatformDaily.js';
 import { REPEATABLE_JOBS } from '../../services/retention/scheduler.js';
 
 // Support access: the front door into a customer organization, and the record of who used it.
@@ -280,11 +282,47 @@ router.get('/platform-stats', async (req, res, next) => {
 
 // Manual "Reconcile now" — the same recompute the nightly job runs (idempotent: live bucket is
 // re-derived from real rows; the deleted bank is never touched), for when the operator is looking
-// at a stale "last reconciled" and doesn't want to wait for 03:47 UTC.
+// at a stale "last reconciled" and doesn't want to wait for 03:47 UTC. Also rebuilds the daily
+// trend series from the same rows, so the sparklines reconcile to the totals they sit under.
 router.post('/platform-stats/reconcile', async (req, res, next) => {
   try {
     const live = await recomputeLive({ stampBackfill: true });
-    res.json({ ok: true, live, stats: await getPlatformStats() });
+    const daily = await recomputeDaily();
+    res.json({ ok: true, live, daily, stats: await getPlatformStats() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The per-day series behind the Control Room sparklines. The window ends at YESTERDAY — the last
+// COMPLETE UTC day — so a partial today never renders as a fake dip (a mid-day Reconcile-now may
+// write today's partial bucket into PlatformDaily; it is simply never served). Missing days are
+// zero-filled: a day with no activity is a 0, not a hole.
+router.get('/platform-trends', async (req, res, next) => {
+  try {
+    const days = [30, 90, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+    const dayStr = (msAgo) => new Date(Date.now() - msAgo).toISOString().slice(0, 10);
+    const todayUTC = dayStr(0);
+    const start = dayStr(days * 86_400_000);
+    const rows = await PlatformDaily.find({ day: { $gte: start, $lt: todayUTC } }).sort({ day: 1 }).lean();
+    const byDay = new Map(rows.map((r) => [r.day, r]));
+    const series = [];
+    for (let i = days; i >= 1; i--) {
+      const day = dayStr(i * 86_400_000);
+      const r = byDay.get(day) || {};
+      const row = { day };
+      for (const m of PLATFORM_METRICS) row[m] = r[m] || 0;
+      series.push(row);
+    }
+    const stats = await getPlatformStats();
+    res.json({
+      days: series,
+      tz: 'UTC',
+      live: stats.live,
+      deleted: stats.deleted,
+      undated: stats.undated,
+      backfilledAt: stats.backfilledAt,
+    });
   } catch (err) {
     next(err);
   }

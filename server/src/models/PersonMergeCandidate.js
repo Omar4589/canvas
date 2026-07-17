@@ -8,6 +8,11 @@ const { Schema } = mongoose;
 // `personIdB` is null for single-person flags (keyless / state_missing).
 const personMergeCandidateSchema = new Schema(
   {
+    // The org whose identity disagreement this is. Persons are org-scoped, and both sides of a pair
+    // are provably same-org (the matcher's queries are org-prefixed), so a candidate belongs to
+    // exactly one org — stamped here so the review endpoint can filter/page/count in the DB instead
+    // of fetching platform-wide and filtering in JS (the old shape silently truncated at 500).
+    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', required: true, index: true },
     personIdA: { type: Schema.Types.ObjectId, ref: 'Person', required: true, index: true },
     personIdB: { type: Schema.Types.ObjectId, ref: 'Person', default: null }, // sorted A<B when both present
     reason: {
@@ -32,5 +37,8 @@ personMergeCandidateSchema.index(
   { personIdA: 1, personIdB: 1, reason: 1 },
   { unique: true }
 );
+
+// The review queue's read: one org's open candidates, newest first, paged with an exact total.
+personMergeCandidateSchema.index({ organizationId: 1, status: 1, createdAt: -1 });
 
 export const PersonMergeCandidate = mongoose.model('PersonMergeCandidate', personMergeCandidateSchema);

@@ -38,6 +38,12 @@ const platformStatsSchema = new mongoose.Schema(
     key: { type: String, default: 'singleton', unique: true },
     live: metricFields(),
     deleted: metricFields(),
+    // Rows counted in `live` that carry NO date and therefore cannot appear in the PlatformDaily
+    // trend series (possible for pre-`timestamps: true` documents — Mongoose only stamps createdAt
+    // on write). Counted INDEPENDENTLY by recomputeDaily so the trend invariant
+    //   Σ(series) + undated === live
+    // is a real cross-check of the bucketing, not a residual defined into truth. Expected all-zero.
+    undated: metricFields(),
     // Stamped by the backfill so it can be a one-time, idempotent operation.
     backfilledAt: { type: Date, default: null },
   },

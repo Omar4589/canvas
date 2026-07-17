@@ -233,7 +233,7 @@ export default function Layout() {
                   ) : (
                     <div className={GROUP_HEADER}>Platform</div>
                   )}
-                  {SUPER_NAV.map((n) => (
+                  {SUPER_NAV.filter((n) => !n.breakGlassOnly || user?.platformRole === 'break_glass').map((n) => (
                     <NavItem key={n.to} n={n} collapsed={collapsed} />
                   ))}
                 </>

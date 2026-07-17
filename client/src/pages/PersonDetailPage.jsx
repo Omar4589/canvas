@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
+import Section from '../components/Section.jsx';
 
 const IDENTITY = [
   ['firstName', 'First name'], ['lastName', 'Last name'], ['fullName', 'Full name'],
@@ -20,18 +21,6 @@ function dobInput(d) {
   if (!d) return '';
   const dt = new Date(d);
   return Number.isNaN(+dt) ? '' : dt.toISOString().slice(0, 10);
-}
-
-function Section({ title, right, children }) {
-  return (
-    <section className="mb-6 rounded-lg border border-border bg-card p-5">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-fg">{title}</h2>
-        {right}
-      </div>
-      {children}
-    </section>
-  );
 }
 
 // ── Merge dialog: pick the surviving value for each differing identity field ──
@@ -125,11 +114,32 @@ export default function PersonDetailPage() {
   const [form, setForm] = useState({});
   const [mergeVictim, setMergeVictim] = useState(null);
   const [manualVictim, setManualVictim] = useState('');
+  // Merge picker: search this org's directory for the other record instead of pasting an ObjectId.
+  const [pickerText, setPickerText] = useState('');
+  const [pickerQ, setPickerQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setPickerQ(pickerText.trim()), 300);
+    return () => clearTimeout(t);
+  }, [pickerText]);
 
   const detailQ = useQuery({ queryKey: key, queryFn: () => api(`/super-admin/persons/${personId}`) });
-  const invalidate = () => qc.invalidateQueries({ queryKey: key });
+  // Invalidate the detail AND the directory list — the list's merge?/🔒 pills and the needsReview
+  // filter are derived from the same state every mutation below changes; hitting only the singular
+  // key left them stale (phantom pills after a dismiss/merge).
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: key });
+    qc.invalidateQueries({ queryKey: ['super-admin', 'persons'] });
+  };
   const onErr = (e) => setErr(e.message);
   const clearErr = () => setErr('');
+
+  const pickerOrgId = detailQ.data?.person?.organizationId || null;
+  const pickerResults = useQuery({
+    queryKey: ['super-admin', 'persons', 'merge-picker', pickerOrgId, pickerQ],
+    queryFn: () =>
+      api(`/super-admin/persons?organizationId=${pickerOrgId}&q=${encodeURIComponent(pickerQ)}&limit=8&skip=0`),
+    enabled: !!pickerOrgId && pickerQ.length >= 2,
+  });
 
   const patchIdentity = useMutation({
     mutationFn: (body) => api(`/super-admin/persons/${personId}`, { method: 'PATCH', body }),
@@ -145,7 +155,15 @@ export default function PersonDetailPage() {
   });
   const merge = useMutation({
     mutationFn: (body) => api(`/super-admin/persons/${personId}/merge`, { method: 'POST', body }),
-    onSuccess: () => { clearErr(); setMergeVictim(null); setManualVictim(''); invalidate(); }, onError: onErr,
+    onSuccess: (_data, variables) => {
+      clearErr();
+      setMergeVictim(null);
+      setManualVictim('');
+      // The victim is a tombstone now — drop its cached detail so a re-opened dialog can't show it live.
+      if (variables?.victimId) qc.invalidateQueries({ queryKey: ['super-admin', 'person', variables.victimId] });
+      invalidate();
+    },
+    onError: onErr,
   });
   const split = useMutation({
     mutationFn: (mergeLogId) => api(`/super-admin/persons/${personId}/split`, { method: 'POST', body: { mergeLogId } }),
@@ -153,10 +171,6 @@ export default function PersonDetailPage() {
   });
   const dismissCandidate = useMutation({
     mutationFn: (candidateId) => api(`/super-admin/persons/candidates/${candidateId}/dismiss`, { method: 'POST' }),
-    onSuccess: () => { clearErr(); invalidate(); }, onError: onErr,
-  });
-  const resolveProposal = useMutation({
-    mutationFn: ({ proposalId, action }) => api(`/super-admin/persons/edit-proposals/${proposalId}/${action}`, { method: 'POST' }),
     onSuccess: () => { clearErr(); invalidate(); }, onError: onErr,
   });
 
@@ -371,51 +385,72 @@ export default function PersonDetailPage() {
         </Section>
       )}
 
-      {/* Edit proposals */}
-      {d.proposals.filter((pr) => pr.status === 'pending').length > 0 && (
-        <Section title="Pending identity proposals">
-          <ul className="space-y-2">
-            {d.proposals.filter((pr) => pr.status === 'pending').map((pr) => (
-              <li key={pr._id} className="rounded border border-border p-3 text-sm">
-                <div className="mb-2 text-fg-muted">
-                  Proposed by <span className="font-medium text-fg">{pr.orgName || orgNameById.get(String(pr.orgId)) || pr.orgId}</span> · {pr.source}
-                </div>
-                <ul className="mb-2 space-y-0.5">
-                  {Object.entries(pr.fields || {}).map(([f, v]) => (
-                    <li key={f} className="text-xs">
-                      <span className="text-fg-subtle">{f}:</span>{' '}
-                      <span className="text-fg-muted line-through">{String(pr.canonicalSnapshot?.[f] ?? '—')}</span>{' → '}
-                      <span className="font-medium text-fg">{String(v ?? '—')}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="flex gap-2">
-                  <button onClick={() => resolveProposal.mutate({ proposalId: pr._id, action: 'approve' })} disabled={resolveProposal.isPending} className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-60">Approve &amp; propagate</button>
-                  <button onClick={() => resolveProposal.mutate({ proposalId: pr._id, action: 'reject' })} disabled={resolveProposal.isPending} className="rounded-md border border-border-strong px-3 py-1.5 text-xs">Reject</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-
-      {/* Manual merge */}
+      {/* Manual merge — search-driven victim discovery (the old raw-ObjectId paste survives as a
+          collapsed power-user fallback). Same org only: merges are org-scoped by the server. */}
       <Section title="Merge another record into this person">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <input
-            value={manualVictim}
-            onChange={(e) => setManualVictim(e.target.value.trim())}
-            placeholder="Paste the other person's ID…"
-            className="min-w-[280px] flex-1 rounded border border-border-strong bg-card px-2 py-1.5 font-mono text-xs text-fg"
-          />
-          <button
-            onClick={() => manualVictim && setMergeVictim(manualVictim)}
-            disabled={!manualVictim}
-            className="rounded-md border border-border-strong px-3 py-1.5 text-sm disabled:opacity-50"
-          >
-            Review merge…
-          </button>
-        </div>
+        <input
+          type="search"
+          value={pickerText}
+          onChange={(e) => setPickerText(e.target.value)}
+          placeholder="Search this organization's people by name, vendor uid, or state voter ID…"
+          className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none"
+        />
+        {!pickerOrgId && (
+          <p className="mt-2 text-xs text-fg-subtle">This record has no organization — search unavailable.</p>
+        )}
+        {pickerQ.length >= 2 && pickerResults.isLoading && (
+          <p className="mt-2 text-sm text-fg-subtle">Searching…</p>
+        )}
+        {pickerQ.length >= 2 && pickerResults.data && (
+          <ul className="mt-2 divide-y divide-border overflow-hidden rounded border border-border">
+            {(pickerResults.data.persons || [])
+              .filter((r) => r.id !== p.id)
+              .map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                  <div className="min-w-0">
+                    <span className="font-medium text-fg">{r.fullName || '—'}</span>
+                    {(r.svidKeys || []).slice(0, 1).map((k) => (
+                      <span key={k.stateVoterId} className="ml-2 font-mono text-xs text-fg-subtle">
+                        {k.registeredState} {k.stateVoterId}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Link to={`/super-admin/people/${r.id}`} className="rounded border border-border-strong px-2 py-1 text-xs hover:bg-sunken">
+                      View
+                    </Link>
+                    <button
+                      onClick={() => setMergeVictim(r.id)}
+                      className="rounded border border-border-strong px-2 py-1 text-xs hover:bg-sunken"
+                    >
+                      Review merge…
+                    </button>
+                  </div>
+                </li>
+              ))}
+            {(pickerResults.data.persons || []).filter((r) => r.id !== p.id).length === 0 && (
+              <li className="px-3 py-2 text-sm text-fg-subtle">No other records match.</li>
+            )}
+          </ul>
+        )}
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-fg-subtle">Merge by record ID instead</summary>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <input
+              value={manualVictim}
+              onChange={(e) => setManualVictim(e.target.value.trim())}
+              placeholder="Paste the other person's ID…"
+              className="min-w-[280px] flex-1 rounded border border-border-strong bg-card px-2 py-1.5 font-mono text-xs text-fg"
+            />
+            <button
+              onClick={() => manualVictim && setMergeVictim(manualVictim)}
+              disabled={!manualVictim}
+              className="rounded-md border border-border-strong px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Review merge…
+            </button>
+          </div>
+        </details>
       </Section>
 
       {/* Merge / split history */}

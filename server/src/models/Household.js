@@ -80,9 +80,16 @@ const householdSchema = new mongoose.Schema(
     fullyVoted: { type: Boolean, default: false, index: true },
 
     // Do-not-contact: true when EVERY voter at this address is flagged do-not-contact, so the
-    // door drops off cutting/books/maps for ALL campaign types (lit drop included — "never come
-    // to my door" covers literature). Derived ONLY by services/dnc/recomputeFullyDnc.js; a
-    // voter-less door is never fullyDnc (the ≥1-voter guard).
+    // door drops off cutting, books, and the CANVASSER's map/list for ALL campaign types (lit
+    // drop included — "never come to my door" covers literature). Derived ONLY by
+    // services/dnc/recomputeFullyDnc.js; a voter-less door is never fullyDnc (the ≥1-voter guard).
+    //
+    // The ADMIN map deliberately still shows it (routes/admin/households.js does not filter on
+    // this): that map is the record of work performed and billed, and hiding a surveyed pin
+    // because the voter later opted out would erase delivered work from the person paying for it.
+    // The rule the whole feature turns on: this flag answers "where may we go NEXT", never
+    // "what did we DO" — which is why no report or billing query reads it (the sole exception is
+    // the coverage bucket, and only for doors that were never knocked).
     fullyDnc: { type: Boolean, default: false, index: true },
 
     // Admin-excluded from turf (e.g. "remove apartments"): like fullyVoted, these

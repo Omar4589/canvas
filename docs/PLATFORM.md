@@ -46,6 +46,11 @@ any org to work inside it, then come back out.
   "knocks" in reports (one per household per round — see [METRICS.md](METRICS.md)), so it always
   reads higher. A muted "Recomputed nightly · last reconciled …" line shows the totals' freshness,
   with a **Reconcile now** button beside it (the same idempotent recompute the nightly job runs).
+  Each totals card now carries a **trend sparkline** with a 30d / 90d / 1y toggle — one bar per UTC
+  day, **through yesterday** (the last complete day, so a partial today never reads as a dip). The
+  trend covers **live organizations only**: a deleted customer's records were destroyed on
+  deletion, so their contribution has no dates and can never appear on the line — it stays in the
+  lifetime total, and the card's ⓘ prints that exact gap (plus any dateless-row count, expected 0).
   The page opens with an **ops-health strip** — three chips answering "is anything on fire": the
   retention banner (green/red), how many staff are inside customer orgs right now, and how many org
   deletions are scheduled (with a "need a human" count when any is overdue or failed) — each linking
@@ -53,7 +58,15 @@ any org to work inside it, then come back out.
   "at-risk" list: trials expiring within 7 days, past due, suspended, canceled orgs in wind-down)
   and each name deep-links to that org's Billing panel. Feed rows are drill-able (the org chip opens
   its billing panel) and the feed can **Load older** — history is no longer capped at the newest 50.
-- **Organizations** — the revenue view. A **this-month rollup bar** across every customer org (total
+- **Organizations** — the revenue view. Each org's name opens a read-only **org detail page**
+  (`/organizations/:orgId`; also reachable from a "Details" chip on the Control Room cards): the
+  **member roster** — the one thing that previously required burning a logged support session just
+  to look at — plus the campaign list with last activity, and deep-links to the billing panel, the
+  access log pre-filtered to that org, and the deletion-requests list. All metadata, no grant, no
+  audit row; **switching in** stays the (correctly grant-gated) way to reach voter content. An
+  **internal**-status org shows an explicit warning that internal means *exempt from automatic
+  retention* — the dormancy sweep and wind-down never delete it (the same warning appears in the
+  billing panel when selecting the status). A **this-month rollup bar** across every customer org (total
   billable dollars, billable-campaign count, a status breakdown, and the top payers — internal orgs
   excluded), the server-defined **needs-attention strip** (expiring trials, past due, suspended,
   wind-downs, idle $0 zombies), and a **searchable, sortable, paged table** (name/slug search; sort
@@ -86,7 +99,14 @@ any org to work inside it, then come back out.
   books out, and marks each reviewer's book; after that, the button just works.
 - **All Users** — every account on the platform (with the orgs each belongs to and their role in each),
   now **searched and filtered server-side and paged** — the browser never downloads the whole user
-  base. The headline counts real accounts and lists **deleted tombstones separately** (they carry a
+  base. Each name opens a full **user detail page** (`/super-admin/users/:userId`): identity
+  including the fields no list carries (temp-password state, deletion lock), **all memberships
+  including deactivated ones** (previously invisible from every platform surface; genuinely
+  *removed* memberships are hard-deleted and can't be shown), per-org activity counts (raw field
+  records — not billable knocks — plus surveys and first/last activity), a staff member's **grant
+  and access-log history** (including expired/revoked grants), and the deletion-tombstone **status**
+  (dates only — never the retained name, which stays org-scoped on reports). All of it is account
+  metadata: no support grant needed, no audit row written. The headline counts real accounts and lists **deleted tombstones separately** (they carry a
   "deleted" badge and never inflate the total); filters cover super admins, active/inactive, deleted,
   temp-password (never finished onboarding), and accounts with no memberships. Two clocks are shown
   apart: **Last login** (signing in) and **Last active** (actually canvassing). Expanding a row shows
@@ -108,9 +128,13 @@ any org to work inside it, then come back out.
   failures); and the current view exports to CSV. See [IMPORTS.md](IMPORTS.md) § "Cost review
   (owner-only)".
 - **People** — the **Person** identity layer: each org's voter identities, deduped **within that org**
-  (People are per-org — the same human in two orgs is two separate records); review merge/split
-  candidates, approve edit proposals, and set locks. Fully documented in [PERSONS.md](PERSONS.md).
-  Opening any of it requires a support access grant for that org (below).
+  (People are per-org — the same human in two orgs is two separate records); review merge
+  candidates, merge/split records, and set locks. Merging now starts from a **search picker**
+  (find the other record by name / vendor uid / state voter ID) instead of pasting a raw record id
+  — the id paste survives as a collapsed fallback. The edit-proposal review UI was retired (the
+  mechanism is vestigial post-per-org; see [PERSONS.md](PERSONS.md)). Fully documented in
+  [PERSONS.md](PERSONS.md). Opening any of it requires a support access grant for that org (below),
+  and the People console is **break-glass only** — the nav item is hidden from support-tier staff.
 - **Support access** — where staff grants are managed and the delete-on-request intake lives. Start a
   session deliberately (org picker + the same reason/kind/length form the 403 modal uses — access no
   longer begins only by tripping a Forbidden somewhere); see who currently holds one (with its kind,
@@ -158,10 +182,10 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 
 | Screen | Client page | Endpoint(s) |
 |---|---|---|
-| Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` (`?since=` forward cursor, `?before=` backward "Load older") ([platform.js](../server/src/routes/superAdmin/platform.js)); `GET /super-admin/access/platform-stats`, `POST /super-admin/access/platform-stats/reconcile` (the "Reconcile now" button — same `recomputeLive` as the nightly job), `GET /super-admin/access/idle-orgs`, `GET /super-admin/access/health/retention`, `GET /super-admin/access/grants?all=1`, `GET /super-admin/access/deletion-requests` (the ops-health chips) ([access.js](../server/src/routes/superAdmin/access.js)); `GET /super-admin/organizations/at-risk` (billing strip) |
-| Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) | `GET /super-admin/organizations` (opt-in `skip`/`limit`/`q`/`sort` + `total`), `GET /super-admin/organizations/billing-rollup` (this-month revenue across all customer orgs), `GET /super-admin/organizations/at-risk` (the needs-attention definition), `POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId` (isActive + the Rename control's name/slug), `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js), tested by [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
+| Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` (`?since=` forward cursor, `?before=` backward "Load older") ([platform.js](../server/src/routes/superAdmin/platform.js)); `GET /super-admin/access/platform-stats`, `GET /super-admin/access/platform-trends?days=30\|90\|365` (the sparkline series — zero-filled UTC days ending at **yesterday**; returns `live`/`deleted`/`undated` so the ⓘ can print the exact gaps), `POST /super-admin/access/platform-stats/reconcile` (the "Reconcile now" button — `recomputeLive` **+ `recomputeDaily`**, same as the nightly job), `GET /super-admin/access/idle-orgs`, `GET /super-admin/access/health/retention`, `GET /super-admin/access/grants?all=1`, `GET /super-admin/access/deletion-requests` (the ops-health chips) ([access.js](../server/src/routes/superAdmin/access.js)); `GET /super-admin/organizations/at-risk` (billing strip) |
+| Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) + [OrgDetailPage.jsx](../client/src/pages/OrgDetailPage.jsx) | `GET /super-admin/organizations` (opt-in `skip`/`limit`/`q`/`sort` + `total`), `GET /super-admin/organizations/billing-rollup` (this-month revenue across all customer orgs), `GET /super-admin/organizations/at-risk` (the needs-attention definition), `GET /super-admin/organizations/:orgId` (the slim detail composite — roster incl. deactivated memberships, campaigns + last activity, billing header w/ the `internal` exemption flag; **registered after the literal routes** so `/:orgId` can't swallow them; metadata only — no grant, no AccessLog row), `POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId` (isActive + the Rename control's name/slug), `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js), tested by [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
 | Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; console runner `npm run demo:refresh`). Generation + batched persistence are shared with the seed via [services/platform/demoActivity.js](../server/src/services/platform/demoActivity.js) so both look identical. |
-| All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) | `GET /super-admin/users` (opt-in `skip`/`limit`/`q` + filters `super`/`deleted`/`tempPassword`/`orphan`/`active`; returns `total` + `deletedCount`, and per-page `lastActivityAt`), `GET /super-admin/users/:userId/lockout` (reads the per-email throttle state — per-process, labeled), `PATCH /super-admin/users/:userId/platform-role` (break-glass only; refuses to demote the last break-glass account), `POST /super-admin/users/:userId/promote`, `POST /super-admin/users/:userId/clear-lockout` (clears the per-email login throttle via `clearLoginLockout`, see [loginRateLimit.js](../server/src/middleware/loginRateLimit.js)) ([users.js](../server/src/routes/superAdmin/users.js)) |
+| All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) + [SuperAdminUserDetailPage.jsx](../client/src/pages/SuperAdminUserDetailPage.jsx) | `GET /super-admin/users` (opt-in `skip`/`limit`/`q` + filters `super`/`deleted`/`tempPassword`/`orphan`/`active`; returns `total` + `deletedCount`, and per-page `lastActivityAt`), `GET /super-admin/users/:userId` (the drill-in composite → [services/platform/userOversight.js](../server/src/services/platform/userOversight.js): full identity incl. `tempPasswordSetAt`/`deletionLocked`, ALL memberships incl. deactivated, per-org structural activity counts, staff grant/access history, `DeletedUserRecord` **status only** — metadata, no grant, no AccessLog row), `GET /super-admin/users/:userId/lockout` (reads the per-email throttle state — per-process, labeled), `PATCH /super-admin/users/:userId/platform-role` (break-glass only; refuses to demote the last break-glass account), `POST /super-admin/users/:userId/promote`, `POST /super-admin/users/:userId/clear-lockout` (clears the per-email login throttle via `clearLoginLockout`, see [loginRateLimit.js](../server/src/middleware/loginRateLimit.js)) ([users.js](../server/src/routes/superAdmin/users.js)) |
 | Imports | [SuperAdminImportsPage.jsx](../client/src/pages/SuperAdminImportsPage.jsx) | `GET /super-admin/imports` — cross-org import + geocoding-cost aggregation (real persisted lookup counts; cost derived from `GEOCODE_COST_PER_1000_CENTS`, never sent to clients); opt-in `skip`/`limit`, `q` (file/uploader/org), `orgId`, `sort=cost\|new`, `excludeUndone=1`, `groupBy=month\|org` rollups ([imports.js](../server/src/routes/superAdmin/imports.js)) |
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
 | Support access | [SupportAccessPage.jsx](../client/src/pages/SupportAccessPage.jsx) | `/super-admin/access/*` ([access.js](../server/src/routes/superAdmin/access.js)) — grants CRUD (`GET /grants` returns `scope: all\|mine` + per-grant `read {requests, rows, bytes}` totals), the audit log (`GET /log` — `skip`/`limit` + exact `total`, filters `organizationId`/`actorUserId`/`grantId`/`from`/`to`, each entry carrying `rows`/`bytes`/`route`), `GET /log-facets` (filter options + the log's true extent: `logTotal`, `oldestAt`), retention health, and deletion requests (`GET` paged + `status` filter + per-row `overdue`; `POST` files; `POST /:id/cancel`). Grant/logging services in [services/access/supportAccess.js](../server/src/services/access/supportAccess.js); the full verified picture is in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) (E12/E13 + v3) |
@@ -209,6 +233,20 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
   `actionType ∈ [...ACTION_DOOR, 'restricted']` (so **Refused and Restricted** events both appear,
   matching the styling the feed UIs ship), newest first, with org / canvasser / campaign / household
   populated; supports `?since=` for polling and `?limit=`.
+- **The trend series (`PlatformDaily` + `platform-trends`)** — one row per UTC day, the five
+  lifetime metrics counted from the DATES of surviving rows with the **same filter set as the live
+  bucket** (internal excluded, `KNOCK_ACTIONS`, never `via:'bulk'`). Rebuilt in FULL by
+  `recomputeDaily()` ([platformStats.js](../server/src/services/platform/platformStats.js)) inside
+  the existing nightly `STATS_JOB` (no new cron), the manual backfill, and Reconcile-now — full
+  rebuild is the point: an org hard-delete removes its bars retroactively while the `deleted` bank
+  grows by the same amount. **The invariant, pinned by test:**
+  `Σ(series) + undated === live` per metric — where `undated` is counted **independently**
+  (`countDocuments` on a missing/null date field; possible for pre-`timestamps:true` rows, since
+  Mongoose stamps `createdAt` on write only), making the identity a real cross-check of the
+  bucketing rather than a residual defined into truth. The endpoint zero-fills missing days and
+  **slices off today** (a partial day must never render as a dip). Deliberately **platform-wide
+  with no org dimension** — the Privacy Policy's aggregate-statistics carve-out covers exactly
+  this; a per-org daily series would identify a customer and is a separate privacy decision.
 - **Platform totals (`platform-stats`)** are the two-bucket lifetime counters in
   [models/PlatformStats.js](../server/src/models/PlatformStats.js) /
   [services/platform/platformStats.js](../server/src/services/platform/platformStats.js):

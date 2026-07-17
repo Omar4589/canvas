@@ -272,6 +272,16 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
               placeholder={needsReason ? 'Reason (required)' : 'Reason (optional, kept in history)'}
               className={inputCls}
             />
+            {/* The consequence of `internal`, stated at the choosing moment — it silently exempts
+                the org from BOTH retention sweeps (dormancy + wind-down) and removes it from every
+                platform revenue/lifetime number. */}
+            {statusTo === 'internal' && (
+              <p className="mt-2 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
+                <span className="font-semibold">Internal means exempt:</span> automatic retention will never
+                delete this organization (dormancy sweep and wind-down both skip it), and it drops out of
+                every platform revenue and lifetime number. Only a manual delete can remove it.
+              </p>
+            )}
             {sub.status === 'trial' && (
               <div className="mt-3 rounded-md border border-border bg-card p-2">
                 <div className="flex items-center justify-between">

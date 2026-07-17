@@ -97,6 +97,23 @@ test('uid + svid pointing at different persons → uid wins, merge candidate rai
   assert.strictEqual(String(rows[0].voter.personId), String(pu._id)); // linked to the uid match
   const cand = await PersonMergeCandidate.findOne({ reason: 'uid_svid_conflict' }).lean();
   assert.ok(cand, 'expected a uid_svid_conflict merge candidate');
+  // Batch 3: the candidate carries its org, so the review endpoint can filter/page in the DB
+  // (the old shape fetched platform-wide and filtered in JS — silently truncatable).
+  assert.strictEqual(String(cand.organizationId), String(orgA), 'candidate is stamped with its org');
+});
+
+test('every raised candidate carries organizationId (multi-candidate conflict scenario)', { skip }, async () => {
+  // Both matchers hit different persons → the direct conflict raise. (promote()'s E11000 branch is
+  // a CONCURRENCY guard — the unique indexes include uidSource, so it is not reachable
+  // single-threaded; its person.organizationId stamping is covered by review, not by this test.)
+  await Person.create({ organizationId: orgA, svidKeys: [{ registeredState: 'FL', stateVoterId: 'S8', source: 'import' }], firstName: 'A', lastName: 'A' });
+  await Person.create({ organizationId: orgA, uidKeys: [{ uidSource: 'i360', uid: 'U8', source: 'import' }], svidKeys: [{ registeredState: 'FL', stateVoterId: 'SX', source: 'import' }], firstName: 'B', lastName: 'B' });
+  await reconcileIdentityFromImport([V('S8', { uid: 'U8' })], { orgId: orgA, uidSource: 'i360' });
+  const cands = await PersonMergeCandidate.find({ reason: 'uid_svid_conflict' }).lean();
+  assert.ok(cands.length >= 1, 'the conflict raised a candidate');
+  for (const c of cands) {
+    assert.strictEqual(String(c.organizationId), String(orgA), 'every candidate carries the org');
+  }
 });
 
 test('dual-key new row → one person carrying both keys', { skip }, async () => {

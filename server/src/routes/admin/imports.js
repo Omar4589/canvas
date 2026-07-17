@@ -179,6 +179,7 @@ router.post('/csv', uploadCsv, async (req, res, next) => {
       explode: req.body?.explode !== 'false',
       uidSource: resolved.uidSource ?? null,
       revisitNewVoters: req.body?.revisitNewVoters === 'true',
+      overwriteHandEdits: req.body?.overwriteHandEdits === 'true',
     });
     await saveRawImport(job._id, req.file.originalname, req.file.buffer);
     await getQueue(QUEUE_NAMES.IMPORT).add(

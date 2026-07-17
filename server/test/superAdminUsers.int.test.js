@@ -235,6 +235,49 @@ test('the activity feed pages BACKWARD with `before` — history past the newest
   assert.strictEqual(older.json.events[0].actionType, 'not_home');
 });
 
+test('GET /:userId — the drill-in composite: deactivated memberships, tombstone STATUS only, and NO audit row', { skip }, async () => {
+  const { AccessLog } = await import('../src/models/AccessLog.js');
+  const { DeletedUserRecord } = await import('../src/models/DeletedUserRecord.js');
+
+  // Deactivate Zelda's membership — the platform list hard-filters these out; the drill-in is the
+  // only platform surface that can show it.
+  await Membership.updateOne({ userId: ctx.zelda._id }, { $set: { isActive: false } });
+
+  const res = await call('GET', `/super-admin/users/${ctx.zelda._id}`, { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.user.email, ctx.zelda.email);
+  assert.ok('tempPasswordSetAt' in res.json.user, 'the field no list surface carries is here');
+  assert.ok('deletionLocked' in res.json.user);
+  assert.strictEqual(res.json.memberships.length, 1);
+  assert.strictEqual(res.json.memberships[0].isActive, false, 'the DEACTIVATED membership is visible');
+  assert.ok(res.json.memberships[0].fieldRecords >= 1, 'raw field records counted (her seeded knock)');
+  assert.strictEqual(res.json.staff, null, 'not a super admin → no staff block');
+
+  // Metadata read → NO AccessLog row. (The whole point of the grant-free drill-in.)
+  await new Promise((r) => setTimeout(r, 120));
+  assert.strictEqual(await AccessLog.countDocuments({}), 0, 'no audit row for a metadata read');
+
+  // Tombstone: status/dates only — the snapshot's NAME CONTENT must never appear in the payload.
+  await DeletedUserRecord.create({
+    userId: ctx.tomb._id, firstName: 'Zebadiah', lastName: 'Quixote',
+    organizationIds: [ctx.org._id], deletedAt: new Date(), retentionUntil: new Date(Date.now() + 86_400_000),
+  });
+  const res2 = await call('GET', `/super-admin/users/${ctx.tomb._id}`, { token: ctx.owner.token });
+  assert.ok(res2.json.deletedRecord, 'the tombstone status block is present');
+  assert.ok(res2.json.deletedRecord.retentionUntil);
+  assert.strictEqual(res2.json.deletedRecord.organizationCount, 1);
+  const raw = JSON.stringify(res2.json.deletedRecord);
+  assert.ok(!raw.includes('Zebadiah') && !raw.includes('Quixote'),
+    'the snapshot name content never crosses this platform surface');
+
+  // A super admin's own detail carries the staff block (grants incl. non-live + access footprint).
+  const res3 = await call('GET', `/super-admin/users/${ctx.owner._id}`, { token: ctx.owner.token });
+  assert.ok(res3.json.staff, 'super-admin accounts get the staff history block');
+  assert.ok(Array.isArray(res3.json.staff.grants));
+
+  await Membership.updateOne({ userId: ctx.zelda._id }, { $set: { isActive: true } }); // restore
+});
+
 test('the lockout state is READABLE (per-process, honestly labeled), not just blind-clearable', { skip }, async () => {
   const res = await call('GET', `/super-admin/users/${ctx.zelda._id}/lockout`, { token: ctx.owner.token });
   assert.strictEqual(res.status, 200);

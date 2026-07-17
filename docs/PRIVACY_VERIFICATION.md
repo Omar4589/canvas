@@ -355,7 +355,18 @@ Restoration is **org-scoped and membership-scoped**: only orgs where the person'
 
 **Records with no retention limit at all (VERIFIED):**
 
-- **`AccessLog`** — contains no data about deleted canvassers or customer users. Its `actorUserId` is always Doorline platform staff. It records method, the **route template** (deliberately not the filled path, so no voter ids land in it), a resource class, organizationId, grantId and a timestamp (`server/src/models/AccessLog.js:15-48`). **It is append-only. There is no purge, no TTL, no retention job for it anywhere.** It is also **not** in `ORG_SCOPED` (`deleteOrganization.js:44-51`), so `AccessLog` and `SupportAccessGrant` rows **survive the hard deletion of the customer organization they refer to.** *[v3.1 2026-07-17: still true, and now deliberate-and-visible rather than accidental — the console shows the log's total row count and oldest entry (`GET /log-facets`), and the per-request `rows`/`bytes` magnitude now surfaces in the UI. Whether audit rows get a retention window is an owner policy decision, explicitly deferred; it must never arrive as a code side effect.]*
+- **`AccessLog`** — contains no data about deleted canvassers or customer users. Its `actorUserId` is always Doorline platform staff. It records method, the **route template** (deliberately not the filled path, so no voter ids land in it), a resource class, organizationId, grantId and a timestamp (`server/src/models/AccessLog.js:15-48`). **It is append-only. There is no purge, no TTL, no retention job for it anywhere.** It is also **not** in `ORG_SCOPED` (`deleteOrganization.js:44-51`), so `AccessLog` and `SupportAccessGrant` rows **survive the hard deletion of the customer organization they refer to.** *[v3.1 2026-07-17: still true, and now deliberate-and-visible rather than accidental — the console shows the log's total row count and oldest entry (`GET /log-facets`), and the per-request `rows`/`bytes` magnitude now surfaces in the UI.]*
+
+  > **[v3.1 2026-07-17 — RESOLVED AS A DELIBERATE, OWNER-AFFIRMED DECISION: access logs are kept
+  > forever. This is no longer an open gap.]** The owner considered a retention window and rejected
+  > it as policy-contradicting: `privacy.html` states access records *"are retained"* and names them
+  > as *"the evidence that our controls operated"* — an explicit carve-out that survives customer
+  > deletion — and `DPA.md` §Security commits not to *"materially decrease the overall protection."*
+  > Deleting audit rows would arguably breach both. Capacity was checked and is a non-issue: the log
+  > grows one row per staff request under a support grant (bounded by support burden, never tenant
+  > traffic); a "collection is getting big" justification would be untrue. The model carries a
+  > matching do-not-add-a-TTL comment. Revisiting this requires an owner decision AND owner edits to
+  > `privacy.html` (two sentences) and `DPA.md` §9 — never a code-only change.
 - **`RetentionRun`** — one row per purge run: job name, startedAt, finishedAt, ok, purged count, scanned count, error string (`models/RetentionRun.js:20-32`). No user identity. Retained indefinitely. *Note the `error` field is unbounded free text captured from a thrown exception (`purgeDeletedIdentities.js:49`), so an identifier appearing there cannot be categorically ruled out.*
 
 **Backups — see "THINGS YOU DID NOT ASK ABOUT," item 4.** This is a material residual-copy problem and it is not in Atlas.
@@ -1054,7 +1065,7 @@ I grepped `mobile/` (source and `app.json`) for `ExcludedFromBackup`, `NSURLIsEx
 
 ### 3. `ImportJob` permanently retains voter PII in import history. **VERIFIED.**
 Never mentioned in any inventory. `ImportJob` rows are retained forever (no TTL anywhere) and carry:
-- **`diff`** (`models/ImportJob.js:86`) — samples of **moved voters** as `{stateVoterId, name, fromAddress, toAddress}` (`services/import/computeImportDiff.js:129-137`, `:200-219`). **A voter's name plus their previous and new home address, permanently, in import history.**
+- **`diff`** (`models/ImportJob.js:86`) — samples of **moved voters** as `{stateVoterId, name, fromAddress, toAddress}` (`services/import/computeImportDiff.js:129-137`, `:200-219`). **A voter's name plus their previous and new home address, permanently, in import history.** *[v3 2026-07-17: the persisted diff now also carries `handEditConflicts.sample` — capped (100) kept-value/file-value pairs for hand-edited identity fields (can include a phone or DOB). Same class as the moved-voter samples: org-scoped, both values already held by the org (its own edit + its own upload), same ImportJob lifecycle and org-delete cascade. No new audience, no new third party.]*
 - **`errors[]`** (`ImportJob.js:61`) — `rowIndex`, `code`, `reason`, **`stateVoterId`** (`csvImporter.js:152-158`)
 - **`geocodeCheck.sample`** — sample **addresses**
 

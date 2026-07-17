@@ -14,23 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useInfinitePaged } from '../../../lib/useInfinitePaged';
+import { formatRelative } from '../../../lib/dates';
 import { loadCurrentUser } from '../../../lib/cache';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
-function formatRelative(d) {
-  if (!d) return 'Never';
-  const date = new Date(d);
-  const ms = Date.now() - date.getTime();
-  const min = Math.floor(ms / 60000);
-  if (min < 1) return 'Just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  return `${day}d ago`;
-}
 
 // Filter pills → server query params: the phone no longer downloads the whole user table.
 const FILTERS = [

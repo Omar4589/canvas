@@ -3,7 +3,7 @@ import { createRedis } from '../../queues/connection.js';
 import { QUEUE_NAMES } from '../../queues/index.js';
 import { purgeDeletedIdentities, JOB_NAME } from './purgeDeletedIdentities.js';
 import { runRetentionTriggers, TRIGGER_JOB } from './triggers.js';
-import { recomputeLive, STATS_JOB } from '../platform/platformStats.js';
+import { recomputeLive, recomputeDaily, STATS_JOB } from '../platform/platformStats.js';
 import { PLATFORM_METRICS } from '../../models/PlatformStats.js';
 
 // Registers the repeatable maintenance jobs on the worker dyno.
@@ -90,9 +90,13 @@ export async function processMaintenanceJob(job) {
   }
   if (job.name === STATS_JOB) {
     const live = await recomputeLive({ stampBackfill: true });
+    // The trend series rides the same job: full rebuild from the same rows at the same moment, so
+    // Σ(series) + undated stays reconciled to the live bucket it charts.
+    const daily = await recomputeDaily();
     console.log(
       `[maintenance] ${STATS_JOB}: live bucket recomputed from rows — ` +
-      PLATFORM_METRICS.map((m) => `${m} ${live[m]}`).join(', ')
+      PLATFORM_METRICS.map((m) => `${m} ${live[m]}`).join(', ') +
+      ` · daily series rebuilt (${daily.days} day rows)`
     );
     return live;
   }

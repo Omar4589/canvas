@@ -4,7 +4,9 @@ export default function Pager({ skip, limit, total, onChange, className = '' }) 
   return (
     <div className={`flex items-center justify-between text-sm text-fg-muted ${className}`}>
       <span>
-        {total === 0 ? '0' : `${skip + 1}–${Math.min(skip + limit, total)}`} of {total}
+        {/* toLocaleString matters here: the voter directory routinely pages 6-figure totals. */}
+        {total === 0 ? '0' : `${(skip + 1).toLocaleString()}–${Math.min(skip + limit, total).toLocaleString()}`} of{' '}
+        {total.toLocaleString()}
       </span>
       <div className="flex gap-2">
         <button

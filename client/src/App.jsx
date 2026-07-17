@@ -54,6 +54,8 @@ const SuperAdminPeoplePage = lazy(() => import('./pages/SuperAdminPeoplePage.jsx
 const SuperAdminImportsPage = lazy(() => import('./pages/SuperAdminImportsPage.jsx'));
 const SupportAccessPage = lazy(() => import('./pages/SupportAccessPage.jsx'));
 const PersonDetailPage = lazy(() => import('./pages/PersonDetailPage.jsx'));
+const SuperAdminUserDetailPage = lazy(() => import('./pages/SuperAdminUserDetailPage.jsx'));
+const OrgDetailPage = lazy(() => import('./pages/OrgDetailPage.jsx'));
 
 function PageFallback() {
   return (
@@ -203,6 +205,7 @@ export default function App() {
           <Route element={<RoleGate require="super" />}>
             <Route path="/super-admin" element={<SuperAdminHomePage />} />
             <Route path="/super-admin/users" element={<SuperAdminUsersPage />} />
+            <Route path="/super-admin/users/:userId" element={<SuperAdminUserDetailPage />} />
             <Route path="/super-admin/people" element={<SuperAdminPeoplePage />} />
             <Route path="/super-admin/people/:personId" element={<PersonDetailPage />} />
             <Route path="/super-admin/imports" element={<SuperAdminImportsPage />} />
@@ -211,6 +214,7 @@ export default function App() {
                 for want of a grant — which is exactly when you need it. */}
             <Route path="/super-admin/access" element={<SupportAccessPage />} />
             <Route path="/organizations" element={<OrganizationsPage />} />
+            <Route path="/organizations/:orgId" element={<OrgDetailPage />} />
             {/* Jobs (Bull Board) is a PLATFORM page, not an org one: the server gates the
                 ticket on requireSuperAdmin with no orgContext, and it's only ever linked from
                 SUPER_NAV. Mounting it in the org-scoped shell meant a super admin in platform

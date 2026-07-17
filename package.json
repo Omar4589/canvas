@@ -40,6 +40,7 @@
     "migrate:scrub-map-points": "npm --prefix server run migrate:scrub-map-points --",
     "migrate:deletion-snapshots": "npm --prefix server run migrate:deletion-snapshots --",
     "migrate:platform-stats": "npm --prefix server run migrate:platform-stats --",
+    "migrate:candidate-orgs": "npm --prefix server run migrate:candidate-orgs --",
     "request:org-deletion": "npm --prefix server run request:org-deletion --",
     "migrate:voter-scope": "npm --prefix server run migrate:voter-scope --",
     "migrate:cut-attributes": "npm --prefix server run migrate:cut-attributes --",

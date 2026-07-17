@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useDebouncedValue } from '../lib/useDebouncedValue.js';
+import Pager from '../components/Pager.jsx';
 
 const PAGE_SIZE = 25;
 
@@ -37,7 +38,7 @@ export default function VotersPage() {
   const [surveyStatus, setSurveyStatus] = useState('');
   const [voted, setVoted] = useState('');
   const [dnc, setDnc] = useState('');
-  const [offset, setOffset] = useState(0);
+  const [skip, setSkip] = useState(0);
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -47,22 +48,22 @@ export default function VotersPage() {
   const campaigns = campaignsQ.data?.campaigns || [];
 
   // Any filter change resets to the first page. Search is excluded here: it's
-  // debounced, so resetting the page on the raw keystroke would desync offset
+  // debounced, so resetting the page on the raw keystroke would desync skip
   // from the lagging search term (a wasted fetch, or paging the old results).
   function onFilter(setter) {
     return (v) => {
       setter(v);
-      setOffset(0);
+      setSkip(0);
     };
   }
 
   const debouncedSearch = useDebouncedValue(search);
   // Reset to page 1 when the debounced search actually commits, in the same
-  // render the query key picks up the new term — so offset and search move together.
+  // render the query key picks up the new term — so skip and search move together.
   const [prevSearch, setPrevSearch] = useState(debouncedSearch);
   if (prevSearch !== debouncedSearch) {
     setPrevSearch(debouncedSearch);
-    setOffset(0);
+    setSkip(0);
   }
   const query = buildQuery({
     search: debouncedSearch,
@@ -72,10 +73,10 @@ export default function VotersPage() {
     voted,
     dnc,
     limit: PAGE_SIZE,
-    offset,
+    skip,
   });
   const votersQ = useQuery({
-    queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, dnc, offset }],
+    queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, dnc, skip }],
     queryFn: ({ signal }) => api(`/admin/voters${query}`, { signal }),
     placeholderData: keepPreviousData,
   });
@@ -83,8 +84,6 @@ export default function VotersPage() {
   const data = votersQ.data || { voters: [], total: 0 };
   const total = data.total || 0;
   const rows = data.voters || [];
-  const from = total === 0 ? 0 : offset + 1;
-  const to = Math.min(offset + PAGE_SIZE, total);
 
   return (
     <div>
@@ -211,28 +210,8 @@ export default function VotersPage() {
         </div>
       )}
 
-      <div className="mt-3 flex items-center justify-between text-sm text-fg-muted">
-        <span>
-          {from}–{to} of {total.toLocaleString()}
-        </span>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-            disabled={offset === 0}
-            className="rounded border border-border-strong px-3 py-1 disabled:opacity-50 hover:bg-sunken"
-          >
-            Prev
-          </button>
-          <button
-            type="button"
-            onClick={() => setOffset(offset + PAGE_SIZE)}
-            disabled={to >= total}
-            className="rounded border border-border-strong px-3 py-1 disabled:opacity-50 hover:bg-sunken"
-          >
-            Next
-          </button>
-        </div>
+      <div className="mt-3">
+        <Pager skip={skip} limit={PAGE_SIZE} total={total} onChange={setSkip} />
       </div>
     </div>
   );

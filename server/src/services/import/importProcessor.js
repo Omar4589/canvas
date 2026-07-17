@@ -185,6 +185,7 @@ export async function processImportJob(job) {
       validRows,
       householdMap,
       batchSize: 2000,
+      overwriteHandEdits: importJob.overwriteHandEdits === true,
       onProgress: async ({ phase, processed, total }) => {
         const pct = total ? processed / total : 1;
         // Geocoding 0-20% (when it ran), households 20-60%, voters 60-100%.
@@ -282,9 +283,14 @@ export async function processImportJob(job) {
           ...(geoStats || {}),
           ...(revisit ? { revisitSavedSearchId: revisit.savedSearchId, revisitHouseholdCount: revisit.householdCount } : {}),
         },
-        // A retry recomputes these as 0 (voters already moved) — $max keeps the real
-        // first-attempt counts so the audit trail never regresses.
-        $max: { movedVoters, deactivatedDoors },
+        // A retry recomputes these as 0 (voters already moved; overwrite-mode flags already
+        // pulled) — $max keeps the real first-attempt counts so the audit trail never regresses.
+        $max: {
+          movedVoters,
+          deactivatedDoors,
+          keptHandEdits: counts.keptHandEdits || 0,
+          overwrittenHandEdits: counts.overwrittenHandEdits || 0,
+        },
       }
     );
 

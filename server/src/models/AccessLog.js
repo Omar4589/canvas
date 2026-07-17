@@ -54,6 +54,14 @@ const accessLogSchema = new mongoose.Schema(
   { timestamps: false } // `at` is the timestamp; a createdAt would be noise
 );
 
+// NO TTL — DELIBERATE, OWNER-DECIDED (July 2026). The Privacy Policy states access records "are
+// retained" and names them as "the evidence that our controls operated", a carve-out that survives
+// customer deletion; the DPA promises not to materially decrease protection. A delete-window was
+// considered and rejected as policy-contradicting. Growth is bounded by staff support burden (one
+// row per granted request), never tenant traffic — capacity is not a reason to revisit. Do not add
+// expireAfterSeconds here without an owner decision AND owner edits to privacy.html + DPA.md.
+// See docs/PRIVACY_VERIFICATION.md (v3.1 stamp).
+
 accessLogSchema.index({ organizationId: 1, at: -1 }); // "who looked at MY data?"
 accessLogSchema.index({ actorUserId: 1, at: -1 }); // "what did this person look at?"
 

@@ -5,10 +5,27 @@ import { followMerged } from './resolvePerson.js';
 // The 10 shared identity fields (fullName is one of them). This allowlist is the ONLY thing
 // propagation ever writes — NEVER a match key (uid/uidSource/stateVoterId/
 // registeredState), personId, surveyStatus, householdId, or a district field.
-const IDENTITY_FIELDS = [
+// Exported: it is also the set of hand-edit-shieldable fields the import pipeline consults
+// (applyImport's strip, computeImportDiff's conflict scan).
+export const IDENTITY_FIELDS = [
   'firstName', 'lastName', 'fullName', 'phone', 'phoneType', 'cellPhone',
   'party', 'gender', 'dateOfBirth', 'registrationStatus',
 ];
+
+// Value equality for identity fields, everywhere a hand edit is diffed against another source
+// (the admin PATCH's arm-on-change, the import preview's conflict scan, applyImport's kept/
+// overwritten counts). Two normalizations matter: Dates compare by time (dateOfBirth is a Date
+// on both the CSV row and the Voter doc — `!==` on Dates always differs, so without this every
+// armed DOB false-positives), and undefined/null/'' collapse to null (the PATCH form submits ''
+// for cleared fields).
+export const identityEq = (a, b) => {
+  const n = (v) => (v instanceof Date ? v.getTime() : v === undefined || v === null || v === '' ? null : v);
+  const na = n(a);
+  const nb = n(b);
+  // A Date on one side and an ISO string on the other (lean docs vs parsed rows) still compare.
+  if (na instanceof Object || nb instanceof Object) return String(na) === String(nb);
+  return na === nb;
+};
 
 function pickIdentity(identity) {
   const out = {};

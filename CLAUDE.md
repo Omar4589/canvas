@@ -135,6 +135,10 @@ clients; no OTA/app release is needed to fix help copy.
 ## House rules
 
 - **Plain JavaScript only** — no TypeScript.
+- **Use `grep -a` under `server/src/services/person/`.** `resolvePerson.js` and `mergePersons.js`
+  contain deliberate NUL bytes (composite map-key separators); plain macOS `grep` treats them as
+  binary and **skips them silently** — a `grep -r` audit of the Person layer will wrongly conclude
+  the matching/merge engine doesn't exist. It already misled one audit.
 - **Light theme + red brand accent.** Use the existing semantic design tokens
   (`bg-card`/`text-fg`/…); never hard-coded grays or dark sections.
 - Match each file's neighbors in style, naming, and comment density.

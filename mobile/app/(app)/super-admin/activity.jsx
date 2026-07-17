@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
+import { formatRelative as sharedFormatRelative } from '../../../lib/dates';
 import { useRefresh } from '../../../lib/useRefresh';
 import LiveStatus from '../../../components/LiveStatus';
 import { radius, spacing } from '../../../lib/theme';
@@ -28,18 +29,8 @@ const ACTION_LABEL = {
   lit_dropped: 'Lit dropped',
 };
 
-function formatRelative(d) {
-  if (!d) return '';
-  const date = new Date(d);
-  const ms = Date.now() - date.getTime();
-  const min = Math.floor(ms / 60000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  return `${day}d ago`;
-}
+// Shared helper; feeds render nothing (not 'Never') for a missing timestamp.
+const formatRelative = (d) => sharedFormatRelative(d, { never: '' });
 
 export default function ActivityScreen() {
   const router = useRouter();

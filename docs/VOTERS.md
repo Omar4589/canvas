@@ -100,6 +100,11 @@ statuses above it isn't about what happened; it's a standing request:
 
 - **Edit voter info** — fix/maintain contact, party, gender, registration, districts, and name.
   The Voter ID, household link, and org are locked (they tie back to the source data).
+  **Your hand edits are protected from re-imports**: fixing, say, a phone number confirmed at the
+  door marks that field as locally corrected, and later voter-file uploads keep your value. If an
+  upload carries a different value for a protected field, the import preview shows the conflict
+  ("keeps X · file has Y") and keeps your edit unless you tick **Overwrite these hand edits** —
+  which also clears the protection, and is not reversible by Undo import.
 - **Mark / unmark Do not contact** — on the voter profile, with a required reason (see above).
 - **Edit a survey response in place** — correct answers or the note. Edits are **audited**: we
   record who changed it and when, and keep the voter's "surveyed" status in sync. You can also
@@ -151,7 +156,7 @@ guarded by `requireAuth, orgContext, requireOrgRole('admin')`:
 
 | Method · path | Purpose |
 |---|---|
-| `GET /admin/voters` | Directory: server-paginated (`limit`/`offset`/`total`); search (name/Voter ID/address) + filters (`campaignId`, `party`, `surveyStatus`, `voted`, `precinct`, `dnc`). Rows carry a `dnc` boolean. |
+| `GET /admin/voters` | Directory: server-paginated (`limit`/`skip`/`total` — renamed from `offset` to match every other paged route; the web client is the only caller and ships with the server). Search (name/Voter ID/address) + filters (`campaignId`, `party`, `surveyStatus`, `voted`, `precinct`, `dnc`). Rows carry a `dnc` boolean. |
 | `POST /admin/voters/:voterId/dnc` | Flag do-not-contact (body `{reason}`, required, min 3 chars). Idempotent — a re-flag never restamps (upload-undo attribution). Writes the subdoc + a VoterNote, then `recomputeFullyDnc` for the door. Returns the profile. |
 | `DELETE /admin/voters/:voterId/dnc` | Clear the flag (stamps the transition + VoterNote + recompute; door may reopen). |
 | `GET /admin/voters/:voterId` | Full profile (`buildVoterProfile`). |

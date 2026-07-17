@@ -59,3 +59,20 @@ export const IDLE_ORGS_HELP =
 // Mobile-only suffix — the actions live on the web console.
 export const IDLE_ORGS_MOBILE_NOTE =
   'Re-engage or terminate from the web console: Organizations → Manage billing.';
+
+// The trend sparklines' population, appended to each lifetime card's ⓘ. Built per metric because
+// the honest caveat includes the EXACT counts the line can never show: the deleted-org bank (their
+// rows were destroyed on deletion, so they have no dates) and any surviving rows without a date.
+// One bar per UTC day, through yesterday — the last COMPLETE day — so a partial today never reads
+// as a dip.
+export function trendCaveat({ deletedCount = 0, undatedCount = 0 } = {}) {
+  let s =
+    ' The trend line shows live organizations only — one bar per UTC day, through yesterday (the last complete day).';
+  if (deletedCount > 0) {
+    s += ` ${deletedCount.toLocaleString()} of the lifetime total came from since-deleted customers; their records were destroyed on deletion, so they have no dates and never appear on the line.`;
+  }
+  if (undatedCount > 0) {
+    s += ` ${undatedCount.toLocaleString()} surviving record(s) carry no date and are likewise not on the line.`;
+  }
+  return s;
+}

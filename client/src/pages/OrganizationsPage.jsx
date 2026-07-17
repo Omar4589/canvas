@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import OrgBillingPanel from '../components/OrgBillingPanel.jsx';
@@ -32,6 +32,7 @@ function atRiskLabel(it) {
 
 export default function OrganizationsPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [trialDays, setTrialDays] = useState('7');
@@ -481,7 +482,13 @@ export default function OrganizationsPage() {
                 <tr key={o.id}>
                   <td className="px-3 py-3">
                     <div className="font-medium text-fg">
-                      {o.name}
+                      <button
+                        onClick={() => navigate(`/organizations/${o.id}`)}
+                        className="underline decoration-dotted underline-offset-2 hover:text-brand-accent"
+                        title="Open this organization's detail page (roster, campaigns, access log)"
+                      >
+                        {o.name}
+                      </button>
                       {!o.isActive && (
                         <span className="ml-2 inline-flex rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted">
                           Inactive

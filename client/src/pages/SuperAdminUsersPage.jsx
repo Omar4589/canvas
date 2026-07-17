@@ -1,30 +1,13 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import Pager from '../components/Pager.jsx';
+import LockoutPanel from '../components/LockoutPanel.jsx';
+import { formatDate, formatRelative } from '../lib/dates.js';
 
 const LIMIT = 25;
-
-function formatDate(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString();
-}
-
-function formatRelative(d) {
-  if (!d) return 'Never';
-  const date = new Date(d);
-  const ms = Date.now() - date.getTime();
-  const min = Math.floor(ms / 60000);
-  if (min < 1) return 'Just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}d ago`;
-  return formatDate(d);
-}
 
 // Filter chips → server query params. Server-side now: the browser never holds the full user base.
 const FILTERS = [
@@ -36,56 +19,6 @@ const FILTERS = [
   { key: 'tempPassword', label: 'Temp password', params: { tempPassword: '1' } },
   { key: 'orphan', label: 'No memberships', params: { orphan: '1' } },
 ];
-
-// The lockout pill + clear button, fetched lazily when a row expands. The counter lives in the
-// web process's memory, so it's labeled "this server" — the env allowlist is the durable fix.
-function LockoutPanel({ user }) {
-  const qc = useQueryClient();
-  const [cleared, setCleared] = useState(false);
-  const lockoutQ = useQuery({
-    queryKey: ['super-admin', 'users', user.id, 'lockout'],
-    queryFn: () => api(`/super-admin/users/${user.id}/lockout`),
-  });
-  const clearMut = useMutation({
-    mutationFn: () => api(`/super-admin/users/${user.id}/clear-lockout`, { method: 'POST' }),
-    onSuccess: () => {
-      setCleared(true);
-      setTimeout(() => setCleared(false), 2500);
-      qc.invalidateQueries({ queryKey: ['super-admin', 'users', user.id, 'lockout'] });
-    },
-  });
-
-  const s = lockoutQ.data;
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {lockoutQ.isLoading ? (
-        <span className="text-xs text-fg-subtle">Checking lockout…</span>
-      ) : s?.locked ? (
-        <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
-          Locked — {s.failedAttempts} failed attempts
-          {s.resetAt && ` · retries ${new Date(s.resetAt).toLocaleTimeString()}`}
-        </span>
-      ) : (
-        <span className="rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted">
-          {s?.failedAttempts
-            ? `${s.failedAttempts} of ${s.maxFailures} failed attempts`
-            : 'Not locked out'}
-          {s?.allowlisted && ' · allowlisted (never locks)'}
-        </span>
-      )}
-      <span className="text-[10px] uppercase tracking-wide text-fg-subtle">on this server</span>
-      <button
-        onClick={() => clearMut.mutate()}
-        disabled={clearMut.isPending}
-        className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-semibold text-fg-muted transition-colors hover:bg-sunken disabled:opacity-50"
-        title="Clear this user's login lockout (failed-password limit) so they can retry now"
-      >
-        {cleared ? 'Cleared ✓' : 'Clear lockout'}
-      </button>
-      {clearMut.error && <span className="text-xs text-danger">{clearMut.error.message}</span>}
-    </div>
-  );
-}
 
 export default function SuperAdminUsersPage() {
   const qc = useQueryClient();
@@ -221,7 +154,12 @@ export default function SuperAdminUsersPage() {
               return [
                 <tr key={u.id} className={expanded ? 'bg-sunken/50' : ''}>
                   <td className="px-4 py-3 font-medium text-fg">
-                    {u.firstName} {u.lastName}
+                    <Link
+                      to={`/super-admin/users/${u.id}`}
+                      className="underline decoration-dotted underline-offset-2 hover:text-brand-accent"
+                    >
+                      {u.firstName} {u.lastName}
+                    </Link>
                     {u.isSuperAdmin && (
                       <span className="ml-2 rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
                         {u.platformRole === 'break_glass' ? 'break-glass' : 'support'}

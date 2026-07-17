@@ -20,6 +20,8 @@ tags: import, voters, intake
 
 After you map the columns, click **Preview changes** to see exactly what the import will do — new vs. existing doors, new vs. updated voters, voters that would change doors, and near-duplicate addresses — before you **Confirm & import**.
 
+If your team has **hand-corrected** any voter info (say, a phone number confirmed at the door), the preview also lists every hand edit this file would change. **Your edits are kept by default** — the file updates everything else. To take the file's values instead, tick **Overwrite these hand edits with the file's values** on the review screen; that replaces the listed values and can't be undone.
+
 ## What goes live, and what waits
 
 - A **new voter at a door a walk list already owns** joins that door automatically — **if that door hasn't been knocked yet.** The canvasser sees them when they reach it.

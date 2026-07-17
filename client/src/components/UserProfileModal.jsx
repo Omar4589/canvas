@@ -6,6 +6,7 @@ import PasswordInput from './PasswordInput.jsx';
 import PhoneInput from './ui/PhoneInput.jsx';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { formatDate, formatRelative as sharedFormatRelative } from '../lib/dates.js';
 import { tempPasswordProblem, isValidTempPassword } from '../lib/validators.js';
 
 const ACTION_LABEL = {
@@ -33,31 +34,8 @@ function initials(first, last) {
   return ((first?.[0] || '') + (last?.[0] || '')).toUpperCase() || '?';
 }
 
-function formatDate(d) {
-  if (!d) return '—';
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
-
-function formatRelative(d) {
-  if (!d) return 'Never';
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '—';
-  const ms = Date.now() - date.getTime();
-  const min = Math.floor(ms / 60000);
-  if (min < 1) return 'Just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  return formatDate(d);
-}
+// Shared helpers; this surface's 7-day relative→absolute cutoff is deliberate UX, kept via option.
+const formatRelative = (d) => sharedFormatRelative(d, { cutoffDays: 7 });
 
 function metersToMiles(m) {
   return ((m || 0) * 0.000621371).toFixed(1);

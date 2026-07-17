@@ -4,6 +4,7 @@ import { useParams, Link, useLocation } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import Section from '../components/Section.jsx';
 
 function fmtDate(d, tz, withTime = true) {
   if (!d) return '—';
@@ -21,18 +22,6 @@ function fmtDate(d, tz, withTime = true) {
 function answerText(a) {
   if (a == null || a === '') return '—';
   return Array.isArray(a) ? a.join(', ') : String(a);
-}
-
-function Section({ title, right, children }) {
-  return (
-    <section className="mb-6 rounded-lg border border-border bg-card p-5">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-fg">{title}</h2>
-        {right}
-      </div>
-      {children}
-    </section>
-  );
 }
 
 const EDIT_FIELDS = [

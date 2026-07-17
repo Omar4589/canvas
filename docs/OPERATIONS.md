@@ -98,7 +98,7 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 | Job | When | What it does |
 | --- | --- | --- |
 | `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago |
-| `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
+| `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it), **and rebuilds the `PlatformDaily` trend series in full from the same rows** (the sparklines' data; same job, no extra cron). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
 | `retention-triggers` | Daily 04:41 UTC | **Deletes organizations**: wind-down, dormancy, and due deletion requests |
 
 **Check they're alive:** `GET /api/super-admin/access/health/retention`. It goes **RED** when the last
@@ -279,6 +279,22 @@ npm run migrate:build-indexes -- --apply
 **Why it isn't automatic:** production is deliberately configured *not* to build indexes on startup. If it
 did, every deploy would try to rebuild indexes across your biggest collections at boot, which can lock up
 the database while people are canvassing. So we build them on purpose, when we mean to.
+
+### Stamp merge candidates with their organization (ONE TIME — batch-3 release)
+
+Existing `PersonMergeCandidate` rows predate the `organizationId` field (new ones get it at write
+time). Expected to report **0 rows** in production — no import has ever used a vendor `uidSource`,
+so the collection is empty — but run it once for safety; it's idempotent and dry-runs by default.
+
+```
+npm run migrate:candidate-orgs -- --apply
+```
+
+### Refresh the platform numbers + trend series (optional, after the batch-3 deploy)
+
+`npm run migrate:platform-stats -- --apply` now also **backfills the daily trend series** behind
+the Control Room sparklines (full history from surviving rows' dates). If you skip it, the 03:47 UTC
+job builds the same series that night — running it just means the charts have history immediately.
 
 ### Record which team knocked each door (ONE TIME — after the release that adds it)
 

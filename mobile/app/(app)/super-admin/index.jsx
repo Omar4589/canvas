@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
+import { formatRelative } from '../../../lib/dates';
 import { useRefresh } from '../../../lib/useRefresh';
 import { signOut } from '../../../lib/authState';
 import {
@@ -47,18 +48,6 @@ const ACTION_LABEL = {
   lit_dropped: 'Lit dropped',
 };
 
-function formatRelative(d) {
-  if (!d) return 'Never';
-  const date = new Date(d);
-  const ms = Date.now() - date.getTime();
-  const min = Math.floor(ms / 60000);
-  if (min < 1) return 'Just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  return `${day}d ago`;
-}
 
 function StatTile({ value, label, sub, help }) {
   const styles = useThemedStyles(makeStyles);

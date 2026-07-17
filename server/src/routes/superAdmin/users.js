@@ -6,6 +6,7 @@ import { Membership } from '../../models/Membership.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
 import { clearLoginLockout, loginLockoutStatus } from '../../middleware/loginRateLimit.js';
+import { buildUserOversight } from '../../services/platform/userOversight.js';
 
 const router = Router();
 router.use(requireAuth, requireSuperAdmin);
@@ -94,6 +95,24 @@ router.get('/', async (req, res, next) => {
       total,
       deletedCount,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The drill-in composite: full identity (incl. tempPasswordSetAt/deletionLocked, which no list
+// surface carries), ALL memberships including deactivated ones (the list hard-filters those out —
+// removed ones can't appear anywhere; the row is hard-deleted), structural activity counts, staff
+// grant/access history when the account is a super admin, and DeletedUserRecord STATUS (dates only,
+// never the tombstone's name content). Pure metadata — no grant needed, no AccessLog row written.
+router.get('/:userId', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid userId' });
+    }
+    const detail = await buildUserOversight(req.params.userId);
+    if (!detail) return res.status(404).json({ error: 'User not found' });
+    res.json(detail);
   } catch (err) {
     next(err);
   }
