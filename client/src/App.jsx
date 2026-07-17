@@ -14,6 +14,7 @@ const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const TimelinePage = lazy(() => import('./pages/TimelinePage.jsx'));
 const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
+const SurveyExplorerPage = lazy(() => import('./pages/SurveyExplorerPage.jsx'));
 const NotesPage = lazy(() => import('./pages/NotesPage.jsx'));
 const ClientReportsPage = lazy(() => import('./pages/ClientReportsPage.jsx'));
 const ClientReportBuilderPage = lazy(() => import('./pages/ClientReportBuilderPage.jsx'));
@@ -144,6 +145,7 @@ export default function App() {
           <Route path="/campaigns/:campaignId/team" element={<CampaignTeamPage />} />
           <Route path="/campaigns/:campaignId/timeline" element={<TimelinePage />} />
           <Route path="/campaigns/:campaignId/audit" element={<AuditPage />} />
+          <Route path="/campaigns/:campaignId/explorer" element={<SurveyExplorerPage />} />
           <Route path="/campaigns/:campaignId/notes" element={<NotesPage />} />
           <Route path="/campaigns/:campaignId/early-voting" element={<EarlyVotingPage />} />
           <Route path="/campaigns/:campaignId/reports" element={<ClientReportsPage />} />

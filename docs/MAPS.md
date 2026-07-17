@@ -89,6 +89,11 @@ An organizer sees the whole campaign at once:
 - **Every door**, colored by status, plus **canvasser pings** — a dot wherever a canvasser stood when
   they logged a knock — with a faint line back to the house.
 - **Filters**: by status, by canvasser, by date range, and by a specific survey answer.
+- **Arriving pre-filtered.** Other screens can open the map with filters already set: the **Survey
+  Explorer**'s "Open in Map" (web) and the answer drill's "View on map" (mobile) land here filtered
+  to the same answer, canvasser, and date window they were showing — so the pins are exactly the
+  doors behind the number you were looking at (see [SURVEYS.md](SURVEYS.md), and §D below for the
+  parameters). The [Notes hub](NOTES.md)'s "view on map" similarly focuses a single door.
 - **Live mode**: a "**Live · updated Xs ago**" toggle (on by default) that auto-refreshes the map
   about every 20 seconds, so pins and pings update as the field works — no page reload. You can pause
   it or hit Refresh on demand. It pauses on its own when the browser tab isn't in front.
@@ -239,6 +244,42 @@ the reconnect listener drains it the moment signal returns, without the canvasse
 
 `GET /admin/households/map` activity shape: `{ id, householdId, actionType, timestamp,
 location:{lng,lat,accuracy}, distanceFromHouseMeters, canvasser:{id,firstName,lastName} }`.
+
+### Deep links into the admin maps (client-side URL params)
+
+Both admin maps accept **client-side** params that seed their filters — none of these are server
+params; the map turns them into its normal filter state and fetches as usual. The main sender is
+the **answer drill-in** ([SURVEYS.md](SURVEYS.md) §J): the Survey Explorer's "Open in Map" and the
+mobile drill's "View on map".
+
+**Web ([MapPage.jsx](../client/src/pages/MapPage.jsx))** — read once in the state initializers:
+
+| Param | Seeds |
+|---|---|
+| `?questionKey` + `&option` (+ `&optionId`) | The **survey-answer filter**. Links must always carry the option **text** — the answer chips key on it — with `optionId` alongside for id-native matching (the same dual-read as reporting, §C of SURVEYS.md). |
+| `&userId` | The **canvasser filter** (pre-existing). |
+| `&from` / `&to` | A **touched custom date range** (skips the Today default). |
+| `&effortId` / `&passId` / `&importId` | The scope narrowing (pre-existing). |
+| `?household` (+ `&focusAt` nonce on mobile) | Focus a **single door** — opens on **All time** so an old door still loads, then flies to the pin (the Notes-hub link, and the explorer's per-row "Map →"). |
+| `?flag=1` / `&focusActivityId` | The GPS-audit overlay ([AUDIT.md](AUDIT.md)). |
+
+**Mobile ([admin/map.jsx](../mobile/app/(app)/admin/map.jsx))** — the answer drill's **one-shot
+seed**: `questionKey`, `optionId`, `alabel` (the option **text** — same dual-read reason as web),
+`userId`, `from`, `to`, plus two coordination params: **`scid`** (the seeding campaign's id) and
+**`seedAt`** (a per-tap nonce). Mechanics, all deliberate:
+
+- A `seededRef` remembers the last consumed `seedAt`, so the seed applies **once** — parking on the
+  map tab can't re-apply it (the same idiom as the `household`/`focusAt` door focus).
+- The effect **waits until the active campaign equals `scid`** before applying: the map re-syncs its
+  campaign asynchronously, and its campaign-change reset effects would stomp an early seed. The seed
+  effect is defined **after** those resets on purpose — reordering the effects reintroduces the stomp
+  (there's a comment on it).
+- Applying the seed sets the answer + canvasser filters, a **touched custom range** (or **All time**
+  when the drill itself had no bounds — leaving Today would show a different window than the list
+  the user came from), clears status/scope narrowing, and resets the viewport-bbox/framing refs so
+  the camera re-frames on the seeded doors.
+- The params are then stripped with `router.setParams` using `''` values (the household-clear
+  convention), so back-navigation and later campaign switches see a clean route.
 
 ## E. Rendering
 

@@ -3,6 +3,8 @@ import { createRedis } from '../../queues/connection.js';
 import { QUEUE_NAMES } from '../../queues/index.js';
 import { purgeDeletedIdentities, JOB_NAME } from './purgeDeletedIdentities.js';
 import { runRetentionTriggers, TRIGGER_JOB } from './triggers.js';
+import { recomputeLive, STATS_JOB } from '../platform/platformStats.js';
+import { PLATFORM_METRICS } from '../../models/PlatformStats.js';
 
 // Registers the repeatable maintenance jobs on the worker dyno.
 //
@@ -19,6 +21,12 @@ export const RETENTION_CRON = process.env.RETENTION_CRON || '17 3 * * *';
 // run that was mostly about something else.
 export const TRIGGERS_CRON = process.env.RETENTION_TRIGGERS_CRON || '41 4 * * *';
 
+// Nightly drift-correction for the lifetime platform counters: recompute the live bucket
+// from real rows (bumpLive is best-effort and some delete paths have no hook) and stamp
+// backfilledAt — the Control Room's "last reconciled" line. 03:47 sits between the purge
+// (03:17) and the triggers (04:41).
+export const PLATFORM_STATS_CRON = process.env.PLATFORM_STATS_CRON || '47 3 * * *';
+
 // The `label` is not decoration: the health surface reports on every job in this list, and when one
 // goes quiet the operator needs to be told WHICH promise stopped being kept.
 export const REPEATABLE_JOBS = [
@@ -30,12 +38,22 @@ export const REPEATABLE_JOBS = [
   },
 ];
 
+// Everything the worker schedules. REPEATABLE_JOBS above stays retention-only ON PURPOSE:
+// the /health/retention banner reports on every entry in it (and supportAccess.int.test.js
+// pins the count) — a marketing-counter reconcile going quiet must never read
+// "Retention: NOT ENFORCED". The stats job's own freshness signal is backfilledAt, shown
+// on the Control Room as "last reconciled".
+export const MAINTENANCE_JOBS = [
+  ...REPEATABLE_JOBS,
+  { name: STATS_JOB, cron: PLATFORM_STATS_CRON, label: 'The nightly platform-stats reconcile' },
+];
+
 /** Producer side: declare the repeatable schedule. Idempotent — BullMQ dedupes on (name, cron). */
 export async function registerMaintenanceJobs() {
   const queue = new Queue(QUEUE_NAMES.MAINTENANCE, { connection: createRedis() });
   queue.on('error', (err) => console.error('[queue:maintenance] error:', err?.message || err));
 
-  for (const job of REPEATABLE_JOBS) {
+  for (const job of MAINTENANCE_JOBS) {
     await queue.add(job.name, {}, {
       repeat: { pattern: job.cron },
       // A repeatable job that piles up on an outage is worse than one that skips: we only ever want
@@ -69,6 +87,14 @@ export async function processMaintenanceJob(job) {
         [...res.windDown.orgs, ...res.dormant.orgs].join(', '));
     }
     return res;
+  }
+  if (job.name === STATS_JOB) {
+    const live = await recomputeLive({ stampBackfill: true });
+    console.log(
+      `[maintenance] ${STATS_JOB}: live bucket recomputed from rows — ` +
+      PLATFORM_METRICS.map((m) => `${m} ${live[m]}`).join(', ')
+    );
+    return live;
   }
   throw new Error(`Unknown maintenance job: ${job.name}`);
 }

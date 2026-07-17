@@ -7,7 +7,8 @@ import { api } from '../../../lib/api';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { initMapbox } from '../../../lib/mapbox';
 import { useMapStyle } from '../../../lib/mapStyles';
-import { timeAgo } from '../../../lib/datetime';
+import { formatExact, timeAgo } from '../../../lib/datetime';
+import { formatDistance } from '../../../lib/geo';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -40,6 +41,15 @@ export default function ResponseDetails() {
     enabled: !!responseId,
   });
 
+  // Campaign tz so the exact (to-the-second) timestamps read in the CAMPAIGN's
+  // clock for every admin — shared cache with the screens that pushed here.
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+    staleTime: 60 * 1000,
+  });
+  const tz = (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId))?.timeZone;
+
   const d = q.data;
   const hasPin = d?.household?.lng != null && d?.household?.lat != null;
 
@@ -62,7 +72,7 @@ export default function ResponseDetails() {
             {d.voter?.party ? <Text style={styles.titleParty}> · {d.voter.party}</Text> : null}
           </Text>
           <Text style={styles.subtitle}>
-            {new Date(d.response.submittedAt).toLocaleString()} · {timeAgo(d.response.submittedAt)}
+            {formatExact(d.response.submittedAt, tz)} · {timeAgo(d.response.submittedAt)}
           </Text>
 
           {/* Where — address + a non-interactive map dot */}
@@ -125,13 +135,27 @@ export default function ResponseDetails() {
               {d.round ? `Pass ${d.round.roundNumber}${d.round.name ? ` — ${d.round.name}` : ''}` : '—'}
             </Row>
             <Row styles={styles} label="Recorded">
-              {new Date(d.response.submittedAt).toLocaleString()}
+              {formatExact(d.response.submittedAt, tz)}
             </Row>
+            {d.response.wasOfflineSubmission && d.response.syncedAt ? (
+              <Row styles={styles} label="Synced">
+                {formatExact(d.response.syncedAt, tz)}
+              </Row>
+            ) : null}
+            {d.response.editedAt ? (
+              <Row styles={styles} label="Edited by">
+                {`${d.response.editedBy ? `${d.response.editedBy.firstName} ${d.response.editedBy.lastName || ''}`.trim() : 'Unknown'} · ${formatExact(d.response.editedAt, tz)}`}
+              </Row>
+            ) : null}
             <Row styles={styles} label="Distance from home">
-              {d.response.distanceFromHouseMeters != null ? `${d.response.distanceFromHouseMeters} m` : '—'}
+              {d.response.distanceFromHouseMeters != null ? formatDistance(d.response.distanceFromHouseMeters) : '—'}
             </Row>
             {d.response.wasOfflineSubmission ? (
-              <Text style={styles.offlineBadge}>Recorded offline · synced later</Text>
+              <Text style={styles.offlineBadge}>
+                {d.response.syncedAt
+                  ? `Recorded offline · synced ${timeAgo(d.response.syncedAt)}`
+                  : 'Recorded offline · synced later'}
+              </Text>
             ) : null}
           </View>
 

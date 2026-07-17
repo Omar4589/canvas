@@ -12,7 +12,7 @@ import { Membership } from '../../models/Membership.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { choiceKeyStages, mergeOptionRows, voterAnswerClause, answerTagClause } from '../../services/surveys/answerAgg.js';
-import { tagOptionMap } from '../../services/surveys/tags.js';
+import { tagOptionMap, normalizeTag } from '../../services/surveys/tags.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Organization } from '../../models/Organization.js';
 import { zonedDayRange, tzAbbrev, zonedDayStr } from '../../utils/timezone.js';
@@ -1205,36 +1205,49 @@ router.get('/survey-results', async (req, res, next) => {
   }
 });
 
+// The response filter behind the answer drill-in — shared by the JSON list and the CSV
+// export so the two can never disagree about which responses "chose option X".
+// Tag drill: match ANY option carrying the tag (across questions). Otherwise dual-read a
+// single option: the stable option id (id-native) OR the legacy answer text. An optional
+// ?userId narrows to one canvasser's entries (the audit "who is entering Opposed?" drill).
+// Returns { filter, template, wantsTag } or { error: { status, message } }.
+async function buildVotersByAnswerFilter(req) {
+  const orgId = activeOrgId(req);
+  const { questionKey, option, optionId, surveyTemplateId, tag } = req.query;
+  const wantsTag = !!tag;
+  if (!wantsTag && (!questionKey || (!option && !optionId))) {
+    return { error: { status: 400, message: 'questionKey and option (or optionId) are required' } };
+  }
+  if (wantsTag && !(surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId))) {
+    return { error: { status: 400, message: 'surveyTemplateId is required to drill by tag' } };
+  }
+  let answerClause;
+  let template = null;
+  if (wantsTag) {
+    template = await SurveyTemplate.findOne({ _id: surveyTemplateId, organizationId: orgId }).lean();
+    if (!template) return { error: { status: 404, message: 'Survey not found' } };
+    answerClause = answerTagClause(template, tag);
+  } else {
+    answerClause = voterAnswerClause(questionKey, optionId || null, option ?? null);
+  }
+  const filter = { ...parseDateRange(req, 'submittedAt'), ...baseFilter(req), ...answerClause };
+  if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
+    filter.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
+  }
+  if (req.query.userId && mongoose.isValidObjectId(req.query.userId)) {
+    filter.userId = new mongoose.Types.ObjectId(req.query.userId);
+  }
+  return { filter, template, wantsTag };
+}
+
 router.get('/voters-by-answer', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const orgId = activeOrgId(req);
-    const { questionKey, option, optionId, surveyTemplateId, tag } = req.query;
-    const wantsTag = !!tag;
-    if (!wantsTag && (!questionKey || (!option && !optionId))) {
-      return res.status(400).json({ error: 'questionKey and option (or optionId) are required' });
-    }
-    if (wantsTag && !(surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId))) {
-      return res.status(400).json({ error: 'surveyTemplateId is required to drill by tag' });
-    }
+    const built = await buildVotersByAnswerFilter(req);
+    if (built.error) return res.status(built.error.status).json({ error: built.error.message });
+    const { filter } = built;
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
-    const dateRange = parseDateRange(req, 'submittedAt');
-    const cFilter = baseFilter(req);
-    // Tag drill: match ANY option carrying the tag (across questions). Otherwise dual-read a
-    // single option: the stable option id (id-native) OR the legacy answer text.
-    let answerClause;
-    if (wantsTag) {
-      const template = await SurveyTemplate.findOne({ _id: surveyTemplateId, organizationId: orgId }).lean();
-      if (!template) return res.status(404).json({ error: 'Survey not found' });
-      answerClause = answerTagClause(template, tag);
-    } else {
-      answerClause = voterAnswerClause(questionKey, optionId || null, option ?? null);
-    }
-    const filter = { ...dateRange, ...cFilter, ...answerClause };
-    if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
-      filter.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
-    }
 
     const [total, responses] = await Promise.all([
       SurveyResponse.countDocuments(filter),
@@ -1276,7 +1289,178 @@ router.get('/voters-by-answer', async (req, res, next) => {
             }
           : null,
         note: r.note || null,
+        wasOfflineSubmission: !!r.wasOfflineSubmission,
       })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The drill-in list as a CSV download — same filter as the JSON list above (incl. ?userId and
+// tag mode) with no pagination, for reporting/audit exports ("all Opposed entries this week").
+// Capped so a whole-org drill can't stream an unbounded file.
+router.get('/voters-by-answer.csv', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const built = await buildVotersByAnswerFilter(req);
+    if (built.error) return res.status(built.error.status).json({ error: built.error.message });
+    const { filter, template, wantsTag } = built;
+    const EXPORT_CAP = 50000;
+    const tz = tzOf(req);
+
+    const responses = await SurveyResponse.find(filter)
+      .sort({ submittedAt: -1 })
+      .limit(EXPORT_CAP)
+      .populate('voterId', 'fullName party')
+      .populate('householdId', 'addressLine1 addressLine2 city state zipCode')
+      .populate('userId', 'firstName lastName')
+      .lean();
+
+    // The Question/Answer columns show the drilled question's SNAPSHOT (what was actually
+    // recorded at the door — honest even after an option rename). Tag mode spans questions,
+    // so collect every answer entry that carries the tag.
+    const { questionKey, option, optionId, tag } = req.query;
+    const tagMembers = wantsTag ? tagOptionMap(template).get(normalizeTag(tag)) : null;
+    const answerMatches = (a) => {
+      if (wantsTag) {
+        return (tagMembers?.members || []).some(
+          (m) =>
+            m.questionKey === a.questionKey &&
+            ((m.optionId && (a.optionIds || []).includes(m.optionId)) ||
+              (m.text != null &&
+                (Array.isArray(a.answer) ? a.answer.includes(m.text) : a.answer === m.text)))
+        );
+      }
+      if (a.questionKey !== questionKey) return false;
+      if (optionId && (a.optionIds || []).includes(optionId)) return true;
+      return option != null && (Array.isArray(a.answer) ? a.answer.includes(option) : a.answer === option);
+    };
+    const answerText = (a) => {
+      const base = Array.isArray(a.answer) ? a.answer.join('; ') : a.answer ?? '';
+      return a.otherText ? `${base} — ${a.otherText}` : base;
+    };
+
+    const dateFmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+    const timeFmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    });
+
+    const headers = [
+      'Submitted (ISO)', 'Date', `Time (${tzAbbrev(tz) || tz})`,
+      'Voter', 'Party', 'Address', 'City', 'State', 'Zip',
+      'Canvasser first name', 'Canvasser last name',
+      'Question', 'Answer', 'Note', 'Offline submission', 'Response id',
+    ];
+    const rows = responses.map((r) => {
+      const matched = (r.answers || []).filter(answerMatches);
+      const h = r.householdId;
+      return [
+        r.submittedAt ? new Date(r.submittedAt).toISOString() : '',
+        r.submittedAt ? dateFmt.format(new Date(r.submittedAt)) : '',
+        r.submittedAt ? timeFmt.format(new Date(r.submittedAt)) : '',
+        r.voterId?.fullName || '',
+        r.voterId?.party || '',
+        h ? `${h.addressLine1 || ''}${h.addressLine2 ? `, ${h.addressLine2}` : ''}` : '',
+        h?.city || '',
+        h?.state || '',
+        h?.zipCode || '',
+        r.userId?.firstName || '',
+        r.userId?.lastName || '',
+        matched.map((a) => a.questionLabel).join(' | '),
+        matched.map(answerText).join(' | '),
+        r.note || '',
+        r.wasOfflineSubmission ? 'yes' : 'no',
+        String(r._id),
+      ];
+    });
+
+    const slug = String(wantsTag ? `tag-${tag}` : questionKey || 'answers')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .slice(0, 40);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="answers-${slug}-${new Date().toISOString().slice(0, 10)}.csv"`
+    );
+    res.send(toCsv(headers, rows));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Per-canvasser breakdown for ONE answer option — "who is entering Opposed the most?".
+//
+// The counting contract: this table must sum EXACTLY to the option's count on
+// /survey-results for identical filters. That count comes from the choiceKeyStages
+// explode folded by mergeOptionRows (id-native rows count by option id, legacy rows by
+// text) — so we aggregate with the SAME explode and match the key against
+// {option id, option text}, NOT with voterAnswerClause + countDocuments (a dual-write
+// edge row carrying both an id and a mismatched legacy text would double-count there).
+//
+// Counts are RAW per-user — no team fold (teamFoldStage) — because this is an audit
+// surface: it answers "who pressed the button", never "whose team gets credit".
+// Tag mode is deliberately unsupported: tag rollups are DISTINCT-voter counts across
+// questions, which have no honest per-canvasser sum.
+router.get('/answer-canvassers', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const { questionKey, option, optionId, surveyTemplateId, tag } = req.query;
+    if (tag) {
+      return res.status(400).json({ error: 'Per-canvasser breakdown is per option; tags roll up distinct voters and cannot be split by canvasser.' });
+    }
+    if (!questionKey || (!option && !optionId)) {
+      return res.status(400).json({ error: 'questionKey and option (or optionId) are required' });
+    }
+    const match = { ...parseDateRange(req, 'submittedAt'), ...baseFilter(req) };
+    if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
+      match.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
+    }
+    const keys = [optionId, option].filter((v) => v != null && v !== '');
+
+    // Numerator: this option's selections per canvasser. Denominator: each canvasser's
+    // TOTAL selections on this question (any option) — the context for "12% of everything
+    // they record on this question is Opposed".
+    const [optionRows, questionRows] = await Promise.all([
+      SurveyResponse.aggregate([
+        { $match: match },
+        ...choiceKeyStages(questionKey),
+        { $match: { _answerKeys: { $in: keys } } },
+        { $group: { _id: '$userId', count: { $sum: 1 }, lastAt: { $max: '$submittedAt' } } },
+        { $sort: { count: -1 } },
+      ]),
+      SurveyResponse.aggregate([
+        { $match: match },
+        ...choiceKeyStages(questionKey),
+        { $group: { _id: '$userId', questionTotal: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const totalByUser = new Map(questionRows.map((r) => [String(r._id), r.questionTotal]));
+    const valid = optionRows.filter((r) => r._id != null);
+    const total = valid.reduce((s, r) => s + r.count, 0);
+    const userMap = await hydrateCanvassers(valid.map((r) => String(r._id)), activeOrgId(req));
+
+    res.json({
+      total,
+      rows: valid.map((r) => {
+        const key = String(r._id);
+        const info = userMap.get(key) || {};
+        const questionTotal = totalByUser.get(key) || 0;
+        return {
+          userId: key,
+          firstName: info.firstName || '',
+          lastName: info.lastName || '',
+          status: info.status || 'deleted',
+          count: r.count,
+          share: total > 0 ? Math.round((r.count / total) * 1000) / 10 : 0,
+          questionTotal,
+          pctOfOwnAnswers: questionTotal > 0 ? Math.round((r.count / questionTotal) * 1000) / 10 : 0,
+          lastAt: r.lastAt,
+        };
+      }),
     });
   } catch (err) {
     next(err);
@@ -1302,6 +1486,7 @@ router.get('/responses/:responseId', async (req, res, next) => {
       .populate('householdId', 'addressLine1 addressLine2 city state zipCode location')
       .populate('userId', 'firstName lastName email')
       .populate('passId', 'roundNumber name')
+      .populate('editedBy', 'firstName lastName')
       .lean();
     if (!r) return res.status(404).json({ error: 'Response not found' });
     if (!isOrgAdmin(req) && !(await canManageCampaign(req, r.campaignId))) {
@@ -1312,11 +1497,18 @@ router.get('/responses/:responseId', async (req, res, next) => {
       response: {
         id: String(r._id),
         submittedAt: r.submittedAt,
+        // syncedAt = when the server received it; for an offline submission it trails
+        // submittedAt (the field time) by however long the phone stayed offline.
+        syncedAt: r.syncedAt || null,
         answers: r.answers || [],
         note: r.note || null,
         wasOfflineSubmission: !!r.wasOfflineSubmission,
         distanceFromHouseMeters: r.distanceFromHouseMeters ?? null,
         surveyTemplateVersion: r.surveyTemplateVersion || 1,
+        editedAt: r.editedAt || null,
+        editedBy: r.editedBy
+          ? { id: String(r.editedBy._id), firstName: r.editedBy.firstName, lastName: r.editedBy.lastName }
+          : null,
       },
       voter: r.voterId
         ? {

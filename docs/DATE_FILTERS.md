@@ -52,6 +52,7 @@ Texas campaign, Eastern for a Florida one), identical for every admin wherever t
 | **Campaign dashboard** | **Today** (active) / **All time** (archived) | Active campaigns lead with recent activity; an **archived** campaign has none today, so it opens on All time to show its full history (until you pick a window). |
 | **Admin map** | **Today** | The map is an **audit tool** — it opens on **today's** activity. Because a window *hides* doors you didn't touch in it (see below), the map opens showing just today's touched doors; switch to **All time** to see the whole turf. |
 | **Notes hub** ([NOTES.md](NOTES.md)) | **Today** | Opens on today's notes; **All time** turns it into a full archive. (When you arrive via a note's "view on map" link, that map opens on **All time** so an old door still shows.) |
+| **Survey Explorer** ([SURVEYS.md](SURVEYS.md)) | **Today** | An audit surface like the map — it opens on today's entries ("who recorded this answer *today*?"); widen the range to study the whole drill. A shared drill link with its own dates keeps them. |
 
 You can always change the window; the page just picks a sensible starting point.
 

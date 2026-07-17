@@ -1,4 +1,138 @@
+# STATUS v3 — post-policy-rewrite, re-verified 2026-07-16
+
+> **Read this v3 section first. It supersedes the v2 verdict below the same way v2 superseded v1.**
+> Since v2 was written: the **policy rewrite shipped** (the published legal pages are now committed
+> static HTML and every false published sentence v2 flagged is gone), a **second remediation wave**
+> closed the remaining "fix before the policy ships" items, and an 8-agent adversarial re-audit on
+> 2026-07-16 re-verified this document's claims against the tree. v1/v2 text below is retained as the
+> detailed record; wherever a **[v3 …]** stamp appears, the stamped text is history, not current truth.
+> Unstamped v1/v2 detail was re-checked and still stands.
+
+## Verdict (v3)
+
+The published Privacy Policy, ToS, and DPA are now the static pages `client/public/privacy.html`,
+`terms.html`, `delete-account.html` (served by explicit routes in `server/src/app.js` ahead of the SPA;
+`PrivacyPolicyPage.jsx` / `TermsPage.jsx` no longer exist). Their claims were drafted against this
+document and re-verify cleanly against the code, with the deploy contingencies listed below. The v2
+load-bearing sentence — grant-gated, reason-logged, time-boxed staff access — is now **true as
+published**: the policy states the grant requirement absolutely (the code backs it) and hedges the
+audit half as *"designed to be recorded"* (correct — the write is best-effort).
+
+## What changed since v2 (each code-verified 2026-07-16)
+
+1. **`/super-admin/persons` is closed** (was E13 Hole 1, the #1 gap). `requireBreakGlass` router-wide
+   (`persons.js:27`) — the `support` staff tier cannot reach it at all; every one of the 12 routes
+   requires a live **per-org** `SupportAccessGrant` (`requirePersonOrgGrant`) and writes an AccessLog
+   row (`logPersonAccess`); the directory hard-requires `?organizationId` and scopes every query to the
+   granted org. The once-false comment in `personOversight.js` was rewritten and is now accurate.
+2. **Cross-org merge is refused** (was F14 Exc 4): `mergePersons.js:88-92` 409s when survivor and
+   victim orgs differ; `keysHeldElsewhere` is org-scoped; merge/split are break-glass + grant + logged.
+3. **The audit is fail-closed** (was E13 Hole 2): `voterContentResource()` is gone; `accessLog` decides
+   at response-finish for **every** `/admin`+`/mobile` request and logs by default — the only skips are
+   a 3-entry `AUDIT_EXEMPT` metadata allowlist; unrecognized routes log as `'other'`. The walk-list CSV
+   export now writes a row. Guard test: `test/accessLogCoverage.int.test.js`.
+4. **Vendor self-mint is blocked** (was E13 Hole 3): any non-GET to `/admin/memberships` from a
+   grant-holder 403s `VENDOR_READ_ONLY` (`memberships.js:33-43`); `leadCrew` writes carry
+   `denyVendorPrivilegeWrite`.
+5. **Wind-down is a real export window** (was B7): `canceled` is now read-only — GETs, exports
+   included, pass; writes 402. Customer-self-serve. Share links still die (410).
+6. **Dormancy shield** (was B6 Trigger 2): `DORMANCY_PROTECTED_STATUSES` = {active, trial, past_due,
+   internal} (`triggers.js:92`) — only canceled/suspended orgs are eligible, a missing Subscription
+   protects, and the default window is now **30 months** (`RETENTION_DORMANCY_MONTHS`), matching the
+   policy. Still no warning capability (unchanged — no mailer exists).
+7. **Deletion-request intake exists** (was B6 Trigger 3): operator CLI `request:org-deletion` and a
+   super-admin API (`POST/GET /super-admin/access/deletion-requests`, `POST …/:id/cancel`), 30-day SLA.
+   Failed executions stay `scheduled` and retry (≤5 attempts, `RETENTION_DELETE_MAX_ATTEMPTS`), then go
+   loudly red on the health surface — never a green receipt.
+8. **GeocodeCache expires** (was B5 Exc 1): the codebase's one TTL index — `lastUsedAt`, 540 days
+   (`GeocodeCache.js:53-55`) + `migrate:geocode-lastused` backfill. **Inert until
+   `migrate:build-indexes --apply` runs in prod** (autoIndex is off) *(operator-attested run
+   2026-07-16 — see gap 9)*.
+9. **Public-map write-ins are closed** (was the D11 free-text qualification): `publicPointAnswer`
+   (`computeReport.js:151-176`) rebuilds public answers from option ids against canonical labels —
+   `'__other__'` emits the literal word `'Other'`, unmatched legacy text collapses to `'Other'`, text
+   questions never reach the map — and `migrate:scrub-map-points` back-scrubs already-published points.
+10. **Share links**: `robots.txt` now has `Disallow: /r/` and the `/r/` pages inject
+    `<meta name="robots" content="noindex, nofollow">` (client-JS only — no `X-Robots-Tag` header, so
+    robots.txt is the load-bearing control). A password **can no longer be removed** from a link
+    (`SHARE_PASSWORD_REQUIRED` — replace or rotate). An operator bulk **revoke-legacy** switch exists
+    (deliberately not automatic). Legacy links otherwise remain live — see gaps.
+11. **Device storage**: the bootstrap moved to `FileSystem.cacheDirectory` (excluded from iCloud and
+    Android backup; a startup migration removes the old Documents copy; sign-out clears every copy),
+    and `android.allowBackup: false` landed in `app.json`. **allowBackup is native-build-contingent**
+    (no effect via OTA), and on iOS, AsyncStorage — including the offline queue — is still backed up.
+12. **Org-deletion completeness is retry-safe** (was B5 Exc 2): identity satellites are deleted before
+    each Person, `personIds` derive from both Voter and Person rows, `PersonEditProposal` now carries a
+    required `orgId`, and an exhaustive-sweep test covers every org-scoped collection. Pre-fix orphaned
+    `PersonMergeLog` rows have no back-clean migration (see gaps).
+
+## New policy sentences to keep true (the v3 watchlist)
+
+The rewrite added hard, checkable claims. Any change touching these paths must re-verify them here:
+
+- *"cannot open … without an individual, time-limited support-access grant"* — stated **absolutely**;
+  true only while `requirePersonOrgGrant` + the `orgContext` vendor branch stay mounted. (The audit
+  half is correctly hedged *"designed to be recorded."*)
+- Geocodio: *"we send only the street address — never anyone's name."*
+- Write-ins: *"only as the word 'Other,' never the typed text"* — `publicPointAnswer` + the scrub
+  migration (run it in prod).
+- *"an organization with an active subscription is never deleted for inactivity"* —
+  `DORMANCY_PROTECTED_STATUSES`.
+- The 60-day read-only export window — the `canceled` branch of `middleware/entitlement.js`.
+- Backups *"up to 12 months"* — an **Atlas console setting, not code**; verify against the console.
+- Geocode cache *"expire automatically after 18 months of disuse"* — the TTL index, inert until built.
+- The 180-day name retention on deletion records — still cron-kept on the worker dyno.
+
+## Remaining honest gaps (v3) — supersedes the v2 list
+
+1. **Voter-facing rights: none.** Unchanged, still the single largest gap. Every DSAR is a manual,
+   untooled process; there is no do-not-contact mechanism.
+2. **Grants are self-issued.** No approver, no customer notification; `break_glass` can list all live
+   grants (visibility, not approval). The policy carefully does not claim otherwise — keep it that way.
+3. **The audit log is request-level.** No record ids; *"was MY record accessed?"* is unanswerable. The
+   staff-facing strings ("every record you open is logged") still overstate granularity.
+4. **The cross-org password-reset path is unprevented by decision** (v1 F14 Exc 3): an admin of any org
+   a user belongs to can reset that user's global password. Mitigation: the reset issues a visible
+   forced-change temp password. Rationale recorded at `memberships.js:423-432` (admin reset is the only
+   recovery mechanism; email changes are multi-org-locked, passwords are not). Closing it needs per-org
+   credentials or self-serve email reset.
+5. **Legacy share links stay live until an operator runs the revoke-legacy switch** — but
+   **operator-attested 2026-07-16: no legacy links exist in production** (every live link post-dates
+   the hardening), so this gap is currently empty; it matters again only if that attestation ages
+   (the dry-run `revoke-legacy` call is the one-query way to re-verify). Residual warts that remain
+   in code: the "the migration" comments in `share.js` / `ReportShareLink.js` still name a migration
+   that does not exist (the switch is the real control); the bulk revoke skips per-campaign
+   `manages()`, so a lead can revoke legacy links on campaigns they do not manage; and the unlock-JWT
+   is never re-checked after a password change (≤24h residual access).
+6. **The offline queue**: no TTL, no cap, survives sign-out, and 4xx-failed items are still silently
+   dropped (account deletion now flushes the queue first, closing the billable-knock loss). On iOS it
+   rides device backups.
+7. **The nightly purge loops have no per-org error isolation** — one throwing org halts that night's
+   wind-down, dormancy, and deletion-request sweeps (the run receipt is at least honestly red now).
+8. **Retention crons carry no `tz`** — 03:17/04:41 are UTC only because Heroku dynos default to UTC.
+9. **Deploy status — operator-attested 2026-07-16: the release is deployed, the migrations have been
+   run** (`migrate:persons-org-scope`, `migrate:build-indexes`, `migrate:geocode-lastused`,
+   `migrate:scrub-map-points`), **and the rewritten policy/ToS pages are live.** One residual:
+   `android.allowBackup: false` sits in `mobile/app.json:21` on this branch but is **native config** —
+   it exists only in binaries built after it landed (it changes the EAS fingerprint;
+   `eas fingerprint:compare` answers which installed builds carry it). A bare `buildIndexes` dry run
+   remains the one-command way to re-verify prod indexes at any time.
+10. **GridFS raw-upload deletes are still swallowed** (`rawImportStore.js` `.catch(() => {})`) and are
+    now unrecoverable on a retried org deletion (the jobIds that locate them are destroyed in the same
+    cascade); `deleteOrganization` still runs in no transaction. Pre-fix orphaned `PersonMergeLog`
+    snapshots have no back-clean.
+11. **The Help Center has zero articles on staff/support access** — end users cannot read in-product
+    what the policy now promises. (A transparency gap, not a false sentence.)
+
+---
+
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
+
+> **[v3 — 2026-07-16]** v2 is itself now partially historical. Its gap list: **8 is resolved** (the
+> policy rewrite shipped; `PrivacyPolicyPage.jsx` no longer exists), **7 is narrowed** (noindex +
+> robots landed; links still live until the operator revoke), and **2's dormancy risk is shielded**
+> (paying orgs are no longer eligible) though the no-warning fact stands. Where v2 and v3 differ, v3
+> governs.
 
 > **Read this v2 section first. It supersedes the v1 verdict below.** The v1 brief (which follows,
 > retained for its detailed per-question analysis) audited the code *before* nine fixes landed. This v2
@@ -81,6 +215,8 @@ These survive the remediation and are the list to take to counsel:
 8. **The currently-published `PrivacyPolicyPage.jsx` still contains statements this brief shows are false**
    (notably "no third-party analytics/tracking" and the aggregate-only report description). It was left
    **untouched by instruction** — correcting it is the policy-rewrite pass, not this code remediation.
+   *[v3: the rewrite pass happened — the page was deleted and replaced by `client/public/privacy.html`,
+   whose sentences re-verify against the code. Resolved.]*
 
 ---
 
@@ -91,6 +227,12 @@ These survive the remediation and are the list to take to counsel:
 **Standard applied:** I state only what the code does. Where I inferred, I say so. Where I could not confirm, I say "COULD NOT DETERMINE" rather than round up. **Code comments are not evidence** — several comments in this codebase assert controls that the code does not implement, and I flag each one, because a comment is exactly the sort of thing that ends up in a privacy policy.
 
 **Read this first.** The single most dangerous sentence you could write is: *"Doorline personnel access customer data only under a time-limited, logged support grant, and every access is recorded."* It is the sentence this remediation release appears designed to enable. **It is false in four independent ways.** See E13. Do not write it in any form until engineering closes `/super-admin/persons`.
+
+> **[v3 — 2026-07-16: engineering closed it.]** `/super-admin/persons` is break-glass + per-org-grant
+> gated and every route writes an AccessLog row; the audit is fail-closed; the self-mint is blocked
+> (see the E13 stamps below). The published policy now states the grant requirement absolutely and
+> hedges the logging as *"designed to be recorded"* — the correct form, since the audit write remains
+> best-effort and request-level (E12's granularity caveat still applies).
 
 ---
 
@@ -146,7 +288,7 @@ The operator CLI has **no override** ("Deliberately no `--force`", `deleteAccoun
 - The snapshot is stamped `retentionUntil = deletion time + DELETED_IDENTITY_RETENTION_DAYS` — **default 180 days, environment-configurable** (`deleteAccount.js:25`, `:190`). The 180-day figure is disclosed to the user in the deletion sheet (`server/src/routes/auth.js:219`).
 - **`retentionUntil` is inert data.** Nothing fires at that timestamp. Erasure happens only when a daily BullMQ cron job runs on the worker dyno: `RETENTION_CRON`, default `'17 3 * * *'` (`server/src/services/retention/scheduler.js:16`), registered at `server/src/worker.js:46` and consumed at `:57`. The Procfile declares a `worker` process.
 - **The purge blanks four fields; it does not delete the row.** `DeletedUserRecord.updateMany({retentionUntil: {$lte: now}, purgedAt: null}, {$set: {firstName:'', lastName:'', email:'', phone:null, purgedAt}})` (`server/src/services/retention/purgeDeletedIdentities.js:29`, `:34-37`). Surviving after the purge: `userId`, `organizationIds[]`, `deletedAt`, `retentionUntil`, `purgedAt`, `createdAt`, `updatedAt` (`server/src/models/DeletedUserRecord.js:22-48`).
-- **No TTL index exists anywhere in the codebase.** I grepped `expireAfterSeconds` / `expires:` across all of `server/src`: **zero hits.** There is no database-level expiry on any collection.
+- **No TTL index exists anywhere in the codebase.** I grepped `expireAfterSeconds` / `expires:` across all of `server/src`: **zero hits.** There is no database-level expiry on any collection. *[v3: one TTL index now exists — GeocodeCache's 18-month disuse expiry (F7). Still none on any identity or ledger collection; this section's conclusion stands for `DeletedUserRecord`.]*
 
 **CAVEAT I could not close:** I verified the code and the Procfile. I **could not determine from code** that the worker dyno is scaled up in production. Repo memory records a prior incident in which deploying the wrong branch scaled the worker to 0. The codebase's own health text contemplates the job having **"NEVER run"** and says, in terms, *"we are promising a retention limit we are not enforcing"* (`purgeDeletedIdentities.js:85-89`). A health check exists (`retentionHealth`, `:67-91`, red after 48h) but it is a dashboard reading, not an enforcement mechanism.
 
@@ -220,6 +362,12 @@ Restoration is **org-scoped and membership-scoped**: only orgs where the person'
 
 ### EXCEPTION 1 — Household street addresses survive organization deletion, permanently. **VERIFIED.**
 
+> **[v3: fixed in code, contingent in prod.]** A `lastUsedAt` TTL (540 days) now expires disused
+> entries, with `migrate:geocode-lastused` backfilling old rows — inert until
+> `migrate:build-indexes --apply` runs in production. The no-org-attribution point below still stands
+> for entries while they live, and the policy now discloses the cache (18-month expiry) instead of
+> promising total deletion.
+
 `GeocodeCache` is a **global, un-org-scoped, cross-customer** collection that **contains addresses**.
 
 - It has **no `organizationId` field** (`server/src/models/GeocodeCache.js:18-37`). The schema comment says it is *"intentionally org/campaign-agnostic"* (`:12-14`).
@@ -276,6 +424,14 @@ Any `Subscription` with `status: 'canceled'` whose `statusChangedAt` is older th
 
 ### Trigger 2 — DORMANCY. **VERIFIED, and it is the most dangerous item in this section.**
 
+> **[v3: shielded.]** `DORMANCY_PROTECTED_STATUSES` = {active, trial, past_due, internal}
+> (`triggers.js:92`) — only canceled/suspended orgs are dormancy-eligible, and an org with **no**
+> Subscription record is protected, not deleted. The default window is now **30 months**
+> (`RETENTION_DORMANCY_MONTHS`). **Points 1 and 3 below are superseded** (the shield; and the window
+> math — note the same imprecision survives: 30 × 30-day months = **900 days ≈ 29.6 calendar
+> months**, so keep the policy's "approximately"). Points 2 (canvassing-only clock) and 4 (no
+> warning — still no mailer) remain true.
+
 `purgeDormantOrgs` (`triggers.js:78-102`) scans **every** organization and hard-deletes those with no `CanvassActivity` newer than the cutoff.
 
 1. **It does not check whether the customer is paying.** The only exemption is `Subscription.status === 'internal'` — Doorline's own demo orgs (`:36-39`, `:84`). An organization with an **`active`, fully-paid subscription** is fully eligible for deletion. `Organization` has no exempt/lock field.
@@ -283,11 +439,16 @@ Any `Subscription` with `status: 'canceled'` whose `statusChangedAt` is older th
 3. **The window is 720 days, not 24 months.** `DORMANCY_MONTHS * 30 * DAY` (`:79`) = 720 days ≈ 23.7 calendar months. A policy saying "24 months" over-promises by ~11 days **in the direction of deleting earlier than stated.**
 4. **NO WARNING IS SENT.** The file comment says dormancy happens *"after a warning"* (`triggers.js:16`). **There is no warning mechanism anywhere.** Due orgs are identified and deleted in the same pass, with no notice, no grace flag, no pre-deletion state. **The server has no email or SMS capability at all** — `server/package.json` declares no mailer dependency (no nodemailer, sendgrid, postmark, ses, resend, mailgun, twilio).
 
-> **Do NOT write:** *"We retain your data for as long as your account is active."* The dormancy trigger **contradicts this**: a current, paying customer is deleted after 720 days without a recorded knock.
+> **Do NOT write:** *"We retain your data for as long as your account is active."* The dormancy trigger **contradicts this**: a current, paying customer is deleted after 720 days without a recorded knock. *[v3: superseded — the shield makes this sentence TRUE for active-subscription orgs, and the policy now says exactly that (an active-subscription organization "is never deleted for inactivity"). The two advisories below still stand: no notice capability exists, and say "approximately" on the window.]*
 > **Do NOT write:** *"We will notify you before deleting a dormant account,"* or *"after notice."* Nothing in the application sends anything.
 > **Do NOT write:** *"no door-knocking activity for 24 months."* The correct phrase is *"no canvassing activity recorded for approximately 24 months."* (And note: `POST /admin/turfs/restrict-bulk` writes `CanvassActivity` rows from the **web admin console** with no door knocked — `server/src/routes/admin/turfs.js:695`, insert at `:779` — and those rows reset the dormancy clock, because the trigger filters on `organizationId` alone.)
 
 ### Trigger 3 — DELETE-ON-REQUEST. **VERIFIED: THE EXECUTOR EXISTS; THE INTAKE DOES NOT.**
+
+> **[v3: the intake exists.]** Operator CLI `request:org-deletion` (dry-run by default) and a
+> super-admin API (`POST/GET /super-admin/access/deletion-requests` + a `/cancel` route), both through
+> a shared producer with a 30-day SLA and one-open-request-per-org dedup. The policy's *"we aim to
+> complete verified deletion requests within 30 days"* is now backable.
 
 `executeDueDeletionRequests()` (`triggers.js:111-138`) finds `OrgDeletionRequest` rows with `status: 'scheduled'` and `scheduledFor <= now` and purges them. **But nothing in production code ever creates an `OrgDeletionRequest`.** I grepped the entire repository:
 
@@ -305,11 +466,22 @@ The only human-triggerable org deletion is the break-glass `DELETE /super-admin/
 > **Do NOT write:** *"A customer organization may request deletion of its data and we will complete it within 30 days,"* or anything implying a cancellable request window. **The code does not back it.**
 > If the business intends to honour such a promise, it is a **manual, human process today**, and the policy must say so — or engineering must build the intake.
 
-**Two more facts about the receipts, relevant if you promise a deadline:**
+**Two more facts about the receipts, relevant if you promise a deadline:** *[v3: the first is fixed —
+per-request try/catch keeps a failed request `scheduled` for retry (≤5 attempts,
+`RETENTION_DELETE_MAX_ATTEMPTS`), then flips it to a terminal `failed` that turns the health surface
+red; never a green receipt. The second (no per-org isolation in the two org-purge loops) is still
+true.]*
 - A **failed** deletion request produces a **green** `RetentionRun` receipt. `executeDueDeletionRequests` catches per-org failures, marks the request `status: 'failed'`, and **returns normally** (`triggers.js:121-136`), so `runRetentionTriggers` stamps `ok: true` (`:164-167`). The due-query filters `status: 'scheduled'` (`:113`), so a `'failed'` request is **never picked up again by any code path**. It is permanently dropped behind a successful-looking receipt and a green health banner (`purgeDeletedIdentities.js:68`; `routes/superAdmin/access.js:149-159`).
 - `purgeWoundDownOrgs` has **no per-org error isolation** (`triggers.js:64-68`) and the three triggers run sequentially in one function (`:157-159`), so a single throwing organization aborts the whole nightly sweep.
 
 ## B7. During the 60-day wind-down, can the customer access or export their own data?
+
+> **[v3: fixed — YES, self-serve.]** `canceled` is now genuinely read-only: `middleware/entitlement.js`
+> passes every non-write method before any status check maps to a 402, so GETs — the export endpoints
+> included — succeed during wind-down, and the 402 on writes carries the message *"Your data is
+> read-only and available to export during the wind-down period."* Share links still die (410), and
+> the mobile offline-queue grace accepts only submissions stamped before `statusChangedAt`. The
+> MOBILE-CACHE paragraph below (voter data persisting on canvasser devices) still stands.
 
 **VERIFIED: NO. The account is not read-only — it is fully blocked, reads included.**
 
@@ -455,9 +627,16 @@ The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReport
 ### What is genuinely excluded (VERIFIED, and you may say so)
 No voter name, no canvasser name or user id, no timestamps, no party, no phone, no date of birth. None of these fields exist on the schema, none are selected by the build query, none are emitted. The public map endpoint returns `canvassers: []` (`share.js:169`).
 
+> **[v3: this channel is closed.]** `publicPointAnswer` (`computeReport.js:151-176`) rebuilds every
+> public answer from option ids against the template's canonical labels — `'__other__'` emits the
+> literal word `'Other'`, unmatched legacy snapshot text collapses to `'Other'`, text questions never
+> reach the map — and `migrate:scrub-map-points` back-scrubs already-published points (run it in
+> prod). This is what makes the policy's *"only as the word 'Other,' never the typed text"* sentence
+> true.
+
 **BUT — one qualification you must not drop.** `answers[].answer` is a Mongoose `Mixed` field (`ClientReportMapPoint.js:13`) and is a **live free-text channel**. The remediation whitelist rejects only questions whose **type** is `'text'` (`routes/admin/clientReports.js:78-83`, `:460-474`). A **single-choice or multiple-choice** question may enable an "Other: ___" write-in (`models/SurveyTemplate.js:52`), whose canvasser-typed text is substituted into the answer snapshot (`mobile/app/(app)/voter/[id]/survey.jsx:276`), stored verbatim (`services/surveys/normalizeAnswers.js:45`), passes the type guard, is frozen onto the point (`computeReport.js:184-187`), and is emitted verbatim to the public map. **Free text a canvasser typed can appear pinned to a street address on an unauthenticated page.** No migration scrubs already-published points.
 
-> **Do NOT write** (and this is the sentence **currently published** at `client/src/pages/PrivacyPolicyPage.jsx:106-109`): *"Published reports present only aggregate campaign statistics and a map of door statuses."*
+> **Do NOT write** (and this is the sentence **currently published** at `client/src/pages/PrivacyPolicyPage.jsx:106-109` *[v3: that page no longer exists — the live `client/public/privacy.html` now uses the address-level description recommended below; resolved]*): *"Published reports present only aggregate campaign statistics and a map of door statuses."*
 > **Write:** *"A published report includes a map in which each household reached is shown at its exact street address and coordinates, together with that household's door status and the survey answers the campaign has chosen to display. Voter names and canvasser identities are not included."*
 
 ### Security of the link
@@ -467,11 +646,11 @@ No voter name, no canvasser name or user id, no timestamps, no party, no phone, 
 | **Token entropy** | **VERIFIED STRONG.** 24 bytes from Node's CSPRNG, base64url → 32 chars = **192 bits** (`routes/admin/clientReports.js:151-153`). Not brute-forceable. *(Exception: the demo-org seeder uses `SEED_DEMO_SHARE_TOKEN` verbatim if set — `utils/seedDemoOrg.js:525` — in which case entropy is whatever an operator chose.)* |
 | **Password on NEW links** | **VERIFIED.** Every link created through the admin API gets a bcrypt-hashed password; if the operator supplies none, a 12-char random one is generated and returned once (`clientReports.js:180-184`, `:231`, `:240`, `:247`). |
 | **Expiry on NEW links** | **VERIFIED.** `expiresAt = now + SHARE_LINK_DEFAULT_DAYS` (default **90**, `clientReports.js:173`, `:241`). Expired links return **410** before any report data (`share.js:35-40`). Expiry cannot be extended or cleared via the API. |
-| **LEGACY links** | **VERIFIED OPEN.** Links created **before this release** have `passwordHash: null` and `expiresAt: null` and **remain fully live**. `share.js:57` waves through any link with a null password hash; `share.js:35` treats a null `expiresAt` as unexpired. **No migration remediates them** — I listed all 24 files in `server/src/migrations/` and grepped for `ShareLink`/`passwordHash`: **zero hits.** The code comments at `share.js:33` and `models/ReportShareLink.js:35` refer to "the migration" **as if it exists. It does not.** |
-| **Search-engine indexing** | **VERIFIED: NO PROTECTION.** No `noindex` meta tag, no `X-Robots-Tag` header, no noindex directive anywhere in the client or server (grep: zero hits). `client/public/robots.txt` is `User-agent: * / Allow: / / Disallow: /api` — **`/r/` is not disallowed.** *Mitigating: the URL is unguessable, and the page is client-rendered with its data fetched from `/api/share/...`, which robots.txt does disallow — so a compliant crawler like Googlebot would likely index the URL and shell but be blocked from the report content. **robots.txt is advisory only.** It does not bind scrapers, archivers, or link-preview/unfurl bots, none of which are prevented from retrieving the full report JSON from an open legacy link.* |
+| **LEGACY links** | **VERIFIED OPEN.** Links created **before this release** have `passwordHash: null` and `expiresAt: null` and **remain fully live**. `share.js:57` waves through any link with a null password hash; `share.js:35` treats a null `expiresAt` as unexpired. **No migration remediates them** — I listed all 24 files in `server/src/migrations/` and grepped for `ShareLink`/`passwordHash`: **zero hits.** The code comments at `share.js:33` and `models/ReportShareLink.js:35` refer to "the migration" **as if it exists. It does not.** *[v3: still no migration, and the phantom comments are still in the code — but an operator bulk kill switch now exists (`POST /admin/client-reports/shares/revoke-legacy`, dry-run unless `confirm:true`, deliberately not automatic), and the policy now discloses the pre-July-15 links honestly. Legacy links stay live until an operator flips it.]* |
+| **Search-engine indexing** | **VERIFIED: NO PROTECTION.** *[v3: protection added — `robots.txt:7` now has `Disallow: /r/`, and `PublicReportLayout.jsx` injects `<meta name="robots" content="noindex, nofollow">` on every `/r/` page. Precision: the noindex is client-JS-injected only (no `X-Robots-Tag` header, no server-rendered meta), so robots.txt is the load-bearing control against non-JS crawlers.]* No `noindex` meta tag, no `X-Robots-Tag` header, no noindex directive anywhere in the client or server (grep: zero hits). `client/public/robots.txt` is `User-agent: * / Allow: / / Disallow: /api` — **`/r/` is not disallowed.** *Mitigating: the URL is unguessable, and the page is client-rendered with its data fetched from `/api/share/...`, which robots.txt does disallow — so a compliant crawler like Googlebot would likely index the URL and shell but be blocked from the report content. **robots.txt is advisory only.** It does not bind scrapers, archivers, or link-preview/unfurl bots, none of which are prevented from retrieving the full report JSON from an open legacy link.* |
 | **Revocation** | **PARTIAL.** Deactivate / delete / rotate work on the next request (`share.js:28`). A **bulk** revoke exists but targets **only** the legacy/open subset and is a **dry run unless `confirm: true`** (`clientReports.js:261-286`). It is **not automatic**. It also skips the per-campaign authorization check every other route in the file performs, so a team lead can revoke legacy links across campaigns they do not manage. |
 | **Password change ≠ revocation** | **VERIFIED.** The unlock JWT carries only `{shareId, campaignId}` with a 24h TTL (`services/auth/tokens.js:22-30`) and is never re-checked against the password (`share.js:63-68`). An already-unlocked viewer retains access for up to 24 hours after a password change. *(Link **revocation**, by contrast, does take effect immediately, because `loadShare` re-queries `isActive` on every request.)* |
-| **Password can be REMOVED from any link, today** | **VERIFIED.** `shareUpdateSchema` accepts `password: null` (`clientReports.js:197`), and `:310-312` sets `passwordHash` back to `null`. Passwordless links are **not** a closed legacy set. |
+| **Password can be REMOVED from any link, today** | **VERIFIED.** `shareUpdateSchema` accepts `password: null` (`clientReports.js:197`), and `:310-312` sets `passwordHash` back to `null`. Passwordless links are **not** a closed legacy set. *[v3: fixed — a falsy password now 400s with `SHARE_PASSWORD_REQUIRED` ("replace it, or rotate the link"); removal is unsupported, which is what lets the policy say new links are password-protected as a class.]* |
 | **Metadata is never gated** | **VERIFIED.** `GET /share/:token` (campaign name, organization name, link label) has **no** `requireShareAccess` (`share.js:84`). |
 
 > **Do NOT write:** *"Report links are password-protected and expire."* **False** as a statement about links as a class.
@@ -519,6 +698,16 @@ A grant:
 
 ### HOLE 1 — `/super-admin/persons`: a cross-organization voter-identity console with NO grant and NO audit. Reads **and writes**.
 
+> **[v3: CLOSED — re-verified 2026-07-16.]** The router is `requireAuth, requireBreakGlass`
+> (`persons.js:27` — the `support` tier gets 403 `BREAK_GLASS_REQUIRED` and cannot reach it at all);
+> all 12 routes require a live **per-org** grant (`requirePersonOrgGrant`) and write an AccessLog row
+> (`logPersonAccess`); the directory hard-requires `?organizationId` and scopes every query — free-text
+> search runs only inside the granted org. The once-false `personOversight.js` comment was rewritten
+> and is now accurate (it names the route as the control, not itself). Two honest caveats survive:
+> the per-route logging pattern means a **future** route added without a `logPersonAccess` call would
+> be silently unlogged (unlike `/admin`'s fail-closed middleware), and the log write remains
+> best-effort. The table and prose below are retained as the pre-fix record.
+
 I traced the mount chain myself.
 
 - **The router is gated by `requireAuth, requireSuperAdmin` only.** `server/src/routes/superAdmin/persons.js:15`. **`orgContext` is never imported or mounted** — so **no grant is ever required.** (Grep for `orgContext` across `server/src/routes/superAdmin/`: **zero hits.**)
@@ -554,6 +743,13 @@ I traced the mount chain myself.
 
 ### HOLE 2 — Voter content read under a valid grant that produces NO audit row. **VERIFIED.**
 
+> **[v3: CLOSED.]** `voterContentResource()` no longer exists — the matcher was inverted to
+> fail-closed: `accessLog` registers a finish-listener on **every** `/admin`+`/mobile` request and logs
+> by default; the only skips are a 3-entry `AUDIT_EXEMPT` metadata allowlist, and an unrecognized
+> route logs as `'other'` ("the failure we cannot tolerate is an unlogged read, not a mislabeled
+> one"). The walk-list CSV export below now writes an AccessLog row — traced end-to-end. Guard test:
+> `test/accessLogCoverage.int.test.js`. Rows remain per-request, never per-record (E12).
+
 `voterContentResource()` prefix-matches the path against a **hand-maintained list of ten strings** (`services/access/supportAccess.js:54-73`). I cross-referenced that list against the real mount table (`routes/index.js`):
 
 **Three prefixes are DEAD — they can never match:**
@@ -570,13 +766,19 @@ I traced the mount chain myself.
 
 ### HOLE 3 — A grant can be converted into permanent, unlogged access. **INFERRED FROM CODE PATHS, not executed.**
 
+> **[v3: CLOSED.]** `memberships.js:33-43` rejects any non-GET from a `supportGrant` holder with 403
+> `VENDOR_READ_ONLY` (the `requireOrgRole` super-admin passthrough itself is unchanged — the block is
+> downstream); `leadCrew`'s two write routes carry `denyVendorPrivilegeWrite`. Adversarial variants
+> (member super-admin, no `X-Org-Id`, no grant) each fail on `ALREADY_MEMBER`, `ensureOrgScoped`, or
+> `SUPPORT_ACCESS_REQUIRED` respectively.
+
 `requireOrgRole()` returns `next()` **unconditionally for any `isSuperAdmin` caller, before any role check** (`middleware/auth.js:58`). So a super-admin holding a grant passes the admin gate on `/admin/memberships` and can **create a Membership — including for themselves** (`routes/admin/memberships.js:24` is the only gate). Once a Membership exists, `orgContext`'s membership-first branch takes over, `req.supportGrant` is never set again, and `accessLog` short-circuits **forever**. `/admin/memberships` is also absent from `VOTER_CONTENT_ROUTES`, so the membership-creation request itself writes no audit row.
 
 I did **not** execute this and did **not** fully trace the `POST /admin/memberships` body schema to confirm a staffer can name themselves. **Treat as a control weakness for engineering review, not a proven exploit.** The first step (creating the grant) *is* recorded in `SupportAccessGrant`, so the escalation is not invisible — but the subsequent reads are.
 
 ### HOLE 4 — The Bull Board job console is outside everything. **VERIFIED.**
 
-`app.use('/admin/queues', requireBullBoardAuth, createBullBoardRouter())` — mounted at the **app root**, outside `/api` (`server/src/app.js:77`). It therefore never traverses `routes/index.js`, where `orgContext` and `accessLog` live. `queues/bullBoard.js` calls it *"a cross-tenant job console (all orgs' jobs)."* **No grant, no audit.**
+`app.use('/admin/queues', requireBullBoardAuth, createBullBoardRouter())` — mounted at the **app root**, outside `/api` (`server/src/app.js:97` *[v3: line drifted from :77 as app.js grew; the finding itself was re-verified 2026-07-16 and still stands — no grant, no audit]*). It therefore never traverses `routes/index.js`, where `orgContext` and `accessLog` live. `queues/bullBoard.js` calls it *"a cross-tenant job console (all orgs' jobs)."* **No grant, no audit.**
 
 I looked for voter PII and did **not** find any rendered: job payloads are ids (`{importJobId}`), and turf jobs carry `{campaignId, passId, mode, params, generatedBy}`. **But:**
 - `params` is an **unvalidated pass-through of `req.body.params`** (`routes/admin/turfs.js:170`, `:211`) and in practice carries the admin's **hand-drawn map polygons** and **voter targeting criteria** (party, gender, age range, precinct/district/city/zip, survey-answer ids and their human-readable labels — `services/walklist/resolveWalkList.js:12-35`; `services/turf/generateTurf.js:74`). These are personal-data selection criteria, not "opaque ids."
@@ -614,10 +816,22 @@ One human has **one** `User` row (name, email, phone, password hash) with a **gl
 **But two things cross the boundary:**
 
 - **The global email namespace is an account-existence oracle, and lets one org attach another org's user.** When org A's admin adds a member whose email already exists **anywhere** on the platform, the API returns **409 `EMAIL_EXISTS_USE_LINK`** (`services/memberships/createMember.js:50-51`, `:61-66`). With `linkExisting: true`, org A creates a Membership on that existing global account — **with no consent gate of any kind** (`:53-60`, `:83-94`). Org A's Users page then displays that person's firstName, lastName, email, phone, `isActive`, `createdAt`, **`lastLoginAt`** (a *global* last-login, reflecting activity in any org) and **`isMultiOrg`** (`routes/admin/memberships.js:137-148`). Notification is **after the fact only** (`Membership.acknowledgedAt`). The same flow is reachable by a **team lead** (`routes/admin/leadCrew.js:23`, `:91-97`).
-  **And it is a takeover path.** Once the Membership exists, org A's admin can **reset that user's password** — `PATCH /admin/memberships/:userId/password` is gated **only** on "a Membership for this user exists in my active org" (`memberships.js:385-420`), which org A just minted. That password logs in, and the login response returns `memberships` **for every org the user belongs to** (`routes/auth.js:110-111`). `mustChangePassword` does not block `/auth`, so `POST /auth/change-password` clears the flag and yields a full cross-org session. **INFERRED FROM CODE PATHS, not executed.** It is destructive and detectable (it burns the victim's real password), but it is not prevented. **Escalate to engineering.**
+  **And it is a takeover path.** *[v3: reviewed and left unprevented by decision — admin reset is the
+  product's only password-recovery mechanism, so blocking it would strand multi-org users entirely;
+  the reset now issues a visible forced-change temp password (misuse locks the victim out loudly, not
+  silently), email changes are multi-org-locked (`MULTI_ORG_EMAIL_LOCKED`) while passwords are not,
+  and the rationale is recorded at `memberships.js:423-432`, which cites this document. Closing it
+  properly needs per-org credentials or self-serve email reset.]* Once the Membership exists, org A's admin can **reset that user's password** — `PATCH /admin/memberships/:userId/password` is gated **only** on "a Membership for this user exists in my active org" (`memberships.js:385-420`), which org A just minted. That password logs in, and the login response returns `memberships` **for every org the user belongs to** (`routes/auth.js:110-111`). `mustChangePassword` does not block `/auth`, so `POST /auth/change-password` clears the flag and yields a full cross-org session. **INFERRED FROM CODE PATHS, not executed.** It is destructive and detectable (it burns the victim's real password), but it is not prevented. **Escalate to engineering.**
 - **`isMultiOrg` is disclosed to customers.** An org admin is told, for each of their own members, a boolean indicating that person **also belongs to at least one other organization on the platform** — computed from an **unscoped** aggregate over all Memberships (`memberships.js:109-114`, `:145`). Only a boolean; never the name, id or count of the other orgs. Minor, but it is a genuine cross-tenant inference **shown to customers**.
 
 ### EXCEPTION 4 — Cross-org Person merge is possible via staff tooling. **VERIFIED.**
+
+> **[v3: CLOSED.]** `mergePersons.js:88-92` refuses with a 409 when survivor and victim belong to
+> different organizations; `keysHeldElsewhere` is org-scoped; the merge/split routes are break-glass +
+> per-org-grant gated and AccessLog'd. The free-text victim-id box is still in the UI — the control is
+> server-side. The index caveat below is also resolved in code: `migratePersonsOrgScope.js` drops the
+> two legacy global indexes as its first apply step and its runbook mandates `migrate:build-indexes`
+> after; whether it has RUN in prod still requires a live-DB check.
 The `Person` layer **is** now org-scoped: `organizationId` is required and indexed (`models/Person.js:61-66`), both dedup uniqueness indexes are org-prefixed (`:109-116`), the import resolver hard-throws without an orgId, and the identity fan-out is org-filtered (`services/person/propagateIdentity.js:106`).
 
 **But `mergePersons.js` contains ZERO references to `organizationId`.** I grepped the file: **zero.** It loads survivor and victim by `_id` only and never compares their organizations. `Voter.find({personId: victim._id})` at `mergePersons.js:83` has no org filter; `Voter.updateMany(... {$set: {personId: survivor._id}})` at `:143` re-points **org B's voter rows onto a Person whose `organizationId` is org A**, and `:124-139` copies org B's state voter IDs onto org A's Person document. `POST /super-admin/persons/:personId/merge` (`persons.js:289`) takes an arbitrary `victimId` from the request body and is gated by `requireSuperAdmin` only — **not** `requireBreakGlass`. The UI provides a free-text "paste the other person's ID" box (`client/src/pages/PersonDetailPage.jsx:403-417`).
@@ -665,12 +879,19 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 - **Web: there is NO telemetry-disabling code at all.** I grepped all of `client/src` for `telemetry | setTelemetry | events.mapbox`: **zero hits.** The app only does `mapboxgl.accessToken = token` (`client/src/pages/MapPage.jsx:329`; `TurfsPage.jsx:1033`; `components/ClientReportMap.jsx:88`). The installed dependency is `mapbox-gl` 3.x, whose bundled telemetry client POSTs to `https://events.mapbox.com/events/v2` (`map.load`, `appUserTurnstile`) and persists an **anonymous UUID in the browser's `localStorage`** under `mapbox.eventData`. Mapbox GL JS exposes **no supported opt-out**, and the SDK marks the block *"REMOVAL OR MODIFICATION OF THE PRECEDING CODE VIOLATES THE MAPBOX TERMS OF SERVICE."*
 - **It fires for unauthenticated members of the public**: the public share-report page renders the same Mapbox map (`client/src/pages/PublicReportDetailPage.jsx:63-65` → `ClientReportMap.jsx`). **Recipients of a shared client report — non-users — get a Mapbox tracking identifier written to their browser.**
 
+> **[v3: resolved in the rewrite.]** The blanket sentence is gone — `privacy.html` now has a dedicated
+> Maps paragraph disclosing that Mapbox receives the viewer's IP and viewport on any page with a map,
+> and the residual negative claim is narrowed to advertising cookies / third-party **advertising**
+> trackers (code-supported: no analytics/ad SDK exists in any package.json). The web client also gained
+> `client/src/lib/mapboxInit.js`, which nulls the GL-JS event endpoints as best-effort harm reduction —
+> its own comment says it does NOT reliably stop the beacons on v3 and must not be cited as a mute.
+>
 > **Do NOT write:** *"We do not use advertising cookies, third-party analytics, or tracking technologies on our sites or in our apps."*
-> **This is the sentence currently published** (`client/src/pages/PrivacyPolicyPage.jsx:98-99`), and the mobile code's own comment says telemetry is disabled **specifically to keep that sentence true** (`mobile/lib/mapbox.js:13-14`). **It is supported for mobile. It is NOT supported for the web console or for the public report pages.** It is also the sentence with the sharpest cookie/tracking-technology disclosure consequences.
+> **This is the sentence currently published** (`client/src/pages/PrivacyPolicyPage.jsx:98-99` *[v3: page since deleted]*), and the mobile code's own comment says telemetry is disabled **specifically to keep that sentence true** (`mobile/lib/mapbox.js:13-14`). **It is supported for mobile. It is NOT supported for the web console or for the public report pages.** It is also the sentence with the sharpest cookie/tracking-technology disclosure consequences.
 > *(INFERRED, NOT PROVEN FROM THIS REPO: that the library therefore transmits its default events. I verified the endpoint and the localStorage key are present in the shipped bundle and that no disabling code exists. I did not observe network traffic.)*
 
 ### HEROKU'S ACCESS LOG — this is a data flow, and it is not on anyone's subprocessor list. **VERIFIED.**
-`app.use(morgan(isProd ? 'combined' : 'dev'))` (`server/src/app.js:52`), mounted app-wide with no `skip`, **before** everything. `app.set('trust proxy', 1)` (`:30`) makes `:remote-addr` resolve to the **real client IP**. The `combined` format logs `":method :url HTTP/:http-version"`, and morgan's `:url` token is **`req.originalUrl` — which INCLUDES THE QUERY STRING.**
+`app.use(morgan(isProd ? 'combined' : 'dev'))` (`server/src/app.js:72` *[v3: was :52 — line drift only]*), mounted app-wide with no `skip`, **before** everything. `app.set('trust proxy', 1)` (`:50`) makes `:remote-addr` resolve to the **real client IP**. The `combined` format logs `":method :url HTTP/:http-version"`, and morgan's `:url` token is **`req.originalUrl` — which INCLUDES THE QUERY STRING.**
 
 **Therefore Heroku's log stream receives, in cleartext:**
 - **Voter names and street addresses**, whenever anyone uses a search box: `/admin/voters?search=John%20Smith` (`routes/admin/voters.js:71` — regex-matched against `fullName`, `stateVoterId`, `addressLine1`, `city`, `zipCode`), `/mobile/voters?search=` (`routes/mobile/voters.js:89-100`), `/super-admin/persons?q=` (`routes/superAdmin/persons.js:35`), household address search (`reports.js:2797`).
@@ -737,7 +958,7 @@ There is **no voter account, no voter role** (Membership roles are `['admin','le
 
 **What DOES exist:** an org admin can **correct** a voter's identity fields (`routes/admin/voters.js:186`), **delete a voter's survey response** (`:371`), and **delete a voter note** (`:303`). And a household can be marked `'restricted'` and excluded from future books via an admin `excludeRestricted` toggle (`models/Household.js:47-52`; `services/turf/generateTurf.js:49`, `:205`) — **door-level, admin-controlled, not voter-initiated,** and framed in the help copy as "couldn't physically reach the door," not as suppression.
 
-The currently-published policy states *"Voters do not interact with the Services directly."* The only channel for a voter to exercise any right is a contact email on the policy page. **Every DSAR from a voter is a manual process with no tooling behind it, and there is no way to mark a person do-not-contact.**
+The currently-published policy states *"Voters do not interact with the Services directly."* *[v3: the policy is now `client/public/privacy.html`; the no-rights-mechanism finding is unchanged — it is v3 gap 1, still the largest gap.]* The only channel for a voter to exercise any right is a contact email on the policy page. **Every DSAR from a voter is a manual process with no tooling behind it, and there is no way to mark a person do-not-contact.**
 
 ### (e) WHETHER A PERSON VOTED IS STORED — but NOT how. **VERIFIED.**
 `VotedVoter` records, per campaign per voter: `stateVoterId`, `voterId`, `householdId`, `votedAt`, `uploadId` (`models/VotedVoter.js:9-16`). It drives door suppression (`Household.fullyVoted`) and is surfaced **per voter** to canvassers on mobile.
@@ -765,6 +986,14 @@ The currently-published policy states *"Voters do not interact with the Services
 
 ### 1. The largest at-rest store of voter PII in the whole system is an unencrypted file on a volunteer's phone. **VERIFIED.**
 
+> **[v3: materially improved.]** The bootstrap now lives at `FileSystem.cacheDirectory` (excluded from
+> iCloud and Android auto-backup; `cache.js` carries a "do NOT move it back to documentDirectory —
+> the privacy policy's device-storage disclosure depends on this" comment), a startup migration moves
+> or deletes the legacy Documents copy, and sign-out clears **every** copy (cache file, tmp staging
+> file, legacy Documents file — "sign-out must leave voter data in NO location"). OTA-shipped: a device
+> that hasn't launched the new bundle still holds its old Documents copy. The file's contents and its
+> plaintext, indefinite-while-signed-in nature are unchanged.
+
 `mobile/lib/cache.js:13` writes `canvass.bootstrap.json` into `FileSystem.documentDirectory`. `cache.js:85-86` serializes the entire bootstrap payload to it as **plaintext JSON** (`writeAsStringAsync(BOOTSTRAP_TMP, JSON.stringify(snapshot))` then an atomic rename).
 
 **What is in that file** (I read the server projections):
@@ -777,6 +1006,13 @@ On a 16,000-door turf this is a **multi-megabyte file of named residents at mapp
 **It IS cleared on sign-out** (`mobile/lib/authState.js:41-50` calls `clearBootstrap()`) — credit that. **But nothing else clears it, there is no expiry, and it persists indefinitely as long as the user stays logged in and the app stays installed.**
 
 ### 2. Nothing opts these files out of iCloud / Google device backup. **VERIFIED ABSENCE; CONSEQUENCE INFERRED.**
+
+> **[v3: largely closed.]** `mobile/app.json:21` now sets `android.allowBackup: false` (excludes the
+> whole Android app from Google auto-backup — **native-build-contingent**: it takes effect only in a
+> binary built after the change, never via OTA), and the bootstrap's `cacheDirectory` location keeps it
+> out of iOS backups by platform default. **Residual, keep it in the record:** on iOS, AsyncStorage —
+> including `canvass.offlineQueue` with its GPS-stamped queued knocks and survey payloads — still rides
+> device backups. "Excluded from backup" is fully true on Android, bootstrap-file-true on iOS.
 
 I grepped `mobile/` (source and `app.json`) for `ExcludedFromBackup`, `NSURLIsExcludedFromBackupKey`, `allowBackup`: **zero hits.** `mobile/app.json` sets no `android.allowBackup: false`.
 
@@ -811,7 +1047,7 @@ Also permanently retained and never inventoried: `Voter.identityBackup` (a Mixed
 - The prior cluster tier was Atlas Free (M0), which per the runbook *"is physically incapable of being backed up"* (`:63-69`). **So Atlas snapshot coverage begins only at this release. Data deleted before it was never in an Atlas snapshot** — it may be in the laptop dump.
 - **COULD NOT DETERMINE:** the Atlas snapshot **retention period**. No such value appears anywhere in the repo. Get it from the console.
 
-**Every deletion mechanism in this codebase — the org cascade, the campaign cascade, account deletion, the retention purges — operates exclusively against the live MongoDB collections. No code path scrubs, expires, filters, or even references a backup or snapshot. The published privacy policy does not mention backups at all** (grep of `PrivacyPolicyPage.jsx` for "backup|snapshot": zero hits).
+**Every deletion mechanism in this codebase — the org cascade, the campaign cascade, account deletion, the retention purges — operates exclusively against the live MongoDB collections. No code path scrubs, expires, filters, or even references a backup or snapshot. The published privacy policy does not mention backups at all** (grep of `PrivacyPolicyPage.jsx` for "backup|snapshot": zero hits). *[v3: the rewritten `privacy.html` now discloses backups — residual copies "may persist in our encrypted database backups for up to 12 months" — and that 12-month figure is an Atlas console setting, not code; keep it verified against the console.]*
 
 > **Do NOT write:** *"Residual copies of deleted data persist in backups only until they rotate out on our provider's schedule."* **That is false while the laptop archive exists.** Either the policy covers operator-held dumps, or the company destroys that archive.
 
@@ -822,11 +1058,25 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 
 ### 6. Two smaller items.
 - **`middleware/error.js:7-10` returns `err.message` to the caller on any 500 in production** — which surfaces raw Mongo errors. A duplicate-key error quotes the offending value (e.g. an email address, a street address, a state voter ID).
-- **`app.js:41-44`: CORS reflects ANY Origin when `CLIENT_ORIGIN` is unset** (`origin: process.env.CLIENT_ORIGIN ? ... : true`). Helmet's CSP is **disabled** (`app.js:34-38`). **COULD NOT DETERMINE** the production value of `CLIENT_ORIGIN`.
+- **`app.js:60-65`: CORS reflects ANY Origin when `CLIENT_ORIGIN` is unset** (`origin: process.env.CLIENT_ORIGIN ? ... : true`). Helmet's CSP is **disabled** (`app.js:52-59`). *[v3: line numbers updated for app.js growth; both findings re-verified and unchanged.]* **COULD NOT DETERMINE** the production value of `CLIENT_ORIGIN`.
 
 ---
 
 # THE HONEST GAPS
+
+> **[v3 — 2026-07-16: this list is superseded by "Remaining honest gaps (v3)" at the top of this
+> document.]** Per-item status against today's tree: **1** closed (break-glass + grant + logged) ·
+> **2** open (grants still self-issued) · **3** closed (fail-closed audit) · **4** closed in code
+> (GeocodeCache TTL; migrations pending) · **5** closed (intake + cancel exist) · **6** resolved
+> (policy rewritten as static pages) · **7** closed (dormancy shield) · **8** largely closed
+> (`allowBackup:false` + cacheDirectory; iOS AsyncStorage residual) · **9** open (Heroku log flows;
+> drain state unknown) · **10** open-by-decision (operator revoke switch exists, not automatic) ·
+> **11** closed (robots + noindex) · **12** open (queue survives logout, no TTL) · **13** closed
+> (`VENDOR_READ_ONLY`) · **14** open by decision (documented at `memberships.js:423-432`) · **15**
+> closed (cross-org merge 409s) · **16** open (still no warning capability) · **17** narrowed (one TTL
+> now exists — GeocodeCache; every other retention promise is still cron-kept) · **18** closed
+> (retries + red health) · **19** open (request-level log, by design) · **20** open (pseudonymous end
+> state; policy language now honest) · **21** open (no User-row retention limit).
 
 **This is the list you take to the lawyer. These are the places where the product does not yet do what a policy would want to promise.**
 

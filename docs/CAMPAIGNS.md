@@ -98,7 +98,9 @@ are.
 
 **Click a campaign** (its name, or Open dashboard) to *drill in*: the left sidebar swaps
 from the org-level items to **that campaign's tabs** — Home, Survey, Voter Import, Walk Lists,
-Saved Searches, Turf Cutting, Team, Timeline, Map, Early Voting, Client Reports — with a
+Saved Searches, Turf Cutting, Team, Timeline, Map, Audit, **Survey Explorer** (drill into any
+survey answer — who gave it, who recorded it, and where; see [SURVEYS.md](SURVEYS.md)), Notes,
+Early Voting, Client Reports — with a
 **"‹ Campaigns"** link to exit and a **campaign switcher** dropdown to hop to another campaign
 without leaving the page you're on. (Passes aren't a top-level tab — they live inside each walk
 list; see [PASSES.md](PASSES.md).) The **URL is the active campaign**: `/campaigns/:id` is its Home (dashboard), and each tab is
@@ -263,8 +265,8 @@ The cold-start readiness chain is a pure derivation in
 
 - **Campaign-scoped routes** — the in-campaign screens live under `/campaigns/:campaignId/*` in
   [App.jsx](../client/src/App.jsx) (`survey`, `import`, `walklists`, `efforts`, `turfs`, `passes`,
-  `map`, `early-voting`, `reports`, `reports/:id`; the bare `/campaigns/:campaignId` is the
-  dashboard). Each screen reads the active campaign from `useParams().campaignId` — there is **no
+  `team`, `timeline`, `map`, `audit`, `explorer`, `notes`, `early-voting`, `reports`,
+  `reports/:id`; the bare `/campaigns/:campaignId` is the dashboard). Each screen reads the active campaign from `useParams().campaignId` — there is **no
   localStorage campaign selector**. Old flat routes (`/efforts`, `/passes`, …) and `/dashboard/:id`
   redirect into this shape.
 - Two-level drill-in nav: [navItems.js](../client/src/components/navItems.js) (`ORG_NAV` for the top

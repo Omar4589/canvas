@@ -223,6 +223,11 @@ the wasted effort.
 - The org **Knocks** is **less than or equal to** the sum of every canvasser's knocks: when two
   canvassers overlap on the same house-pass, each gets personal credit for the knock they made,
   but the org counts that house-pass once (we don't bill the client for the overlap).
+- The **survey answer drill-in** (the Survey Explorer's By-canvasser table — "who recorded this
+  answer?") is the same way, only stricter: those are **raw per-person entry counts**, never
+  re-credited to a team. It's an **audit surface** — it answers "who pressed the button", not
+  "whose team gets credit" — so it deliberately skips the team fold that the team-attribution
+  reports apply. See [SURVEYS.md](SURVEYS.md) (Part 1 → *Auditing answers*; contract in §J).
 
 ---
 

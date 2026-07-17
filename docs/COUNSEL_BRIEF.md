@@ -83,7 +83,8 @@ When a user deletes their account, we destroy their login, name, email, phone an
 **retain their name for 180 days** so the organization can still attribute past field work — including
 the GPS trail — to a real person, as a fraud- and quality-control measure. This is disclosed to the
 user at the moment they delete, on a public page, and in the Privacy Policy. After 180 days the name
-is purged and the records become anonymous.
+is purged; the records then no longer directly identify the person but remain linked to a stable
+internal identifier — pseudonymous, not anonymous (see [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) A3).
 
 - CCPA's deletion right has express carve-outs for security and fraud prevention, so this is
   *probably* fine. **Confirm it** — "probably" is what we're paying to remove.

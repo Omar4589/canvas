@@ -583,6 +583,7 @@ export default function DashboardPage() {
                   surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
                   dateRange={dateRange}
                   campaignId={campaignId}
+                  effortId={effortId}
                   tz={tz}
                 />
               </div>
@@ -595,11 +596,15 @@ export default function DashboardPage() {
                     questionResultsRefs.current[q.key] = el;
                   }}
                 >
+                  {/* effortId flows through to the drill-in lists (voters-by-answer /
+                      answer-canvassers) so they honor the same walk-list filter as the
+                      counts above them. */}
                   <QuestionResults
                     question={q}
                     surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
                     dateRange={dateRange}
                     campaignId={campaignId}
+                    effortId={effortId}
                     tz={tz}
                   />
                 </div>

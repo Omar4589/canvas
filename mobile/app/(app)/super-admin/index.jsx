@@ -24,6 +24,14 @@ import {
 import Logo from '../../../components/Logo';
 import LiveStatus from '../../../components/LiveStatus';
 import NavTileGrid from '../../../components/NavTileGrid';
+import InfoHint from '../../../components/InfoHint';
+import {
+  PLATFORM_TOTALS,
+  OVERVIEW_HELP,
+  TOTALS_INTRO,
+  IDLE_ORGS_HELP,
+  IDLE_ORGS_MOBILE_NOTE,
+} from '../../../lib/platformStatsMeta';
 import { ThemeIconButton } from '../../../components/ThemeToggle';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -51,12 +59,15 @@ function formatRelative(d) {
   return `${day}d ago`;
 }
 
-function StatTile({ value, label, sub }) {
+function StatTile({ value, label, sub, help }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.statTile}>
       <Text style={styles.statValue}>{value ?? '—'}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <View style={styles.statLabelRow}>
+        <Text style={styles.statLabel}>{label}</Text>
+        {help ? <InfoHint title={label} body={help} /> : null}
+      </View>
       {sub ? <Text style={styles.statSub}>{sub}</Text> : null}
     </View>
   );
@@ -99,9 +110,31 @@ export default function SuperAdminHome() {
     ...useFocusedPoll(),
   });
 
-  const { refreshing, onRefresh } = useRefresh([overviewQ.refetch, feedQ.refetch]);
-  // One pill for both polls: freshest of the two, fetching if either is, refresh both.
-  const liveUpdatedAt = Math.max(overviewQ.dataUpdatedAt || 0, feedQ.dataUpdatedAt || 0) || undefined;
+  // Lifetime totals (live + banked-from-deleted) — one singleton doc, cheap to poll.
+  const statsQ = useQuery({
+    queryKey: ['super-admin', 'platform-stats'],
+    queryFn: () => api('/super-admin/access/platform-stats'),
+    refetchInterval: live ? 30_000 : false,
+    ...useFocusedPoll(),
+  });
+  // Idle-orgs walks every active org server-side — fine at platform scale, and the
+  // focused-poll pause keeps a covered screen from paying for it.
+  const idleQ = useQuery({
+    queryKey: ['super-admin', 'idle-orgs'],
+    queryFn: () => api('/super-admin/access/idle-orgs'),
+    refetchInterval: live ? 30_000 : false,
+    ...useFocusedPoll(),
+  });
+
+  const { refreshing, onRefresh } = useRefresh([overviewQ.refetch, feedQ.refetch, statsQ.refetch, idleQ.refetch]);
+  // One pill for all polls: freshest of them, fetching if any is, refresh all.
+  const liveUpdatedAt =
+    Math.max(
+      overviewQ.dataUpdatedAt || 0,
+      feedQ.dataUpdatedAt || 0,
+      statsQ.dataUpdatedAt || 0,
+      idleQ.dataUpdatedAt || 0
+    ) || undefined;
 
   async function pickOrg(orgId) {
     qc.clear();
@@ -135,11 +168,13 @@ export default function SuperAdminHome() {
         <LiveStatus
           live={live}
           onToggle={() => setLive((v) => !v)}
-          isFetching={overviewQ.isFetching || feedQ.isFetching}
+          isFetching={overviewQ.isFetching || feedQ.isFetching || statsQ.isFetching || idleQ.isFetching}
           updatedAt={liveUpdatedAt}
           onRefresh={() => {
             overviewQ.refetch();
             feedQ.refetch();
+            statsQ.refetch();
+            idleQ.refetch();
           }}
         />
       </View>
@@ -166,21 +201,27 @@ export default function SuperAdminHome() {
             value={totals?.orgs?.total?.toLocaleString()}
             label="Orgs"
             sub={`${totals?.orgs?.active ?? 0} active`}
+            help={OVERVIEW_HELP.orgs}
           />
           <StatTile
             value={totals?.users?.total?.toLocaleString()}
             label="Users"
             sub={`${totals?.users?.superAdmins ?? 0} super`}
+            help={OVERVIEW_HELP.users}
           />
           <StatTile
             value={totals?.activeNow?.count?.toLocaleString()}
             label="Active now"
             sub={totals?.activeNow?.threshold || '15m'}
+            help={OVERVIEW_HELP.activeNow}
           />
         </View>
 
         <View style={styles.todayCard}>
-          <Text style={styles.todayLabel}>Today</Text>
+          <View style={styles.statLabelRow}>
+            <Text style={styles.todayLabel}>Today</Text>
+            <InfoHint title="Today" body={OVERVIEW_HELP.today} />
+          </View>
           <View style={styles.todayRow}>
             <View style={styles.todayCell}>
               <Text style={styles.todayValue}>
@@ -202,6 +243,32 @@ export default function SuperAdminHome() {
             </View>
           </View>
         </View>
+
+        {/* Idle organizations — the needs-a-human queue no sweep can ever resolve. */}
+        <View style={styles.statLabelRow}>
+          <Text style={styles.sectionLabel}>Idle organizations</Text>
+          <InfoHint title="Idle organizations" body={`${IDLE_ORGS_HELP}\n\n${IDLE_ORGS_MOBILE_NOTE}`} />
+        </View>
+        {(idleQ.data?.orgs || []).length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>No idle organizations — nothing to review.</Text>
+          </View>
+        ) : (
+          <>
+            {idleQ.data.orgs.map((o) => (
+              <View key={o.organizationId} style={styles.idleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.idleName}>{o.name}</Text>
+                  <Text style={styles.idleMeta}>
+                    {o.status} · {o.monthsIdle} mo idle
+                  </Text>
+                </View>
+                <Text style={styles.idleMeta}>{formatRelative(o.lastActivityAt)}</Text>
+              </View>
+            ))}
+            <Text style={styles.caption}>{IDLE_ORGS_MOBILE_NOTE}</Text>
+          </>
+        )}
 
         {/* Quick actions */}
         <View style={styles.quickActions}>
@@ -269,6 +336,25 @@ export default function SuperAdminHome() {
             </Pressable>
           ))
         )}
+
+        {/* Platform totals — lifetime numbers, every tile explains itself (shared ⓘ copy). */}
+        <Text style={[styles.sectionLabel, { marginTop: spacing.lg }]}>Platform totals</Text>
+        <Text style={styles.caption}>{TOTALS_INTRO}</Text>
+        <View style={styles.statsRowWrap}>
+          {PLATFORM_TOTALS.map(({ key, label, help }) => (
+            <View key={key} style={styles.totalsTile}>
+              <StatTile
+                value={(statsQ.data?.total?.[key] ?? 0).toLocaleString()}
+                label={label}
+                help={help}
+              />
+            </View>
+          ))}
+        </View>
+        <Text style={styles.caption}>
+          Recomputed nightly · last reconciled{' '}
+          {statsQ.data?.backfilledAt ? new Date(statsQ.data.backfilledAt).toLocaleString() : 'never'}
+        </Text>
 
         {/* Recent activity preview */}
         <View style={styles.activityHeader}>
@@ -355,6 +441,30 @@ function makeStyles(t) {
   statValue: { ...type.h2, fontSize: 20, fontVariant: ['tabular-nums'] },
   statLabel: { fontSize: 11, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.4 },
   statSub: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  statLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  // Platform totals: 5 tiles wrapping into a 3+2 grid (statTile is flex:1, so each needs
+  // a fixed-basis wrapper or the row refuses to wrap).
+  statsRowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  totalsTile: { width: '31%', flexGrow: 1 },
+  caption: { fontSize: 11, color: colors.textMuted, marginBottom: spacing.md },
+  idleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  idleName: { fontSize: 13, fontWeight: '600', color: colors.textPrimary },
+  idleMeta: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
 
   todayCard: {
     backgroundColor: colors.card,

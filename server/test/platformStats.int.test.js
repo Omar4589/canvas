@@ -15,9 +15,12 @@ const { Voter } = await import('../src/models/Voter.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { PlatformStats } = await import('../src/models/PlatformStats.js');
-const { recomputeLive, captureOrgBeforeDelete, captureCampaignBeforeDelete, getPlatformStats } = await import('../src/services/platform/platformStats.js');
+const { recomputeLive, captureOrgBeforeDelete, captureCampaignBeforeDelete, getPlatformStats, STATS_JOB } = await import('../src/services/platform/platformStats.js');
 const { deleteOrganization } = await import('../src/services/platform/deleteOrganization.js');
 const { idleZeroDollarOrgs } = await import('../src/services/billing/idleOrgs.js');
+// Safe to import (bullmq never connects until registerMaintenanceJobs) — retentionTriggers.int
+// does the same.
+const { MAINTENANCE_JOBS, REPEATABLE_JOBS, processMaintenanceJob } = await import('../src/services/retention/scheduler.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -158,6 +161,33 @@ test('INTERNAL orgs are excluded from capture — deleting Meridian never moves 
   const after = await getPlatformStats();
   assert.deepStrictEqual(after.total, before.total, 'internal activity never enters the marketing numbers');
   assert.strictEqual(after.total.doorsKnocked, 0);
+});
+
+test('the nightly reconcile is scheduled OUTSIDE the retention list, and its handler re-syncs live only', { skip }, async () => {
+  // Schedule pin (mirrors the retention jobs' own pin): deleting the registration fails a test
+  // instead of the drift-corrector going quiet.
+  const job = MAINTENANCE_JOBS.find((j) => j.name === STATS_JOB);
+  assert.ok(job, 'the reconcile job is registered in MAINTENANCE_JOBS');
+  assert.ok(job.cron, 'with a cron');
+  // …and it must NOT be in REPEATABLE_JOBS: the retention health banner reports on every entry
+  // there (supportAccess.int pins the count) — a stats hiccup must never read "NOT ENFORCED".
+  assert.ok(!REPEATABLE_JOBS.some((j) => j.name === STATS_JOB), 'kept out of the retention list');
+
+  // Handler through the real dispatcher: drifted live gets re-synced from rows; the deleted bank
+  // is never recomputed; backfilledAt (the "last reconciled" line) is stamped.
+  await seedOrg({ slug: 'real', status: 'active', knocks: 5, bulk: 3, surveys: 2, voters: 4 });
+  await PlatformStats.updateOne(
+    { key: 'singleton' },
+    { $set: { 'live.doorsKnocked': 999, 'deleted.doorsKnocked': 100 } },
+    { upsert: true }
+  );
+
+  await processMaintenanceJob({ name: STATS_JOB });
+
+  const s = await getPlatformStats();
+  assert.strictEqual(s.live.doorsKnocked, 5, 'live re-synced from real rows (bulk excluded)');
+  assert.strictEqual(s.deleted.doorsKnocked, 100, 'deleted bank untouched');
+  assert.ok(s.backfilledAt, 'backfilledAt stamped — the Control Room "last reconciled" line');
 });
 
 test('idle-org watch surfaces an abandoned $0 active org, and only that one', { skip }, async () => {

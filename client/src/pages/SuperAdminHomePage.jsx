@@ -5,8 +5,11 @@ import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import CrossOrgActivityFeed from '../components/CrossOrgActivityFeed.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
+import StatCard from '../components/StatCard.jsx';
+import InfoHint from '../components/InfoHint.jsx';
 import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { BillingPill } from '../lib/billingStatus.jsx';
+import { PLATFORM_TOTALS, OVERVIEW_HELP, TOTALS_INTRO, IDLE_ORGS_HELP } from '../lib/platformStatsMeta.js';
 
 function formatRelative(d) {
   if (!d) return 'No activity';
@@ -20,20 +23,6 @@ function formatRelative(d) {
   const day = Math.floor(hr / 24);
   if (day < 30) return `${day}d ago`;
   return date.toLocaleDateString();
-}
-
-function StatCard({ label, value, sub }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-      <div className="text-2xl font-semibold tabular-nums text-fg">
-        {value ?? '—'}
-      </div>
-      <div className="mt-0.5 text-xs font-medium uppercase tracking-wide text-fg-muted">
-        {label}
-      </div>
-      {sub && <div className="mt-1 text-xs text-fg-subtle">{sub}</div>}
-    </div>
-  );
 }
 
 export default function SuperAdminHomePage() {
@@ -61,6 +50,20 @@ export default function SuperAdminHomePage() {
     queryFn: () => api('/super-admin/platform-overview'),
     ...livePollOptions(live, true, 30_000),
   });
+  // Lifetime totals (live + banked-from-deleted) — one singleton doc, cheap to poll.
+  const statsQ = useQuery({
+    queryKey: ['super-admin', 'platform-stats'],
+    queryFn: () => api('/super-admin/access/platform-stats'),
+    ...livePollOptions(live, true, 30_000),
+  });
+  // Cost note: idle-orgs walks every active org (2 queries each). Cheap at platform scale,
+  // and livePollOptions never polls a backgrounded tab; revisit the interval before the org
+  // count reaches the hundreds.
+  const idleQ = useQuery({
+    queryKey: ['super-admin', 'idle-orgs'],
+    queryFn: () => api('/super-admin/access/idle-orgs'),
+    ...livePollOptions(live, true, 30_000),
+  });
 
   function pickOrg(orgId) {
     switchOrg(orgId);
@@ -70,6 +73,8 @@ export default function SuperAdminHomePage() {
 
   const totals = overviewQ.data?.totals;
   const orgs = overviewQ.data?.organizations || [];
+  const idleOrgs = idleQ.data?.orgs || [];
+  const idleMonths = idleQ.data?.months ?? 6;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -78,7 +83,7 @@ export default function SuperAdminHomePage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <h1 className="text-2xl font-semibold text-fg">Platform control room</h1>
             <LiveStatus
-              {...liveStatusProps([overviewQ], { live, onToggle: () => setLive((v) => !v) })}
+              {...liveStatusProps([overviewQ, statsQ, idleQ], { live, onToggle: () => setLive((v) => !v) })}
             />
           </div>
           <p className="text-sm text-fg-muted">
@@ -90,25 +95,33 @@ export default function SuperAdminHomePage() {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <StatCard
             label="Organizations"
-            value={totals?.orgs?.total?.toLocaleString()}
-            sub={`${totals?.orgs?.active ?? 0} active`}
+            value={totals?.orgs?.total?.toLocaleString() ?? '—'}
+            hint={`${totals?.orgs?.active ?? 0} active`}
+            help={OVERVIEW_HELP.orgs}
+            compact
           />
           <StatCard
             label="Users"
-            value={totals?.users?.total?.toLocaleString()}
-            sub={`${totals?.users?.active ?? 0} active · ${totals?.users?.superAdmins ?? 0} super`}
+            value={totals?.users?.total?.toLocaleString() ?? '—'}
+            hint={`${totals?.users?.active ?? 0} active · ${totals?.users?.superAdmins ?? 0} super`}
+            help={OVERVIEW_HELP.users}
+            compact
           />
           <StatCard
             label="Active now"
-            value={totals?.activeNow?.count?.toLocaleString()}
-            sub={`last ${totals?.activeNow?.threshold || '15m'}`}
+            value={totals?.activeNow?.count?.toLocaleString() ?? '—'}
+            hint={`last ${totals?.activeNow?.threshold || '15m'}`}
+            help={OVERVIEW_HELP.activeNow}
+            compact
           />
           <StatCard
             label="Today"
-            value={totals?.today?.doorsKnocked?.toLocaleString()}
-            sub={`${totals?.today?.surveysSubmitted ?? 0} voters surveyed · ${
+            value={totals?.today?.doorsKnocked?.toLocaleString() ?? '—'}
+            hint={`${totals?.today?.surveysSubmitted ?? 0} voters surveyed · ${
               totals?.today?.litDropped ?? 0
             } lit drops`}
+            help={OVERVIEW_HELP.today}
+            compact
           />
         </div>
 
@@ -142,6 +155,62 @@ export default function SuperAdminHomePage() {
             </button>
           </div>
         )}
+
+        {/* The other needs-a-human queue, clustered with the billing strip: orgs that no
+            automatic sweep can ever resolve (see IDLE_ORGS_HELP). */}
+        <div>
+          <div className="mb-1 flex items-center gap-1.5">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">
+              Idle organizations
+            </h2>
+            <InfoHint label="What lands an org here">{IDLE_ORGS_HELP}</InfoHint>
+          </div>
+          <p className="max-w-2xl text-sm text-fg-subtle">
+            Active, $0 (no live campaign), and silent for over {idleMonths} months — so the
+            retention sweep will never catch them and they can&apos;t reset the clock on their own.
+            Decide per org: re-engage, or terminate in Billing (which starts the{' '}
+            <span className="whitespace-nowrap">60-day wind-down</span>).
+          </p>
+          {idleQ.isLoading && <p className="mt-2 text-sm text-fg-subtle">Loading…</p>}
+          {!idleQ.isLoading && idleOrgs.length === 0 && (
+            <p className="mt-2 text-sm text-fg-subtle">No idle organizations — nothing to review.</p>
+          )}
+          {idleOrgs.length > 0 && (
+            <div className="mt-2 overflow-x-auto rounded border border-border">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-muted text-xs uppercase tracking-wide text-fg-muted">
+                  <tr>
+                    <th className="px-3 py-2">Organization</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Months idle</th>
+                    <th className="px-3 py-2">Last activity</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {idleOrgs.map((o) => (
+                    <tr key={o.organizationId} className="border-t border-border">
+                      <td className="px-3 py-2 text-fg">{o.name}</td>
+                      <td className="px-3 py-2 text-fg-muted">{o.status}</td>
+                      <td className="px-3 py-2 text-fg-muted">{o.monthsIdle}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-fg-muted">
+                        {o.lastActivityAt ? new Date(o.lastActivityAt).toLocaleDateString() : 'never'}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          onClick={() => navigate(`/organizations?billing=${o.organizationId}`)}
+                          className="text-xs font-semibold text-brand-accent hover:underline"
+                        >
+                          Manage billing →
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         <div>
           <div className="mb-2 flex items-center justify-between">
@@ -241,6 +310,30 @@ export default function SuperAdminHomePage() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Lifetime marketing numbers — below the operational content on purpose. Every card
+            explains itself via the shared ⓘ copy (lib/platformStatsMeta.js). */}
+        <div>
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-fg-muted">
+            Platform totals
+          </h2>
+          <p className="mb-3 max-w-2xl text-sm text-fg-subtle">{TOTALS_INTRO}</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {PLATFORM_TOTALS.map(({ key, label, help }) => (
+              <StatCard
+                key={key}
+                label={label}
+                value={(statsQ.data?.total?.[key] ?? 0).toLocaleString()}
+                compact
+                help={help}
+              />
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-fg-subtle">
+            Recomputed nightly · last reconciled{' '}
+            {statsQ.data?.backfilledAt ? new Date(statsQ.data.backfilledAt).toLocaleString() : 'never'}
+          </p>
         </div>
       </div>
 

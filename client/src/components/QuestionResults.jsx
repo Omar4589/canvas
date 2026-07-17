@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { percentsTo100 } from '../lib/percent.js';
+import { useCampaignTeam } from '../lib/useCampaignTeam.js';
+import { Badge, Segmented } from './ui/index.js';
+import AnswerCanvasserTable from './AnswerCanvasserTable.jsx';
+import ResponseDetailDrawer from './ResponseDetailDrawer.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -14,21 +19,38 @@ function buildQuery(params) {
   return s ? `?${s}` : '';
 }
 
-function formatDate(d, tz) {
+function formatDateTime(d, tz) {
   if (!d) return '';
-  return formatInTz(d, tz, { month: 'short', day: 'numeric' }, false);
+  return formatInTz(
+    d,
+    tz,
+    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' },
+    true
+  );
 }
 
 const PAGE_SIZE = 25;
 
-function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateRange, campaignId, tz }) {
+function VoterList({
+  questionKey,
+  optionId,
+  option,
+  tag,
+  surveyTemplateId,
+  dateRange,
+  campaignId,
+  effortId,
+  userId,
+  tz,
+  onOpenResponse,
+}) {
   const [skip, setSkip] = useState(0);
   const [accumulated, setAccumulated] = useState([]);
 
   // A tag query is cross-question: it sends `tag` + `surveyTemplateId` instead of
   // questionKey/optionId/option.
-  // Callers key <VoterList> on the identifying props, so a filter change
-  // remounts with fresh skip/accumulated state.
+  // Callers key <VoterList> on the identifying props (incl. userId/effortId), so a
+  // filter change remounts with fresh skip/accumulated state.
   const byTag = !!tag;
 
   const queryString = buildQuery(
@@ -37,6 +59,8 @@ function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateR
           tag,
           surveyTemplateId,
           campaignId,
+          effortId,
+          userId,
           from: dateRange?.from,
           to: dateRange?.to,
           limit: PAGE_SIZE,
@@ -48,6 +72,8 @@ function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateR
           option,
           surveyTemplateId,
           campaignId,
+          effortId,
+          userId,
           from: dateRange?.from,
           to: dateRange?.to,
           limit: PAGE_SIZE,
@@ -64,6 +90,8 @@ function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateR
       tag,
       surveyTemplateId,
       campaignId,
+      effortId,
+      userId,
       dateRange?.from,
       dateRange?.to,
       skip,
@@ -97,7 +125,11 @@ function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateR
     <div>
       <ul className="max-h-80 divide-y divide-border overflow-y-auto">
         {accumulated.map((v) => (
-          <li key={v.responseId} className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm">
+          <li
+            key={v.responseId}
+            onClick={() => onOpenResponse?.(v.responseId)}
+            className="flex cursor-pointer items-start justify-between gap-3 px-3 py-2 text-sm transition-colors hover:bg-card"
+          >
             <div className="min-w-0">
               <div className="truncate text-fg">
                 {v.voter?.fullName || 'Unknown'}
@@ -106,10 +138,20 @@ function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateR
                     {v.voter.party}
                   </span>
                 )}
+                {v.wasOfflineSubmission && (
+                  <Badge variant="info" className="ml-2">
+                    Offline
+                  </Badge>
+                )}
               </div>
               {v.household && (
                 <div className="truncate text-xs text-fg-muted">
                   {v.household.addressLine1}, {v.household.city}
+                </div>
+              )}
+              {v.note && (
+                <div className="truncate text-xs italic text-fg-subtle" title={v.note}>
+                  “{v.note}”
                 </div>
               )}
             </div>
@@ -119,7 +161,16 @@ function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateR
                   {v.canvasser.firstName} {v.canvasser.lastName}
                 </div>
               )}
-              <div>{formatDate(v.submittedAt, tz)}</div>
+              <div className="tabular-nums">{formatDateTime(v.submittedAt, tz)}</div>
+              {v.household && (
+                <Link
+                  to={`/campaigns/${campaignId}/map?household=${v.household.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="font-medium text-brand-accent hover:underline"
+                >
+                  Map →
+                </Link>
+              )}
             </div>
           </li>
         ))}
@@ -139,6 +190,188 @@ function VoterList({ questionKey, optionId, option, tag, surveyTemplateId, dateR
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// Small canvasser <select> shared by the option/tag drills. `allMembers`, not `members`:
+// the filter must list whoever RECORDED responses, even someone since deactivated.
+function CanvasserSelect({ campaignId, value, onChange }) {
+  const { allMembers } = useCampaignTeam(campaignId);
+  const options = useMemo(
+    () =>
+      (allMembers || [])
+        .map((m) => ({
+          id: String(m.user.id),
+          name: `${m.user.firstName || ''} ${m.user.lastName || ''}`.trim() || m.user.email,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [allMembers]
+  );
+  if (!options.length) return null;
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      title="Filter by canvasser"
+      className="rounded border border-border bg-card px-2 py-1 text-xs text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+    >
+      <option value="">All canvassers</option>
+      {options.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// The expanded-option drill: canvasser filter + Voters/By-canvasser toggle + the full-view
+// link. Callers key this on the identifying filters, so local userId/view state resets when
+// the surrounding filters change; userId is ALSO in the VoterList remount key below.
+function OptionDrill({
+  questionKey,
+  optionId,
+  option,
+  surveyTemplateId,
+  dateRange,
+  campaignId,
+  effortId,
+  tz,
+  onOpenResponse,
+}) {
+  const [userId, setUserId] = useState('');
+  const [view, setView] = useState('voters');
+
+  const fullViewHref = `/campaigns/${campaignId}/explorer${buildQuery({
+    survey: surveyTemplateId,
+    q: questionKey,
+    optionId,
+    option,
+    from: dateRange?.from,
+    to: dateRange?.to,
+    userId,
+    effortId,
+  })}`;
+
+  const canvassersQ = useQuery({
+    queryKey: [
+      'reports',
+      'answer-canvassers',
+      campaignId,
+      questionKey,
+      optionId,
+      option,
+      surveyTemplateId,
+      effortId,
+      dateRange?.from,
+      dateRange?.to,
+    ],
+    queryFn: () =>
+      api(
+        `/admin/reports/answer-canvassers${buildQuery({
+          questionKey,
+          optionId,
+          option,
+          surveyTemplateId,
+          campaignId,
+          effortId,
+          from: dateRange?.from,
+          to: dateRange?.to,
+        })}`
+      ),
+    enabled: view === 'canvassers',
+  });
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <CanvasserSelect campaignId={campaignId} value={userId} onChange={setUserId} />
+          <Segmented
+            size="sm"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'voters', label: 'Voters' },
+              { value: 'canvassers', label: 'By canvasser' },
+            ]}
+          />
+        </div>
+        <Link to={fullViewHref} className="text-xs font-medium text-brand-accent hover:underline">
+          Open full view →
+        </Link>
+      </div>
+      {view === 'canvassers' ? (
+        <div className="p-2">
+          {canvassersQ.isLoading ? (
+            <div className="px-1 py-2 text-xs text-fg-muted">Loading…</div>
+          ) : canvassersQ.error ? (
+            <div className="px-1 py-2 text-xs text-danger">Error: {canvassersQ.error.message}</div>
+          ) : (
+            <AnswerCanvasserTable
+              rows={canvassersQ.data?.rows || []}
+              selectedUserId={userId}
+              onSelect={(id) => {
+                setUserId(id);
+                setView('voters');
+              }}
+              tz={tz}
+            />
+          )}
+        </div>
+      ) : (
+        <VoterList
+          key={userId}
+          questionKey={questionKey}
+          optionId={optionId}
+          option={option}
+          surveyTemplateId={surveyTemplateId}
+          dateRange={dateRange}
+          campaignId={campaignId}
+          effortId={effortId}
+          userId={userId}
+          tz={tz}
+          onOpenResponse={onOpenResponse}
+        />
+      )}
+    </div>
+  );
+}
+
+// The expanded-tag drill: canvasser filter + full-view link, but NO by-canvasser toggle —
+// tag counts are distinct voters across questions, which have no per-canvasser sum.
+function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, tz, onOpenResponse }) {
+  const [userId, setUserId] = useState('');
+
+  const fullViewHref = `/campaigns/${campaignId}/explorer${buildQuery({
+    tag,
+    survey: surveyTemplateId,
+    from: dateRange?.from,
+    to: dateRange?.to,
+    userId,
+    effortId,
+  })}`;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <CanvasserSelect campaignId={campaignId} value={userId} onChange={setUserId} />
+        <Link to={fullViewHref} className="text-xs font-medium text-brand-accent hover:underline">
+          Open full view →
+        </Link>
+      </div>
+      <VoterList
+        key={userId}
+        tag={tag}
+        surveyTemplateId={surveyTemplateId}
+        dateRange={dateRange}
+        campaignId={campaignId}
+        effortId={effortId}
+        userId={userId}
+        tz={tz}
+        onOpenResponse={onOpenResponse}
+      />
     </div>
   );
 }
@@ -223,10 +456,11 @@ function TagRow({ tag, voterCount, percent, expanded, onToggle }) {
   );
 }
 
-export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId, tz }) {
+export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId, effortId, tz }) {
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
   const [expandedTag, setExpandedTag] = useState(null);
+  const [detailId, setDetailId] = useState(null);
 
   if (!tags.length) return null;
 
@@ -272,13 +506,15 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
               )}
               {isOpen && (
                 <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">
-                  <VoterList
-                    key={`${t.tag}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
+                  <TagDrill
+                    key={`${t.tag}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${effortId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
                     tag={t.tag}
                     surveyTemplateId={surveyTemplateId}
                     dateRange={dateRange}
                     campaignId={campaignId}
+                    effortId={effortId}
                     tz={zone}
+                    onOpenResponse={setDetailId}
                   />
                 </div>
               )}
@@ -289,6 +525,14 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
       <div className="mt-2 text-xs text-fg-subtle">
         Click any tag to see the voters reached.
       </div>
+      {detailId && (
+        <ResponseDetailDrawer
+          responseId={detailId}
+          campaignId={campaignId}
+          tz={zone}
+          onClose={() => setDetailId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -317,6 +561,7 @@ export default function QuestionResults({
   surveyTemplateId,
   dateRange,
   campaignId,
+  effortId,
   tz,
 }) {
   const orgTz = useOrgTimeZone();
@@ -326,6 +571,7 @@ export default function QuestionResults({
   // Round so the question's options total exactly 100.0% (largest-remainder, from the counts).
   const percents = percentsTo100(options.map((o) => o.count || 0));
   const [expandedOption, setExpandedOption] = useState(null);
+  const [detailId, setDetailId] = useState(null);
   const expandable = type === 'single_choice' || type === 'multiple_choice';
 
   return (
@@ -355,15 +601,17 @@ export default function QuestionResults({
                 />
                 {isOpen && (
                   <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">
-                    <VoterList
-                      key={`${key}|${o.id ?? o.option}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
+                    <OptionDrill
+                      key={`${key}|${o.id ?? o.option}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${effortId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
                       questionKey={key}
                       optionId={o.id}
                       option={o.option}
                       surveyTemplateId={surveyTemplateId}
                       dateRange={dateRange}
                       campaignId={campaignId}
+                      effortId={effortId}
                       tz={zone}
+                      onOpenResponse={setDetailId}
                     />
                   </div>
                 )}
@@ -376,6 +624,14 @@ export default function QuestionResults({
         <div className="mt-2 text-xs text-fg-subtle">
           Click any option to see who selected it.
         </div>
+      )}
+      {detailId && (
+        <ResponseDetailDrawer
+          responseId={detailId}
+          campaignId={campaignId}
+          tz={zone}
+          onClose={() => setDetailId(null)}
+        />
       )}
     </div>
   );

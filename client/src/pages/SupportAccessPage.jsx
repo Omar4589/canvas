@@ -1,15 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import StatCard from '../components/StatCard.jsx';
-
-const fmt = (n) => (n ?? 0).toLocaleString();
-const PLATFORM_METRICS = [
-  ['organizations', 'Organizations'],
-  ['campaigns', 'Campaigns'],
-  ['doorsKnocked', 'Doors knocked'],
-  ['surveyResponses', 'Surveys'],
-  ['votersProcessed', 'Voters'],
-];
 
 // Support access: who is currently inside a customer's data, and who has been.
 //
@@ -42,16 +32,6 @@ export default function SupportAccessPage() {
   const health = useQuery({
     queryKey: ['retention-health'],
     queryFn: () => api('/super-admin/access/health/retention'),
-  });
-
-  const stats = useQuery({
-    queryKey: ['platform-stats'],
-    queryFn: () => api('/super-admin/access/platform-stats'),
-  });
-
-  const idle = useQuery({
-    queryKey: ['idle-orgs'],
-    queryFn: () => api('/super-admin/access/idle-orgs'),
   });
 
   const revoke = useMutation({
@@ -186,60 +166,6 @@ export default function SupportAccessPage() {
         )}
       </section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">Platform totals</h2>
-        <p className="mt-1 text-sm text-fg-subtle">
-          Lifetime numbers across all customers. Excludes internal/demo orgs, and survives customer
-          deletion (a deleted org&apos;s contribution is preserved, not lost).
-        </p>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {PLATFORM_METRICS.map(([key, label]) => (
-            <StatCard key={key} label={label} value={fmt(stats.data?.total?.[key])} compact />
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">
-          Idle organizations
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm text-fg-subtle">
-          Active, $0 (no live campaign), and silent for over {idle.data?.months ?? 6} months — so the
-          retention sweep will never catch them and they can&apos;t reset the clock on their own. Decide
-          per org: re-engage, or terminate in Billing (which starts the {' '}
-          <span className="whitespace-nowrap">60-day wind-down</span>).
-        </p>
-        {idle.isLoading && <p className="mt-2 text-sm text-fg-subtle">Loading…</p>}
-        {idle.data?.orgs?.length === 0 && (
-          <p className="mt-2 text-sm text-fg-subtle">No idle organizations — nothing to review.</p>
-        )}
-        {idle.data?.orgs?.length > 0 && (
-          <div className="mt-2 overflow-x-auto rounded border border-border">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-muted text-xs uppercase tracking-wide text-fg-muted">
-                <tr>
-                  <th className="px-3 py-2">Organization</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Months idle</th>
-                  <th className="px-3 py-2">Last activity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {idle.data.orgs.map((o) => (
-                  <tr key={o.organizationId} className="border-t border-border">
-                    <td className="px-3 py-2 text-fg">{o.name}</td>
-                    <td className="px-3 py-2 text-fg-muted">{o.status}</td>
-                    <td className="px-3 py-2 text-fg-muted">{o.monthsIdle}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-fg-muted">
-                      {o.lastActivityAt ? new Date(o.lastActivityAt).toLocaleDateString() : 'never'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
     </div>
   );
 }

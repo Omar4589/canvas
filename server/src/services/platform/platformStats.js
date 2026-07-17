@@ -13,6 +13,11 @@ import { KNOCK_ACTIONS, NOT_BULK } from '../reports/aggregations.js';
 
 const KEY = { key: 'singleton' };
 
+// Name of the nightly reconcile job (registered in services/retention/scheduler.js
+// MAINTENANCE_JOBS; the handler calls recomputeLive below). Lives here beside the service
+// it names, mirroring JOB_NAME in retention/purgeDeletedIdentities.js.
+export const STATS_JOB = 'platform-stats-reconcile';
+
 // The org ids that must be excluded everywhere (Doorline's own demo/internal orgs).
 async function internalOrgIds() {
   const subs = await Subscription.find({ status: 'internal' }, 'organizationId').lean();

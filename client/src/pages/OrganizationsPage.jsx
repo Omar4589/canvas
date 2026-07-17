@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import OrgBillingPanel from '../components/OrgBillingPanel.jsx';
@@ -40,6 +41,18 @@ export default function OrganizationsPage() {
     queryKey: ['super-admin', 'organizations'],
     queryFn: () => api('/super-admin/organizations'),
   });
+
+  // Deep link from the Control Room's idle queue: /organizations?billing=<orgId> opens
+  // that org's billing panel once the list is in (the panel header needs the name), then
+  // consumes the param so closing the panel doesn't reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const target = searchParams.get('billing');
+    if (!target || !orgsQ.data) return;
+    const o = orgsQ.data.organizations?.find((x) => x.id === target);
+    if (o) setBillingOrg({ id: o.id, name: o.name });
+    setSearchParams({}, { replace: true });
+  }, [orgsQ.data, searchParams, setSearchParams]);
 
   const createMut = useMutation({
     mutationFn: (data) => api('/super-admin/organizations', { method: 'POST', body: data }),

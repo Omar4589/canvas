@@ -98,6 +98,7 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 | Job | When | What it does |
 | --- | --- | --- |
 | `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago |
+| `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it). Cron override: `PLATFORM_STATS_CRON`. |
 | `retention-triggers` | Daily 04:41 UTC | **Deletes organizations**: wind-down, dormancy, and due deletion requests |
 
 **Check they're alive:** `GET /api/super-admin/access/health/retention`. It goes **RED** when the last

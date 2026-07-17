@@ -34,13 +34,24 @@ any org to work inside it, then come back out.
   **today's activity** (doors knocked, surveys, lit drops — across every org), and a table of every
   organization with its members, campaigns, who's live, and when it was last active. Alongside it, a
   **live activity feed** streams recent door events (Not home / Wrong address / **Refused** /
-  **Restricted** / Survey / Lit drop) from across all orgs.
+  **Restricted** / Survey / Lit drop) from across all orgs. Two more blocks (moved here from Support
+  access): the **Idle organizations** queue — active-status, $0 (no live campaign), silent past the
+  idle window; the population neither retention sweep can ever resolve, so a human decides
+  re-engage vs terminate, and each row's **Manage billing →** deep-links to that org's Billing panel
+  (`/organizations?billing=<orgId>`) — and the lifetime **Platform totals** (organizations,
+  campaigns, doors knocked, surveys, voters), which exclude internal/demo orgs and survive customer
+  deletion. **Every number on the page carries an ⓘ** explaining exactly what it counts (copy in
+  `client/src/lib/platformStatsMeta.js`, mirrored to mobile); the one worth memorizing: lifetime
+  "Doors knocked" counts **raw field records**, a deliberately different unit from the billable
+  "knocks" in reports (one per household per round — see [METRICS.md](METRICS.md)), so it always
+  reads higher. A muted "Recomputed nightly · last reconciled …" line shows the totals' freshness.
 - **Organizations** — the list of every org; create a new one, activate/deactivate them (a
   deactivated org's members can't sign into it), manage each org's **billing** (status pill + Manage
   → the Billing panel; see [BILLING.md](BILLING.md)), and **permanently delete** an org. Delete is a
   hard, irreversible cascade — campaigns, doors, voters, history, reports, share links, memberships —
   guarded by typing the org's slug back. User accounts always survive (someone in another org keeps
-  that access); canonical People shared with other orgs survive too, with ownership released.
+  that access); the org's identity records (People) are deleted with it — People are per-org, so
+  nothing is shared with anyone else (see [PERSONS.md](PERSONS.md)).
 - **Refresh demo day** (Control Room) — one click re-stages the demo org's recent canvassing
   relative to *now*: the four prior evenings plus a "today" whose knocks run from mid-morning up to
   the minute you pressed it. Press it right before a pitch so the dashboard, map, and timeline look
@@ -64,11 +75,28 @@ any org to work inside it, then come back out.
   totals + a per-import table (homes that arrived with coordinates = free, vs. those that needed a
   lookup; new vs. cached; and the internal dollar cost). This cost is owner-only — it's never shown to
   admins or clients. Filter by month; see [IMPORTS.md](IMPORTS.md) § "Cost review (owner-only)".
-- **People** — the cross-org **Person** layer: the same real person appearing in several orgs, deduped;
-  review merge/split candidates, approve edit proposals, and set ownership/locks. Fully documented in
-  [PERSONS.md](PERSONS.md).
+- **People** — the **Person** identity layer: each org's voter identities, deduped **within that org**
+  (People are per-org — the same human in two orgs is two separate records); review merge/split
+  candidates, approve edit proposals, and set locks. Fully documented in [PERSONS.md](PERSONS.md).
+  Opening any of it requires a support access grant for that org (below).
+- **Support access** — where staff grants are managed: start a grant (with its written reason), see
+  who currently holds one, revoke them, and review the access audit trail and retention-job health.
 - **Jobs** — the background job queues (imports, turf-cutting) for when something needs a look under the
   hood.
+
+## When Doorline staff can see customer data
+
+Doorline staff can't open a customer organization's voter or canvassing data just because they work
+here. Entering an org requires a **support access grant**: the staff member starts one with a written
+reason, it covers **one organization at a time**, and it **expires automatically after a few hours**.
+Access under a grant is designed to be recorded in an **audit log** — who entered, which organization,
+what kind of data was touched, when, and the stated reason — and those records are kept. There is no
+unlogged mode.
+
+Two things this is *not*: it doesn't apply to an organization's **own** admins, leads, and canvassers
+working in their own org (that's normal use, not staff access, and isn't logged this way); and it is
+an internal control with after-the-fact accountability, not a customer approval step — grants are
+disclosed in the Privacy Policy, not requested from the customer.
 
 ---
 
@@ -87,12 +115,13 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 
 | Screen | Client page | Endpoint(s) |
 |---|---|---|
-| Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` ([platform.js](../server/src/routes/superAdmin/platform.js)) |
+| Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` ([platform.js](../server/src/routes/superAdmin/platform.js)); `GET /super-admin/access/platform-stats`, `GET /super-admin/access/idle-orgs` ([access.js](../server/src/routes/superAdmin/access.js)) |
 | Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) | `GET/POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId`, `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js), tested by [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
 | Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; console runner `npm run demo:refresh`). Generation + batched persistence are shared with the seed via [services/platform/demoActivity.js](../server/src/services/platform/demoActivity.js) so both look identical. |
 | All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) | `GET /super-admin/users`, `POST /super-admin/users/:userId/promote`, `POST /super-admin/users/:userId/clear-lockout` (clears the per-email login throttle via `clearLoginLockout`, see [loginRateLimit.js](../server/src/middleware/loginRateLimit.js)) ([users.js](../server/src/routes/superAdmin/users.js)) |
 | Imports | [SuperAdminImportsPage.jsx](../client/src/pages/SuperAdminImportsPage.jsx) | `GET /super-admin/imports` — cross-org import + geocoding-cost aggregation (real persisted lookup counts; cost derived from `GEOCODE_COST_PER_1000_CENTS`, never sent to clients) ([imports.js](../server/src/routes/superAdmin/imports.js)) |
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
+| Support access | [SupportAccessPage.jsx](../client/src/pages/SupportAccessPage.jsx) | `/super-admin/access/*` ([access.js](../server/src/routes/superAdmin/access.js)) — grants CRUD, audit-log review, retention health, deletion requests. Grant/logging services in [services/access/supportAccess.js](../server/src/services/access/supportAccess.js); the full verified picture is in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) (E12/E13 + v3) |
 | Jobs | queues page | Bull Board at `/admin/queues` (`requireBullBoardAuth`, mounted in [app.js](../server/src/app.js)) |
 
 ## Notes
@@ -108,6 +137,27 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
   `actionType ∈ [...ACTION_DOOR, 'restricted']` (so **Refused and Restricted** events both appear,
   matching the styling the feed UIs ship), newest first, with org / canvasser / campaign / household
   populated; supports `?since=` for polling and `?limit=`.
+- **Platform totals (`platform-stats`)** are the two-bucket lifetime counters in
+  [models/PlatformStats.js](../server/src/models/PlatformStats.js) /
+  [services/platform/platformStats.js](../server/src/services/platform/platformStats.js):
+  `total = live + deleted`. `live` is a best-effort running tally (bumped on create/knock/survey/
+  import; increments swallow errors by design) that is **recomputed from real rows** by the nightly
+  `platform-stats-reconcile` job (03:47 UTC, `recomputeLive({stampBackfill:true})`; manual runner
+  `npm run migrate:platform-stats -- --apply` → [backfillPlatformStats.js](../server/src/migrations/backfillPlatformStats.js)).
+  `deleted` is banked from **true row counts captured the instant before an org/campaign is deleted**
+  and is never recomputed. Internal orgs (Subscription `status:'internal'`) are excluded everywhere.
+  `backfilledAt` drives the Control Room's "last reconciled" line. The reconcile job is registered in
+  `MAINTENANCE_JOBS` ([scheduler.js](../server/src/services/retention/scheduler.js)) **deliberately
+  outside `REPEATABLE_JOBS`** — the retention health banner reports on that list, and a stats hiccup
+  must never read "Retention: NOT ENFORCED".
+- **Idle organizations (`idle-orgs`)** — criteria in
+  [services/billing/idleOrgs.js](../server/src/services/billing/idleOrgs.js): org `isActive`, paying
+  subscription status (`active`/`trial`/`past_due`, or none — fails open), **zero active campaigns**
+  ($0 under per-campaign billing), newest `CanvassActivity` (fallback `createdAt`) older than
+  `PLATFORM_IDLE_MONTHS` (default 6). These escape **both** retention triggers by construction: the
+  wind-down needs `canceled`, and the dormancy purge protects paying statuses — hence the human
+  queue. Terminating (Billing panel → status `canceled`, reason required) starts the 60-day
+  wind-down; the nightly sweep deletes on lapse (see [OPERATIONS.md](OPERATIONS.md)).
 - **`promote`** toggles `User.isSuperAdmin`; a super admin **cannot** toggle their own flag (guards
   against self-lockout / accidental self-demotion).
 - **Organizations** `PATCH` flips `isActive` (deactivate hides the org from its members) and edits

@@ -282,7 +282,9 @@ export default function AdminMap() {
   const dateTouchedRef = useRef(false);
   const [statusFilter, setStatusFilter] = useState([]); // [] = all statuses
   const [canvasserId, setCanvasserId] = useState('');
-  const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', label: '' });
+  // `option` is the answer TEXT, sent alongside optionId so the server dual-reads
+  // (id-native rows by id, legacy text-only rows by text) — same as the web map.
+  const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', option: '', label: '' });
   const [live, setLive] = useState(true);
   const [openMenu, setOpenMenu] = useState(null); // 'date' | 'canvasser' | 'status' | 'answer' | null
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -358,7 +360,7 @@ export default function AdminMap() {
   const mapQ = useQuery({
     queryKey: [
       'admin', 'households', 'map', cId, range?.from, range?.to, statusFilter.join(','),
-      canvasserId, answerFilter.questionKey, answerFilter.optionId, effortId, passId, importId, showPings, bbox,
+      canvasserId, answerFilter.questionKey, answerFilter.optionId, answerFilter.option, effortId, passId, importId, showPings, bbox,
     ],
     queryFn: () => {
       const p = new URLSearchParams({ campaignId: String(cId) });
@@ -369,6 +371,7 @@ export default function AdminMap() {
       if (answerFilter.questionKey) {
         p.set('questionKey', answerFilter.questionKey);
         if (answerFilter.optionId) p.set('optionId', answerFilter.optionId);
+        if (answerFilter.option) p.set('option', answerFilter.option);
       }
       if (effortId) p.set('effortId', effortId);
       if (passId) p.set('passId', passId);
@@ -491,7 +494,7 @@ export default function AdminMap() {
       setRange({ preset: 'all', from: null, to: null });
       setStatusFilter([]);
       setCanvasserId('');
-      setAnswerFilter({ questionKey: '', optionId: '', label: '' });
+      setAnswerFilter({ questionKey: '', optionId: '', option: '', label: '' });
       setScope({ effortId: '', passId: '', importId: '' });
       return; // wait for the unfiltered set, then focus on the next run
     }
@@ -546,6 +549,50 @@ export default function AdminMap() {
     mapQ.isSuccess,
     mapQ.isFetching,
   ]);
+
+  // Seed the audit filters from an answer-drill "View on map" link (?seedAt=…) —
+  // one-shot, modeled on the household focus above. Keyed on a per-tap nonce so a
+  // repeat link re-seeds but background re-renders don't; consumed params are
+  // stripped (a bare tab press re-delivers route params — leaving them would
+  // re-seed forever). Waits until the seed's own campaign (?scid=, saved active
+  // by the sender before pushing) is the one loaded: the campaign-change effects
+  // above reset the range/filters, so seeding before the switch would be stomped.
+  // Defined AFTER those effects so that on the switch commit this runs last.
+  const seedNonce = one(params.seedAt);
+  const seedCid = one(params.scid);
+  const seededRef = useRef(null);
+  useEffect(() => {
+    if (!seedNonce || seededRef.current === seedNonce) return;
+    if (seedCid && String(seedCid) !== String(cId)) return; // re-runs when cId catches up
+    seededRef.current = seedNonce;
+    const qk = one(params.questionKey) || '';
+    const oid = one(params.optionId) || '';
+    const alabel = one(params.alabel) || '';
+    const uid = one(params.userId) || '';
+    const f = one(params.from) || '';
+    const t = one(params.to) || '';
+    setAnswerFilter(
+      qk
+        ? { questionKey: qk, optionId: oid, option: alabel, label: alabel }
+        : { questionKey: '', optionId: '', option: '', label: '' }
+    );
+    setCanvasserId(uid);
+    // Show exactly what the drill list showed: no lingering status/effort narrowing.
+    setStatusFilter([]);
+    setScope({ effortId: '', passId: '', importId: '' });
+    // Mirror the drill's window: explicit bounds → custom range; none → the drill
+    // was all-time. Marked touched so the tz reseed can't snap it back to today.
+    dateTouchedRef.current = true;
+    setRange(f || t ? { preset: 'custom', from: f || null, to: t || null } : { preset: 'all', from: null, to: null });
+    // Drop the viewport bound + re-frame on the seeded subset once it loads (same
+    // reset as a campaign change) — else the pull stays clipped to wherever the
+    // map was last parked and the drill's doors may sit off-screen.
+    setBbox(null);
+    bboxArmedRef.current = false;
+    lastBoundsRef.current = null;
+    framedRef.current = false;
+    router.setParams({ questionKey: '', optionId: '', alabel: '', userId: '', from: '', to: '', seedAt: '', scid: '' });
+  }, [seedNonce, seedCid, cId]);
 
   const lineFeatures = useMemo(
     () => (showPings ? linesToFeatures(activities, householdsById) : { type: 'FeatureCollection', features: [] }),
@@ -1125,7 +1172,7 @@ export default function AdminMap() {
         {openMenu === 'answer' && (
           <View style={styles.menu}>
             <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
-              <MenuItem label="Any answer" active={!answerFilter.questionKey} onPress={() => { setAnswerFilter({ questionKey: '', optionId: '', label: '' }); setOpenMenu(null); }} />
+              <MenuItem label="Any answer" active={!answerFilter.questionKey} onPress={() => { setAnswerFilter({ questionKey: '', optionId: '', option: '', label: '' }); setOpenMenu(null); }} />
               {surveyQuestions.map((q) => (
                 <View key={q.key}>
                   <Text style={styles.menuGroup}>{q.label}</Text>
@@ -1133,8 +1180,11 @@ export default function AdminMap() {
                     <MenuItem
                       key={o.id || o.option}
                       label={o.option}
-                      active={answerFilter.questionKey === q.key && answerFilter.optionId === o.id}
-                      onPress={() => { setAnswerFilter({ questionKey: q.key, optionId: o.id, label: o.option }); setOpenMenu(null); }}
+                      active={
+                        answerFilter.questionKey === q.key &&
+                        (answerFilter.optionId ? answerFilter.optionId === o.id : answerFilter.option === o.option)
+                      }
+                      onPress={() => { setAnswerFilter({ questionKey: q.key, optionId: o.id, option: o.option, label: o.option }); setOpenMenu(null); }}
                     />
                   ))}
                 </View>

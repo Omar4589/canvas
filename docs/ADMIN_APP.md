@@ -49,6 +49,16 @@ Only canvassers **assigned to the campaign** can be assigned books (they need th
 them) — if someone's missing, there's a link to Campaign assignments. Canvassers see changes on their
 next sync.
 
+### Drilling into a survey answer (campaign screen)
+On a campaign's detail screen, the survey results list each answer with its count — **tap a count**
+to open the entries behind it. That screen now has a **Voters | By canvasser** toggle (who *recorded*
+this answer, ranked, with what share of their own answers it is), a **canvasser filter** pill, rows
+showing the exact campaign-time timestamp plus note/Offline badges, and a **View on map** action that
+opens the admin Map pre-filtered to the same answer, canvasser, and date window. Tapping an entry
+opens the **response detail**, which now shows an *"Edited by …"* line when an admin changed it and a
+*"Synced"* line for offline submissions. Same tool as the web **Survey Explorer** — see
+[SURVEYS.md](SURVEYS.md) (Part 1 → *Auditing answers*).
+
 ### The More hub
 - **Manage:** Users; **GPS audit** ([AUDIT.md](AUDIT.md)); **Notes** — the campaign Notes hub, door/
   survey/admin notes in one feed ([NOTES.md](NOTES.md)); Voter search; Switch to canvass mode. (More
@@ -192,6 +202,21 @@ book's homes for assignment in context. Hidden route, pushed from the Books list
 
 **Prerequisite:** a canvasser sees a book only if assigned to the **campaign** *and* the **book**, so
 book assignment alone is a no-op until they're on the campaign — hence the campaign-assigned roster.
+
+## The survey answer drill (mobile)
+
+The mobile end of the answer drill-in — the endpoints, counting contract, and web counterpart live
+in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
+
+| Screen | What changed |
+|---|---|
+| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey. |
+| [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, userId, from, to, scid, seedAt }`). |
+| [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`). |
+| [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. |
+
+Every fetch carries `campaignId` (the reports router 403s a lead without a managed one). All of this
+is JS-only — ships via OTA, no native build.
 
 ## Web-dashboard admin surfaces (file map)
 These tools are web-only (the mobile More hub links out to the web for them). Listed here so the file

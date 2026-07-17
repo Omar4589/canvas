@@ -129,7 +129,14 @@ export default function MapPage() {
   const rangeTouchedRef = useRef(!!searchParams.get('from') || !!searchParams.get('household'));
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState(searchParams.get('userId') || '');
-  const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '', optionId: '' });
+  // A Survey Explorer "Open in Map" deep-link carries the answer drill
+  // (?questionKey/&option/&optionId) — seeded once, like canvasserId above. The
+  // filter chips key on option TEXT, so links must always include `option`.
+  const [answerFilter, setAnswerFilter] = useState(() => ({
+    questionKey: searchParams.get('questionKey') || '',
+    option: searchParams.get('option') || '',
+    optionId: searchParams.get('optionId') || '',
+  }));
   const [showCanvasserPins, setShowCanvasserPins] = useState(false);
   // Live auto-refresh of the map (web admins are at a desk + connected). Gates
   // the poll interval below; pauses automatically when the tab is backgrounded.

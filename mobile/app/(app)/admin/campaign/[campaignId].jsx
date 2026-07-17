@@ -175,6 +175,8 @@ export default function CampaignDetail() {
   }, [canvassersQ.data, coordByUserId]);
 
   function goVoters(qn, opt) {
+    // Scope the drill to the SAME template these on-screen counts came from.
+    const tplId = surveyResultsQ.data?.surveyTemplate?.id;
     router.push({
       pathname: '/(app)/admin/answer-voters',
       params: {
@@ -183,6 +185,7 @@ export default function CampaignDetail() {
         option: String(opt.option),
         optionId: String(opt.id ?? ''),
         label: qn.label,
+        ...(tplId ? { surveyTemplateId: String(tplId) } : {}),
         ...(range?.from ? { from: range.from } : {}),
         ...(range?.to ? { to: range.to } : {}),
       },
