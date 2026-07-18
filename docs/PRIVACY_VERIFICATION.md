@@ -102,7 +102,10 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   (asserted over the outbox in `test/mailTriggers.int.test.js`); the silent campaignRoster
   auto-add never emails. Mail is DORMANT until `RESEND_API_KEY` + `MAIL_FROM` are set — setting
   them is the DPA §6 subprocessor go-live and requires the DPA/policy edits + customer notice
-  FIRST.
+  FIRST. *(Disclosure text landed 2026-07-17 — DPA §6 list + privacy.html service-providers
+  paragraph + Last-updated bump, in the SAME commit as the mail code, so one deploy flips the
+  published pages and the capability together; the env vars were pre-set in Heroku and are inert
+  until that deploy. Customer §6 notice = owner, before deploying.)*
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
