@@ -11,6 +11,8 @@ tags: canvasser, account, user, password, existing, link
 
 The quickest way is **inline from a campaign's roster**: on the campaign's **Team** page, tap **+ New canvasser**, enter their name and email, and set a **temporary password**. It can be simple and easy to read out loud — the first time they sign in, they're required to choose their own strong password. This adds the account and drops them onto that campaign in one step. Both **team leads** and **admins** can do this.
 
+They also get an **invitation email** with a set-password link (valid 72 hours), so they can set their own password before you've even seen them — the typed temporary password is the fallback for someone who can't get to their inbox. The email never contains the password itself.
+
 Admins can also add people org-wide from the **Users** page — same idea, and you can set the role (canvasser, team lead, or admin) there.
 
 > Heads up: a temporary password is valid for **72 hours**. Have the new person sign in and set their own password within that window — if it lapses, just set a new temporary password for them.

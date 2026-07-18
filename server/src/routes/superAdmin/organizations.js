@@ -17,6 +17,9 @@ import { idleZeroDollarOrgs } from '../../services/billing/idleOrgs.js';
 import { createOrgMember, MemberError } from '../../services/memberships/createMember.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 import { deleteOrganization } from '../../services/platform/deleteOrganization.js';
+import { sendMail } from '../../services/mail/mailer.js';
+import { provisioningWelcome } from '../../services/mail/templates.js';
+import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
 
 const router = Router();
 router.use(requireAuth, requireSuperAdmin);
@@ -364,6 +367,11 @@ router.post('/', async (req, res, next) => {
         billingAccess: true,
       });
       admin = { id: String(user._id), email: user.email, firstName: user.firstName, lastName: user.lastName };
+      // Welcome the new client's first admin with a set-password link — best-effort, never awaited (a
+      // mail hiccup must not fail provisioning). The temp password above stays in the 201 response for
+      // out-of-band hand-off; it never appears in the email.
+      const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
+      sendMail({ to: user.email, ...provisioningWelcome({ firstName: user.firstName, orgName: org.name, setPasswordUrl: url }), kind: 'provisioningWelcome' });
     }
 
     res.status(201).json({ organization: org, admin, tempPassword });

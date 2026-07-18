@@ -5,6 +5,9 @@ import { OrgDeletionRequest } from '../../models/OrgDeletionRequest.js';
 import { RetentionRun } from '../../models/RetentionRun.js';
 import { deleteOrganization } from '../platform/deleteOrganization.js';
 import { windDownDeletionDate } from '../billing/windDown.js';
+import { sendMail } from '../mail/mailer.js';
+import { windDownWarning, dormancyWarning } from '../mail/templates.js';
+import { orgNotifyEmails } from '../mail/recipients.js';
 
 // The three disclosed retention triggers. Each is a REAL purge — it calls the same irreversible
 // org-delete cascade a super-admin would — and each writes a RetentionRun so that a trigger which
@@ -14,20 +17,29 @@ import { windDownDeletionDate } from '../billing/windDown.js';
 // service file is a business decision nobody can change without a deploy.
 //
 //   WIND-DOWN            a terminated customer gets a grace period to export, then their data goes.
-//   DORMANCY             a NON-PAYING account (canceled/suspended) untouched for two years goes. There
-//                        is NO warning email — the server has no email/SMS capability at all — which is
-//                        exactly why this is gated to accounts that already stopped being customers.
+//   DORMANCY             a NON-PAYING account (canceled/suspended) untouched for two years goes.
 //   DELETE-ON-REQUEST    a customer asks; we have an SLA and we keep it.
 //
 // The point of all three: "we keep your data as long as you're a customer, and then we don't" has to
 // be something that HAPPENS, not something we say. Before this, nothing in the codebase ever deleted
 // voter data on a timer — a canceled customer's voter file sat in our database forever.
+//
+// WIND-DOWN and DORMANCY additionally WARN before they delete (the warn* stages below), and their
+// purges are gated on that warning having actually happened: no org is ever deleted by those two
+// triggers unless a warning email was ACCEPTED FOR DELIVERY (or the org has no reachable recipient
+// at all) at least WARN_GRACE_DAYS earlier. "We warned you first" is a marker in the database, not
+// an intention. DELETE-ON-REQUEST is exempt from warning on purpose — it IS the customer's request.
 
 // WIND_DOWN_DAYS + the deletion-date math live in one shared place so the customer-facing banner and
 // this deletion job cannot disagree. Re-exported here for the existing importers/tests.
 export { WIND_DOWN_DAYS } from '../billing/windDown.js';
 export const DORMANCY_MONTHS = Number(process.env.RETENTION_DORMANCY_MONTHS || 30);
 export const DELETE_REQUEST_SLA_DAYS = Number(process.env.RETENTION_DELETE_SLA_DAYS || 30);
+// How far ahead of a deletion the warning email goes out, and the minimum time a customer gets
+// between the warning actually reaching them and the deletion firing (matters when an org is
+// already past its deadline at warn time — it still gets the full grace, never a same-day purge).
+export const WARN_LEAD_DAYS = Number(process.env.RETENTION_WARN_LEAD_DAYS || 30);
+export const WARN_GRACE_DAYS = Number(process.env.RETENTION_WARN_GRACE_DAYS || 14);
 
 export const TRIGGER_JOB = 'retention-triggers';
 
@@ -44,7 +56,90 @@ async function isExempt(orgId) {
 }
 
 /**
- * 1. WIND-DOWN. A subscription that has been `canceled` for longer than the grace period.
+ * Deliver one deletion warning and decide whether it counts. The marker a purge trusts means
+ * "the customer was actually told" — so it is earned in exactly two ways:
+ *   - sendMail returned { sent: true }: Resend ACCEPTED the message. Not "we tried" — a send
+ *     that failed, timed out, or ran while mail is dormant (no RESEND_API_KEY yet) returns
+ *     sent: false and the org is retried next sweep, unstamped. One bad MAIL_FROM must never
+ *     quietly license deleting a never-warned customer.
+ *   - The org has ZERO reachable recipients (no admins, no billing contact — typically already
+ *     torn down by hand). Nothing will ever be deliverable, so waiting would only mean keeping
+ *     their data forever; stamp with a loud log.
+ */
+async function deliverWarning({ orgId, orgSlug, template, kind }) {
+  const recipients = await orgNotifyEmails(orgId);
+  if (!recipients.length) {
+    console.warn(
+      `[retention] ${kind}: org ${orgSlug} has no reachable recipients (no active admins, no billing contact) — marking warned without an email.`
+    );
+    return { stamp: true };
+  }
+  const result = await sendMail({ to: recipients, ...template, kind });
+  if (!result.sent) {
+    console.warn(
+      `[retention] ${kind}: warning for ${orgSlug} NOT delivered (${result.disabled ? 'mail dormant' : result.error || 'send failed'}) — not marking; will retry next sweep.`
+    );
+    return { stamp: false };
+  }
+  return { stamp: true };
+}
+
+/**
+ * 1a. WIND-DOWN WARNING. Canceled subscriptions within WARN_LEAD_DAYS of their deletion date
+ * (including already overdue) that have never been warned.
+ *
+ * The date the email promises is PERSISTED (`windDownDeleteNotBefore`) and the purge gates on it:
+ * max(the banner's wind-down date, warn time + WARN_GRACE_DAYS). For the normal case that IS the
+ * banner date — same windDownDeletionDate() call, so the email, the banner, and the deletion can't
+ * disagree. The max() only matters for an org already past its deadline when warnings first ship:
+ * it gets the full grace instead of an email naming a date in the past. Persisting also freezes
+ * the promise against later env changes — a config edit can delay a deletion, never accelerate it
+ * past what a customer was told.
+ */
+export async function warnWindDownOrgs({ apply = true } = {}) {
+  const now = Date.now();
+  const subs = await Subscription.find(
+    { status: 'canceled', windDownWarnedAt: null },
+    'organizationId statusChangedAt'
+  ).lean();
+
+  const candidates = [];
+  for (const s of subs) {
+    const deletionDate = windDownDeletionDate(s.statusChangedAt);
+    if (!deletionDate) continue;
+    if (deletionDate.getTime() - now > WARN_LEAD_DAYS * DAY) continue;
+    if (await isExempt(s.organizationId)) continue;
+    const org = await Organization.findById(s.organizationId, 'name slug').lean();
+    if (org) candidates.push({ sub: s, org, deletionDate });
+  }
+
+  // Dry-run counts only — it must not email a customer, and it must not stamp.
+  if (!apply) return { due: candidates.length, warned: 0, orgs: candidates.map((c) => c.org.slug) };
+
+  let warned = 0;
+  for (const c of candidates) {
+    const deleteNotBefore = new Date(Math.max(c.deletionDate.getTime(), now + WARN_GRACE_DAYS * DAY));
+    const { stamp } = await deliverWarning({
+      orgId: c.org._id,
+      orgSlug: c.org.slug,
+      template: windDownWarning({ orgName: c.org.name, deleteOnDate: deleteNotBefore }),
+      kind: 'windDownWarning',
+    });
+    if (!stamp) continue;
+    // Guarded on the marker still being null AND the sub still canceled: a concurrent status
+    // change (which clears the markers) must not be overwritten by a warning that raced it.
+    await Subscription.updateOne(
+      { _id: c.sub._id, windDownWarnedAt: null, status: 'canceled' },
+      { $set: { windDownWarnedAt: new Date(), windDownDeleteNotBefore: deleteNotBefore } }
+    );
+    warned += 1;
+  }
+  return { due: candidates.length, warned, orgs: candidates.map((c) => c.org.slug) };
+}
+
+/**
+ * 1b. WIND-DOWN PURGE. A subscription that has been `canceled` past the wind-down window — AND
+ * whose customer was warned (see warnWindDownOrgs), at least WARN_GRACE_DAYS ago.
  *
  * The grace period is the customer's window to export. Terminating a contract must not mean their
  * data lingers indefinitely on our servers "just in case" — that is exactly the retention we tell
@@ -54,7 +149,7 @@ export async function purgeWoundDownOrgs({ apply = true } = {}) {
   const now = Date.now();
   const subs = await Subscription.find(
     { status: 'canceled' },
-    'organizationId statusChangedAt'
+    'organizationId statusChangedAt windDownWarnedAt windDownDeleteNotBefore'
   ).lean();
 
   const due = [];
@@ -64,6 +159,11 @@ export async function purgeWoundDownOrgs({ apply = true } = {}) {
     // few, so an indexed status query + an in-code check per row is fine and keeps the math in one place.
     const deletionDate = windDownDeletionDate(s.statusChangedAt);
     if (!deletionDate || deletionDate.getTime() > now) continue;
+    // Never delete unwarned: no marker (the warning was never accepted for delivery — mail down,
+    // dormant, or the warn stage hasn't reached them) means NO deletion, this sweep or any sweep.
+    // And never before the exact date the warning email named.
+    if (!s.windDownWarnedAt || !s.windDownDeleteNotBefore) continue;
+    if (new Date(s.windDownDeleteNotBefore).getTime() > now) continue;
     if (await isExempt(s.organizationId)) continue;
     const org = await Organization.findById(s.organizationId, 'name slug').lean();
     if (org) due.push({ org, since: s.statusChangedAt });
@@ -91,18 +191,78 @@ export async function purgeWoundDownOrgs({ apply = true } = {}) {
 // not auto-delete them for inactivity.
 const DORMANCY_PROTECTED_STATUSES = new Set(['active', 'trial', 'past_due', 'internal']);
 
+/**
+ * 2a. DORMANCY WARNING. Orgs whose inactivity clock will cross DORMANCY_MONTHS within
+ * WARN_LEAD_DAYS (or already has), on a non-protected subscription, never warned.
+ *
+ * Same delivery/stamp semantics as wind-down. The promised date is max(the org's natural
+ * dormancy-purge date, warn time + WARN_GRACE_DAYS), persisted on the Organization. The email
+ * says it plainly: any recorded canvassing activity cancels the deletion — and the purge below
+ * enforces exactly that.
+ */
+export async function warnDormantOrgs({ apply = true } = {}) {
+  const now = Date.now();
+  const cutoff = new Date(now - DORMANCY_MONTHS * 30 * DAY);
+  // An org is warn-eligible when its last activity is within WARN_LEAD_DAYS of the dormancy
+  // boundary — i.e. it will become purge-eligible within the lead window if nobody knocks.
+  const warnHorizon = new Date(cutoff.getTime() + WARN_LEAD_DAYS * DAY);
+  const orgs = await Organization.find(
+    { createdAt: { $lte: warnHorizon }, dormancyWarnedAt: null },
+    'name slug createdAt'
+  ).lean();
+
+  const candidates = [];
+  for (const org of orgs) {
+    if (await isExempt(org._id)) continue;
+    const sub = await Subscription.findOne({ organizationId: org._id }, 'status').lean();
+    if (!sub || DORMANCY_PROTECTED_STATUSES.has(sub.status)) continue;
+    const last = await CanvassActivity.findOne({ organizationId: org._id }, 'timestamp')
+      .sort({ timestamp: -1 })
+      .lean();
+    const lastTouch = new Date(last?.timestamp || org.createdAt);
+    if (lastTouch > warnHorizon) continue;
+    const naturalPurgeAt = new Date(lastTouch.getTime() + DORMANCY_MONTHS * 30 * DAY);
+    candidates.push({ org, naturalPurgeAt });
+  }
+
+  // Dry-run counts only — it must not email a customer, and it must not stamp.
+  if (!apply) return { due: candidates.length, warned: 0, orgs: candidates.map((c) => c.org.slug) };
+
+  let warned = 0;
+  for (const c of candidates) {
+    const deleteNotBefore = new Date(Math.max(c.naturalPurgeAt.getTime(), now + WARN_GRACE_DAYS * DAY));
+    const { stamp } = await deliverWarning({
+      orgId: c.org._id,
+      orgSlug: c.org.slug,
+      template: dormancyWarning({ orgName: c.org.name, deleteOnDate: deleteNotBefore }),
+      kind: 'dormancyWarning',
+    });
+    if (!stamp) continue;
+    await Organization.updateOne(
+      { _id: c.org._id, dormancyWarnedAt: null },
+      { $set: { dormancyWarnedAt: new Date(), dormancyDeleteNotBefore: deleteNotBefore } }
+    );
+    warned += 1;
+  }
+  return { due: candidates.length, warned, orgs: candidates.map((c) => c.org.slug) };
+}
+
 export async function purgeDormantOrgs({ apply = true } = {}) {
-  const cutoff = new Date(Date.now() - DORMANCY_MONTHS * 30 * DAY);
-  const orgs = await Organization.find({ createdAt: { $lte: cutoff } }, 'name slug createdAt').lean();
+  const now = Date.now();
+  const cutoff = new Date(now - DORMANCY_MONTHS * 30 * DAY);
+  const orgs = await Organization.find(
+    { createdAt: { $lte: cutoff } },
+    'name slug createdAt dormancyWarnedAt dormancyDeleteNotBefore'
+  ).lean();
 
   const due = [];
   for (const org of orgs) {
     if (await isExempt(org._id)) continue;
-    // Gate on subscription status, not knock recency alone. Deleting a paying customer because they
-    // did not canvass for two years would be catastrophic — and we have NO email or SMS capability, so
-    // we cannot warn anyone first. That makes "only delete an account that is no longer a customer" a
-    // hard requirement: dormancy may only ever touch a canceled or suspended org (one that has already
-    // stopped paying), never an active, trialing, or past-due one. An org with no subscription record
+    // Gate on subscription status, not knock recency alone. Deleting a paying customer because
+    // they did not canvass for two years would be catastrophic. Even with the warning emails
+    // below, "only delete an account that is no longer a customer" stays a hard requirement:
+    // dormancy may only ever touch a canceled or suspended org (one that has already stopped
+    // paying), never an active, trialing, or past-due one. An org with no subscription record
     // at all is treated as protected (fail safe) rather than deleted.
     const sub = await Subscription.findOne({ organizationId: org._id }, 'status').lean();
     if (!sub || DORMANCY_PROTECTED_STATUSES.has(sub.status)) continue;
@@ -112,8 +272,25 @@ export async function purgeDormantOrgs({ apply = true } = {}) {
       .lean();
     // An org that never canvassed at all is measured from its creation date, not treated as
     // infinitely dormant — otherwise a customer who signs up on Friday is "dormant" on Monday.
-    const lastTouch = last?.timestamp || org.createdAt;
-    if (new Date(lastTouch) <= cutoff) due.push({ org, lastTouch });
+    const lastTouch = new Date(last?.timestamp || org.createdAt);
+
+    // Activity AFTER the warning voids it — "any recorded canvassing activity cancels this" is
+    // what the email promised. Clear the marker so a future dormancy stretch starts from a
+    // fresh warning instead of trusting a stale one.
+    if (org.dormancyWarnedAt && lastTouch > new Date(org.dormancyWarnedAt)) {
+      if (apply) {
+        await Organization.updateOne(
+          { _id: org._id },
+          { $set: { dormancyWarnedAt: null, dormancyDeleteNotBefore: null } }
+        );
+      }
+      continue;
+    }
+    if (lastTouch > cutoff) continue;
+    // Never delete unwarned (see purgeWoundDownOrgs) — and never before the date the email named.
+    if (!org.dormancyWarnedAt || !org.dormancyDeleteNotBefore) continue;
+    if (new Date(org.dormancyDeleteNotBefore).getTime() > now) continue;
+    due.push({ org, lastTouch });
   }
 
   if (!apply) return { due: due.length, purged: 0, orgs: due.map((d) => d.org.slug) };
@@ -213,18 +390,24 @@ export async function runRetentionTriggers({ apply = true } = {}) {
   const run = await RetentionRun.create({ job: TRIGGER_JOB, startedAt });
 
   try {
+    // Warnings run FIRST, so a sweep's receipt always shows warns ahead of the purges they
+    // license. A freshly-warned org can never be purged in the same sweep by construction:
+    // its deleteNotBefore is at least WARN_GRACE_DAYS in the future.
+    const warnWindDown = await warnWindDownOrgs({ apply });
+    const warnDormant = await warnDormantOrgs({ apply });
     const windDown = await purgeWoundDownOrgs({ apply });
     const dormant = await purgeDormantOrgs({ apply });
     const requested = await executeDueDeletionRequests({ apply });
 
     const purged = windDown.purged + dormant.purged + requested.purged;
     const scanned = windDown.due + dormant.due + requested.due;
+    const warned = warnWindDown.warned + warnDormant.warned;
 
     await RetentionRun.updateOne(
       { _id: run._id },
-      { $set: { finishedAt: new Date(), ok: true, purged, scanned } }
+      { $set: { finishedAt: new Date(), ok: true, purged, scanned, warned } }
     );
-    return { ok: true, windDown, dormant, requested, purged, scanned };
+    return { ok: true, warnWindDown, warnDormant, windDown, dormant, requested, purged, scanned, warned };
   } catch (err) {
     await RetentionRun.updateOne(
       { _id: run._id },

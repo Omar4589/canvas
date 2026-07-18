@@ -39,7 +39,9 @@ audit half as *"designed to be recorded"* (correct — the write is best-effort)
 6. **Dormancy shield** (was B6 Trigger 2): `DORMANCY_PROTECTED_STATUSES` = {active, trial, past_due,
    internal} (`triggers.js:92`) — only canceled/suspended orgs are eligible, a missing Subscription
    protects, and the default window is now **30 months** (`RETENTION_DORMANCY_MONTHS`), matching the
-   policy. Still no warning capability (unchanged — no mailer exists).
+   policy. Still no warning capability (unchanged — no mailer exists). *[v4 2026-07-17: superseded —
+   a mailer now exists (Resend, `services/mail/`) and the sweep WARNS before both wind-down and
+   dormancy purges, which are gated on delivery-verified markers. See the v4 watchlist entry.]*
 7. **Deletion-request intake exists** (was B6 Trigger 3): operator CLI `request:org-deletion` and a
    super-admin API (`POST/GET /super-admin/access/deletion-requests`, `POST …/:id/cancel`), 30-day SLA.
    Failed executions stay `scheduled` and retry (≤5 attempts, `RETENTION_DELETE_MAX_ATTEMPTS`), then go
@@ -89,6 +91,18 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   `routes/mobile/canvass.js`. **The policy now names it** (privacy.html "Canvassing activity" —
   contact preferences: recorded with the reason, used to "exclude that person from the
   organization's future canvassing lists and exports") — that published sentence anchors here.
+- *(v4 2026-07-17)* **Warnings-before-deletion is now a CHECKABLE claim.** Any future policy/DPA
+  sentence of the form *"we notify you before scheduled deletion"* anchors here: true only while
+  (a) `purgeWoundDownOrgs`/`purgeDormantOrgs` keep their never-delete-unwarned gates (marker +
+  `deleteNotBefore`), (b) the markers are stamped ONLY on `sendMail(...).sent === true` or
+  genuinely-zero recipients (`deliverWarning`), (c) the billing status chokepoint keeps clearing
+  BOTH marker pairs, and (d) activity-after-warning keeps voiding the dormancy marker. Guard
+  test: `test/retentionWarnings.int.test.js`. Related checkables: reset tokens are stored
+  sha256-hashed and single-use (`test/mailFlow.int.test.js`); **emails never contain passwords**
+  (asserted over the outbox in `test/mailTriggers.int.test.js`); the silent campaignRoster
+  auto-add never emails. Mail is DORMANT until `RESEND_API_KEY` + `MAIL_FROM` are set — setting
+  them is the DPA §6 subprocessor go-live and requires the DPA/policy edits + customer notice
+  FIRST.
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -102,8 +116,10 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
    has no account, no access/correction/deletion route; a DSAR is still a manual process that an
    admin tools through the console. The flag is per-org (dies with the org's data — a
    platform-sticky DNC would be a new cross-org retention promise; deliberately out).
-2. **Grants are self-issued.** No approver, no customer notification; `break_glass` can list all live
-   grants (visibility, not approval). The policy carefully does not claim otherwise — keep it that way.
+2. **Grants are self-issued.** No approver; `break_glass` can list all live grants (visibility, not
+   approval). The policy carefully does not claim otherwise — keep it that way. *[v4 2026-07-17:
+   narrowed — customers are now NOTIFIED automatically on every new grant (see E12 stamp). The
+   no-approver half stands; do not write "approved."]*
 3. **The audit log is request-level.** No record ids; *"was MY record accessed?"* is unanswerable. The
    staff-facing strings ("every record you open is logged") still overstate granularity.
 4. **The cross-org password-reset path is unprevented by decision** (v1 F14 Exc 3): an admin of any org
@@ -195,7 +211,10 @@ migration this time. New operator tool: `request:org-deletion <slug> --apply`.
 The re-audit found one HIGH regression in an earlier draft of these fixes — a multi-org password-reset
 block that would have locked out multi-org users (no self-serve reset exists) and cited a non-existent
 "Forgot Password." **It was reverted.** The re-audit confirms no remaining regression: member-admins pass
-every new guard; the guards bite only vendors (grant-holders). *(Separately, the dev-only
+every new guard; the guards bite only vendors (grant-holders). *[v4 2026-07-17: self-serve reset now
+EXISTS (`POST /auth/forgot-password` + `/auth/reset-password`, email-tokened, sha256-stored,
+single-use); the multi-org admin-reset guard remains out by owner decision — the historical
+reasoning above no longer blocks it, see `memberships.js` comment.]* *(Separately, the dev-only
 `migratePersons.js` backfill tool calls `resolvePerson` without an org and is inoperative under the
 prior deploy's org-scoping — a broken maintenance script, not a runtime path. Flagged, not fixed here.)*
 
@@ -210,7 +229,11 @@ These survive the remediation and are the list to take to counsel:
    of the nine fixes.**
 2. **Deletion is TTL/timer-based, not instant, and never warned.** There is **no email or SMS capability
    at all**, so no customer is warned before a wind-down or dormancy deletion. Write *"we aim to delete
-   within…"*, never *"is deleted after…"*.
+   within…"*, never *"is deleted after…"*. *[v4 2026-07-17: the "never warned" half is superseded —
+   wind-down and dormancy purges now REQUIRE a delivery-verified warning email
+   (`warnWindDownOrgs`/`warnDormantOrgs` + the never-delete-unwarned purge gates,
+   `services/retention/triggers.js`; guard test `test/retentionWarnings.int.test.js`). The
+   "aim to delete, not is deleted" advisory stands — timing is still cron-kept.]*
 3. **Deletion is not total.** Cached addresses age out (≤18 months, coordinate-only); `AccessLog` /
    `SupportAccessGrant` / deletion-receipt rows are retained by design (they are the proof the deletion
    happened); **Atlas backups retain deleted data for their retention window** (daily 7d / weekly 4w /
@@ -223,7 +246,10 @@ These survive the remediation and are the list to take to counsel:
 5. **Passwords are per-user, not per-org (item 14).** One admin resetting a multi-org member's password
    affects that person's login everywhere; mitigated (not eliminated) by forced-change-on-next-login,
    which makes misuse visible rather than silent. Architectural; needs per-org credentials or email to
-   fully close.
+   fully close. *[v4 2026-07-17: email now exists and self-serve reset shipped; the admin-reset
+   guard stays out by owner decision (a locked-out user can now rescue themselves, so the
+   trade-off changed but the owner kept admin resets unrestricted). Item 14 remains
+   open-by-decision.]*
 6. **The audit write is best-effort.** See the carve-out above.
 7. **Legacy `/r/` report links** created before the password/expiry change remain open and non-expiring
    until an operator revokes them (now at least `noindex` + robots-disallowed).
@@ -455,18 +481,20 @@ Any `Subscription` with `status: 'canceled'` whose `statusChangedAt` is older th
 > Subscription record is protected, not deleted. The default window is now **30 months**
 > (`RETENTION_DORMANCY_MONTHS`). **Points 1 and 3 below are superseded** (the shield; and the window
 > math — note the same imprecision survives: 30 × 30-day months = **900 days ≈ 29.6 calendar
-> months**, so keep the policy's "approximately"). Points 2 (canvassing-only clock) and 4 (no
-> warning — still no mailer) remain true.
+> months**, so keep the policy's "approximately"). Point 2 (canvassing-only clock) remains true.
+> Point 4 is **superseded (v4 2026-07-17)**: a warning email now precedes dormancy deletion and the
+> purge is GATED on its verified delivery (`dormancyWarnedAt`/`dormancyDeleteNotBefore` markers;
+> activity after the warning voids it — exactly what the email promises).
 
 `purgeDormantOrgs` (`triggers.js:78-102`) scans **every** organization and hard-deletes those with no `CanvassActivity` newer than the cutoff.
 
 1. **It does not check whether the customer is paying.** The only exemption is `Subscription.status === 'internal'` — Doorline's own demo orgs (`:36-39`, `:84`). An organization with an **`active`, fully-paid subscription** is fully eligible for deletion. `Organization` has no exempt/lock field.
 2. **The clock is canvassing activity ONLY.** `CanvassActivity.findOne({organizationId}).sort({timestamp:-1})` is the only activity query in the function (`:85-87`). **A login, a voter-file import, a turf cut, a report view, a survey edit, or a subscription payment does NOT reset the clock.** An org that has never canvassed is measured from `Organization.createdAt` (`:90`).
 3. **The window is 720 days, not 24 months.** `DORMANCY_MONTHS * 30 * DAY` (`:79`) = 720 days ≈ 23.7 calendar months. A policy saying "24 months" over-promises by ~11 days **in the direction of deleting earlier than stated.**
-4. **NO WARNING IS SENT.** The file comment says dormancy happens *"after a warning"* (`triggers.js:16`). **There is no warning mechanism anywhere.** Due orgs are identified and deleted in the same pass, with no notice, no grace flag, no pre-deletion state. **The server has no email or SMS capability at all** — `server/package.json` declares no mailer dependency (no nodemailer, sendgrid, postmark, ses, resend, mailgun, twilio).
+4. **NO WARNING IS SENT.** The file comment says dormancy happens *"after a warning"* (`triggers.js:16`). **There is no warning mechanism anywhere.** Due orgs are identified and deleted in the same pass, with no notice, no grace flag, no pre-deletion state. **The server has no email or SMS capability at all** — `server/package.json` declares no mailer dependency (no nodemailer, sendgrid, postmark, ses, resend, mailgun, twilio). *[v4 2026-07-17: superseded. `services/mail/` sends via the Resend REST API (global fetch — still no mailer npm dependency, so the package.json sweep stays literally true while its conclusion flips). `warnDormantOrgs` emails ~`RETENTION_WARN_LEAD_DAYS` ahead; the purge refuses any org without a delivery-verified `dormancyWarnedAt` marker and before its persisted `dormancyDeleteNotBefore`.]*
 
 > **Do NOT write:** *"We retain your data for as long as your account is active."* The dormancy trigger **contradicts this**: a current, paying customer is deleted after 720 days without a recorded knock. *[v3: superseded — the shield makes this sentence TRUE for active-subscription orgs, and the policy now says exactly that (an active-subscription organization "is never deleted for inactivity"). The two advisories below still stand: no notice capability exists, and say "approximately" on the window.]*
-> **Do NOT write:** *"We will notify you before deleting a dormant account,"* or *"after notice."* Nothing in the application sends anything.
+> **Do NOT write:** *"We will notify you before deleting a dormant account,"* or *"after notice."* Nothing in the application sends anything. *[v4 2026-07-17: FLIPPED — once mail is live (RESEND_API_KEY + MAIL_FROM set, DPA §6 notice done) this sentence becomes safe to write, and stronger: the code cannot dormancy- or wind-down-delete an unwarned org at all. Until the vars are set, warnings are attempted-and-logged only, and no purge fires — the fail state is "data kept too long," never "deleted unwarned."]*
 > **Do NOT write:** *"no door-knocking activity for 24 months."* The correct phrase is *"no canvassing activity recorded for approximately 24 months."* (And note: `POST /admin/turfs/restrict-bulk` writes `CanvassActivity` rows from the **web admin console** with no door knocked — `server/src/routes/admin/turfs.js:695`, insert at `:779` — and those rows reset the dormancy clock, because the trigger filters on `organizationId` alone.)
 
 ### Trigger 3 — DELETE-ON-REQUEST. **VERIFIED: THE EXECUTOR EXISTS; THE INTAKE DOES NOT.**
@@ -721,7 +749,7 @@ A grant:
 
 ### Three things you must NOT imply
 
-**1. The grant is SELF-ISSUED.** `POST /super-admin/access/grants` is gated by `requireSuperAdmin` only — **not** `requireBreakGlass` (`routes/superAdmin/access.js:19`, `:31`). `createGrant` sets `actorUserId: req.user._id` (`supportAccess.js:25-39`): **the staff member grants themselves access, to any organization, instantly.** There is **no approver, no second-person sign-off, no customer approval, and no customer notification.** I found no customer-facing surface for grants or the access log anywhere (`SupportAccessPage.jsx` is routed under `/super-admin`; a grep of `server/src/content/help/` for "support access" / "Doorline staff" returns **zero articles**).
+**1. The grant is SELF-ISSUED.** `POST /super-admin/access/grants` is gated by `requireSuperAdmin` only — **not** `requireBreakGlass` (`routes/superAdmin/access.js:19`, `:31`). `createGrant` sets `actorUserId: req.user._id` (`supportAccess.js:25-39`): **the staff member grants themselves access, to any organization, instantly.** There is **no approver, no second-person sign-off, no customer approval, and no customer notification.** I found no customer-facing surface for grants or the access log anywhere (`SupportAccessPage.jsx` is routed under `/super-admin`; a grep of `server/src/content/help/` for "support access" / "Doorline staff" returns **zero articles**). *[v4 2026-07-17: the NOTIFICATION half narrows — every newly-created grant now emails the org's notify list (billingAccess admins → all admins → billing contact) with the staff first name, reason and expiry (`access.js` + `supportGrantNotice`); reusing a live grant re-sends nothing. Self-issuance and no-approver are unchanged — notice, not consent.]*
 
 > **Do NOT write:** *"with your authorization," "at your request," "with notice to you,"* or anything implying customer consent or an independent authorization gate. **The grant is an attribution control, not an approval control.**
 
@@ -961,7 +989,7 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 
 ### NOT PRESENT — verified negatives you may rely on
 - **NO PAYMENT PROCESSOR. Stripe is NOT integrated and receives NO data.** There is no `stripe` package in any of the four `package.json` files. `models/Subscription.js:44-47` contains dormant placeholder fields (`source` enum permitting `'stripe'`, a null `stripeCustomerId`) with comments describing Stripe as a **future** phase. Billing is manual/internal. **Do NOT disclose Stripe as a subprocessor.** If the business collects payment out-of-band, that is outside this codebase.
-- **NO email provider, NO SMS provider, NO crash-reporting, NO error-tracking, NO product analytics SDK.** Swept all four `package.json` files for Sentry, Bugsnag, Datadog, New Relic, LogRocket, Nodemailer, SMTP, SendGrid, Mailgun, Postmark, Resend, Twilio, AWS SES/S3, Segment, Amplitude, Mixpanel, PostHog, Firebase, GA, GTM: **zero.** The web page has no third-party script tags and self-hosts its fonts. **Consequence: there is no automated password-reset email — recovery is admin-issued temporary passwords only, and there is no mechanism to warn anyone of anything.**
+- **NO email provider, NO SMS provider, NO crash-reporting, NO error-tracking, NO product analytics SDK.** Swept all four `package.json` files for Sentry, Bugsnag, Datadog, New Relic, LogRocket, Nodemailer, SMTP, SendGrid, Mailgun, Postmark, Resend, Twilio, AWS SES/S3, Segment, Amplitude, Mixpanel, PostHog, Firebase, GA, GTM: **zero.** The web page has no third-party script tags and self-hosts its fonts. **Consequence: there is no automated password-reset email — recovery is admin-issued temporary passwords only, and there is no mechanism to warn anyone of anything.** *[v4 2026-07-17: **THE EMAIL HALF OF THIS NEGATIVE FLIPS.** Transactional email via **Resend** now exists — `services/mail/mailer.js` POSTs to `api.resend.com` with global fetch, so the package.json sweep still finds zero mailer dependencies, but the CONCLUSION is void: self-serve password reset, invite/set-password links, org/campaign-add notices, support-grant notices, and pre-deletion warnings all send once `RESEND_API_KEY` + `MAIL_FROM` are set (dormant until then — the DPA §6 go-live switch). Emails carry the recipient's name + address to Resend: **Resend is a subprocessor and must appear in DPA §6 and the privacy policy's service-providers paragraph BEFORE the vars are set.** Emails never contain passwords. SMS/analytics/crash negatives all stand.]*
 - **OpenStreetMap / Overpass** appears in a **one-time developer script** that builds a committed demo fixture (`server/src/utils/demoData/fetchDemoAddresses.js`). It sends a hard-coded bounding box, no personal data, and nothing in the production request path imports it. **Does not need disclosure as a subprocessor.**
 
 ---
@@ -1113,14 +1141,14 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 
 > **[v3 — 2026-07-16: this list is superseded by "Remaining honest gaps (v3)" at the top of this
 > document.]** Per-item status against today's tree: **1** closed (break-glass + grant + logged) ·
-> **2** open (grants still self-issued) · **3** closed (fail-closed audit) · **4** closed in code
+> **2** narrowed *(v4: customer notice now automatic; still self-issued)* · **3** closed (fail-closed audit) · **4** closed in code
 > (GeocodeCache TTL; migrations pending) · **5** closed (intake + cancel exist) · **6** resolved
 > (policy rewritten as static pages) · **7** closed (dormancy shield) · **8** largely closed
 > (`allowBackup:false` + cacheDirectory; iOS AsyncStorage residual) · **9** open (Heroku log flows;
 > drain state unknown) · **10** open-by-decision (operator revoke switch exists, not automatic) ·
 > **11** closed (robots + noindex) · **12** open (queue survives logout, no TTL) · **13** closed
 > (`VENDOR_READ_ONLY`) · **14** open by decision (documented at `memberships.js:423-432`) · **15**
-> closed (cross-org merge 409s) · **16** open (still no warning capability) · **17** narrowed (one TTL
+> closed (cross-org merge 409s) · **16** closed *(v4: delivery-gated warnings)* · **17** narrowed (one TTL
 > now exists — GeocodeCache; every other retention promise is still cron-kept) · **18** closed
 > (retries + red health) · **19** open (request-level log, by design) · **20** open (pseudonymous end
 > state; policy language now honest) · **21** open (no User-row retention limit).
@@ -1131,6 +1159,8 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 
 1. **`/super-admin/persons` is an ungated, unaudited, cross-organization voter-identity console with read AND write.** Any `support`-tier staff account can search every Person on the platform by name, read name/DOB/phone/cell/party/gender/registration/state-voter-ID/**home addresses** across every customer, and **merge, split, re-own and lock** those records. No grant. No audit row. The code comment at `personOversight.js:71-73` claims the exact opposite. **Until this is closed, no sentence of the form "staff access to your data is time-boxed, reason-logged and audited" is true.** (E13)
 2. **The support grant is self-issued, with no approval and no notice to the customer.** (E12)
+   *[v4 2026-07-17: the notice half is closed — automatic customer email on every new grant. The
+   approval half stands.]*
 3. **The audit log does not cover the routes that actually export voter data.** Three of its ten prefixes are dead strings that can never match; the walk-list CSV export — voter names, ages, phones, addresses — leaves **zero** audit rows. (E13, Hole 2)
 4. **`GeocodeCache` retains every customer's street addresses forever, including after the customer is deleted, with no org attribution.** *"When you leave, we delete your data"* is false while this exists. (B5)
 5. **There is no intake for a customer deletion request.** The 30-day SLA executor exists; nothing anywhere creates the request it consumes. **The promise is unbackable today.** (B6)
@@ -1147,7 +1177,7 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 13. **A grant-holding staff member can mint themselves a Membership and become permanently ungated and unlogged.** (E13, Hole 3 — inferred, needs engineering review)
 14. **A customer admin can link another org's user account into their org and reset that person's password**, obtaining a cross-org session. (F14 — inferred, needs engineering review)
 15. **Cross-org Person merge is possible from the staff console** — `mergePersons.js` has zero `organizationId` references. It can also cause org B's deletion to destroy org A's Person records. (F14)
-16. **Dormancy deletion sends no warning.** The code comment says "after a warning." **The server has no email or SMS capability at all.**
+16. **Dormancy deletion sends no warning.** The code comment says "after a warning." **The server has no email or SMS capability at all.** *[v4 2026-07-17: CLOSED — the comment is finally true. Warning emails precede both dormancy and wind-down deletion, and the purges are hard-gated on delivery-verified markers (`test/retentionWarnings.int.test.js`).]*
 
 ### YOU CANNOT PROMISE THESE, BECAUSE NOTHING ENFORCES THEM
 

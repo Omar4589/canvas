@@ -155,10 +155,22 @@ router.post('/status', async (req, res, next) => {
     sub.status = data.to;
     sub.statusChangedAt = new Date();
     sub.source = 'manual';
+    // ANY status change voids outstanding deletion warnings — BOTH kinds. The wind-down clock
+    // re-anchors on statusChangedAt, so its warning is stale by construction; and a dormancy
+    // warning sent while the org was canceled must not survive a comped reactivation, or a
+    // later re-cancellation would purge on the strength of a warning emailed to a then-paying
+    // customer. Any FUTURE status writer (e.g. a Stripe webhook) must route through this
+    // chokepoint or replicate these clears.
+    sub.windDownWarnedAt = null;
+    sub.windDownDeleteNotBefore = null;
     if (data.to === 'trial' && !sub.trialEndsAt) {
       sub.trialEndsAt = new Date(Date.now() + 7 * 86400000);
     }
     await sub.save();
+    await Organization.updateOne(
+      { _id: org._id },
+      { $set: { dormancyWarnedAt: null, dormancyDeleteNotBefore: null } }
+    );
     await SubscriptionEvent.create({
       organizationId: org._id,
       byUserId: req.user._id,

@@ -18,6 +18,9 @@ import {
   resolveManagedCampaigns,
 } from '../../services/memberships/createMember.js';
 import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
+import { sendMail } from '../../services/mail/mailer.js';
+import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js';
+import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
 import { phoneSchema, nameSchema, emailSchema, passwordSchema as passwordField } from '../../utils/validators.js';
 
 const router = Router();
@@ -217,6 +220,17 @@ router.post('/', async (req, res, next) => {
         grantedBy: req.user._id,
         campaignIds: managed,
       });
+    }
+
+    // Notify the person we just added — best-effort, never awaited (a mail hiccup must not fail the
+    // admin's add). A brand-new account gets a set-password invite; the admin-typed temp password stays
+    // in the 201 response below as a manual fallback and never appears in the email. An existing account
+    // linked into this org gets a no-credentials "you've been added" note.
+    if (data.linkExisting) {
+      sendMail({ to: user.email, ...addedToOrg({ firstName: user.firstName, orgName: req.activeOrg.name }), kind: 'addedToOrg' });
+    } else {
+      const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
+      sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, setPasswordUrl: url }), kind: 'inviteSetPassword' });
     }
 
     res.status(201).json({
@@ -421,15 +435,16 @@ router.patch('/:userId/password', async (req, res, next) => {
     if (target.deletedAt) return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
 
     // NOTE (item 14 — cross-org link-and-reset): passwords are per-USER, not per-org (one User row, one
-    // passwordHash, shared across every org the person belongs to), and admin-assisted reset is the ONLY
-    // password-recovery mechanism in the product — there is no self-serve "forgot password" flow and the
-    // server has no email capability. So an admin of one org resetting a multi-org member's password
-    // does affect that person's login everywhere. We do NOT block it, because blocking it would leave a
-    // multi-org user who forgets their password with NO way back in at all. The existing mitigation
-    // stands: the new password is TEMPORARY (mustChangePassword forces a change at next login), so misuse
-    // is not silent — the legitimate user is locked out visibly the moment their old password stops
-    // working. Truly closing this needs per-org credentials or an email-based self-serve reset; both are
-    // out of scope here and are flagged for counsel in docs/PRIVACY_VERIFICATION.md.
+    // passwordHash, shared across every org the person belongs to), so an admin of one org resetting a
+    // multi-org member's password affects that person's login everywhere. A self-serve email reset NOW
+    // EXISTS (POST /auth/forgot-password — a locked-out multi-org user can rescue themselves), which
+    // removes the old "blocking would strand them" objection — but by owner decision the admin path
+    // stays unrestricted: field reality is a canvasser at a door with a dead login and an email they
+    // can't reach. If that trade ever flips, the guard is one MULTI_ORG_EMAIL_LOCKED-shaped step away
+    // (see the email route above). The standing mitigation: the new password is TEMPORARY
+    // (mustChangePassword forces a change at next login), so misuse is not silent — the legitimate
+    // user is locked out visibly the moment their old password stops working. Flagged for counsel in
+    // docs/PRIVACY_VERIFICATION.md (item 14, open by decision).
     const { password } = passwordSchema.parse(req.body);
     const passwordHash = await User.hashPassword(password);
     // This is a TEMPORARY password: the user is forced to choose a new one at

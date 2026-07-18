@@ -7,10 +7,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Linking,
   StyleSheet,
 } from 'react-native';
 import { Redirect } from 'expo-router';
 import { api } from '../lib/api';
+import { WEB_URL } from '../lib/config';
 import { signIn, useAuthToken } from '../lib/authState';
 import {
   saveCurrentUser,
@@ -119,6 +121,16 @@ export default function Login() {
               <Text style={styles.buttonText}>Sign in</Text>
             )}
           </Pressable>
+
+          {/* Reset is a browser-only flow (token links land on the web). Open it in the
+              system browser rather than rebuild the form natively. */}
+          <Pressable
+            onPress={() => Linking.openURL(`${WEB_URL}/forgot-password`).catch(() => {})}
+            hitSlop={8}
+            style={styles.forgotWrap}
+          >
+            <Text style={styles.forgot}>Forgot password?</Text>
+          </Pressable>
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -185,5 +197,7 @@ function makeStyles(t) {
     fontWeight: '700',
     fontSize: 16,
   },
+  forgotWrap: { alignItems: 'center', marginTop: spacing.lg },
+  forgot: { color: colors.brand, fontWeight: '600', fontSize: 14 },
   });
 }

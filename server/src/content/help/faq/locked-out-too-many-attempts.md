@@ -20,6 +20,9 @@ To get back in:
    the correct password works again.
 2. **Or ask a super-admin to clear it.** On **Super-admin ▸ All Users**, they click **Clear lockout**
    on your row and you can retry immediately.
+3. **Not sure the password is right anymore?** Use [Forgot password?](reset-my-password) — emailing
+   yourself a reset link doesn't count against the login limit, and setting a new password gets you
+   in without waiting.
 
 > Owner note: add your own super-admin email to the `LOGIN_RATELIMIT_ALLOWLIST` setting so *you* can
 > never be locked out — allowlisted accounts skip the throttle entirely.

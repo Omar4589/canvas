@@ -20,6 +20,13 @@ const organizationSchema = new mongoose.Schema(
     // Anchor timezone for ORG-WIDE rollups (multi-campaign), where a single campaign's
     // zone doesn't apply. Per-campaign views use Campaign.timeZone. Overridable in the UI.
     timeZone: { type: String, default: 'America/New_York' },
+    // Dormancy-deletion warning bookkeeping (services/retention/triggers.js). `dormancyWarnedAt`
+    // is stamped ONLY when the warning email was actually accepted for delivery (or the org has
+    // no reachable recipient at all) — the purge refuses to run without it, and refuses before
+    // `dormancyDeleteNotBefore`, the exact date the email promised. New activity, or a billing
+    // status change, clears both: a stale warning must never license a deletion.
+    dormancyWarnedAt: { type: Date, default: null },
+    dormancyDeleteNotBefore: { type: Date, default: null },
   },
   { timestamps: true }
 );

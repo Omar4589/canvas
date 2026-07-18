@@ -26,6 +26,9 @@ const retentionRunSchema = new mongoose.Schema(
     // What it actually did, so a run that "succeeded" while doing nothing is still legible.
     purged: { type: Number, default: 0 },
     scanned: { type: Number, default: 0 },
+    // Deletion warnings delivered this run (wind-down + dormancy) — the "we warned before we
+    // deleted" half of the promise, countable next to the deletions themselves.
+    warned: { type: Number, default: 0 },
     error: { type: String, default: null },
   },
   { timestamps: true }

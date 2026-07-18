@@ -74,6 +74,21 @@ const votersOf = (org) => Voter.countDocuments({ organizationId: org._id });
 const ageOrg = (org, at) =>
   Organization.collection.updateOne({ _id: org._id }, { $set: { createdAt: at } });
 
+// The purges now refuse to touch an UNWARNED org (see test/retentionWarnings.int.test.js for the
+// warning machinery itself). These fixtures backdate the "customer was warned" markers so the purge
+// logic under test here — the date boundaries — is what decides. deleteNotBefore mirrors the natural
+// deletion date: past for the overdue orgs, future for the fresh ones.
+const markWindDownWarned = (org, deleteNotBefore, warnedAt = new Date(Date.now() - 40 * DAY)) =>
+  Subscription.updateOne(
+    { organizationId: org._id },
+    { $set: { windDownWarnedAt: warnedAt, windDownDeleteNotBefore: deleteNotBefore } }
+  );
+const markDormancyWarned = (org, deleteNotBefore, warnedAt = new Date(Date.now() - 40 * DAY)) =>
+  Organization.updateOne(
+    { _id: org._id },
+    { $set: { dormancyWarnedAt: warnedAt, dormancyDeleteNotBefore: deleteNotBefore } }
+  );
+
 before(async () => { if (URI) await mongoose.connect(URI); });
 after(async () => { if (URI) await mongoose.disconnect(); });
 beforeEach(async () => {
@@ -88,6 +103,10 @@ test(`WIND-DOWN: a customer canceled >${WIND_DOWN_DAYS}d ago is purged; one canc
   const recent = await makeOrg('Just Left', 'recent', 'canceled', new Date(Date.now() - 1 * DAY));
   const active = await makeOrg('Still Paying', 'active', 'active');
   for (const o of [old, recent, active]) await seedData(o);
+  // Both canceled orgs were duly warned — so the DATE, not a missing marker, is what protects
+  // 'recent' below. 'active' is deliberately unmarked: a paying org never even gets that far.
+  await markWindDownWarned(old, new Date(Date.now() - 5 * DAY));
+  await markWindDownWarned(recent, windDownDeletionDate(new Date(Date.now() - 1 * DAY)));
 
   const res = await purgeWoundDownOrgs({ apply: true });
   assert.strictEqual(res.purged, 1);
@@ -103,13 +122,18 @@ test(`WIND-DOWN: a customer canceled >${WIND_DOWN_DAYS}d ago is purged; one canc
 });
 
 test('TIE: the banner date IS the wind-down deletion boundary — one shared helper, no drift', { skip }, async () => {
-  // The banner is the ONLY warning a customer gets before deletion (no email exists). If the banner said
-  // one date and the job deleted on another, that is the words-vs-code drift this project exists to kill.
-  // Both entitlementFor (the banner) and purgeWoundDownOrgs (the job) call windDownDeletionDate, and this
-  // test asserts the banner's date equals the job's selection boundary for the same org.
+  // The banner and the WARNING EMAIL are what a customer sees before deletion. If either said one
+  // date while the job deleted on another, that is the words-vs-code drift this project exists to
+  // kill. Both entitlementFor (the banner) and purgeWoundDownOrgs (the job) call
+  // windDownDeletionDate, and this test asserts the banner's date equals the job's selection
+  // boundary for the same org. (The email side of the tie lives in retentionWarnings.int.test.js.)
   const now = Date.now();
   const overdue = await makeOrg('Overdue', 'wd-due', 'canceled', new Date(now - (WIND_DOWN_DAYS + 1) * DAY));
   const fresh = await makeOrg('Fresh cancel', 'wd-fresh', 'canceled', new Date(now - (WIND_DOWN_DAYS - 5) * DAY));
+  // Warned per the new never-delete-unwarned gate; each promised its natural (banner) date, so
+  // the selection below is decided purely by the shared date helper.
+  await markWindDownWarned(overdue, windDownDeletionDate(new Date(now - (WIND_DOWN_DAYS + 1) * DAY)));
+  await markWindDownWarned(fresh, windDownDeletionDate(new Date(now - (WIND_DOWN_DAYS - 5) * DAY)));
 
   const dueSub = await Subscription.findOne({ organizationId: overdue._id }).lean();
   const freshSub = await Subscription.findOne({ organizationId: fresh._id }).lean();
@@ -149,6 +173,11 @@ test(`DORMANCY: a NON-PAYING org with no activity for ${DORMANCY_MONTHS} months 
   await ageOrg(revived, stale);
   await seedData(revived, new Date()); // knocked a door today
 
+  // Both were duly warned (marker + elapsed promised date), so what separates them below is the
+  // activity clock itself — and for 'revived', today's knock also VOIDS its warning.
+  await markDormancyWarned(dormant, new Date(Date.now() - 5 * DAY));
+  await markDormancyWarned(revived, new Date(Date.now() - 5 * DAY));
+
   const res = await purgeDormantOrgs({ apply: true });
   assert.strictEqual(res.purged, 1);
   assert.strictEqual(await Organization.countDocuments({ _id: dormant._id }), 0);
@@ -156,11 +185,14 @@ test(`DORMANCY: a NON-PAYING org with no activity for ${DORMANCY_MONTHS} months 
   // The clock IS the last knock. One door knocked today buys another two years, by construction.
   assert.ok(await Organization.findById(revived._id), 'a single recent knock resets the clock');
   assert.strictEqual(await votersOf(revived), 1);
+  // And the knock cleared the stale warning — a future dormancy stretch starts from a fresh warn.
+  const revivedFresh = await Organization.findById(revived._id).lean();
+  assert.strictEqual(revivedFresh.dormancyWarnedAt, null, 'activity after a warning voids it');
 });
 
 test('DORMANCY: a PAYING customer is NEVER purged for inactivity, however long', { skip }, async () => {
   // The load-bearing guarantee. An active, paid-up organization that simply has not canvassed between
-  // election cycles must not be auto-deleted — we have no way to warn them, and they are a customer.
+  // election cycles must not be auto-deleted — warning email or not, they are a customer.
   const stale = new Date(Date.now() - (DORMANCY_MONTHS * 30 + 400) * DAY);
   for (const status of ['active', 'trial', 'past_due']) {
     const org = await makeOrg(`Paying ${status}`, `paying-${status}`, status);

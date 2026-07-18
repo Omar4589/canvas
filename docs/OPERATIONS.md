@@ -99,7 +99,7 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 | --- | --- | --- |
 | `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago |
 | `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it), **and rebuilds the `PlatformDaily` trend series in full from the same rows** (the sparklines' data; same job, no extra cron). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
-| `retention-triggers` | Daily 04:41 UTC | **Deletes organizations**: wind-down, dormancy, and due deletion requests |
+| `retention-triggers` | Daily 04:41 UTC | **Warns, then deletes organizations**: emails deletion warnings ~30 days ahead (wind-down + dormancy), then purges wind-down, dormancy, and due deletion requests. **Wind-down and dormancy never delete an unwarned org**: the purge requires a delivery-verified warning marker plus a grace period, so while email is unconfigured those two purges simply hold (data kept, never deleted unwarned). Delete-on-request is exempt — it *is* the customer's instruction. |
 
 **Check they're alive:** `GET /api/super-admin/access/health/retention`. It goes **RED** when the last
 successful run is >48h old — because a silently-dead scheduled job is indistinguishable from one that
@@ -110,10 +110,36 @@ had nothing to do, unless something is counting.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `RETENTION_WIND_DOWN_DAYS` | **60** | After a subscription is canceled, the customer has this long to export. Then their data is deleted. |
-| `RETENTION_DORMANCY_MONTHS` | **24** | No canvassing activity for this long → the org is purged. A single knock resets the clock (the clock *is* the last knock). |
+| `RETENTION_DORMANCY_MONTHS` | **30** | No canvassing activity for this long → a non-paying (canceled/suspended) org is purged. A single knock resets the clock (the clock *is* the last knock). |
 | `RETENTION_DELETE_SLA_DAYS` | **30** | A deletion request is scheduled this far out — the window in which a mistaken or coerced request can be cancelled. |
 | `DELETED_IDENTITY_RETENTION_DAYS` | **180** | How long a deleted user's name is kept for fraud attribution. |
 | `SUPPORT_GRANT_HOURS` | **4** | How long a support access session lasts. |
+| `RETENTION_WARN_LEAD_DAYS` | **30** | How far ahead of a wind-down/dormancy deletion the warning email goes out. |
+| `RETENTION_WARN_GRACE_DAYS` | **14** | Minimum time between the warning actually being delivered and the deletion — even for an org already past its deadline when first warned. |
+
+### Email (Resend) — the dormant/live switch
+
+Transactional email (password resets, invites, org/campaign notices, support-grant notices,
+deletion warnings) is **dormant until BOTH vars are set** — no key, no network calls, sends are
+logged only:
+
+| Setting | Meaning |
+| --- | --- |
+| `RESEND_API_KEY` | The Resend API key. **Setting this is the go-live switch — see the gate below.** |
+| `MAIL_FROM` | The sender, e.g. `Doorline <notifications@doorline.app>`. Both vars required; key without from stays dormant (loud warning in the logs). |
+| `MAIL_TIMEOUT_MS` | Send timeout, default 10000. |
+
+> 🛑 **Before setting the key (DPA §6 — contractual, not optional):** Resend is a new
+> subprocessor (it receives recipients' names + email addresses). The DPA's subprocessor list and
+> the privacy policy's service-providers paragraph must be updated and **customers notified
+> BEFORE the first real email is sent.** Also verify the sending domain in Resend and publish
+> SPF + DKIM first, or every mail bounces. While dormant, everything else works: the reset page
+> exists (requests simply produce no email), and the retention warn stage attempts, logs, and
+> retries next sweep — it never marks a customer "warned" off an undelivered email.
+
+**Verify after go-live:** request a password reset to your own address; check the Resend
+dashboard shows it delivered; after the next 04:41 UTC sweep, `heroku logs --dyno worker` should
+show warn counts instead of `[retention] ... NOT delivered (mail dormant)` lines.
 
 Orgs with subscription status **`internal`** (our demo/platform tenants) are **exempt from every
 auto-purge** — the App Review demo tenant must not evaporate because nobody knocked a door in it.

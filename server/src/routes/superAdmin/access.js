@@ -7,6 +7,9 @@ import { AccessLog } from '../../models/AccessLog.js';
 import { Organization } from '../../models/Organization.js';
 import { User } from '../../models/User.js';
 import { createGrant, revokeGrant, activeGrant, DEFAULT_GRANT_HOURS, MAX_GRANT_HOURS } from '../../services/access/supportAccess.js';
+import { orgNotifyEmails } from '../../services/mail/recipients.js';
+import { sendMail } from '../../services/mail/mailer.js';
+import { supportGrantNotice } from '../../services/mail/templates.js';
 import { retentionHealth } from '../../services/retention/purgeDeletedIdentities.js';
 import { deletionRequestHealth } from '../../services/retention/triggers.js';
 import { requestOrgDeletion, cancelOrgDeletion, listDeletionRequests, DeletionRequestError } from '../../services/retention/deletionRequests.js';
@@ -44,13 +47,26 @@ router.post('/grants', async (req, res, next) => {
     const org = await Organization.findById(data.organizationId, 'name slug').lean();
     if (!org) return res.status(404).json({ error: 'Organization not found' });
 
-    const grant = await createGrant({
+    const { grant, created } = await createGrant({
       actorUserId: req.user._id,
       organizationId: org._id,
       reason: data.reason,
       kind: data.kind,
       hours: data.hours,
     });
+
+    // Tell the customer we're in — but ONLY on a genuinely-new grant (reusing a live one must not spam
+    // the org on repeated entry). Best-effort: never awaited, so a mail hiccup can't fail the grant. An
+    // org with no reachable notify recipient is logged loudly and skipped; the staffer's FIRST NAME only
+    // reaches the customer (never full name/email).
+    if (created) {
+      const to = await orgNotifyEmails(org._id);
+      if (to.length) {
+        sendMail({ to, ...supportGrantNotice({ orgName: org.name, staffFirstName: req.user.firstName, reason: grant.reason, expiresAt: grant.expiresAt }), kind: 'supportGrantNotice' });
+      } else {
+        console.warn(`[access] support grant ${grant._id} for org ${org._id} (${org.name}) has NO reachable notify recipient — customer was NOT notified of the access.`);
+      }
+    }
 
     res.status(201).json({
       grant: {

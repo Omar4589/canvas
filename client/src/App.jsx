@@ -10,6 +10,10 @@ import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
 // for signed-in users heading straight to the console.
 const LandingPage = lazy(() => import('./pages/LandingPage.jsx'));
 
+// Public, unauthenticated password-reset flow — lazy so it never loads for the console.
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage.jsx'));
+
 const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const TimelinePage = lazy(() => import('./pages/TimelinePage.jsx'));
@@ -89,6 +93,10 @@ export default function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
+        {/* Public password-reset flow — beside /login, OUTSIDE any ProtectedRoute. The reset
+            page also serves first-time invite / set-password links. */}
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
         {/* /privacy, /terms and /delete-account are NOT React routes anymore. They are committed
             static documents (client/public/*.html) served by Express at the clean URLs, ahead of
             the SPA fallback — a legal notice must render for curl, store-review bots and crawlers

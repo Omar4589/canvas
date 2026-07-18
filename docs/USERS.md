@@ -175,11 +175,19 @@ book without a separate step. Everyone appears in these lists, including you —
 
 ## Passwords & lockouts
 
-**Every account starts with a temporary password.** Whoever creates the account — a super admin
-provisioning a client's first admin, an org admin adding a member, or a team lead adding a canvasser —
-sets a temporary password, and the same flow covers password *recovery* when someone's locked out (a
-locked-out user can't reach *any* org, so recovery has to work even when the only super-admin isn't
-around). How it works:
+**Forgot your password? Reset it yourself by email.** The sign-in page has a **Forgot password?**
+link (the mobile app opens the same page in the browser): enter your email, and if an account
+exists we send a **single-use reset link** that's good for **1 hour**. The page never says whether
+an account exists — the confirmation reads the same either way, on purpose. Opening the link lets
+you set a new password (same strength rules and live checklist as everywhere else), then you sign
+in normally. New accounts get the same kind of link in their **invitation email** (that one lasts
+**72 hours**), so most people never see a typed temporary password at all. Emails never contain a
+password — only a link.
+
+**Every account still starts with a temporary password** as the manual fallback. Whoever creates
+the account — a super admin provisioning a client's first admin, an org admin adding a member, or a
+team lead adding a canvasser — sets one, and the same flow covers password *recovery* when someone
+can't receive email (wrong address on file, inbox unreachable in the field). How it works:
 
 - The account is given a **temporary password** — set when it's created, or later when an admin clicks
   **"Set temporary password"** on the user's profile to rescue someone.
@@ -362,6 +370,19 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   throttled. State is the default in-process `MemoryStore` (per-dyno; cleared on redeploy).
   `clearLoginLockout(email)` calls `loginEmailLimiter.resetKey(email)`, exposed to super admins via
   `POST /super-admin/users/:userId/clear-lockout`.
+- **Self-serve email reset** — `POST /auth/forgot-password` (public; always the same generic 200,
+  answered BEFORE any user lookup so response timing can't reveal whether an account exists; the
+  token write + email run detached after the response). Issues a 32-byte single-use token — stored
+  **sha256-hashed** in `User.passwordResetToken`/`passwordResetExpiresAt` (1h; invite links use the
+  same fields at 72h) — and emails `https://doorline.app/reset-password/<raw>`.
+  `POST /auth/reset-password` consumes it in ONE atomic `findOneAndUpdate` (hash + unexpired +
+  active + undeleted → set `passwordHash`, clear `mustChangePassword`/`tempPasswordSetAt`/both
+  token fields), so two racing submits can't both win; strength is Zod-checked BEFORE the lookup so
+  a weak password never burns the token. Throttled by its own limiters (per-IP 20 + per-email
+  5 / 15 min, counting every request on a store **separate** from the login lockout — see
+  `middleware/loginRateLimit.js`). Existing sessions are NOT invalidated by a reset (same as
+  change-password); tying that to an offline-queue-safe 401 retry is a flagged follow-up. Mail
+  itself is dormant until `RESEND_API_KEY`/`MAIL_FROM` are configured (`services/mail/mailer.js`).
 - **Self-service change** — `POST /auth/change-password` (`requireAuth` only, no org context). Verifies
   `currentPassword`, **enforces strength on `newPassword` via `strongPasswordSchema`** (8+ with an
   uppercase, a lowercase, a number, and a special character), rejects reuse, sets

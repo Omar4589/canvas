@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Never send a Referer header off-site. Critical so the one-time token in a
+         /reset-password/:token URL can't leak via the Referer of any outbound request; harmless
+         for the public marketing routes (no SEO cost, unlike robots). -->
+    <meta name="referrer" content="no-referrer" />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

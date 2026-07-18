@@ -41,6 +41,14 @@ const subscriptionSchema = new mongoose.Schema(
     // Internal account-manager notes (LOI terms, grandfathered deals). Never
     // exposed to org admins — only the super-admin billing endpoints return it.
     notes: { type: String, default: '' },
+    // Wind-down-deletion warning bookkeeping (services/retention/triggers.js). `windDownWarnedAt`
+    // is stamped ONLY when the warning email was actually accepted for delivery (or the org has
+    // no reachable recipient at all) — the purge refuses to run without it, and refuses before
+    // `windDownDeleteNotBefore`, the exact date the email promised (max of the banner's wind-down
+    // date and warn-time + grace, so an org already overdue still gets its full grace). Cleared by
+    // the POST /status chokepoint on ANY status change.
+    windDownWarnedAt: { type: Date, default: null },
+    windDownDeleteNotBefore: { type: Date, default: null },
     // Who owns status writes. Webhooks (the future Stripe phase) only apply when
     // source is 'stripe', so a manual override always wins.
     source: { type: String, enum: ['manual', 'stripe'], default: 'manual' },

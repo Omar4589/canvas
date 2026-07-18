@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId } from '../api/client.js';
 import { resolveHomePath } from '../lib/homePath.js';
@@ -75,6 +75,14 @@ export default function LoginPage() {
           onSubmit={onSubmit}
           className="rounded-xl border border-border bg-card p-6 shadow-sm"
         >
+          {/* One-time note after a completed reset (navigate('/login', { state: { resetSuccess } })).
+              Router state clears on the next navigation, so it never reappears on a manual visit. */}
+          {location.state?.resetSuccess && (
+            <div className="mb-4 rounded-md border border-success/30 bg-success-tint px-3 py-2 text-sm text-success">
+              Password updated — sign in with your new password.
+            </div>
+          )}
+
           <label className="block text-xs font-semibold text-fg-muted">
             Email address
           </label>
@@ -88,9 +96,17 @@ export default function LoginPage() {
             className="mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
 
-          <label className="mt-4 block text-xs font-semibold text-fg-muted">
-            Password
-          </label>
+          <div className="mt-4 flex items-baseline justify-between">
+            <label className="block text-xs font-semibold text-fg-muted">
+              Password
+            </label>
+            <Link
+              to="/forgot-password"
+              className="text-xs font-semibold text-brand-accent hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
           <div className="mt-1">
             <PasswordInput
               value={password}

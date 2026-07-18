@@ -12,6 +12,9 @@ import {
   memberIdentityShape,
   resolveCoordinatorId,
 } from '../../services/memberships/createMember.js';
+import { sendMail } from '../../services/mail/mailer.js';
+import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js';
+import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
 
 // A team lead's crew surface, scoped to ONE campaign they manage (requireCampaignManager
 // gates the mount). It gives a lead the crew-building an org admin does on the Users
@@ -116,6 +119,16 @@ router.post('/', denyVendorPrivilegeWrite, async (req, res, next) => {
       },
       { upsert: true }
     );
+
+    // ONE combined email — best-effort, never awaited (a mail hiccup must not fail the lead's add).
+    // A new account gets a set-password invite naming BOTH the org and this campaign; an existing account
+    // linked in gets a no-credentials "you've been added" note that names the campaign.
+    if (data.linkExisting) {
+      sendMail({ to: user.email, ...addedToOrg({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name }), kind: 'addedToOrg' });
+    } else {
+      const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
+      sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name, setPasswordUrl: url }), kind: 'inviteSetPassword' });
+    }
 
     res.status(201).json({ user: user.toSafeJSON() });
   } catch (err) {

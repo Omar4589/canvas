@@ -23,20 +23,24 @@ export async function activeGrant(actorUserId, organizationId) {
   }).sort({ expiresAt: -1 });
 }
 
+// Returns { grant, created }: `created` is false when a live grant was REUSED rather than newly made,
+// so the caller can notify the customer on a genuinely-new grant only (reusing a live one must never
+// re-send the access notice, or repeated entry would spam the org).
 export async function createGrant({ actorUserId, organizationId, reason, kind = 'support', hours }) {
   const h = Math.min(Number(hours) || DEFAULT_GRANT_HOURS, MAX_GRANT_HOURS);
   // Re-use a live grant rather than stacking them, so "how long have they been in there" stays a
   // question with one answer.
   const existing = await activeGrant(actorUserId, organizationId);
-  if (existing) return existing;
+  if (existing) return { grant: existing, created: false };
 
-  return SupportAccessGrant.create({
+  const grant = await SupportAccessGrant.create({
     actorUserId,
     organizationId,
     reason: String(reason || '').trim(),
     kind,
     expiresAt: new Date(Date.now() + h * 3_600_000),
   });
+  return { grant, created: true };
 }
 
 export async function revokeGrant(grantId, actorUserId) {

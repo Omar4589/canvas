@@ -8,7 +8,13 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import routes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
-import { loginIpLimiter, loginEmailLimiter } from './middleware/loginRateLimit.js';
+import {
+  loginIpLimiter,
+  loginEmailLimiter,
+  forgotIpLimiter,
+  forgotEmailLimiter,
+  resetIpLimiter,
+} from './middleware/loginRateLimit.js';
 import { requireBullBoardAuth, createBullBoardRouter } from './queues/bullBoard.js';
 import { WEB_SEGMENTS } from './webRoutes.js';
 
@@ -89,6 +95,13 @@ export function createApp() {
   // with an env allowlist (LOGIN_RATELIMIT_ALLOWLIST) that bypasses both so an allowlisted
   // super-admin can never lock themselves out. The email key relies on express.json() above.
   app.use('/api/auth/login', loginIpLimiter, loginEmailLimiter);
+
+  // Password-reset throttles (same module): forgot counts EVERY request on a store separate
+  // from the login one — the endpoint always answers 200, and reset requests must never
+  // contribute to (or be cleared with) login lockouts. Reset-password gets a per-IP cap only;
+  // the token itself is the real gate.
+  app.use('/api/auth/forgot-password', forgotIpLimiter, forgotEmailLimiter);
+  app.use('/api/auth/reset-password', resetIpLimiter);
 
   app.use('/api', routes);
 

@@ -5,14 +5,23 @@ audience: all
 kind: faq
 order: 21
 sourceDoc: USERS.md
-summary: There's no reset email — an admin issues a temporary password and you set a new one.
-tags: password, login, account
+summary: Use the "Forgot password?" link to email yourself a reset link, or ask an admin for a temporary password.
+tags: password, login, account, reset, email
 ---
 
-There's **no self-service "forgot password" email** yet. Instead:
+You can reset it yourself by email:
 
-1. Ask an **org admin** to reset your password — they'll issue you a **temporary password**.
-2. Sign in with the temporary password. It's valid for **72 hours**.
-3. You'll be prompted to **set your own new password** right away.
+1. On the sign-in page, tap **Forgot password?** (in the mobile app, this opens the same page in
+   your browser).
+2. Enter the email address on your account. If an account exists for that address, we'll send a
+   **reset link** — check your inbox and spam folder.
+3. Open the link and choose a new password. The link works **once** and expires after **1 hour**,
+   so use it soon. If it expires, just request a new one.
+4. Sign in with your new password.
 
-> Heads up: If the temporary password expires before you use it, just ask the admin to reset it again — they can do it any time.
+**No email arriving, or no access to that inbox?** The old way still works: ask an **org admin**
+to issue you a **temporary password**. It's valid for **72 hours**, and you'll be prompted to set
+your own new password right away when you sign in with it.
+
+> Requesting a reset never locks your account — you can keep signing in with your current
+> password even if you asked for a link and didn't use it.

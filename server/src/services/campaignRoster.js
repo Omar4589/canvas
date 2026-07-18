@@ -10,6 +10,10 @@ export async function ensureCampaignAssignments(campaignId, userIds, orgId, byUs
   const ids = [...new Set((userIds || []).map((u) => String(u)))].filter(Boolean);
   if (!ids.length) return;
   const now = new Date();
+  // NO EMAIL ON PURPOSE. This is a SILENT side-effect roster add — it fires whenever someone is handed a
+  // book so the campaign shows up in their field app, not from a deliberate "add to campaign" action. The
+  // "you've been added to a campaign" note is sent only from the Team-page add loop (routes/admin/
+  // assignments.js). Do NOT wire a sendMail here or a book assignment would spam a duplicate notice.
   await CampaignAssignment.bulkWrite(
     ids.map((uid) => ({
       updateOne: {

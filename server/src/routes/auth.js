@@ -8,6 +8,9 @@ import { signUserToken } from '../services/auth/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
 import { MIN_CLIENT_API_VERSION } from '../config/clientVersion.js';
 import { strongPasswordSchema } from '../utils/validators.js';
+import { sendMail } from '../services/mail/mailer.js';
+import { passwordReset } from '../services/mail/templates.js';
+import { issuePasswordResetToken, sha256Hex, RESET_TOKEN_HOURS } from '../services/auth/passwordReset.js';
 import {
   checkDeletionBlockers,
   deleteAccount,
@@ -109,6 +112,81 @@ router.post('/login', async (req, res, next) => {
     const token = signUserToken(user);
     const memberships = await loadMembershipsForUser(user._id);
     res.json({ token, user: user.toSafeJSON(), memberships, minClientApiVersion: MIN_CLIENT_API_VERSION });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// --- Self-serve password reset (public, email-based) --------------------------------------
+//
+// Anti-oracle contract: this endpoint must not reveal whether an account exists. Three
+// channels are closed: the BODY is identical either way, the RESPONSE TIME is identical
+// (we answer before doing any user-dependent work — the lookup, token write and email all
+// run detached after the response), and the 429s are keyed identically for real and fake
+// addresses (the forgot limiters count every request, not failures). Errors in the detached
+// work are swallowed into a log line — there is no response left to affect.
+const forgotPasswordSchema = z.object({ email: z.string().email() });
+
+router.post('/forgot-password', async (req, res) => {
+  let email;
+  try {
+    ({ email } = forgotPasswordSchema.parse(req.body));
+  } catch (err) {
+    return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+  }
+
+  res.json({ ok: true, message: "If an account exists for that address, we've emailed a reset link." });
+
+  try {
+    const user = await User.findOne({ email: email.toLowerCase() });
+    // Same eligibility as login: active, not deleted. mustChangePassword users are eligible
+    // on purpose — a canvasser whose temp password expired can rescue themselves here
+    // instead of waiting on an admin.
+    if (!user || !user.isActive || user.deletedAt) return;
+    const { url } = await issuePasswordResetToken(user._id, { hours: RESET_TOKEN_HOURS });
+    await sendMail({ to: user.email, ...passwordReset({ firstName: user.firstName, resetUrl: url }), kind: 'passwordReset' });
+  } catch (err) {
+    console.error('[auth] forgot-password: detached send failed:', err.message);
+  }
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(20),
+  // Zod runs BEFORE the token lookup, so a weak password never consumes the single-use token
+  // — the user fixes it and resubmits the same link.
+  newPassword: strongPasswordSchema,
+});
+
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const { token, newPassword } = resetPasswordSchema.parse(req.body);
+    const passwordHash = await User.hashPassword(newPassword);
+    // Single-use is race-safe because match + consume are ONE atomic findOneAndUpdate: two
+    // concurrent submits of the same token can't both match. Also serves invite/set-password
+    // links (same token machinery, longer TTL) — hence clearing the temp-password state too.
+    const user = await User.findOneAndUpdate(
+      {
+        passwordResetToken: sha256Hex(token),
+        passwordResetExpiresAt: { $gt: new Date() },
+        isActive: true,
+        deletedAt: null,
+      },
+      {
+        $set: {
+          passwordHash,
+          mustChangePassword: false,
+          tempPasswordSetAt: null,
+          passwordResetToken: null,
+          passwordResetExpiresAt: null,
+        },
+      },
+      { new: true }
+    );
+    // One generic code for bad/expired/used/foreign tokens — the distinction is not the
+    // requester's business. No session is issued; the user signs in with the new password.
+    if (!user) return res.status(400).json({ error: 'This link is invalid or has expired.', code: 'RESET_INVALID' });
+    res.json({ ok: true });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);

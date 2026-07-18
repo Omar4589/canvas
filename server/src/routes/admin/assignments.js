@@ -9,6 +9,8 @@ import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
 import { canvasserStanding } from '../../services/reports/canvasserIdentity.js';
+import { sendMail } from '../../services/mail/mailer.js';
+import { addedToCampaign } from '../../services/mail/templates.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -114,6 +116,7 @@ router.post('/', async (req, res, next) => {
     }
 
     let created = 0;
+    const newlyAdded = []; // only rows actually INSERTED this call — re-adds / already-present send nothing
     for (const userId of validIds) {
       const result = await CampaignAssignment.updateOne(
         { campaignId: campaign._id, userId },
@@ -128,7 +131,21 @@ router.post('/', async (req, res, next) => {
         },
         { upsert: true }
       );
-      if (result.upsertedCount) created++;
+      if (result.upsertedCount) {
+        created++;
+        newlyAdded.push(userId);
+      }
+    }
+
+    // Notify only the genuinely-new roster rows — best-effort, never awaited. SKIP anyone still holding a
+    // temp password (mustChangePassword): a brand-new invitee's set-password email already named this
+    // campaign (leadCrew), so a second "added to a campaign" note before they've even set a password is noise.
+    if (newlyAdded.length) {
+      const users = await User.find({ _id: { $in: newlyAdded } }).select('firstName email mustChangePassword').lean();
+      for (const u of users) {
+        if (u.mustChangePassword || !u.email) continue;
+        sendMail({ to: u.email, ...addedToCampaign({ firstName: u.firstName, orgName: req.activeOrg.name, campaignName: campaign.name }), kind: 'addedToCampaign' });
+      }
     }
     res.status(201).json({ created, total: validIds.length });
   } catch (err) {

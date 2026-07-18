@@ -21,6 +21,11 @@ export const MAPBOX_PUBLIC_TOKEN =
 // help a bundle that predates it, but it protects every future mismatch.)
 export const CLIENT_API_VERSION = 1;
 
+// Production web origin (the console + public marketing site). The mobile app links
+// OUT to it for browser-only flows — e.g. the password-reset UI lives on the web.
+// Mirrors client/index.html's canonical/og:url; the API is the `api.` subdomain.
+export const WEB_URL = 'https://doorline.app';
+
 // Where "get the update" sends people. One copy, used by both update surfaces
 // (the /update-required contract wall and the UpdateGate build nag).
 export const STORE_URL = Platform.select({
