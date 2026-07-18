@@ -65,7 +65,12 @@ export function teamFoldStage(leadIds) {
 // pass counts again. passId:null collapses to a single legacy bucket per household (pre-turf
 // data = one knock/house). The pipeline also tallies how many of those knocks landed a
 // survey / lit drop, so the connection rate's numerator is always a subset of knocks.
-export function knocksPipeline(match, { byCampaign = false } = {}) {
+//
+// `byPass` promotes the inner group's passId to the OUTER group — one row per round.
+// The inner (household, pass) dedup is identical either way, so Σ(byPass rows) equals the
+// collapsed campaign total by construction: per-round numbers can never disagree with the
+// headline they break down. passId:null surfaces as one legacy row (_id: null).
+export function knocksPipeline(match, { byCampaign = false, byPass = false } = {}) {
   const inner = { householdId: '$householdId', passId: '$passId' };
   if (byCampaign) inner.campaignId = '$campaignId';
   return [
@@ -80,7 +85,7 @@ export function knocksPipeline(match, { byCampaign = false } = {}) {
     },
     {
       $group: {
-        _id: byCampaign ? '$_id.campaignId' : null,
+        _id: byCampaign ? '$_id.campaignId' : byPass ? '$_id.passId' : null,
         knocks: { $sum: 1 },
         surveyedKnocks: { $sum: '$hasSurvey' },
         litKnocks: { $sum: '$hasLit' },

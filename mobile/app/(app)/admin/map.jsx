@@ -284,7 +284,9 @@ export default function AdminMap() {
   const [canvasserId, setCanvasserId] = useState('');
   // `option` is the answer TEXT, sent alongside optionId so the server dual-reads
   // (id-native rows by id, legacy text-only rows by text) — same as the web map.
-  const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', option: '', label: '' });
+  // `templateId` pins the filter to ONE survey template (multi-survey campaigns);
+  // '' falls back to the campaign's current template once surveyQ resolves.
+  const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', option: '', label: '', templateId: '' });
   const [live, setLive] = useState(true);
   const [openMenu, setOpenMenu] = useState(null); // 'date' | 'canvasser' | 'status' | 'answer' | null
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -357,10 +359,33 @@ export default function AdminMap() {
     framedRef.current = false; // re-frame the camera on the new campaign's doors
   }, [cId]);
 
+  // Survey (for the answer-filter chips) — same source the web map uses. Honors the map's date
+  // range so the per-answer counts match the visible dates (absent from/to = all-time).
+  // Declared BEFORE mapQ: the households query scopes its answer filter to this template.
+  const surveyQ = useQuery({
+    queryKey: ['admin', 'survey-results', cId, range?.from, range?.to],
+    queryFn: () => {
+      const p = new URLSearchParams({ campaignId: String(cId) });
+      if (range?.from) p.set('from', range.from);
+      if (range?.to) p.set('to', range.to);
+      return api(`/admin/reports/survey-results?${p.toString()}`);
+    },
+    enabled: !!cId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Template scope for the answer filter: an explicit seed/menu choice wins; else the
+  // campaign's current template once surveyQ resolves (the same template the chips came
+  // from). '' = legacy cross-template union server-side. Only meaningful with an answer
+  // filter active, so it's '' otherwise (stable query key).
+  const answerTemplateId = answerFilter.questionKey
+    ? String(answerFilter.templateId || surveyQ.data?.surveyTemplate?.id || '')
+    : '';
+
   const mapQ = useQuery({
     queryKey: [
       'admin', 'households', 'map', cId, range?.from, range?.to, statusFilter.join(','),
-      canvasserId, answerFilter.questionKey, answerFilter.optionId, answerFilter.option, effortId, passId, importId, showPings, bbox,
+      canvasserId, answerFilter.questionKey, answerFilter.optionId, answerFilter.option, answerTemplateId, effortId, passId, importId, showPings, bbox,
     ],
     queryFn: () => {
       const p = new URLSearchParams({ campaignId: String(cId) });
@@ -372,6 +397,7 @@ export default function AdminMap() {
         p.set('questionKey', answerFilter.questionKey);
         if (answerFilter.optionId) p.set('optionId', answerFilter.optionId);
         if (answerFilter.option) p.set('option', answerFilter.option);
+        if (answerTemplateId) p.set('surveyTemplateId', answerTemplateId);
       }
       if (effortId) p.set('effortId', effortId);
       if (passId) p.set('passId', passId);
@@ -390,20 +416,6 @@ export default function AdminMap() {
     // Tabs keep this screen mounted forever once visited — pause the live poll
     // (and refresh on return) whenever another screen covers it.
     ...useFocusedPoll(),
-  });
-
-  // Survey (for the answer-filter chips) — same source the web map uses. Honors the map's date
-  // range so the per-answer counts match the visible dates (absent from/to = all-time).
-  const surveyQ = useQuery({
-    queryKey: ['admin', 'survey-results', cId, range?.from, range?.to],
-    queryFn: () => {
-      const p = new URLSearchParams({ campaignId: String(cId) });
-      if (range?.from) p.set('from', range.from);
-      if (range?.to) p.set('to', range.to);
-      return api(`/admin/reports/survey-results?${p.toString()}`);
-    },
-    enabled: !!cId,
-    staleTime: 5 * 60 * 1000,
   });
 
   // GPS-audit flags overlay — OPEN (unresolved) flags for the current scope. Reviewing one
@@ -494,7 +506,7 @@ export default function AdminMap() {
       setRange({ preset: 'all', from: null, to: null });
       setStatusFilter([]);
       setCanvasserId('');
-      setAnswerFilter({ questionKey: '', optionId: '', option: '', label: '' });
+      setAnswerFilter({ questionKey: '', optionId: '', option: '', label: '', templateId: '' });
       setScope({ effortId: '', passId: '', importId: '' });
       return; // wait for the unfiltered set, then focus on the next run
     }
@@ -568,13 +580,14 @@ export default function AdminMap() {
     const qk = one(params.questionKey) || '';
     const oid = one(params.optionId) || '';
     const alabel = one(params.alabel) || '';
+    const stid = one(params.surveyTemplateId) || '';
     const uid = one(params.userId) || '';
     const f = one(params.from) || '';
     const t = one(params.to) || '';
     setAnswerFilter(
       qk
-        ? { questionKey: qk, optionId: oid, option: alabel, label: alabel }
-        : { questionKey: '', optionId: '', option: '', label: '' }
+        ? { questionKey: qk, optionId: oid, option: alabel, label: alabel, templateId: stid }
+        : { questionKey: '', optionId: '', option: '', label: '', templateId: '' }
     );
     setCanvasserId(uid);
     // Show exactly what the drill list showed: no lingering status/effort narrowing.
@@ -591,7 +604,7 @@ export default function AdminMap() {
     bboxArmedRef.current = false;
     lastBoundsRef.current = null;
     framedRef.current = false;
-    router.setParams({ questionKey: '', optionId: '', alabel: '', userId: '', from: '', to: '', seedAt: '', scid: '' });
+    router.setParams({ questionKey: '', optionId: '', alabel: '', surveyTemplateId: '', userId: '', from: '', to: '', seedAt: '', scid: '' });
   }, [seedNonce, seedCid, cId]);
 
   const lineFeatures = useMemo(
@@ -1172,7 +1185,7 @@ export default function AdminMap() {
         {openMenu === 'answer' && (
           <View style={styles.menu}>
             <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
-              <MenuItem label="Any answer" active={!answerFilter.questionKey} onPress={() => { setAnswerFilter({ questionKey: '', optionId: '', option: '', label: '' }); setOpenMenu(null); }} />
+              <MenuItem label="Any answer" active={!answerFilter.questionKey} onPress={() => { setAnswerFilter({ questionKey: '', optionId: '', option: '', label: '', templateId: '' }); setOpenMenu(null); }} />
               {surveyQuestions.map((q) => (
                 <View key={q.key}>
                   <Text style={styles.menuGroup}>{q.label}</Text>
@@ -1184,7 +1197,7 @@ export default function AdminMap() {
                         answerFilter.questionKey === q.key &&
                         (answerFilter.optionId ? answerFilter.optionId === o.id : answerFilter.option === o.option)
                       }
-                      onPress={() => { setAnswerFilter({ questionKey: q.key, optionId: o.id, option: o.option, label: o.option }); setOpenMenu(null); }}
+                      onPress={() => { setAnswerFilter({ questionKey: q.key, optionId: o.id, option: o.option, label: o.option, templateId: String(surveyQ.data?.surveyTemplate?.id || '') }); setOpenMenu(null); }}
                     />
                   ))}
                 </View>

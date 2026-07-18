@@ -51,6 +51,15 @@ Only canvassers **assigned to the campaign** can be assigned books (they need th
 them) — if someone's missing, there's a link to Campaign assignments. Canvassers see changes on their
 next sync.
 
+### The campaign screen's "By round" card
+On a campaign's detail screen, between the Activity tiles and Coverage, a **By round** card lists
+one row per walk-list round (walk list name over the round label, e.g. "Pass 2 · GOTV") with the
+round's knocks and a "Conn N%" line ("Lit N%" on a lit-drop campaign) — over the same date range as
+the Activity tiles. The rows are counted exactly like the web dashboard's **By round** table, so
+they always sum to the same Knocks headline; knocks recorded before rounds existed show as a
+"Legacy / no round" row. Full counting model + the invoice-ready CSV export (web-only) in
+[METRICS.md](METRICS.md).
+
 ### Drilling into a survey answer (campaign screen)
 On a campaign's detail screen, the survey results list each answer with its count — **tap a count**
 to open the entries behind it. That screen now has a **Voters | By canvasser** toggle (who *recorded*
@@ -212,9 +221,9 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 
 | Screen | What changed |
 |---|---|
-| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey. |
-| [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, userId, from, to, scid, seedAt }`). |
-| [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`). |
+| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey. Also hosts the **By round** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate). |
+| [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, surveyTemplateId, userId, from, to, scid, seedAt }`). |
+| [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`) and **template-scoped** — it carries `templateId` (seeded, or stamped from the current survey's `surveyTemplate.id` when an option is picked) and sends it as `surveyTemplateId` on the households query ([MAPS.md](MAPS.md) §D). |
 | [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. |
 
 Every fetch carries `campaignId` (the reports router 403s a lead without a managed one). All of this

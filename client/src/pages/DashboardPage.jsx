@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { api } from '../api/client.js';
+import { api, getToken, getActiveOrgId } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import QuestionResults, { TagResults } from '../components/QuestionResults.jsx';
@@ -134,6 +134,63 @@ export default function DashboardPage() {
     enabled: !!campaignId && !!dateRange,
     ...HOME_POLL,
   });
+
+  // Per-round breakdown (walk list × pass) over the billing pipeline — same window +
+  // effort filter as the Activity cards above it, so the rows sum to the same headline.
+  const byRoundQ = useQuery({
+    queryKey: ['reports', 'knocks-by-pass', campaignId, effortId, dateRange?.from, dateRange?.to],
+    queryFn: () =>
+      api(
+        `/admin/reports/knocks-by-pass${buildQuery({
+          campaignId,
+          effortId: effortId || undefined,
+          from: dateRange?.from,
+          to: dateRange?.to,
+        })}`
+      ),
+    enabled: !!campaignId && !!dateRange,
+    ...HOME_POLL,
+  });
+
+  // The invoice-ready per-round CSV — an attachment, not JSON, so the shared api()
+  // helper can't be used; raw fetch + blob (the SurveyExplorer/WalkLists pattern).
+  const [exportingRounds, setExportingRounds] = useState(false);
+  const [roundsExportError, setRoundsExportError] = useState('');
+  async function exportRoundsCsv() {
+    setRoundsExportError('');
+    setExportingRounds(true);
+    try {
+      const headers = {};
+      const token = getToken();
+      const orgId = getActiveOrgId();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (orgId) headers['X-Org-Id'] = orgId;
+      const qs = buildQuery({
+        campaignId,
+        effortId: effortId || undefined,
+        from: dateRange?.from,
+        to: dateRange?.to,
+      });
+      const res = await fetch(`/api/admin/reports/knocks-by-pass.csv${qs}`, { headers });
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      const blob = await res.blob();
+      const disp = res.headers.get('Content-Disposition') || '';
+      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
+      const fileName = m ? decodeURIComponent(m[1]) : 'knocks-by-pass.csv';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setRoundsExportError(err.message || 'Export failed');
+    } finally {
+      setExportingRounds(false);
+    }
+  }
 
   const surveysQ = useQuery({
     queryKey: ['reports', 'surveys', campaignId],
@@ -477,6 +534,79 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      {/* By round — walk list × pass over the same billing pipeline and window as Activity.
+          Hidden until the campaign has at least one round (or legacy knocks) to show. */}
+      {(byRoundQ.data?.rounds || []).length > 0 && (
+        <section className="mb-6">
+          <SectionHeading
+            title="By round"
+            right={
+              <span className="flex items-center gap-2">
+                {roundsExportError && <span className="text-xs text-danger">{roundsExportError}</span>}
+                <span className="text-xs text-fg-muted">Selected range</span>
+                <button
+                  type="button"
+                  onClick={exportRoundsCsv}
+                  disabled={exportingRounds}
+                  className="rounded border border-border-strong bg-card px-3 py-1 text-sm text-fg-muted hover:bg-sunken disabled:opacity-50"
+                >
+                  {exportingRounds ? 'Exporting…' : 'Export CSV'}
+                </button>
+              </span>
+            }
+          />
+          <div className="overflow-x-auto rounded-lg border border-border bg-card">
+            <table className="min-w-full text-sm">
+              <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
+                <tr>
+                  <th className="px-4 py-2 text-left">Walk list</th>
+                  <th className="px-4 py-2 text-left">Round</th>
+                  <th className="px-4 py-2 text-right">Knocks</th>
+                  <th className="px-4 py-2 text-right">{isLitDrop ? 'Lit drops' : 'Survey doors'}</th>
+                  <th className="px-4 py-2 text-right">Conn %</th>
+                  <th className="px-4 py-2 text-right">
+                    <span className="inline-flex items-center gap-1">
+                      New homes reached
+                      <InfoHint label="About new homes reached">
+                        Homes reached for the <strong>first</strong> time (in the selected range,
+                        when one is set) — a re-knocked door adds a knock but not a new home.
+                      </InfoHint>
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {(byRoundQ.data?.rounds || []).map((r) => (
+                  <tr key={r.passId || 'legacy'} className="border-t border-border">
+                    <td className="px-4 py-2 text-fg">{r.effortName || '—'}</td>
+                    <td className="px-4 py-2 text-fg-muted">{r.roundLabel}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-fg">{(r.knocks || 0).toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-fg">
+                      {((isLitDrop ? r.litKnocks : r.surveyedKnocks) || 0).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{ratePct(r.connectionRate)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-fg">{(r.coverageGained || 0).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+              {byRoundQ.data?.totals && (
+                <tfoot>
+                  <tr className="border-t border-border bg-sunken/50 font-semibold text-fg">
+                    <td className="px-4 py-2" colSpan={2}>TOTAL</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{(byRoundQ.data.totals.knocks || 0).toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {((isLitDrop ? byRoundQ.data.totals.litKnocks : byRoundQ.data.totals.surveyedKnocks) || 0).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">{ratePct(byRoundQ.data.totals.connectionRate)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{(byRoundQ.data.totals.coverageGained || 0).toLocaleString()}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* Coverage — current-state, all-time */}
       <section className="mb-8">

@@ -37,3 +37,24 @@ export function voterMetaParts(voter) {
   const age = voter.age ?? voterAge(voter.dateOfBirth);
   return [voter.party, age != null ? `${age} yrs` : null, voter.gender].filter(Boolean);
 }
+
+// Normalize a raw voter-file party value to a colors.party key. Vendor files carry whatever the
+// state exports — 'D', 'REP', 'DEM', 'UNA', 'NPA', 'Libertarian' — while colors.party is keyed on
+// full names, so an unmapped value used to fall through to colors.brand and paint the bar RED,
+// which reads as Republican. Unrecognized-but-present parties map to 'Other' (amber — honest:
+// "a party, not one of the big three"), blank/null to 'Unknown' (gray). Display still shows the
+// file's own raw text; only the COLOR is normalized.
+const PARTY_KEY = {
+  D: 'Democratic', DEM: 'Democratic', DEMOCRAT: 'Democratic', DEMOCRATIC: 'Democratic',
+  R: 'Republican', REP: 'Republican', REPUBLICAN: 'Republican', GOP: 'Republican',
+  I: 'Independent', IND: 'Independent', INDEPENDENT: 'Independent',
+  U: 'No Party', UN: 'No Party', UNA: 'No Party', NPA: 'No Party', NP: 'No Party',
+  UNAFFILIATED: 'No Party', NONPARTISAN: 'No Party', 'NON-PARTISAN': 'No Party',
+  'NO PARTY': 'No Party', NONE: 'No Party',
+  UNKNOWN: 'Unknown',
+};
+export function partyKey(raw) {
+  const s = raw == null ? '' : String(raw).trim();
+  if (!s) return 'Unknown';
+  return PARTY_KEY[s.toUpperCase()] || 'Other';
+}

@@ -15,6 +15,10 @@ async function main() {
       `(${summary.staged.todayKnocks} today) + ${summary.staged.surveys} surveys across ${summary.staged.books} books ` +
       `· wiped ${summary.wiped.activities} activities / ${summary.wiped.surveys} surveys`
   );
+  const rounds = (summary.rounds || [])
+    .map((r) => `'${r.pass}' (${r.status}) ${r.activities} activities / ${r.surveys} surveys`)
+    .join(' · ');
+  if (rounds) console.log(`  rounds: ${rounds} · ${summary.reknockDoors} doors re-knocked across rounds`);
   await mongoose.disconnect();
 }
 

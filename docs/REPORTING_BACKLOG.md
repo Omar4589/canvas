@@ -20,6 +20,19 @@ breakdown.
 - Reuse: `knocksPipeline` ([aggregations.js](../server/src/services/reports/aggregations.js)) already
   groups by `(household, pass)`; the report endpoints just need to accept/scope by `passId`.
 
+> **Done (2026-07)** — the round breakdown + billing export shipped. `knocksPipeline` grew a
+> `byPass` option (one row per round, Σ(rounds) === the collapsed total by construction) behind
+> `GET /admin/reports/knocks-by-pass` (+ `?groupBy=canvasser` for by-canvasser-by-round, with the
+> `crossCanvasserDoors` over-claim reconciliation) and the invoice-ready
+> `GET /admin/reports/knocks-by-pass.csv` (walk list × round rows + a TOTAL row; Export CSV button
+> on the Dashboard's new **By round** section). Surfaces: Dashboard **By round** table (web),
+> per-pass **Survey doors / Lit drops / Conn %** columns on the Passes panel (the enriched
+> `GET /admin/campaigns/:id/passes`), and a **By round** card on the mobile admin campaign screen.
+> "Coverage gained" landed as **New homes reached** — first-ever-knock attribution per round.
+> Spec + counting contract in [METRICS.md](METRICS.md) (Part 1 "By round", §E).
+> **Client Reports intentionally remain round-blind** — a weekly client snapshot summarizes the
+> window, it doesn't itemize rounds; revisit only if a client asks.
+
 ## 2. Clarity / vocabulary pass
 The metrics are correct but the distinction is subtle and could be misread (esp. by a client):
 - **Knocks** = per door **per round** (billable) — knock a door in R1 and again in R2 = 2 knocks.
@@ -31,8 +44,8 @@ The metrics are correct but the distinction is subtle and could be misread (esp.
 > **"one per house · per round"** (Overview, Dashboard), and the "billable" / "house-pass" /
 > "billed once" framing was pulled out of the dashboards, the metric tooltips, the Timeline overlaps
 > line, and the client report — billing framing now lives only on the Billing page. The per-round vs
-> global distinction reads clearer. The **round breakdown** (Round 1 vs Round 2 side by side) is still
-> open under item 1.
+> global distinction reads clearer. The **round breakdown** (Round 1 vs Round 2 side by side) has
+> since shipped too — see item 1's Done block.
 
 ## 3. Walk one surface in depth (do last)
 After 1–2, pick **Dashboard**, **Overview**, or the public **Client Reports** and walk it the way we
@@ -46,6 +59,7 @@ walked Turf Cutting ("what do we see / what should we see / what can/can't we do
 > Still **round-blind** per item 1 — per-round breakdown was intentionally left out of this pass. See
 > [CLIENT_PORTAL.md](CLIENT_PORTAL.md).
 
-Surfaces inventory: Overview (org rollup), DashboardPage (single-campaign: activity + coverage funnel +
-survey results + canvasser leaderboard), PassesPage (per-round knocks — the only round-aware view),
-Client Reports (public weekly snapshots). Endpoints: [reports.js](../server/src/routes/admin/reports.js).
+Surfaces inventory: Overview (org rollup), DashboardPage (single-campaign: activity + **By round** +
+coverage funnel + survey results + canvasser leaderboard), PassesPage (per-round knocks + rates),
+Client Reports (public weekly snapshots — still round-blind by design). Endpoints:
+[reports.js](../server/src/routes/admin/reports.js).

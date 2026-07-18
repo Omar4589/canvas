@@ -82,14 +82,19 @@ any org to work inside it, then come back out.
   that access); the org's identity records (People) are deleted with it — People are per-org, so
   nothing is shared with anyone else (see [PERSONS.md](PERSONS.md)).
 - **Refresh demo day** (Control Room) — one click re-stages the demo org's recent canvassing
-  relative to *now*: the four prior evenings plus a "today" whose knocks run from mid-morning up to
-  the minute you pressed it. Press it right before a pitch so the dashboard, map, and timeline look
-  live. The staged day reads like a real field operation — the work is spread across the demo's
-  several canvassers, each knocking a believable ~15-20 doors an hour (never hundreds), a realistic
-  connection rate of about 1 in 5 doors, and survey answers that mirror a real canvass. It only ever
-  touches the demo org; each app-review account's book (you can have one per platform — Apple, Google)
-  always stays unwalked so those doors stay fresh for reviewers, and the voted layer + published client
-  report survive. Also runnable from the Heroku Run console: `npm --prefix server run demo:refresh`.
+  relative to *now*, as a **two-round story**: an archived **Round 1** worked the week before
+  (evenings on days −8…−12, its pass properly archived), and the active **Round 2** on the four
+  prior evenings plus a "today" whose knocks run from mid-morning up to the minute you pressed it.
+  A believable share of Round-2 doors are **re-knocks** of Round-1 not-homes — so the dashboard's
+  **By round** table, the per-pass numbers, and the knock-vs-coverage distinction all demo
+  truthfully (two knocks, one home). Press it right before a pitch so the dashboard, map, and
+  timeline look live. The staged days read like a real field operation — the work is spread across
+  the demo's several canvassers, each knocking a believable ~15-20 doors an hour (never hundreds), a
+  realistic connection rate of about 1 in 5 doors, and survey answers that mirror a real canvass. It
+  only ever touches the demo org; each app-review account's book (you can have one per platform —
+  Apple, Google) stays unwalked **in both rounds** so those doors stay fresh for reviewers, and the
+  voted layer + published client report survive. Also runnable from the Heroku Run console:
+  `npm --prefix server run demo:refresh`.
 
   One-time setup / repair: the button leans on the demo org being set up correctly — a roster of
   field canvassers with the books shared out among them, and each app-review account's book marked as
@@ -151,6 +156,20 @@ any org to work inside it, then come back out.
 - **Jobs** — the background job queues (imports, turf-cutting) for when something needs a look under the
   hood.
 
+## On the phone
+
+The mobile app carries a companion version of the platform console, laid out the same way as the
+rest of the app: a **bottom tab bar** with five tabs. **Control Room** is the "is anything on fire"
+screen — the live pill, headline stats, today's numbers, billing alerts, support-access glance, idle
+orgs, and the lifetime totals. **Orgs** is the single organization surface: every org as a card
+(members, campaigns, who's active now, last activity, billing state), with **Switch into this
+org →** to enter its admin console, plus create and deactivate/reactivate. **Users** is the same
+server-searched, filtered, paged account list as the web (promote and clear-lockout included), and
+**Activity** is the cross-org live feed with "Load older" history. **More** holds your account,
+Help, the theme toggle, "Switch into an organization", and Sign out. The phone version is for
+monitoring and the handful of actions worth having in the field — billing changes, org deletion,
+imports/People/Support-access review stay on the web console.
+
 ## When Doorline staff can see customer data
 
 Doorline staff can't open a customer organization's voter or canvassing data just because they work
@@ -184,7 +203,7 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 |---|---|---|
 | Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` (`?since=` forward cursor, `?before=` backward "Load older") ([platform.js](../server/src/routes/superAdmin/platform.js)); `GET /super-admin/access/platform-stats`, `GET /super-admin/access/platform-trends?days=30\|90\|365` (the sparkline series — zero-filled UTC days ending at **yesterday**; returns `live`/`deleted`/`undated` so the ⓘ can print the exact gaps), `POST /super-admin/access/platform-stats/reconcile` (the "Reconcile now" button — `recomputeLive` **+ `recomputeDaily`**, same as the nightly job), `GET /super-admin/access/idle-orgs`, `GET /super-admin/access/health/retention`, `GET /super-admin/access/grants?all=1`, `GET /super-admin/access/deletion-requests` (the ops-health chips) ([access.js](../server/src/routes/superAdmin/access.js)); `GET /super-admin/organizations/at-risk` (billing strip) |
 | Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) + [OrgDetailPage.jsx](../client/src/pages/OrgDetailPage.jsx) | `GET /super-admin/organizations` (opt-in `skip`/`limit`/`q`/`sort` + `total`), `GET /super-admin/organizations/billing-rollup` (this-month revenue across all customer orgs), `GET /super-admin/organizations/at-risk` (the needs-attention definition), `GET /super-admin/organizations/:orgId` (the slim detail composite — roster incl. deactivated memberships, campaigns + last activity, billing header w/ the `internal` exemption flag; **registered after the literal routes** so `/:orgId` can't swallow them; metadata only — no grant, no AccessLog row), `POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId` (isActive + the Rename control's name/slug), `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js), tested by [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
-| Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; console runner `npm run demo:refresh`). Generation + batched persistence are shared with the seed via [services/platform/demoActivity.js](../server/src/services/platform/demoActivity.js) so both look identical. |
+| Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; regenerates **both rounds** of the 2-round story and re-stamps pass lifecycle dates; returns per-round staged counts + `reknockDoors`; console runner `npm run demo:refresh`). Generation + batched persistence are shared with the seed via [services/platform/demoActivity.js](../server/src/services/platform/demoActivity.js) so both look identical. |
 | All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) + [SuperAdminUserDetailPage.jsx](../client/src/pages/SuperAdminUserDetailPage.jsx) | `GET /super-admin/users` (opt-in `skip`/`limit`/`q` + filters `super`/`deleted`/`tempPassword`/`orphan`/`active`; returns `total` + `deletedCount`, and per-page `lastActivityAt`), `GET /super-admin/users/:userId` (the drill-in composite → [services/platform/userOversight.js](../server/src/services/platform/userOversight.js): full identity incl. `tempPasswordSetAt`/`deletionLocked`, ALL memberships incl. deactivated, per-org structural activity counts, staff grant/access history, `DeletedUserRecord` **status only** — metadata, no grant, no AccessLog row), `GET /super-admin/users/:userId/lockout` (reads the per-email throttle state — per-process, labeled), `PATCH /super-admin/users/:userId/platform-role` (break-glass only; refuses to demote the last break-glass account), `POST /super-admin/users/:userId/promote`, `POST /super-admin/users/:userId/clear-lockout` (clears the per-email login throttle via `clearLoginLockout`, see [loginRateLimit.js](../server/src/middleware/loginRateLimit.js)) ([users.js](../server/src/routes/superAdmin/users.js)) |
 | Imports | [SuperAdminImportsPage.jsx](../client/src/pages/SuperAdminImportsPage.jsx) | `GET /super-admin/imports` — cross-org import + geocoding-cost aggregation (real persisted lookup counts; cost derived from `GEOCODE_COST_PER_1000_CENTS`, never sent to clients); opt-in `skip`/`limit`, `q` (file/uploader/org), `orgId`, `sort=cost\|new`, `excludeUndone=1`, `groupBy=month\|org` rollups ([imports.js](../server/src/routes/superAdmin/imports.js)) |
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
@@ -274,12 +293,36 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
   name/slug (slug validated kebab-case — see [validators.js](../server/src/utils/validators.js)).
 - **Refresh demo day internals** ([demoActivity.js](../server/src/services/platform/demoActivity.js),
   [refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js)):
+  - **The demo is a permanent two-round story, regenerated identically by seed and refresh.** The
+    seed ([seedDemoOrg.js](../server/src/utils/seedDemoOrg.js)) finds-or-creates Round 1 and Round 2
+    idempotently (`Pass.findOne({effortId, roundNumber})` else `createNextPass`, with a fail-loud
+    guard against a stray pass minting the wrong number) and cuts+assigns each round's books via a
+    shared `buildRoundBooks(pass)` — reviewer books are `isReviewerBook`-marked in **every** round.
+    Round 2 is cut **last** so the `Household.turfId` mirror lands on the active round's books.
+    Round 1 is archived (activated −14d 9am, archived −7d 6pm), Round 2 active (activated −6d 9am);
+    the lifecycle dates are **re-stamped every run** so the narrative stays fresh relative to now
+    (per-round report attribution keys on the `passId` stamped into each activity, not on date
+    windows). Activity: Round 1 staged on `ARCHIVED_DAY_OFFSETS` (−8…−12), Round 2 on the default
+    `DAY_OFFSETS` (today…−4) — `stageDemoActivity` takes a `dayOffsets` param — then **both rounds
+    are concatenated and persisted with ONE `persistDemoActivity` call**, so a door's color is
+    `resolveStatus` over all rounds (latest-across-passes) and writes stay batched. ~375-450 Round-2
+    doors are deliberate **re-knocks** of Round-1 doors (two knocks, one home — the By-round table
+    and knock-vs-coverage distinction demo truthfully).
+  - **The refresh regenerates BOTH rounds.** `refreshDemoDay` pulls **all archived + active passes
+    with published turfs** (an active-only pull would erase Round-1 history on first press), guards
+    reviewer books over the union of their assignments, wipes, restages archived rounds on the old
+    offsets + the active round on the defaults (concat + single persist, same as the seed), and
+    touches up pass lifecycle dates at the staged-window boundary. Returns per-round staged counts +
+    `reknockDoors` alongside the original staged/wiped shape (the CLI prints one per-round summary
+    line; the Control Room toast shows the overall staged/wiped totals).
   - **Realism is per-canvasser, not per-book.** `stageDemoActivity` groups each canvasser's books,
-    spreads them ~one-per-day across `[today, -1, -2, -3, -4]`, and walks each day on a single running
+    spreads them ~one-per-day across the round's day offsets, and walks each day on a single running
     clock (2-5 min/door, capped). So the single-day `doorsPerHour = knocks / (last-first span)` (see
     [reports.js](../server/src/routes/admin/reports.js), [METRICS.md](METRICS.md)) lands ~15-20/hr
     instead of collapsing a canvasser's whole inventory into one window (the old per-book scheduler
     produced ~150-200/hr). `OUTCOME_WEIGHTS` tune the connection rate (surveys ÷ knocks) to ~22%.
+    (For offset sets without day 0 — the archived round — every day schedules as an evening and
+    `todayKnocks` stays 0; the now-cutoff is never consulted.)
   - **Batched writes, no H12.** `persistDemoActivity` computes door status **in memory** via
     `resolveStatus` and writes with a single `Household.bulkWrite` (plus `insertMany` for activity and
     deduped surveys) — replacing per-household/per-survey loops that blew Heroku's 30s request limit.
@@ -295,8 +338,12 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
     refresh keeps every one of them unwalked. No button changes are needed to add a platform.
   - **One-time repair = re-run the seed.** `node src/utils/seedDemoOrg.js --reset --apply` reshapes the
     survey template, ensures the field-canvasser roster, **cleanly redistributes** book assignments
-    (wipe + reassign: reviewer keeps one marked book, the rest round-robin across field canvassers),
-    and restages a fresh day — without touching doors/voters/report/share-link. Set
+    (wipe + reassign: reviewer keeps one marked book per round, the rest round-robin across field
+    canvassers), and restages the full two-round story — without touching
+    doors/voters/report/share-link. (On an org that predates the second round, the seed *creates*
+    Round 2 via `createNextPass`, cuts+publishes its books, and archives Round 1; run it with
+    `--reset --apply` — or press Refresh demo day once — so the staged history matches the new pass
+    dates.) Set
     `SEED_DEMO_CANVASSER_EMAIL` to the demo org's actual review-account email(s) first — comma-separate
     for multiple platforms (`apple@review.com,android@review.com`) — so the seed resolves and marks the
     right reviewer book(s).

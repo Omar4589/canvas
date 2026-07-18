@@ -47,6 +47,12 @@ Passes belong to a walk list, so you manage them **from the walk list** — ther
 - **"Open full view →"** in that panel (or the direct link `…/efforts/:effortId/passes`) for a
   roomier full-page view of the same thing.
 
+Each pass row in that table shows its own numbers — **Books**, **Knocks**, **Survey doors**
+(**Lit drops** on a lit-drop campaign), and **Conn %** — counted exactly the way the dashboard's
+**By round** breakdown counts them (one knock = one distinct house × round, see
+[METRICS.md](METRICS.md)). The panel is **all-time**; the dashboard table honors its date filter,
+so the two match exactly on an "All time" range and can legitimately differ on any narrower one.
+
 ## Pass 1 is created for you
 
 When you create a walk list, **Pass 1 is created automatically** so the usual flow — walk list →
@@ -104,6 +110,13 @@ Two callers:
 
 ## Other pass routes (`routes/admin/passes.js`)
 
+- `GET /` (the list) — every pass of the campaign (optionally `?effortId=`) with `turfCount` plus
+  **per-round counts from the shared billing pipeline** (`knocksPipeline({ campaignId }, { byPass:
+  true })`, [aggregations.js](../server/src/services/reports/aggregations.js)): `knockCount`,
+  `surveyedKnocks`, `litKnocks`, `refusedKnocks`, `connectionRate`, `contactRate`. Same aggregation
+  every report uses, run **all-time** (no date window) — it equals the `/admin/reports/knocks-by-pass`
+  report exactly when that report's range is all-time; a windowed report legitimately shows less
+  ([METRICS.md](METRICS.md) §E). Also returns `activePassIds`.
 - `POST /:id/activate` — requires ≥1 published `Turf` for the pass; on survey campaigns requires
   `campaign.surveyTemplateId`. Archives other **active** passes **of the same effort** only, then
   sets `active` (+ `activatedAt` once).
@@ -116,8 +129,12 @@ Two callers:
 ## Client — one component, two mounts
 
 `client/src/components/PassManager.jsx` holds **all** pass UI (stat cards, New-pass control, table,
-per-pass detail, activate/archive/delete). It takes `{ campaignId, effortId, tz, variant }` — the
-walk list is fixed by the caller, so there is **no walk-list picker**:
+per-pass detail, activate/archive/delete). It takes `{ campaignId, effortId, tz, variant,
+campaignType }` — the walk list is fixed by the caller, so there is **no walk-list picker**. The
+table's per-pass columns include **Knocks, Survey doors** (labeled **Lit drops** when
+`campaignType === 'lit_drop'` — same column, different unit) and **Conn %** from the enriched list
+route above; `campaignType` is threaded from both mounts (PassesPage via `useCampaignSelection`,
+EffortsPage via `EffortRow`) so the compact drawer variant labels the column correctly too:
 
 - `variant="full"` — stat cards + a "New pass" card + the full table. Rendered by the scoped page
   `PassesPage.jsx` at **`/campaigns/:campaignId/efforts/:effortId/passes`** (a thin wrapper that

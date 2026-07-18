@@ -2,6 +2,10 @@
 // org + campaign of ~1,145 households on REAL Des Moines (Beaverdale/Drake) addresses
 // with ~2,600 fabricated voters, cut into books, assigned to demo canvassers, with
 // staged canvass history, early-vote drops, and one published report + share link.
+// The campaign permanently tells a 2-ROUND story: Round 1 archived (its knocks land
+// on days −8..−12) and Round 2 active (knocks on today + the four prior evenings),
+// so the knocks-by-pass report and round pickers always have real history to show.
+// The "Refresh demo day" button restages the SAME 2-round story.
 // Serves landing-page screenshots, Apple/Google app-review demo accounts, and live
 // prospect demos. Addresses/coordinates are real (from demoAddresses.json); every
 // voter identity is fabricated.
@@ -94,7 +98,7 @@ import { ensureCampaignAssignments } from '../services/campaignRoster.js';
 import { recomputeFullyVoted } from '../services/voted/recomputeFullyVoted.js';
 import { computeWindowStats, buildFrozenMapPoints } from '../services/reports/computeReport.js';
 import { zonedDayRange } from '../utils/timezone.js';
-import { stageDemoActivity, persistDemoActivity } from '../services/platform/demoActivity.js';
+import { stageDemoActivity, persistDemoActivity, ARCHIVED_DAY_OFFSETS } from '../services/platform/demoActivity.js';
 import { inStateBounds } from '../utils/stateBounds.js';
 import {
   makeRng,
@@ -394,15 +398,91 @@ function surveyQuestions() {
 // Thin wrapper over the shared demo-activity generator (services/platform/demoActivity)
 // — the SAME code the "Refresh demo day" button uses, so the seeded dashboard and a
 // refreshed one look identical (per-canvasser scheduling, ~22% connection rate,
-// realistic answers). The reviewer's book is excluded structurally by turf id.
-async function stageCanvassHistory({ rng, campaign, template, turfs, assignmentsByTurf, reviewerTurfIds, votersByHousehold }) {
-  const stagedBooks = turfs.filter((t) => !reviewerTurfIds.has(String(t._id)));
-  const { activities, surveys, overlaps, todayKnocks } = stageDemoActivity({
-    rng, campaign, template, tz: CAMPAIGN_TZ, stagedBooks, assignmentsByTurf,
-    hhById: votersByHousehold.docs, votersByHousehold: votersByHousehold.byId,
+// realistic answers). Each round's books are staged on that round's day window
+// (`rounds` = [{ label, turfs, assignmentsByTurf, reviewerTurfIds, dayOffsets }]),
+// the reviewer's book is excluded structurally by turf id, and EVERYTHING persists
+// in ONE persistDemoActivity call — Household.status is latest-across-passes, so a
+// door knocked in both rounds needs a single resolveStatus over all its actions
+// (and one call keeps the writes batched / H12-safe).
+async function stageCanvassHistory({ rng, campaign, template, rounds, votersByHousehold }) {
+  const allActivities = [];
+  const allSurveys = [];
+  const perRound = [];
+  const doorSets = [];
+  let overlaps = 0;
+  let todayKnocks = 0;
+  for (const round of rounds) {
+    const stagedBooks = round.turfs.filter((t) => !round.reviewerTurfIds.has(String(t._id)));
+    const staged = stageDemoActivity({
+      rng, campaign, template, tz: CAMPAIGN_TZ, stagedBooks,
+      assignmentsByTurf: round.assignmentsByTurf,
+      hhById: votersByHousehold.docs, votersByHousehold: votersByHousehold.byId,
+      ...(round.dayOffsets ? { dayOffsets: round.dayOffsets } : {}), // default = recent window
+    });
+    allActivities.push(...staged.activities);
+    allSurveys.push(...staged.surveys);
+    overlaps += staged.overlaps;
+    todayKnocks += staged.todayKnocks;
+    doorSets.push(new Set(staged.activities.map((a) => String(a.householdId))));
+    perRound.push({ label: round.label, activities: staged.activities.length, surveys: staged.surveys.length });
+  }
+  // Cross-round re-knocks: distinct doors that took a knock in more than one round
+  // (the "second pass" story the knocks-by-pass report tells).
+  const hitCounts = new Map();
+  for (const set of doorSets) for (const id of set) hitCounts.set(id, (hitCounts.get(id) || 0) + 1);
+  const reknockDoors = [...hitCounts.values()].filter((n) => n > 1).length;
+  await persistDemoActivity({ campaign, activities: allActivities, surveys: allSurveys });
+  return {
+    activities: allActivities.length, surveys: allSurveys.length,
+    overlaps, todayKnocks, perRound, reknockDoors,
+  };
+}
+
+// Cut + publish + assign ONE round's books — reused for both rounds so the archived
+// Round 1 and the active Round 2 each get real published books. Idempotent: an
+// already-published round skips the cut; assignment is a CLEAN reassignment every
+// run so a drifted org (e.g. every book stuck on one account) self-heals. Every
+// review login gets a reserved clean book in EVERY round, marked isReviewerBook —
+// the durable anchor both the staging exclusion and the refresh button's guard key
+// on, so no round's staged history can ever walk a review account's doors.
+async function buildRoundBooks({ pass, org, campaign, admin, bookedReviewers, background }) {
+  let published = await Turf.countDocuments({ passId: pass._id, status: 'published' });
+  if (!published) {
+    const { bookCount } = await generateTurf({
+      campaignId: campaign._id, passId: pass._id, mode: 'geometric', params: { maxDoors: BOOK_MAX_DOORS },
+    });
+    const accepted = await Turf.updateMany(
+      { campaignId: campaign._id, passId: pass._id, status: 'draft' },
+      { $set: { status: 'published' } }
+    );
+    published = accepted.modifiedCount;
+    console.log(`   ${pass.name}: cut ${bookCount} books · published ${published}`);
+  } else {
+    console.log(`   ${pass.name}: books skipped (${published} already published)`);
+  }
+  const turfs = await Turf.find({ passId: pass._id, status: 'published' }).sort({ name: 1 });
+  if (turfs.length <= bookedReviewers.length) {
+    console.error(`only ${turfs.length} books on ${pass.name} but ${bookedReviewers.length} review login(s) — need at least one field book left over`);
+    process.exit(1);
+  }
+  // The last N books (by name) become the review logins' reserved books, one each.
+  const reviewerTurfs = turfs.slice(turfs.length - bookedReviewers.length);
+  const reviewerByTurfId = new Map(reviewerTurfs.map((t, k) => [String(t._id), bookedReviewers[k]]));
+  await TurfAssignment.deleteMany({ campaignId: campaign._id, passId: pass._id });
+  const assignmentsByTurf = new Map();
+  let bgIdx = 0;
+  const assignmentDocs = turfs.map((turf) => {
+    const reviewerUser = reviewerByTurfId.get(String(turf._id));
+    const user = reviewerUser || background[bgIdx++ % background.length];
+    assignmentsByTurf.set(String(turf._id), user._id);
+    return {
+      turfId: turf._id, userId: user._id,
+      organizationId: org._id, campaignId: campaign._id, passId: turf.passId,
+      assignedBy: admin._id, assignedAt: new Date(), isReviewerBook: !!reviewerUser,
+    };
   });
-  await persistDemoActivity({ campaign, activities, surveys });
-  return { activities: activities.length, surveys: surveys.length, overlaps, todayKnocks };
+  await TurfAssignment.insertMany(assignmentDocs);
+  return { turfs, assignmentsByTurf, reviewerTurfIds: new Set(reviewerByTurfId.keys()), reviewerTurfs };
 }
 
 async function stageEarlyVoting({ campaign, adminId, votersByHousehold, turfs, reviewerTurfIds }) {
@@ -773,7 +853,11 @@ async function main() {
     console.log(`4. imported ${counts.newVoters} voters / ${counts.newHouseholds} households (persons linked)`);
   }
 
-  // 5. Effort + pass ----------------------------------------------------------
+  // 5. Effort + rounds --------------------------------------------------------
+  // The permanent 2-round story: Round 1 archived (walked the week before), Round 2
+  // active (walked on the recent days). Both are found-or-created by their exact
+  // (effortId, roundNumber) — the unique Pass index makes re-runs safe, and
+  // createNextPass's E11000 retry covers a race.
   let effort = await Effort.findOne({ campaignId: campaign._id, name: 'Beaverdale' });
   if (!effort) {
     effort = await Effort.create({
@@ -785,61 +869,32 @@ async function main() {
     { campaignId: campaign._id, isActive: true, effortId: null },
     { $set: { effortId: effort._id } }
   );
-  let pass = await Pass.findOne({ effortId: effort._id }).sort({ roundNumber: -1 });
-  if (!pass) {
-    pass = await createNextPass({ organizationId: org._id, campaignId: campaign._id, effortId: effort._id, userId: admin._id });
-    if (!pass) { console.error('createNextPass failed'); process.exit(1); }
+  async function ensureRound(roundNumber) {
+    let p = await Pass.findOne({ effortId: effort._id, roundNumber });
+    if (!p) {
+      p = await createNextPass({ organizationId: org._id, campaignId: campaign._id, effortId: effort._id, userId: admin._id });
+      if (!p) { console.error('createNextPass failed'); process.exit(1); }
+      if (p.roundNumber !== roundNumber) {
+        console.error(`expected round ${roundNumber} but createNextPass minted round ${p.roundNumber} — clean up stray passes on the demo effort`);
+        process.exit(1);
+      }
+    }
+    return p;
   }
-  console.log(`5. effort '${effort.name}' · claimed ${claimed.modifiedCount} intake doors · ${pass.name} (${pass.status})`);
+  const r1 = await ensureRound(1);
+  const r2 = await ensureRound(2);
+  console.log(`5. effort '${effort.name}' · claimed ${claimed.modifiedCount} intake doors · rounds '${r1.name}' + '${r2.name}'`);
 
-  // 6. Cut + publish books ----------------------------------------------------
-  let published = await Turf.countDocuments({ passId: pass._id, status: 'published' });
-  if (!published) {
-    const { bookCount } = await generateTurf({
-      campaignId: campaign._id, passId: pass._id, mode: 'geometric', params: { maxDoors: BOOK_MAX_DOORS },
-    });
-    const accepted = await Turf.updateMany(
-      { campaignId: campaign._id, passId: pass._id, status: 'draft' },
-      { $set: { status: 'published' } }
-    );
-    published = accepted.modifiedCount;
-    console.log(`6. cut ${bookCount} books · published ${published}`);
-  } else {
-    console.log(`6. books: skipped (${published} already published)`);
-  }
-
-  // 7. Assign books — CLEAN reassignment so a drifted org (e.g. every book stuck on
-  // one account) self-heals: wipe the pass's assignments, then reserve ONE marked
-  // book per reviewer (kept clean for app review — Apple, Google, …) and distribute
-  // the rest across the field canvassers. isReviewerBook is the durable anchor the
-  // refresh button excludes by.
-  // EVERY app-review login gets a reserved clean book — the admins too, because an admin can
-  // switch into canvass mode and a reviewer who finds an empty book list reports that the app
-  // doesn't work. Only the background field canvassers share the walked ones.
+  // 6/7. Cut + publish + assign books for BOTH rounds (buildRoundBooks). EVERY
+  // app-review login gets a reserved clean book in each round — the admins too,
+  // because an admin can switch into canvass mode and a reviewer who finds an
+  // empty book list reports that the app doesn't work. Only the background field
+  // canvassers share the walked ones. Order is load-bearing: Round 2 is cut LAST
+  // so the Household.turfId mirror ends pointed at the ACTIVE round's books.
   const bookedReviewers = [...admins, ...reviewers];
-  const turfs = await Turf.find({ passId: pass._id, status: 'published' }).sort({ name: 1 });
-  if (turfs.length <= bookedReviewers.length) {
-    console.error(`only ${turfs.length} books but ${bookedReviewers.length} review login(s) — need at least one field book left over`);
-    process.exit(1);
-  }
-  // The last N books (by name) become the review logins' reserved books, one each.
-  const reviewerTurfs = turfs.slice(turfs.length - bookedReviewers.length);
-  const reviewerByTurfId = new Map(reviewerTurfs.map((t, k) => [String(t._id), bookedReviewers[k]]));
-  await TurfAssignment.deleteMany({ campaignId: campaign._id, passId: pass._id });
-  const assignmentsByTurf = new Map();
-  let bgIdx = 0;
-  const assignmentDocs = turfs.map((turf) => {
-    const reviewerUser = reviewerByTurfId.get(String(turf._id));
-    const user = reviewerUser || background[bgIdx++ % background.length];
-    assignmentsByTurf.set(String(turf._id), user._id);
-    return {
-      turfId: turf._id, userId: user._id,
-      organizationId: org._id, campaignId: campaign._id, passId: turf.passId,
-      assignedBy: admin._id, assignedAt: new Date(), isReviewerBook: !!reviewerUser,
-    };
-  });
-  await TurfAssignment.insertMany(assignmentDocs);
-  const reviewerTurfIds = new Set(reviewerByTurfId.keys());
+  console.log('6/7. books per round:');
+  const round1 = await buildRoundBooks({ pass: r1, org, campaign, admin, bookedReviewers, background });
+  const round2 = await buildRoundBooks({ pass: r2, org, campaign, admin, bookedReviewers, background });
   // Admins are on the crew too now: CampaignAssignment is what gates a campaign's visibility on
   // mobile, so without it an admin in canvass mode can't even see the campaign their reserved
   // book belongs to.
@@ -852,23 +907,49 @@ async function main() {
       { upsert: true, setDefaultsOnInsert: true }
     );
   }
-  const reviewerBookNote = reviewerTurfs.map((t, k) => `'${t.name}' → ${bookedReviewers[k].email}`).join(', ');
-  console.log(`7. assigned ${turfs.length} books across ${background.length} field canvassers · ${bookedReviewers.length} review book(s) kept clean: ${reviewerBookNote}`);
+  const reviewerBookNote = round2.reviewerTurfs.map((t, k) => `'${t.name}' → ${bookedReviewers[k].email}`).join(', ');
+  console.log(
+    `   assigned ${round1.turfs.length}+${round2.turfs.length} books across ${background.length} field canvassers ` +
+      `· ${bookedReviewers.length} review book(s) kept clean per round — active round: ${reviewerBookNote}`
+  );
 
-  // Activate the round (mirrors routes/admin/passes.js invariants).
-  if (pass.status !== 'active') {
-    await Pass.updateMany(
-      { campaignId: campaign._id, effortId: pass.effortId, status: 'active', _id: { $ne: pass._id } },
-      { $set: { status: 'archived', archivedAt: new Date() } }
-    );
-    pass.status = 'active';
-    if (!pass.activatedAt) pass.activatedAt = localTime(-7, 9 * 60); // before all staged knocks
-    await pass.save();
-    console.log(`   round activated (${pass.name})`);
-  }
+  // Round lifecycle. STATUSES are corrected on every run (the one-active-round-per-
+  // effort invariant must always hold), but the DATE stamps move only in the same run
+  // that (re)stages the knocks — a no-op `--apply` re-run must never slide activatedAt/
+  // archivedAt past knocks that stay where they are, or every knock lands outside its
+  // round's lifecycle window. R1 ran −14d → −7d (staged knocks on days −8..−12); R2
+  // activated at the boundary (−6d) and owns today..−4. Refresh-demo-day re-stamps
+  // dates the same way because it always restages.
+  const activityCount = await CanvassActivity.countDocuments({ campaignId: campaign._id });
+  const willStage = activityCount === 0;
+  await Pass.updateMany(
+    { campaignId: campaign._id, effortId: effort._id, status: 'active', _id: { $ne: r2._id } },
+    { $set: { status: 'archived', archivedAt: new Date() } }
+  );
+  await Pass.updateOne(
+    { _id: r1._id },
+    {
+      $set: {
+        status: 'archived',
+        ...(willStage ? { activatedAt: localTime(-14, 9 * 60), archivedAt: localTime(-7, 18 * 60) } : {}),
+      },
+    }
+  );
+  await Pass.updateOne(
+    { _id: r2._id },
+    {
+      $set: {
+        status: 'active',
+        ...(willStage ? { activatedAt: localTime(-6, 9 * 60), archivedAt: null } : {}),
+      },
+    }
+  );
+  console.log(
+    `   rounds: '${r1.name}' archived · '${r2.name}' active` +
+      (willStage ? ' (dates stamped −14d/−7d and −6d with the staged history)' : ' (dates untouched — history kept)')
+  );
 
   // 8. Staged canvass history --------------------------------------------------
-  const activityCount = await CanvassActivity.countDocuments({ campaignId: campaign._id });
   if (activityCount > 0) {
     console.log(`8. history: skipped (${activityCount} activities exist — use --reset --apply to restage)`);
   } else {
@@ -882,17 +963,26 @@ async function main() {
       votersByHousehold.byId.get(k).push(v);
     }
     const staged = await stageCanvassHistory({
-      rng: makeRng(RNG_SEED + 1), campaign, template, turfs,
-      assignmentsByTurf, reviewerTurfIds, votersByHousehold,
+      rng: makeRng(RNG_SEED + 1), campaign, template, votersByHousehold,
+      rounds: [
+        { label: r1.name, ...round1, dayOffsets: ARCHIVED_DAY_OFFSETS }, // archived week
+        { label: r2.name, ...round2 }, // default offsets: today + four prior evenings
+      ],
     });
     console.log(`8. staged ${staged.activities} activities · ${staged.surveys} surveys · ${staged.overlaps} overlap doors`);
+    console.log(
+      `   rounds staged: ${staged.perRound.map((r) => `'${r.label}' ${r.activities} activities / ${r.surveys} surveys`).join(' · ')}` +
+        ` · ${staged.reknockDoors} doors re-knocked across rounds`
+    );
 
     // 9. Early voting ----------------------------------------------------------
     for (const h of await Household.find({ campaignId: campaign._id, isActive: true }, 'status')) {
       votersByHousehold.docs.get(String(h._id)).status = h.status; // refresh post-recompute
     }
+    // Untouched doors are drawn from the ACTIVE round's books (the ones on the map).
     const voted = await stageEarlyVoting({
-      campaign, adminId: admin._id, votersByHousehold, turfs, reviewerTurfIds,
+      campaign, adminId: admin._id, votersByHousehold,
+      turfs: round2.turfs, reviewerTurfIds: round2.reviewerTurfIds,
     });
     console.log(`9. early voting: ${voted.voters} voters marked · ${voted.doorsDropped} doors dropped`);
 
@@ -906,14 +996,14 @@ async function main() {
   const [hh, vv, tt, aa, ss] = await Promise.all([
     Household.countDocuments({ campaignId: campaign._id }),
     Voter.countDocuments({ organizationId: org._id }),
-    Turf.countDocuments({ passId: pass._id, status: 'published' }),
+    Turf.countDocuments({ passId: { $in: [r1._id, r2._id] }, status: 'published' }),
     CanvassActivity.countDocuments({ campaignId: campaign._id }),
     SurveyResponse.countDocuments({ campaignId: campaign._id }),
   ]);
   console.log('\n────────────────────────────────────────────');
   console.log(`Demo ready: '${DEMO_ORG_NAME}' / '${DEMO_CAMPAIGN_NAME}'`);
   console.log(`  campaignId: ${campaign._id}`);
-  console.log(`  ${hh} doors · ${vv} voters · ${tt} books · ${aa} activities · ${ss} surveys`);
+  console.log(`  ${hh} doors · ${vv} voters · ${tt} books across 2 rounds · ${aa} activities · ${ss} surveys`);
   // Print exactly what goes into App Store Connect / Play Console, and say which account the
   // reviewer is meant to DELETE — the admins refuse deletion, so if the notes don't point at a
   // disposable one the reviewer concludes the feature doesn't work.
@@ -921,7 +1011,7 @@ async function main() {
     const isAdmin = k < admins.length;
     const pw = isAdmin ? ADMIN_PASSWORDS[k] : CANVASSER_PASSWORDS[k - admins.length];
     const role = isAdmin ? 'ADMIN, deletion-LOCKED' : 'canvasser, DELETABLE — give this one to test deletion';
-    console.log(`  ${u.email} / ${pw} — ${role} — book '${reviewerTurfs[k].name}' kept clean`);
+    console.log(`  ${u.email} / ${pw} — ${role} — book '${round2.reviewerTurfs[k].name}' kept clean`);
   });
   console.log(`  client portal:   /r/${share.token}`);
   // Print the command as it must be typed in Heroku's Run console, which starts at the REPO

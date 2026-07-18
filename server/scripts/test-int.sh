@@ -10,7 +10,12 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # server/
-PORT="${MONGO_TEST_PORT:-27779}"
+# Random default port: two CONCURRENT runs of this script (say, one in a terminal and one from an
+# agent) used to share :27779 — and since db names derive from file paths, each run's per-file
+# cleanup wiped the OTHER run's data mid-test. That produced phantom one-off failures (a vanished
+# ImportJob, suites dying at connect) that never reproduced in isolation. Pin MONGO_TEST_PORT only
+# when you genuinely want two runs on one mongod.
+PORT="${MONGO_TEST_PORT:-$((20000 + RANDOM % 20000))}"
 DATADIR="$(mktemp -d)"
 MONGO_PID=""
 

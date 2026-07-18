@@ -8,42 +8,25 @@ import {
   RefreshControl,
   StyleSheet,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { formatRelative as sharedFormatRelative } from '../../../lib/dates';
 import { useRefresh } from '../../../lib/useRefresh';
+import { ACTION_LABEL, dotColors } from '../../../lib/activityFeed';
 import LiveStatus from '../../../components/LiveStatus';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
-const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-};
-
 // Shared helper; feeds render nothing (not 'Never') for a missing timestamp.
 const formatRelative = (d) => sharedFormatRelative(d, { never: '' });
 
 export default function ActivityScreen() {
-  const router = useRouter();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const DOT_COLOR = {
-    survey_submitted: colors.success,
-    not_home: colors.brand,
-    wrong_address: colors.danger,
-    refused: colors.status.refused,
-    restricted: colors.status.restricted,
-    lit_dropped: colors.accentPurple,
-  };
+  const DOT_COLOR = dotColors(colors);
 
   const [live, setLive] = useState(true);
   const feedQ = useQuery({
@@ -88,11 +71,7 @@ export default function ActivityScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Control Room</Text>
-        </Pressable>
         <Text style={styles.headerTitle}>Live activity</Text>
-        <View style={{ width: 80 }} />
       </View>
       <View style={styles.liveRow}>
         <LiveStatus
@@ -175,9 +154,7 @@ function makeStyles(t) {
     paddingVertical: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
   },
-  back: { color: colors.brand, fontWeight: '700', fontSize: 14 },
   headerTitle: { ...type.h3 },
   liveRow: {
     paddingHorizontal: spacing.lg,

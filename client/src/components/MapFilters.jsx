@@ -85,16 +85,24 @@ export default function MapFilters({
       answerFilter?.questionKey === questionKey &&
       answerFilter?.option === option
     ) {
-      onAnswerChange({ questionKey: '', option: '', optionId: '' });
+      onAnswerChange({ questionKey: '', option: '', optionId: '', templateId: '' });
     } else {
-      onAnswerChange({ questionKey, option, optionId: optionId || '' });
+      // Pin the filter to the template these chips came from — question keys / option ids
+      // are unique only WITHIN one template, so a same-named option in another survey on
+      // this campaign must never leak into the pin set.
+      onAnswerChange({
+        questionKey,
+        option,
+        optionId: optionId || '',
+        templateId: survey?.surveyTemplate?.id || '',
+      });
     }
   }
 
   function clearAll() {
     onStatusChange([]);
     onCanvasserChange?.('');
-    onAnswerChange({ questionKey: '', option: '', optionId: '' });
+    onAnswerChange({ questionKey: '', option: '', optionId: '', templateId: '' });
   }
 
   const hasActiveFilters =

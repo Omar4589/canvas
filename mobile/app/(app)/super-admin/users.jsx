@@ -6,14 +6,15 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
+  RefreshControl,
   StyleSheet,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useInfinitePaged } from '../../../lib/useInfinitePaged';
+import { useRefresh } from '../../../lib/useRefresh';
 import { formatRelative } from '../../../lib/dates';
 import { loadCurrentUser } from '../../../lib/cache';
 import { radius, spacing } from '../../../lib/theme';
@@ -33,7 +34,6 @@ const FILTERS = [
 export default function SuperAdminUsersScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const router = useRouter();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
@@ -81,14 +81,12 @@ export default function SuperAdminUsersScreen() {
   // profile may predate platformRole — then the button stays and the server still refuses).
   const canPromote = me?.platformRole !== 'support';
 
+  const { refreshing, onRefresh } = useRefresh([usersQ.refetch]);
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Control Room</Text>
-        </Pressable>
         <Text style={styles.headerTitle}>All users</Text>
-        <View style={{ width: 80 }} />
       </View>
 
       <View style={styles.controls}>
@@ -119,7 +117,17 @@ export default function SuperAdminUsersScreen() {
         </ScrollView>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
+      <ScrollView
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brand}
+            colors={[colors.brand]}
+          />
+        }
+      >
         {!usersQ.isLoading && (
           <Text style={styles.countLine}>
             {/* Deleted tombstones counted apart so they never inflate the headline. */}
@@ -241,9 +249,7 @@ function makeStyles(t) {
     paddingVertical: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
   },
-  back: { color: colors.brand, fontWeight: '700', fontSize: 14 },
   headerTitle: { ...type.h3 },
   controls: {
     paddingHorizontal: spacing.lg,

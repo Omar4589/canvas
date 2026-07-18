@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { Stack, Redirect } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { loadCurrentUser } from '../../../lib/cache';
 import { useTheme } from '../../../lib/ThemeContext';
+// Shared with the admin Tabs layout — one icon set, one style.
+import { OverviewIcon, BuildingsIcon, PeopleIcon, ClockIcon, MoreIcon } from '../../../components/icons/tabIcons';
 
 export default function SuperAdminLayout() {
   const { colors } = useTheme();
@@ -31,11 +33,38 @@ export default function SuperAdminLayout() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="users" />
-      <Stack.Screen name="organizations" />
-      <Stack.Screen name="activity" />
-    </Stack>
+    <Tabs
+      // Same semantics the admin tabs ship: back returns to the previously-focused tab,
+      // not a jump to Control Room.
+      backBehavior="history"
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: colors.brand,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+      }}
+    >
+      <Tabs.Screen
+        name="index"
+        options={{ title: 'Control Room', tabBarIcon: ({ color, size }) => <OverviewIcon color={color} size={size} /> }}
+      />
+      <Tabs.Screen
+        name="organizations"
+        options={{ title: 'Orgs', tabBarIcon: ({ color, size }) => <BuildingsIcon color={color} size={size} /> }}
+      />
+      <Tabs.Screen
+        name="users"
+        options={{ title: 'Users', tabBarIcon: ({ color, size }) => <PeopleIcon color={color} size={size} /> }}
+      />
+      <Tabs.Screen
+        name="activity"
+        options={{ title: 'Activity', tabBarIcon: ({ color, size }) => <ClockIcon color={color} size={size} /> }}
+      />
+      <Tabs.Screen
+        name="more"
+        options={{ title: 'More', tabBarIcon: ({ color, size }) => <MoreIcon color={color} size={size} /> }}
+      />
+    </Tabs>
   );
 }

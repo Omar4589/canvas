@@ -140,12 +140,14 @@ export default function MapPage() {
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState(searchParams.get('userId') || '');
   // A Survey Explorer "Open in Map" deep-link carries the answer drill
-  // (?questionKey/&option/&optionId) — seeded once, like canvasserId above. The
-  // filter chips key on option TEXT, so links must always include `option`.
+  // (?questionKey/&option/&optionId/&surveyTemplateId) — seeded once, like canvasserId
+  // above. The filter chips key on option TEXT, so links must always include `option`;
+  // templateId scopes the drill to ONE survey (keys/ids are unique only within a template).
   const [answerFilter, setAnswerFilter] = useState(() => ({
     questionKey: searchParams.get('questionKey') || '',
     option: searchParams.get('option') || '',
     optionId: searchParams.get('optionId') || '',
+    templateId: searchParams.get('surveyTemplateId') || '',
   }));
   const [showCanvasserPins, setShowCanvasserPins] = useState(false);
   // Live auto-refresh of the map (web admins are at a desk + connected). Gates
@@ -236,6 +238,14 @@ export default function MapPage() {
     enabled: !!campaignId && selectedCampaign?.type !== 'lit_drop',
   });
 
+  // Template scope for the answer filter. Chips stamp templateId as they're clicked;
+  // legacy deep links without the param scope to the current template once it loads —
+  // which equals today's cross-template behavior until then.
+  const answerTemplateId =
+    answerFilter.templateId ||
+    (answerFilter.questionKey ? surveyQ.data?.surveyTemplate?.id : '') ||
+    '';
+
   const queryString = buildQuery({
     campaignId,
     from: dateRange.from,
@@ -245,6 +255,7 @@ export default function MapPage() {
     questionKey: answerFilter.questionKey,
     option: answerFilter.option,
     optionId: answerFilter.optionId,
+    surveyTemplateId: answerTemplateId,
     includeActivities: showCanvasserPins ? '1' : '',
     includeBounds: '1', // campaign door extent, to frame the camera even with no knocks today
     effortId: scopeEffortId,
@@ -265,6 +276,7 @@ export default function MapPage() {
       answerFilter.questionKey,
       answerFilter.option,
       answerFilter.optionId,
+      answerTemplateId,
       showCanvasserPins,
       scopeEffortId,
       scopePassId,

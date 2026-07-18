@@ -152,6 +152,9 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
       stateHouseDistrict: voter.stateHouseDistrict || null,
       precinct: voter.precinct || null,
       surveyStatus: voter.surveyStatus,
+      // Identity fields a hand edit armed against re-imports (routes/admin/voters.js PATCH) —
+      // the profile shows which values are protected so an admin knows why a file didn't move them.
+      protectedFields: voter.locallyEditedFields || [],
       // The reason is visible here (an online, scoped read — same exposure class as the admin
       // notes below); the offline bootstrap cache carries only a boolean, never the reason.
       doNotContact: voter.doNotContact?.flagged

@@ -86,8 +86,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   and new surveys, and a fully-flagged door drops from every campaign type."* True only while the
   `KNOCKABLE_DOOR_FILTER` spread covers every knockable-door site, the export's live-state join
   stays in `walklists.js` export.csv, and the `DO_NOT_CONTACT` backstop stays mounted in
-  `routes/mobile/canvass.js`. If the policy ever names do-not-contact in its category list or
-  rights section, that sentence anchors HERE.
+  `routes/mobile/canvass.js`. **The policy now names it** (privacy.html "Canvassing activity" —
+  contact preferences: recorded with the reason, used to "exclude that person from the
+  organization's future canvassing lists and exports") — that published sentence anchors here.
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -540,7 +541,7 @@ if (!WRITE_METHODS.has(req.method)) return next();            // entitlement.js:
 
 **VERIFIED.** There is **no full-account export**. A repo-wide grep for `exportOrg|fullExport|dataExport|exportAll` returns nothing.
 
-**Exactly four server-side CSV endpoints exist, all under `/admin`:**
+**Exactly five server-side CSV endpoints exist, all under `/admin`:**
 
 | Endpoint | Contents | Gate |
 |---|---|---|
@@ -548,6 +549,9 @@ if (!WRITE_METHODS.has(req.method)) return next();            // entitlement.js:
 | `GET /admin/reports/canvassers.csv` (`reports.js:2267`) | Per-canvasser **First name, Last name, Email, Phone, Status** + aggregate counts. **Restores deleted users' names and emails** (A4). | admin or lead (`reports.js:37`) |
 | `GET /admin/reports/canvassers/:userId/export.csv` (`reports.js:3383`) | **Timestamp, Action, Address, City, State, Zip, Voter name, Party, Latitude, Longitude, GPS Accuracy, Distance from house, Offline flag, free-text Note** (`headers :3406-3410`) | admin or lead |
 | `GET /admin/reports/voters-by-answer.csv` (`reports.js:1303`) | The survey **answer drill-in** export ("everyone who answered X", optionally one canvasser's entries, or a tag): per response — **Submitted timestamp (ISO + campaign-tz date/time), Voter name, Party, Address, City, State, Zip, Canvasser first/last name, the drilled Question/Answer snapshots, the response's free-text Note, offline flag, response id** (`headers :1353-1358`). Capped at **50,000 rows** (`EXPORT_CAP`, `:1309`); no pagination. | admin or lead (`reports.js:37`); a lead additionally **must pass a `campaignId` they manage** (the reports-router scope middleware, `reports.js:47-60`) — the same gate as the JSON drill it mirrors (`buildVotersByAnswerFilter` is shared, `:1214`) |
+| `GET /admin/reports/knocks-by-pass.csv` (`reports.js:2643`) | The per-round billing breakdown — **aggregate counts only**: walk-list name, round number/name/status/dates, knocks, survey doors, lit knocks, refused, rates, "new homes reached", plus a TOTAL row. **No voter PII in either layout.** With `?groupBy=canvasser`: per-canvasser rows add **First name, Last name, Email, Status** beside the counts — the same canvasser-identity class `canvassers.csv` above already exports, resolved by the same hydrator (for a **deleted** user that means the snapshot-restored **name only**; the hydrator blanks a deleted user's email — `canvasserIdentity.js:72`). | admin or lead (`reports.js:37`); `campaignId` is **required for everyone** (400 without it, `buildKnocksByPass` `reports.js:2460`), and a lead's must be one they manage (the reports-router scope middleware, `reports.js:47-60`) |
+
+**The fifth (knocks-by-pass.csv) is aggregate counts, not records — no policy text change.** Its default layout carries no personal data at all (walk-list/round names and tallies); the `groupBy=canvasser` layout re-exposes canvasser name/email/status to **exactly the audience** that already downloads them from `canvassers.csv` (same admin-or-lead gate, plus the stricter always-required `campaignId`). No voter fields appear in any layout, no new party receives data, and no new category of data leaves the system, **so no Privacy Policy / ToS / DPA text change is required for it.** Staff (grant-based) access is covered by the fail-closed central access log (E13 — no exemption for this route).
 
 **The fourth (voters-by-answer.csv) is a same-audience exposure, not a new recipient class.** It downloads exactly what the same caller could already page through on `GET /admin/reports/voters-by-answer` (same filter builder, same role + lead-campaign gate) — voter identity/address, canvasser identity, the chosen answer, and the door note were all already readable by that audience in-app, and the walk-list CSV above already put voter name/party/address in a file for the same roles. No new party receives data and no new category of data leaves the system, **so no Privacy Policy / ToS / DPA text change is required for it.** Staff (grant-based) access to it is covered by the fail-closed central access log (E13 — the finish-listener middleware logs unless explicitly exempted; this route has no exemption).
 

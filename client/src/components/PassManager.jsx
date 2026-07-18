@@ -4,6 +4,7 @@ import { api } from '../api/client.js';
 import StatCard from './StatCard.jsx';
 import { Card, Badge, Button, Input, Modal } from './ui';
 import { formatInTz } from '../lib/datetime.js';
+import { ratePct } from '../lib/rates.js';
 
 // Effort-scoped pass management, shared by the full-page PassesPage wrapper
 // (variant="full") and the Walk Lists drawer (variant="compact"). The effort is
@@ -174,7 +175,7 @@ function PassDetail({ campaignId, pass, tz }) {
   );
 }
 
-export default function PassManager({ campaignId, effortId, tz, variant = 'full' }) {
+export default function PassManager({ campaignId, effortId, tz, variant = 'full', campaignType }) {
   const qc = useQueryClient();
   const compact = variant === 'compact';
   const [name, setName] = useState('');
@@ -217,7 +218,9 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
     onSuccess: invalidate,
   });
 
-  const colSpan = 8;
+  // Lit-drop campaigns knock to drop literature, not to survey — same column, different unit.
+  const isLitDrop = campaignType === 'lit_drop';
+  const colSpan = 10;
 
   return (
     <div>
@@ -275,6 +278,8 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
               <th className="px-4 py-2 text-left">Status</th>
               <th className="px-4 py-2 text-right">Books</th>
               <th className="px-4 py-2 text-right">Knocks</th>
+              <th className="px-4 py-2 text-right">{isLitDrop ? 'Lit drops' : 'Survey doors'}</th>
+              <th className="px-4 py-2 text-right">Conn %</th>
               <th className="px-4 py-2 text-left">Progress</th>
               <th className="px-4 py-2 text-left">Created</th>
               <th className="px-4 py-2 text-right">Actions</th>
@@ -304,6 +309,10 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-fg">{p.turfCount}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-fg">{(p.knockCount || 0).toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-fg">
+                      {((isLitDrop ? p.litKnocks : p.surveyedKnocks) || 0).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{ratePct(p.connectionRate)}</td>
                     <td className="px-4 py-2"><PassProgress campaignId={campaignId} passId={p._id} /></td>
                     <td className="px-4 py-2 text-fg-muted">
                       {p.createdAt ? formatInTz(p.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : '—'}

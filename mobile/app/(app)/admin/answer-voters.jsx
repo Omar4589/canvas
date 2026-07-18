@@ -170,6 +170,7 @@ export default function AnswerVoters() {
         questionKey,
         optionId: optionId || '',
         alabel: option ?? label ?? '',
+        surveyTemplateId: surveyTemplateId || '',
         userId: canvasserId || '',
         from: from || '',
         to: to || '',

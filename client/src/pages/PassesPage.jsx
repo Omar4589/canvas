@@ -36,7 +36,7 @@ export default function PassesPage() {
       </div>
 
       {effortId ? (
-        <PassManager campaignId={campaignId} effortId={effortId} tz={tz} variant="full" />
+        <PassManager campaignId={campaignId} effortId={effortId} tz={tz} variant="full" campaignType={selected?.type} />
       ) : (
         <p className="text-sm text-fg-muted">
           Pick a walk list from{' '}

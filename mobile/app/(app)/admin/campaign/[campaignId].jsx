@@ -134,6 +134,14 @@ export default function CampaignDetail() {
     queryFn: () => api(`/admin/reports/campaign-rollup?${rangeParams().toString()}`),
     enabled: !!cId && !!range,
   });
+  // Per-round knocks (walk list × round) over the SAME window — the billing
+  // pipeline's rows, so they sum exactly to the invoice. Server sorts: walk list
+  // asc, round asc, legacy last.
+  const roundsQ = useQuery({
+    queryKey: ['admin', 'reports', 'knocks-by-pass', cId, range?.from, range?.to],
+    queryFn: () => api(`/admin/reports/knocks-by-pass?${rangeParams().toString()}`),
+    enabled: !!cId && !!range,
+  });
 
   const totals = overviewQ.data?.totals || {};
   const canvass = overviewQ.data?.canvass || {};
@@ -146,6 +154,7 @@ export default function CampaignDetail() {
   const rangeRate = rateFromPct(rangeStats.connectionRate);
 
   const questions = surveyResultsQ.data?.questions || [];
+  const rounds = roundsQ.data?.rounds || [];
 
   // Top-5 canvassers normalized to the shared CanvasserCard shape: rename Doors/
   // Surveys/Lit, compute doors-per-hour from first→last, join the coordinator.
@@ -302,6 +311,39 @@ export default function CampaignDetail() {
               </View>
             )}
           </View>
+
+          {/* By round (range) — one row per walk list × round from the billing pipeline */}
+          <SectionHeader title="By round" subtitle="Knocks per walk-list round in range" />
+          {roundsQ.isLoading ? (
+            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md, marginBottom: spacing.md }} />
+          ) : roundsQ.error ? (
+            // A failed fetch (weak signal, or an old server during the OTA window) must
+            // never render as an authoritative zero on a billing surface.
+            <View style={styles.card}>
+              <Text style={styles.muted}>Couldn't load rounds — {roundsQ.error.message}</Text>
+            </View>
+          ) : rounds.length === 0 ? (
+            <View style={styles.card}>
+              <Text style={styles.muted}>No rounds yet.</Text>
+            </View>
+          ) : (
+            <View style={styles.card}>
+              {rounds.map((r, i) => (
+                <View key={r.passId || `legacy-${i}`} style={[styles.roundRow, i === rounds.length - 1 && { borderBottomWidth: 0 }]}>
+                  <View style={{ flex: 1, marginRight: spacing.sm }}>
+                    {r.effortName ? (
+                      <Text style={styles.roundEffort} numberOfLines={1}>{r.effortName}</Text>
+                    ) : null}
+                    <Text style={styles.roundLabel} numberOfLines={1}>{r.roundLabel}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={styles.roundKnocks}>{(r.knocks || 0).toLocaleString()}</Text>
+                    <Text style={styles.roundConn}>{isLitDrop ? 'Lit' : 'Conn'} {r.connectionRate ?? 0}%</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
 
           {/* Coverage (all-time) */}
           <SectionHeader
@@ -482,6 +524,12 @@ function makeStyles(t) {
   statTileLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textAlign: 'center' },
 
   coverageSummary: { ...type.caption, marginBottom: spacing.sm, color: colors.textPrimary, fontWeight: '600' },
+
+  roundRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  roundEffort: { ...type.bodyStrong, fontSize: 14 },
+  roundLabel: { ...type.caption, marginTop: 2 },
+  roundKnocks: { ...type.bodyStrong, fontSize: 14, fontVariant: ['tabular-nums'] },
+  roundConn: { ...type.caption, marginTop: 2, fontVariant: ['tabular-nums'] },
 
   canvasserRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   canvasserRank: { width: 24, fontSize: 14, fontWeight: '800', color: colors.brand },

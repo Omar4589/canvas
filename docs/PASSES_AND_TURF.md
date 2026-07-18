@@ -492,9 +492,20 @@ the app **does not** refetch bootstrap on remount (`staleTime 30s`, `refetchOnMo
 [map.jsx:310-337](../mobile/app/(app)/map.jsx#L310)); between full fetches it relies on the **30s delta**
 `GET /mobile/changes` ([map.jsx:489-556](../mobile/app/(app)/map.jsx#L489)), which returns households whose
 `updatedAt > since` **within the caller's current scope** and patches only `status` + `location` (pin) +
-archival on **already-cached** doors. Consequences:
+archival on **already-cached** doors. Voters ride the delta on **two tracks, unioned**
+([routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js)): **(1)** ALL voters of each
+changed household — not only docs whose own `updatedAt` moved, because marking a voter voted writes a
+`VotedVoter` row, not the Voter doc (the recompute bumps the household, so its door is already in the
+delta); **(2)** voters whose **own `updatedAt` moved** — a pure identity edit (admin correction, Person
+propagation, re-import reconcile) touches only the Voter doc, never the household, so track 1 alone
+would strand it until a cold re-bootstrap. Same cost class either way: index seeks over the
+canvasser's own book scope, projected to the bootstrap's identity-cache fields. Consequences:
 
 - **Pin moves & status changes propagate in ~30s** (they bump `Household.updatedAt` and stay in scope).
+- **Voter identity edits propagate in ~30s too** (track 2) — a corrected name/party reaches phones
+  without a pull-to-refresh. (One projection caveat: the delta ships the identity-cache fields only —
+  `phone` isn't among them, so a phone-only correction reaches the profile screen live but the cached
+  delta copy carries no phone until a full bootstrap.)
 - **A move/merge/split is _not_ reflected by the delta**: it never adds a door, never changes book
   membership, and carries no removal signal — so a door that moved _out_ of a canvasser's book lingers
   on their cached map, and one that moved _in_ doesn't appear, until a full bootstrap.

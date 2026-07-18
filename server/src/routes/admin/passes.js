@@ -10,7 +10,7 @@ import { Household } from '../../models/Household.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
-import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
+import { knocksPipeline, connectionRate, contactRate } from '../../services/reports/aggregations.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { createNextPass } from '../../services/passes/createPass.js';
 
@@ -52,20 +52,28 @@ router.get('/', async (req, res, next) => {
       { $group: { _id: '$passId', turfs: { $sum: 1 } } },
     ]);
     const cMap = new Map(counts.map((c) => [String(c._id), c.turfs]));
-    // Per-round knock count — billing definition: distinct (household, pass).
-    const knockAgg = await CanvassActivity.aggregate([
-      { $match: { campaignId: req.campaign._id, actionType: { $in: KNOCK_ACTIONS } } },
-      { $group: { _id: { passId: '$passId', householdId: '$householdId' } } },
-      { $group: { _id: '$_id.passId', knocks: { $sum: 1 } } },
-    ]);
-    const kMap = new Map(knockAgg.map((c) => [String(c._id), c.knocks]));
+    // Per-round counts via the SHARED billing pipeline (distinct (household, pass) +
+    // completion tallies) — the same aggregation every report uses, so this page can
+    // never disagree with the knocks-by-pass report or the dashboards.
+    const knockAgg = await CanvassActivity.aggregate(
+      knocksPipeline({ campaignId: req.campaign._id }, { byPass: true })
+    );
+    const kMap = new Map(knockAgg.map((c) => [String(c._id), c]));
     const activeIds = await activePassIds(req.campaign._id);
     res.json({
-      passes: passes.map((p) => ({
-        ...p,
-        turfCount: cMap.get(String(p._id)) || 0,
-        knockCount: kMap.get(String(p._id)) || 0,
-      })),
+      passes: passes.map((p) => {
+        const k = kMap.get(String(p._id)) || null;
+        return {
+          ...p,
+          turfCount: cMap.get(String(p._id)) || 0,
+          knockCount: k?.knocks || 0,
+          surveyedKnocks: k?.surveyedKnocks || 0,
+          litKnocks: k?.litKnocks || 0,
+          refusedKnocks: k?.refusedKnocks || 0,
+          connectionRate: k ? connectionRate(k) : 0,
+          contactRate: k ? contactRate(k) : 0,
+        };
+      }),
       activePassIds: activeIds.map(String),
     });
   } catch (err) {

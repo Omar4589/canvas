@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Tabs, Redirect } from 'expo-router';
-import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import {
   loadCurrentUser,
   loadMemberships,
@@ -9,60 +8,8 @@ import {
 } from '../../../lib/cache';
 import { isConsoleRole } from '../../../lib/role';
 import { useTheme } from '../../../lib/ThemeContext';
-
-function OverviewIcon({ color, size }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x="3" y="3" width="8" height="8" rx="1.5" stroke={color} strokeWidth="2" />
-      <Rect x="13" y="3" width="8" height="5" rx="1.5" stroke={color} strokeWidth="2" />
-      <Rect x="13" y="11" width="8" height="10" rx="1.5" stroke={color} strokeWidth="2" />
-      <Rect x="3" y="13" width="8" height="8" rx="1.5" stroke={color} strokeWidth="2" />
-    </Svg>
-  );
-}
-
-function ClockIcon({ color, size }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx="12" cy="12" r="9" stroke={color} strokeWidth="2" />
-      <Path d="M12 7v5l3.5 2" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
-
-function MapPinIcon({ color, size }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11Z"
-        stroke={color}
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <Circle cx="12" cy="10" r="2.4" stroke={color} strokeWidth="2" />
-    </Svg>
-  );
-}
-
-function BooksIcon({ color, size }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x="5" y="3" width="14" height="18" rx="2" stroke={color} strokeWidth="2" />
-      <Path d="M9 3v18" stroke={color} strokeWidth="2" />
-      <Path d="M12.5 8h4M12.5 12h4" stroke={color} strokeWidth="2" strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-function MoreIcon({ color, size }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx="5" cy="12" r="1.8" fill={color} />
-      <Circle cx="12" cy="12" r="1.8" fill={color} />
-      <Circle cx="19" cy="12" r="1.8" fill={color} />
-    </Svg>
-  );
-}
+// Shared with the super-admin Tabs layout — one icon set, one style.
+import { OverviewIcon, ClockIcon, MapPinIcon, BooksIcon, MoreIcon } from '../../../components/icons/tabIcons';
 
 export default function AdminLayout() {
   const { colors } = useTheme();

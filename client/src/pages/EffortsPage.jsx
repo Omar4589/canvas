@@ -165,7 +165,7 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
   );
 }
 
-function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewNames, tz, intakeCount, onUpdate, onArchive, onDelete }) {
+function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, campaignType, crewNames, tz, intakeCount, onUpdate, onArchive, onDelete }) {
   const [open, setOpen] = useState(false);
   const survey = surveys.find((s) => String(s._id) === String(effort.surveyTemplateId));
   const crewTitle = (crewNames || []).join(', ');
@@ -236,7 +236,7 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, crewN
                   Open full view →
                 </Link>
               </div>
-              <PassManager campaignId={campaignId} effortId={effort._id} tz={tz} variant="compact" />
+              <PassManager campaignId={campaignId} effortId={effort._id} tz={tz} variant="compact" campaignType={campaignType} />
             </div>
           </td>
         </tr>
@@ -441,6 +441,7 @@ export default function EffortsPage() {
                 walkLists={walkLists}
                 surveys={surveys}
                 isSurveyType={isSurveyType}
+                campaignType={selected?.type}
                 crewNames={(e.crewUserIds || []).map((id) => nameByUserId.get(id)).filter(Boolean)}
                 tz={tz}
                 intakeCount={intakeCount}

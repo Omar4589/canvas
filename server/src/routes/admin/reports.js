@@ -5,6 +5,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Pass } from '../../models/Pass.js';
+import { Effort } from '../../models/Effort.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { User } from '../../models/User.js';
@@ -2427,6 +2428,280 @@ router.get('/canvassers.csv', async (req, res, next) => {
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="canvassers-${new Date().toISOString().slice(0, 10)}.csv"`
+    );
+    res.send(toCsv(headers, rows));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-round billing report ("knocks by pass")
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The rows an invoice is assembled from: walk list × round over the billing pipeline
+// (distinct household×pass), plus campaign totals from the SAME pipeline — so the rows
+// always sum exactly to the headline they break down. The round-blind Campaign.stats
+// fast-path is never used here; everything is live aggregation.
+//
+// "New homes reached" (coverageGained) = households whose FIRST-EVER campaign knock
+// landed in that round; a date window applies to WHEN that first knock happened. So a
+// re-knocked R1 door adds a knock to R2 but never coverage, and Σ(coverageGained) over
+// all time equals the campaign's distinct knocked-door coverage.
+//
+// ?groupBy=canvasser adds RAW per-user rows (NOT_BULK, never team-folded). A door two
+// canvassers both knocked in the same round counts ONCE for the round but once per
+// canvasser — the over-claim is reported as crossCanvasserDoors (the /team-breakdown
+// convention), computed against a NOT_BULK round total so admin bulk marks can't
+// masquerade as cross-canvasser overlap.
+//
+// Shared by the JSON and CSV handlers so the report and the export can't drift.
+async function buildKnocksByPass(req) {
+  if (!req.query.campaignId || !mongoose.isValidObjectId(req.query.campaignId)) {
+    return { error: { status: 400, message: 'campaignId is required' } };
+  }
+  const cFilter = baseFilter(req); // organizationId + campaignId (+ optional effortId)
+  const windowed = parseDateRange(req, 'timestamp');
+  const match = { ...cFilter, ...windowed };
+  const groupByCanvasser = req.query.groupBy === 'canvasser';
+
+  // Org-scope the metadata lookups too — baseFilter org-scopes the activity aggregates,
+  // but without organizationId here a foreign campaignId would still leak another org's
+  // walk-list/round names and dates as zero-knock rows.
+  const passFilter = { organizationId: cFilter.organizationId, campaignId: cFilter.campaignId };
+  if (cFilter.effortId) passFilter.effortId = cFilter.effortId;
+
+  const [perPass, totalRows, firstKnockRows, passes, efforts] = await Promise.all([
+    CanvassActivity.aggregate(knocksPipeline(match, { byPass: true })),
+    CanvassActivity.aggregate(knocksPipeline(match)),
+    // First-ever knock per household scans the campaign LIFETIME — no date filter AND no
+    // effortId: CanvassActivity.effortId is stamped at knock time and never restamped, so
+    // an effort-scoped scan would call a force-claimed, previously-worked door "new" the
+    // moment its old knocks sit under the old effort. First-ever means first-ever in the
+    // CAMPAIGN; effortId only selects which rows are displayed. The window then narrows
+    // to first-knocks that happened inside it.
+    CanvassActivity.aggregate([
+      {
+        $match: {
+          organizationId: cFilter.organizationId,
+          campaignId: cFilter.campaignId,
+          actionType: { $in: KNOCK_ACTIONS },
+        },
+      },
+      { $sort: { timestamp: 1 } },
+      {
+        $group: {
+          _id: '$householdId',
+          firstAt: { $first: '$timestamp' },
+          firstPassId: { $first: '$passId' },
+        },
+      },
+      ...(windowed.timestamp ? [{ $match: { firstAt: windowed.timestamp } }] : []),
+      { $group: { _id: '$firstPassId', coverageGained: { $sum: 1 } } },
+    ]),
+    Pass.find(passFilter, 'roundNumber name status effortId activatedAt archivedAt').lean(),
+    Effort.find({ organizationId: cFilter.organizationId, campaignId: cFilter.campaignId }, 'name').lean(),
+  ]);
+
+  const effortName = new Map(efforts.map((e) => [String(e._id), e.name]));
+  const passById = new Map(passes.map((p) => [String(p._id), p]));
+  const countsByPass = new Map(perPass.map((r) => [String(r._id), r]));
+  const coverageByPass = new Map(firstKnockRows.map((r) => [String(r._id), r.coverageGained]));
+
+  // Row set = every round of the campaign/effort (even 0-knock ones — "R2 active, no
+  // knocks yet" is real information) + any agg bucket without a Pass doc (legacy
+  // passId:null, or a knock whose pass was deleted).
+  const rowKeys = new Set([...passes.map((p) => String(p._id)), ...perPass.map((r) => String(r._id))]);
+  const shapeRow = (key) => {
+    const p = passById.get(key) || null;
+    const k = countsByPass.get(key) || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
+    const legacy = key === 'null' || key === 'undefined';
+    return {
+      passId: legacy ? null : key,
+      effortId: p ? String(p.effortId) : null,
+      effortName: p ? effortName.get(String(p.effortId)) || null : null,
+      roundNumber: p ? p.roundNumber : null,
+      roundName: p ? p.name : null,
+      roundLabel: p ? `Pass ${p.roundNumber} · ${p.name}` : 'Legacy / no round',
+      status: p ? p.status : null,
+      activatedAt: p?.activatedAt || null,
+      archivedAt: p?.archivedAt || null,
+      knocks: k.knocks,
+      surveyedKnocks: k.surveyedKnocks,
+      litKnocks: k.litKnocks,
+      refusedKnocks: k.refusedKnocks,
+      connectionRate: connectionRate(k),
+      contactRate: contactRate(k),
+      coverageGained: coverageByPass.get(key) || 0,
+    };
+  };
+  const rounds = [...rowKeys].map(shapeRow).sort(
+    (a, b) =>
+      (a.effortName || '￿').localeCompare(b.effortName || '￿') ||
+      (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity)
+  );
+
+  const t = totalRows[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
+  const totals = {
+    knocks: t.knocks,
+    surveyedKnocks: t.surveyedKnocks,
+    litKnocks: t.litKnocks,
+    refusedKnocks: t.refusedKnocks,
+    connectionRate: connectionRate(t),
+    contactRate: contactRate(t),
+    // Sum the DISPLAYED rows, not every first-knock bucket — the scan is deliberately
+    // effort-unscoped (see above), so under ?effortId other efforts' buckets exist but
+    // aren't shown, and the TOTAL must stay the sum of the table.
+    coverageGained: rounds.reduce((s, r) => s + r.coverageGained, 0),
+  };
+
+  let byCanvasser;
+  let crossCanvasserDoors;
+  if (groupByCanvasser) {
+    const flag = (action) => ({ $max: { $cond: [{ $eq: ['$actionType', action] }, 1, 0] } });
+    const [userRows, nonBulkPerPass] = await Promise.all([
+      CanvassActivity.aggregate([
+        { $match: { ...match, ...NOT_BULK, actionType: { $in: KNOCK_ACTIONS } } },
+        {
+          $group: {
+            _id: { householdId: '$householdId', passId: '$passId', userId: '$userId' },
+            hasSurvey: flag('survey_submitted'),
+            hasLit: flag('lit_dropped'),
+            hasRefused: flag('refused'),
+          },
+        },
+        {
+          $group: {
+            _id: { passId: '$_id.passId', userId: '$_id.userId' },
+            knocks: { $sum: 1 },
+            surveyedKnocks: { $sum: '$hasSurvey' },
+            litKnocks: { $sum: '$hasLit' },
+            refusedKnocks: { $sum: '$hasRefused' },
+          },
+        },
+      ]),
+      CanvassActivity.aggregate(knocksPipeline({ ...match, ...NOT_BULK }, { byPass: true })),
+    ]);
+    const userMap = await hydrateCanvassers(
+      userRows.filter((r) => r._id.userId != null).map((r) => String(r._id.userId)),
+      activeOrgId(req),
+    );
+    byCanvasser = userRows
+      .filter((r) => r._id.userId != null)
+      .map((r) => {
+        const key = String(r._id.passId);
+        const p = passById.get(key) || null;
+        const info = userMap.get(String(r._id.userId)) || {};
+        return {
+          passId: p ? key : null,
+          roundNumber: p ? p.roundNumber : null,
+          roundName: p ? p.name : null,
+          roundLabel: p ? `Pass ${p.roundNumber} · ${p.name}` : 'Legacy / no round',
+          effortName: p ? effortName.get(String(p.effortId)) || null : null,
+          userId: String(r._id.userId),
+          firstName: info.firstName || '',
+          lastName: info.lastName || '',
+          email: info.email || '',
+          status: info.status || 'deleted',
+          knocks: r.knocks,
+          surveyedKnocks: r.surveyedKnocks,
+          litKnocks: r.litKnocks,
+          refusedKnocks: r.refusedKnocks,
+          connectionRate: connectionRate(r),
+          contactRate: contactRate(r),
+        };
+      })
+      .sort(
+        (a, b) =>
+          (a.effortName || '￿').localeCompare(b.effortName || '￿') ||
+          (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity) ||
+          b.knocks - a.knocks
+      );
+    const nonBulkByPass = new Map(nonBulkPerPass.map((r) => [String(r._id), r.knocks]));
+    const sumByPass = new Map();
+    for (const r of byCanvasser) {
+      const key = r.passId ?? 'null';
+      sumByPass.set(key, (sumByPass.get(key) || 0) + r.knocks);
+    }
+    crossCanvasserDoors = 0;
+    for (const [key, sum] of sumByPass) {
+      crossCanvasserDoors += Math.max(0, sum - (nonBulkByPass.get(key) || 0));
+    }
+  }
+
+  return { cFilter, rounds, totals, byCanvasser, crossCanvasserDoors };
+}
+
+router.get('/knocks-by-pass', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const built = await buildKnocksByPass(req);
+    if (built.error) return res.status(built.error.status).json({ error: built.error.message });
+    res.json({
+      campaignId: String(built.cFilter.campaignId),
+      timeZone: tzOf(req),
+      from: req.query.from || null,
+      to: req.query.to || null,
+      rounds: built.rounds,
+      totals: built.totals,
+      byCanvasser: built.byCanvasser,
+      crossCanvasserDoors: built.crossCanvasserDoors,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The invoice-ready download. Default view: one row per walk list × round + a TOTAL row
+// (checkable against the invoice at a glance). ?groupBy=canvasser swaps in the per-user
+// per-round rows; coverage is omitted there — first-ever-knock coverage has no honest
+// per-canvasser attribution.
+router.get('/knocks-by-pass.csv', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const built = await buildKnocksByPass(req);
+    if (built.error) return res.status(built.error.status).json({ error: built.error.message });
+
+    let headers;
+    let rows;
+    if (built.byCanvasser) {
+      headers = [
+        'Walk list', 'Round', 'Round name', 'Canvasser first name', 'Canvasser last name',
+        'Email', 'Status', 'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
+        'Connection rate %', 'Contact rate %',
+      ];
+      rows = built.byCanvasser.map((r) => [
+        r.effortName || '', r.roundNumber ?? '', r.roundName ?? r.roundLabel,
+        r.firstName, r.lastName, r.email, r.status,
+        r.knocks, r.surveyedKnocks, r.litKnocks, r.refusedKnocks,
+        r.connectionRate, r.contactRate,
+      ]);
+    } else {
+      headers = [
+        'Walk list', 'Round', 'Round name', 'Round status', 'Activated (ISO)', 'Archived (ISO)',
+        'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
+        'Connection rate %', 'Contact rate %', 'New homes reached',
+      ];
+      rows = built.rounds.map((r) => [
+        r.effortName || '', r.roundNumber ?? '',
+        r.roundName ?? r.roundLabel, r.status || '',
+        r.activatedAt ? new Date(r.activatedAt).toISOString() : '',
+        r.archivedAt ? new Date(r.archivedAt).toISOString() : '',
+        r.knocks, r.surveyedKnocks, r.litKnocks, r.refusedKnocks,
+        r.connectionRate, r.contactRate, r.coverageGained,
+      ]);
+      const t = built.totals;
+      rows.push([
+        'TOTAL', '', '', '', '', '',
+        t.knocks, t.surveyedKnocks, t.litKnocks, t.refusedKnocks,
+        t.connectionRate, t.contactRate, t.coverageGained,
+      ]);
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="knocks-by-pass-${new Date().toISOString().slice(0, 10)}.csv"`
     );
     res.send(toCsv(headers, rows));
   } catch (err) {

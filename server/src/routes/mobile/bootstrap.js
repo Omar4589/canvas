@@ -384,26 +384,44 @@ router.get('/changes', async (req, res, next) => {
       }
     }
 
+    // Identity-cache fields (match the bootstrap projection) so voter changes reach an
+    // already-bootstrapped client via the delta poll, not only a full re-bootstrap.
+    const VOTER_DELTA_PROJ = { _id: 1, householdId: 1, surveyStatus: 1, fullName: 1, firstName: 1, lastName: 1, party: 1, gender: 1, dateOfBirth: 1, 'doNotContact.flagged': 1 };
+
+    // Voters ride the delta on TWO tracks, unioned:
+    //  1. ALL voters of a changed household (not only docs whose own updatedAt moved):
+    //     marking a voter voted writes a VotedVoter row, not the Voter doc, so an
+    //     updatedAt filter would miss the ✓. The recompute bumps the household, so its
+    //     door is already in this delta.
+    //  2. Voters whose OWN updatedAt moved — a pure identity edit (admin correction,
+    //     Person propagation, re-import reconcile) touches only the Voter doc, never the
+    //     household, so track 1 alone would strand it until a cold re-bootstrap. Same
+    //     cost class as the household delta above: index seeks over the canvasser's own
+    //     book scope.
     let changedVoters = [];
-    if (changedHouseholds.length > 0) {
+    {
       const hhIds = changedHouseholds.map((h) => h._id);
-      // Re-send ALL voters of the changed households (not only docs whose own
-      // updatedAt moved): marking a voter voted writes a VotedVoter row, not the
-      // Voter doc, so an updatedAt filter would miss the ✓. The recompute bumps
-      // each affected household's updatedAt, so its door is already in this delta.
-      const raw = await Voter.find(
-        { householdId: { $in: hhIds }, organizationId: orgId },
-        // Identity-cache fields (match the bootstrap projection) so propagated Person
-        // identity reaches an already-bootstrapped client via the delta poll, not only a
-        // full re-bootstrap.
-        { _id: 1, householdId: 1, surveyStatus: 1, fullName: 1, firstName: 1, lastName: 1, party: 1, gender: 1, dateOfBirth: 1, 'doNotContact.flagged': 1 }
-      ).lean();
-      const votedRecs = await VotedVoter.find(
-        { campaignId: cId, voterId: { $in: raw.map((v) => v._id) } },
-        { voterId: 1 }
-      ).lean();
-      const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
-      changedVoters = raw.map((v) => toWireVoter(v, votedSet.has(String(v._id))));
+      const [byHousehold, byOwnEdit] = await Promise.all([
+        hhIds.length > 0
+          ? Voter.find({ householdId: { $in: hhIds }, organizationId: orgId }, VOTER_DELTA_PROJ).lean()
+          : Promise.resolve([]),
+        scope.length > 0
+          ? Voter.find(
+              { householdId: { $in: scope }, organizationId: orgId, updatedAt: { $gt: sinceDate } },
+              VOTER_DELTA_PROJ
+            ).lean()
+          : Promise.resolve([]),
+      ]);
+      const seen = new Set(byHousehold.map((v) => String(v._id)));
+      const raw = [...byHousehold, ...byOwnEdit.filter((v) => !seen.has(String(v._id)))];
+      if (raw.length > 0) {
+        const votedRecs = await VotedVoter.find(
+          { campaignId: cId, voterId: { $in: raw.map((v) => v._id) } },
+          { voterId: 1 }
+        ).lean();
+        const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
+        changedVoters = raw.map((v) => toWireVoter(v, votedSet.has(String(v._id))));
+      }
     }
 
     res.json({

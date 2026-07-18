@@ -14,10 +14,17 @@ import { zonedDayRange } from '../../utils/timezone.js';
 // through here, so the two paths can never drift in realism or write pattern.
 //
 // The realism model is PER-CANVASSER, not per-book: each canvasser walks roughly
-// one book per day spread across today + the four prior evenings, on a single
-// running clock (2-5 min between doors), capped to a believable daily total. That
-// keeps `doorsPerHour = knocks / (last-first span)` in a realistic ~15-20 band
-// instead of collapsing a canvasser's whole inventory into one window.
+// one book per day spread across a window of days (default: today + the four
+// prior evenings; an archived round staged for history uses an older window), on
+// a single running clock (2-5 min between doors), capped to a believable daily
+// total. That keeps `doorsPerHour = knocks / (last-first span)` in a realistic
+// ~15-20 band instead of collapsing a canvasser's whole inventory into one window.
+//
+// Both callers stage the demo campaign's PERMANENT 2-round story: Round 1
+// archived (knocks on ARCHIVED_DAY_OFFSETS), Round 2 active (knocks on
+// DAY_OFFSETS) — one stageDemoActivity call per round, then everything is
+// concatenated into a SINGLE persistDemoActivity call, because Household.status
+// must resolve across ALL rounds' activities at once (latest-across-passes).
 //
 // Distributions are tuned to a real field operation: most doors are not-home, the
 // connection rate (surveys / knocks) lands ~22%, and the survey answers mirror a
@@ -57,8 +64,14 @@ const ISSUE_IDS = [
   'roads_infrastructure',
 ];
 
-// One book per day, cycling: today first, then the four prior evenings.
-const DAY_OFFSETS = [0, -1, -2, -3, -4];
+// One book per day, cycling: today first, then the four prior evenings. This is
+// the ACTIVE round's window — the default when no `dayOffsets` is passed.
+export const DAY_OFFSETS = [0, -1, -2, -3, -4];
+
+// The ARCHIVED round's window: five evenings the week before the active round's
+// window opens. Staging an archived round with these keeps the 2-round demo story
+// coherent — Round 1's knocks all land before Round 2 activates (day −6).
+export const ARCHIVED_DAY_OFFSETS = [-8, -9, -10, -11, -12];
 
 // ---------------------------------------------------------------------------
 // Timezone helpers — all staged history is relative to `now` so the demo stays
@@ -69,7 +82,9 @@ function dayStr(offsetDays, tz, now) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
 
-function localTime(offsetDays, minutesAfterMidnight, tz, now) {
+// Exported for the demo-day refresh, which re-stamps Pass lifecycle dates
+// (activatedAt/archivedAt) on the same relative-to-now clock the knocks use.
+export function localTime(offsetDays, minutesAfterMidnight, tz, now) {
   const day = dayStr(offsetDays, tz, now);
   const midnightUtc = zonedDayRange(day, day, tz).$gte;
   return new Date(midnightUtc.getTime() + minutesAfterMidnight * 60000);
@@ -124,10 +139,17 @@ function activityDoc({ rng, hh, userId, actionType, ts, passId, turfId, voterId 
  * @param assignmentsByTurf Map<turfIdStr, userId> — who owns each book
  * @param hhById            Map<hhIdStr, householdDoc>
  * @param votersByHousehold Map<hhIdStr, voterDoc[]>
+ * @param dayOffsets        which days the books land on (default DAY_OFFSETS —
+ *                          the active round's today + four prior evenings). Pass
+ *                          ARCHIVED_DAY_OFFSETS to stage an archived round; a set
+ *                          without 0 simply never hits the isToday branch, so
+ *                          every day schedules as an evening, the now-cutoff is
+ *                          never consulted, and todayKnocks stays 0.
  * @returns { activities, surveys, overlaps, todayKnocks }
  */
 export function stageDemoActivity({
-  rng, campaign, template, tz, stagedBooks, assignmentsByTurf, hhById, votersByHousehold, now = Date.now(),
+  rng, campaign, template, tz, stagedBooks, assignmentsByTurf, hhById, votersByHousehold,
+  dayOffsets = DAY_OFFSETS, now = Date.now(),
 }) {
   const activities = [];
   const surveys = [];
@@ -209,7 +231,7 @@ export function stageDemoActivity({
     // Assign each of this canvasser's books to a day, taking a partial slice.
     const byDay = new Map();
     books.forEach((turf, i) => {
-      const dayOffset = DAY_OFFSETS[i % DAY_OFFSETS.length];
+      const dayOffset = dayOffsets[i % dayOffsets.length];
       const allDoors = (turf.householdIds || []).map(String).filter((id) => hhById.has(id));
       const fraction = BOOK_FRACTIONS[i % BOOK_FRACTIONS.length];
       const selected = allDoors.slice(0, Math.round(allDoors.length * fraction));
@@ -261,10 +283,13 @@ export function stageDemoActivity({
 }
 
 /**
- * Persist a staged day with batched writes (the fix for the H12 timeout). Assumes
- * the caller already wiped the activity layer and reset touched doors to unknocked.
- * Door status is computed IN MEMORY from the generated activities (no per-household
- * DB round-trips), exactly the way resolveStatus maintains it.
+ * Persist staged activity with batched writes (the fix for the H12 timeout).
+ * Assumes the caller already wiped the activity layer and reset touched doors to
+ * unknocked. Door status is computed IN MEMORY from the generated activities (no
+ * per-household DB round-trips), exactly the way resolveStatus maintains it.
+ * Call it ONCE with every round's activities concatenated — a door knocked in two
+ * rounds must have its status resolved over BOTH rounds' actions, and a single
+ * call also keeps the writes batched.
  */
 export async function persistDemoActivity({ campaign, activities, surveys }) {
   if (activities.length) await CanvassActivity.insertMany(activities, { ordered: false });

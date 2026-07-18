@@ -703,6 +703,7 @@ export default function SurveyExplorerPage() {
               questionKey={q}
               option={option}
               optionId={optionId}
+              surveyTemplateId={resolvedTemplateId}
               userId={userId}
               effortId={effortId}
               from={dateRange?.from}

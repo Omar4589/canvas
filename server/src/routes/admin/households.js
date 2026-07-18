@@ -113,6 +113,13 @@ router.get('/map', async (req, res, next) => {
     const questionKey = req.query.questionKey || null;
     const answerOption = req.query.option || null;
     const optionId = req.query.optionId || null;
+    // Question keys / option ids are label slugs unique only WITHIN one survey template,
+    // so the answer filter accepts an optional template scope. Optional for back-compat:
+    // clients that don't send it (old mobile builds) keep the legacy cross-template union.
+    const surveyTemplateId =
+      req.query.surveyTemplateId && mongoose.isValidObjectId(req.query.surveyTemplateId)
+        ? new mongoose.Types.ObjectId(req.query.surveyTemplateId)
+        : null;
 
     const campaignId =
       req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
@@ -250,6 +257,7 @@ router.get('/map', async (req, res, next) => {
       // Dual-read: match by stable option id (id-native) OR legacy answer text,
       // so a renamed option still selects its earlier responses.
       Object.assign(surveyMatch, voterAnswerClause(questionKey, optionId, answerOption));
+      if (surveyTemplateId) surveyMatch.surveyTemplateId = surveyTemplateId;
     }
 
     // Pass scoping: limit to households that sit in this pass's books (Turf.householdIds).

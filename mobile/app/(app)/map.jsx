@@ -528,7 +528,13 @@ export default function MapScreen() {
           ),
           voters: prev.voters.map((v) => {
             const c = vMap.get(String(v._id));
-            return c ? { ...v, surveyStatus: c.surveyStatus, voted: c.voted ?? v.voted, dnc: c.dnc ?? v.dnc } : v;
+            // Take EVERYTHING the delta ships — identity included. The server sends
+            // fullName/party/gender/age through the delta precisely so a propagated Person edit
+            // (or an admin's hand correction) reaches an already-bootstrapped phone; the old
+            // cherry-pick of surveyStatus/voted discarded them until a cold re-bootstrap. Safe
+            // because both the bootstrap and /changes voter projections are identical and shaped
+            // by the same toWireVoter (bootstrap.js) — the delta voter is never a partial view.
+            return c ? { ...v, ...c } : v;
           }),
         };
         saveBootstrap(next);

@@ -4,28 +4,19 @@ import {
   Text,
   Pressable,
   ScrollView,
-  ActivityIndicator,
   RefreshControl,
   StyleSheet,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { formatRelative } from '../../../lib/dates';
 import { useRefresh } from '../../../lib/useRefresh';
-import { signOut } from '../../../lib/authState';
-import {
-  loadCurrentUser,
-  saveActiveOrgId,
-  clearActiveCampaign,
-  clearBootstrap,
-} from '../../../lib/cache';
+import { loadCurrentUser } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
 import LiveStatus from '../../../components/LiveStatus';
-import NavTileGrid from '../../../components/NavTileGrid';
 import InfoHint from '../../../components/InfoHint';
 import {
   PLATFORM_TOTALS,
@@ -34,20 +25,13 @@ import {
   IDLE_ORGS_HELP,
   IDLE_ORGS_MOBILE_NOTE,
 } from '../../../lib/platformStatsMeta';
-import { ThemeIconButton } from '../../../components/ThemeToggle';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
-const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-};
-
+// The Control Room tab: "is anything on fire" + the platform numbers. Org cards live on the Orgs
+// tab, the activity feed on the Activity tab, and sign-out/theme on More — the bottom bar owns
+// cross-navigation now.
 
 function StatTile({ value, label, sub, help }) {
   const styles = useThemedStyles(makeStyles);
@@ -64,18 +48,9 @@ function StatTile({ value, label, sub, help }) {
 }
 
 export default function SuperAdminHome() {
-  const router = useRouter();
   const qc = useQueryClient();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const DOT_COLOR = {
-    survey_submitted: colors.success,
-    not_home: colors.brand,
-    wrong_address: colors.danger,
-    refused: colors.status.refused,
-    restricted: colors.status.restricted,
-    lit_dropped: colors.accentPurple,
-  };
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -84,18 +59,10 @@ export default function SuperAdminHome() {
 
   const [live, setLive] = useState(true);
 
-  // This stack base stays mounted under pushed child screens — pause both
-  // polls (and refresh on return) whenever the screen is covered.
+  // Polls pause (and refresh on return) whenever another tab covers this one.
   const overviewQ = useQuery({
     queryKey: ['super-admin', 'platform-overview'],
     queryFn: () => api('/super-admin/platform-overview'),
-    refetchInterval: live ? 30_000 : false,
-    ...useFocusedPoll(),
-  });
-
-  const feedQ = useQuery({
-    queryKey: ['super-admin', 'activity-feed', 5],
-    queryFn: () => api('/super-admin/activity-feed?limit=5'),
     refetchInterval: live ? 30_000 : false,
     ...useFocusedPoll(),
   });
@@ -147,59 +114,38 @@ export default function SuperAdminHome() {
   }
 
   const { refreshing, onRefresh } = useRefresh([
-    overviewQ.refetch, feedQ.refetch, statsQ.refetch, idleQ.refetch, grantsQ.refetch, healthQ.refetch,
+    overviewQ.refetch, statsQ.refetch, idleQ.refetch, grantsQ.refetch, healthQ.refetch,
   ]);
   // One pill for all polls: freshest of them, fetching if any is, refresh all.
   const liveUpdatedAt =
     Math.max(
       overviewQ.dataUpdatedAt || 0,
-      feedQ.dataUpdatedAt || 0,
       statsQ.dataUpdatedAt || 0,
       idleQ.dataUpdatedAt || 0,
       grantsQ.dataUpdatedAt || 0,
       healthQ.dataUpdatedAt || 0
     ) || undefined;
 
-  async function pickOrg(orgId) {
-    qc.clear();
-    await saveActiveOrgId(orgId);
-    await clearActiveCampaign();
-    await clearBootstrap();
-    router.replace('/(app)/admin');
-  }
-
-  async function onLogout() {
-    qc.clear();
-    await signOut();
-  }
-
   const totals = overviewQ.data?.totals;
   const orgs = overviewQ.data?.organizations || [];
-  const events = feedQ.data?.events || [];
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Logo size={26} />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
-          <ThemeIconButton />
-          <Pressable onPress={onLogout} hitSlop={8}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </Pressable>
-        </View>
+        <Text style={styles.headerLabel}>Platform · super</Text>
       </View>
       <View style={styles.liveRow}>
         <LiveStatus
           live={live}
           onToggle={() => setLive((v) => !v)}
           isFetching={
-            overviewQ.isFetching || feedQ.isFetching || statsQ.isFetching || idleQ.isFetching
+            overviewQ.isFetching || statsQ.isFetching || idleQ.isFetching
             || grantsQ.isFetching || healthQ.isFetching
           }
           updatedAt={liveUpdatedAt}
           onRefresh={() => {
             overviewQ.refetch();
-            feedQ.refetch();
             statsQ.refetch();
             idleQ.refetch();
             grantsQ.refetch();
@@ -394,73 +340,6 @@ export default function SuperAdminHome() {
           ))
         )}
 
-        {/* Quick actions */}
-        <View style={styles.quickActions}>
-          <NavTileGrid
-            items={[
-              { label: 'Organizations', subtitle: 'All orgs', onPress: () => router.push('/(app)/super-admin/organizations') },
-              { label: 'All users', subtitle: 'Platform users', onPress: () => router.push('/(app)/super-admin/users') },
-              { label: 'Activity', subtitle: 'System activity', onPress: () => router.push('/(app)/super-admin/activity') },
-            ]}
-          />
-        </View>
-
-        {/* All organizations */}
-        <Text style={styles.sectionLabel}>All organizations</Text>
-        {overviewQ.isLoading ? (
-          <ActivityIndicator color={colors.brand} style={{ marginVertical: spacing.lg }} />
-        ) : orgs.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No orgs yet. Create one in Organizations.</Text>
-          </View>
-        ) : (
-          orgs.map((o) => (
-            <Pressable
-              key={o.id}
-              onPress={() => pickOrg(o.id)}
-              disabled={!o.isActive}
-              style={({ pressed }) => [
-                styles.orgCard,
-                { opacity: pressed || !o.isActive ? 0.85 : 1 },
-              ]}
-            >
-              <View style={styles.orgCardTop}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.orgName}>{o.name}</Text>
-                  <Text style={styles.orgSlug}>{o.slug}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  {!o.isActive && (
-                    <View style={styles.pillNeutral}>
-                      <Text style={styles.pillTextNeutral}>inactive</Text>
-                    </View>
-                  )}
-                  {o.activeNowCount > 0 && (
-                    <View style={[styles.pillSuccess, { marginTop: 4 }]}>
-                      <Text style={styles.pillTextSuccess}>🟢 {o.activeNowCount} active</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-              <View style={styles.orgCardStats}>
-                <View style={styles.orgStat}>
-                  <Text style={styles.orgStatValue}>{o.memberCount}</Text>
-                  <Text style={styles.orgStatLabel}>Members</Text>
-                </View>
-                <View style={styles.orgStat}>
-                  <Text style={styles.orgStatValue}>{o.campaignCount}</Text>
-                  <Text style={styles.orgStatLabel}>Campaigns</Text>
-                </View>
-                <View style={styles.orgStat}>
-                  <Text style={styles.orgStatLast}>{formatRelative(o.lastActivityAt)}</Text>
-                  <Text style={styles.orgStatLabel}>Last active</Text>
-                </View>
-              </View>
-              <Text style={styles.orgCardCta}>Switch into this org →</Text>
-            </Pressable>
-          ))
-        )}
-
         {/* Platform totals — lifetime numbers, every tile explains itself (shared ⓘ copy). */}
         <Text style={[styles.sectionLabel, { marginTop: spacing.lg }]}>Platform totals</Text>
         <Text style={styles.caption}>{TOTALS_INTRO}</Text>
@@ -479,48 +358,6 @@ export default function SuperAdminHome() {
           Recomputed nightly · last reconciled{' '}
           {statsQ.data?.backfilledAt ? new Date(statsQ.data.backfilledAt).toLocaleString() : 'never'}
         </Text>
-
-        {/* Recent activity preview */}
-        <View style={styles.activityHeader}>
-          <Text style={styles.sectionLabel}>Recent activity</Text>
-          <Pressable onPress={() => router.push('/(app)/super-admin/activity')}>
-            <Text style={styles.seeAll}>See all →</Text>
-          </Pressable>
-        </View>
-        {feedQ.isLoading ? (
-          <ActivityIndicator color={colors.brand} />
-        ) : events.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No activity yet.</Text>
-          </View>
-        ) : (
-          events.map((e) => (
-            <View key={e.id} style={styles.activityRow}>
-              <View
-                style={[
-                  styles.activityDot,
-                  { backgroundColor: DOT_COLOR[e.actionType] || colors.textMuted },
-                ]}
-              />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.activityAction}>
-                  {ACTION_LABEL[e.actionType] || e.actionType}
-                  {e.organization && (
-                    <Text style={styles.activityOrg}>  · {e.organization.name}</Text>
-                  )}
-                </Text>
-                <Text style={styles.activitySub} numberOfLines={1}>
-                  {e.canvasser
-                    ? `${e.canvasser.firstName} ${e.canvasser.lastName}`
-                    : 'Unknown'}
-                  {/* City/state only — street addresses left this feed on purpose (server route). */}
-                  {e.household?.city ? ` · ${e.household.city}${e.household.state ? `, ${e.household.state}` : ''}` : ''}
-                </Text>
-              </View>
-              <Text style={styles.activityTime}>{formatRelative(e.timestamp)}</Text>
-            </View>
-          ))
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -538,7 +375,7 @@ function makeStyles(t) {
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  signOut: { color: colors.brand, fontWeight: '600', fontSize: 14 },
+  headerLabel: { ...type.caption, color: colors.textSecondary },
   liveRow: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
@@ -647,8 +484,6 @@ function makeStyles(t) {
   todayValue: { ...type.h2, fontSize: 18, fontVariant: ['tabular-nums'] },
   todayCellLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
 
-  quickActions: { marginBottom: spacing.lg },
-
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',
@@ -669,74 +504,5 @@ function makeStyles(t) {
     marginBottom: spacing.md,
   },
   emptyText: { ...type.caption, textAlign: 'center' },
-
-  orgCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-  },
-  orgCardTop: { flexDirection: 'row', alignItems: 'flex-start' },
-  orgName: { ...type.h3, fontSize: 16 },
-  orgSlug: { ...type.caption, fontSize: 11, marginTop: 1 },
-  orgCardStats: {
-    flexDirection: 'row',
-    marginTop: spacing.md,
-    gap: spacing.md,
-  },
-  orgStat: { flex: 1 },
-  orgStatValue: { ...type.h2, fontSize: 16, fontVariant: ['tabular-nums'] },
-  orgStatLast: { ...type.bodyStrong, fontSize: 12 },
-  orgStatLabel: { fontSize: 10, fontWeight: '600', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.4 },
-  orgCardCta: { color: colors.brand, fontWeight: '700', fontSize: 12, marginTop: spacing.sm },
-
-  pillNeutral: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.pill,
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pillTextNeutral: { fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' },
-  pillSuccess: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.pill,
-    backgroundColor: colors.successBg,
-    borderWidth: 1,
-    borderColor: colors.successBorder,
-  },
-  pillTextSuccess: { fontSize: 10, fontWeight: '700', color: colors.success, textTransform: 'uppercase' },
-
-  activityHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  seeAll: { color: colors.brand, fontWeight: '700', fontSize: 12 },
-
-  activityRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.xs,
-    paddingHorizontal: spacing.md,
-  },
-  activityDot: { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
-  activityAction: { ...type.bodyStrong, fontSize: 13 },
-  activityOrg: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
-  activitySub: { ...type.caption, fontSize: 11, marginTop: 1 },
-  activityTime: { fontSize: 11, color: colors.textMuted },
   });
 }

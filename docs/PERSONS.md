@@ -251,8 +251,12 @@ as it used to. That is what makes a door-confirmed correction durable: canonical
 preview surfaces any **hand-edit conflicts** (file value ≠ armed value: totals, per-field counts,
 capped samples) so the admin decides keep (default) or overwrite per import; choosing overwrite
 `$pull`s the affected flags so future files update those fields normally. Districts stay
-org-local. Mobile reach: the `/mobile/changes` projection ships the identity-cache fields so
-propagated edits reach an already-bootstrapped app.
+org-local. Mobile reach: `/mobile/changes` emits voters whose **own `updatedAt` moved** (unioned
+with changed-household voters — the propagation fan-out's `bulkWrite` bumps each sibling Voter's
+`updatedAt`) and projects the identity-cache fields, so a propagated identity edit reaches an
+already-bootstrapped app **within ~30s via the delta poll**, not only on a full re-bootstrap
+([PASSES_AND_TURF.md](PASSES_AND_TURF.md) §G; `phone` is outside the delta projection — a
+phone-only edit reaches phones on the live profile fetch or a full re-bootstrap).
 
 ## E. Super-admin API — [routes/superAdmin/persons.js](../server/src/routes/superAdmin/persons.js)
 

@@ -54,6 +54,13 @@ see a **"this month" usage meter** (billable campaigns × rate), and read the **
 exportable as CSV for invoicing. Payment itself happens outside the app (send an invoice — Stripe
 Invoicing works well); the app tracks *entitlement*, not money.
 
+When an invoice needs the knock detail *behind* a campaign's line — which walk list and which round
+(pass) the work landed in — the campaign dashboard's **By round** section exports exactly that
+(`knocks-by-pass.csv`: one row per walk list × round plus a TOTAL row, counted by the same rule as
+the statement's knocks; optionally per canvasser per round). It's supporting detail, not a price
+input — **pricing is unchanged** ($300 per campaign per month); the statement stays the billing
+document. See [METRICS.md](METRICS.md) (Part 1 "By round").
+
 **Onboarding a new client is one step:** creating the org also seats its **first admin** (name +
 email → a temp password to hand over — type a simple one or leave it blank to auto-generate; either
 way it's shown once and they reset it on first login) and starts the trial at your chosen length.
@@ -118,6 +125,12 @@ when suspended/canceled, alive through `past_due`.
 not archived before M began (`archivedAt || updatedAt` for legacy rows). `knocksThisMonth` reuses
 `knocksPipeline` — the same distinct (household, pass) counting as everywhere else
 ([METRICS.md](METRICS.md)). `households` is reported for visibility, never priced.
+
+Per-round supporting detail for a statement line comes from
+`GET /admin/reports/knocks-by-pass` / `.csv` ([METRICS.md](METRICS.md) §E) — the same pipeline with
+`byPass: true`, so Σ(rounds) equals the campaign total **by construction** and the export always
+reconciles with the statement's knock count over the same window. The dollar amount never reads it;
+pricing stays flat per campaign per month.
 
 ## Endpoints
 

@@ -33,6 +33,14 @@ const EDIT_FIELDS = [
   ['stateHouseDistrict', 'State house district'], ['precinct', 'Precinct'],
 ];
 
+// Labels for the import-protected (hand-edited) fields line — EDIT_FIELDS plus the two armable
+// fields that aren't form inputs (derived fullName; DOB renders separately).
+const PROTECTED_FIELD_LABELS = Object.fromEntries([
+  ...EDIT_FIELDS,
+  ['fullName', 'Full name'],
+  ['dateOfBirth', 'Date of birth'],
+]);
+
 function VoterFields({ voter, person, onSave, saving, tz }) {
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({});
@@ -78,6 +86,13 @@ function VoterFields({ voter, person, onSave, saving, tz }) {
         {voter.lastEditedAt && (
           <p className="mt-3 text-xs text-fg-subtle">
             Last edited {fmtDate(voter.lastEditedAt, tz)}{voter.lastEditedBy ? ` by ${voter.lastEditedBy.name}` : ''}
+          </p>
+        )}
+        {(voter.protectedFields || []).length > 0 && (
+          <p className="mt-1 text-xs text-fg-subtle">
+            <span className="font-medium text-fg-muted">Protected from re-imports:</span>{' '}
+            {voter.protectedFields.map((f) => PROTECTED_FIELD_LABELS[f] || f).join(', ')} — voter-file
+            uploads keep these hand-edited values (the import preview shows any conflicts).
           </p>
         )}
       </Section>

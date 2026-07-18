@@ -21,6 +21,10 @@ Pass numbers **restart per walk list**, so you'll have a North Pass 1 and a Sout
 
 Passes live *inside* a walk list, not on their own page. Open the **Walk Lists** page, open a walk list, and use the **Passes** panel. Everything — create, activate, archive — happens right there.
 
+## Each pass shows its numbers
+
+The passes table shows each pass's own count of **books**, **knocks**, **survey doors** (lit drops on a lit-drop campaign), and its **connection rate**. They're counted exactly like the campaign Home's **By round** section — one knock per door per pass. One difference to know: the passes table always shows **all-time** numbers, while the Home's By round table follows the **date range** you've picked there — set the Home range to "All time" and the two match exactly. For what each number means, see [Understanding the numbers](metrics).
+
 ## Pass 1 is made for you
 
 When you create a walk list, **Pass 1 is created automatically**, so your usual flow (walk list → [cut books](turf-and-books) → activate) needs no extra step. To add a follow-up, click **New pass** — it numbers itself. A name is optional: leave it blank for "Pass 2," or type one like "GOTV" to label it.

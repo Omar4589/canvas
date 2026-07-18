@@ -6,6 +6,7 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
+  RefreshControl,
   StyleSheet,
   Modal,
   KeyboardAvoidingView,
@@ -14,10 +15,37 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
+import { formatRelative } from '../../../lib/dates';
+import { useRefresh } from '../../../lib/useRefresh';
+import {
+  saveActiveOrgId,
+  clearActiveCampaign,
+  clearBootstrap,
+} from '../../../lib/cache';
+import LiveStatus from '../../../components/LiveStatus';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+
+// The Orgs tab — THE org surface (merged from the old Control Room org cards + this screen's
+// lifecycle actions). Reads platform-overview (the richer payload: active-now, last activity,
+// billing state), shares its cache with the Control Room tab, and owns both verbs: switch INTO an
+// org, and manage its lifecycle (create / deactivate). Billing state transitions stay web-only.
+
+// The at-a-glance billing tag; hidden when everything is normal ('active').
+function billingTag(b) {
+  if (!b?.effective || b.effective === 'active') return null;
+  if (b.effective === 'trial') {
+    return { label: b.trialDaysLeft != null ? `trial · ${b.trialDaysLeft}d` : 'trial', tone: 'warn' };
+  }
+  if (b.effective === 'past_due') return { label: 'past due', tone: 'warn' };
+  if (b.effective === 'suspended') return { label: 'suspended', tone: 'danger' };
+  if (b.effective === 'canceled') return { label: 'canceled', tone: 'danger' };
+  if (b.effective === 'internal') return { label: 'internal', tone: 'neutral' };
+  return { label: b.effective, tone: 'neutral' };
+}
 
 export default function OrganizationsScreen() {
   const { colors } = useTheme();
@@ -25,16 +53,23 @@ export default function OrganizationsScreen() {
   const router = useRouter();
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
+  const [live, setLive] = useState(true);
 
-  const orgsQ = useQuery({
-    queryKey: ['super-admin', 'organizations'],
-    queryFn: () => api('/super-admin/organizations'),
+  // Same key the Control Room polls — one cache, one truth, and this tab's pill honors the
+  // live-poll contract (its one count query polls and feeds the pill).
+  const overviewQ = useQuery({
+    queryKey: ['super-admin', 'platform-overview'],
+    queryFn: () => api('/super-admin/platform-overview'),
+    refetchInterval: live ? 30_000 : false,
+    ...useFocusedPoll(),
   });
 
   const createMut = useMutation({
     mutationFn: (body) => api('/super-admin/organizations', { method: 'POST', body }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] });
+      // This tab READS platform-overview — invalidating the old ['super-admin','organizations']
+      // key would leave the list blind to its own write.
+      qc.invalidateQueries({ queryKey: ['super-admin', 'platform-overview'] });
       setShowCreate(false);
     },
   });
@@ -42,25 +77,52 @@ export default function OrganizationsScreen() {
   const toggleMut = useMutation({
     mutationFn: ({ id, isActive }) =>
       api(`/super-admin/organizations/${id}`, { method: 'PATCH', body: { isActive } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['super-admin', 'platform-overview'] }),
   });
 
-  const orgs = orgsQ.data?.organizations || [];
+  // Enter the org's admin console — a cache-clearing state transition (same body the Control Room
+  // used to own before the org cards moved here).
+  async function pickOrg(orgId) {
+    qc.clear();
+    await saveActiveOrgId(orgId);
+    await clearActiveCampaign();
+    await clearBootstrap();
+    router.replace('/(app)/admin');
+  }
+
+  const { refreshing, onRefresh } = useRefresh([overviewQ.refetch]);
+  const orgs = overviewQ.data?.organizations || [];
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Control Room</Text>
-        </Pressable>
         <Text style={styles.headerTitle}>Organizations</Text>
         <Pressable onPress={() => setShowCreate(true)} hitSlop={8}>
           <Text style={styles.headerAction}>+ New</Text>
         </Pressable>
       </View>
+      <View style={styles.liveRow}>
+        <LiveStatus
+          live={live}
+          onToggle={() => setLive((v) => !v)}
+          isFetching={overviewQ.isFetching}
+          updatedAt={overviewQ.dataUpdatedAt || undefined}
+          onRefresh={() => overviewQ.refetch()}
+        />
+      </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
-        {orgsQ.isLoading ? (
+      <ScrollView
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brand}
+            colors={[colors.brand]}
+          />
+        }
+      >
+        {overviewQ.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : orgs.length === 0 ? (
           <View style={styles.empty}>
@@ -69,60 +131,74 @@ export default function OrganizationsScreen() {
             </Text>
           </View>
         ) : (
-          orgs.map((o) => (
-            <View key={o.id} style={styles.orgCard}>
-              <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.orgName}>{o.name}</Text>
-                  <Text style={styles.orgSlug}>{o.slug}</Text>
+          orgs.map((o) => {
+            const tag = billingTag(o.billing);
+            return (
+              <View key={o.id} style={styles.orgCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.orgName}>{o.name}</Text>
+                    <Text style={styles.orgSlug}>{o.slug}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    {!o.isActive && (
+                      <View style={[styles.pill, styles.pillNeutral]}>
+                        <Text style={[styles.pillText, styles.pillTextNeutral]}>inactive</Text>
+                      </View>
+                    )}
+                    {tag && (
+                      <View style={[styles.pill, styles[`pill_${tag.tone}`]]}>
+                        <Text style={[styles.pillText, styles[`pillText_${tag.tone}`]]}>{tag.label}</Text>
+                      </View>
+                    )}
+                    {o.activeNowCount > 0 && (
+                      <View style={[styles.pill, styles.pillSuccess]}>
+                        <Text style={[styles.pillText, styles.pillTextSuccess]}>🟢 {o.activeNowCount} active</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
-                <View
-                  style={[
-                    styles.statusPill,
-                    o.isActive ? styles.statusActive : styles.statusInactive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusPillText,
-                      o.isActive ? styles.statusActiveText : styles.statusInactiveText,
+
+                <View style={styles.statsRow}>
+                  <View style={styles.statCell}>
+                    <Text style={styles.statValue}>{o.memberCount}</Text>
+                    <Text style={styles.statLabel}>Members</Text>
+                  </View>
+                  <View style={styles.statCell}>
+                    <Text style={styles.statValue}>{o.campaignCount}</Text>
+                    <Text style={styles.statLabel}>Campaigns</Text>
+                  </View>
+                  <View style={styles.statCell}>
+                    <Text style={styles.statLast}>{formatRelative(o.lastActivityAt)}</Text>
+                    <Text style={styles.statLabel}>Last active</Text>
+                  </View>
+                </View>
+
+                <View style={styles.actionsRow}>
+                  <Pressable
+                    onPress={() => pickOrg(o.id)}
+                    disabled={!o.isActive}
+                    style={({ pressed }) => [
+                      styles.switchBtn,
+                      { opacity: pressed ? 0.85 : o.isActive ? 1 : 0.5 },
                     ]}
                   >
-                    {o.isActive ? 'active' : 'inactive'}
-                  </Text>
+                    <Text style={styles.switchBtnText}>Switch into this org →</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => toggleMut.mutate({ id: o.id, isActive: !o.isActive })}
+                    disabled={toggleMut.isPending}
+                    hitSlop={8}
+                    style={styles.toggleBtn}
+                  >
+                    <Text style={o.isActive ? styles.toggleTextDeactivate : styles.toggleTextActivate}>
+                      {o.isActive ? 'Deactivate' : 'Reactivate'}
+                    </Text>
+                  </Pressable>
                 </View>
               </View>
-              <View style={styles.statsRow}>
-                <View style={styles.statCell}>
-                  <Text style={styles.statValue}>{o.memberCount}</Text>
-                  <Text style={styles.statLabel}>Members</Text>
-                </View>
-                <View style={styles.statCell}>
-                  <Text style={styles.statValue}>{o.campaignCount}</Text>
-                  <Text style={styles.statLabel}>Campaigns</Text>
-                </View>
-              </View>
-              <Pressable
-                onPress={() => toggleMut.mutate({ id: o.id, isActive: !o.isActive })}
-                disabled={toggleMut.isPending}
-                style={[
-                  styles.toggleBtn,
-                  o.isActive ? styles.toggleBtnDeactivate : styles.toggleBtnActivate,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.toggleBtnText,
-                    o.isActive
-                      ? styles.toggleBtnTextDeactivate
-                      : styles.toggleBtnTextActivate,
-                  ]}
-                >
-                  {o.isActive ? 'Deactivate' : 'Reactivate'}
-                </Text>
-              </Pressable>
-            </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
 
@@ -223,14 +299,20 @@ function makeStyles(t) {
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  back: { color: colors.brand, fontWeight: '700', fontSize: 14 },
   headerTitle: { ...type.h3 },
   headerAction: { color: colors.brand, fontWeight: '700', fontSize: 14 },
+  liveRow: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
 
   empty: {
     backgroundColor: colors.card,
@@ -254,26 +336,28 @@ function makeStyles(t) {
   orgName: { ...type.h3, fontSize: 16 },
   orgSlug: { ...type.caption, fontSize: 11, marginTop: 1 },
 
-  statusPill: {
+  pill: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: radius.pill,
     borderWidth: 1,
   },
-  statusPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  statusActive: { backgroundColor: colors.successBg, borderColor: colors.successBorder },
-  statusActiveText: { color: colors.success },
-  statusInactive: { backgroundColor: colors.bg, borderColor: colors.border },
-  statusInactiveText: { color: colors.textSecondary },
+  pillText: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  pillNeutral: { backgroundColor: colors.bg, borderColor: colors.border },
+  pillTextNeutral: { color: colors.textSecondary },
+  pillSuccess: { backgroundColor: colors.successBg, borderColor: colors.successBorder },
+  pillTextSuccess: { color: colors.success },
+  pill_warn: { backgroundColor: colors.warnBg, borderColor: colors.warnBorder },
+  pillText_warn: { color: colors.warnFg },
+  pill_danger: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
+  pillText_danger: { color: colors.danger },
+  pill_neutral: { backgroundColor: colors.bg, borderColor: colors.border },
+  pillText_neutral: { color: colors.textSecondary },
 
   statsRow: { flexDirection: 'row', marginTop: spacing.md, gap: spacing.lg },
   statCell: { flex: 1 },
   statValue: { ...type.h2, fontSize: 18, fontVariant: ['tabular-nums'] },
+  statLast: { ...type.bodyStrong, fontSize: 12, marginTop: 4 },
   statLabel: {
     fontSize: 10,
     fontWeight: '600',
@@ -282,18 +366,25 @@ function makeStyles(t) {
     letterSpacing: 0.4,
   },
 
-  toggleBtn: {
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: spacing.md,
-    paddingVertical: spacing.sm,
+    gap: spacing.md,
+  },
+  switchBtn: {
+    flex: 1,
+    paddingVertical: spacing.sm + 2,
     borderRadius: radius.md,
     alignItems: 'center',
+    backgroundColor: colors.brandTint,
     borderWidth: 1,
+    borderColor: colors.brand,
   },
-  toggleBtnActivate: { borderColor: colors.successBorder, backgroundColor: colors.successBg },
-  toggleBtnTextActivate: { color: colors.success, fontWeight: '700', fontSize: 13 },
-  toggleBtnDeactivate: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerBg },
-  toggleBtnTextDeactivate: { color: colors.danger, fontWeight: '700', fontSize: 13 },
-  toggleBtnText: {},
+  switchBtnText: { color: colors.brand, fontWeight: '700', fontSize: 13 },
+  toggleBtn: { paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  toggleTextDeactivate: { color: colors.danger, fontWeight: '700', fontSize: 13 },
+  toggleTextActivate: { color: colors.success, fontWeight: '700', fontSize: 13 },
 
   modalBackdrop: { flex: 1, backgroundColor: colors.backdrop, justifyContent: 'flex-end' },
   formSheet: {

@@ -15,6 +15,7 @@ import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { timeAgo } from '../../../../../lib/datetime';
 import { radius, spacing } from '../../../../../lib/theme';
+import { partyKey } from '../../../../../lib/voters';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
@@ -76,7 +77,10 @@ export default function VotersScreen() {
   const partyData = (q.data?.partyBreakdown || []).map((p) => ({
     label: p.value,
     value: p.count,
-    color: colors.party[p.value] || colors.brand,
+    // partyKey normalizes raw file values ('D', 'REP', 'UNA'…) to the colors.party keys —
+    // the old raw lookup fell through to colors.brand, painting every unmapped party RED,
+    // which reads as Republican. Label stays the file's own text; only the color normalizes.
+    color: colors.party[partyKey(p.value)] || colors.party.Unknown,
   }));
   const genderData = (q.data?.genderBreakdown || []).map((g) => ({
     label: g.value,
