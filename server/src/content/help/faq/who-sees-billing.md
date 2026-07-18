@@ -15,4 +15,6 @@ To grant it: go to **Users**, find the admin, and turn on **Billing access**. Th
 
 The admin you set up with the account starts with billing access automatically. Everyone else defaults to off until you turn it on.
 
+One guardrail to know: billing admins are also who receives important account emails (like a notice before any scheduled data deletion), so the app **won't let you remove, demote, or switch off the last admin with billing access** — you'll see *"Give billing access to another admin first."* Grant it to a second admin, then make your change.
+
 See [Billing and your account](billing) for how pricing and trials work.

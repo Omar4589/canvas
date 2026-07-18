@@ -179,6 +179,13 @@ never invoiced.)
   `/admin/billing` endpoints. Client-side, `useAuth()` exposes
   `canViewBilling = isSuperAdmin || (isOrgAdmin && activeMembership.billingAccess)`; the flag rides
   the login/me membership payload and the `GET /admin/memberships` list.
+- **An org can never lose its LAST billing admin through the console** (`LAST_BILLING_ADMIN`,
+  409). Billing admins are also who receives the billing-grade emails — support-access notices
+  and the wind-down/dormancy **deletion warnings** ([EMAIL.md](EMAIL.md)) — so all five console
+  doors refuse on the last one: toggling billing access off, demoting the role, deactivating the
+  membership (either route), removing them from the org, and (pre-existing) deleting their own
+  account. Hand billing access to another admin first, then proceed. Guard + test:
+  `routes/admin/memberships.js` `isLastBillingAdmin`, `test/billingAccess.int.test.js`.
 - **Provisioning** ([routes/superAdmin/organizations.js](../server/src/routes/superAdmin/organizations.js))
   reuses `createOrgMember` ([services/memberships/createMember.js](../server/src/services/memberships/createMember.js),
   now taking `mustChangePassword` + `billingAccess`) to seat the first admin atomically with the

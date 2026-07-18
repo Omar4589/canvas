@@ -9,9 +9,11 @@ import { Subscription } from '../../models/Subscription.js';
 //   2) if none, the Subscription.billingContact.email on file
 // There is deliberately NO "all active admins" fallback. May return [] (an org with no billing
 // identity at all) — the caller decides what an empty list means; for the deletion warnings
-// that is the loud zero-recipient stamp in services/retention/triggers.js. In practice every
-// provisioned org starts with a billing identity: the first admin is created with
-// billingAccess: true (routes/superAdmin/organizations.js).
+// that is the loud zero-recipient stamp in services/retention/triggers.js. Every provisioned
+// org starts with a billing identity (the first admin is created with billingAccess: true,
+// routes/superAdmin/organizations.js), and the console REFUSES to strip the last billing admin
+// (LAST_BILLING_ADMIN guards in routes/admin/memberships.js + deleteAccount) — so [] should
+// only ever mean an org that was born without admins.
 //
 // The Membership → User two-step mirrors campaignRoster.js (activeMemberIdSet): Membership carries
 // the userId, then a second query resolves the User account, which must be active AND not

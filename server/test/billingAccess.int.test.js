@@ -200,3 +200,62 @@ test('migration grandfathers existing admins but skips super admins', { skip }, 
   const sup = await Membership.findOne({ userId: superMember._id, organizationId: org2._id }).lean();
   assert.strictEqual(sup.billingAccess, false, 'a super admin is skipped — they bypass the billing gate anyway');
 });
+
+test('LAST_BILLING_ADMIN guard: no console door can strip an org of its only billing admin', { skip }, async () => {
+  // Fresh, self-contained org so this test never depends on what earlier cases granted. The
+  // stakes: billing-grade notices — support-access grants and the DELETION WARNINGS — go only
+  // to billingAccess admins (services/mail/recipients.js), so losing the last one silently
+  // leaves the org with nobody to warn before its data is purged.
+  const gOrg = await Organization.create({ name: 'Guarded', slug: 'guarded', isActive: true });
+  await Subscription.create({ organizationId: gOrg._id, status: 'active' });
+  const gBillU = await makeUser('Gbill');
+  const gPlainU = await makeUser('Gplain');
+  await Membership.create({ userId: gBillU._id, organizationId: gOrg._id, role: 'admin', isActive: true, billingAccess: true });
+  await Membership.create({ userId: gPlainU._id, organizationId: gOrg._id, role: 'admin', isActive: true, billingAccess: false });
+  const gBill = { token: signUserToken(gBillU), orgId: gOrg._id, userId: gBillU._id };
+  const gPlain = { token: signUserToken(gPlainU), orgId: gOrg._id, userId: gPlainU._id };
+
+  // Door 1: toggling billing access off (even on yourself) — refused on the last one.
+  const toggle = await call('PATCH', `/admin/memberships/${gBill.userId}`, { ...gBill, body: { billingAccess: false } });
+  assert.strictEqual(toggle.status, 409);
+  assert.strictEqual(toggle.json.code, 'LAST_BILLING_ADMIN');
+
+  // Door 2: demoting the last billing admin's role (role changes are not billing-gated, so a
+  // plain admin can attempt this) — refused.
+  const demote = await call('PATCH', `/admin/memberships/${gBill.userId}`, { ...gPlain, body: { role: 'lead' } });
+  assert.strictEqual(demote.status, 409);
+  assert.strictEqual(demote.json.code, 'LAST_BILLING_ADMIN');
+
+  // Door 3a: deactivating via the general PATCH — refused.
+  const deact = await call('PATCH', `/admin/memberships/${gBill.userId}`, { ...gPlain, body: { isActive: false } });
+  assert.strictEqual(deact.status, 409);
+  assert.strictEqual(deact.json.code, 'LAST_BILLING_ADMIN');
+
+  // Door 3b: the dedicated deactivate route — refused.
+  const deact2 = await call('PATCH', `/admin/memberships/${gBill.userId}/deactivate`, gPlain);
+  assert.strictEqual(deact2.status, 409);
+  assert.strictEqual(deact2.json.code, 'LAST_BILLING_ADMIN');
+
+  // Door 4: removing the membership from the org — refused.
+  const removed = await call('DELETE', `/admin/memberships/${gBill.userId}`, gPlain);
+  assert.strictEqual(removed.status, 409);
+  assert.strictEqual(removed.json.code, 'LAST_BILLING_ADMIN');
+
+  // Through all five attempts, the org still has its billing admin.
+  const still = await Membership.findOne({ userId: gBill.userId, organizationId: gOrg._id }).lean();
+  assert.strictEqual(still.billingAccess, true);
+  assert.strictEqual(still.isActive, true);
+  assert.strictEqual(still.role, 'admin');
+
+  // The guard is about the LAST one, not billing admins generally: hand access to the plain
+  // admin, and the same demotion that was refused above now succeeds…
+  const grant = await call('PATCH', `/admin/memberships/${gPlain.userId}`, { ...gBill, body: { billingAccess: true } });
+  assert.strictEqual(grant.status, 200);
+  const demoteNow = await call('PATCH', `/admin/memberships/${gBill.userId}`, { ...gPlain, body: { role: 'lead' } });
+  assert.strictEqual(demoteNow.status, 200, 'with a second billing admin, the first can be demoted');
+
+  // …which makes the second one the last: the guard follows.
+  const toggleNew = await call('PATCH', `/admin/memberships/${gPlain.userId}`, { ...gPlain, body: { billingAccess: false } });
+  assert.strictEqual(toggleNew.status, 409);
+  assert.strictEqual(toggleNew.json.code, 'LAST_BILLING_ADMIN');
+});

@@ -33,8 +33,10 @@ disclosed subprocessor — DPA §6 + the privacy policy's service-providers para
 
 **Billing admins only** (emails 7–9, an owner decision): these billing-grade notices go to the
 admins who hold **Billing access**, or — only when an org has none — to the **billing contact**
-on file. They are never sent to every admin. (Every provisioned org's first admin starts with
-Billing access, so in practice there is always a recipient.)
+on file. They are never sent to every admin. Every provisioned org's first admin starts with
+Billing access, and the console **refuses to remove the last billing admin**
+(`LAST_BILLING_ADMIN` — see [BILLING.md](BILLING.md)), so a normally-created org always has a
+recipient.
 
 ## Emailed links: how long they last
 

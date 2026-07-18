@@ -87,6 +87,32 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
+// An org must never lose its LAST billing admin through a console action: the billing-grade
+// notices — support-access grants and the wind-down/dormancy DELETION WARNINGS — go only to
+// billingAccess admins (services/mail/recipients.js), so an org with none has nobody to warn
+// before its data is deleted. Account deletion already blocks on this (deleteAccount's
+// LAST_BILLING_ADMIN); these guard the three console doors that used to slip past it:
+// toggling billing access off, demoting the role, and deactivating/removing the membership.
+// No super-admin bypass on purpose — hand billing access to another admin first, then proceed.
+async function isLastBillingAdmin(membership) {
+  if (!membership?.billingAccess || membership.role !== 'admin' || !membership.isActive) return false;
+  const others = await Membership.countDocuments({
+    organizationId: membership.organizationId,
+    userId: { $ne: membership.userId },
+    role: 'admin',
+    isActive: true,
+    billingAccess: true,
+  });
+  return others === 0;
+}
+
+const LAST_BILLING_ADMIN_ERROR = {
+  error:
+    'This is the only admin with billing access — the one who receives billing and account notices. ' +
+    'Give billing access to another admin first.',
+  code: 'LAST_BILLING_ADMIN',
+};
+
 // Replace a lead's CampaignManager grants in this org with exactly `campaignIds`
 // (an array of ObjectId already validated by resolveManagedCampaigns). Additive
 // upserts keep existing grantedBy/grantedAt; anything not in the set is removed.
@@ -283,6 +309,16 @@ router.patch('/:userId', async (req, res, next) => {
     });
     if (!membership) return res.status(404).json({ error: 'Membership not found' });
 
+    // Any change that would strip this membership's billing standing — the flag itself, the
+    // admin role it rides on, or the membership's active status — is refused on the last one.
+    const stripsBilling =
+      data.billingAccess === false ||
+      (data.role !== undefined && data.role !== 'admin') ||
+      data.isActive === false;
+    if (stripsBilling && (await isLastBillingAdmin(membership))) {
+      return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
+
     if ('coordinatorId' in data) {
       const coordRes = await resolveCoordinatorId({
         orgId,
@@ -348,6 +384,10 @@ router.delete('/:userId', async (req, res, next) => {
       return res.status(400).json({ error: "You can't remove yourself from this org." });
     }
     const orgId = activeOrgId(req);
+    const target = await Membership.findOne({ userId: req.params.userId, organizationId: orgId });
+    if (target && (await isLastBillingAdmin(target))) {
+      return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
     await Membership.deleteOne({ userId: req.params.userId, organizationId: orgId });
     // This used to drop CampaignAssignment + CampaignManager only, which left the removed
     // person still holding every TurfAssignment and EffortMember row they had — so their
@@ -466,6 +506,11 @@ router.patch('/:userId/password', async (req, res, next) => {
 router.patch('/:userId/deactivate', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    const existing = await Membership.findOne({ userId: req.params.userId, organizationId: activeOrgId(req) });
+    if (!existing) return res.status(404).json({ error: 'Membership not found' });
+    if (await isLastBillingAdmin(existing)) {
+      return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
     const membership = await Membership.findOneAndUpdate(
       { userId: req.params.userId, organizationId: activeOrgId(req) },
       { isActive: false },
