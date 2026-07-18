@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { User } from '../../models/User.js';
@@ -28,7 +29,10 @@ export const memberIdentityShape = {
   firstName: nameSchema.optional(),
   lastName: nameSchema.optional(),
   phone: phoneSchema,
-  password: passwordSchema.optional(),
+  // OPTIONAL since the emailed set-password invite became the primary way in: blank means
+  // createOrgMember generates a random throwaway nobody ever sees. '' (an empty form field)
+  // is normalized to absent so leaving the box empty never trips the min-8 rule.
+  password: z.preprocess((v) => (v === '' || v == null ? undefined : v), passwordSchema.optional()),
   // true = link an EXISTING global account by email; false = create a new one.
   linkExisting: z.boolean().optional().default(false),
 };
@@ -65,10 +69,16 @@ export async function createOrgMember({
       'EMAIL_EXISTS_USE_LINK'
     );
   } else {
-    if (!data.password || !data.firstName || !data.lastName) {
-      throw new MemberError(400, 'New user requires firstName, lastName, and password.');
+    if (!data.firstName || !data.lastName) {
+      throw new MemberError(400, 'New user requires firstName and lastName.');
     }
-    const passwordHash = await User.hashPassword(data.password);
+    // No typed temp password → generate a strong random throwaway that NOBODY ever sees (not
+    // returned, not logged, never emailed). The account's real way in is the emailed
+    // set-password invite; the typed temp password survives purely as the manual fallback for
+    // someone who can't reach their inbox. mustChangePassword still gates either way.
+    const passwordHash = await User.hashPassword(
+      data.password || crypto.randomBytes(18).toString('base64url')
+    );
     user = await User.create({
       firstName: data.firstName,
       lastName: data.lastName,

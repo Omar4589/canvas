@@ -407,9 +407,11 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
     if (error?.data?.code === 'EMAIL_EXISTS_USE_LINK') setLinkExisting(true);
   }, [error]);
 
+  // The temp password is OPTIONAL. Blank → the server generates a throwaway nobody sees and the
+  // new member sets their own via the emailed set-password link; only a TYPED one must pass min-8.
   const valid = linkExisting
     ? !!email.trim()
-    : firstName.trim() && lastName.trim() && email.trim() && isValidTempPassword(password);
+    : firstName.trim() && lastName.trim() && email.trim() && (password === '' || isValidTempPassword(password));
 
   return (
     <ScrollView
@@ -502,12 +504,12 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
             style={styles.textInput}
           />
 
-          <Text style={styles.formLabel}>Temporary password (min 8 chars)</Text>
+          <Text style={styles.formLabel}>Temporary password (optional)</Text>
           <PasswordInput
             value={password}
             onChangeText={setPassword}
             autoComplete="new-password"
-            placeholder="••••••••"
+            placeholder="Leave blank to email an invite"
           />
           {password.length > 0 && tempPasswordProblem(password) && (
             <Text style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>
@@ -515,7 +517,8 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
             </Text>
           )}
           <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.xs }}>
-            They choose their own strong password at first sign-in.
+            Leave blank to let them set their own password via the emailed invite (recommended).
+            Type one only if they can’t receive email.
           </Text>
         </>
       )}

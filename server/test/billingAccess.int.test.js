@@ -158,7 +158,9 @@ test('provisioning creates org + custom trial + first admin (temp pw, billing ac
     body: { name: 'New Client Co', trialDays: 14, admin: { firstName: 'Ada', lastName: 'Owner', email: 'ada.owner@client.co' } },
   });
   assert.strictEqual(r.status, 201);
-  assert.ok(r.json.tempPassword && r.json.tempPassword.length >= 8, 'returns a temp password to hand over');
+  // No typed temp password → NONE is echoed back: the throwaway generated internally is shown
+  // to nobody, and the emailed set-password invite is the account's way in.
+  assert.strictEqual(r.json.tempPassword, null, 'a blank temp password stays secret everywhere');
   assert.ok(r.json.admin?.email === 'ada.owner@client.co');
 
   const orgId = r.json.organization._id || r.json.organization.id;

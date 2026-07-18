@@ -74,10 +74,14 @@ function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, err
       onCreate({ email: em, linkExisting: true });
       return;
     }
-    const problem = tempPasswordProblem(password);
-    if (problem) {
-      setLocalError(problem);
-      return;
+    // The temp password is OPTIONAL. Blank → the server generates a throwaway nobody sees and the
+    // new canvasser sets their own via the emailed set-password link. Only validate a typed one.
+    if (password !== '') {
+      const problem = tempPasswordProblem(password);
+      if (problem) {
+        setLocalError(problem);
+        return;
+      }
     }
     setLocalError('');
     onCreate({
@@ -117,7 +121,7 @@ function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, err
         <p className="text-sm text-fg-muted">
           {emailLookup
             ? 'Links an existing Door Line account to your organization and puts them on this campaign. They keep their current password.'
-            : 'Adds a brand-new canvasser to your organization and puts them on this campaign. Set a temporary password — they choose their own strong one at first sign-in.'}
+            : 'Adds a brand-new canvasser to your organization and puts them on this campaign. They set their own password from the emailed invite — a temporary one is optional.'}
         </p>
         {!emailLookup && (
           <div className="grid grid-cols-2 gap-3">
@@ -144,14 +148,17 @@ function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, err
               <PhoneInput value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password <span className="text-fg-subtle">(min 8 characters)</span></label>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password <span className="text-fg-subtle">(optional)</span></label>
               <PasswordInput
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
                 autoComplete="new-password"
-                placeholder="At least 8 characters"
+                placeholder="Leave blank to email an invite"
               />
+              <p className="mt-1 text-xs text-fg-subtle">
+                Leave blank to let them set their own password via the emailed invite (recommended).
+                Type one only if they can’t receive email.
+              </p>
             </div>
           </>
         )}

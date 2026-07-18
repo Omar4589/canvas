@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { Organization } from '../../models/Organization.js';
 import { Membership } from '../../models/Membership.js';
@@ -392,13 +391,15 @@ router.post('/', async (req, res, next) => {
     let admin = null;
     let tempPassword = null;
     if (data.admin) {
-      // Use the typed temp password if the super admin set one; otherwise auto-generate a
-      // ~12-char one (base64url satisfies passwordSchema — no whitespace/control chars).
-      tempPassword = data.admin.password || randomBytes(9).toString('base64url');
+      // A TYPED temp password is echoed once in the 201 for out-of-band hand-off. Left blank,
+      // createOrgMember generates a throwaway NOBODY sees (not even this response) — the
+      // emailed set-password invite is the account's way in, so a blank means no shared
+      // secret exists anywhere.
+      tempPassword = data.admin.password || null;
       const { user } = await createOrgMember({
         orgId: org._id,
         addedBy: req.user._id,
-        data: { ...data.admin, password: tempPassword },
+        data: data.admin,
         role: 'admin',
         mustChangePassword: true,
         billingAccess: true,

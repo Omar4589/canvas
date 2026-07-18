@@ -106,13 +106,15 @@ export default function OrganizationsPage() {
       setAdminEmail('');
       setAdminPassword('');
       setError(null);
-      // Surface the temp password ONCE — the only time it's ever shown.
-      if (res?.tempPassword && res?.admin) {
+      // Confirm the seated admin. When a temp password was TYPED the server echoes it back —
+      // surface it ONCE for hand-off. When left blank, tempPassword is null: the admin gets in
+      // via the emailed set-password link, so show that note instead of a credential to copy.
+      if (res?.admin) {
         setCopied(false);
         setCreatedCreds({
           orgName: res.organization?.name || '',
           email: res.admin.email,
-          tempPassword: res.tempPassword,
+          tempPassword: res.tempPassword || null,
         });
       }
       qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] });
@@ -245,9 +247,10 @@ export default function OrganizationsPage() {
             First admin (optional)
           </h3>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Leave blank to add admins later from the Users page. When filled, set a temp password to
-            hand over (or leave it blank to auto-generate one) — either way it’s shown once, they reset
-            it on first login, and they get billing access.
+            Leave blank to add admins later from the Users page. When filled, they get a set-password
+            invite by email and choose their own password — leave the temp password blank for that
+            (recommended). Type one only to hand over manually if they can’t receive email. They get
+            billing access either way.
           </p>
           <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
@@ -282,18 +285,20 @@ export default function OrganizationsPage() {
           <div className="mt-3">
             <label className="block text-xs font-semibold text-fg-muted">
               Temporary password{' '}
-              <span className="font-normal text-fg-subtle">(optional — leave blank to auto-generate)</span>
+              <span className="font-normal text-fg-subtle">(optional)</span>
             </label>
             <input
               type="text"
               value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
-              placeholder="Leave blank to auto-generate a secure one"
+              placeholder="Leave blank to email a set-password invite"
               autoComplete="off"
               className={fieldCls}
             />
             <p className="mt-1 text-xs text-fg-subtle">
-              A simple one is fine — they choose a strong password on first login.
+              Leave blank to email them a set-password invite (recommended). Type one only to hand
+              over manually if they can’t receive email — a simple one is fine, they choose a strong
+              password on first login.
             </p>
           </div>
         </div>
@@ -322,8 +327,9 @@ export default function OrganizationsPage() {
                 Admin created{createdCreds.orgName ? ` — ${createdCreds.orgName}` : ''}
               </h2>
               <p className="mt-1 text-xs text-success-fg/90">
-                Hand these to the client — they’ll reset the password on first login. This is the only
-                time the temp password is shown.
+                {createdCreds.tempPassword
+                  ? 'Hand these to the client — they’ll reset the password on first login. This is the only time the temp password is shown.'
+                  : 'A set-password invite was emailed to them — they follow the link to choose their own password (link valid 72 hours). No credential to hand over.'}
               </p>
             </div>
             <button
@@ -333,22 +339,31 @@ export default function OrganizationsPage() {
               Dismiss ✕
             </button>
           </div>
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Email</div>
+          {createdCreds.tempPassword ? (
+            <>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Email</div>
+                  <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.email}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Temp password</div>
+                  <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.tempPassword}</div>
+                </div>
+              </div>
+              <button
+                onClick={copyCreds}
+                className="mt-3 rounded-md border border-success/40 bg-card px-3 py-2 text-sm font-semibold text-success-fg shadow-sm hover:bg-success-tint"
+              >
+                {copied ? 'Copied ✓' : 'Copy credentials'}
+              </button>
+            </>
+          ) : (
+            <div className="mt-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Invite emailed to</div>
               <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.email}</div>
             </div>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Temp password</div>
-              <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.tempPassword}</div>
-            </div>
-          </div>
-          <button
-            onClick={copyCreds}
-            className="mt-3 rounded-md border border-success/40 bg-card px-3 py-2 text-sm font-semibold text-success-fg shadow-sm hover:bg-success-tint"
-          >
-            {copied ? 'Copied ✓' : 'Copy credentials'}
-          </button>
+          )}
         </div>
       )}
 

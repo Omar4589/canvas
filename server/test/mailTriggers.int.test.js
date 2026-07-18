@@ -142,6 +142,29 @@ test('memberships POST (new user): inviteSetPassword only, no password in the ma
   assert.strictEqual(consume.status, 200, 'the emailed set-password link is a working token');
 });
 
+// 1b) The temp password is now OPTIONAL: a blank one is generated internally (shown to nobody),
+//     the invite still goes out, and the emailed link — the account's only way in — works. An
+//     empty-string password (a blank form field) is treated the same as absent.
+test('memberships POST (new user, NO password): invite still sent, link works, nothing echoed', { skip }, async () => {
+  const email = 'linkonly.hire@t.co';
+  const res = await call('POST', '/admin/memberships', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+    body: { email, firstName: 'Link', lastName: 'Only', password: '' },
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.json.tempPassword, undefined, 'nothing password-shaped is echoed back');
+
+  const seen = await waitFor(() => kinds('inviteSetPassword').length === 1);
+  assert.ok(seen, 'the invite goes out without a typed temp password');
+  const m = bodyOf(kinds('inviteSetPassword')[0]).match(/reset-password\/([A-Za-z0-9_-]+)/);
+  assert.ok(m, 'the invite carries the set-password link');
+  const consume = await call('POST', '/auth/reset-password', {
+    body: { token: m[1], newPassword: 'MyOwn!Pass77' },
+  });
+  assert.strictEqual(consume.status, 200, 'the link is the working way in');
+});
+
 // 2) Org add an EXISTING user (linkExisting) → one addedToOrg, and NO credentials link in it.
 test('memberships POST (linkExisting): addedToOrg only, carrying no set-password link', { skip }, async () => {
   const email = 'returning@t.co';
@@ -232,21 +255,33 @@ test('assignments POST: new row emails once, re-add is silent, mustChangePasswor
   assert.strictEqual(kinds('addedToCampaign').length, 0, 'a mustChangePassword invitee is not re-notified');
 });
 
-// 6) Provisioning (super-admin org create with an admin block) → provisioningWelcome; the returned
-//    tempPassword (here auto-generated) is nowhere in the mail.
-test('superAdmin organizations POST: provisioningWelcome, and the returned temp password never leaks', { skip }, async () => {
+// 6) Provisioning (super-admin org create with an admin block) → provisioningWelcome. A TYPED
+//    temp password is echoed once in the 201 and appears nowhere in the mail; a BLANK one is
+//    generated internally and shown to nobody — not even the response.
+test('superAdmin organizations POST: provisioningWelcome; typed temp pw echoed-not-mailed, blank stays secret', { skip }, async () => {
+  const typedPw = 'hand-off-pw-42';
   const res = await call('POST', '/super-admin/organizations', {
     token: ctx.superTok,
-    body: { name: 'Provisioned Org', admin: { firstName: 'Percy', lastName: 'Owner', email: 'percy.owner@t.co' } },
+    body: { name: 'Provisioned Org', admin: { firstName: 'Percy', lastName: 'Owner', email: 'percy.owner@t.co', password: typedPw } },
   });
   assert.strictEqual(res.status, 201);
-  const tempPassword = res.json.tempPassword;
-  assert.ok(typeof tempPassword === 'string' && tempPassword.length > 0, 'a temp password is returned once');
+  assert.strictEqual(res.json.tempPassword, typedPw, 'a typed temp password is echoed once for hand-off');
 
   const seen = await waitFor(() => kinds('provisioningWelcome').length === 1);
   assert.ok(seen, `expected one provisioningWelcome, saw ${outbox.length} total`);
   assert.deepStrictEqual(kinds('provisioningWelcome')[0].to, ['percy.owner@t.co']);
-  assert.ok(!JSON.stringify(outbox).includes(tempPassword), 'the auto-generated temp password must not reach the inbox');
+  assert.ok(!JSON.stringify(outbox).includes(typedPw), 'the typed temp password must not reach the inbox');
+
+  // Blank branch: provisioned with no password at all → 201, invite still emails, and no
+  // password exists anywhere a human could read it.
+  const blank = await call('POST', '/super-admin/organizations', {
+    token: ctx.superTok,
+    body: { name: 'Blank Pw Org', admin: { firstName: 'Bea', lastName: 'Owner', email: 'bea.owner@t.co' } },
+  });
+  assert.strictEqual(blank.status, 201);
+  assert.strictEqual(blank.json.tempPassword, null, 'a blank temp password is never echoed');
+  const seenBlank = await waitFor(() => kinds('provisioningWelcome').length === 2);
+  assert.ok(seenBlank, 'the invite still goes out with a blank temp password');
 });
 
 // 7) Grant notice → ONE supportGrantNotice to the org's BILLING identities only (billingNotifyEmails:

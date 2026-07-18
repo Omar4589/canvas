@@ -55,9 +55,12 @@ to the org you just left.
 
 On the Users page, "Add member" has two modes:
 
-- **New user** (default) — you provide their name, email, optional phone, a **temporary password**, and
-  a role. This creates a brand-new account. The temporary password can be simple — the person is
-  **required to choose their own strong password the first time they sign in** (on web or mobile).
+- **New user** (default) — you provide their name, email, optional phone, a role, and — **optionally**
+  — a temporary password. This creates a brand-new account, and they get an **invitation email with a
+  set-password link** either way. **Leave the password blank (recommended)**: they set their own via
+  the emailed link, and no shared secret ever exists. Type one only when they can't reach their inbox
+  (it can be simple — read it out loud; they're required to replace it with their own strong password
+  the first time they sign in, on web or mobile).
 - **Existing user (by email — link them to this org)** — check the box and enter just an email + role.
   This finds a person who *already has an account* (e.g. they canvass for another campaign) and adds
   a membership to your org, without creating a duplicate.
@@ -184,10 +187,12 @@ in normally. New accounts get the same kind of link in their **invitation email*
 **72 hours**), so most people never see a typed temporary password at all. Emails never contain a
 password — only a link.
 
-**Every account still starts with a temporary password** as the manual fallback. Whoever creates
-the account — a super admin provisioning a client's first admin, an org admin adding a member, or a
-team lead adding a canvasser — sets one, and the same flow covers password *recovery* when someone
-can't receive email (wrong address on file, inbox unreachable in the field). How it works:
+**The typed temporary password is now an optional, manual fallback.** Whoever creates the account —
+a super admin provisioning a client's first admin, an org admin adding a member, or a team lead
+adding a canvasser — **may** type one, for someone who can't receive email (wrong address on file,
+inbox unreachable in the field); left blank, a random throwaway is generated internally that nobody
+ever sees, and the emailed link is the account's only way in. The same typed-password flow covers
+*recovery* ("Set temporary password" on a profile). How the typed path works:
 
 - The account is given a **temporary password** — set when it's created, or later when an admin clicks
   **"Set temporary password"** on the user's profile to rescue someone.
@@ -404,10 +409,14 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   offline queue **holds** (never drops) queued knocks on both `401 SESSION_REVOKED` and the gate's
   403, and the queue survives sign-out — so a mid-shift reset can no longer lose billable work
   (`mobile/lib/offlineQueue.js` isAuthFailure).
-- **Set on create** — every account-creation path issues a temporary password + forces a first-login
-  change: super-admin provisioning (`POST /super-admin/organizations`, first admin — the super admin can
-  type the temp password or leave it blank to auto-generate), admin add-member (`POST /admin/memberships`),
-  and the team-lead crew endpoint (`POST /admin/campaigns/:id/crew`). All route through
+- **Set on create** — every account-creation path hashes SOME password + forces a first-login
+  change, but the typed temp password is OPTIONAL on all three: super-admin provisioning
+  (`POST /super-admin/organizations`, first admin — a typed password is echoed once in the 201,
+  a blank one is generated internally and `tempPassword` comes back null), admin add-member
+  (`POST /admin/memberships`), and the team-lead crew endpoint (`POST /admin/campaigns/:id/crew`).
+  Blank/'' → `createOrgMember` hashes `crypto.randomBytes(18)` base64url that is never returned,
+  logged, or emailed — the emailed set-password invite (72h, same machinery as reset) is the
+  account's way in. All route through
   `createOrgMember({ ..., mustChangePassword: true })`, which writes `{ mustChangePassword, tempPasswordSetAt }`
   **only on the create-new branch** — so linking an existing account never touches its password or flag.
 

@@ -197,11 +197,15 @@ export default function UsersPage() {
     };
     if (form.role === 'lead') body.managedCampaignIds = form.managedCampaignIds;
     if (!emailLookup) {
-      // A new account: check the relaxed temp-password rule before the round-trip.
-      const problem = tempPasswordProblem(form.password);
-      if (problem) {
-        setFormError(problem);
-        return;
+      // A new account: the temp password is OPTIONAL. Blank → the server generates a throwaway
+      // nobody sees and the invitee's way in is the emailed set-password link. Only a TYPED one
+      // gets the min-8 check; the empty case is intentionally allowed here (validators unchanged).
+      if (form.password !== '') {
+        const problem = tempPasswordProblem(form.password);
+        if (problem) {
+          setFormError(problem);
+          return;
+        }
       }
       body.firstName = form.firstName;
       body.lastName = form.lastName;
@@ -361,15 +365,18 @@ export default function UsersPage() {
                 />
               </div>
               <div className="md:col-span-3">
-                <label className={labelCls}>Temporary password <span className="text-fg-subtle">(min 8 characters — they set their own at first sign-in)</span></label>
+                <label className={labelCls}>Temporary password <span className="text-fg-subtle">(optional)</span></label>
                 <div className="mt-1">
                   <PasswordInput
                     value={form.password}
                     onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))}
-                    required
                     autoComplete="new-password"
                   />
                 </div>
+                <p className="mt-1 text-xs text-fg-subtle">
+                  Leave blank to let them set their own password via the emailed invite (recommended).
+                  Type one only if they can’t receive email.
+                </p>
               </div>
             </>
           )}

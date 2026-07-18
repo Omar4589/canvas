@@ -249,9 +249,11 @@ function CreateCanvasserModal({ onClose, onCreate, onFoundExisting, submitting, 
     if (error?.data?.code === 'EMAIL_EXISTS_USE_LINK') setLinkExisting(true);
   }, [error]);
 
+  // The temp password is OPTIONAL. Blank → the server generates a throwaway nobody sees and the
+  // new canvasser sets their own via the emailed set-password link; only a TYPED one must pass min-8.
   const valid = linkExisting
     ? !!email.trim()
-    : firstName.trim() && lastName.trim() && email.trim() && isValidTempPassword(password);
+    : firstName.trim() && lastName.trim() && email.trim() && (password === '' || isValidTempPassword(password));
   const pwProblem = !linkExisting && password.length > 0 ? tempPasswordProblem(password) : null;
 
   function submit() {
@@ -283,7 +285,7 @@ function CreateCanvasserModal({ onClose, onCreate, onFoundExisting, submitting, 
           <Text style={styles.modalSub}>
             {linkExisting
               ? 'Links an existing Door Line account to this org and campaign. They keep their current password.'
-              : 'Creates a canvasser and adds them to this campaign. Set a temporary password — they choose their own strong one at first sign-in.'}
+              : 'Creates a canvasser and adds them to this campaign. They set their own password from the emailed invite — a temporary one is optional.'}
           </Text>
           <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>
             <Pressable
@@ -328,9 +330,13 @@ function CreateCanvasserModal({ onClose, onCreate, onFoundExisting, submitting, 
               <>
                 <Text style={styles.formLabel}>Phone (optional)</Text>
                 <TextInput value={phone} onChangeText={(t) => setPhone(formatUsPhoneInput(t))} keyboardType="phone-pad" placeholder="(555) 123-4567" placeholderTextColor={colors.textMuted} style={styles.modalInput} />
-                <Text style={styles.formLabel}>Temporary password (min 8)</Text>
-                <PasswordInput value={password} onChangeText={setPassword} autoComplete="new-password" placeholder="At least 8 characters" />
+                <Text style={styles.formLabel}>Temporary password (optional)</Text>
+                <PasswordInput value={password} onChangeText={setPassword} autoComplete="new-password" placeholder="Leave blank to email an invite" />
                 {pwProblem ? <Text style={styles.modalError}>{pwProblem}</Text> : null}
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.xs }}>
+                  Leave blank to let them set their own password via the emailed invite (recommended).
+                  Type one only if they can’t receive email.
+                </Text>
               </>
             )}
             {error && error.data?.code === 'ALREADY_MEMBER' ? (
