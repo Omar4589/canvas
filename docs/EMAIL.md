@@ -121,6 +121,20 @@ ONLY on `sendMail → {sent: true}` or a genuinely-zero-recipient org; the purge
 without a marker or before its promised date. Dormant mail ⇒ warnings retry unstamped and no
 purge fires. Knobs: `RETENTION_WARN_LEAD_DAYS` (30), `RETENTION_WARN_GRACE_DAYS` (14).
 
+## Delivery truth (the Resend webhook)
+
+`POST /api/webhooks/resend` (`routes/public/resendWebhook.js`) upgrades EmailLog rows from
+"Resend accepted it" to what the inbox reported: **delivered · bounced · complained · delayed**.
+Public by necessity, so auth IS the signature: Svix HMAC over the raw body (app.js keeps that
+one path un-JSON-parsed) with `RESEND_WEBHOOK_SECRET`, ±5-minute replay window; no secret → 503
+and nothing processed. The join key is `EmailLog.resendId`, captured from the send response
+(the `test:accept` transport fabricates one, so the loop tests offline —
+`test/resendWebhook.int.test.js`). bounced/complained are TERMINAL: a late 'delivered' never
+repaints them. **Deliberately not consumed: open/click events** — that is behavioral tracking
+of recipients, the privacy policy says we don't, and tracking stays off in Resend.
+Setup: Resend dashboard → Webhooks → add `https://doorline.app/api/webhooks/resend`, select the
+four delivery events, copy the signing secret into the `RESEND_WEBHOOK_SECRET` config var.
+
 ## The send log (`models/EmailLog.js` + the super-admin Emails page)
 
 Every sendMail attempt writes one **metadata-only** row (kind, recipients, subject, outcome

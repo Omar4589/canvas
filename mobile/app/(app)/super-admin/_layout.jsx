@@ -65,6 +65,9 @@ export default function SuperAdminLayout() {
         name="more"
         options={{ title: 'More', tabBarIcon: ({ color, size }) => <MoreIcon color={color} size={size} /> }}
       />
+
+      {/* Hidden from the bar, still navigable via push (drill-in off the More tab) */}
+      <Tabs.Screen name="emails" options={{ href: null }} />
     </Tabs>
   );
 }

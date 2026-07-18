@@ -83,6 +83,16 @@ export default function SuperAdminMore() {
           <Text style={styles.accountChevron}>›</Text>
         </Pressable>
 
+        <Text style={styles.sectionLabel}>Platform</Text>
+        <View style={styles.group}>
+          <Row
+            icon="✉️"
+            label="Emails"
+            sub="Transactional send log"
+            onPress={() => router.push('/(app)/super-admin/emails')}
+          />
+        </View>
+
         <Text style={styles.sectionLabel}>Support</Text>
         <View style={styles.group}>
           <Row icon="❓" label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />

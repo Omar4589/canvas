@@ -128,6 +128,7 @@ logged only:
 | `RESEND_API_KEY` | The Resend API key. **Setting this is the go-live switch — see the gate below.** |
 | `MAIL_FROM` | The sender, e.g. `Doorline <notifications@doorline.app>`. Both vars required; key without from stays dormant (loud warning in the logs). |
 | `MAIL_TIMEOUT_MS` | Send timeout, default 10000. |
+| `RESEND_WEBHOOK_SECRET` | Signing secret for the delivery webhook (Resend dashboard → Webhooks → add `https://doorline.app/api/webhooks/resend`, events: delivered / bounced / complained / delivery_delayed — never opened/clicked). Unset = delivery statuses simply stay blank on the Emails page. |
 
 > 🛑 **Before setting the key (DPA §6 — contractual, not optional):** Resend is a new
 > subprocessor (it receives recipients' names + email addresses). The DPA's subprocessor list and
