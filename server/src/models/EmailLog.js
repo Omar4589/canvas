@@ -28,6 +28,17 @@ const emailLogSchema = new mongoose.Schema(
     // unconfigured, send recorded only. Mirrors sendMail's honest return, never re-derived.
     outcome: { type: String, enum: ['sent', 'failed', 'dormant'], required: true, index: true },
     error: { type: String, default: null },
+    // Resend's id for this email (from the 2xx response body) — the join key the delivery
+    // webhook uses to upgrade this row from "accepted" to what actually happened. The test
+    // transport fabricates one so the full accept→webhook loop is testable offline.
+    resendId: { type: String, default: null },
+    // What the inbox side reported, via the signed Resend webhook (routes/public/resendWebhook.js):
+    // delivered · bounced · complained · delayed. null = no webhook event yet (or webhooks not
+    // configured). bounced/complained are TERMINAL — a late 'delivered' never overwrites them.
+    deliveryStatus: { type: String, enum: [null, 'delivered', 'bounced', 'complained', 'delayed'], default: null },
+    deliveryAt: { type: Date, default: null },
+    // Human-readable detail for the bad outcomes (bounce reason, complaint type).
+    deliveryDetail: { type: String, default: null },
     // Attribution when the caller knows it — the org an org-level notice concerns, the user a
     // personal email addresses. Optional: some sends have only one or neither.
     organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
@@ -46,5 +57,7 @@ const emailLogSchema = new mongoose.Schema(
 emailLogSchema.index({ sentAt: -1 });
 emailLogSchema.index({ organizationId: 1, sentAt: -1 });
 emailLogSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// The webhook's lookup key. Sparse: only rows that actually went through Resend carry one.
+emailLogSchema.index({ resendId: 1 }, { sparse: true });
 
 export const EmailLog = mongoose.model('EmailLog', emailLogSchema);

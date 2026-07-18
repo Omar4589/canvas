@@ -11,20 +11,25 @@ const LIMIT = 50;
 
 const OUTCOMES = ['sent', 'failed', 'dormant'];
 
-function OutcomeBadge({ outcome, error }) {
+function OutcomeBadge({ outcome, error, deliveryStatus, deliveryDetail }) {
+  // Once the Resend webhook has spoken, the INBOX-side truth outranks "we sent it":
+  // delivered > sent, and bounced/complained repaint the row as the failure it really was.
+  const label = deliveryStatus || outcome;
   const cls =
-    outcome === 'sent'
-      ? 'bg-success/10 text-success'
-      : outcome === 'failed'
-        ? 'bg-danger/10 text-danger'
-        : 'bg-sunken text-fg-muted';
+    label === 'delivered'
+      ? 'bg-success/15 text-success'
+      : label === 'sent'
+        ? 'bg-success/10 text-success'
+        : label === 'failed' || label === 'bounced'
+          ? 'bg-danger/10 text-danger'
+          : label === 'complained'
+            ? 'bg-warning/10 text-warning'
+            : 'bg-sunken text-fg-muted'; // dormant · delayed
+  // Bounce reason / complaint type / Resend rejection — surfaced on hover, not in the row.
+  const detail = deliveryDetail || (outcome === 'failed' ? error : null);
   return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}
-      // Resend's rejection reason rides along on failures — surfaced on hover, not in the row.
-      title={outcome === 'failed' && error ? error : undefined}
-    >
-      {outcome}
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${cls}`} title={detail || undefined}>
+      {label === 'delivered' ? '✓ delivered' : label}
     </span>
   );
 }
@@ -166,7 +171,7 @@ export default function SuperAdminEmailsPage() {
                     <td className="px-3 py-2 text-fg-muted">{e.organization?.name || '—'}</td>
                     <td className="whitespace-nowrap px-3 py-2">
                       <div className="flex items-center gap-1.5">
-                        <OutcomeBadge outcome={e.outcome} error={e.error} />
+                        <OutcomeBadge outcome={e.outcome} error={e.error} deliveryStatus={e.deliveryStatus} deliveryDetail={e.deliveryDetail} />
                         {e.keptForever && (
                           <span
                             className="rounded-full border border-border px-2 py-0.5 text-xs font-medium text-fg-subtle"

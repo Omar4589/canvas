@@ -42,6 +42,7 @@ import mobileVotersRouter from './mobile/voters.js';
 import adminClientReportsRouter from './admin/clientReports.js';
 import shareRouter from './public/share.js';
 import buildStatusRouter from './public/buildStatus.js';
+import resendWebhookRouter from './public/resendWebhook.js';
 import helpRouter from './help.js';
 
 const router = Router();
@@ -59,6 +60,10 @@ router.use('/share', shareRouter);
 // client draws a nag/wall from the answer. Mounted BEFORE the auth gate so the wall can cover
 // the login screen; env-driven, see routes/public/buildStatus.js.
 router.use('/build-status', buildStatusRouter);
+
+// Resend delivery webhook (no login — Resend calls it; auth = the Svix signature over the raw
+// body, which app.js preserves with an express.raw mount on this exact path).
+router.use('/webhooks/resend', resendWebhookRouter);
 
 // Help Center content — self-gated (any logged-in member) and intentionally outside the
 // password/entitlement gates below, so help is always readable (incl. suspended orgs).

@@ -73,6 +73,10 @@ export function createApp() {
   // compresses ~85-90%, and neither Express nor Heroku's router does this
   // for us (see docs/PERFORMANCE.md → Payload scaling).
   app.use(compression());
+  // The Resend webhook's Svix signature covers the EXACT raw bytes, so that one path keeps a
+  // raw Buffer body — mounted BEFORE express.json, whose parse would make byte-perfect
+  // re-serialization impossible (body-parser sets req._body, so the JSON parser skips it).
+  app.use('/api/webhooks/resend', express.raw({ type: '*/*', limit: '1mb' }));
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan(isProd ? 'combined' : 'dev'));

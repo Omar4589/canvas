@@ -57,6 +57,11 @@ router.get('/', async (req, res, next) => {
         subject: r.subject,
         outcome: r.outcome,
         error: r.error || null,
+        // What the inbox side reported via the Resend webhook — null until an event arrives
+        // (or forever, if webhooks aren't configured). bounced/complained carry deliveryDetail.
+        deliveryStatus: r.deliveryStatus || null,
+        deliveryAt: r.deliveryAt || null,
+        deliveryDetail: r.deliveryDetail || null,
         // Live org when it still exists; the send-time NAME SNAPSHOT when it doesn't — a
         // deletion-warning evidence row must stay legible after the org it warned is purged.
         organization: r.organizationId

@@ -24,7 +24,7 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 const KEEP_FOREVER_KINDS = new Set(['windDownWarning', 'dormancyWarning']);
 const EMAIL_LOG_RETENTION_DAYS = Number(process.env.EMAIL_LOG_RETENTION_DAYS || 365);
 
-function recordEmail({ kind, recipients, subject, outcome, error, meta }) {
+function recordEmail({ kind, recipients, subject, outcome, error, meta, resendId }) {
   if (mongoose.connection.readyState !== 1) return;
   const sentAt = new Date();
   EmailLog.create({
@@ -33,6 +33,7 @@ function recordEmail({ kind, recipients, subject, outcome, error, meta }) {
     subject,
     outcome,
     error: error || null,
+    resendId: resendId || null,
     organizationId: meta?.organizationId || null,
     organizationName: meta?.organizationName || null,
     userId: meta?.userId || null,
@@ -137,10 +138,13 @@ export async function sendMail({ to, subject, html, text, kind, meta } = {}) {
       console.warn('[mailer] TEST transport active — no real mail is being delivered.');
     }
     pushOutbox({ to: recipients, subject: safeSubject, html, text, kind, at: new Date() });
+    // Accepted test sends fabricate a resendId, so tests can drive the full accept → webhook →
+    // delivery-status loop with no network (test/resendWebhook.int.test.js).
     recordEmail({
       kind, recipients, subject: safeSubject, meta,
       outcome: accept ? 'sent' : 'failed',
       error: accept ? null : 'test transport: rejected',
+      resendId: accept ? `test-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` : null,
     });
     return accept ? { sent: true } : { sent: false, error: 'test transport: rejected' };
   }
@@ -167,7 +171,10 @@ export async function sendMail({ to, subject, html, text, kind, meta } = {}) {
       return { sent: false, error: summary };
     }
     console.log(`[mailer] sent ${kind || 'mail'} → ${recipients.map(maskEmail).join(', ')} :: ${safeSubject}`);
-    recordEmail({ kind, recipients, subject: safeSubject, outcome: 'sent', meta });
+    // Resend's 2xx body carries the email id — the key the delivery webhook joins back on.
+    // Best-effort: a body we can't parse just means no delivery upgrades for this row.
+    const sentBody = await res.json().catch(() => null);
+    recordEmail({ kind, recipients, subject: safeSubject, outcome: 'sent', meta, resendId: sentBody?.id || null });
     return { sent: true };
   } catch (err) {
     const summary = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : (err?.message || String(err));
