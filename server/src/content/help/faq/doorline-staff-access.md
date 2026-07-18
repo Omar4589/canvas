@@ -23,4 +23,7 @@ by looking at your account.
 This is about Doorline's own staff. Your organization's admins, team leads, and canvassers working in
 your org are simply using the product — their permissions are governed by their role, not by grants.
 
+The one exception is Doorline's own internal demo organizations, which contain only fictional data —
+never a customer's — so staff work in those directly.
+
 The full commitment is in our [Privacy Policy](https://doorline.app/privacy).

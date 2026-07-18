@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Redirect, useRouter } from 'expo-router';
 import { api } from '../lib/api';
-import { useAuthToken } from '../lib/authState';
+import { useAuthToken, signIn, signOut } from '../lib/authState';
 import { saveCurrentUser, saveMemberships } from '../lib/cache';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
@@ -52,10 +52,24 @@ export default function ChangePassword() {
         method: 'POST',
         body: { currentPassword, newPassword },
       });
+      // The change revokes every session issued before it — INCLUDING the token this request
+      // rode in on. Adopt the fresh one from the response first, or the very next request
+      // (and a mid-shift canvasser's queued-knock flush) would 401 into a sign-out.
+      if (res.token) await signIn(res.token);
       if (res.user) await saveCurrentUser(res.user);
       await saveMemberships(res.memberships || []);
       router.replace('/');
     } catch (err) {
+      // The session died UNDER this screen — the user completed a reset elsewhere (the
+      // emailed rescue link) while this device sat on the forced-change form. Without this,
+      // the form is an inescapable dead end: submits 401 forever, relaunch re-routes here
+      // off the cached mustChangePassword, and the only exit (reinstall) would destroy any
+      // queued knocks. signOut drops to /login via the !token redirect — the offline queue
+      // survives it by design.
+      if (err.code === 'SESSION_REVOKED') {
+        await signOut();
+        return;
+      }
       setError(err.message);
     } finally {
       setLoading(false);

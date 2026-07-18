@@ -57,6 +57,14 @@ async function main() {
       });
     }
     if (missing.length) console.log(`created ${missing.length} subscriptions.`);
+    // Keep flag⇔status coupled: any org this migration treats as internal-by-slug also gets
+    // the born-immutable Organization.isInternal flag (raw write — the sanctioned bypass,
+    // same as migrate:internal-orgs), so the billing coupling guard can't wedge it later.
+    const flagged = await Organization.collection.updateMany(
+      { slug: { $in: [...internalSlugs] }, isInternal: { $ne: true } },
+      { $set: { isInternal: true } }
+    );
+    if (flagged.modifiedCount) console.log(`set isInternal on ${flagged.modifiedCount} org(s).`);
     // Bulk backfill via updateMany + aggregation pipeline so updatedAt itself
     // isn't bumped by the write (timestamps are skipped on pipeline updates).
     const r = await Campaign.updateMany({ isActive: false, archivedAt: null }, [

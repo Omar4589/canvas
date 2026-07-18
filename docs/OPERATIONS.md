@@ -141,6 +141,14 @@ logged only:
 dashboard shows it delivered; after the next 04:41 UTC sweep, `heroku logs --dyno worker` should
 show warn counts instead of `[retention] ... NOT delivered (mail dormant)` lines.
 
+**The Emails page (Super-admin ▸ Emails)** is the in-app send log: every attempt with kind,
+recipients, outcome (sent / failed / dormant) and a last-24h failure count — metadata only;
+rendered content and bounce forensics stay in the Resend dashboard. Ordinary rows expire after
+`EMAIL_LOG_RETENTION_DAYS` (**365**); wind-down/dormancy **warning rows are kept forever** as
+the deletion-warning evidence trail (they survive the org's own deletion, with the org name
+snapshotted at send time). Its indexes are schema-declared — the deploy needs
+`migrate:build-indexes --apply`.
+
 Orgs with subscription status **`internal`** (our demo/platform tenants) are **exempt from every
 auto-purge** — the App Review demo tenant must not evaporate because nobody knocked a door in it.
 

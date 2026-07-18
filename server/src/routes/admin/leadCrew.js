@@ -124,10 +124,10 @@ router.post('/', denyVendorPrivilegeWrite, async (req, res, next) => {
     // A new account gets a set-password invite naming BOTH the org and this campaign; an existing account
     // linked in gets a no-credentials "you've been added" note that names the campaign.
     if (data.linkExisting) {
-      sendMail({ to: user.email, ...addedToOrg({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name }), kind: 'addedToOrg' });
+      sendMail({ to: user.email, ...addedToOrg({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name }), kind: 'addedToOrg', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
     } else {
       const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
-      sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name, setPasswordUrl: url }), kind: 'inviteSetPassword' });
+      sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name, setPasswordUrl: url }), kind: 'inviteSetPassword', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
     }
 
     res.status(201).json({ user: user.toSafeJSON() });

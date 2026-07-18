@@ -150,6 +150,7 @@ router.get('/platform-overview', async (req, res, next) => {
           name: o.name,
           slug: o.slug,
           isActive: o.isActive,
+          isInternal: !!o.isInternal,
           memberCount: memberMap.get(String(o._id)) || 0,
           campaignCount: campaignMap.get(String(o._id)) || 0,
           activeNowCount: activeNowMap.get(String(o._id)) || 0,

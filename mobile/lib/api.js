@@ -1,5 +1,6 @@
 import { API_BASE_URL, CLIENT_API_VERSION } from './config';
 import { getToken } from './auth';
+import { getCurrentToken } from './authState';
 import { loadActiveOrgId } from './cache';
 
 // Server messages that mean "this request had no valid active-organization
@@ -24,10 +25,13 @@ const DEFAULT_TIMEOUT_MS = 20000;
 
 export async function api(
   path,
-  { method = 'GET', body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}
+  { method = 'GET', body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, signal, orgId: orgIdOverride } = {}
 ) {
   const token = await getToken();
-  const orgId = await loadActiveOrgId();
+  // orgId is normally the active org, but the offline queue pins each item to the org it was
+  // recorded under — a multi-org user who re-logs into a different org must not flush org-A
+  // knocks under an org-B header (they'd 4xx and be dropped as "bad submissions").
+  const orgId = orgIdOverride !== undefined ? orgIdOverride : await loadActiveOrgId();
   const finalHeaders = {
     Accept: 'application/json',
     'X-Client-Version': String(CLIENT_API_VERSION),
@@ -90,6 +94,18 @@ export async function api(
       // under the user mid-session, which the global handler disambiguates by refetching.
       if (res.status === 403 && data?.code === 'FORBIDDEN_ROLE' && !err.code) {
         err.code = 'FORBIDDEN_ROLE';
+      }
+      // The server explicitly revoked this session (password changed elsewhere). Tagged so the
+      // global handler can sign out to the login screen instead of every query dead-ending.
+      // The offline queue is untouched by sign-out, so queued knocks survive to flush after
+      // the user signs back in. Tagged ONLY when the token this request carried is still the
+      // one in use: an in-flight request from BEFORE a token rotation (change-password adopts
+      // a fresh token) can land 401 AFTER the rotation, and signing out then would wipe the
+      // brand-new session. A stale request's 401 keeps err.status for the queue's hold logic
+      // but never triggers the global sign-out.
+      if (res.status === 401 && data?.code === 'SESSION_REVOKED') {
+        const current = getCurrentToken();
+        if (!current || current === token) err.code = 'SESSION_REVOKED';
       }
       throw err;
     }

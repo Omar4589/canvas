@@ -8,7 +8,7 @@ import LiveStatus from '../components/LiveStatus.jsx';
 import StatCard from '../components/StatCard.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
-import { BillingPill } from '../lib/billingStatus.jsx';
+import { BillingPill, InternalBadge } from '../lib/billingStatus.jsx';
 import { PLATFORM_TOTALS, OVERVIEW_HELP, TOTALS_INTRO, IDLE_ORGS_HELP, trendCaveat } from '../lib/platformStatsMeta.js';
 import { Sparkline } from '../components/charts/index.jsx';
 
@@ -377,14 +377,20 @@ export default function SuperAdminHomePage() {
                       <div className="text-xs text-fg-muted">{o.slug}</div>
                     </div>
                     <div className="flex flex-col items-end gap-1">
+                      {o.isInternal && <InternalBadge label="Internal" />}
                       {!o.isActive && (
                         <span className="rounded-full bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
                           inactive
                         </span>
                       )}
-                      {o.billing?.effective && o.billing.effective !== 'active' && (
-                        <BillingPill effective={o.billing.effective} />
-                      )}
+                      {/* Suppress the billing pill when it would just repeat the Internal badge
+                          (flag + status agreeing) — but keep it when they DISAGREE: that
+                          contradiction is the drift signal worth seeing. */}
+                      {o.billing?.effective &&
+                        o.billing.effective !== 'active' &&
+                        !(o.isInternal && o.billing.effective === 'internal') && (
+                          <BillingPill effective={o.billing.effective} />
+                        )}
                       {o.activeNowCount > 0 && (
                         <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
                           🟢 {o.activeNowCount} active

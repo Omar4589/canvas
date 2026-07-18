@@ -32,6 +32,7 @@ import adminBillingRouter from './admin/billing.js';
 import superAdminUsersRouter from './superAdmin/users.js';
 import superAdminPersonsRouter from './superAdmin/persons.js';
 import superAdminAccessRouter from './superAdmin/access.js';
+import superAdminEmailsRouter from './superAdmin/emails.js';
 import superAdminImportsRouter from './superAdmin/imports.js';
 import superAdminPlatformRouter from './superAdmin/platform.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
@@ -84,6 +85,7 @@ router.use('/super-admin/users', superAdminUsersRouter);
 router.use('/super-admin/persons', superAdminPersonsRouter);
 // Support access grants + the vendor-access audit log + retention health.
 router.use('/super-admin/access', superAdminAccessRouter);
+router.use('/super-admin/emails', superAdminEmailsRouter);
 router.use('/super-admin/imports', superAdminImportsRouter);
 router.use('/super-admin', superAdminPlatformRouter);
 

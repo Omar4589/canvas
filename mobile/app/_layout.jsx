@@ -5,12 +5,14 @@ import {
   QueryClient,
   QueryClientProvider,
   QueryCache,
+  MutationCache,
   focusManager,
 } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { clearActiveOrgId, clearActiveCampaign } from '../lib/cache';
+import { signOut } from '../lib/authState';
 import { refreshSession } from '../lib/session';
 import { loadRoleContext } from '../lib/role';
 import { ThemeProvider, useTheme } from '../lib/ThemeContext';
@@ -75,16 +77,41 @@ async function recoverRole() {
   }
 }
 
+// Route to the forced-change screen the moment ANY request reports the temp-password gate —
+// an admin reset this user mid-session, and without this the phone just shows errors on every
+// screen until a full relaunch re-runs index.jsx's boot redirect. Debounced like recoverRole:
+// a burst of failing queries triggers one navigation.
+let routingToChangePassword = false;
+function routeToForcedChange() {
+  if (routingToChangePassword) return;
+  routingToChangePassword = true;
+  try {
+    router.replace('/change-password');
+  } finally {
+    setTimeout(() => {
+      routingToChangePassword = false;
+    }, 1500);
+  }
+}
+
+// Shared by the query AND mutation caches — a revoked session can surface through either
+// (a dashboard poll or a notes/assignment mutation), and both must land on the same recovery.
+function onGlobalError(err) {
+  if (err?.code === 'ORG_CONTEXT') recoverOrgContext();
+  else if (err?.code === 'FORBIDDEN_ROLE') recoverRole();
+  // The password was changed elsewhere and this session is revoked — sign out to the login
+  // screen (signOut is idempotent, so several failing queries landing at once is fine).
+  // Queued knocks survive: signOut clears identity caches, never the offline queue.
+  else if (err?.code === 'SESSION_REVOKED') signOut();
+  else if (err?.status === 403 && err?.data?.code === 'PASSWORD_CHANGE_REQUIRED') routeToForcedChange();
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, refetchOnWindowFocus: false },
   },
-  queryCache: new QueryCache({
-    onError: (err) => {
-      if (err?.code === 'ORG_CONTEXT') recoverOrgContext();
-      else if (err?.code === 'FORBIDDEN_ROLE') recoverRole();
-    },
-  }),
+  queryCache: new QueryCache({ onError: onGlobalError }),
+  mutationCache: new MutationCache({ onError: onGlobalError }),
 });
 
 // Pause React Query interval polling while the app is backgrounded (battery).

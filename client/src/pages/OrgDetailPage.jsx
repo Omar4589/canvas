@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import Section from '../components/Section.jsx';
-import { BillingPill } from '../lib/billingStatus.jsx';
+import { BillingPill, InternalBadge } from '../lib/billingStatus.jsx';
 import { formatDate, formatRelative } from '../lib/dates.js';
 
 // The SLIM org detail page: header + the member roster (the one thing that used to require a
@@ -31,6 +31,7 @@ export default function OrgDetailPage() {
         <h1 className="text-2xl font-semibold text-fg">{o.name}</h1>
         <span className="font-mono text-xs text-fg-subtle">{o.slug}</span>
         {!o.isActive && <span className="rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted">Inactive</span>}
+        {o.isInternal && <InternalBadge label="Internal org" />}
         <BillingPill effective={b.effective} />
       </div>
       <div className="mb-4 text-sm text-fg-muted">
@@ -41,12 +42,26 @@ export default function OrgDetailPage() {
         )}
       </div>
 
-      {/* The consequence of `internal`, stated where the status is seen — choosing it silently
-          exempts the org from BOTH retention sweeps (wind-down and dormancy). */}
-      {b.internal && (
+      {/* The consequences of `internal`, stated where they're seen. Each sentence keys on the
+          field that actually drives it: the retention exemption follows the billing STATUS,
+          the staff free-entry follows the immutable FLAG. They normally agree; if they ever
+          drift (e.g. the pre-migration window), the box states exactly which half applies —
+          it must never assert unaudited staff entry that isn't actually in effect. */}
+      {(b.internal || o.isInternal) && (
         <div className="mb-4 rounded-md border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
-          <span className="font-semibold">Internal organization:</span> exempt from automatic retention —
-          the dormancy sweep and the wind-down will never delete it. Only a manual delete can.
+          <span className="font-semibold">Internal organization:</span>
+          {b.internal && (
+            <>
+              {' '}exempt from automatic retention — the dormancy sweep and the wind-down will never
+              delete it. Only a manual delete can.
+            </>
+          )}
+          {o.isInternal && (
+            <>
+              {' '}Staff enter this organization freely, without a support grant, and their activity
+              is not written to the access log — it holds only Doorline&apos;s own synthetic data.
+            </>
+          )}
         </div>
       )}
 

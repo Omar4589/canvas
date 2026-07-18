@@ -7,7 +7,7 @@ import { deleteOrganization } from '../platform/deleteOrganization.js';
 import { windDownDeletionDate } from '../billing/windDown.js';
 import { sendMail } from '../mail/mailer.js';
 import { windDownWarning, dormancyWarning } from '../mail/templates.js';
-import { orgNotifyEmails } from '../mail/recipients.js';
+import { billingNotifyEmails } from '../mail/recipients.js';
 
 // The three disclosed retention triggers. Each is a REAL purge — it calls the same irreversible
 // org-delete cascade a super-admin would — and each writes a RetentionRun so that a trigger which
@@ -62,19 +62,21 @@ async function isExempt(orgId) {
  *     that failed, timed out, or ran while mail is dormant (no RESEND_API_KEY yet) returns
  *     sent: false and the org is retried next sweep, unstamped. One bad MAIL_FROM must never
  *     quietly license deleting a never-warned customer.
- *   - The org has ZERO reachable recipients (no admins, no billing contact — typically already
- *     torn down by hand). Nothing will ever be deliverable, so waiting would only mean keeping
- *     their data forever; stamp with a loud log.
+ *   - The org has ZERO reachable BILLING recipients (no billingAccess admin, no billing contact
+ *     on file — recipients are deliberately billing-identities-only, never all admins; see
+ *     services/mail/recipients.js). Nothing this notice is allowed to reach will ever be
+ *     deliverable, so waiting would only mean keeping their data forever; stamp with a loud
+ *     log. In practice every provisioned org starts with a billingAccess admin.
  */
 async function deliverWarning({ orgId, orgSlug, template, kind }) {
-  const recipients = await orgNotifyEmails(orgId);
+  const recipients = await billingNotifyEmails(orgId);
   if (!recipients.length) {
     console.warn(
-      `[retention] ${kind}: org ${orgSlug} has no reachable recipients (no active admins, no billing contact) — marking warned without an email.`
+      `[retention] ${kind}: org ${orgSlug} has no reachable billing recipients (no billingAccess admin, no billing contact) — marking warned without an email.`
     );
     return { stamp: true };
   }
-  const result = await sendMail({ to: recipients, ...template, kind });
+  const result = await sendMail({ to: recipients, ...template, kind, meta: { organizationId: orgId } });
   if (!result.sent) {
     console.warn(
       `[retention] ${kind}: warning for ${orgSlug} NOT delivered (${result.disabled ? 'mail dormant' : result.error || 'send failed'}) — not marking; will retry next sweep.`

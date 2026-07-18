@@ -249,9 +249,10 @@ test('superAdmin organizations POST: provisioningWelcome, and the returned temp 
   assert.ok(!JSON.stringify(outbox).includes(tempPassword), 'the auto-generated temp password must not reach the inbox');
 });
 
-// 7) Grant notice → ONE supportGrantNotice, recipients following the orgNotifyEmails cascade; a re-request
-//    while the grant is live does not re-notify; the notice carries the staffer's FIRST name, not their email.
-test('supportGrantNotice: cascade recipients, dedupe on reuse, first-name-not-email in the body', { skip }, async () => {
+// 7) Grant notice → ONE supportGrantNotice to the org's BILLING identities only (billingNotifyEmails:
+//    billingAccess admins, else the billing contact — NEVER every admin); a re-request while the grant
+//    is live does not re-notify; the notice carries the staffer's FIRST name, not their email.
+test('supportGrantNotice: billing-only recipients, dedupe on reuse, first-name-not-email in the body', { skip }, async () => {
   // Org A: a billingAccess admin AND a plain admin → only the billing admin is notified (not "everyone").
   const orgA = await Organization.create({ name: 'Notice Org A', slug: 'notice-a', isActive: true });
   const billingAdmin = await User.create({ firstName: 'Bill', lastName: 'Payer', email: 'billing.a@t.co', passwordHash: 'x', isActive: true });
@@ -288,13 +289,25 @@ test('supportGrantNotice: cascade recipients, dedupe on reuse, first-name-not-em
   assert.strictEqual(gB.status, 201);
   assert.ok(await waitFor(() => kinds('supportGrantNotice').length === 1), 'org B is notified via billingContact');
   assert.deepStrictEqual(kinds('supportGrantNotice')[0].to, ['contact.b@t.co']);
+
+  // Org D: ONLY plain (non-billing) admins and no billing contact → the notice goes to NOBODY.
+  // Pins the owner decision: these are billing-grade notices, and "all active admins" is NOT a
+  // fallback tier — a plain admin never receives them.
+  const orgD = await Organization.create({ name: 'Notice Org D', slug: 'notice-d', isActive: true });
+  const plainOnly = await User.create({ firstName: 'Paul', lastName: 'Plain', email: 'plain.d@t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: plainOnly._id, organizationId: orgD._id, role: 'admin', isActive: true, billingAccess: false });
+  clearOutbox();
+  const gD = await call('POST', '/super-admin/access/grants', { token: ctx.superTok, body: { organizationId: String(orgD._id), reason } });
+  assert.strictEqual(gD.status, 201);
+  await sleep(250);
+  assert.strictEqual(kinds('supportGrantNotice').length, 0, 'plain admins are never a fallback for billing-grade notices');
 });
 
 // 8) An org with no reachable notify recipient (no admins, no billingContact) → no crash, no email, and
 //    the grant route still succeeds.
 test('supportGrantNotice: an org with no reachable recipient sends nothing and the grant still 201s', { skip }, async () => {
   const orgC = await Organization.create({ name: 'Notice Org C', slug: 'notice-c', isActive: true });
-  // No admin memberships, no Subscription → orgNotifyEmails returns [].
+  // No admin memberships, no Subscription → billingNotifyEmails returns [].
   const res = await call('POST', '/super-admin/access/grants', {
     token: ctx.superTok,
     body: { organizationId: String(orgC._id), reason: 'A support session with no reachable recipient (ticket 7).' },

@@ -75,6 +75,9 @@ export function AuthProvider({ children }) {
       method: 'POST',
       body: { currentPassword, newPassword },
     });
+    // The change revokes every session issued before it — including the token that made this
+    // request. Adopt the fresh one from the response, or the next call would 401 to /login.
+    if (res.token) setToken(res.token);
     setUser(res.user);
     setMemberships(res.memberships || []);
     return res;

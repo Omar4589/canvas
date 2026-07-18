@@ -713,8 +713,16 @@ async function main() {
   // 1. Org + users -----------------------------------------------------------
   const org =
     existingOrg ||
-    (await Organization.create({ name: DEMO_ORG_NAME, slug: DEMO_ORG_SLUG, timeZone: CAMPAIGN_TZ }));
-  // Demo orgs are `internal` — permanently free, never gated, off the books.
+    (await Organization.create({ name: DEMO_ORG_NAME, slug: DEMO_ORG_SLUG, timeZone: CAMPAIGN_TZ, isInternal: true }));
+  // Demo orgs are `internal` — permanently free, never gated, off the books, and staff enter
+  // without a support grant (middleware/orgContext.js). `isInternal` is schema-immutable, so
+  // an EXISTING org needs the sanctioned raw-collection write (same technique, and same
+  // justification, as migrate:internal-orgs) — filter-guarded, idempotent, and reached only
+  // via the DEMO_ORG_SLUG lookup above, so it can never touch a real org.
+  await Organization.collection.updateOne(
+    { _id: org._id, isInternal: { $ne: true } },
+    { $set: { isInternal: true } }
+  );
   await Subscription.updateOne(
     { organizationId: org._id },
     { $set: { status: 'internal', statusChangedAt: new Date() } },

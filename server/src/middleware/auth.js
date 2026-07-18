@@ -18,6 +18,21 @@ export async function requireAuth(req, res, next) {
     if (!user || !user.isActive || user.deletedAt) {
       return res.status(401).json({ error: 'Invalid or inactive user' });
     }
+    // A token issued before the user's last self-set password change is a revoked session:
+    // "I changed my password" must actually end every other session holding the old one.
+    // Compared in whole SECONDS (JWT iat granularity), so the fresh token change-password
+    // itself returns — minted in the same second as the stamp — is never rejected. null
+    // passwordChangedAt = never changed → nothing to compare (grandfathers old sessions).
+    // Distinct code so clients can route to sign-in instead of showing a generic failure.
+    if (user.passwordChangedAt && typeof payload.iat === 'number') {
+      const changedTs = Math.floor(new Date(user.passwordChangedAt).getTime() / 1000);
+      if (payload.iat < changedTs) {
+        return res.status(401).json({
+          error: 'Your password was changed — sign in again.',
+          code: 'SESSION_REVOKED',
+        });
+      }
+    }
     req.user = user;
     next();
   } catch (err) {

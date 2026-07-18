@@ -28,6 +28,11 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
   slug: slugSchema.optional(),
   isActive: z.boolean().optional(),
+  // Doorline-owned internal org (demo/sandbox). Break-glass only; the flag is immutable
+  // after creation (models/Organization.js) and locks billing to 'internal'. An internal
+  // org is born EMPTY — there is no customer data in it to expose — which is what makes
+  // the staff free-entry carve-out (middleware/orgContext.js) safe.
+  internal: z.boolean().optional(),
   // Trial length in days (default 7). The clock runs from creation.
   trialDays: z.number().int().min(1).max(90).optional(),
   // Optional: seat the client's first admin in the same step. When present, the super admin
@@ -95,6 +100,7 @@ router.get('/', async (req, res, next) => {
         name: o.name,
         slug: o.slug,
         isActive: o.isActive,
+        isInternal: !!o.isInternal,
         memberCount: memberMap.get(String(o._id)) || 0,
         campaignCount: camp?.count || 0,
         campaignsActive: camp?.active || 0,
@@ -264,6 +270,7 @@ router.get('/:orgId', async (req, res, next) => {
         name: org.name,
         slug: org.slug,
         isActive: org.isActive,
+        isInternal: !!org.isInternal,
         createdAt: org.createdAt,
       },
       billing: {
@@ -310,6 +317,19 @@ router.get('/:orgId', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const data = createSchema.parse(req.body);
+    if (data.internal) {
+      // Creating an org in the staff-free-entry class is an authority act — break-glass
+      // tier only (mirrors requireBreakGlass, middleware/auth.js).
+      if (req.user.platformRole !== 'break_glass') {
+        return res.status(403).json({
+          error: 'Creating an internal organization requires break-glass authority.',
+          code: 'BREAK_GLASS_REQUIRED',
+        });
+      }
+      if (data.trialDays !== undefined) {
+        return res.status(400).json({ error: 'An internal organization has no trial.', code: 'INTERNAL_NO_TRIAL' });
+      }
+    }
     const slug = (data.slug || Organization.toSlug(data.name)).toLowerCase();
     if (!slug) return res.status(400).json({ error: 'Could not derive slug from name' });
     // Pre-check the admin email so a conflict fails BEFORE we create the org — no
@@ -327,27 +347,44 @@ router.post('/', async (req, res, next) => {
       name: data.name.trim(),
       slug,
       isActive: data.isActive !== false,
+      isInternal: !!data.internal, // immutable after this line — see models/Organization.js
       createdBy: req.user._id,
     });
-    // Every new org starts a trial (default 7 days; user decision, Jul 2026). The
-    // clock runs from creation — create the org right after the demo call.
-    const trialDays = data.trialDays ?? 7;
-    await Subscription.create({
-      organizationId: org._id,
-      status: 'trial',
-      trialEndsAt: new Date(Date.now() + trialDays * 86400000),
-      statusChangedAt: new Date(),
-    });
-    await SubscriptionEvent.create({
-      organizationId: org._id,
-      byUserId: req.user._id,
-      toStatus: 'trial',
-      reason: `Organization created — ${trialDays}-day trial started`,
-    });
+    if (data.internal) {
+      // Internal orgs are permanently non-billable; status is locked to 'internal'
+      // (routes/superAdmin/billing.js) — no trial, no clock.
+      await Subscription.create({
+        organizationId: org._id,
+        status: 'internal',
+        statusChangedAt: new Date(),
+      });
+      await SubscriptionEvent.create({
+        organizationId: org._id,
+        byUserId: req.user._id,
+        toStatus: 'internal',
+        reason: 'Organization created — internal (Doorline-owned)',
+      });
+    } else {
+      // Every new customer org starts a trial (default 7 days; user decision, Jul 2026).
+      // The clock runs from creation — create the org right after the demo call.
+      const trialDays = data.trialDays ?? 7;
+      await Subscription.create({
+        organizationId: org._id,
+        status: 'trial',
+        trialEndsAt: new Date(Date.now() + trialDays * 86400000),
+        statusChangedAt: new Date(),
+      });
+      await SubscriptionEvent.create({
+        organizationId: org._id,
+        byUserId: req.user._id,
+        toStatus: 'trial',
+        reason: `Organization created — ${trialDays}-day trial started`,
+      });
+    }
 
-    // Lifetime marketing counter: a real customer org was created (new orgs start on a trial, never
-    // 'internal', so this is always a countable org).
-    await bumpLive('organizations', 1, { isInternal: false });
+    // Lifetime marketing counter — bumpLive itself skips internal orgs, so Doorline's own
+    // sandboxes never inflate the customer numbers.
+    await bumpLive('organizations', 1, { isInternal: !!data.internal });
 
     // Optionally seat the first admin in the same step (closes the chicken-and-egg
     // gap: POST /admin/memberships needs an existing org admin). Temp password is
@@ -371,7 +408,7 @@ router.post('/', async (req, res, next) => {
       // mail hiccup must not fail provisioning). The temp password above stays in the 201 response for
       // out-of-band hand-off; it never appears in the email.
       const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
-      sendMail({ to: user.email, ...provisioningWelcome({ firstName: user.firstName, orgName: org.name, setPasswordUrl: url }), kind: 'provisioningWelcome' });
+      sendMail({ to: user.email, ...provisioningWelcome({ firstName: user.firstName, orgName: org.name, setPasswordUrl: url }), kind: 'provisioningWelcome', meta: { organizationId: org._id, organizationName: org.name, userId: user._id } });
     }
 
     res.status(201).json({ organization: org, admin, tempPassword });
@@ -389,6 +426,22 @@ router.patch('/:orgId', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid orgId' });
     }
     const data = updateSchema.parse(req.body);
+    const existing = await Organization.findById(req.params.orgId, 'slug isInternal').lean();
+    if (!existing) return res.status(404).json({ error: 'Organization not found' });
+    // An internal org's slug is its identity for internal tooling (the demo refresh and the
+    // billing migration key on it) — renaming would silently break the Control Room button.
+    // Flag-scoped so any future internal org gets the same protection. (`isInternal` itself
+    // is not in updateSchema and is schema-immutable — it cannot be set here.)
+    if (
+      existing.isInternal &&
+      data.slug !== undefined &&
+      data.slug.toLowerCase().trim() !== existing.slug
+    ) {
+      return res.status(403).json({
+        error: "An internal organization's slug is its identity for internal tooling (demo refresh, migrations) and cannot be changed.",
+        code: 'INTERNAL_SLUG_LOCKED',
+      });
+    }
     const update = {};
     if (data.name !== undefined) update.name = data.name.trim();
     if (data.slug !== undefined) update.slug = data.slug.toLowerCase().trim();

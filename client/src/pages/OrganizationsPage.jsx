@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tansta
 import { api } from '../api/client.js';
 import OrgBillingPanel from '../components/OrgBillingPanel.jsx';
 import Pager from '../components/Pager.jsx';
-import { BillingPill, fmtUsd } from '../lib/billingStatus.jsx';
+import { BillingPill, InternalBadge, fmtUsd } from '../lib/billingStatus.jsx';
 import { isValidEmail, tempPasswordProblem } from '../lib/validators.js';
 
 const fieldCls =
@@ -489,6 +489,9 @@ export default function OrganizationsPage() {
                       >
                         {o.name}
                       </button>
+                      {/* Flag marker (tamper-proof isInternal), distinct from the Billing pill's
+                          billing STATE — this row can show both. */}
+                      {o.isInternal && <InternalBadge label="Internal" className="ml-2" />}
                       {!o.isActive && (
                         <span className="ml-2 inline-flex rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted">
                           Inactive

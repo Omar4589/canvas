@@ -57,6 +57,7 @@ const SuperAdminUsersPage = lazy(() => import('./pages/SuperAdminUsersPage.jsx')
 const SuperAdminPeoplePage = lazy(() => import('./pages/SuperAdminPeoplePage.jsx'));
 const SuperAdminImportsPage = lazy(() => import('./pages/SuperAdminImportsPage.jsx'));
 const SupportAccessPage = lazy(() => import('./pages/SupportAccessPage.jsx'));
+const SuperAdminEmailsPage = lazy(() => import('./pages/SuperAdminEmailsPage.jsx'));
 const PersonDetailPage = lazy(() => import('./pages/PersonDetailPage.jsx'));
 const SuperAdminUserDetailPage = lazy(() => import('./pages/SuperAdminUserDetailPage.jsx'));
 const OrgDetailPage = lazy(() => import('./pages/OrgDetailPage.jsx'));
@@ -221,6 +222,8 @@ export default function App() {
                 (no orgContext), so it stays reachable even when every org-scoped panel is 403ing
                 for want of a grant — which is exactly when you need it. */}
             <Route path="/super-admin/access" element={<SupportAccessPage />} />
+            {/* The transactional-email log — platform-scoped, metadata only (content lives in Resend). */}
+            <Route path="/super-admin/emails" element={<SuperAdminEmailsPage />} />
             <Route path="/organizations" element={<OrganizationsPage />} />
             <Route path="/organizations/:orgId" element={<OrgDetailPage />} />
             {/* Jobs (Bull Board) is a PLATFORM page, not an org one: the server gates the

@@ -145,7 +145,7 @@ router.post('/forgot-password', async (req, res) => {
     // instead of waiting on an admin.
     if (!user || !user.isActive || user.deletedAt) return;
     const { url } = await issuePasswordResetToken(user._id, { hours: RESET_TOKEN_HOURS });
-    await sendMail({ to: user.email, ...passwordReset({ firstName: user.firstName, resetUrl: url }), kind: 'passwordReset' });
+    await sendMail({ to: user.email, ...passwordReset({ firstName: user.firstName, resetUrl: url }), kind: 'passwordReset', meta: { userId: user._id } });
   } catch (err) {
     console.error('[auth] forgot-password: detached send failed:', err.message);
   }
@@ -179,6 +179,10 @@ router.post('/reset-password', async (req, res, next) => {
           tempPasswordSetAt: null,
           passwordResetToken: null,
           passwordResetExpiresAt: null,
+          // Revoke every existing session: whoever just proved control of the email inbox is
+          // the account owner, and anyone else holding an old JWT (the reason for the reset,
+          // in the worst case) is out. requireAuth enforces this via SESSION_REVOKED.
+          passwordChangedAt: new Date(),
         },
       },
       { new: true }
@@ -218,11 +222,24 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
     const passwordHash = await User.hashPassword(newPassword);
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { passwordHash, mustChangePassword: false, tempPasswordSetAt: null },
+      // passwordChangedAt revokes every OTHER session (requireAuth's SESSION_REVOKED check);
+      // the fresh token below is minted after the stamp, so THIS device continues seamlessly —
+      // critical for a canvasser mid-shift completing the forced change after an admin reset,
+      // whose queued knocks must flush on the very next screen. Any outstanding emailed
+      // reset/invite link dies too: a link issued for the OLD credentials must not be able to
+      // reset the password (and revoke everything) after the user has already moved on.
+      {
+        passwordHash,
+        mustChangePassword: false,
+        tempPasswordSetAt: null,
+        passwordChangedAt: new Date(),
+        passwordResetToken: null,
+        passwordResetExpiresAt: null,
+      },
       { new: true }
     );
     const memberships = await loadMembershipsForUser(user._id);
-    res.json({ user: user.toSafeJSON(), memberships });
+    res.json({ token: signUserToken(user), user: user.toSafeJSON(), memberships });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);

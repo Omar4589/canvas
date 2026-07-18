@@ -227,10 +227,10 @@ router.post('/', async (req, res, next) => {
     // in the 201 response below as a manual fallback and never appears in the email. An existing account
     // linked into this org gets a no-credentials "you've been added" note.
     if (data.linkExisting) {
-      sendMail({ to: user.email, ...addedToOrg({ firstName: user.firstName, orgName: req.activeOrg.name }), kind: 'addedToOrg' });
+      sendMail({ to: user.email, ...addedToOrg({ firstName: user.firstName, orgName: req.activeOrg.name }), kind: 'addedToOrg', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
     } else {
       const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
-      sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, setPasswordUrl: url }), kind: 'inviteSetPassword' });
+      sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, setPasswordUrl: url }), kind: 'inviteSetPassword', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
     }
 
     res.status(201).json({

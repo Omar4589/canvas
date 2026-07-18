@@ -7,7 +7,7 @@ import { AccessLog } from '../../models/AccessLog.js';
 import { Organization } from '../../models/Organization.js';
 import { User } from '../../models/User.js';
 import { createGrant, revokeGrant, activeGrant, DEFAULT_GRANT_HOURS, MAX_GRANT_HOURS } from '../../services/access/supportAccess.js';
-import { orgNotifyEmails } from '../../services/mail/recipients.js';
+import { billingNotifyEmails } from '../../services/mail/recipients.js';
 import { sendMail } from '../../services/mail/mailer.js';
 import { supportGrantNotice } from '../../services/mail/templates.js';
 import { retentionHealth } from '../../services/retention/purgeDeletedIdentities.js';
@@ -56,13 +56,14 @@ router.post('/grants', async (req, res, next) => {
     });
 
     // Tell the customer we're in — but ONLY on a genuinely-new grant (reusing a live one must not spam
-    // the org on repeated entry). Best-effort: never awaited, so a mail hiccup can't fail the grant. An
-    // org with no reachable notify recipient is logged loudly and skipped; the staffer's FIRST NAME only
-    // reaches the customer (never full name/email).
+    // the org on repeated entry). Recipients are the org's BILLING identities only (billingAccess
+    // admins, else the billing contact — never every admin; owner decision 2026-07-18). Best-effort:
+    // never awaited, so a mail hiccup can't fail the grant. An org with no billing recipient is logged
+    // loudly and skipped; the staffer's FIRST NAME only reaches the customer (never full name/email).
     if (created) {
-      const to = await orgNotifyEmails(org._id);
+      const to = await billingNotifyEmails(org._id);
       if (to.length) {
-        sendMail({ to, ...supportGrantNotice({ orgName: org.name, staffFirstName: req.user.firstName, reason: grant.reason, expiresAt: grant.expiresAt }), kind: 'supportGrantNotice' });
+        sendMail({ to, ...supportGrantNotice({ orgName: org.name, staffFirstName: req.user.firstName, reason: grant.reason, expiresAt: grant.expiresAt }), kind: 'supportGrantNotice', meta: { organizationId: org._id, organizationName: org.name } });
       } else {
         console.warn(`[access] support grant ${grant._id} for org ${org._id} (${org.name}) has NO reachable notify recipient — customer was NOT notified of the access.`);
       }

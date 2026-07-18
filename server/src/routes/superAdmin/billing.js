@@ -49,15 +49,18 @@ async function loadOrgSub(req, res) {
   }
   let sub = await Subscription.findOne({ organizationId: org._id });
   if (!sub) {
+    // An internal org's missing sub backfills as 'internal' — the status must follow the
+    // born-immutable flag, or the coupling guard below would wedge the org on 'active'.
+    const status = org.isInternal ? 'internal' : 'active';
     sub = await Subscription.create({
       organizationId: org._id,
-      status: 'active',
+      status,
       statusChangedAt: new Date(),
     });
     await SubscriptionEvent.create({
       organizationId: org._id,
       byUserId: req.user._id,
-      toStatus: 'active',
+      toStatus: status,
       reason: 'Backfilled — org predates billing',
     });
   }
@@ -83,7 +86,7 @@ router.get('/', async (req, res, next) => {
         .lean(),
     ]);
     res.json({
-      organization: { id: String(org._id), name: org.name, slug: org.slug, isActive: org.isActive },
+      organization: { id: String(org._id), name: org.name, slug: org.slug, isActive: org.isActive, isInternal: !!org.isInternal },
       subscription: sub.toObject(),
       entitlement: entitlementFor(sub),
       events,
@@ -145,6 +148,24 @@ router.post('/status', async (req, res, next) => {
     if (!loaded) return;
     const { org, sub } = loaded;
     const data = statusSchema.parse(req.body);
+    // 'internal' billing status is COUPLED to the born-immutable Organization.isInternal flag,
+    // both ways. Without the flag, 'internal' is unreachable — closing the hole where any
+    // support-tier staffer could silently zero out a customer's billing (and exempt them from
+    // the retention sweeps). With the flag, the status can never leave 'internal' — an internal
+    // org is permanently non-billable. Ordering: the flag check runs BEFORE the same-status
+    // check so a flagged org whose sub drifted can be healed with to:'internal'.
+    if (data.to === 'internal' && !org.isInternal) {
+      return res.status(403).json({
+        error: "Only an organization created as internal can hold 'internal' billing status.",
+        code: 'INTERNAL_FLAG_REQUIRED',
+      });
+    }
+    if (org.isInternal && data.to !== 'internal') {
+      return res.status(403).json({
+        error: 'An internal organization is permanently non-billable; its status cannot leave internal.',
+        code: 'INTERNAL_LOCKED',
+      });
+    }
     if (data.to === sub.status) {
       return res.status(400).json({ error: `Already ${sub.status}.` });
     }

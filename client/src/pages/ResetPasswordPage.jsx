@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
 import PasswordRequirements from '../components/PasswordRequirements.jsx';
 import { isStrongPassword, passwordProblem } from '../lib/validators.js';
@@ -11,6 +12,7 @@ import Logo from '../components/Logo.jsx';
 export default function ResetPasswordPage() {
   const { token } = useParams();
   const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -51,6 +53,11 @@ export default function ResetPasswordPage() {
         body: { token, newPassword },
         public: true,
       });
+      // The reset just revoked every session — including one THIS browser may still hold (a
+      // logged-in user opening their own reset link). Clear it before navigating, or the
+      // login page's "already signed in" redirect would bounce into the now-dead app and
+      // lose the success note in the hard-recovery reload. No-op when not signed in.
+      logout();
       navigate('/login', { state: { resetSuccess: true } });
     } catch (err) {
       if (err.code === 'RESET_INVALID') {

@@ -100,7 +100,14 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   test: `test/retentionWarnings.int.test.js`. Related checkables: reset tokens are stored
   sha256-hashed and single-use (`test/mailFlow.int.test.js`); **emails never contain passwords**
   (asserted over the outbox in `test/mailTriggers.int.test.js`); the silent campaignRoster
-  auto-add never emails. Mail is DORMANT until `RESEND_API_KEY` + `MAIL_FROM` are set — setting
+  auto-add never emails. *(2026-07-18: an internal **EmailLog** now records every send attempt —
+  METADATA ONLY (kind, recipient addresses, subject, outcome, org/user ids + an org-name
+  snapshot), never the body. New retention class: ordinary rows TTL out after
+  `EMAIL_LOG_RETENTION_DAYS` (365); the two deletion-WARNING kinds are kept indefinitely as the
+  evidence for this very watchlist entry, and deliberately survive the warned org's deletion.
+  Super-admin-only surface (`/super-admin/emails`). Internal operational/security log — no
+  published-policy sentence names it, and none becomes false by it; if a data-inventory is ever
+  published, list it there.)* Mail is DORMANT until `RESEND_API_KEY` + `MAIL_FROM` are set — setting
   them is the DPA §6 subprocessor go-live and requires the DPA/policy edits + customer notice
   FIRST. *(Disclosure text landed 2026-07-17 — DPA §6 list + privacy.html service-providers
   paragraph + Last-updated bump, in the SAME commit as the mail code, so one deploy flips the
@@ -735,11 +742,15 @@ No voter name, no canvasser name or user id, no timestamps, no party, no phone, 
 
 ## E12. Is platform-staff access to customer data gated and logged?
 
-**PARTIAL. Gated and logged on `/admin/*` and `/mobile/*` only. That qualifier must accompany every sentence you write about this.**
+**PARTIAL. Gated and logged on `/admin/*` and `/mobile/*` only, and — [v3.2 2026-07-18] — only for
+CUSTOMER organizations.** Doorline's own `isInternal` orgs are a deliberate exemption: staff enter
+them ungated and unlogged (they hold no customer PII — only Doorline's own synthetic/demo data; see
+the v3.2 stamp under "What is real"). **Both qualifiers must accompany every sentence you write about
+this.**
 
 ### What is real (VERIFIED)
 
-`orgContext` is the **sole** assigner of `req.activeOrg` (grep for `req.activeOrg =` returns hits only in that file). A super-admin who is **not** a member of the target organization gets **403 `SUPPORT_ACCESS_REQUIRED`** unless `activeGrant()` returns an unrevoked, unexpired grant (`server/src/middleware/orgContext.js:79-94`; `services/access/supportAccess.js:16-23`). Membership is checked first (`:58-67`).
+`orgContext` is the **sole** assigner of `req.activeOrg` (grep for `req.activeOrg =` returns hits only in that file). A super-admin who is **not** a member of the target organization gets **403 `SUPPORT_ACCESS_REQUIRED`** unless `activeGrant()` returns an unrevoked, unexpired grant (`server/src/middleware/orgContext.js:96-111` *[v3.2 2026-07-18: was :79-94 — the internal-org branch insertion shifted it; :79-94 now holds the carve-out itself]*; `services/access/supportAccess.js:16-23`). Membership is checked first (`:61-70`).
 
 A grant:
 - lasts **4 hours by default, capped at 24** — both **environment-overridable** (`SUPPORT_GRANT_HOURS`, `SUPPORT_GRANT_MAX_HOURS`; `supportAccess.js:12-13`, `:26`). The cap is genuinely hard for one grant: `expiresAt` is written in exactly one place and there is no extension route.
@@ -748,11 +759,61 @@ A grant:
 - is revocable, effective on the next request (no server-side grant cache)
 - carries a `kind` (`support | incident | migration | audit | other`) — **but `kind` is OPTIONAL, defaults to `'support'`, and the staff console never sends it** (`access.js:25`; `supportAccess.js:25`; `client/src/components/SupportAccessGate.jsx:91`). In practice every grant is `'support'`.
 
-**A customer's own admins and members are neither grant-gated nor logged, and that is correct.** `orgContext` finds an active Membership and returns `next()` before it ever considers super-admin status, never setting `req.supportGrant`; `accessLog` then short-circuits (`orgContext.js:58-67`; `accessLog.js:40`). **No AccessLog row is ever written for a customer reading their own organization's data.**
+**A customer's own admins and members are neither grant-gated nor logged, and that is correct.** `orgContext` finds an active Membership and returns `next()` before it ever considers super-admin status, never setting `req.supportGrant`; `accessLog` then short-circuits (`orgContext.js:61-70`; `accessLog.js:40`). **No AccessLog row is ever written for a customer reading their own organization's data.**
+
+> **[v3.2 2026-07-18 — the `isInternal` carve-out, BY DESIGN. Staff enter Doorline-owned internal orgs
+> ungated and unlogged.]** There is a THIRD ungated-and-unlogged case beside "member of the org": a
+> super-admin entering a Doorline-owned **internal** organization (`Organization.isInternal`).
+> `orgContext` grants free entry in a branch **after** the membership check and **before** the vendor
+> grant branch — `req.activeOrg` set, **no `req.supportGrant`** — so the vendor write-blocks
+> (`VENDOR_READ_ONLY`) and `accessLog` stay silent exactly as they do for a real member
+> (`orgContext.js:80-84`; it also sets `req.internalOrgAccess = true` for observability only — nothing
+> gates on it). This is safe because an internal org holds **only Doorline's own synthetic/demo data —
+> no customer PII** — and it is fenced so it can never widen to cover a customer org:
+> - **Born-immutable flag.** `isInternal` is `immutable: true` and absent from every update schema
+>   (`models/Organization.js:18`) — no `findByIdAndUpdate` and no PATCH body can set it on an
+>   existing org. The only paths that set it are (a) org **creation** (the break-glass API below)
+>   and (b) **three** sanctioned, operator-run raw-collection writes, all CLI-only — not reachable
+>   from any HTTP route: `utils/seedDemoOrg.js` (hard-locked to the demo slug),
+>   `migrations/migrateInternalOrgs.js` (demo slug by default; `--slugs` accepts arbitrary orgs),
+>   and `migrations/migrateBilling.js:63-66` (its pre-existing `--internal` slugs). **The two
+>   migrations can therefore target ANY existing org** — the boundary claim is "no *API* path",
+>   not "no path at all": an operator with server shell access is outside this control, and these
+>   scripts are that operator's tools. Their runs print what they touch and are idempotent.
+> - **Break-glass-only creation.** `POST /super-admin/organizations {internal:true}` 403s
+>   `BREAK_GLASS_REQUIRED` for the `support` tier — i.e. any non-`break_glass` staff; those are the
+>   only two platform tiers (`organizations.js:322-328`; `models/User.js:28-31`); an
+>   internal org is born with no trial (`INTERNAL_NO_TRIAL`) and a `Subscription` born `'internal'`.
+>   The slug is locked against rename (`INTERNAL_SLUG_LOCKED`, `organizations.js:435-444`).
+> - **Billing locked to `'internal'` both ways** (see the (b) stamp below), which is what keeps it out
+>   of both retention sweeps.
+>
+> **There is no API path that moves a customer (PII-bearing) org into the exempt class.** The carve-out
+> enlarges the "not a vendor" set from {real member} to {real member, internal-org staff}; it does not
+> touch the customer-org gate, which still requires a live grant and still logs every voter-content
+> read. Every "gated and logged" sentence in this section is about **customer** organizations. The
+> published policy already scopes its promise this way — `privacy.html` "How Doorline personnel access
+> customer data" says staff cannot open *"a customer organization's"* data without a grant — so this
+> exemption makes **no** published sentence false and needs no policy edit.
+
+> **[v3.2 2026-07-18 — a silent-comp / retention-exemption hole that is now CLOSED.]** Before the flag
+> existed, `'internal'` was just another value in the billing-status enum, and
+> `POST /super-admin/organizations/:orgId/billing/status` is gated by `requireSuperAdmin` only. So
+> **any** super-admin (including the `support` tier) could set **any customer org** to `'internal'` —
+> permanently free AND silently exempt from BOTH retention sweeps (`triggers.js` `isExempt` +
+> `DORMANCY_PROTECTED_STATUSES` ⊇ `internal`, line 39-44 above), leaving nothing but a
+> `SubscriptionEvent` row behind. That is now closed by two-way coupling to the born-immutable flag
+> (`billing.js:157-168`): `to:'internal'` on an **un-flagged** org 403s `INTERNAL_FLAG_REQUIRED`, and an
+> **already-flagged** org can never leave `'internal'` (403 `INTERNAL_LOCKED`). The flag checks run
+> BEFORE the same-status short-circuit, so `to:'internal'` can still HEAL a flagged org whose sub
+> drifted, but it can never CREATE the exemption on a customer org; `loadOrgSub` likewise backfills a
+> missing sub as `'internal'` only for a flagged org. **Net: the free-forever + retention-exempt state
+> that `'internal'` confers is now reachable only through break-glass org creation, never through a
+> billing edit on an existing customer org.**
 
 ### Three things you must NOT imply
 
-**1. The grant is SELF-ISSUED.** `POST /super-admin/access/grants` is gated by `requireSuperAdmin` only — **not** `requireBreakGlass` (`routes/superAdmin/access.js:19`, `:31`). `createGrant` sets `actorUserId: req.user._id` (`supportAccess.js:25-39`): **the staff member grants themselves access, to any organization, instantly.** There is **no approver, no second-person sign-off, no customer approval, and no customer notification.** I found no customer-facing surface for grants or the access log anywhere (`SupportAccessPage.jsx` is routed under `/super-admin`; a grep of `server/src/content/help/` for "support access" / "Doorline staff" returns **zero articles**). *[v4 2026-07-17: the NOTIFICATION half narrows — every newly-created grant now emails the org's notify list (billingAccess admins → all admins → billing contact) with the staff first name, reason and expiry (`access.js` + `supportGrantNotice`); reusing a live grant re-sends nothing. Self-issuance and no-approver are unchanged — notice, not consent.]*
+**1. The grant is SELF-ISSUED.** `POST /super-admin/access/grants` is gated by `requireSuperAdmin` only — **not** `requireBreakGlass` (`routes/superAdmin/access.js:19`, `:31`). `createGrant` sets `actorUserId: req.user._id` (`supportAccess.js:25-39`): **the staff member grants themselves access, to any organization, instantly.** There is **no approver, no second-person sign-off, no customer approval, and no customer notification.** I found no customer-facing surface for grants or the access log anywhere (`SupportAccessPage.jsx` is routed under `/super-admin`; a grep of `server/src/content/help/` for "support access" / "Doorline staff" returns **zero articles**). *[v4 2026-07-17: the NOTIFICATION half narrows — every newly-created grant now emails the org's notify list with the staff first name, reason and expiry (`access.js` + `supportGrantNotice`); reusing a live grant re-sends nothing. Self-issuance and no-approver are unchanged — notice, not consent. Recipients updated 2026-07-18 by owner decision: BILLING identities only (billingAccess admins, else the billing contact of record) — never all admins; an org with no billing identity gets no notice (loudly logged). The same billing-only rule now governs the wind-down/dormancy deletion warnings (`services/mail/recipients.js` billingNotifyEmails).]*
 
 > **Do NOT write:** *"with your authorization," "at your request," "with notice to you,"* or anything implying customer consent or an independent authorization gate. **The grant is an attribution control, not an approval control.**
 
@@ -899,7 +960,7 @@ One human has **one** `User` row (name, email, phone, password hash) with a **gl
   the reset now issues a visible forced-change temp password (misuse locks the victim out loudly, not
   silently), email changes are multi-org-locked (`MULTI_ORG_EMAIL_LOCKED`) while passwords are not,
   and the rationale is recorded at `memberships.js:423-432`, which cites this document. Closing it
-  properly needs per-org credentials or self-serve email reset.]* Once the Membership exists, org A's admin can **reset that user's password** — `PATCH /admin/memberships/:userId/password` is gated **only** on "a Membership for this user exists in my active org" (`memberships.js:385-420`), which org A just minted. That password logs in, and the login response returns `memberships` **for every org the user belongs to** (`routes/auth.js:110-111`). `mustChangePassword` does not block `/auth`, so `POST /auth/change-password` clears the flag and yields a full cross-org session. **INFERRED FROM CODE PATHS, not executed.** It is destructive and detectable (it burns the victim's real password), but it is not prevented. **Escalate to engineering.**
+  properly needs per-org credentials or self-serve email reset.]* Once the Membership exists, org A's admin can **reset that user's password** — `PATCH /admin/memberships/:userId/password` is gated **only** on "a Membership for this user exists in my active org" (`memberships.js:385-420`), which org A just minted. That password logs in, and the login response returns `memberships` **for every org the user belongs to** (`routes/auth.js:110-111`). `mustChangePassword` does not block `/auth`, so `POST /auth/change-password` clears the flag and yields a full cross-org session. **INFERRED FROM CODE PATHS, not executed.** It is destructive and detectable (it burns the victim's real password), but it is not prevented. **Escalate to engineering.** *[v4 2026-07-18: narrowed — the victim can now recover WITHOUT any admin via the emailed self-serve reset, and completing it REVOKES the attacker's minted session (`SESSION_REVOKED`); the attack itself (open by owner decision, item 14) is unchanged.]*
 - **`isMultiOrg` is disclosed to customers.** An org admin is told, for each of their own members, a boolean indicating that person **also belongs to at least one other organization on the platform** — computed from an **unscoped** aggregate over all Memberships (`memberships.js:109-114`, `:145`). Only a boolean; never the name, id or count of the other orgs. Minor, but it is a genuine cross-tenant inference **shown to customers**.
 
 ### EXCEPTION 4 — Cross-org Person merge is possible via staff tooling. **VERIFIED.**
@@ -1054,9 +1115,9 @@ The currently-published policy states *"Voters do not interact with the Services
 
 **What actually fails to revoke is narrower and specific:**
 - **Logout is a server-side no-op** (`routes/auth.js:193-195`). No denylist, no token version, no session store.
-- **A password change does not invalidate existing tokens.** `change-password` writes only `{passwordHash, mustChangePassword:false, tempPasswordSetAt:null}` (`auth.js:141-145`); nothing compares a token to the hash. **A stolen or forwarded bearer token keeps working for up to 30 days after the victim resets their password** (`JWT_EXPIRES_IN`, default `'30d'`, `services/auth/tokens.js:6`).
+- **A password change does not invalidate existing tokens.** `change-password` writes only `{passwordHash, mustChangePassword:false, tempPasswordSetAt:null}` (`auth.js:141-145`); nothing compares a token to the hash. **A stolen or forwarded bearer token keeps working for up to 30 days after the victim resets their password** (`JWT_EXPIRES_IN`, default `'30d'`, `services/auth/tokens.js:6`). *[v4 2026-07-18: **FLIPPED.** A SELF-SET password change (emailed reset or `/auth/change-password`) now stamps `User.passwordChangedAt`, and `requireAuth` 401s (`SESSION_REVOKED`) any token whose `iat` predates it — every pre-change session dies on its next request; the changing device continues via a fresh token in the change-password response. An ADMIN temp reset deliberately does not stamp (the `mustChangePassword` gate already suspends live sessions recoverably; the stamp lands when the user completes the forced change). Null stamp grandfathers pre-feature sessions. The mobile offline queue HOLDS queued knocks on 401/`PASSWORD_CHANGE_REQUIRED` instead of dropping them, and the queue survives sign-out — billable field work survives a mid-shift reset. Guard test: `test/sessionInvalidation.int.test.js`.]*
 
-> **Do NOT write** anything implying that logging out, or changing your password, terminates existing sessions. **Neither does.**
+> **Do NOT write** anything implying that logging out, or changing your password, terminates existing sessions. **Neither does.** *[v4 2026-07-18: half-flipped — a password CHANGE now does terminate other sessions, and the policy may say so. LOGOUT remains a server-side no-op; still do not claim logout ends the session.]*
 
 ---
 

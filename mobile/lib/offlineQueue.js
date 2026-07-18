@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './api';
+import { loadActiveOrgId } from './cache';
 
 const QUEUE_KEY = 'canvass.offlineQueue';
 
@@ -33,15 +34,23 @@ function withQueueLock(fn) {
 
 /**
  * Enqueue a submission for offline retry.
- * Submission shape: { id, path, body, enqueuedAt }
+ * Submission shape: { id, path, body, orgId, enqueuedAt }
+ *
+ * orgId is captured at RECORD time and pinned to the item: a multi-org user can sign back in
+ * (a session revoke clears the active org) and pick a different org before the flush runs, and
+ * without the pin their held knocks would flush under the wrong X-Org-Id — a 4xx the flush
+ * loop treats as a bad submission and DROPS. Items enqueued before this field existed flush
+ * under the active org, exactly as before.
  */
 export function enqueue(path, body) {
   return withQueueLock(async () => {
     const queue = await readQueue();
+    const orgId = await loadActiveOrgId();
     queue.push({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       path,
       body: { ...body, wasOfflineSubmission: true },
+      ...(orgId ? { orgId } : {}),
       enqueuedAt: new Date().toISOString(),
     });
     await writeQueue(queue);
@@ -67,6 +76,14 @@ function removeItem(id) {
   });
 }
 
+// "The credentials are dead, not the door." Any 401 (revoked/expired token), plus the
+// temp-password gate's 403 (an admin reset this user mid-session — passwordGate.js). These are
+// OUR auth lifecycle, never a verdict on the submission itself, so they must never drop a knock.
+function isAuthFailure(err) {
+  if (err.status === 401) return true;
+  return err.status === 403 && err.data?.code === 'PASSWORD_CHANGE_REQUIRED';
+}
+
 async function doFlush() {
   let sent = 0;
   const errors = [];
@@ -76,7 +93,12 @@ async function doFlush() {
     if (queue.length === 0) break;
     const item = queue[0];
     try {
-      await api(item.path, { method: 'POST', body: item.body });
+      // Pinned org header (see enqueue) — legacy items without one use the active org.
+      await api(item.path, {
+        method: 'POST',
+        body: item.body,
+        ...(item.orgId ? { orgId: item.orgId } : {}),
+      });
       sent++;
       await removeItem(item.id);
     } catch (err) {
@@ -85,7 +107,17 @@ async function doFlush() {
         errors.push({ id: item.id, reason: err.message });
         break;
       }
-      // 4xx: drop the bad submission so it doesn't block the queue forever
+      // AUTH failure: the SESSION is broken, not the submission. A 401 (token revoked by a
+      // password reset, or expired) or the temp-password gate's 403 means every item behind
+      // this one would fail identically — and dropping them would bin billable knocks a
+      // canvasser already walked. HOLD everything and stop; the queue survives sign-out, so
+      // the knocks flush on the first trigger after the user is signed back in (or completes
+      // the forced password change, which hands this device a fresh token).
+      if (isAuthFailure(err)) {
+        errors.push({ id: item.id, reason: err.message, authBlocked: true });
+        break;
+      }
+      // Other 4xx: drop the bad submission so it doesn't block the queue forever
       if (err.status >= 400 && err.status < 500) {
         errors.push({ id: item.id, reason: err.message, dropped: true });
         await removeItem(item.id);
@@ -156,7 +188,12 @@ export async function submitOrQueue(path, body) {
     const response = await api(path, { method: 'POST', body });
     return { ok: true, queued: false, response };
   } catch (err) {
-    if (!err.status || err.status >= 500) {
+    // Auth failures queue too: the knock HAPPENED — the canvasser is standing at the door —
+    // and a revoked session (password reset elsewhere, admin temp reset mid-shift) is our
+    // lifecycle problem, not the door's. The pin keeps its optimistic color with the pending
+    // overlay, and the item flushes after re-auth. Only a true verdict on the submission
+    // itself (any other 4xx) surfaces as a rejection.
+    if (!err.status || err.status >= 500 || isAuthFailure(err)) {
       await enqueue(path, body);
       return { ok: false, queued: true, error: err };
     }

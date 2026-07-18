@@ -54,6 +54,14 @@ const userSchema = new mongoose.Schema(
     tempPasswordSetAt: { type: Date, default: null },
     passwordResetToken: { type: String, default: null },
     passwordResetExpiresAt: { type: Date, default: null },
+    // Session revocation anchor: any JWT issued BEFORE this instant is refused by requireAuth
+    // (401 SESSION_REVOKED). Stamped when the USER sets a new password themselves (self-serve
+    // change or emailed reset) — "I changed my password" must mean "everyone else holding my
+    // old session is out." Deliberately NOT stamped by an admin temp reset: that path already
+    // suspends live sessions via mustChangePassword (passwordGate.js), and the stamp lands the
+    // moment the user completes the forced change. null = never changed → all tokens honored
+    // (grandfathers every session issued before this field shipped).
+    passwordChangedAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
   },
   { timestamps: true }

@@ -26,6 +26,7 @@
     "migrate:survey-dedup": "node src/migrations/migrateSurveyDedup.js",
     "migrate:survey-option-ids": "node src/migrations/migrateSurveyOptionIds.js",
     "migrate:org-tags": "node src/migrations/migrateOrgTags.js",
+    "migrate:internal-orgs": "node src/migrations/migrateInternalOrgs.js",
     "migrate:cleanup-client-role": "node src/migrations/cleanupClientRole.js",
     "migrate:persons": "node src/migrations/migratePersons.js",
     "migrate:billing": "node src/migrations/migrateBilling.js",

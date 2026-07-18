@@ -144,7 +144,7 @@ router.post('/', async (req, res, next) => {
       const users = await User.find({ _id: { $in: newlyAdded } }).select('firstName email mustChangePassword').lean();
       for (const u of users) {
         if (u.mustChangePassword || !u.email) continue;
-        sendMail({ to: u.email, ...addedToCampaign({ firstName: u.firstName, orgName: req.activeOrg.name, campaignName: campaign.name }), kind: 'addedToCampaign' });
+        sendMail({ to: u.email, ...addedToCampaign({ firstName: u.firstName, orgName: req.activeOrg.name, campaignName: campaign.name }), kind: 'addedToCampaign', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: u._id } });
       }
     }
     res.status(201).json({ created, total: validIds.length });

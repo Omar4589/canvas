@@ -51,8 +51,10 @@ function setMail(mode) {
   }
 }
 
-// Orgs here get a billingContact email so orgNotifyEmails() finds a recipient — a warn test
+// Orgs here get a billingContact email so billingNotifyEmails() finds a recipient — a warn test
 // against a recipient-less org would silently exercise the zero-recipient stamp path instead.
+// (Recipients are billing-identities ONLY — billingAccess admins, else the billing contact;
+// plain admins never receive deletion warnings. Owner decision 2026-07-18.)
 async function makeOrg(name, slug, subStatus, statusChangedAt = new Date(), { contact = true } = {}) {
   const org = await Organization.create({ name, slug, isActive: true });
   await Subscription.create({

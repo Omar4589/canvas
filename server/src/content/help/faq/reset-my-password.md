@@ -24,4 +24,7 @@ to issue you a **temporary password**. It's valid for **72 hours**, and you'll b
 your own new password right away when you sign in with it.
 
 > Requesting a reset never locks your account — you can keep signing in with your current
-> password even if you asked for a link and didn't use it.
+> password even if you asked for a link and didn't use it. **Completing** a reset, though, signs
+> you out everywhere else: any phone or browser still signed in with the old password gets sent
+> back to the sign-in screen. Work recorded in the field app is safe — anything not yet synced
+> waits and syncs after you sign back in.

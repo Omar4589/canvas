@@ -184,6 +184,16 @@ working in their own org (that's normal use, not staff access, and isn't logged 
 an internal control with after-the-fact accountability, not a customer approval step — grants are
 disclosed in the Privacy Policy, not requested from the customer.
 
+**The one exception: Doorline's own internal organizations.** Doorline keeps a small number of its own
+**internal** orgs — the demo org and any future sandbox — that hold **only fictional, Doorline-made
+data**, never a customer's. Because there's no customer information inside one, staff work in them
+**directly**, the same way an org's own admin does: no support grant, and no audit-log entry. The mark
+is set **when the org is created** (and only by the highest, "break-glass" tier of staff); **no screen
+or API request can add it to an existing customer org afterward** — the only remaining paths are
+operator-run maintenance scripts on the server itself, which sit outside the app entirely (Part 2 lists
+each one). An internal org is permanently free and off the books. So the grant-and-log requirement
+above always applies to **your** organization; the carve-out reaches only Doorline's own practice data.
+
 ---
 
 # Part 2 — Technical reference
@@ -209,6 +219,50 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
 | Support access | [SupportAccessPage.jsx](../client/src/pages/SupportAccessPage.jsx) | `/super-admin/access/*` ([access.js](../server/src/routes/superAdmin/access.js)) — grants CRUD (`GET /grants` returns `scope: all\|mine` + per-grant `read {requests, rows, bytes}` totals), the audit log (`GET /log` — `skip`/`limit` + exact `total`, filters `organizationId`/`actorUserId`/`grantId`/`from`/`to`, each entry carrying `rows`/`bytes`/`route`), `GET /log-facets` (filter options + the log's true extent: `logTotal`, `oldestAt`), retention health, and deletion requests (`GET` paged + `status` filter + per-row `overdue`; `POST` files; `POST /:id/cancel`). Grant/logging services in [services/access/supportAccess.js](../server/src/services/access/supportAccess.js); the full verified picture is in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) (E12/E13 + v3) |
 | Jobs | queues page | Bull Board at `/admin/queues` (`requireBullBoardAuth`, mounted in [app.js](../server/src/app.js)) |
+
+## Internal (Doorline-owned) organizations
+
+`Organization.isInternal` ([models/Organization.js](../server/src/models/Organization.js)) is the
+**security boundary** that lets platform staff enter an org **without** a support grant and **without**
+an AccessLog row. `orgContext` ([middleware/orgContext.js](../server/src/middleware/orgContext.js))
+grants a super-admin free entry to an internal org in a branch that runs **after** the membership check
+and **before** the vendor-grant branch — `req.activeOrg` set, `req.internalOrgAccess = true`
+(observability only), but **no `req.supportGrant`** — so the `VENDOR_READ_ONLY` write-blocks and
+[middleware/accessLog.js](../server/src/middleware/accessLog.js) stay silent exactly as they do for a
+real member. It is safe because an internal org holds **only Doorline's own synthetic/demo data** and
+because the flag can never reach a customer org:
+
+- **Born-immutable.** The field is `immutable: true` and is absent from every update schema, so no
+  PATCH body and no ordinary Mongoose write can set it on an existing org. It is settable **only at
+  creation**, plus **three** sanctioned raw-collection writes — all CLI-only, none reachable from an
+  HTTP route: [utils/seedDemoOrg.js](../server/src/utils/seedDemoOrg.js) (hard-locked to the demo
+  slug), [migrations/migrateInternalOrgs.js](../server/src/migrations/migrateInternalOrgs.js)
+  (`npm run migrate:internal-orgs`, dry-run by default, `--apply`; `--slugs` accepts arbitrary orgs),
+  and [migrations/migrateBilling.js](../server/src/migrations/migrateBilling.js) (its pre-existing
+  `--internal` slugs). All three are idempotent and print what they touch; their write filters guard
+  *re-running*, not *targeting* — the two migrations can flag any org an operator names, which is the
+  operator's prerogative (server shell access sits outside the app's security boundary).
+- **Create-time only, break-glass only.** `POST /super-admin/organizations {internal:true}`
+  ([organizations.js](../server/src/routes/superAdmin/organizations.js)) requires
+  `platformRole === 'break_glass'` (else **403 `BREAK_GLASS_REQUIRED`**); passing `trialDays` with
+  `internal` is **400 `INTERNAL_NO_TRIAL`**; the org's `Subscription` is born `'internal'`, and
+  `bumpLive` skips internal orgs so they never inflate the marketing counters.
+- **Slug locked.** `PATCH /super-admin/organizations/:orgId` refuses a slug change on a flagged org
+  (**403 `INTERNAL_SLUG_LOCKED`**) — the slug is the internal tooling's key (demo refresh, migrations),
+  so renaming would silently break the Control Room button. (`isInternal` itself is not in the update
+  schema and is schema-immutable, so it cannot be toggled here either.)
+- **Billing locked to `'internal'` both ways** — see [BILLING.md](BILLING.md). This is what keeps an
+  internal org out of **both** retention sweeps.
+- **UI:** the Organizations list rows, the org-detail composite, the billing GET, and the
+  platform-overview rows all carry `isInternal`; the console surfaces it as an "Internal" badge and, on
+  a flagged org, replaces the billing status control with a "Locked to Internal" note.
+
+**Fixing a mistakenly-internal org.** The flag is deliberately **one-way** — there is intentionally no
+route, migration, or flag-clear that turns an internal org back into a customer org (that door is
+exactly the attack the immutability closes). If an org is created internal by mistake, the remediation
+is a **break-glass `DELETE /super-admin/organizations/:orgId`** (typed-slug confirm) and **recreate** it
+as a normal customer org. An internal org holds only synthetic data, so the delete destroys nothing a
+customer owns.
 
 ## Notes
 

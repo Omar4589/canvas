@@ -160,6 +160,11 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
 
   const orgInfo = billingQ.data?.organization;
   const displayName = orgInfo?.name || orgName;
+  // The born-immutable flag (Organization.isInternal), NOT the billing status. When set, the server
+  // locks the status to 'internal' (POST /billing/status → 403 INTERNAL_LOCKED for any other target);
+  // when unset, it rejects a move TO 'internal' (403 INTERNAL_FLAG_REQUIRED). So the control mirrors
+  // both server rules: locked note for a flagged org, and no selectable 'internal' for the rest.
+  const isInternal = !!orgInfo?.isInternal;
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -246,41 +251,45 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
           {/* Status + trial */}
           <div className="rounded-lg border border-border bg-surface p-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Status</h3>
-            <div className="mt-2 flex flex-wrap items-end gap-2">
-              <div>
-                <label className="block text-xs font-semibold text-fg-muted">Change to</label>
-                <select value={statusTo} onChange={(e) => setStatusTo(e.target.value)} className={inputCls}>
-                  <option value="">— keep {BILLING_STATUS_META[sub.status]?.label || sub.status} —</option>
-                  {STATUSES.filter((s) => s !== sub.status).map((s) => (
-                    <option key={s} value={s}>
-                      {BILLING_STATUS_META[s]?.label || s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                onClick={() => statusMut.mutate({ to: statusTo, reason: reason.trim() || undefined })}
-                disabled={!statusTo || (needsReason && !reason.trim()) || statusMut.isPending}
-                className={btnCls}
-              >
-                Apply
-              </button>
-            </div>
-            <input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder={needsReason ? 'Reason (required)' : 'Reason (optional, kept in history)'}
-              className={inputCls}
-            />
-            {/* The consequence of `internal`, stated at the choosing moment — it silently exempts
-                the org from BOTH retention sweeps (dormancy + wind-down) and removes it from every
-                platform revenue/lifetime number. */}
-            {statusTo === 'internal' && (
+            {isInternal ? (
+              // A born-internal org's status is locked to 'internal' (the flag is immutable and the
+              // server enforces regardless); show why instead of a control that can only 403.
               <p className="mt-2 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
-                <span className="font-semibold">Internal means exempt:</span> automatic retention will never
-                delete this organization (dormancy sweep and wind-down both skip it), and it drops out of
-                every platform revenue and lifetime number. Only a manual delete can remove it.
+                <span className="font-semibold">Locked to Internal.</span> This organization was created
+                internal, so its billing status can&apos;t be changed — it stays exempt from both retention
+                sweeps and out of every revenue and lifetime number. Only a manual delete can remove it.
               </p>
+            ) : (
+              <>
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-fg-muted">Change to</label>
+                    <select value={statusTo} onChange={(e) => setStatusTo(e.target.value)} className={inputCls}>
+                      <option value="">— keep {BILLING_STATUS_META[sub.status]?.label || sub.status} —</option>
+                      {/* 'internal' is set only at creation (break-glass); the server 403s a move to it
+                          here, so it's not offered. */}
+                      {STATUSES.filter((s) => s !== sub.status && s !== 'internal').map((s) => (
+                        <option key={s} value={s}>
+                          {BILLING_STATUS_META[s]?.label || s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => statusMut.mutate({ to: statusTo, reason: reason.trim() || undefined })}
+                    disabled={!statusTo || (needsReason && !reason.trim()) || statusMut.isPending}
+                    className={btnCls}
+                  >
+                    Apply
+                  </button>
+                </div>
+                <input
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder={needsReason ? 'Reason (required)' : 'Reason (optional, kept in history)'}
+                  className={inputCls}
+                />
+              </>
             )}
             {sub.status === 'trial' && (
               <div className="mt-3 rounded-md border border-border bg-card p-2">

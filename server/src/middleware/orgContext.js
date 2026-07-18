@@ -48,6 +48,9 @@ export async function orgContext(req, res, next) {
       //
       // "Vendor access" means reaching into an organization you are NOT a member of. A super-admin who
       // is also the genuine admin of an org is not a vendor there — they are a member, doing their job.
+      // There are exactly TWO non-vendor cases: a real membership, and a Doorline-owned org marked
+      // `isInternal` (the branch below the membership check). Everywhere this comment says "customer
+      // organization" it means an org WITHOUT that flag.
       //
       // The first cut of this gate tested `isSuperAdmin` before looking for a membership, and returned
       // unconditionally. So a platform super-admin who was also the admin of their own organization got
@@ -64,6 +67,20 @@ export async function orgContext(req, res, next) {
         req.activeOrg = org;
         req.activeMembership = membership;
         return next(); // a member is a member — no grant, and nothing to audit
+      }
+
+      // ── Doorline-owned INTERNAL org: staff enter freely, as members. ─────────────────────────
+      // The grant-and-audit machinery below exists to protect CUSTOMER data. Organization.isInternal
+      // is born-immutable (models/Organization.js), settable only at break-glass creation or by the
+      // internal-orgs migration, and its billing status is locked to 'internal' — so an org in this
+      // branch holds only Doorline's own synthetic data, and there is no API path that can move a
+      // customer org into it. Staff therefore get exactly the member branch's semantics: activeOrg
+      // set, NO req.supportGrant — which is precisely why the vendor write-blocks (VENDOR_READ_ONLY)
+      // and middleware/accessLog.js stay silent, the same way they do for a real member.
+      if (req.user.isSuperAdmin && org.isInternal) {
+        req.activeOrg = org;
+        req.internalOrgAccess = true; // observability only — nothing gates on this
+        return next();
       }
 
       // No membership. If they are platform staff, THIS is vendor access, and it needs a grant.

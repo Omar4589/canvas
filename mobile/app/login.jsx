@@ -14,6 +14,7 @@ import { Redirect } from 'expo-router';
 import { api } from '../lib/api';
 import { WEB_URL } from '../lib/config';
 import { signIn, useAuthToken } from '../lib/authState';
+import { flushQueue } from '../lib/offlineQueue';
 import {
   saveCurrentUser,
   saveMemberships,
@@ -61,6 +62,12 @@ export default function Login() {
         await saveActiveOrgId(memberships[0].organizationId);
       }
       await signIn(res.token);
+      // Knocks held through an auth outage (queue survives sign-out) drain on re-auth itself,
+      // not only when a map screen happens to mount — an admin who signs back in to check
+      // dashboards must not leave field work parked all day. Fire-and-forget; each queued
+      // item flushes under the org it was recorded in (its pinned orgId), so the cleared
+      // active org above doesn't matter.
+      flushQueue();
     } catch (err) {
       setError(err.message);
     } finally {

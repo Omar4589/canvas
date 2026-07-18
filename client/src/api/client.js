@@ -25,10 +25,13 @@ export async function api(
 ) {
   const finalHeaders = { ...headers };
   // Public (share-link) calls carry no user identity — only the optional share access token.
+  // sentToken is held so the SESSION_REVOKED handler below can tell "this very session was
+  // revoked" from a stale in-flight request that predates a token rotation.
+  let sentToken = null;
   if (!isPublic) {
-    const token = getToken();
+    sentToken = getToken();
     const orgId = getActiveOrgId();
-    if (token) finalHeaders.Authorization = `Bearer ${token}`;
+    if (sentToken) finalHeaders.Authorization = `Bearer ${sentToken}`;
     if (orgId) finalHeaders['X-Org-Id'] = orgId;
   }
   if (shareToken) finalHeaders['X-Share-Token'] = shareToken;
@@ -95,6 +98,31 @@ export async function api(
           detail: { organizationId: data.organizationId, organizationName: data.organizationName },
         })
       );
+    }
+    // The password was changed elsewhere (self-serve reset or change on another device) and the
+    // server revoked this session. Clear the dead token and land on sign-in — without this,
+    // every panel fails with a Retry button that can never succeed. Two guards:
+    //  - Act only if the token THIS request carried is still the stored one. After
+    //    change-password rotates the token, a poll that left with the OLD token can land 401
+    //    here (another tab, or a request already in flight) — clearing then would wipe the
+    //    just-adopted session and sign out the very person who changed their password.
+    //  - Never redirect off a PUBLIC page. The AuthProvider probes /auth/me on every route,
+    //    so a stale token would otherwise yank someone out of /reset-password/:token (mid
+    //    reset!) or a shared report; clearing the dead token alone ends the noise there.
+    if (
+      res.status === 401 &&
+      data?.code === 'SESSION_REVOKED' &&
+      typeof window !== 'undefined' &&
+      sentToken &&
+      sentToken === getToken()
+    ) {
+      setToken(null);
+      const p = window.location.pathname;
+      const isPublic =
+        p === '/' ||
+        ['/login', '/forgot-password', '/reset-password', '/r', '/privacy', '/terms', '/delete-account', '/update-required']
+          .some((base) => p === base || p.startsWith(`${base}/`));
+      if (!isPublic) window.location.assign('/login');
     }
 
     const err = new Error(data?.error || `Request failed: ${res.status}`);

@@ -113,6 +113,23 @@ route on `canManageCampaign(req, req.params.campaignId)`. It runs after `orgCont
 `requireOrgRole('admin')` on the nine campaign routers; each keeps its own `loadCampaign` org-ownership
 check, so ownership and management are enforced independently.
 
+## Super admins inside an org — including internal orgs
+
+A super admin acts on org routes through the **same admin surfaces** everyone else does, not a parallel
+one: `requireOrgRole(...)` short-circuits to `next()` for any `isSuperAdmin` caller
+([middleware/auth.js](../server/src/middleware/auth.js)), so once `orgContext` has seated them in an org
+they use the ordinary `/admin/*` endpoints as an admin. What differs is only how `orgContext` seats
+them: a **customer** org requires a live support grant (and logs), while a **Doorline-owned internal
+org** (`Organization.isInternal`) is free entry — no grant, no AccessLog row — because it holds only
+synthetic data (see [PLATFORM.md](PLATFORM.md) → *When Doorline staff can see customer data* and
+*Internal (Doorline-owned) organizations*).
+
+This is why there is **no separate super-admin password-reset endpoint.** Resetting a member's
+temporary password in an internal org goes through the **normal org-admin surface** —
+`PATCH /admin/memberships/:userId/password`, the same "Set temporary password" control an org admin
+uses (see [USERS.md](USERS.md)). Staff act *as* the internal org's admin, directly; there is nothing to
+build alongside it.
+
 ## Per-surface enforcement (the contract)
 
 **Campaign-nested routers** — `requireCampaignManager` (super/admin/granted-lead): `assignments`,

@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { consoleHomePath } from '../lib/homePath.js';
 import { consoleMemberships } from '../lib/roles.js';
+import { InternalBadge } from '../lib/billingStatus.jsx';
 
 export default function OrgSwitcher() {
   const { memberships, activeOrgId, switchOrg, isSuperAdmin } = useAuth();
@@ -28,6 +29,7 @@ export default function OrgSwitcher() {
         organizationId: o.id,
         organizationName: o.name,
         role: 'super_admin',
+        isInternal: o.isInternal,
       }));
     }
     // Only orgs this user can actually OPEN. Listing a canvasser membership here made it
@@ -79,8 +81,11 @@ export default function OrgSwitcher() {
           <span className="block text-[10px] uppercase tracking-wide text-fg-muted">
             Organization
           </span>
-          <span className="block truncate font-medium text-fg">
-            {active?.organizationName || 'Select…'}
+          <span className="flex items-center gap-1.5">
+            <span className="truncate font-medium text-fg">
+              {active?.organizationName || 'Select…'}
+            </span>
+            {active?.isInternal && <InternalBadge label="Internal org" compact className="shrink-0" />}
           </span>
         </span>
         <span className="ml-2 text-fg-subtle">▾</span>
@@ -118,9 +123,15 @@ export default function OrgSwitcher() {
                   ].join(' ')}
                 >
                   <span className="truncate">{m.organizationName}</span>
-                  <span className="ml-2 text-[10px] uppercase tracking-wide text-fg-subtle">
-                    {m.role}
-                  </span>
+                  {isSuperAdmin ? (
+                    // Every super-admin row carries the same meaningless 'super_admin' role — drop it
+                    // and instead flag the one distinction that matters here: internal orgs.
+                    m.isInternal && <InternalBadge label="Internal" compact className="ml-2 shrink-0" />
+                  ) : (
+                    <span className="ml-2 text-[10px] uppercase tracking-wide text-fg-subtle">
+                      {m.role}
+                    </span>
+                  )}
                 </button>
               </li>
             ))}

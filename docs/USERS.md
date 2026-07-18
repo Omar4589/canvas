@@ -380,18 +380,30 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   token fields), so two racing submits can't both win; strength is Zod-checked BEFORE the lookup so
   a weak password never burns the token. Throttled by its own limiters (per-IP 20 + per-email
   5 / 15 min, counting every request on a store **separate** from the login lockout — see
-  `middleware/loginRateLimit.js`). Existing sessions are NOT invalidated by a reset (same as
-  change-password); tying that to an offline-queue-safe 401 retry is a flagged follow-up. Mail
-  itself is dormant until `RESEND_API_KEY`/`MAIL_FROM` are configured (`services/mail/mailer.js`).
+  `middleware/loginRateLimit.js`). **Completing a reset revokes every existing session**: it stamps
+  `User.passwordChangedAt`, and `requireAuth` refuses any JWT issued before that instant
+  (`401 { code: 'SESSION_REVOKED' }`) — "I changed my password" ends every other device's session.
+  A null stamp grandfathers sessions issued before this feature. Mail itself is dormant until
+  `RESEND_API_KEY`/`MAIL_FROM` are configured (`services/mail/mailer.js`).
 - **Self-service change** — `POST /auth/change-password` (`requireAuth` only, no org context). Verifies
   `currentPassword`, **enforces strength on `newPassword` via `strongPasswordSchema`** (8+ with an
   uppercase, a lowercase, a number, and a special character), rejects reuse, sets
-  `{ passwordHash, mustChangePassword: false, tempPasswordSetAt: null }`, returns fresh
-  `{ user, memberships }`. The existing JWT stays valid (payload is unaffected). This is the endpoint
-  the **forced change** after a temp password also hits, so a rescued user's replacement is strong.
+  `{ passwordHash, mustChangePassword: false, tempPasswordSetAt: null, passwordChangedAt: now }`
+  (plus clearing any outstanding emailed reset/invite token — a link issued for the old
+  credentials must not fire later), returns fresh `{ token, user, memberships }`. The stamp revokes every session issued before the
+  change; the **fresh token in the response** is how the device that made the change continues
+  seamlessly (both clients adopt it) — critical for a canvasser completing the forced change
+  mid-shift, whose queued knocks must flush on the very next screen. This is the endpoint the
+  **forced change** after a temp password also hits, so a rescued user's replacement is strong.
 - **Admin reset** — `PATCH /admin/memberships/:userId/password` now sets a **temporary** password:
   `{ passwordHash, mustChangePassword: true, tempPasswordSetAt: now }`. Still gated by membership in the
-  caller's active org, so any of a multi-org user's admins can issue one.
+  caller's active org, so any of a multi-org user's admins can issue one. Deliberately does NOT
+  stamp `passwordChangedAt`: live sessions are already suspended recoverably by the password gate
+  (`403 PASSWORD_CHANGE_REQUIRED` — the phone shows the forced-change screen instead of dumping to
+  login), and the hard revocation lands the moment the user completes that change. The mobile
+  offline queue **holds** (never drops) queued knocks on both `401 SESSION_REVOKED` and the gate's
+  403, and the queue survives sign-out — so a mid-shift reset can no longer lose billable work
+  (`mobile/lib/offlineQueue.js` isAuthFailure).
 - **Set on create** — every account-creation path issues a temporary password + forces a first-login
   change: super-admin provisioning (`POST /super-admin/organizations`, first admin — the super admin can
   type the temp password or leave it blank to auto-generate), admin add-member (`POST /admin/memberships`),
@@ -404,6 +416,17 @@ password can only reach `change-password`/`me`/`logout` — it cannot read or ac
 *change* the password would lock out the real user, who notices immediately and re-requests a reset. The
 72h expiry bounds the window. Full elimination isn't possible under shared identity; this is the
 mitigation envelope.
+
+**Doorline staff in an internal org use this same admin reset — there is no separate super-admin
+password endpoint.** In a Doorline-owned **internal** org (`Organization.isInternal`), a super admin
+enters freely — no support grant, no AccessLog row (`middleware/orgContext.js`; the org holds only
+synthetic data, see [PLATFORM.md](PLATFORM.md)) — and then acts *as* that org's admin, because
+`requireOrgRole(...)` passes through for a super admin. So resetting a demo account's temporary password
+is just `PATCH /admin/memberships/:userId/password`, the ordinary org-admin surface above; there is
+deliberately no parallel `/super-admin/.../password` route to build or secure. (Reaching a **customer**
+org's admin surfaces works the same way, except `orgContext` first requires a live, logged support
+grant — the reset endpoint itself is identical.) The authz side of this is in [ROLES.md](ROLES.md) →
+*Super admins inside an org — including internal orgs*.
 
 ## Cross-org guards
 

@@ -140,12 +140,37 @@ pricing stays flat per campaign per month.
 | `GET /super-admin/organizations/billing-rollup` | **This month's revenue across every customer org** in one response: per-org `{rate, totalCents, billableCampaigns, effective, trialEndsAt, windDownEndsAt}` (ranked by revenue) + the aggregate header (`totalCents`, `billableCampaigns`, `byStatus`). N+1 statement walk per org (fine at platform scale). Count contract: billable = statement lines with `billable === true`; **internal orgs excluded entirely** — they are not revenue. Powers the Organizations page's revenue bar and per-row dollars. |
 | `GET /super-admin/organizations/at-risk` | The one server-side needs-attention definition (replacing the old client-only ≤2-day heuristic): trials expiring within `days` (default 7), `past_due`, `suspended`, `canceled` in wind-down (with the deletion date), and idle $0 zombies (`idleZeroDollarOrgs`). Feeds the Organizations strip AND the Control Room's billing strip. |
 | `PATCH …/billing` | Rate / contact / notes; diffs logged as a `SubscriptionEvent`. Status is NOT patchable here. |
-| `POST …/billing/status` `{to, reason}` | The status chokepoint: any → any, reason **required** for `suspended`/`canceled`, sets `statusChangedAt`, reclaims `source:'manual'`, logs the event. 400 on a no-op. Idle $0 orgs (active, no live campaign, long silent) are surfaced on the **Control Room's Idle organizations queue**, which deep-links here — setting `canceled` is what starts their 60-day wind-down (see [PLATFORM.md](PLATFORM.md)). |
+| `POST …/billing/status` `{to, reason}` | The status chokepoint: any → any, reason **required** for `suspended`/`canceled`, sets `statusChangedAt`, reclaims `source:'manual'`, logs the event. 400 on a no-op. **`internal` is coupled to `Organization.isInternal` both ways** (see below): `to:'internal'` on an un-flagged org **403 `INTERNAL_FLAG_REQUIRED`**; a flagged org can never leave `internal` (**403 `INTERNAL_LOCKED`**) — the flag checks run *before* the same-status 400, so `to:'internal'` can heal a flagged org whose sub drifted. Idle $0 orgs (active, no live campaign, long silent) are surfaced on the **Control Room's Idle organizations queue**, which deep-links here — setting `canceled` is what starts their 60-day wind-down (see [PLATFORM.md](PLATFORM.md)). |
 | `POST …/billing/extend-trial` `{days?\|until?}` | Trial-status only. `+days` from max(now, current end) — extending an *expired* trial un-suspends with no separate step. |
 | `GET …/billing/statement?month=YYYY-MM` | The monthly statement JSON (CSV is built client-side from it). |
 | `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, rate, and **`usage`** (this month's billable-campaign count + `totalCents` via `currentUsage`). **No** billing contact / notes / source / Stripe ids. |
 | `POST /super-admin/organizations` | Create a client: org + trial (`trialDays`, default 7) + optional **first admin** (`admin{firstName,lastName,email,password?}` → uses the typed `password` or auto-generates a temp one, `mustChangePassword`, `billingAccess:true`; returns `tempPassword` once). A taken admin email 409s **before** the org is created. |
 | `PATCH /admin/memberships/:userId` `{billingAccess}` | Grant/revoke the Billing surface for an admin — only a caller who already has `billingAccess` (or a super admin) may change it (else 403). |
+
+## The `internal` status (Doorline-owned orgs)
+
+`internal` is not a status an account manager toggles — it is **set once, at internal-org creation, and
+then flag-locked in both directions.** It exists only for Doorline's own orgs (the demo org and any
+future sandbox), which are permanently free, never gated, and excluded from the revenue rollups and
+at-risk lists. (An internal org's **own** billing panel still renders its statement lines for
+reference — the statement builder is org-agnostic — but those lines never enter any rollup and are
+never invoiced.)
+
+- **Born with the org.** `POST /super-admin/organizations {internal:true}` creates the `Subscription`
+  with `status:'internal'` in the same step (break-glass only; see
+  [PLATFORM.md](PLATFORM.md) → *Internal (Doorline-owned) organizations*). There is no trial and no
+  clock. `loadOrgSub` backfills a **missing** sub as `'internal'` for a flagged org (so the coupling
+  guard can't wedge it on `active`); `migrate:billing` / `seed:demo` set it for the demo org.
+- **Coupled to `Organization.isInternal` both ways** in the status chokepoint
+  ([billing.js](../server/src/routes/superAdmin/billing.js)): **into** `internal` requires the
+  born-immutable flag (`INTERNAL_FLAG_REQUIRED` without it — this is what closed the old hole where any
+  super-admin could silently comp a customer org to free-forever *and* exempt it from the retention
+  sweeps); **out of** `internal` is refused on a flagged org (`INTERNAL_LOCKED`). Because the flag can
+  only be set at creation and never on an existing customer org, the `internal` state — and the
+  retention exemption it carries — is reachable **only** through break-glass org creation.
+- **Retention:** `internal` is in `DORMANCY_PROTECTED_STATUSES` and `triggers.js`'s `isExempt`, so an
+  internal org is never touched by wind-down or dormancy purges. That exemption is legible in the
+  org-detail billing header (`internal: true`).
 
 ## Onboarding & per-admin billing access
 

@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import { api } from '../../lib/api';
+import { signIn } from '../../lib/authState';
 import { loadCurrentUser, saveCurrentUser, saveMemberships } from '../../lib/cache';
 import PasswordInput from '../../components/PasswordInput';
 import PasswordRequirements from '../../components/PasswordRequirements';
@@ -111,6 +112,10 @@ export default function ProfileScreen() {
         method: 'POST',
         body: { currentPassword, newPassword },
       });
+      // The change revokes every session issued before it — including this device's token.
+      // Adopt the fresh one FIRST, or the map's next poll would 401 into a sign-out seconds
+      // after the user successfully changed their own password.
+      if (res.token) await signIn(res.token);
       if (res.user) await saveCurrentUser(res.user);
       if (res.memberships) await saveMemberships(res.memberships);
       setCurrentPassword('');

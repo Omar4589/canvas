@@ -46,6 +46,7 @@ mobile/*.jks
 # Server
 server/uploads/
 server/tmp/
+server/scripts/email-previews.html
 
 # Voter data — NEVER commit. Upload via the admin dashboard instead.
 /*.csv

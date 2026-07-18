@@ -11,7 +11,39 @@
 // No Express imports on purpose: the web process AND worker.js (the retention deletion-warning job)
 // both import this module.
 
+import mongoose from 'mongoose';
+import { EmailLog } from '../../models/EmailLog.js';
+
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
+
+// Metadata-only send log (models/EmailLog.js) — the super-admin Emails page and the
+// deletion-warning evidence trail. Fire-and-forget and NEVER throws: a logging failure must not
+// affect the send (or its honest return value), and a standalone script importing this module
+// with no DB connection must not hang on a buffered write — hence the readyState guard.
+// The two warning kinds are kept forever (expiresAt null); everything else ages out.
+const KEEP_FOREVER_KINDS = new Set(['windDownWarning', 'dormancyWarning']);
+const EMAIL_LOG_RETENTION_DAYS = Number(process.env.EMAIL_LOG_RETENTION_DAYS || 365);
+
+function recordEmail({ kind, recipients, subject, outcome, error, meta }) {
+  if (mongoose.connection.readyState !== 1) return;
+  const sentAt = new Date();
+  EmailLog.create({
+    kind: kind || 'mail',
+    to: recipients,
+    subject,
+    outcome,
+    error: error || null,
+    organizationId: meta?.organizationId || null,
+    organizationName: meta?.organizationName || null,
+    userId: meta?.userId || null,
+    sentAt,
+    expiresAt: KEEP_FOREVER_KINDS.has(kind)
+      ? null
+      : new Date(sentAt.getTime() + EMAIL_LOG_RETENTION_DAYS * 86_400_000),
+  }).catch((err) => {
+    console.error(`[mailer] email log write failed (${kind || 'mail'}): ${err?.message || err}`);
+  });
+}
 
 // Ring buffer of the last N intended sends (dormant mode). Bounded: a keyless prod dyno that "sends"
 // for weeks would otherwise leak memory one entry at a time. Oldest drops first.
@@ -77,7 +109,7 @@ function toArray(to) {
  * delete their data" off this flag, so a false positive here would let us delete data we never warned
  * about. Every other outcome — dormant, non-2xx, thrown, aborted — is { sent: false, ... }.
  */
-export async function sendMail({ to, subject, html, text, kind } = {}) {
+export async function sendMail({ to, subject, html, text, kind, meta } = {}) {
   const recipients = toArray(to);
   const safeSubject = sanitizeHeader(subject);
 
@@ -89,6 +121,7 @@ export async function sendMail({ to, subject, html, text, kind } = {}) {
     // Dormant: log intent (full addresses are fine in dev) and stash on the ring buffer.
     console.log(`[mailer] DORMANT ${kind || 'mail'} → ${recipients.join(', ') || '(none)'} :: ${safeSubject}`);
     pushOutbox({ to: recipients, subject: safeSubject, html, text, kind, at: new Date() });
+    recordEmail({ kind, recipients, subject: safeSubject, outcome: 'dormant', meta });
     return { sent: false, disabled: true };
   }
 
@@ -104,6 +137,11 @@ export async function sendMail({ to, subject, html, text, kind } = {}) {
       console.warn('[mailer] TEST transport active — no real mail is being delivered.');
     }
     pushOutbox({ to: recipients, subject: safeSubject, html, text, kind, at: new Date() });
+    recordEmail({
+      kind, recipients, subject: safeSubject, meta,
+      outcome: accept ? 'sent' : 'failed',
+      error: accept ? null : 'test transport: rejected',
+    });
     return accept ? { sent: true } : { sent: false, error: 'test transport: rejected' };
   }
 
@@ -125,13 +163,16 @@ export async function sendMail({ to, subject, html, text, kind } = {}) {
       const body = await res.text().catch(() => '');
       const summary = `Resend HTTP ${res.status}: ${body.slice(0, 200)}`;
       console.error(`[mailer] send FAILED (${kind || 'mail'} → ${recipients.map(maskEmail).join(', ')}): ${summary}`);
+      recordEmail({ kind, recipients, subject: safeSubject, outcome: 'failed', error: summary, meta });
       return { sent: false, error: summary };
     }
     console.log(`[mailer] sent ${kind || 'mail'} → ${recipients.map(maskEmail).join(', ')} :: ${safeSubject}`);
+    recordEmail({ kind, recipients, subject: safeSubject, outcome: 'sent', meta });
     return { sent: true };
   } catch (err) {
     const summary = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : (err?.message || String(err));
     console.error(`[mailer] send THREW (${kind || 'mail'} → ${recipients.map(maskEmail).join(', ')}): ${summary}`);
+    recordEmail({ kind, recipients, subject: safeSubject, outcome: 'failed', error: summary, meta });
     return { sent: false, error: summary };
   } finally {
     clearTimeout(timer);
