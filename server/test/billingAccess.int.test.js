@@ -259,3 +259,72 @@ test('LAST_BILLING_ADMIN guard: no console door can strip an org of its only bil
   assert.strictEqual(toggleNew.status, 409);
   assert.strictEqual(toggleNew.json.code, 'LAST_BILLING_ADMIN');
 });
+
+test('LAST_BILLING_ADMIN guard: every door ALLOWS the strip when a second billing admin exists', { skip }, async () => {
+  // The mirror of the refusal test: with two billing admins (A + B), each door may strip A because
+  // B remains. Proves the guard blocks only the LAST one — its early-return never over-refuses. A is
+  // re-granted / reactivated between doors so it's a genuine billing admin at each door's turn.
+  const org = await Organization.create({ name: 'TwoBill', slug: 'twobill', isActive: true });
+  await Subscription.create({ organizationId: org._id, status: 'active' });
+  const aU = await makeUser('Atwo');
+  const bU = await makeUser('Btwo');
+  await Membership.create({ userId: aU._id, organizationId: org._id, role: 'admin', isActive: true, billingAccess: true });
+  await Membership.create({ userId: bU._id, organizationId: org._id, role: 'admin', isActive: true, billingAccess: true });
+  const A = { orgId: org._id, userId: aU._id };
+  const B = { token: signUserToken(bU), orgId: org._id, userId: bU._id }; // caller: a billing admin, so allowed on every door
+
+  // Door 1 — billingAccess:false on A.
+  const d1 = await call('PATCH', `/admin/memberships/${A.userId}`, { ...B, body: { billingAccess: false } });
+  assert.strictEqual(d1.status, 200, 'billingAccess:false allowed while B remains');
+  // Re-grant so A is a billing admin again for the next door.
+  assert.strictEqual((await call('PATCH', `/admin/memberships/${A.userId}`, { ...B, body: { billingAccess: true } })).status, 200);
+
+  // Door 3a — isActive:false via the general PATCH.
+  const d3a = await call('PATCH', `/admin/memberships/${A.userId}`, { ...B, body: { isActive: false } });
+  assert.strictEqual(d3a.status, 200, 'isActive:false allowed while B remains');
+  assert.strictEqual((await call('PATCH', `/admin/memberships/${A.userId}/reactivate`, B)).status, 200);
+
+  // Door 3b — the dedicated deactivate route.
+  const d3b = await call('PATCH', `/admin/memberships/${A.userId}/deactivate`, B);
+  assert.strictEqual(d3b.status, 200, '/deactivate allowed while B remains');
+  assert.strictEqual((await call('PATCH', `/admin/memberships/${A.userId}/reactivate`, B)).status, 200);
+
+  // Door 4 — DELETE the membership.
+  const d4 = await call('DELETE', `/admin/memberships/${A.userId}`, B);
+  assert.strictEqual(d4.status, 200, 'DELETE allowed while B remains');
+  assert.strictEqual(await Membership.findOne({ userId: A.userId, organizationId: org._id }), null);
+
+  // B was the survivor the whole way through and is untouched.
+  const b = await Membership.findOne({ userId: B.userId, organizationId: org._id }).lean();
+  assert.strictEqual(b.billingAccess, true);
+  assert.strictEqual(b.isActive, true);
+  assert.strictEqual(b.role, 'admin');
+});
+
+test('LAST_BILLING_ADMIN guard: ordinary non-billing members are never blocked', { skip }, async () => {
+  // The guard keys on being an ACTIVE billing ADMIN. A canvasser, or a non-billing admin, can be
+  // freely deactivated/removed/demoted even when they're the org's only such member — so the
+  // early-return in isLastBillingAdmin (billingAccess && role==='admin' && isActive) can't misfire
+  // and wall off routine roster management.
+  const org = await Organization.create({ name: 'Routine', slug: 'routine', isActive: true });
+  await Subscription.create({ organizationId: org._id, status: 'active' });
+  const baU = await makeUser('Ba');       // the org's one billing admin (arms the guard)
+  const naU = await makeUser('Na');       // a NON-billing admin
+  const cU = await makeUser('Ca');        // a canvasser
+  await Membership.create({ userId: baU._id, organizationId: org._id, role: 'admin', isActive: true, billingAccess: true });
+  await Membership.create({ userId: naU._id, organizationId: org._id, role: 'admin', isActive: true, billingAccess: false });
+  await Membership.create({ userId: cU._id, organizationId: org._id, role: 'canvasser', isActive: true, billingAccess: false });
+  const BA = { token: signUserToken(baU), orgId: org._id, userId: baU._id };
+
+  // Demote the non-billing admin — not billing-relevant, allowed.
+  assert.strictEqual((await call('PATCH', `/admin/memberships/${naU._id}`, { ...BA, body: { role: 'canvasser' } })).status, 200);
+  // Deactivate the canvasser — allowed.
+  assert.strictEqual((await call('PATCH', `/admin/memberships/${cU._id}/deactivate`, BA)).status, 200);
+  // Remove the (now-canvasser) former non-billing admin — allowed.
+  assert.strictEqual((await call('DELETE', `/admin/memberships/${naU._id}`, BA)).status, 200);
+
+  // The billing admin who armed the guard is untouched throughout.
+  const ba = await Membership.findOne({ userId: baU._id, organizationId: org._id }).lean();
+  assert.strictEqual(ba.billingAccess, true);
+  assert.strictEqual(ba.isActive, true);
+});

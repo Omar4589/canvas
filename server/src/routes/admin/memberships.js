@@ -94,6 +94,15 @@ function ensureOrgScoped(req, res) {
 // LAST_BILLING_ADMIN); these guard the three console doors that used to slip past it:
 // toggling billing access off, demoting the role, and deactivating/removing the membership.
 // No super-admin bypass on purpose — hand billing access to another admin first, then proceed.
+//
+// Two layers, because the check-and-write isn't atomic (no Mongo transaction — the deploy runs a
+// standalone-friendly setup and the codebase uses none): isLastBillingAdmin is the cheap PRE-write
+// gate that catches the ordinary single-admin case without touching anything; strandsBilling is the
+// POST-write backstop for the concurrency race the pre-write count can't see. With exactly two
+// billing admins, two simultaneous strips each observe the OTHER as sufficient and both pass the
+// pre-write gate — so after each write we re-count and undo the one that raced the org to zero.
+// The undo can over-fire (both revert, both 409) but can never STRAND: the org keeps a billing
+// admin no matter the interleaving, and a retry succeeds once the dust settles.
 async function isLastBillingAdmin(membership) {
   if (!membership?.billingAccess || membership.role !== 'admin' || !membership.isActive) return false;
   const others = await Membership.countDocuments({
@@ -104,6 +113,19 @@ async function isLastBillingAdmin(membership) {
     billingAccess: true,
   });
   return others === 0;
+}
+
+// Post-write backstop: true when the org now has ZERO active billing admins. Counts ALL of them
+// (not "others") because the just-written doc already reflects the strip. Only worth calling after
+// a write that actually stripped a billing admin — an ordinary member edit can't reach zero.
+async function strandsBilling(organizationId) {
+  const remaining = await Membership.countDocuments({
+    organizationId,
+    role: 'admin',
+    isActive: true,
+    billingAccess: true,
+  });
+  return remaining === 0;
 }
 
 const LAST_BILLING_ADMIN_ERROR = {
@@ -318,6 +340,14 @@ router.patch('/:userId', async (req, res, next) => {
     if (stripsBilling && (await isLastBillingAdmin(membership))) {
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
     }
+    // Snapshot the billing-standing fields BEFORE the mutating save, so the post-write backstop
+    // (below) can undo exactly this strip if it raced another to zero. Captured only when it could
+    // matter — the target was a billing admin and the request strips it.
+    const wasBillingAdmin =
+      membership.billingAccess && membership.role === 'admin' && membership.isActive;
+    const billingBefore = wasBillingAdmin
+      ? { billingAccess: membership.billingAccess, role: membership.role, isActive: membership.isActive }
+      : null;
 
     if ('coordinatorId' in data) {
       const coordRes = await resolveCoordinatorId({
@@ -342,6 +372,14 @@ router.patch('/:userId', async (req, res, next) => {
     const { managedCampaignIds: _omitGrants, ...membershipUpdate } = data;
     Object.assign(membership, membershipUpdate);
     await membership.save();
+
+    // Post-write backstop for the concurrency race (see isLastBillingAdmin/strandsBilling). Runs
+    // BEFORE grant reconciliation so a revert leaves no half-applied side effects.
+    if (stripsBilling && billingBefore && (await strandsBilling(orgId))) {
+      membership.set(billingBefore);
+      await membership.save();
+      return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
 
     // Reconcile grants: leaving the lead role clears every grant; staying/becoming
     // a lead with an explicit set replaces it (an omitted set leaves grants as-is).
@@ -388,7 +426,16 @@ router.delete('/:userId', async (req, res, next) => {
     if (target && (await isLastBillingAdmin(target))) {
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
     }
+    const wasBillingAdmin =
+      target && target.billingAccess && target.role === 'admin' && target.isActive;
     await Membership.deleteOne({ userId: req.params.userId, organizationId: orgId });
+    // Post-write backstop for the concurrency race (see isLastBillingAdmin/strandsBilling). Re-count
+    // BEFORE releaseAssignedWork, and re-insert the exact row (same _id) if this delete raced the
+    // org to zero — releaseAssignedWork hasn't run yet, so nothing needs unwinding.
+    if (wasBillingAdmin && (await strandsBilling(orgId))) {
+      await Membership.create(target.toObject());
+      return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
     // This used to drop CampaignAssignment + CampaignManager only, which left the removed
     // person still holding every TurfAssignment and EffortMember row they had — so their
     // books stayed "assigned" to somebody who was no longer in the org, those doors never
@@ -511,12 +558,18 @@ router.patch('/:userId/deactivate', async (req, res, next) => {
     if (await isLastBillingAdmin(existing)) {
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
     }
+    const wasBillingAdmin = existing.billingAccess && existing.role === 'admin' && existing.isActive;
     const membership = await Membership.findOneAndUpdate(
       { userId: req.params.userId, organizationId: activeOrgId(req) },
       { isActive: false },
       { new: true }
     );
     if (!membership) return res.status(404).json({ error: 'Membership not found' });
+    // Post-write backstop for the concurrency race (see isLastBillingAdmin/strandsBilling).
+    if (wasBillingAdmin && (await strandsBilling(activeOrgId(req)))) {
+      await Membership.updateOne({ _id: existing._id }, { isActive: true });
+      return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
     res.json({ membership });
   } catch (err) {
     next(err);

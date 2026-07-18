@@ -82,8 +82,10 @@ recipient.
   emulates a 2xx / a failure with no network, still pushing to `outbox` — the only way tests can
   exercise delivery-gated callers. Loud warning if it ever runs.
 - **`templates.js`** — 8 templates, each `{subject, html, text}`. One shared table-based light
-  theme (all-inline CSS, text wordmark, no images), `esc()` on every customer-typed string,
-  long-form en-US dates in UTC.
+  theme (all-inline CSS), `esc()` on every customer-typed string, long-form en-US dates in UTC.
+  The brand row is the logomark PNG (served from `doorline.app/apple-touch-icon.png` — SVG and
+  data: URIs are stripped by Gmail) beside the TEXT wordmark, inside the white card (the PNG has
+  a white background); clients that block remote images still show the text.
 - **`recipients.js`** — `billingNotifyEmails(orgId)`: active admin Memberships with
   `billingAccess: true` → their live Users' emails; if none, `Subscription.billingContact.email`;
   deduped/lowercased; may be `[]`. **Deliberately no all-admins tier** (owner decision

@@ -427,6 +427,26 @@ export default function UsersPage() {
         </span>
       </Card>
 
+      {/* A refused billing-access change (notably LAST_BILLING_ADMIN — the org can't be left with
+          no billing admin) surfaces here. The toggle itself is server-data-driven, so it snaps
+          back on its own; this is the "why". Clears on the next toggle attempt (mutate resets). */}
+      {saveBilling.isError && (
+        <div
+          role="alert"
+          className="mb-4 flex items-start gap-3 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger"
+        >
+          <span className="flex-1">{saveBilling.error.message}</span>
+          <button
+            type="button"
+            onClick={() => saveBilling.reset()}
+            className="shrink-0 font-semibold hover:opacity-70"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {isLoading ? (
         <Card className="overflow-hidden">
           <SkeletonRows />

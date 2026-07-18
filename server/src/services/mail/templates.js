@@ -1,9 +1,12 @@
 // Transactional email templates. Each returns { subject, html, text }: `html` for rich clients,
 // `text` a complete standalone plain-text alternative (readable on its own, no HTML dependency).
 //
-// Everything a template needs is INLINED. Email clients strip <style> and <head> and most block
-// remote images, so the layout is table-based, every rule is an inline style, and the wordmark is
-// styled TEXT ("Doorline"), never an <img> or SVG. Light theme only — the brand's red on near-white.
+// Everything a template needs is INLINED. Email clients strip <style> and <head>, so the layout is
+// table-based and every rule is an inline style. The brand row is the real logomark PNG (served
+// from the public site — SVG is stripped by Gmail, data: URIs too) PLUS the styled TEXT
+// "Doorline" beside it: clients that block remote images by default still show the text, so the
+// brand never disappears. The PNG has a white background, which is why the brand row lives INSIDE
+// the white card. Light theme only — the brand's red on near-white.
 //
 // esc() is applied to EVERY interpolated customer-typed value in the HTML (names, org names, campaign
 // names, reasons). Those strings originate from user input; an email body is HTML, so an un-escaped
@@ -60,17 +63,34 @@ function button(label, url) {
       <p style="margin:0 0 16px;font-family:${FONT};font-size:13px;line-height:20px;word-break:break-all;"><a href="${safeUrl}" style="color:${ACCENT};">${safeUrl}</a></p>`;
 }
 
-// Shared shell: page-bg table → centered white card (wordmark + body) → muted footer.
+// The logomark PNG, served from the public site (client/public/apple-touch-icon.png — the
+// red door-pin on white). 180×180 source shown at 36×36 = crisp on retina. Prod origin by
+// default so an email rendered anywhere points at the real asset.
+function logoUrl() {
+  return `${process.env.WEB_ORIGIN || 'https://doorline.app'}/apple-touch-icon.png`;
+}
+
+// Shared shell: page-bg table → centered white card (brand row + body) → muted footer. The
+// brand row = logomark <img> + TEXT wordmark side by side; alt is empty on purpose (the text
+// beside it IS the accessible name — an alt would read "Doorline Doorline" in screen readers
+// and render doubled when images are blocked).
 function layout(bodyHtml) {
   return `
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${PAGE_BG};margin:0;padding:24px 0;">
   <tr>
     <td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
-        <tr><td style="padding:4px 8px 16px;">
-          <span style="font-family:${FONT};font-size:22px;font-weight:700;color:${ACCENT};letter-spacing:-0.5px;">Doorline</span>
-        </td></tr>
-        <tr><td style="background:${CARD_BG};border:1px solid ${BORDER};border-radius:12px;padding:32px;">
+        <tr><td style="background:${CARD_BG};border:1px solid ${BORDER};border-radius:12px;padding:28px 32px 32px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;">
+            <tr>
+              <td style="vertical-align:middle;padding-right:8px;">
+                <img src="${logoUrl()}" width="36" height="36" alt="" style="display:block;border:0;" />
+              </td>
+              <td style="vertical-align:middle;">
+                <span style="font-family:${FONT};font-size:22px;font-weight:700;color:${ACCENT};letter-spacing:-0.5px;">Doorline</span>
+              </td>
+            </tr>
+          </table>
 ${bodyHtml}
         </td></tr>
         <tr><td style="padding:16px 8px;font-family:${FONT};font-size:12px;line-height:18px;color:${MUTED};">

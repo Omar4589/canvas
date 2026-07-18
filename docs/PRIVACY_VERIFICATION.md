@@ -96,8 +96,19 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   (a) `purgeWoundDownOrgs`/`purgeDormantOrgs` keep their never-delete-unwarned gates (marker +
   `deleteNotBefore`), (b) the markers are stamped ONLY on `sendMail(...).sent === true` or
   genuinely-zero recipients (`deliverWarning`), (c) the billing status chokepoint keeps clearing
-  BOTH marker pairs, and (d) activity-after-warning keeps voiding the dormancy marker. Guard
-  test: `test/retentionWarnings.int.test.js`. Related checkables: reset tokens are stored
+  BOTH marker pairs, (d) activity-after-warning keeps voiding the dormancy marker, and *(e) 2026-07-18)*
+  the console REFUSES to strip an org's LAST billing admin — so the genuinely-zero-recipients branch
+  in (b) can only fire for an org **born** without admins, never one a console action emptied, keeping
+  the never-delete-unwarned guarantee unvoidable. That last one closes the gap between (b) and
+  reality: `services/mail/recipients.js` `billingNotifyEmails` draws warnings only from active
+  `billingAccess` admins (else the billing contact of record), so an org left with zero would "warn"
+  nobody yet still purge. `isLastBillingAdmin`/`strandsBilling` in `routes/admin/memberships.js`
+  refuse all three console doors (PATCH strip / `deactivate` / DELETE) with `409 LAST_BILLING_ADMIN`,
+  a post-write recount backstops the two-admin strip race, and `deleteAccount`'s pre-existing block
+  covers account deletion — no super-admin bypass on any of them. Guard tests:
+  `test/retentionWarnings.int.test.js` and `test/billingAccess.int.test.js` (the LAST_BILLING_ADMIN
+  suite — every door refused on the last one, allowed once a second exists, ordinary members never
+  blocked). Related checkables: reset tokens are stored
   sha256-hashed and single-use (`test/mailFlow.int.test.js`); **emails never contain passwords**
   (asserted over the outbox in `test/mailTriggers.int.test.js`); the silent campaignRoster
   auto-add never emails. *(2026-07-18: an internal **EmailLog** now records every send attempt —
