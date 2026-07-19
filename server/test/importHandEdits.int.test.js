@@ -69,6 +69,15 @@ const rowX = (over = {}) => ({
   svid: 'HEX1', first: 'Xen', last: 'Xylo', phone: '888', party: 'G',
   address: '300 Pine St', lat: '40.300000', lng: '-89.300000', ...over,
 });
+// Y and Z serve the pin-shield cases: Y's door gets a human-corrected pin, Z's never does.
+const rowY = (over = {}) => ({
+  svid: 'HEY1', first: 'Yuri', last: 'Yates', phone: '444', party: 'D',
+  address: '400 Cedar St', lat: '40.400000', lng: '-89.400000', ...over,
+});
+const rowZ = (over = {}) => ({
+  svid: 'HEZ1', first: 'Zoe', last: 'Zane', phone: '555', party: 'R',
+  address: '500 Birch St', lat: '40.500000', lng: '-89.500000', ...over,
+});
 // v2: V hand-kept name, NEW phone + party, and a NEW address (the re-housing probe).
 const v2Row = () => rowV({
   first: 'Verified', phone: '333', party: 'R',
@@ -315,4 +324,81 @@ test('7. no-shield fast path: a never-edited voter takes every field from the fi
   assert.notStrictEqual(String(v.householdId), String(before7.householdId), 're-housed like any import');
   assert.strictEqual(job.keptHandEdits, 0, 'nothing counted for an unarmed voter');
   assert.strictEqual(job.overwrittenHandEdits, 0);
+});
+
+// ── Pin shield: the household twin of the voter hand-edit shield. A pin dragged to where the
+// house actually is (coordSource:'corrected') is a field-verified fact the voter file cannot
+// know, so a re-import must not snap it back to the file's coordinates. ──
+
+// Resolve the door through its voter rather than guessing normalizedAddress's exact form.
+async function homeOf(svid) {
+  const v = await getVoter(svid);
+  assert.ok(v, `precondition: voter ${svid} exists`);
+  return Household.findById(v.householdId).lean();
+}
+
+// Stand in for updateHouseholdLocation's write (that route is exercised by its own suite; here we
+// only need the resulting state: a human-placed pin).
+async function correctPin(svid, [lng, lat]) {
+  const h = await homeOf(svid);
+  await Household.updateOne(
+    { _id: h._id },
+    { $set: { location: { type: 'Point', coordinates: [lng, lat] }, coordSource: 'corrected', coordConfidence: null, previousLocation: h.location || null } }
+  );
+  return h._id;
+}
+
+test('8. a human-corrected pin survives a re-import (and the file still updates everything else)', { skip }, async () => {
+  // Y lives at a door whose file coords are wrong; someone drags the pin to the real house.
+  await runFile([rowY()]);
+  const id = await correctPin('HEY1', [-89.444444, 40.444444]);
+
+  // Re-import the SAME address (city/zip are part of the address key — changing one would re-house
+  // the voter to a different door and prove nothing) carrying the file's original, wrong coords.
+  // The phone moves so we can confirm the import really did apply its updates.
+  const { job } = await runFile([rowY({ phone: '4444' })]);
+  assert.strictEqual(job.status, 'completed');
+
+  const after = await homeOf('HEY1');
+  assert.strictEqual(String(after._id), String(id), 'same door, not a new one');
+  assert.deepStrictEqual(after.location.coordinates, [-89.444444, 40.444444], 'corrected pin kept — NOT reverted to the file');
+  assert.strictEqual(after.coordSource, 'corrected', 'still flagged as human-placed');
+  assert.strictEqual((await getVoter('HEY1')).phone, '4444', 'the import DID apply — only the pin was shielded');
+  assert.strictEqual(job.keptPins, 1, 'the kept pin is reported');
+});
+
+test('9. overwriteHandEdits releases the pin shield too — one keep-or-overwrite decision', { skip }, async () => {
+  const before = await homeOf('HEY1');
+  assert.strictEqual(before.coordSource, 'corrected', 'precondition: still corrected from case 8');
+
+  const { job } = await runFile([rowY()], { overwriteHandEdits: true });
+  assert.strictEqual(job.status, 'completed');
+
+  const after = await homeOf('HEY1');
+  assert.deepStrictEqual(after.location.coordinates, [-89.400000, 40.400000], "the file's coords win when the admin opted in");
+  assert.strictEqual(after.coordSource, 'file', 'provenance follows the value');
+  assert.strictEqual(job.keptPins, 0, 'nothing kept in overwrite mode');
+});
+
+test('10. the shield never over-blocks: an uncorrected door still takes the file\'s coords', { skip }, async () => {
+  // Z's pin was never touched by a human, so a moved file coordinate must land normally.
+  await runFile([rowZ()]);
+  const before = await homeOf('HEZ1');
+  assert.notStrictEqual(before.coordSource, 'corrected', 'precondition: never hand-corrected');
+
+  const { job } = await runFile([rowZ({ lat: '40.555000', lng: '-89.555000' })]);
+  const after = await homeOf('HEZ1');
+  assert.deepStrictEqual(after.location.coordinates, [-89.555000, 40.555000], 'ordinary door tracks the file');
+  assert.strictEqual(job.keptPins, 0, 'an uncorrected door is not counted as kept');
+});
+
+test('11. a brand-new address still inserts with its coords (the $setOnInsert path)', { skip }, async () => {
+  // Guards the shield's strip-to-$setOnInsert: a never-seen address must not insert location-less.
+  const { job } = await runFile([rowY({ address: '600 Walnut St', lat: '40.600000', lng: '-89.600000' })]);
+  assert.strictEqual(job.status, 'completed');
+
+  const fresh = await homeOf('HEY1');
+  assert.ok(fresh, 'the new door was created');
+  assert.deepStrictEqual(fresh.location.coordinates, [-89.600000, 40.600000], 'inserted complete with coords');
+  assert.strictEqual(fresh.coordSource, 'file');
 });

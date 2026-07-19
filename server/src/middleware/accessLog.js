@@ -116,6 +116,10 @@ export function accessLog(req, res, next) {
       resource,
       rows,
       bytes: bytes || null,
+      // Record-level subjects, tagged by the single-record/export handlers via
+      // addAuditSubjects (services/access/supportAccess.js). Tags exist on member requests
+      // too — harmlessly: this row is only ever written for vendor access.
+      subjects: res.locals?.auditSubjects || null,
     });
   });
 

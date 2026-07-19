@@ -22,6 +22,8 @@ After you map the columns, click **Preview changes** to see exactly what the imp
 
 If your team has **hand-corrected** any voter info (say, a phone number confirmed at the door), the preview also lists every hand edit this file would change. **Your edits are kept by default** — the file updates everything else. To take the file's values instead, tick **Overwrite these hand edits with the file's values** on the review screen; that replaces the listed values and can't be undone.
 
+**Corrected map pins are protected the same way.** If someone dragged a door's pin to where the house actually is, a later import **won't snap it back** to the file's coordinates — the person standing at the door knew better than the file. Everything else about that address still updates normally. The same **Overwrite** tick box also releases the pins, so it's one decision: keep what your team corrected, or let the file win.
+
 ## What goes live, and what waits
 
 - A **new voter at a door a walk list already owns** joins that door automatically — **if that door hasn't been knocked yet.** The canvasser sees them when they reach it.

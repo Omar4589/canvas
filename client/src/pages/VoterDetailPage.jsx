@@ -315,6 +315,62 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
   );
 }
 
+// A quiet audit footnote: did Doorline staff (a vendor inside a support session, not a member of
+// this org) touch THIS voter's record, and why? Own its own fetch so a hiccup here can never take
+// the profile down — on error it renders nothing at all.
+function StaffAccessCard({ voterId, tz }) {
+  const q = useQuery({
+    queryKey: ['voter-staff-access', voterId],
+    queryFn: () => api(`/admin/voters/${voterId}/staff-access`),
+    retry: false,
+  });
+  // Error or still-loading → render nothing. Minimal by design: the card simply appears once the
+  // audit data lands, and the profile is never blocked or broken by it.
+  if (q.isError || q.isLoading || !q.data) return null;
+
+  const { count, entries } = q.data;
+  // Record-level capture is new; say so plainly so an empty history isn't read as "provably never."
+  const subNote = (
+    <p className="text-xs text-fg-subtle">
+      Record-level tracking began July 19, 2026; earlier staff access (if any) was logged per-request only.
+    </p>
+  );
+
+  return (
+    <Section title="Doorline staff access">
+      {count === 0 ? (
+        <>
+          <p className="text-sm text-fg-muted">Never accessed by Doorline staff.</p>
+          <div className="mt-2">{subNote}</div>
+        </>
+      ) : (
+        <>
+          {subNote}
+          <ul className="mt-3 space-y-2 text-sm">
+            {entries.map((e, i) => (
+              <li key={i} className="flex flex-wrap items-baseline gap-x-2 text-fg-muted">
+                <span className="text-fg-subtle">{fmtDate(e.at, tz)}</span>
+                <span className="font-medium text-fg">{e.staffFirstName || 'Doorline staff'}</span>
+                {e.reason && (
+                  <span className="max-w-xs truncate text-fg-muted" title={e.reason}>· {e.reason}</span>
+                )}
+                {e.export && (
+                  <span
+                    className="rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted"
+                    title="This record was included in a data export, not opened individually"
+                  >
+                    export
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Section>
+  );
+}
+
 export default function VoterDetailPage() {
   const { voterId } = useParams();
   const orgTz = useOrgTimeZone();
@@ -511,6 +567,8 @@ export default function VoterDetailPage() {
           </ul>
         )}
       </Section>
+
+      <StaffAccessCard voterId={voterId} tz={orgTz} />
     </div>
   );
 }

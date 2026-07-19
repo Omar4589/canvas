@@ -17,7 +17,7 @@ import mongoose from 'mongoose';
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-accesslog';
 
-const { classifyResource, isAuditExempt } = await import('../src/services/access/supportAccess.js');
+const { classifyResource, isAuditExempt, capSubjects, SUBJECT_CAP } = await import('../src/services/access/supportAccess.js');
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
 const { Organization } = await import('../src/models/Organization.js');
@@ -25,6 +25,16 @@ const { User } = await import('../src/models/User.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { SupportAccessGrant } = await import('../src/models/SupportAccessGrant.js');
 const { AccessLog } = await import('../src/models/AccessLog.js');
+// ALL dynamic imports live up here, before any test() is defined: an `await import` BETWEEN test
+// definitions lets already-defined tests start running while the file is still loading, and a
+// fast early finish then force-exits the runner mid-load, cancelling the not-yet-defined tests
+// (observed as a flaky "3 tests, all failed" run).
+const { Membership } = await import('../src/models/Membership.js');
+const { Campaign } = await import('../src/models/Campaign.js');
+const { Household } = await import('../src/models/Household.js');
+const { Voter } = await import('../src/models/Voter.js');
+const { Person } = await import('../src/models/Person.js');
+const { SavedSearch } = await import('../src/models/SavedSearch.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -150,4 +160,189 @@ test('STRUCTURAL: every known voter-data URL shape is loggable; only metadata is
   // Fail-closed backstop: an UNRECOGNIZED /admin route is still logged (classified 'other'), not skipped.
   assert.strictEqual(isAuditExempt('/admin/some-future-voter-surface'), false);
   assert.strictEqual(classifyResource('/admin/some-future-voter-surface'), 'other');
+});
+
+// ── RECORD-LEVEL SUBJECTS ("was MY record accessed?") — added 2026-07-19 ─────────────────────
+// Single-record opens and exports tag WHICH records a vendor request touched; list browses stay
+// request-level. These tests pin the whole contract: tagging, the honest-scope negative (members
+// still never logged), the subjectId lookup, and the customer-facing voter panel endpoint.
+
+async function pollLogs(filter, want = 1) {
+  let logs = [];
+  for (const deadline = Date.now() + 3000; Date.now() < deadline; ) {
+    logs = await AccessLog.find(filter).lean();
+    if (logs.length >= want) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return logs;
+}
+
+// Fixtures for the record-level cases (built once; AccessLog/grants are wiped per test).
+before(async () => {
+  if (!URI) return;
+  for (const M of [Membership, Campaign, Household, Voter, Person, SavedSearch]) await M.deleteMany({});
+
+  const camp = await Campaign.create({ organizationId: ctx.org._id, name: 'Cov Camp', type: 'survey', state: 'FL', isActive: true });
+  const hh = await Household.create({
+    organizationId: ctx.org._id, campaignId: camp._id,
+    addressLine1: '1 Audit Way', city: 'T', state: 'FL', zipCode: '1',
+    normalizedAddress: '1 AUDIT WAY|coverage',
+    location: { type: 'Point', coordinates: [-81, 28] },
+  });
+  const voter = await Voter.create({
+    organizationId: ctx.org._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-1',
+    firstName: 'Vera', lastName: 'Subject', fullName: 'Vera Subject',
+  });
+  const voter2 = await Voter.create({
+    organizationId: ctx.org._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-2',
+    firstName: 'Vic', lastName: 'Second', fullName: 'Vic Second',
+  });
+  const person = await Person.create({
+    organizationId: ctx.org._id, firstName: 'Pera', lastName: 'Identity', fullName: 'Pera Identity',
+  });
+  const walklist = await SavedSearch.create({
+    organizationId: ctx.org._id, campaignId: camp._id, name: 'Audit WL',
+    voterIds: [voter._id, voter2._id], householdIds: [hh._id],
+  });
+
+  const memberAdmin = await User.create({
+    firstName: 'Mia', lastName: 'Member', email: 'mia.member@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: memberAdmin._id, organizationId: ctx.org._id, role: 'admin', isActive: true });
+  const walker = await User.create({
+    firstName: 'Wal', lastName: 'Walker', email: 'wal.cov@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: walker._id, organizationId: ctx.org._id, role: 'canvasser', isActive: true });
+  const breakGlass = await User.create({
+    firstName: 'Bree', lastName: 'Glass', email: 'bg@doorline.app',
+    passwordHash: 'x', isActive: true, isSuperAdmin: true, platformRole: 'break_glass',
+  });
+
+  const org2 = await Organization.create({ name: 'Other Co', slug: 'other-cov', isActive: true });
+  const admin2 = await User.create({
+    firstName: 'Ann', lastName: 'Other', email: 'ann.other@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: admin2._id, organizationId: org2._id, role: 'admin', isActive: true });
+
+  Object.assign(ctx, {
+    camp, hh, voter, voter2, person, walklist,
+    member: { token: signUserToken(memberAdmin), orgId: ctx.org._id },
+    walker: { token: signUserToken(walker), orgId: ctx.org._id },
+    bg: { token: signUserToken(breakGlass), orgId: ctx.org._id, _id: breakGlass._id },
+    other: { token: signUserToken(admin2), orgId: org2._id },
+  });
+});
+
+async function grantFor(actorToken) {
+  const r = await call('POST', '/super-admin/access/grants', {
+    token: actorToken,
+    body: { organizationId: String(ctx.org._id), reason: 'Record-level audit test (ticket 5).' },
+  });
+  assert.strictEqual(r.status, 201);
+}
+
+test('RECORD-LEVEL: a vendor voter-profile read carries the voter as its subject', { skip }, async () => {
+  await grantFor(ctx.support.token);
+  const read = await call('GET', `/admin/voters/${ctx.voter._id}`, ctx.support);
+  assert.ok(read.status < 400, `expected a successful read, got ${read.status}`);
+
+  const logs = await pollLogs({ organizationId: ctx.org._id, 'subjects.id': ctx.voter._id });
+  assert.strictEqual(logs.length, 1, 'the profile read row carries the voter subject');
+  assert.deepStrictEqual(
+    logs[0].subjects.map((s) => `${s.type}:${s.id}`),
+    [`voter:${ctx.voter._id}`]
+  );
+  assert.strictEqual(logs[0].subjectsTruncated, false);
+});
+
+test('RECORD-LEVEL: a vendor walk-list export logs exactly the voters written to the file', { skip }, async () => {
+  await grantFor(ctx.support.token);
+  const csv = await call('GET', `/admin/campaigns/${ctx.camp._id}/walklists/${ctx.walklist._id}/export.csv`, ctx.support);
+  assert.ok(csv.status < 400, `expected a successful export, got ${csv.status}`);
+
+  const logs = await pollLogs({ organizationId: ctx.org._id, resource: 'walklists' });
+  assert.strictEqual(logs.length, 1);
+  const ids = new Set((logs[0].subjects || []).map((s) => String(s.id)));
+  assert.ok(ids.has(String(ctx.voter._id)) && ids.has(String(ctx.voter2._id)), 'both exported voters are subjects');
+  assert.strictEqual(logs[0].subjects.every((s) => s.type === 'voter'), true);
+  assert.strictEqual(logs[0].subjectsTruncated, false);
+});
+
+test('HONEST SCOPE: a MEMBER admin reading the same profile and export logs NOTHING', { skip }, async () => {
+  const read = await call('GET', `/admin/voters/${ctx.voter._id}`, ctx.member);
+  assert.strictEqual(read.status, 200);
+  const csv = await call('GET', `/admin/campaigns/${ctx.camp._id}/walklists/${ctx.walklist._id}/export.csv`, ctx.member);
+  assert.ok(csv.status < 400);
+  await new Promise((r) => setTimeout(r, 400)); // give a wrong write time to land
+  assert.strictEqual(await AccessLog.countDocuments({}), 0, 'member access is never vendor access');
+});
+
+test('RECORD-LEVEL: the person console read carries the person subject (direct recordAccess path)', { skip }, async () => {
+  await grantFor(ctx.bg.token);
+  const read = await call('GET', `/super-admin/persons/${ctx.person._id}`, { token: ctx.bg.token });
+  assert.ok(read.status < 400, `expected a successful person read, got ${read.status}`);
+
+  const logs = await pollLogs({ organizationId: ctx.org._id, 'subjects.id': ctx.person._id });
+  assert.strictEqual(logs.length, 1, 'the person-console read row carries the person subject');
+  assert.strictEqual(logs[0].subjects[0].type, 'person');
+});
+
+test('LOOKUP: /super-admin/access/log?subjectId returns exactly the rows that touched the record', { skip }, async () => {
+  await grantFor(ctx.support.token);
+  await call('GET', `/admin/voters/${ctx.voter._id}`, ctx.support); // touches voter
+  await call('GET', '/admin/imports', ctx.support); // request-level row, no subjects
+  await pollLogs({ organizationId: ctx.org._id }, 2);
+
+  const filtered = await call('GET', `/super-admin/access/log?subjectId=${ctx.voter._id}`, { token: ctx.support.token });
+  assert.strictEqual(filtered.status, 200);
+  assert.strictEqual(filtered.json.entries.length, 1, 'only the row that touched this record');
+  assert.strictEqual(filtered.json.entries[0].subjectCount, 1);
+  assert.strictEqual(filtered.json.entries[0].subjects[0].id, String(ctx.voter._id));
+
+  const all = await call('GET', '/super-admin/access/log', { token: ctx.support.token });
+  assert.ok(all.json.entries.length >= 2, 'unfiltered log still shows both rows');
+});
+
+test('CUSTOMER-FACING: the voter staff-access panel answers from the org side, first-name-only', { skip }, async () => {
+  await grantFor(ctx.support.token);
+  await call('GET', `/admin/voters/${ctx.voter._id}`, ctx.support); // a direct open
+  await call('GET', `/admin/campaigns/${ctx.camp._id}/walklists/${ctx.walklist._id}/export.csv`, ctx.support); // an export sweep
+  await pollLogs({ organizationId: ctx.org._id }, 2);
+
+  const panel = await call('GET', `/admin/voters/${ctx.voter._id}/staff-access`, ctx.member);
+  assert.strictEqual(panel.status, 200);
+  assert.strictEqual(panel.json.count, 2, 'both the direct open and the export touched this record');
+  for (const e of panel.json.entries) {
+    assert.strictEqual(e.staffFirstName, 'Sam', 'first name only');
+    assert.ok(e.reason, 'the grant reason is shown');
+    assert.ok(!JSON.stringify(e).includes('support@doorline.app'), 'never the staff email');
+  }
+  assert.deepStrictEqual(
+    panel.json.entries.map((e) => e.export).sort(),
+    [false, true],
+    'the export entry is marked as an export; the direct open is not'
+  );
+
+  // The untouched voter reads clean — "never accessed" is a real answer, not a default.
+  const clean = await call('GET', `/admin/voters/${ctx.voter2._id}/staff-access`, ctx.member);
+  assert.strictEqual(clean.json.count, 1, 'voter2 was only touched by the export');
+  assert.strictEqual(clean.json.entries[0].export, true);
+
+  // Org isolation + role gate.
+  const cross = await call('GET', `/admin/voters/${ctx.voter._id}/staff-access`, ctx.other);
+  assert.strictEqual(cross.status, 404, 'another org cannot see this voter at all');
+  const walker = await call('GET', `/admin/voters/${ctx.voter._id}/staff-access`, ctx.walker);
+  assert.strictEqual(walker.status, 403, 'canvassers have no admin surface');
+});
+
+// Pure unit — the cap can never quietly claim completeness.
+test('capSubjects: over-cap lists truncate with an honest total', () => {
+  const list = Array.from({ length: SUBJECT_CAP + 5 }, (_, i) => ({ type: 'voter', id: String(i) }));
+  const capped = capSubjects(list);
+  assert.strictEqual(capped.subjects.length, SUBJECT_CAP);
+  assert.strictEqual(capped.subjectsTruncated, true);
+  assert.strictEqual(capped.subjectsTotal, SUBJECT_CAP + 5);
+  const small = capSubjects(list.slice(0, 3));
+  assert.strictEqual(small.subjects.length, 3);
+  assert.strictEqual(small.subjectsTruncated, undefined);
 });

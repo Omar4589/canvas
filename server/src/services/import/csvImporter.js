@@ -342,34 +342,68 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
 
   // 1. Households.
   const householdValues = Array.from(householdMap.values());
-  const householdOps = householdValues.map((h) => ({
-    updateOne: {
-      filter: { campaignId, normalizedAddress: h.normalizedAddress },
-      update: {
-        $set: {
-          organizationId: orgId,
-          addressLine1: h.addressLine1,
-          addressLine2: h.addressLine2,
-          city: h.city,
-          state: h.state,
-          zipCode: h.zipCode,
-          county: h.county ?? null,
-          // After the geocode step every kept household has coords; this guard just
-          // forecloses a [null,null] Point ever being written.
-          location: h.longitude != null && h.latitude != null ? { type: 'Point', coordinates: [h.longitude, h.latitude] } : null,
-          coordSource: h.coordSource || (h.longitude != null && h.latitude != null ? 'file' : null),
-          coordConfidence: h.coordConfidence ?? null,
-        },
-        $setOnInsert: {
-          campaignId,
-          normalizedAddress: h.normalizedAddress,
-          status: 'unknocked',
-          isActive: true,
-        },
+
+  // 0.5. Pin shield (the household twin of the voter hand-edit shield below). A canvasser or admin
+  // who drags a door's pin to where the house actually is stamps coordSource:'corrected'
+  // (services/households/updateHouseholdLocation.js) — a field-verified fact the file can't know.
+  // The blind $set below used to rewrite location/coordSource on EVERY re-import, silently
+  // reverting those corrections to the file's (often worse) coordinates. Prefetch the corrected
+  // addresses so the write can skip them. Same discipline as the voter shield: batched $in, a
+  // narrow filter so only corrected rows come back, projection of just the key. Skipped entirely
+  // when the admin asked for the file to win — overwriteHandEdits governs BOTH shields, so there's
+  // one keep-or-overwrite decision, not two competing toggles.
+  const correctedAddresses = new Set();
+  if (!overwriteHandEdits) {
+    const addrs = householdValues.map((h) => h.normalizedAddress);
+    for (let i = 0; i < addrs.length; i += batchSize) {
+      const corrected = await Household.find(
+        { campaignId, normalizedAddress: { $in: addrs.slice(i, i + batchSize) }, coordSource: 'corrected' },
+        { normalizedAddress: 1 }
+      ).lean();
+      for (const h of corrected) correctedAddresses.add(h.normalizedAddress);
+    }
+  }
+
+  let keptPins = 0;
+  const householdOps = householdValues.map((h) => {
+    const set = {
+      organizationId: orgId,
+      addressLine1: h.addressLine1,
+      addressLine2: h.addressLine2,
+      city: h.city,
+      state: h.state,
+      zipCode: h.zipCode,
+      county: h.county ?? null,
+      // After the geocode step every kept household has coords; this guard just
+      // forecloses a [null,null] Point ever being written.
+      location: h.longitude != null && h.latitude != null ? { type: 'Point', coordinates: [h.longitude, h.latitude] } : null,
+      coordSource: h.coordSource || (h.longitude != null && h.latitude != null ? 'file' : null),
+      coordConfidence: h.coordConfidence ?? null,
+    };
+    const setOnInsert = {
+      campaignId,
+      normalizedAddress: h.normalizedAddress,
+      status: 'unknocked',
+      isActive: true,
+    };
+    // Corrected pin: move the location trio to $setOnInsert. The existing row keeps its
+    // human-placed pin; a row deleted between the prefetch and this write still inserts complete
+    // coords. A field must never appear in both operators — Mongo rejects the conflict.
+    if (correctedAddresses.has(h.normalizedAddress)) {
+      keptPins += 1;
+      for (const f of ['location', 'coordSource', 'coordConfidence']) {
+        setOnInsert[f] = set[f];
+        delete set[f];
+      }
+    }
+    return {
+      updateOne: {
+        filter: { campaignId, normalizedAddress: h.normalizedAddress },
+        update: { $set: set, $setOnInsert: setOnInsert },
+        upsert: true,
       },
-      upsert: true,
-    },
-  }));
+    };
+  });
   const insertedHouseholdIds = [];
   for (let i = 0; i < householdOps.length; i += batchSize) {
     const res = await Household.bulkWrite(householdOps.slice(i, i + batchSize), { ordered: false });
@@ -493,6 +527,8 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
     // Hand-edit outcome: (voter, field) instances where the file disagreed with an armed edit.
     keptHandEdits,
     overwrittenHandEdits,
+    // Households whose human-corrected pin this import left alone (0 when overwriteHandEdits).
+    keptPins,
     // Exact docs inserted this run (for "undo import"). Empty on an idempotent retry.
     insertedHouseholdIds,
     insertedVoterIds,

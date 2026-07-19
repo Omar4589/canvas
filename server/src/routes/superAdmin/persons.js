@@ -28,7 +28,7 @@ router.use(requireAuth, requireBreakGlass);
 
 // Record a break-glass read/write of a specific customer's identity record. Reuses the same AccessLog
 // the /admin path writes, so "who at Doorline touched my data?" has one answer across both surfaces.
-function logPersonAccess(req, { organizationId, grantId, resource, route, rows = null }) {
+function logPersonAccess(req, { organizationId, grantId, resource, route, rows = null, personId = null }) {
   recordAccess({
     actorUserId: req.user._id,
     organizationId,
@@ -39,6 +39,9 @@ function logPersonAccess(req, { organizationId, grantId, resource, route, rows =
     // These direct calls bypass the /admin res wraps, so magnitude is passed explicitly where the
     // handler knows it (the directory list); null elsewhere means single-record.
     rows,
+    // Record-level subject where the handler holds ONE person — "was MY record accessed?"
+    // answers through the same subjects field the /admin middleware path writes.
+    subjects: personId ? [{ type: 'person', id: personId }] : null,
   });
 }
 
@@ -206,7 +209,7 @@ router.post('/candidates/:candidateId/dismiss', async (req, res, next) => {
     const person = await Person.findById(c.personIdA, 'organizationId').lean();
     const grant = await requirePersonOrgGrant(req, res, person?.organizationId);
     if (!grant) return;
-    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-candidate-dismiss', route: 'POST /super-admin/persons/candidates/:candidateId/dismiss' });
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, personId: person._id, resource: 'person-candidate-dismiss', route: 'POST /super-admin/persons/candidates/:candidateId/dismiss' });
     c.status = 'dismissed';
     c.resolvedBy = req.user._id;
     c.resolvedAt = new Date();
@@ -267,7 +270,7 @@ router.post('/edit-proposals/:proposalId/approve', async (req, res, next) => {
     if (!person) return res.status(404).json({ error: 'Person not found' });
     const grant = await requirePersonOrgGrant(req, res, person.organizationId);
     if (!grant) return;
-    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-edit', route: 'POST /super-admin/persons/edit-proposals/:proposalId/approve' });
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, personId: person._id, resource: 'person-edit', route: 'POST /super-admin/persons/edit-proposals/:proposalId/approve' });
 
     // A super-admin lock pins a field — a proposal can't override it until it's unlocked.
     const lockedHit = Object.keys(prop.fields || {}).filter((f) => (person.lockedFields || []).includes(f));
@@ -331,7 +334,7 @@ router.get('/:personId', async (req, res, next) => {
     if (!grant) return;
     const view = await buildPersonOversight(person._id);
     if (!view) return res.status(404).json({ error: 'Person not found' });
-    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, route: 'GET /super-admin/persons/:personId' });
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, personId: person._id, route: 'GET /super-admin/persons/:personId' });
     res.json(view);
   } catch (err) { next(err); }
 });
@@ -346,7 +349,7 @@ router.patch('/:personId', async (req, res, next) => {
     if (!person) return res.status(404).json({ error: 'Person not found' });
     const grant = await requirePersonOrgGrant(req, res, person.organizationId);
     if (!grant) return;
-    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId' });
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, personId: person._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId' });
 
     const fields = {};
     for (const f of PERSON_IDENTITY_FIELDS) {
@@ -374,7 +377,7 @@ router.patch('/:personId/owner', async (req, res, next) => {
     if (!person) return res.status(404).json({ error: 'Person not found' });
     const grant = await requirePersonOrgGrant(req, res, person.organizationId);
     if (!grant) return;
-    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId/owner' });
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, personId: person._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId/owner' });
 
     const orgId = req.body.orgId || null;
     if (orgId) {
@@ -397,7 +400,7 @@ router.patch('/:personId/lock', async (req, res, next) => {
     if (!person) return res.status(404).json({ error: 'Person not found' });
     const grant = await requirePersonOrgGrant(req, res, person.organizationId);
     if (!grant) return;
-    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId/lock' });
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, personId: person._id, resource: 'person-edit', route: 'PATCH /super-admin/persons/:personId/lock' });
     const requested = Array.isArray(req.body.lockedFields) ? req.body.lockedFields : [];
     const invalid = requested.filter((f) => !PERSON_IDENTITY_FIELDS.includes(f));
     if (invalid.length) return res.status(400).json({ error: `Not lockable identity fields: ${invalid.join(', ')}` });
@@ -434,7 +437,7 @@ router.post('/:personId/split', async (req, res, next) => {
     if (!person) return res.status(404).json({ error: 'Person not found' });
     const grant = await requirePersonOrgGrant(req, res, person.organizationId);
     if (!grant) return;
-    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, resource: 'person-split', route: 'POST /super-admin/persons/:personId/split' });
+    logPersonAccess(req, { organizationId: person.organizationId, grantId: grant._id, personId: person._id, resource: 'person-split', route: 'POST /super-admin/persons/:personId/split' });
     const { mergeLogId } = req.body || {};
     if (!mongoose.isValidObjectId(mergeLogId)) return res.status(400).json({ error: 'mergeLogId is required' });
     const result = await splitPerson({ mergeLogId, byUserId: req.user._id });

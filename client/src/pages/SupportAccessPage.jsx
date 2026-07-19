@@ -62,12 +62,51 @@ function DeletionStatusChip({ status, overdue }) {
   );
 }
 
+// Record-level touch for a log row: which specific records this ONE request opened or exported.
+// Empty for request-level rows (list browses, and any row predating the feature) — those carry no
+// subjects. `subjectCount` is the honest total (may exceed the displayed sample); `subjectsTruncated`
+// means the id sample was capped, so the count is shown with a trailing "+".
+function RecordChips({ subjects, subjectCount, subjectsTruncated }) {
+  if (!subjects?.length || !subjectCount) return <span className="text-fg-subtle">—</span>;
+  // Group the display sample by type. Almost always a single type; a request touching more than one
+  // (e.g. a voter and its household) is rare — then we can only split the sample, so per-type counts
+  // fall back to the sample's own tally.
+  const byType = new Map();
+  for (const s of subjects) {
+    if (!byType.has(s.type)) byType.set(s.type, []);
+    byType.get(s.type).push(s.id);
+  }
+  const types = [...byType.keys()];
+  const single = types.length === 1;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {types.map((type) => {
+        const ids = byType.get(type);
+        const n = single ? subjectCount : ids.length;
+        return (
+          <span
+            key={type}
+            title={ids.join('\n')}
+            className="rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted"
+          >
+            {type} ×{n.toLocaleString()}{subjectsTruncated ? '+' : ''}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function SupportAccessPage() {
   const qc = useQueryClient();
 
-  // Access-log filters. grantId is set by an open session's "view its log →" link.
-  const [logFilters, setLogFilters] = useState({ organizationId: '', actorUserId: '', from: '', to: '', grantId: '' });
+  // Access-log filters. grantId is set by an open session's "view its log →" link; subjectId (a
+  // record ObjectId) narrows to rows that touched one specific record.
+  const [logFilters, setLogFilters] = useState({ organizationId: '', actorUserId: '', from: '', to: '', grantId: '', subjectId: '' });
   const [logSkip, setLogSkip] = useState(0);
+  // Raw text of the record-id box, kept separate so a half-typed / invalid id can show in the field
+  // without being sent as a filter (only a full 24-hex ObjectId becomes `subjectId`).
+  const [recordIdText, setRecordIdText] = useState('');
 
   // Deep link from the org detail page: ?organizationId=<id> pre-fills the log's org filter, then
   // consumes the param (same consume-once pattern as OrganizationsPage's ?billing=).
@@ -305,12 +344,15 @@ export default function SupportAccessPage() {
                   expires {new Date(g.expiresAt).toLocaleString()}
                   {g.lastAccessAt && <> · last request {new Date(g.lastAccessAt).toLocaleString()}</>}
                   {' · '}
-                  {/* Requests, not "records": one row per request — a 4,000-row export is ONE request. */}
+                  {/* Rows are per-request — a 4,000-row export is ONE request. Single-record opens and
+                      exports now also carry the subject ids they touched (shown in the log's Records
+                      column); list-browses stay request-level, with no subjects. */}
                   <button
                     type="button"
                     onClick={() => {
                       setLogSkip(0);
-                      setLogFilters({ organizationId: '', actorUserId: '', from: '', to: '', grantId: g.id });
+                      setLogFilters({ organizationId: '', actorUserId: '', from: '', to: '', grantId: g.id, subjectId: '' });
+                      setRecordIdText('');
                     }}
                     className="underline decoration-dotted underline-offset-2 hover:text-fg"
                     title="Show this session's rows in the access log below"
@@ -385,6 +427,23 @@ export default function SupportAccessPage() {
               className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg focus:border-brand-accent focus:outline-none"
             />
           </label>
+          <label className="flex items-center gap-1 text-xs text-fg-muted">
+            record id
+            <input
+              type="text"
+              value={recordIdText}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setRecordIdText(raw);
+                const v = raw.trim();
+                // Only a full 24-hex ObjectId becomes a filter; anything else clears it (blank input,
+                // partial paste). Paging resets like every other filter via setFilter.
+                setFilter('subjectId', /^[0-9a-f]{24}$/i.test(v) ? v : '');
+              }}
+              placeholder="24-hex record id"
+              className="w-48 rounded border border-border-strong bg-card px-2 py-1 font-mono text-xs text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none"
+            />
+          </label>
           {logFilters.grantId && (
             <span className="rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-accent">
               one session
@@ -398,10 +457,10 @@ export default function SupportAccessPage() {
               </button>
             </span>
           )}
-          {(logFilters.organizationId || logFilters.actorUserId || logFilters.from || logFilters.to || logFilters.grantId) && (
+          {(logFilters.organizationId || logFilters.actorUserId || logFilters.from || logFilters.to || logFilters.grantId || recordIdText) && (
             <button
               type="button"
-              onClick={() => { setLogSkip(0); setLogFilters({ organizationId: '', actorUserId: '', from: '', to: '', grantId: '' }); }}
+              onClick={() => { setLogSkip(0); setLogFilters({ organizationId: '', actorUserId: '', from: '', to: '', grantId: '', subjectId: '' }); setRecordIdText(''); }}
               className="text-xs text-fg-muted underline decoration-dotted underline-offset-2 hover:text-fg"
             >
               clear filters
@@ -426,6 +485,7 @@ export default function SupportAccessPage() {
                   <th className="px-3 py-2">Who</th>
                   <th className="px-3 py-2">Organization</th>
                   <th className="px-3 py-2">Opened</th>
+                  <th className="px-3 py-2" title="Specific records this request opened or exported — blank for list browses and rows predating record-level capture">Records</th>
                   <th className="px-3 py-2" title="Rows and payload size of the response — request-rows, not distinct voters">Read</th>
                   <th className="px-3 py-2">Why</th>
                 </tr>
@@ -440,6 +500,9 @@ export default function SupportAccessPage() {
                     <td className="px-3 py-2 text-fg">{e.organization}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-fg-muted" title={e.route || undefined}>
                       {e.method} {e.resource}
+                    </td>
+                    <td className="px-3 py-2">
+                      <RecordChips subjects={e.subjects} subjectCount={e.subjectCount} subjectsTruncated={e.subjectsTruncated} />
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-fg-muted">{fmtRead(e.rows, e.bytes)}</td>
                     <td className="px-3 py-2 text-fg-muted">{e.reason || '—'}</td>

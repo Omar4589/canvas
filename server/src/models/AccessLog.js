@@ -37,18 +37,40 @@ const accessLogSchema = new mongoose.Schema(
       index: true,
     },
     method: { type: String, required: true },
-    // The route TEMPLATE (/admin/voters/:voterId), not the filled path — so the log doesn't itself
-    // become a pile of voter ids.
+    // The route TEMPLATE (/admin/voters/:voterId), not the filled path.
     route: { type: String, required: true },
     // What class of thing was read, in words a non-engineer can audit.
     resource: { type: String, default: null }, // 'voters' | 'map' | 'reports' | 'surveys' | 'notes' | …
-    // Magnitude. The log is request-level (one row per request, never record ids), so these are what
-    // distinguish a one-voter peek from a 4,000-row export: rows = list length of the JSON/CSV payload
-    // (null = unknown or single-record), bytes = uncompressed payload size. Captured centrally by the
-    // res wraps in middleware/accessLog.js; null on rows written by direct recordAccess callers that
-    // don't measure (persons.js).
+    // Magnitude: rows = list length of the JSON/CSV payload (null = unknown or single-record),
+    // bytes = uncompressed payload size. Captured centrally by the res wraps in
+    // middleware/accessLog.js; null on rows written by direct recordAccess callers that don't
+    // measure (persons.js).
     rows: { type: Number, default: null },
     bytes: { type: Number, default: null },
+    // WHICH records this request opened — the record-level half of "was MY record accessed?"
+    // (2026-07-19; earlier rows predate it and are request-level only). Deliberately SCOPED:
+    // single-record opens/writes (a voter profile, a household drill, a person-console read) and
+    // EXPORTS (the frozen id set actually written to the file) carry subjects; LIST/BROWSE
+    // requests do not — a directory page listing 200 names is one browse, not 200 record
+    // accesses, and pretending otherwise would drown the signal the log exists to carry. Ids
+    // belong here: this IS the audit, its rows are keep-forever evidence, and an id that
+    // outlives its record is the proof of what was once read. Volume stays tiny — rows are only
+    // ever written for staff access under a grant. Capped per row (capSubjects in
+    // services/access/supportAccess.js): subjectsTruncated + subjectsTotal record the honest
+    // remainder for a pathological export.
+    subjects: {
+      type: [
+        {
+          type: { type: String, enum: ['voter', 'person', 'household', 'user'], required: true },
+          id: { type: mongoose.Schema.Types.ObjectId, required: true },
+        },
+      ],
+      default: undefined, // absent, not [], on request-level rows — keeps them visibly pre-feature/browse
+      _id: false,
+    },
+    subjectsTruncated: { type: Boolean, default: false },
+    // Real subject count when truncated (subjects.length is the cap, not the truth, then).
+    subjectsTotal: { type: Number, default: null },
     at: { type: Date, default: Date.now, index: true },
   },
   { timestamps: false } // `at` is the timestamp; a createdAt would be noise
@@ -64,5 +86,6 @@ const accessLogSchema = new mongoose.Schema(
 
 accessLogSchema.index({ organizationId: 1, at: -1 }); // "who looked at MY data?"
 accessLogSchema.index({ actorUserId: 1, at: -1 }); // "what did this person look at?"
+accessLogSchema.index({ 'subjects.id': 1, at: -1 }); // "was THIS record accessed?" (multikey)
 
 export const AccessLog = mongoose.model('AccessLog', accessLogSchema);

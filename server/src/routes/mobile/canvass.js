@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { z } from 'zod';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
@@ -23,6 +25,13 @@ import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 
 const router = Router();
+
+// Record-level audit tag for :voterId (see routes/admin/voters.js) — completeness: the one
+// voter-scoped route here is a field write, but a staff request under a grant logs the record.
+router.param('voterId', (req, res, next, voterId) => {
+  if (mongoose.isValidObjectId(voterId)) addAuditSubjects(res, 'voter', voterId);
+  next();
+});
 router.use(requireAuth, orgContext, requireOrgMember);
 
 function activeOrgId(req) {

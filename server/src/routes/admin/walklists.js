@@ -9,6 +9,7 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { Effort } from '../../models/Effort.js';
 import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import {
   parseAndMatch,
   resolveHouseholdsFromVoterMatch,
@@ -274,6 +275,11 @@ router.get('/:id/export.csv', async (req, res, next) => {
       ).lean(),
     ]);
     const hhById = new Map(households.map((h) => [String(h._id), h]));
+
+    // Record-level audit: the export's subjects are the voters ACTUALLY written to the file
+    // (post-DNC-filter) — not the raw frozen list. A staff export under a support grant logs
+    // exactly which records left the building (middleware/accessLog.js).
+    addAuditSubjects(res, 'voter', voters.map((v) => v._id));
 
     const headers = ['Voter ID', 'First Name', 'Last Name', 'Party', 'Age', 'Phone', 'Precinct', 'Address', 'City', 'State', 'ZIP'];
     const lines = [headers.join(',')];

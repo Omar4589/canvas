@@ -17,12 +17,20 @@ import { Organization } from '../../models/Organization.js';
 import { Turf } from '../../models/Turf.js';
 import { Pass } from '../../models/Pass.js';
 import { getPassStatusMap, getUserStatusMap } from '../../services/passes/passStatus.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 
 const router = Router();
 // Team leads reach the campaign Map (and its household-activity popup), so both routes
 // here allow leads — scoped per-request to a campaign they manage (see the gates below).
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
+
+// Record-level audit tag for every :householdId drill (see routes/admin/voters.js for the
+// pattern) — a staff read under a grant logs WHICH door was opened.
+router.param('householdId', (req, res, next, householdId) => {
+  if (mongoose.isValidObjectId(householdId)) addAuditSubjects(res, 'household', householdId);
+  next();
+});
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

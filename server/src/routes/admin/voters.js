@@ -10,6 +10,7 @@ import { VotedVoter } from '../../models/VotedVoter.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { VoterNote } from '../../models/VoterNote.js';
+import { AccessLog } from '../../models/AccessLog.js';
 import { recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
@@ -18,10 +19,20 @@ import { recomputeFullyDnc } from '../../services/dnc/recomputeFullyDnc.js';
 import { Person } from '../../models/Person.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
 import { propagateIdentity, identityEq } from '../../services/person/propagateIdentity.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { followMerged } from '../../services/person/resolvePerson.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
+
+// Record-level audit tag: EVERY route with :voterId — current and future — marks the voter as
+// this request's subject, so a staff read under a support grant logs WHICH record was opened
+// (middleware/accessLog.js picks the tag up at finish; member requests never write a row).
+// Invalid ids are skipped: a garbage param must not poison the audit write.
+router.param('voterId', (req, res, next, voterId) => {
+  if (mongoose.isValidObjectId(voterId)) addAuditSubjects(res, 'voter', voterId);
+  next();
+});
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -160,6 +171,49 @@ router.get('/:voterId', async (req, res, next) => {
     const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
     if (!profile) return res.status(404).json({ error: 'Voter not found' });
     res.json(profile);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// "Was this record accessed by Doorline?" — the customer-facing half of record-level audit.
+// Org-scoped and admin-gated like everything here: an org admin reads the AccessLog rows for
+// THEIR org whose subjects include this voter (or its household/person identity), and can
+// answer a voter's question without a support ticket. Staff identity is FIRST NAME ONLY —
+// the same disclosure the support-grant notice email makes. Rows exist only for staff access
+// under a grant, so "no entries" genuinely means "Doorline never opened this record"
+// (record-level detail began 2026-07-19; earlier staff access was logged per-request only).
+router.get('/:voterId/staff-access', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const voter = await Voter.findOne(
+      { _id: req.params.voterId, organizationId: activeOrgId(req) },
+      'householdId personId'
+    ).lean();
+    if (!voter) return res.status(404).json({ error: 'Voter not found' });
+
+    const subjectIds = [voter._id, voter.householdId, voter.personId].filter(Boolean);
+    const rows = await AccessLog.find(
+      { organizationId: activeOrgId(req), 'subjects.id': { $in: subjectIds } },
+      'at route resource actorUserId grantId subjects subjectsTotal'
+    )
+      .populate('actorUserId', 'firstName')
+      .populate('grantId', 'reason kind')
+      .sort({ at: -1 })
+      .limit(50)
+      .lean();
+
+    res.json({
+      count: rows.length,
+      entries: rows.map((r) => ({
+        at: r.at,
+        staffFirstName: r.actorUserId?.firstName || 'Doorline staff',
+        reason: r.grantId?.reason || null,
+        kind: r.resource,
+        // An export swept this record up with others; a non-export is a direct open.
+        export: /export/.test(r.route || '') || (r.subjectsTotal ?? r.subjects?.length ?? 0) > 1,
+      })),
+    });
   } catch (err) {
     next(err);
   }

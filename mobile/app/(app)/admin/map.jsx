@@ -192,10 +192,10 @@ function formatAnswer(answer) {
 }
 
 // A filter chip that opens a dropdown menu (canvasser / status / answer).
-function FilterChip({ label, active, open, onPress }) {
+function FilterChip({ label, active, open, onPress, style }) {
   const styles = useThemedStyles(makeStyles);
   return (
-    <Pressable onPress={onPress} style={[styles.filterChip, active && styles.filterChipActive]}>
+    <Pressable onPress={onPress} style={[styles.filterChip, active && styles.filterChipActive, style]}>
       <Text style={[styles.filterChipText, active && styles.filterChipTextActive]} numberOfLines={1}>
         {label}
       </Text>
@@ -1206,6 +1206,7 @@ export default function AdminMap() {
         </View>
 
         <View style={styles.chromeCard}>
+          {/* Row 1: the filters, horizontally scrollable (content-width chips). */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1235,13 +1236,15 @@ export default function AdminMap() {
             </View>
           )}
 
+          {/* Row 2: the layer toggle switches, stretched to fill the width like row 1 —
+              each an equal share, so the two rows read as one uniform grid. */}
           <View style={styles.subBar}>
-            <View style={styles.toggleChip}>
-              <Switch value={showPings} onValueChange={setShowPings} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
+            <View style={[styles.toggleChip, styles.chipFill]}>
+              <Switch style={styles.miniSwitch} value={showPings} onValueChange={setShowPings} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
               <Text style={styles.toggleLabel}>Pings</Text>
             </View>
-            <View style={styles.toggleChip}>
-              <Switch value={showFlags} onValueChange={setShowFlags} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
+            <View style={[styles.toggleChip, styles.chipFill]}>
+              <Switch style={styles.miniSwitch} value={showFlags} onValueChange={setShowFlags} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
               <Text style={styles.toggleLabel}>Flags</Text>
               {showFlags && openFlagCount > 0 ? (
                 <View style={styles.flagBadge}>
@@ -1249,8 +1252,8 @@ export default function AdminMap() {
                 </View>
               ) : null}
             </View>
-            <View style={styles.toggleChip}>
-              <Switch value={showOverlaps} onValueChange={setShowOverlaps} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
+            <View style={[styles.toggleChip, styles.chipFill]}>
+              <Switch style={styles.miniSwitch} value={showOverlaps} onValueChange={setShowOverlaps} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
               <Text style={styles.toggleLabel}>Overlaps</Text>
               {showOverlaps && overlapDoorCount > 0 ? (
                 <View style={styles.overlapBadge}>
@@ -1258,6 +1261,10 @@ export default function AdminMap() {
                 </View>
               ) : null}
             </View>
+          </View>
+
+          {/* Row 3: live status (left) + the house count (right). */}
+          <View style={styles.statusBar}>
             <LiveStatus
               live={live}
               onToggle={() => setLive((v) => !v)}
@@ -1840,25 +1847,38 @@ function makeStyles(t) {
 
   subBar: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.sm,
     gap: spacing.sm,
     alignItems: 'center',
   },
   toggleChip: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    // Same height as the row-1 filter chips; overflow:hidden so the native Switch can't push
+    // this row taller (it's larger on Android).
+    height: 36,
+    overflow: 'hidden',
     backgroundColor: colors.card,
     borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card,
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
+  // Shrink the native switch so it fits the filter-chip-height pill on both platforms.
+  miniSwitch: { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] },
   toggleLabel: { fontSize: 13, fontWeight: '600', color: colors.textPrimary },
+  // Row 3: live pill on the left, house count on the right.
+  statusBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
   flagBadge: {
     minWidth: 18,
     paddingHorizontal: 5,
@@ -1902,6 +1922,8 @@ function makeStyles(t) {
 
   chromeCard: { paddingTop: spacing.xs },
   chipScroll: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm, gap: spacing.sm },
+  // Row 2's toggle chips stretch to fill the width (equal thirds).
+  chipFill: { flex: 1, minWidth: 0 },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',

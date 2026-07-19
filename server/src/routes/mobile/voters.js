@@ -13,9 +13,17 @@ import { Voter } from '../../models/Voter.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
+
+// Record-level audit tag for :voterId (see routes/admin/voters.js) — staff reads through the
+// mobile surface under a grant log the record too.
+router.param('voterId', (req, res, next, voterId) => {
+  if (mongoose.isValidObjectId(voterId)) addAuditSubjects(res, 'voter', voterId);
+  next();
+});
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

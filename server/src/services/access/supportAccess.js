@@ -123,16 +123,43 @@ export async function requirePersonOrgGrant(req, res, organizationId) {
   return null;
 }
 
+// --- Record-level subjects ("was MY record accessed?") --------------------------------------
+//
+// Handlers that open ONE record (a voter profile, a household drill) or export a KNOWN id set
+// tag the response via addAuditSubject(s); the accessLog middleware picks the tags up at finish
+// and recordAccess stores them on the row. List/browse endpoints deliberately do NOT tag — the
+// row stays request-level with a rows count, as before. Tagging is unconditional and near-free:
+// the tags only ever persist when a row is written at all (staff access under a grant).
+//
+// SUBJECT_CAP bounds a pathological export row; capSubjects records the honest remainder
+// (subjectsTruncated + subjectsTotal) so a capped row can never quietly claim completeness.
+export const SUBJECT_CAP = 20000;
+
+export function addAuditSubjects(res, type, ids) {
+  if (!res?.locals || !ids) return;
+  if (!res.locals.auditSubjects) res.locals.auditSubjects = [];
+  for (const id of Array.isArray(ids) ? ids : [ids]) {
+    if (id) res.locals.auditSubjects.push({ type, id });
+  }
+}
+
+export function capSubjects(list) {
+  if (!list || !list.length) return {};
+  if (list.length <= SUBJECT_CAP) return { subjects: list };
+  return { subjects: list.slice(0, SUBJECT_CAP), subjectsTruncated: true, subjectsTotal: list.length };
+}
+
 /**
  * Record one staff read of customer voter content. Best-effort: an audit write must never take down
  * the request it is auditing — but it must also never silently vanish, so a failure is logged loudly.
  */
-export async function recordAccess({ actorUserId, organizationId, grantId, method, route, resource, rows = null, bytes = null }) {
+export async function recordAccess({ actorUserId, organizationId, grantId, method, route, resource, rows = null, bytes = null, subjects = null }) {
   try {
     await AccessLog.create({
       actorUserId, organizationId, grantId, method, route, resource,
       ...(rows != null ? { rows } : {}),
       ...(bytes != null ? { bytes } : {}),
+      ...(subjects && subjects.length ? capSubjects(subjects) : {}),
     });
     if (grantId) {
       await SupportAccessGrant.updateOne(

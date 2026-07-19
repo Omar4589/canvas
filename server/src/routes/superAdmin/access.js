@@ -173,6 +173,11 @@ router.get('/log', async (req, res, next) => {
     if (req.query.grantId && mongoose.isValidObjectId(req.query.grantId)) {
       q.grantId = req.query.grantId;
     }
+    // "Was THIS record accessed?" — matches the multikey subjects index. Only rows written
+    // since record-level capture shipped (2026-07-19) can match; older rows are request-level.
+    if (req.query.subjectId && mongoose.isValidObjectId(req.query.subjectId)) {
+      q['subjects.id'] = req.query.subjectId;
+    }
     const from = parseDayBound(req.query.from, false);
     const to = parseDayBound(req.query.to, true);
     if (from || to) {
@@ -207,6 +212,11 @@ router.get('/log', async (req, res, next) => {
         // uncompressed payload size. These are request-rows, NOT distinct voters.
         rows: r.rows ?? null,
         bytes: r.bytes ?? null,
+        // Record-level subjects (single-record opens + exports; absent on browse rows and on
+        // rows predating the feature). First few for display; the count is always honest.
+        subjects: r.subjects?.length ? r.subjects.slice(0, 5).map((s) => ({ type: s.type, id: String(s.id) })) : null,
+        subjectCount: r.subjectsTotal ?? (r.subjects?.length || null),
+        subjectsTruncated: !!r.subjectsTruncated,
       })),
       total,
     });

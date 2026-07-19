@@ -33,9 +33,17 @@ import { detectFlags } from '../../services/audit/flagDetection.js';
 import { FLAG_THRESHOLDS, SEVERITY_RANK, AUDIT_WINDOW_MAX_DAYS } from '../../services/audit/flagThresholds.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { VoterNote } from '../../models/VoterNote.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
+
+// Record-level audit tag: the /canvassers/:userId drills + export read ONE person's performance
+// data — a staff read under a support grant logs whose (see routes/admin/voters.js).
+router.param('userId', (req, res, next, userId) => {
+  if (mongoose.isValidObjectId(userId)) addAuditSubjects(res, 'user', userId);
+  next();
+});
 
 // Shared "far knock" threshold — the legacy far-counts/flagged feeds and the new GPS audit
 // all key off ONE number (services/audit/flagThresholds.js), so "far" means one thing.

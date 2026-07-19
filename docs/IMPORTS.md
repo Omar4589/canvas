@@ -266,6 +266,21 @@ today's `bad_coords` behavior byte-for-byte. `GeocodeCache` indexes build at wor
 (an amber "approximate" ring on `interpolated` pins) and a pin can be **corrected** — which sets
 `coordSource='corrected'`. See [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
 
+**Pin shield (the household twin of the voter hand-edit shield).** A corrected pin is a
+field-verified fact the file cannot know, so `applyImport` **will not revert it**. Before building
+the household ops it prefetches this campaign's `coordSource:'corrected'` addresses (batched `$in`,
+key-only projection — the narrow filter keeps it tiny even on a 100k-row file) and, for those,
+moves `location`/`coordSource`/`coordConfidence` out of `$set` into `$setOnInsert`: the existing
+door keeps its human-placed pin, while a row deleted between prefetch and write still inserts with
+complete coords (a field must never appear in both operators — Mongo rejects the conflict). Every
+other household field still takes the file. **`overwriteHandEdits` governs BOTH shields** — one
+keep-or-overwrite decision, not two competing toggles — so ticking it lets the file's coords win and
+resets `coordSource` to `'file'`. The count of pins left alone rides back as `keptPins` (on the
+`ImportJob`, `$max`-merged like the other counters, so a retry can't double it). Guard cases 8–11 in
+[importHandEdits.int.test.js](../server/test/importHandEdits.int.test.js) pin all four behaviors:
+kept by default, released on overwrite, never over-blocking an uncorrected door, and a brand-new
+address still inserting with coords.
+
 **Cost review (owner-only).** Every completed apply import persists its real lookup counts
 (`geocodedNew` = billable Geocodio hits, `geocodedCached`, `geocodeUnmatched`) plus
 `householdsWithFileCoords` (homes that arrived with coords, counted *before* geocoding fills the
