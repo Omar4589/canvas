@@ -318,3 +318,16 @@ into matching. It is **per-org matching only** — Persons are org-scoped, and t
 copy says so (the old "matched across orgs" wording described the pre-July-2026 behavior that was
 removed). Full design — the canonical Person model, the ownership state machine, and
 super-admin oversight — is in [PERSONS.md](PERSONS.md).
+
+**The namespace input is hidden in the UI (owner decision 2026-07-19) — the server path is
+untouched.** Every file we import is matched on `stateVoterId`, which `validateRow` hard-requires;
+the vendor namespace only applies to commercial vendor files carrying that vendor's own person ID,
+and no org has ever set one. It was hidden rather than relabeled because it is the **master switch
+for uid-first matching**: `UID` is an offerable column mapping, and a namespace + a column mapped to
+`UID` makes the uid the *authoritative* key over the state voter ID
+(`resolvePerson.js` — on disagreement it raises a `uid_svid_conflict` candidate and **links to the
+uid match**), so a non-unique column (precinct, county code) mapped there would collapse distinct
+humans onto one Person and then fan identity edits between them via `propagateIdentity`. With no
+namespace, `hasUid` is false and a mis-mapped `UID` column is inert — hiding the one input disarms
+the whole path. The state/setter and the request field remain wired (a legacy `ImportProfile` value
+still loads), so restoring the input is the only change needed if a vendor-data customer appears.

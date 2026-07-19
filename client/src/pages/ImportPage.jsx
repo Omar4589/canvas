@@ -704,13 +704,20 @@ export default function ImportPage() {
             )}
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <input
-                value={uidSource}
-                onChange={(e) => setUidSource(e.target.value)}
-                placeholder="Vendor uid namespace (e.g. i360) — optional"
-                title="If this vendor's file has a universal person ID (uid), name the vendor so re-imports match the same person within your organization even when the voter ID changes. Leave blank to match on voter ID only. Records are never matched or shared across organizations."
-                className="rounded border border-border-strong bg-card text-fg placeholder:text-fg-subtle px-2 py-1 text-xs"
-              />
+              {/* The vendor-uid namespace input is DELIBERATELY NOT RENDERED (owner decision
+                  2026-07-19). It only applies to commercial vendor files carrying that vendor's own
+                  person ID; every file we actually import is matched on State Voter ID, which is a
+                  hard-required column. Two reasons it's hidden rather than merely relabeled: admins
+                  read it as "name this import" and type something, and `UID` is an offerable column
+                  mapping — a namespace PLUS a column mapped to UID makes the uid the AUTHORITATIVE
+                  match key over the state voter ID (services/person/resolvePerson.js), so a
+                  non-unique column (precinct, county code) would collapse different people onto one
+                  Person. The namespace is the master switch for that whole path: with it absent,
+                  `hasUid` is false and a mis-mapped UID column is inert. Typing a name with no uid
+                  column was always harmless — this closes the case where both line up.
+                  The state + setter stay wired (a legacy saved profile still loads its value) and
+                  every request still sends the field, so NO server or matching logic changed.
+                  Restoring the input is all that's needed if a vendor-data customer ever appears. */}
               <input
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
