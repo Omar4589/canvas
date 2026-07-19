@@ -289,6 +289,9 @@ export const NAV_ICONS = {
   '/tags': IconTag,
   '/voters': IconVoters,
   '/admin/duplicate-surveys': IconDuplicate,
+  // Overlaps reuses the duplicate glyph — two canvassers on one door is the same idea, and
+  // navIcon() silently falls back to a generic dot for any key missing here.
+  '/overlaps': IconDuplicate,
   '/billing': IconBilling,
   '/super-admin': IconGauge,
   '/super-admin/users': IconUsers,

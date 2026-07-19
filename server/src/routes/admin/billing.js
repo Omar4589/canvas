@@ -75,9 +75,15 @@ router.patch('/settings', async (req, res, next) => {
     // explicit per-campaign override is unaffected by an org-level flip, and recomputing it
     // would be wasted work). Campaigns created before this feature carry trusted stats with no
     // restrictedDoorCount, so without this the counter-backed dashboard would disagree with the
-    // live-aggregated invoice export the moment someone opts in. Rare admin op, same hook as
-    // re-cut/bulk-restrict; swallowErrors so a slow recompute can't fail a setting that saved.
-    if (changed) {
+    // live-aggregated invoice export the moment someone opts in.
+    //
+    // Only on turning it ON: `stats.restrictedDoorCount` is read only while the policy resolves
+    // true, so turning it off is free, and the next turn-on repairs anything that drifted. This
+    // matters more here than on a single campaign — an org-wide flip fans out over every
+    // inheriting campaign, and an admin trying the setting out shouldn't re-aggregate the whole
+    // org's ledger twice. Rare admin op, same hook as re-cut/bulk-restrict; swallowErrors so a
+    // slow recompute can't fail a setting that already saved.
+    if (changed && data.billRestrictedDoors) {
       const inheriting = await Campaign.find(
         { organizationId: req.activeOrg._id, billRestrictedDoors: null },
         { _id: 1 }

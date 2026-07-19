@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
   Pressable,
   ScrollView,
   ActivityIndicator,
+  RefreshControl,
   StyleSheet,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { useRefresh } from '../../../lib/useRefresh';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { rangeFor } from '../../../lib/dateRanges';
 import { timeAgo, formatExact } from '../../../lib/datetime';
@@ -50,28 +52,42 @@ export default function AdminOverlaps() {
     typeof params.preset === 'string' ? params.preset : 'today'
   );
 
-  useEffect(() => {
-    loadActiveCampaign().then((c) => setCampaign(c || null));
-  }, []);
+  // Re-sync on FOCUS, not once on mount: this is a hidden Tabs.Screen, so it stays mounted across
+  // navigations — a mount-once load showed the previous campaign's overlaps after switching orgs or
+  // campaigns and coming back. Same pattern as notes.jsx / audit.jsx.
+  useFocusEffect(
+    useCallback(() => {
+      loadActiveCampaign().then((c) =>
+        setCampaign((prev) => (String(c?.id) !== String(prev?.id) ? c || null : prev))
+      );
+    }, [])
+  );
 
   const cId = campaign?.id;
   // Anchor presets to the campaign's tz; the query is already gated on cId (campaign loaded),
   // so it never fetches a device-tz window.
   const range = useMemo(() => rangeFor(preset, null, campaign?.timeZone), [preset, campaign?.timeZone]);
 
+  // The ANCHORED endpoint, deliberately not the date-windowed /overlaps this screen used to read.
+  // Windowed detection only fires when BOTH knocks fall inside the range — so on the default
+  // "Today" it stayed silent about a door knocked last week and again this morning, which is the
+  // single case this screen exists to catch. Anchoring detects across the whole pass and surfaces
+  // the collision because one knock is in view, naming the earlier one.
   const overlapsQ = useQuery({
-    queryKey: ['admin', 'reports', 'overlaps', cId, range.from, range.to],
+    queryKey: ['admin', 'reports', 'overlap-doors', cId, range.from, range.to],
     queryFn: () => {
       const p = new URLSearchParams();
       if (cId) p.set('campaignId', cId);
       if (range.from) p.set('from', range.from);
       if (range.to) p.set('to', range.to);
-      return api(`/admin/reports/overlaps?${p.toString()}`);
+      return api(`/admin/reports/overlap-doors?${p.toString()}`);
     },
     enabled: !!cId,
   });
 
-  const overlaps = overlapsQ.data?.overlaps || [];
+  const overlaps = overlapsQ.data?.doors || [];
+  const outOfRange = overlapsQ.data?.outOfRangeTotal || 0;
+  const { refreshing, onRefresh } = useRefresh([overlapsQ.refetch]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -112,14 +128,25 @@ export default function AdminOverlaps() {
 
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />
+        }
       >
-        {overlapsQ.isLoading ? (
+        {overlapsQ.error ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>Couldn't load overlaps: {overlapsQ.error.message}</Text>
+            <Pressable onPress={() => overlapsQ.refetch()} hitSlop={6}>
+              <Text style={styles.retry}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : overlapsQ.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : overlaps.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No overlap 🎉</Text>
             <Text style={styles.emptyText}>
               Every house in this range was visited by at most one canvasser.
+              {outOfRange > 0 ? ` ${outOfRange} more sit outside your dates — widen the range to see them.` : ''}
             </Text>
           </View>
         ) : (
@@ -130,18 +157,26 @@ export default function AdminOverlaps() {
                 {overlaps.length === 1 ? 'house' : 'houses'} with overlap
               </Text>
             </View>
+            {outOfRange > 0 ? (
+              <Text style={styles.outOfRangeHint}>
+                +{outOfRange} more outside your dates — widen the range to see them.
+              </Text>
+            ) : null}
 
             {overlaps.map((o) => (
-              <View key={o.household.id} style={styles.card}>
+              <View key={o.householdId} style={styles.card}>
                 <View style={styles.cardHead}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.address}>
-                      {o.household.addressLine1}
-                      {o.household.addressLine2 ? `, ${o.household.addressLine2}` : ''}
+                      {o.household
+                        ? `${o.household.addressLine1}${o.household.addressLine2 ? `, ${o.household.addressLine2}` : ''}`
+                        : 'Address unavailable'}
                     </Text>
-                    <Text style={styles.addressSub}>
-                      {o.household.city}, {o.household.state} {o.household.zipCode}
-                    </Text>
+                    {o.household ? (
+                      <Text style={styles.addressSub}>
+                        {o.household.city}, {o.household.state} {o.household.zipCode}
+                      </Text>
+                    ) : null}
                   </View>
                   <View style={styles.countBadge}>
                     <Text style={styles.countBadgeText}>{o.totalCanvassers} canvassers</Text>
@@ -169,11 +204,12 @@ export default function AdminOverlaps() {
                                 {actionLabel(c.actionType)}
                               </Text>
                               <Text style={styles.canvasserTimeAgo}>
-                                {timeAgo(c.timestamp)}
+                                {timeAgo(c.lastAt)}
                               </Text>
                             </View>
                             <Text style={styles.canvasserTimestamp}>
-                              {formatExact(c.timestamp, campaign?.timeZone)}
+                              {formatExact(c.lastAt, campaign?.timeZone)}
+                              {c.inRange === false ? ' · earlier' : ''}
                             </Text>
                           </View>
                         </View>
@@ -256,6 +292,20 @@ function makeStyles(t) {
   summaryValue: { ...type.title, color: colors.brand },
   summaryLabel: { ...type.caption },
 
+  outOfRangeHint: {
+    ...type.caption,
+    fontSize: 11,
+    marginBottom: spacing.sm,
+    marginLeft: spacing.xs,
+  },
+  errorBox: {
+    backgroundColor: colors.dangerBg,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  errorText: { ...type.body, fontSize: 13, color: colors.danger },
+  retry: { fontSize: 13, fontWeight: '700', color: colors.danger },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

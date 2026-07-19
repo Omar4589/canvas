@@ -44,6 +44,7 @@ export const CAMPAIGN_NAV = [
   { slug: 'timeline', label: 'Timeline', icon: '/timeline' },
   { slug: 'map', label: 'Map', icon: '/map' },
   { slug: 'audit', label: 'Audit', icon: '/audit' },
+  { slug: 'overlaps', label: 'Overlaps', icon: '/overlaps' },
   { slug: 'explorer', label: 'Survey Explorer', icon: '/surveys' },
   { slug: 'notes', label: 'Notes', icon: '/notes' },
   { slug: 'early-voting', label: 'Early Voting', icon: '/early-voting' },

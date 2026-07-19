@@ -20,6 +20,7 @@ const TimelinePage = lazy(() => import('./pages/TimelinePage.jsx'));
 const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
 const SurveyExplorerPage = lazy(() => import('./pages/SurveyExplorerPage.jsx'));
 const NotesPage = lazy(() => import('./pages/NotesPage.jsx'));
+const OverlapsPage = lazy(() => import('./pages/OverlapsPage.jsx'));
 const ClientReportsPage = lazy(() => import('./pages/ClientReportsPage.jsx'));
 const ClientReportBuilderPage = lazy(() => import('./pages/ClientReportBuilderPage.jsx'));
 const PublicReportLayout = lazy(() => import('./components/PublicReportLayout.jsx'));
@@ -159,6 +160,7 @@ export default function App() {
           <Route path="/campaigns/:campaignId/audit" element={<AuditPage />} />
           <Route path="/campaigns/:campaignId/explorer" element={<SurveyExplorerPage />} />
           <Route path="/campaigns/:campaignId/notes" element={<NotesPage />} />
+          <Route path="/campaigns/:campaignId/overlaps" element={<OverlapsPage />} />
           <Route path="/campaigns/:campaignId/early-voting" element={<EarlyVotingPage />} />
           <Route path="/campaigns/:campaignId/reports" element={<ClientReportsPage />} />
           <Route path="/campaigns/:campaignId/reports/:id" element={<ClientReportBuilderPage />} />

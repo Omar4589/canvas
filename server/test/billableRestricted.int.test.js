@@ -416,6 +416,27 @@ test('opting in self-heals a pre-feature campaign whose counters lack restricted
   await setOrgFlag(false);
 });
 
+test('toggling off and back on still lands on the right number', { skip }, async () => {
+  // The recompute fires only on transitions INTO "billed", so turning it off is free. That is
+  // only safe if the counter is never READ while off, and if the next turn-on repairs whatever
+  // drifted meanwhile. Simulate the worst case: counters corrupted while the policy is off.
+  await setOrgFlag(false);
+  await setCampaignFlag(true);
+  await setCampaignFlag(false);
+  await Campaign.updateOne({ _id: ctx.campaign._id }, { $set: { 'stats.restrictedDoorCount': 999 } });
+
+  // While OFF the bogus counter must not surface — billableDoors is knock-only.
+  const off = await call('GET', `/admin/reports/overview?campaignId=${ctx.campaign._id}`, auth());
+  assert.equal(off.json.totals.billableDoors, EXPECTED_KNOCKS, 'a stale counter is invisible while off');
+
+  // Turning it back on repairs the counter before anything reads it.
+  await setCampaignFlag(true);
+  const on = await call('GET', `/admin/reports/overview?campaignId=${ctx.campaign._id}`, auth());
+  assert.equal(on.json.totals.billableDoors, EXPECTED_KNOCKS + EXPECTED_RESTRICTED_DOORS);
+  assert.equal(on.json.totals.restrictedDoors, EXPECTED_RESTRICTED_DOORS, '999 must be gone');
+  await setCampaignFlag(null);
+});
+
 test('a team lead cannot change the billable-door policy', { skip }, async () => {
   const r = await call('PATCH', `/admin/campaigns/${ctx.campaign._id}`, {
     token: ctx.leadTok, orgId: ctx.org._id, body: { billRestrictedDoors: true },

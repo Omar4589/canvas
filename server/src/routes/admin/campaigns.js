@@ -14,6 +14,7 @@ import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
 import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
+import { resolveBillRestricted } from '../../services/reports/billRestricted.js';
 import { deleteCampaignCascade } from '../../services/campaigns/deleteCampaign.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 
@@ -243,7 +244,7 @@ router.patch('/:campaignId', async (req, res, next) => {
     // hasCanvassed like `type` is: this is a read-time reporting policy — no stored count
     // changes — so flipping it mid-campaign is legitimate and fully reversible.
     //
-    // `restrictedDoorsChanged` triggers a counter recompute AFTER the save (below). A campaign
+    // `restrictedDoorsChanged` may trigger a counter recompute AFTER the save (below). A campaign
     // that predates this feature has trusted stats with NO restrictedDoorCount, so the
     // counter-backed dashboard would report billableDoors = knocks while the live-aggregated
     // invoice export reported the real, higher number — the toggle would look broken on one
@@ -277,11 +278,27 @@ router.patch('/:campaignId', async (req, res, next) => {
     // No survey-required guard here — a survey campaign may exist without a template; the
     // requirement is enforced at round activation (passes.js) instead.
     await campaign.save();
+    // Recompute ONLY on a transition INTO "restricted doors are billed" — not on every flip.
+    // `stats.restrictedDoorCount` is read only while the policy resolves true, so a stale value
+    // under an off policy is harmless, and the next turn-on is what repairs it. Turning the
+    // setting OFF is therefore free, and an admin toggling back and forth doesn't re-aggregate
+    // the ledger each time.
+    //
+    // The obvious cheaper guard — "skip if the field already exists" — does NOT work: an
+    // unrelated .save() materializes subdoc defaults, so merely renaming a pre-feature campaign
+    // stamps a WRONG restrictedDoorCount of 0 while leaving reconciledAt trusted (the same trap
+    // the reconciledAt comment in models/Campaign.js documents). Nor can the field default to
+    // null to make absence detectable: bumpCampaignStats $incs it on the canvasser hot path, and
+    // $inc throws on null. Keying off the transition sidesteps both.
+    //
     // Rare admin op → full recompute, the same hook re-cut/bulk-restrict use. swallowErrors
     // because counters are a read optimization: a failed recompute must not fail a save that
     // already committed (the next reconcile repairs it).
     if (restrictedDoorsChanged) {
-      await recomputeCampaignStats(campaign._id, { swallowErrors: true });
+      const org = await Organization.findById(orgId, { billRestrictedDoors: 1 }).lean();
+      if (resolveBillRestricted(campaign, org)) {
+        await recomputeCampaignStats(campaign._id, { swallowErrors: true });
+      }
     }
     res.json({ campaign });
   } catch (err) {
