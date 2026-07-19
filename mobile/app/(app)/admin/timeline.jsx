@@ -314,8 +314,18 @@ export default function AdminTimeline() {
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
     // Pace stays raw effort: it's a per-person rate, not a billing figure.
     const doorsPerHour = hours > 0 ? rawDoors / hours : null;
-    return { doors, surveys, connPct, doorsPerHour };
-  }, [coordRows, data.billableKnocks]);
+    // The invoice figure when this campaign bills for restricted homes (a door the canvasser
+    // walked to and couldn't reach). Never fed into connPct — nobody answered a locked gate.
+    return {
+      doors,
+      surveys,
+      connPct,
+      doorsPerHour,
+      billableDoors: data.billableDoors ?? doors,
+      restrictedDoors: data.restrictedDoors ?? 0,
+      billRestricted: Boolean(data.billRestrictedDoors),
+    };
+  }, [coordRows, data.billableKnocks, data.billableDoors, data.restrictedDoors, data.billRestrictedDoors]);
 
   // "Knocking N of M": M = the current roster UNION everyone who knocked in the range; N = how
   // many of them actually knocked. The roster alone undercounted both numbers — a canvasser who
@@ -381,7 +391,13 @@ export default function AdminTimeline() {
   const rangeLabel = labelForRange(range);
 
   const kpiTiles = [
-    { label: 'Doors', value: kpis.doors.toLocaleString(), sub: `Distinct doors · ${rangeLabel}` },
+    {
+      label: kpis.billRestricted ? 'Billable doors' : 'Doors',
+      value: (kpis.billRestricted ? kpis.billableDoors : kpis.doors).toLocaleString(),
+      sub: kpis.billRestricted
+        ? `${kpis.doors.toLocaleString()} knocked + ${kpis.restrictedDoors.toLocaleString()} restricted`
+        : `Distinct doors · ${rangeLabel}`,
+    },
     { label: 'Survey doors', value: kpis.surveys.toLocaleString(), sub: 'Doors with a survey' },
     {
       label: 'Connection rate',

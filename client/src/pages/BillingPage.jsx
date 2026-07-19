@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getActiveOrgId } from '../api/client.js';
 import { BillingPill, fmtUsd } from '../lib/billingStatus.jsx';
 
@@ -30,11 +30,25 @@ function fmtShort(d) {
 // and the billing contact all live on the super-admin side — this page is deliberately read-only.
 export default function BillingPage() {
   const orgId = getActiveOrgId();
+  const qc = useQueryClient();
 
   const billingQ = useQuery({
     queryKey: ['admin', 'billing', orgId],
     queryFn: () => api('/admin/billing'),
     enabled: Boolean(orgId),
+  });
+
+  // The org-wide default for counting restricted doors as billable doors. Individual
+  // campaigns can still override it from the campaign edit drawer.
+  const setRestricted = useMutation({
+    mutationFn: (billRestrictedDoors) =>
+      api('/admin/billing/settings', { method: 'PATCH', body: { billRestrictedDoors } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'billing', orgId] });
+      // Every door total on the report surfaces shifts with this — see CampaignsPage.
+      qc.invalidateQueries({ queryKey: ['reports'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+    },
   });
 
   const data = billingQ.data;
@@ -71,8 +85,8 @@ export default function BillingPage() {
             )}
             <p className="mt-3 text-sm text-fg-muted">
               Plan: <span className="font-medium text-fg">{fmtUsd(data.pricePerCampaignCents)} per active campaign / month</span>
-              . A campaign starts billing the month it records its first knock and stops after the
-              month it’s archived.
+              . A campaign starts billing the month of its first field visit — a knock, or a
+              restricted home a canvasser walked to — and stops after the month it’s archived.
             </p>
             {data.usage && (
               <div className="mt-3 rounded-lg border border-border bg-sunken px-3 py-2.5">
@@ -98,7 +112,9 @@ export default function BillingPage() {
                           {c.name}
                           <span className="text-fg-subtle">
                             {c.isActive ? ' · active' : ` · archived ${fmtShort(c.archivedAt)}`}
-                            {c.firstKnockAt && ` · first knock ${fmtShort(c.firstKnockAt)}`}
+                            {c.firstKnockAt
+                              ? ` · billing started ${fmtShort(c.firstKnockAt)}`
+                              : ' · billing not started'}
                           </span>
                         </span>
                         <span className="shrink-0 font-medium text-fg">{fmtUsd(c.amountCents)}</span>
@@ -122,6 +138,34 @@ export default function BillingPage() {
             </a>
           </div>
 
+          {/* Your OWN invoicing policy, not Doorline's. Lives on this page because it is a
+              billing-counting decision and this page already has the bill-payer's attention. */}
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+            <h2 className="text-sm font-semibold text-fg">Your invoicing</h2>
+            <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-fg">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={Boolean(data.billRestrictedDoors)}
+                disabled={setRestricted.isPending}
+                onChange={(e) => setRestricted.mutate(e.target.checked)}
+              />
+              <span>
+                Count restricted homes as billable doors
+                <span className="mt-1 block text-xs text-fg-muted">
+                  A restricted home is one your canvasser walked to and couldn’t reach — a locked
+                  gate or a secured building. Turn this on if you invoice your client per door and
+                  want those trips included. It changes only the door totals on your exports and
+                  reports; your contact and survey rates stay based on doors that were actually
+                  knocked, and it never changes what Doorline charges you. Individual campaigns can
+                  override this from the campaign’s edit screen.
+                </span>
+              </span>
+            </label>
+            {setRestricted.error && (
+              <p className="mt-2 text-xs text-danger">{setRestricted.error.message}</p>
+            )}
+          </div>
         </>
       )}
     </div>

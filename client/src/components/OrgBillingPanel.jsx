@@ -137,17 +137,20 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
   function downloadCsv() {
     if (!stmt) return;
     const rows = [
-      ['Campaign', 'Households', 'First knock', 'Archived', 'Knocks this month', 'Billable', 'Amount'],
+      ['Campaign', 'Households', 'Billing started', 'Archived', 'Knocks this month', 'Restricted doors', 'Billable doors', 'Billable', 'Amount'],
       ...stmt.lines.map((l) => [
         l.name,
         l.households,
         l.firstKnockAt ? new Date(l.firstKnockAt).toISOString().slice(0, 10) : '',
         l.archivedAt ? new Date(l.archivedAt).toISOString().slice(0, 10) : '',
         l.knocksThisMonth,
+        l.restrictedDoorsThisMonth,
+        // The org's own invoice figure; equals knocks when it doesn't bill restricted doors.
+        l.billRestrictedDoors ? l.billableDoorsThisMonth : l.knocksThisMonth,
         l.billable ? 'yes' : 'no',
         (l.amountCents / 100).toFixed(2),
       ]),
-      ['Total', '', '', '', '', '', (stmt.totalCents / 100).toFixed(2)],
+      ['Total', '', '', '', '', '', '', '', (stmt.totalCents / 100).toFixed(2)],
     ];
     const csv = rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -427,7 +430,9 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
               <tr>
                 <th className="py-1 pr-3">Campaign</th>
                 <th className="py-1 pr-3">Households</th>
-                <th className="py-1 pr-3">First knock</th>
+                {/* The billing clock, started by the first field visit — a knock OR a
+                    restricted home a canvasser walked to (a desk bulk-restrict doesn't count). */}
+                <th className="py-1 pr-3">Billing started</th>
                 <th className="py-1 pr-3">Knocks ({month})</th>
                 <th className="py-1 pr-3 text-right">Amount</th>
               </tr>
@@ -441,8 +446,18 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
                     {l.billable ? '' : l.firstKnockAt ? '' : ' — not billing yet'}
                   </td>
                   <td className="py-1.5 pr-3">{l.households.toLocaleString()}</td>
-                  <td className="py-1.5 pr-3">{fmtDate(l.firstKnockAt)}</td>
-                  <td className="py-1.5 pr-3">{l.knocksThisMonth.toLocaleString()}</td>
+                  <td className="py-1.5 pr-3">{l.firstKnockAt ? fmtDate(l.firstKnockAt) : 'Not started'}</td>
+                  <td className="py-1.5 pr-3">
+                    {l.knocksThisMonth.toLocaleString()}
+                    {/* Only worth showing when the org invoices restricted doors — otherwise
+                        billableDoorsThisMonth is just a duplicate of the knock count. */}
+                    {l.billRestrictedDoors && l.restrictedDoorsThisMonth > 0 && (
+                      <span className="ml-1 text-xs text-fg-subtle">
+                        (+{l.restrictedDoorsThisMonth.toLocaleString()} restricted ={' '}
+                        {l.billableDoorsThisMonth.toLocaleString()} billable doors)
+                      </span>
+                    )}
+                  </td>
                   <td className="py-1.5 pr-3 text-right">{l.billable ? fmtUsd(l.amountCents) : '—'}</td>
                 </tr>
               ))}

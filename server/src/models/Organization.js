@@ -32,6 +32,15 @@ const organizationSchema = new mongoose.Schema(
     // Anchor timezone for ORG-WIDE rollups (multi-campaign), where a single campaign's
     // zone doesn't apply. Per-campaign views use Campaign.timeZone. Overridable in the UI.
     timeZone: { type: String, default: 'America/New_York' },
+    // Org-wide DEFAULT for "do restricted (inaccessible) doors count toward the billable door
+    // totals we invoice our client from". Campaign.billRestrictedDoors overrides it per campaign
+    // (null there = inherit this); resolve via services/reports/billRestricted.js — never read
+    // either field directly. Default false = today's behavior (restricted is never a billable
+    // door). This affects ONLY door totals on invoice-facing surfaces: knocks, every rate, and
+    // the coverage funnel are untouched in both states (docs/METRICS.md). It also has no bearing
+    // on what DOORLINE charges this org — our price is flat per campaign per month.
+    // Set by the org's own billing admin (PATCH /admin/billing/settings).
+    billRestrictedDoors: { type: Boolean, default: false },
     // Dormancy-deletion warning bookkeeping (services/retention/triggers.js). `dormancyWarnedAt`
     // is stamped ONLY when the warning email was actually accepted for delivery (or the org has
     // no reachable recipient at all) — the purge refuses to run without it, and refuses before

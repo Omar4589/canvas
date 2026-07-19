@@ -263,6 +263,75 @@ test('overlap-doors is DAY-AGNOSTIC: H (same pass, 4 days apart) collides; F (di
   assert.strictEqual(pass1Row.canvassers.length, 2, 'both Chad and Chris are named on the pass');
 });
 
+// ── ANCHORED date scoping on /overlap-doors (owner scenario 2026-07-19) ──
+// H is the case that matters: Chad DAY1, Chris DAY5, same pass. Viewing only DAY5, the admin must
+// still be told this door was already worked — the windowed /overlaps below structurally cannot.
+
+test('ANCHORED: a window covering only Chris\'s day still surfaces H, and names Chad\'s earlier knock', { skip }, async () => {
+  const { adminTok, org, camp, H, chad, chris } = ctx;
+  const r = await call(
+    'GET',
+    `/api/admin/reports/overlap-doors?campaignId=${camp._id}&from=${DAY5}&to=${DAY5}`,
+    { token: adminTok, orgId: org._id }
+  );
+  assert.strictEqual(r.status, 200);
+  assert.ok(r.json.householdIds.map(String).includes(String(H._id)),
+    'the DAY5 knock anchors the collision into view — a windowed rule would have found nothing');
+  assert.strictEqual(r.json.total, 1);
+  assert.strictEqual(r.json.outOfRangeTotal, 0, 'H is surfaced, so it is not also counted as hidden');
+
+  const pass1Row = r.json.doors
+    .find((d) => String(d.householdId) === String(H._id))
+    .passes.find((p) => String(p.passId) === String(ctx.pass1._id));
+  assert.strictEqual(pass1Row.canvassers.length, 2, 'BOTH canvassers are named, not just the in-window one');
+  const byId = new Map(pass1Row.canvassers.map((c) => [c.userId, c]));
+  const chrisRow = byId.get(String(chris._id));
+  const chadRow = byId.get(String(chad._id));
+  assert.strictEqual(chrisRow.inRange, true, "Chris's DAY5 knock is the one you're looking at");
+  assert.strictEqual(chadRow.inRange, false, "Chad's DAY1 knock is the earlier one that made it a collision");
+  assert.ok(chadRow.lastAt, 'the earlier knock carries its date so the UI can print it');
+  assert.strictEqual(pass1Row.canvassers[0].userId, String(chris._id), 'newest knock sorts first');
+});
+
+test('ANCHORED: a window containing NEITHER knock hides H but counts it as outOfRangeTotal', { skip }, async () => {
+  const { adminTok, org, camp, H } = ctx;
+  const r = await call(
+    'GET',
+    `/api/admin/reports/overlap-doors?campaignId=${camp._id}&from=${DAY2}&to=${DAY2}`,
+    { token: adminTok, orgId: org._id }
+  );
+  assert.strictEqual(r.status, 200);
+  assert.ok(!r.json.householdIds.map(String).includes(String(H._id)), 'nothing to ring on a day with no knocks');
+  assert.strictEqual(r.json.total, 0);
+  assert.strictEqual(r.json.outOfRangeTotal, 1, 'the collision is still real — surfaced as the "outside your dates" hint');
+});
+
+test('ANCHORED: ?userId keeps collisions INVOLVING that canvasser and drops the rest', { skip }, async () => {
+  const { adminTok, org, camp, H, chris, admin } = ctx;
+  const mine = await call(
+    'GET',
+    `/api/admin/reports/overlap-doors?campaignId=${camp._id}&userId=${chris._id}`,
+    { token: adminTok, orgId: org._id }
+  );
+  assert.strictEqual(mine.status, 200);
+  assert.ok(mine.json.householdIds.map(String).includes(String(H._id)),
+    'Chris is in the collision — filtering to him must NOT zero it out (the post-grouping trap)');
+
+  const other = await call(
+    'GET',
+    `/api/admin/reports/overlap-doors?campaignId=${camp._id}&userId=${admin._id}`,
+    { token: adminTok, orgId: org._id }
+  );
+  assert.strictEqual(other.status, 200);
+  assert.strictEqual(other.json.total, 0, 'a canvasser who never knocked H sees no collision');
+});
+
+test('/overlap-doors requires campaignId (unscoped it would scan the org ledger)', { skip }, async () => {
+  const { adminTok, org } = ctx;
+  const bare = await call('GET', '/api/admin/reports/overlap-doors', { token: adminTok, orgId: org._id });
+  assert.strictEqual(bare.status, 400, 'an ADMIN gets 400; a lead is stopped earlier by the router gate (see below)');
+});
+
 test('contrast: the date-scoped /overlaps over a window covering only Chris\'s day does NOT flag H', { skip }, async () => {
   const { adminTok, org, camp, H } = ctx;
   // DAY5 covers only Chris's not_home; Chad's survey was DAY1 — outside. So the windowed

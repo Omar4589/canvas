@@ -37,6 +37,10 @@ insights, early voting, and client reports.
 ## What a team lead can never do
 
 - **Create, archive, or delete a campaign** — admins shape the campaign list; a lead is handed campaigns.
+- **Change a campaign's key dates, type, state, or its billable-door policy** (whether restricted
+  homes count toward invoiced door totals — see [BILLING.md](BILLING.md)). A lead edits their
+  campaign's name, survey, and timezone; anything that changes what gets *invoiced* stays with org
+  admins. The server refuses with a 403 naming the field, so this can't be bypassed from the UI.
 - **Touch org-wide libraries** — the **survey template library** and the **tag library**. A lead can
   *read* both (to attach a survey to their campaign and to filter by tag) but not create/edit/delete
   templates or tags.

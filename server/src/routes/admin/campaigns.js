@@ -5,6 +5,7 @@ import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { Campaign } from '../../models/Campaign.js';
+import { Organization } from '../../models/Organization.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Household } from '../../models/Household.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
@@ -34,6 +35,9 @@ const createSchema = z.object({
   earlyVotingStart: isoDateSchema.nullable().optional(),
   earlyVotingEnd: isoDateSchema.nullable().optional(),
   datesNote: z.string().trim().max(280).optional(),
+  // TRI-STATE: null = inherit the org default, true/false = explicit override. `.nullable()`
+  // is the whole point — a plain boolean would make "inherit" unexpressible from the UI.
+  billRestrictedDoors: z.boolean().nullable().optional(),
 });
 
 const updateSchema = createSchema.partial();
@@ -129,7 +133,11 @@ router.get('/', async (req, res, next) => {
       .populate('surveyTemplateId', 'name version')
       .lean();
     const withMetrics = await withCounts(campaigns, activeOrgId(req));
-    res.json({ campaigns: withMetrics });
+    // The org default for the billable-door policy, so the edit drawer can LABEL what
+    // "use the organization default" currently resolves to. Every campaign row already
+    // carries its own tri-state override via the lean spread.
+    const org = await Organization.findById(activeOrgId(req), { billRestrictedDoors: 1 }).lean();
+    res.json({ campaigns: withMetrics, orgBillRestrictedDoors: Boolean(org?.billRestrictedDoors) });
   } catch (err) {
     next(err);
   }
@@ -169,6 +177,8 @@ router.post('/', async (req, res, next) => {
       earlyVotingStart: data.earlyVotingStart ?? null,
       earlyVotingEnd: data.earlyVotingEnd ?? null,
       datesNote: data.datesNote ?? '',
+      // Undefined → null → inherit the org default. New campaigns never hard-code a value.
+      billRestrictedDoors: data.billRestrictedDoors ?? null,
       createdBy: req.user._id,
     });
     // Lifetime marketing counter. req.subscription is attached by the entitlement middleware, so the
@@ -191,10 +201,10 @@ router.patch('/:campaignId', async (req, res, next) => {
     }
     const data = updateSchema.parse(req.body);
     // A lead is a campaign-scoped admin: they can edit their campaign's name,
-    // survey, and timezone — but archiving (isActive), the type, the state, and
-    // the key dates stay with org admins.
+    // survey, and timezone — but archiving (isActive), the type, the state, the
+    // key dates, and the billable-door policy stay with org admins.
     if (!isOrgAdmin(req)) {
-      for (const field of ['isActive', 'type', 'state', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd', 'datesNote']) {
+      for (const field of ['isActive', 'type', 'state', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd', 'datesNote', 'billRestrictedDoors']) {
         if (data[field] !== undefined) {
           return res.status(403).json({ error: `Only an org admin can change a campaign's ${field}.` });
         }
@@ -228,6 +238,10 @@ router.patch('/:campaignId', async (req, res, next) => {
     if (data.earlyVotingStart !== undefined) campaign.earlyVotingStart = data.earlyVotingStart;
     if (data.earlyVotingEnd !== undefined) campaign.earlyVotingEnd = data.earlyVotingEnd;
     if (data.datesNote !== undefined) campaign.datesNote = data.datesNote;
+    // Explicit null restores "inherit the org default". Deliberately NOT locked by
+    // hasCanvassed like `type` is: this is a read-time reporting policy — no stored count
+    // changes — so flipping it mid-campaign is legitimate and fully reversible.
+    if (data.billRestrictedDoors !== undefined) campaign.billRestrictedDoors = data.billRestrictedDoors;
     if (data.isActive !== undefined && data.isActive !== campaign.isActive) {
       campaign.isActive = data.isActive;
       // Billing reads this: a campaign bills through its ARCHIVE month, not

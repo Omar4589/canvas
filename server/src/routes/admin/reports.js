@@ -19,13 +19,16 @@ import { Organization } from '../../models/Organization.js';
 import { zonedDayRange, tzAbbrev, zonedDayStr } from '../../utils/timezone.js';
 import {
   KNOCK_ACTIONS,
+  BILLABLE_WITH_RESTRICTED,
   NOT_BULK,
   knocksPipeline,
+  billableDoorsOf,
   connectionRate,
   contactRate,
   coverageBucketExpr,
   teamFoldStage,
 } from '../../services/reports/aggregations.js';
+import { billRestrictedFor, resolveBillRestricted } from '../../services/reports/billRestricted.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps, computeOverlapDoors } from '../../services/reports/overlaps.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
@@ -306,7 +309,10 @@ router.get('/overview', async (req, res, next) => {
     let statTotals = null;
     if (!cFilter.effortId) {
       const scopeFilter = cFilter.campaignId ? { _id: cFilter.campaignId } : { organizationId: orgId };
-      const statDocs = await Campaign.find(scopeFilter, { stats: 1 }).lean();
+      const [statDocs, orgDefaults] = await Promise.all([
+        Campaign.find(scopeFilter, { stats: 1, billRestrictedDoors: 1 }).lean(),
+        Organization.findById(orgId, { billRestrictedDoors: 1 }).lean(),
+      ]);
       if (statDocs.length && statDocs.every((d) => d.stats?.reconciledAt)) {
         statTotals = statDocs.reduce(
           (acc, d) => ({
@@ -315,11 +321,27 @@ router.get('/overview', async (req, res, next) => {
             litKnocks: acc.litKnocks + (d.stats.litKnockCount || 0),
             refusedKnocks: acc.refusedKnocks + (d.stats.refusedKnockCount || 0),
             surveysSubmitted: acc.surveysSubmitted + (d.stats.surveyCount || 0),
+            // Resolved PER CAMPAIGN, then summed: an org-wide rollup can span campaigns that
+            // disagree about the policy, and a single org-level check would silently apply one
+            // campaign's answer to all of them. A campaign that doesn't bill restricted doors
+            // contributes only its knocks — which is exactly `billableDoors === knocks` there.
+            billableDoors:
+              acc.billableDoors +
+              (d.stats.knockCount || 0) +
+              (resolveBillRestricted(d, orgDefaults) ? d.stats.restrictedDoorCount || 0 : 0),
+            restrictedDoors: acc.restrictedDoors + (d.stats.restrictedDoorCount || 0),
           }),
-          { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, surveysSubmitted: 0 }
+          {
+            knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0,
+            surveysSubmitted: 0, billableDoors: 0, restrictedDoors: 0,
+          }
         );
       }
     }
+
+    // Only needed by the live fallback below — the counter path already resolved the flag PER
+    // CAMPAIGN while summing, which the single scalar here couldn't express for an org-wide scope.
+    const liveBillRestricted = statTotals ? false : await billRestrictedFor(orgId, cFilter.campaignId);
 
     const [
       households,
@@ -346,8 +368,10 @@ router.get('/overview', async (req, res, next) => {
         { $match: cFilter },
         { $group: { _id: '$actionType', count: { $sum: 1 } } },
       ]),
-      // Billable knocks: distinct (household, pass). See knocksPipeline.
-      statTotals ? [] : CanvassActivity.aggregate(knocksPipeline(cFilter)),
+      // Billable knocks: distinct (household, pass). See knocksPipeline. The live fallback runs
+      // with includeRestricted so it yields the same pair of numbers the counter path does —
+      // `knocks` is identical either way, so nothing else on this response shifts.
+      statTotals ? [] : CanvassActivity.aggregate(knocksPipeline(cFilter, { includeRestricted: true })),
     ]);
 
     const voterIds = voterDocs.map((h) => h._id);
@@ -379,7 +403,10 @@ router.get('/overview', async (req, res, next) => {
       else if (r._id === 'restricted') events.restricted = r.count;
     }
 
-    const k = statTotals || knockAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
+    const k = statTotals ||
+      knockAgg[0] || {
+        knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, billableDoors: 0, restrictedDoors: 0,
+      };
     const surveyedVoters = surveyedVoterIds.length;
 
     res.json({
@@ -394,6 +421,12 @@ router.get('/overview', async (req, res, next) => {
         surveyedKnocks: k.surveyedKnocks,
         litKnocks: k.litKnocks,
         refusedKnocks: k.refusedKnocks,
+        // Equal to `knocks` unless the campaign(s) in scope bill restricted doors. Rates
+        // (below) and homesKnocked (above) stay knock-based in every case. The counter path
+        // already applied each campaign's own policy while summing; only the live single-scope
+        // fallback still needs the helper.
+        billableDoors: statTotals ? k.billableDoors : billableDoorsOf(k, liveBillRestricted),
+        restrictedDoors: k.restrictedDoors ?? 0,
         connectionRate: connectionRate(k),
         contactRate: contactRate(k),
       },
@@ -437,8 +470,11 @@ router.get('/campaign-rollup', async (req, res, next) => {
       }
     }
 
-    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1, electionDay: 1, earlyVotingStart: 1, earlyVotingEnd: 1, datesNote: 1, stats: 1 }).lean();
+    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1, electionDay: 1, earlyVotingStart: 1, earlyVotingEnd: 1, datesNote: 1, stats: 1, billRestrictedDoors: 1 }).lean();
     const ids = campaigns.map((c) => c._id);
+    // Org default for the billable-door policy; each row resolves its own override against it,
+    // because a rollup can legitimately span campaigns that answer differently.
+    const orgDefaults = await Organization.findById(organizationId, { billRestrictedDoors: 1 }).lean();
 
     if (ids.length === 0) {
       return res.json({
@@ -452,6 +488,8 @@ router.get('/campaign-rollup', async (req, res, next) => {
           surveyedKnocks: 0,
           litKnocks: 0,
           refusedKnocks: 0,
+          billableDoors: 0,
+          restrictedDoors: 0,
           surveysSubmitted: 0,
           surveyedVoters: 0,
           litDropped: 0,
@@ -530,7 +568,14 @@ router.get('/campaign-rollup', async (req, res, next) => {
               },
             ]),
         // Billable knocks per campaign: distinct (household, pass). See knocksPipeline.
-        useStats ? [] : CanvassActivity.aggregate(knocksPipeline(activityMatch, { byCampaign: true })),
+        useStats
+          ? []
+          : CanvassActivity.aggregate(
+              // includeRestricted unconditionally: the rows below apply each campaign's own
+              // policy when picking billableDoors, so the pipeline just has to SUPPLY both
+              // numbers. `knocks` is unaffected by the wider action set (see knocksPipeline).
+              knocksPipeline(activityMatch, { byCampaign: true, includeRestricted: true })
+            ),
         // Surveys (volume) + surveyed voters (distinct) per campaign, from SurveyResponse.
         // Stays live even with stats: surveyedVoters is a DISTINCT-voter count, which a
         // maintained scalar counter can't represent.
@@ -592,6 +637,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
         surveyedKnocks: 0,
         litKnocks: 0,
         refusedKnocks: 0,
+        restrictedDoors: 0,
         activeCanvassers: 0,
         lastActivityAt: null,
       });
@@ -617,6 +663,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
         c.surveyedKnocks = s.surveyedKnockCount || 0;
         c.litKnocks = s.litKnockCount || 0;
         c.refusedKnocks = s.refusedKnockCount || 0;
+        c.restrictedDoors = s.restrictedDoorCount || 0;
         c.litDropped = s.litDroppedCount || 0;
         c.activeCanvassers = (s.canvasserIds || []).length;
         c.lastActivityAt = s.lastActivityAt || null;
@@ -635,6 +682,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
       c.surveyedKnocks = r.surveyedKnocks;
       c.litKnocks = r.litKnocks;
       c.refusedKnocks = r.refusedKnocks;
+      c.restrictedDoors = r.restrictedDoors;
     }
     for (const r of surveyAgg) {
       const c = byCampaign.get(String(r._id));
@@ -674,6 +722,12 @@ router.get('/campaign-rollup', async (req, res, next) => {
           surveyedKnocks: c.surveyedKnocks,
           litKnocks: c.litKnocks,
           refusedKnocks: c.refusedKnocks,
+          // This campaign's own answer — a rollup can span campaigns that disagree, so the
+          // policy is resolved per row rather than once for the response.
+          billRestrictedDoors: resolveBillRestricted(campaign, orgDefaults),
+          restrictedDoors: c.restrictedDoors,
+          billableDoors:
+            c.knocks + (resolveBillRestricted(campaign, orgDefaults) ? c.restrictedDoors : 0),
           surveysSubmitted: c.surveysSubmitted,
           surveyedVoters: c.surveyedVoters,
           litDropped: c.litDropped,
@@ -696,6 +750,10 @@ router.get('/campaign-rollup', async (req, res, next) => {
       surveyedKnocks: sum('surveyedKnocks'),
       litKnocks: sum('litKnocks'),
       refusedKnocks: sum('refusedKnocks'),
+      // Sums the PER-ROW billableDoors, so a mixed-policy org totals each campaign under its
+      // own rule rather than applying one campaign's answer to the whole org.
+      billableDoors: sum('billableDoors'),
+      restrictedDoors: sum('restrictedDoors'),
       surveysSubmitted: sum('surveysSubmitted'),
       surveyedVoters: sum('surveyedVoters'),
       litDropped: sum('litDropped'),
@@ -1584,20 +1642,34 @@ router.get('/overlaps', async (req, res, next) => {
   }
 });
 
-// Pass-wide overlap set for the map / household-panel indicator: the households where 2+
-// distinct canvassers knocked the same (household, pass), DELIBERATELY un-windowed — a
-// same-pass overlap split across days (e.g. a survey on the 14th, a not-home on the 18th)
-// is a real collision the date-scoped /overlaps above cannot see. Cheap (no per-event
-// arrays) so it's safe campaign-wide. baseFilter carries org/campaign/effort; ?passId
-// narrows to one round.
+// Overlap set for the map / household-panel indicator: the households where 2+ distinct
+// canvassers knocked the same (household, pass). DATE-SCOPED like every other map layer (owner
+// decision 2026-07-19 — a filtered view whose layer ignored the filter read as a bug), but the
+// service still groups over the whole pass so it can report `outOfRangeTotal`: the same-pass
+// collisions your window hides, which the date-scoped /overlaps above structurally cannot see.
+// ?userId narrows to collisions INVOLVING that canvasser (applied post-grouping — see the service).
+// campaignId is REQUIRED: unscoped this aggregates the org's entire activity ledger.
 router.get('/overlap-doors', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    if (!req.query.campaignId || !mongoose.isValidObjectId(req.query.campaignId)) {
+      return res.status(400).json({ error: 'campaignId is required' });
+    }
     const match = { ...baseFilter(req) };
     if (req.query.passId && mongoose.isValidObjectId(req.query.passId)) {
       match.passId = new mongoose.Types.ObjectId(req.query.passId);
     }
-    const result = await computeOverlapDoors(match, { organizationId: activeOrgId(req) });
+    // The window is NOT spread into `match` — the pipeline needs the whole pass to count what the
+    // window hides. It travels separately as an in-range test.
+    const { timestamp: range } = parseDateRange(req, 'timestamp');
+    const userId =
+      req.query.userId && mongoose.isValidObjectId(req.query.userId)
+        ? new mongoose.Types.ObjectId(req.query.userId)
+        : null;
+    const result = await computeOverlapDoors(match, {
+      dateRange: range ? { from: range.$gte || null, to: range.$lt || null } : null,
+      userId,
+    });
     res.json(result);
   } catch (err) {
     next(err);
@@ -1810,6 +1882,9 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       { ...baseFilter(req), ...(window ? { timestamp: window } : {}) },
       await crewFilter(req)
     );
+    // Does this campaign invoice restricted doors? Only widens `billableDoors` below — every
+    // per-canvasser number on this screen is knock-based either way.
+    const billRestricted = await billRestrictedFor(orgId, baseFilter(req).campaignId);
 
     // One aggregation, mode-keyed bucket: hour-of-day for a single day, calendar day for
     // a range. Both bucket in the anchor tz ($hour/$dateToString with timezone), so DST
@@ -1881,7 +1956,11 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       // Campaign-wide BILLABLE knocks — distinct (household, pass), so a door two canvassers
       // both worked is one knock. Unbucketed and uncapped already, so totals mode reuses it
       // as-is and the invoice number is identical in every mode.
-      CanvassActivity.aggregate(knocksPipeline(scoped)),
+      //
+      // includeRestricted yields BOTH numbers from this one pass: `knocks` is untouched by the
+      // flag (see knocksPipeline), so billableKnocks — and the overlapDoors subtraction built on
+      // it — keep their exact meaning, while `billableDoors` carries the invoice figure.
+      CanvassActivity.aggregate(knocksPipeline(scoped, { includeRestricted: true })),
       // Overlaps $push every event into per-door arrays, which over a whole campaign can breach
       // Mongo's 100MB per-stage limit. Reconciling overlaps is a "what happened this week" job
       // anyway — it needs a bounded window, so totals mode skips it rather than risk the query.
@@ -2070,6 +2149,12 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       grandKnocks,
       grandSurveys,
       billableKnocks,
+      // The invoice figure when this campaign bills for restricted doors; equal to
+      // billableKnocks otherwise. Deliberately a SEPARATE field: billableKnocks feeds the
+      // overlap subtraction below, whose other side (grandKnocks) counts knock events only.
+      billableDoors: billableDoorsOf(knockAgg[0], billRestricted),
+      restrictedDoors: knockAgg[0]?.restrictedDoors || 0,
+      billRestrictedDoors: billRestricted,
       // Pure arithmetic on two numbers we already have, so the overlap DOOR COUNT is honest
       // even in totals mode — it's only the per-door reconciliation CARDS that need a bounded
       // window (see the computeOverlaps skip above).
@@ -2499,9 +2584,15 @@ async function buildKnocksByPass(req) {
   const passFilter = { organizationId: cFilter.organizationId, campaignId: cFilter.campaignId };
   if (cFilter.effortId) passFilter.effortId = cFilter.effortId;
 
+  // Does this campaign invoice restricted doors? The pipelines below ALWAYS gather them
+  // (so `restrictedDoors` reports what exists, consistently with /overview and the rollup);
+  // this flag only decides what gets presented as the billable figure, via billableDoorsOf.
+  const billRestricted = await billRestrictedFor(cFilter.organizationId, cFilter.campaignId);
+  const knockOpts = { includeRestricted: true };
+
   const [perPass, totalRows, firstKnockRows, passes, efforts] = await Promise.all([
-    CanvassActivity.aggregate(knocksPipeline(match, { byPass: true })),
-    CanvassActivity.aggregate(knocksPipeline(match)),
+    CanvassActivity.aggregate(knocksPipeline(match, { ...knockOpts, byPass: true })),
+    CanvassActivity.aggregate(knocksPipeline(match, knockOpts)),
     // First-ever knock per household scans the campaign LIFETIME — no date filter AND no
     // effortId: CanvassActivity.effortId is stamped at knock time and never restamped, so
     // an effort-scoped scan would call a force-claimed, previously-worked door "new" the
@@ -2542,7 +2633,9 @@ async function buildKnocksByPass(req) {
   const rowKeys = new Set([...passes.map((p) => String(p._id)), ...perPass.map((r) => String(r._id))]);
   const shapeRow = (key) => {
     const p = passById.get(key) || null;
-    const k = countsByPass.get(key) || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
+    const k = countsByPass.get(key) || {
+      knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, billableDoors: 0, restrictedDoors: 0,
+    };
     const legacy = key === 'null' || key === 'undefined';
     return {
       passId: legacy ? null : key,
@@ -2558,6 +2651,11 @@ async function buildKnocksByPass(req) {
       surveyedKnocks: k.surveyedKnocks,
       litKnocks: k.litKnocks,
       refusedKnocks: k.refusedKnocks,
+      // Equal to `knocks` unless this campaign invoices restricted doors. Rates below are
+      // deliberately built from `knocks` in BOTH cases — a locked gate answered nobody.
+      billableDoors: billableDoorsOf(k, billRestricted),
+      // Always the true count, billed or not, so the UI can offer the opt-in when it's > 0.
+      restrictedDoors: k.restrictedDoors,
       connectionRate: connectionRate(k),
       contactRate: contactRate(k),
       coverageGained: coverageByPass.get(key) || 0,
@@ -2569,12 +2667,19 @@ async function buildKnocksByPass(req) {
       (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity)
   );
 
-  const t = totalRows[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
+  const t = totalRows[0] || {
+    knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, billableDoors: 0, restrictedDoors: 0,
+  };
   const totals = {
     knocks: t.knocks,
     surveyedKnocks: t.surveyedKnocks,
     litKnocks: t.litKnocks,
     refusedKnocks: t.refusedKnocks,
+    // Same pipeline, same (household, pass) dedup as the per-round rows above, and the same
+    // policy helper — so Σ(rounds.billableDoors) === totals.billableDoors by construction,
+    // exactly like knocks.
+    billableDoors: billableDoorsOf(t, billRestricted),
+    restrictedDoors: t.restrictedDoors,
     connectionRate: connectionRate(t),
     contactRate: contactRate(t),
     // Sum the DISPLAYED rows, not every first-knock bucket — the scan is deliberately
@@ -2587,12 +2692,16 @@ async function buildKnocksByPass(req) {
   let crossCanvasserDoors;
   if (groupByCanvasser) {
     const flag = (action) => ({ $max: { $cond: [{ $eq: ['$actionType', action] }, 1, 0] } });
+    // Mirrors knocksPipeline's action set and hasKnock fold, one dimension wider (per user), so a
+    // per-canvasser export and the round totals it breaks down count the same doors. NOT_BULK is
+    // already applied campaign-wide here, so nothing extra is needed to keep desk marks out.
     const [userRows, nonBulkPerPass] = await Promise.all([
       CanvassActivity.aggregate([
-        { $match: { ...match, ...NOT_BULK, actionType: { $in: KNOCK_ACTIONS } } },
+        { $match: { ...match, ...NOT_BULK, actionType: { $in: BILLABLE_WITH_RESTRICTED } } },
         {
           $group: {
             _id: { householdId: '$householdId', passId: '$passId', userId: '$userId' },
+            hasKnock: { $max: { $cond: [{ $in: ['$actionType', KNOCK_ACTIONS] }, 1, 0] } },
             hasSurvey: flag('survey_submitted'),
             hasLit: flag('lit_dropped'),
             hasRefused: flag('refused'),
@@ -2601,14 +2710,19 @@ async function buildKnocksByPass(req) {
         {
           $group: {
             _id: { passId: '$_id.passId', userId: '$_id.userId' },
-            knocks: { $sum: 1 },
+            knocks: { $sum: '$hasKnock' },
+            billableDoors: { $sum: 1 },
+            restrictedDoors: { $sum: { $cond: [{ $eq: ['$hasKnock', 0] }, 1, 0] } },
             surveyedKnocks: { $sum: '$hasSurvey' },
             litKnocks: { $sum: '$hasLit' },
             refusedKnocks: { $sum: '$hasRefused' },
           },
         },
       ]),
-      CanvassActivity.aggregate(knocksPipeline({ ...match, ...NOT_BULK }, { byPass: true })),
+      // The cross-canvasser over-claim baseline. MUST carry the same includeRestricted as the
+      // per-user rows above: comparing a restricted-inclusive per-user sum against a
+      // knocks-only round total would report phantom overlap on every restricted door.
+      CanvassActivity.aggregate(knocksPipeline({ ...match, ...NOT_BULK }, { ...knockOpts, byPass: true })),
     ]);
     const userMap = await hydrateCanvassers(
       userRows.filter((r) => r._id.userId != null).map((r) => String(r._id.userId)),
@@ -2635,6 +2749,8 @@ async function buildKnocksByPass(req) {
           surveyedKnocks: r.surveyedKnocks,
           litKnocks: r.litKnocks,
           refusedKnocks: r.refusedKnocks,
+          billableDoors: billableDoorsOf(r, billRestricted),
+          restrictedDoors: r.restrictedDoors,
           connectionRate: connectionRate(r),
           contactRate: contactRate(r),
         };
@@ -2643,13 +2759,17 @@ async function buildKnocksByPass(req) {
         (a, b) =>
           (a.effortName || '￿').localeCompare(b.effortName || '￿') ||
           (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity) ||
-          b.knocks - a.knocks
+          b.billableDoors - a.billableDoors
       );
-    const nonBulkByPass = new Map(nonBulkPerPass.map((r) => [String(r._id), r.knocks]));
+    // Both sides of the over-claim subtraction go through the SAME policy helper, so the
+    // comparison stays apples-to-apples whether or not restricted doors are being billed.
+    const nonBulkByPass = new Map(
+      nonBulkPerPass.map((r) => [String(r._id), billableDoorsOf(r, billRestricted)])
+    );
     const sumByPass = new Map();
     for (const r of byCanvasser) {
       const key = r.passId ?? 'null';
-      sumByPass.set(key, (sumByPass.get(key) || 0) + r.knocks);
+      sumByPass.set(key, (sumByPass.get(key) || 0) + r.billableDoors);
     }
     crossCanvasserDoors = 0;
     for (const [key, sum] of sumByPass) {
@@ -2657,7 +2777,7 @@ async function buildKnocksByPass(req) {
     }
   }
 
-  return { cFilter, rounds, totals, byCanvasser, crossCanvasserDoors };
+  return { cFilter, rounds, totals, byCanvasser, crossCanvasserDoors, billRestricted };
 }
 
 router.get('/knocks-by-pass', async (req, res, next) => {
@@ -2674,6 +2794,9 @@ router.get('/knocks-by-pass', async (req, res, next) => {
       totals: built.totals,
       byCanvasser: built.byCanvasser,
       crossCanvasserDoors: built.crossCanvasserDoors,
+      // Tells the client whether billableDoors is a distinct number worth showing, or just a
+      // duplicate of knocks. Clients must not re-derive it — the tri-state lives server-side.
+      billRestrictedDoors: built.billRestricted,
     });
   } catch (err) {
     next(err);
@@ -2690,25 +2813,32 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
     const built = await buildKnocksByPass(req);
     if (built.error) return res.status(built.error.status).json({ error: built.error.message });
 
+    // The two billable-door columns appear ONLY for a campaign that invoices restricted doors.
+    // An org that never opts in keeps a byte-identical export — nobody's invoicing spreadsheet
+    // gains a column it didn't ask for, and where the columns DO appear they carry a number that
+    // differs from Knocks (rather than a confusing duplicate of it).
+    const doorCols = built.billRestricted ? ['Restricted doors', 'Billable doors'] : [];
+    const doorVals = (r) => (built.billRestricted ? [r.restrictedDoors, r.billableDoors] : []);
+
     let headers;
     let rows;
     if (built.byCanvasser) {
       headers = [
         'Walk list', 'Round', 'Round name', 'Canvasser first name', 'Canvasser last name',
         'Email', 'Status', 'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
-        'Connection rate %', 'Contact rate %',
+        ...doorCols, 'Connection rate %', 'Contact rate %',
       ];
       rows = built.byCanvasser.map((r) => [
         r.effortName || '', r.roundNumber ?? '', r.roundName ?? r.roundLabel,
         r.firstName, r.lastName, r.email, r.status,
         r.knocks, r.surveyedKnocks, r.litKnocks, r.refusedKnocks,
-        r.connectionRate, r.contactRate,
+        ...doorVals(r), r.connectionRate, r.contactRate,
       ]);
     } else {
       headers = [
         'Walk list', 'Round', 'Round name', 'Round status', 'Activated (ISO)', 'Archived (ISO)',
         'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
-        'Connection rate %', 'Contact rate %', 'New homes reached',
+        ...doorCols, 'Connection rate %', 'Contact rate %', 'New homes reached',
       ];
       rows = built.rounds.map((r) => [
         r.effortName || '', r.roundNumber ?? '',
@@ -2716,13 +2846,13 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
         r.activatedAt ? new Date(r.activatedAt).toISOString() : '',
         r.archivedAt ? new Date(r.archivedAt).toISOString() : '',
         r.knocks, r.surveyedKnocks, r.litKnocks, r.refusedKnocks,
-        r.connectionRate, r.contactRate, r.coverageGained,
+        ...doorVals(r), r.connectionRate, r.contactRate, r.coverageGained,
       ]);
       const t = built.totals;
       rows.push([
         'TOTAL', '', '', '', '', '',
         t.knocks, t.surveyedKnocks, t.litKnocks, t.refusedKnocks,
-        t.connectionRate, t.contactRate, t.coverageGained,
+        ...doorVals(t), t.connectionRate, t.contactRate, t.coverageGained,
       ]);
     }
 

@@ -15,9 +15,10 @@ Each row carries that round's knocks, survey doors (or lit drops), connection ra
 
 The last line is the **TOTAL row**: the sum of every round above it, and always exactly the campaign's Knocks number for the same date range — so you can check the export against the dashboard, or against an invoice, at a glance. Knocks recorded before the campaign had rounds appear as one "Legacy / no round" row.
 
-Two things to know:
+Three things to know:
 
 - **Pick the date range first.** The export uses the range selected on the page — set it to the invoice period (say, last month) before downloading.
 - **Pricing doesn't change.** Doorline bills per campaign per month; this export is the supporting detail behind the work, not a price calculator.
+- **Restricted homes can be included.** If this campaign counts restricted homes as billable doors, the export gains **Restricted doors** and **Billable doors** columns, and the TOTAL row carries the billable-door figure. If it doesn't, the export looks exactly as it always has. See [Can I bill for restricted doors?](bill-restricted-doors).
 
 See [Understanding the numbers](metrics) and [Billing and your account](billing).

@@ -17,6 +17,7 @@ import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
 import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
+import { formatInTz } from '../lib/datetime.js';
 import {
   householdsToGeoJSON,
   overlapDoorsToGeoJSON,
@@ -154,6 +155,7 @@ export default function MapPage() {
   // Opt-in overlap overlay: rings doors worked by 2+ distinct canvassers in the same pass
   // (a turf collision / potential double-count). Default OFF — the default map is unchanged.
   const [showOverlaps, setShowOverlaps] = useState(false);
+  const [showOverlapList, setShowOverlapList] = useState(false);
   // Live auto-refresh of the map (web admins are at a desk + connected). Gates
   // the poll interval below; pauses automatically when the tab is backgrounded.
   const [live, setLive] = useState(true);
@@ -335,22 +337,34 @@ export default function MapPage() {
   const flagEntries = flagsQ.data?.entries || [];
   const flagSummary = flagsQ.data?.summary || null;
 
-  // Overlap doors — a SEPARATE query (only when the layer is on) so toggling it never
-  // refetches households. Pass-wide and DAY-AGNOSTIC (unlike the date-scoped Map): it honors
-  // the campaign + any effort/pass scope, but NOT the date range. Returns the household ids
-  // (+ per-door collision detail) we ring on the map.
+  // Overlap doors — a SEPARATE query (only when the layer is on) so toggling it never refetches
+  // households. Detection is ANCHORED: the server finds collisions across the whole pass but only
+  // surfaces the ones with a knock inside these dates, so a door knocked 4/5 and again today shows
+  // up while you're looking at today. Honors campaign + effort/pass + the canvasser filter.
+  // `doors[]` carries each colliding canvasser with their knock date and an `inRange` marker;
+  // `outOfRangeTotal` counts collisions this window hides entirely.
   const overlapDoorsQ = useQuery({
-    queryKey: ['admin', 'overlap-doors', campaignId, scopeEffortId, scopePassId],
+    queryKey: [
+      'admin', 'overlap-doors', campaignId, scopeEffortId, scopePassId,
+      dateRange.from, dateRange.to, canvasserId,
+    ],
     queryFn: () =>
       api(
         `/admin/reports/overlap-doors${buildQuery({
           campaignId,
           effortId: scopeEffortId,
           passId: scopePassId,
+          from: dateRange.from,
+          to: dateRange.to,
+          userId: canvasserId || null,
         })}`
       ),
     enabled: !!campaignId && showOverlaps,
-    ...livePollOptions(live),
+    // Deliberately NOT livePollOptions. This is a toggle-driven audit layer that aggregates a whole
+    // pass, and a collision from ten minutes ago is still a collision — re-running it every 20s for
+    // as long as the layer is open bought nothing. One fetch when you switch it on, and again only
+    // when the campaign/effort/pass/date/canvasser scope actually changes.
+    refetchInterval: false,
     placeholderData: keepPreviousData,
   });
   const overlapIds = useMemo(
@@ -747,11 +761,31 @@ export default function MapPage() {
                 </span>
               </>
             )}
+            {/* `total` is the count actually ringed — collisions with a knock inside these dates.
+                Clicking it opens the review list (who double-knocked what, and when). */}
             {showOverlaps && overlapDoorsQ.data?.total > 0 && (
               <>
                 <span className="text-fg-subtle" aria-hidden="true">·</span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-2 py-0.5 font-medium text-warning-fg">
-                  ⚠ {overlapDoorsQ.data.total.toLocaleString()} overlaps
+                <button
+                  type="button"
+                  onClick={() => setShowOverlapList((v) => !v)}
+                  aria-expanded={showOverlapList}
+                  className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-2 py-0.5 font-medium text-warning-fg hover:opacity-80"
+                >
+                  ⚠ {overlapDoorsQ.data.total.toLocaleString()} overlaps — review
+                </button>
+              </>
+            )}
+            {/* Collisions this window hides entirely. Real, just not anchored to a day you're
+                viewing — say so rather than drop them silently. */}
+            {showOverlaps && overlapDoorsQ.data?.outOfRangeTotal > 0 && (
+              <>
+                <span className="text-fg-subtle" aria-hidden="true">·</span>
+                <span
+                  className="text-fg-muted"
+                  title="Doors double-knocked in the same pass where neither knock falls in the dates you're viewing. Widen the date range to bring them into the list."
+                >
+                  +{overlapDoorsQ.data.outOfRangeTotal.toLocaleString()} outside your dates
                 </span>
               </>
             )}
@@ -927,6 +961,75 @@ export default function MapPage() {
                 onClose={() => setSelectedFlagId(null)}
                 tz={tz}
               />
+            </div>
+          )}
+          {/* Overlap review list — the answer to "who double-knocked what?". The ring alone can't
+              say that, and hunting pins doesn't scale. Doors outside the loaded viewport still list
+              (the endpoint is not viewport-bound); they just can't be flown to. */}
+          {showOverlaps && showOverlapList && overlapDoorsQ.data?.doors?.length > 0 && (
+            <div
+              style={{
+                position: 'absolute',
+                left: 16,
+                top: 16,
+                zIndex: 11,
+                width: 340,
+                maxWidth: 'calc(100% - 32px)',
+                maxHeight: 'calc(100% - 32px)',
+                overflowY: 'auto',
+              }}
+              className="rounded-lg border border-border bg-card shadow-lg"
+            >
+              <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                <span className="text-sm font-semibold text-fg">
+                  Double-knocked doors ({overlapDoorsQ.data.doors.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowOverlapList(false)}
+                  className="text-fg-subtle hover:text-fg"
+                  aria-label="Close overlap list"
+                >
+                  ×
+                </button>
+              </div>
+              <ul className="divide-y divide-border">
+                {overlapDoorsQ.data.doors.map((d) => {
+                  const h = householdsById.get(String(d.householdId));
+                  return (
+                    <li key={d.householdId} className="px-3 py-2">
+                      <button
+                        type="button"
+                        disabled={!h}
+                        onClick={() => {
+                          if (!h) return;
+                          flyToHousehold(h);
+                          setSelected(String(d.householdId));
+                        }}
+                        className="text-left text-sm font-medium text-brand-accent hover:underline disabled:cursor-default disabled:text-fg-muted disabled:no-underline"
+                      >
+                        {h ? h.addressLine1 : 'Door outside the current view'}
+                      </button>
+                      {d.passes.map((p) => (
+                        <div key={p.passId || 'legacy'} className="mt-1">
+                          <div className="text-xs text-fg-subtle">{p.roundLabel}</div>
+                          {p.canvassers.map((c) => (
+                            <div key={c.userId} className="flex items-baseline justify-between gap-2 text-xs">
+                              <span className={c.inRange ? 'font-medium text-fg' : 'text-fg-muted'}>
+                                {c.name}
+                                {!c.inRange && ' (earlier)'}
+                              </span>
+                              <span className="tabular-nums text-fg-muted">
+                                {formatInTz(c.lastAt, tz, { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, false) || '—'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
           {flagFlash && (

@@ -151,6 +151,11 @@ export default function CampaignsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
       qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+      // The billable-door policy changes the door totals every report surface shows
+      // (overview, knocks-by-pass, timeline), and none of them are covered by the two keys
+      // above — a stale invoice after saving the drawer reads as "the toggle didn't work".
+      // They all share the ['reports', …] prefix, so one invalidation catches the lot.
+      qc.invalidateQueries({ queryKey: ['reports'] });
       setEditing(null);
     },
   });
@@ -243,6 +248,7 @@ export default function CampaignsPage() {
         <CampaignFormDrawer
           initial={editing}
           surveys={surveys}
+          orgBillRestrictedDoors={campaignsQ.data?.orgBillRestrictedDoors ?? false}
           onSave={(body) =>
             editing ? update.mutate({ id: editing._id, body }) : create.mutate(body)
           }

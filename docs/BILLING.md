@@ -10,10 +10,17 @@ Related: [CAMPAIGNS.md](CAMPAIGNS.md) (archiving — it ends a campaign's billin
 ## What Doorline charges
 
 **$300 per campaign per month** (the default — the rate is stored per organization, so a
-negotiated deal just changes that org's number). A campaign starts billing in the calendar month
-it records its **first knock** and keeps billing through the month it's **archived**. Setup months
-— created, imported, turf cut, but nobody knocking yet — are free, and archiving a finished
-campaign is what stops its billing, which is one more reason to archive.
+negotiated deal just changes that org's number). A campaign starts billing in the calendar month of
+its **first field visit** — a knock, or a restricted home a canvasser walked to and couldn't get
+into — and keeps billing through the month it's **archived**. Setup months — created, imported, turf
+cut, but nobody in the field yet — are free, and archiving a finished campaign is what stops its
+billing, which is one more reason to archive. Marking a book restricted from your desk is not a
+field visit and doesn't start anything. Every billing surface shows **Billing started** per campaign
+so you can see the date it began (or that it hasn't).
+
+The price never depends on how many doors were knocked — it's a flat rate per active campaign per
+month. (Separately, if *you* invoice your own client per door, see **Billable doors** in
+[METRICS.md](METRICS.md) — that setting changes your reports, not your Doorline bill.)
 
 Universe size is **not** priced and never enforced by the software. The "up to ~10,000 households
 per campaign" figure some contracts carry is a sales guideline; bigger universes are a
@@ -122,11 +129,41 @@ when suspended/canceled, alive through `past_due`.
 
 [services/billing/statement.js](../server/src/services/billing/statement.js) —
 `monthlyStatement(orgId, 'YYYY-MM')`. Per campaign, in the **campaign's own timezone**
-(`zonedDayRange`, [TIMEZONES.md](TIMEZONES.md)): billable in month M iff *first knock*
-(earliest `KNOCK_ACTIONS` activity — `restricted`/notes never start billing) `< end(M)` **and**
-not archived before M began (`archivedAt || updatedAt` for legacy rows). `knocksThisMonth` reuses
-`knocksPipeline` — the same distinct (household, pass) counting as everywhere else
-([METRICS.md](METRICS.md)). `households` is reported for visibility, never priced.
+(`zonedDayRange`, [TIMEZONES.md](TIMEZONES.md)): billable in month M iff the *first field visit*
+`< end(M)` **and** not archived before M began (`archivedAt || updatedAt` for legacy rows).
+`knocksThisMonth` reuses `knocksPipeline` — the same distinct (household, pass) counting as
+everywhere else ([METRICS.md](METRICS.md)). `households` is reported for visibility, never priced.
+
+**First field visit** (revised Jul 2026) = the earliest `KNOCK_ACTIONS` row **or** the earliest
+**non-bulk** `restricted` mark, whichever came first (`BILLABLE_WITH_RESTRICTED` + `NOT_BULK`). A
+canvasser who walks to a gated community and finds it locked made the trip, so the clock starts.
+Two things this is *not*:
+
+- It is **independent of the `billRestrictedDoors` opt-in** below. That flag decides what appears on
+  the org's own invoice totals; when *Doorline* starts charging is not a customer-tunable number.
+- It does **not** extend to bulk marks. An admin bulk-restricting a whole book from the Turf Cutting
+  page ([turfs.js](../server/src/routes/admin/turfs.js), the only `via:'bulk'` writer) is desk work,
+  and must never start an org's billing clock before anyone has walked. Notes still never start it.
+
+⚠️ Statements are computed **live**, so this rule is retroactive: a past month can flip to billable.
+Diff `GET /super-admin/organizations/billing-rollup` before and after deploying a change here.
+
+`firstKnockAt` is surfaced as the **"Billing started"** indicator on both billing surfaces (the
+super-admin `OrgBillingPanel` statement table and the org admin's own Billing page), reading
+"Not started" when null — previously it was computed and returned but never shown.
+
+### Billable doors — the customer's OWN invoicing (not ours)
+
+Orgs that invoice their client per door can opt to count **restricted** homes, since the canvasser
+made the walk. `Organization.billRestrictedDoors` is the org-wide default (set by a billing admin via
+`PATCH /admin/billing/settings`); `Campaign.billRestrictedDoors` is a **tri-state** override (`null` =
+inherit). **Both default to off**, so nothing changes for an org that never opts in — with the flag
+off `billableDoors === knocks` bit-for-bit.
+
+Statement lines carry `billableDoorsThisMonth`, `restrictedDoorsThisMonth`, and the resolved
+`billRestrictedDoors` for display. **None of them are ever priced** — `amountCents` remains
+`billable ? rateCents : 0`, a boolean × flat rate. The full counting semantics, and the invariant
+that no rate or coverage number moves, are in [METRICS.md](METRICS.md).
 
 Per-round supporting detail for a statement line comes from
 `GET /admin/reports/knocks-by-pass` / `.csv` ([METRICS.md](METRICS.md) §E) — the same pipeline with
@@ -145,7 +182,8 @@ pricing stays flat per campaign per month.
 | `POST …/billing/status` `{to, reason}` | The status chokepoint: any → any, reason **required** for `suspended`/`canceled`, sets `statusChangedAt`, reclaims `source:'manual'`, logs the event. 400 on a no-op. **`internal` is coupled to `Organization.isInternal` both ways** (see below): `to:'internal'` on an un-flagged org **403 `INTERNAL_FLAG_REQUIRED`**; a flagged org can never leave `internal` (**403 `INTERNAL_LOCKED`**) — the flag checks run *before* the same-status 400, so `to:'internal'` can heal a flagged org whose sub drifted. Idle $0 orgs (active, no live campaign, long silent) are surfaced on the **Control Room's Idle organizations queue**, which deep-links here — setting `canceled` is what starts their 60-day wind-down (see [PLATFORM.md](PLATFORM.md)). |
 | `POST …/billing/extend-trial` `{days?\|until?}` | Trial-status only. `+days` from max(now, current end) — extending an *expired* trial un-suspends with no separate step. |
 | `GET …/billing/statement?month=YYYY-MM` | The monthly statement JSON (CSV is built client-side from it). |
-| `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, rate, and **`usage`** (this month's billable-campaign count + `totalCents` via `currentUsage`). **No** billing contact / notes / source / Stripe ids. |
+| `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, rate, **`usage`** (this month's billable-campaign count + `totalCents` via `currentUsage`), and the org's `billRestrictedDoors` default. **No** billing contact / notes / source / Stripe ids. |
+| `PATCH /admin/billing/settings` `{billRestrictedDoors}` | Sets the org-wide default for counting restricted doors as billable doors. Same bill-payer gate as the GET. Exists here rather than on an org-settings page because there isn't one — every other org mutation is super-admin-only — and because it is a billing-counting policy. Per-campaign overrides go through `PATCH /admin/campaigns/:id` (org-admin only; a lead is refused). |
 | `POST /super-admin/organizations` | Create a client: org + trial (`trialDays`, default 7) + optional **first admin** (`admin{firstName,lastName,email,password?}` → uses the typed `password` or auto-generates a temp one, `mustChangePassword`, `billingAccess:true`; returns `tempPassword` once). A taken admin email 409s **before** the org is created. |
 | `PATCH /admin/memberships/:userId` `{billingAccess}` | Grant/revoke the Billing surface for an admin — only a caller who already has `billingAccess` (or a super admin) may change it (else 403). |
 

@@ -12,7 +12,15 @@ const US_TIMEZONES = [
   { value: 'Pacific/Honolulu', label: 'Hawaii (Honolulu)' },
 ];
 
-export default function CampaignFormDrawer({ initial, surveys, onSave, onCancel, saving, error }) {
+export default function CampaignFormDrawer({
+  initial,
+  surveys,
+  onSave,
+  onCancel,
+  saving,
+  error,
+  orgBillRestrictedDoors = false,
+}) {
   const isEdit = !!initial?._id;
   // Once canvassing has started, the type flip is locked (server-enforced) and a
   // timezone change re-buckets historical stats — surfaced as a warning.
@@ -30,6 +38,11 @@ export default function CampaignFormDrawer({ initial, surveys, onSave, onCancel,
   const [earlyVotingStart, setEarlyVotingStart] = useState(initial?.earlyVotingStart || '');
   const [earlyVotingEnd, setEarlyVotingEnd] = useState(initial?.earlyVotingEnd || '');
   const [datesNote, setDatesNote] = useState(initial?.datesNote || '');
+  // Tri-state, carried through the form as a STRING because a <select> has no null:
+  // 'inherit' | 'yes' | 'no' ⇄ null | true | false on the wire.
+  const [billRestricted, setBillRestricted] = useState(
+    initial?.billRestrictedDoors === true ? 'yes' : initial?.billRestrictedDoors === false ? 'no' : 'inherit'
+  );
 
   function submit(e) {
     e.preventDefault();
@@ -44,6 +57,7 @@ export default function CampaignFormDrawer({ initial, surveys, onSave, onCancel,
       earlyVotingStart: earlyVotingStart || null,
       earlyVotingEnd: earlyVotingEnd || null,
       datesNote: datesNote.trim(),
+      billRestrictedDoors: billRestricted === 'yes' ? true : billRestricted === 'no' ? false : null,
     });
   }
 
@@ -237,6 +251,25 @@ export default function CampaignFormDrawer({ initial, surveys, onSave, onCancel,
           />
           Active (visible to canvassers)
         </label>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">
+            Restricted doors on invoices
+          </label>
+          <Select value={billRestricted} onChange={(e) => setBillRestricted(e.target.value)}>
+            <option value="inherit">
+              Use organization default ({orgBillRestrictedDoors ? 'count them' : "don't count them"})
+            </option>
+            <option value="yes">Count them as billable doors</option>
+            <option value="no">Don&apos;t count them</option>
+          </Select>
+          <p className="mt-1 text-xs text-fg-muted">
+            A restricted home is one a canvasser walked to and couldn&apos;t reach — a locked gate or
+            a secured building. Counting them adds them to the door totals on your invoice export,
+            since the trip still took time. It never changes your contact or survey rates, and it
+            never changes what Doorline charges you.
+          </p>
+        </div>
 
         {/* Reassurance on create only — no dollars, non-blocking. */}
         {!isEdit && (

@@ -205,9 +205,11 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // billable-knock state BEFORE, and — because the delete below removes exactly THIS canvasser's
   // rows and the create adds one known row — the state AFTER, plus the per-type deleted counts.
   // Must match the deleteMany filter's actionType set (REPLACEABLE_ACTIONS) exactly.
+  // `via` is projected for knockStateOf: a bulk-authored restricted mark must not count as a
+  // billable door (aggregations.js). Omitting it would make every bulk mark look like field work.
   const pairRows = await CanvassActivity.find(
     { householdId, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
-    'actionType userId timestamp location distanceFromHouseMeters replaced'
+    'actionType via userId timestamp location distanceFromHouseMeters replaced'
   ).lean();
   const mineRows = pairRows.filter((r) => String(r.userId) === String(userId));
   const replaced = buildReplacedSnapshot(mineRows);
@@ -405,9 +407,14 @@ router.post('/households/:householdId/lit-drop', async (req, res, next) => {
 });
 
 // Restricted Access: the home is inaccessible (gated/locked/no legal access). Recorded
-// as a first-class disposition + door status, but deliberately NOT a billable knock — it
-// stays out of KNOCK_ACTIONS, so it never enters knocks/rates/coverage-knocked. Available
-// for ALL campaign types (an unreachable home blocks both surveys and lit drops).
+// as a first-class disposition + door status, but deliberately NOT a knock — it stays out of
+// KNOCK_ACTIONS, so it never enters knocks/rates/coverage-knocked. Available for ALL campaign
+// types (an unreachable home blocks both surveys and lit drops).
+//
+// It MAY still count as a billable DOOR: an org that invoices per door can opt in per campaign
+// (billRestrictedDoors — services/reports/billRestricted.js), because the canvasser made the walk.
+// That is a read-time reporting choice and changes none of the above. Independently, a first
+// non-bulk restricted mark DOES start the campaign's billing clock (services/billing/statement.js).
 router.post('/households/:householdId/restricted', async (req, res, next) => {
   try {
     const result = await recordHouseholdAction({
@@ -496,7 +503,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // there): the pair's replaceable rows give before/after knock state + deleted counts.
     const pairRows = await CanvassActivity.find(
       { householdId: household._id, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
-      'actionType userId timestamp location distanceFromHouseMeters replaced'
+      'actionType via userId timestamp location distanceFromHouseMeters replaced'
     ).lean();
     const mineRows = pairRows.filter((r) => String(r.userId) === String(req.user._id));
     const replaced = buildReplacedSnapshot(mineRows);

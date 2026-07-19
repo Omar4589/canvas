@@ -15,3 +15,5 @@ They look similar in the field but count very differently:
 - **Restricted access** — you physically **couldn't reach** the door: a gated community, a locked building, no access. It's fully visible and counted as its own category, but it is **not** counted as a knock (you never actually knocked).
 
 Both stay on the map and in your counts. For restricted homes, an admin can choose to **exclude** them from the next round's books so nobody is sent back to a door no one can reach — while leaving the option to try again later if access opens up.
+
+A restricted home is never a knock — but if you invoice a client per door, an admin can choose to count it as a **billable door**, since the canvasser still made the trip. That's a separate setting and it doesn't change any of the above. See [Can I bill for restricted doors?](bill-restricted-doors).

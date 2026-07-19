@@ -27,6 +27,7 @@ The Campaigns page opens on a summary strip — how many campaigns, how many act
 - **Timezone** — editable, but once there's field activity you'll see a warning: changing it re-buckets every past daily stat. Nothing is lost and all-time totals stay the same, but day-by-day numbers shift.
 - **Type (survey ↔ lit drop)** — locks the moment canvassing starts. To run a different type, create a new campaign instead.
 - **Key dates** — admins only. As a lead you can see them but not change them (see [Team lead vs admin](team-lead-vs-admin)).
+- **Restricted doors on invoices** — admins only. Choose whether restricted (inaccessible) homes count toward this campaign's billable door totals, or leave it on *Use organization default*. Unlike Type, this is never locked — it only affects how doors are reported, so you can change it at any point in the campaign and change it back. See [Can I bill for restricted doors?](bill-restricted-doors).
 
 ## Key dates
 

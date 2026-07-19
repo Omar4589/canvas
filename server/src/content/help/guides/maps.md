@@ -27,7 +27,11 @@ Normally each house is colored by its status across the **whole campaign** — h
 
 Turn on **Show overlaps** and the map rings the doors that **more than one canvasser knocked in the same pass** — an amber ring around each, with an **"N overlaps"** count up top. Tap one and its detail panel names the other canvassers who worked it. Once a pass has covered a door, nobody should knock it again until the next pass, so an overlap is a turf collision worth a look — usually two walk lists that ran into each other.
 
-This toggle shows the **complete** picture: **the same pass, on any day** — so it catches two canvassers on one door even when they knocked it on **different days**. (The Timeline's overlap line only reconciles the date range you're viewing, so it can miss a cross-day collision — see [Understanding the numbers](metrics).) Nobody is ever billed twice for an overlap; this is purely to help you coach and coordinate. It's off by default.
+**It follows your dates, and still catches the cross-day case.** Say a door was knocked on the 5th and someone knocks it again on the 11th, in the same pass. Viewing the 11th, that door is flagged — the collision is found across the whole pass, then shown to you because one of its knocks happened on a day you're looking at. Tap **Review** next to the count for the list: each door, the round, and every canvasser who worked it with the date they did, so the earlier knock is named rather than left for you to hunt down. That's usually enough to message the crew: *someone is knocking doors that are already done — check your books.*
+
+If a door was double-knocked entirely outside the dates you're viewing, it isn't hidden from you either — it's counted as **"+N outside your dates"** next to the total. Widen the range to bring those into the list.
+
+(The Timeline's overlap line works differently: it only reconciles collisions where **both** knocks fall inside the range you picked, so it can miss a cross-day one — see [Understanding the numbers](metrics).) Nobody is ever billed twice for an overlap; this is purely to help you coach and coordinate. It's off by default.
 
 ## Arriving pre-filtered from a drill
 

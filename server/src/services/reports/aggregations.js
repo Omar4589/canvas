@@ -9,6 +9,24 @@ import mongoose from 'mongoose';
 // because it can be left without an actual visit decision.
 export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 
+// The wider set used ONLY for billable-DOOR counting when an org opts in
+// (Campaign/Organization.billRestrictedDoors — resolve via billRestricted.js). A restricted mark
+// is still not a knock and never becomes one: it can add a *door* to an invoice, never a knock to
+// a rate. Also the set that decides when a campaign's billing clock STARTS, which is deliberately
+// flag-independent (services/billing/statement.js).
+export const BILLABLE_WITH_RESTRICTED = [...KNOCK_ACTIONS, 'restricted'];
+
+// Apply the billable-door POLICY to a knocksPipeline row. Callers run the pipeline with
+// includeRestricted so `restrictedDoors` always reports how many inaccessible doors are there —
+// the same number whether or not the org bills for them, which is what lets the UI say "you have
+// N restricted doors, turn this on to bill them". This helper is then the ONE place that decides
+// whether they count, so `restrictedDoors` can't mean "exists" on one surface and "is billed" on
+// another. Returns the number to present as billable doors.
+export function billableDoorsOf(row, billRestricted) {
+  if (!row) return 0;
+  return billRestricted ? row.billableDoors || 0 : row.knocks || 0;
+}
+
 // Excludes admin BULK-authored rows (via:'bulk', today only bulk-restrict) from
 // per-CANVASSER surfaces: timelines, leaderboards, shift windows, travel, the
 // GPS audit, activity feeds, active-now. Bulk rows still drive door status,
@@ -70,14 +88,39 @@ export function teamFoldStage(leadIds) {
 // The inner (household, pass) dedup is identical either way, so Σ(byPass rows) equals the
 // collapsed campaign total by construction: per-round numbers can never disagree with the
 // headline they break down. passId:null surfaces as one legacy row (_id: null).
-export function knocksPipeline(match, { byCampaign = false, byPass = false } = {}) {
+//
+// `includeRestricted` widens the action set so an inaccessible door counts as a BILLABLE DOOR
+// (opt-in per org/campaign — see billRestricted.js). It deliberately does NOT make restricted a
+// knock: the flag adds rows to the dedup, and the extra `hasKnock` fold below keeps `knocks`
+// meaning exactly what it always meant. So every rate built on `knocks` (connectionRate,
+// contactRate) and every surveyed/lit/refused sub-count are byte-identical in both states, and
+// with the flag OFF `billableDoors === knocks` and `restrictedDoors === 0` — an org that never
+// opts in sees nothing in the product change. That equivalence is the invariant this function
+// exists to hold; test/billableRestricted.int.test.js asserts it.
+export function knocksPipeline(match, { byCampaign = false, byPass = false, includeRestricted = false } = {}) {
   const inner = { householdId: '$householdId', passId: '$passId' };
   if (byCampaign) inner.campaignId = '$campaignId';
+  const actions = includeRestricted ? BILLABLE_WITH_RESTRICTED : KNOCK_ACTIONS;
   return [
-    { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },
+    { $match: { ...match, actionType: { $in: actions } } },
+    // Drop DESK-authored bulk RESTRICTED rows: an admin bulk-restricting a gated community from
+    // the Turf Cutting page did no field work, and the whole point of the opt-in is paying for
+    // the walk.
+    //
+    // Scoped to `restricted` on purpose — a blanket NOT_BULK here is WRONG and was caught by
+    // knocksByPass.int.test.js. A via:'bulk' row on a KNOCK action is a real billable knock that
+    // round totals are contractually required to include (only per-CANVASSER surfaces exclude
+    // bulk — see NOT_BULK above), so filtering it out silently deletes a door from the invoice.
+    //
+    // $nor rather than a top-level $or so it can never clobber an $or the CALLER put in `match`
+    // (the team/crew filters do). Adjacent $match stages are coalesced by the query planner.
+    ...(includeRestricted ? [{ $match: { $nor: [{ actionType: 'restricted', via: 'bulk' }] } }] : []),
     {
       $group: {
         _id: inner,
+        // Constant 1 when includeRestricted is false — which is what makes `knocks` below
+        // identical to the historical `{ $sum: 1 }`.
+        hasKnock: { $max: { $cond: [{ $in: ['$actionType', KNOCK_ACTIONS] }, 1, 0] } },
         hasSurvey: { $max: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
         hasLit: { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
         hasRefused: { $max: { $cond: [{ $eq: ['$actionType', 'refused'] }, 1, 0] } },
@@ -86,7 +129,14 @@ export function knocksPipeline(match, { byCampaign = false, byPass = false } = {
     {
       $group: {
         _id: byCampaign ? '$_id.campaignId' : byPass ? '$_id.passId' : null,
-        knocks: { $sum: 1 },
+        // Unchanged meaning: a door someone actually knocked. Rates read THIS.
+        knocks: { $sum: '$hasKnock' },
+        // What an opted-in org invoices from. The (household, pass) dedup does the hard part for
+        // free: a door where one canvasser marked restricted and another knocked is ONE billable
+        // door, and a restricted mark later superseded by a real disposition folds into the knock
+        // rather than adding to it.
+        billableDoors: { $sum: 1 },
+        restrictedDoors: { $sum: { $cond: [{ $eq: ['$hasKnock', 0] }, 1, 0] } },
         surveyedKnocks: { $sum: '$hasSurvey' },
         litKnocks: { $sum: '$hasLit' },
         refusedKnocks: { $sum: '$hasRefused' },

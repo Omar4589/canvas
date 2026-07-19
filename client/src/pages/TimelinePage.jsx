@@ -213,8 +213,18 @@ export default function TimelinePage() {
     // Pace stays raw effort: it's per-person time on doors, not a billing figure.
     const rawDoors = filteredRows.reduce((n, r) => n + (r.dayKnocks || 0), 0);
     const doorsPerHour = hours > 0 ? rawDoors / hours : null;
-    return { doors, surveys, connPct, doorsPerHour };
-  }, [filteredRows, data.billableKnocks]);
+    // The invoice figure when this campaign bills for restricted homes. Deliberately NOT fed
+    // into connPct above — a locked gate answered nobody, so it can't sit in a rate denominator.
+    return {
+      doors,
+      surveys,
+      connPct,
+      doorsPerHour,
+      billableDoors: data.billableDoors ?? doors,
+      restrictedDoors: data.restrictedDoors ?? 0,
+      billRestricted: Boolean(data.billRestrictedDoors),
+    };
+  }, [filteredRows, data.billableKnocks, data.billableDoors, data.restrictedDoors, data.billRestrictedDoors]);
 
   // "Knocking N of M": M = the people this campaign could expect work from in this range, N =
   // how many actually knocked.
@@ -387,7 +397,15 @@ export default function TimelinePage() {
             {/* Distinct doors, deduped by (house, round) — the figure you'd give a client. The raw
                 event count lives in the reconciliation line below, where it can't be mistaken for
                 this one. */}
-            <StatCard label="Doors" value={kpis.doors.toLocaleString()} hint={`Distinct doors · ${rangeLabel}`} />
+            <StatCard
+              label={kpis.billRestricted ? 'Billable doors' : 'Doors'}
+              value={(kpis.billRestricted ? kpis.billableDoors : kpis.doors).toLocaleString()}
+              hint={
+                kpis.billRestricted
+                  ? `${kpis.doors.toLocaleString()} knocked + ${kpis.restrictedDoors.toLocaleString()} restricted · ${rangeLabel}`
+                  : `Distinct doors · ${rangeLabel}`
+              }
+            />
             <StatCard label="Survey doors" value={kpis.surveys.toLocaleString()} hint="Doors with a survey" />
             <StatCard
               label="Connection rate"

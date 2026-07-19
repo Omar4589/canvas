@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Switch,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
@@ -236,6 +237,7 @@ export default function AdminMap() {
   const [showPings, setShowPings] = useState(false);
   const [showFlags, setShowFlags] = useState(false);
   const [showOverlaps, setShowOverlaps] = useState(false);
+  const [showOverlapList, setShowOverlapList] = useState(false);
   const [selected, setSelected] = useState(null);
   const [selectedPing, setSelectedPing] = useState(null);
   const [selectedFlagId, setSelectedFlagId] = useState(null);
@@ -454,20 +456,26 @@ export default function AdminMap() {
     ...useFocusedPoll(),
   });
 
-  // Overlap doors — opt-in highlight of houses knocked by 2+ distinct canvassers in the
-  // same pass. Pass-wide and DAY-AGNOSTIC (unlike the date-scoped /overlaps list), so it
-  // ignores the map's date range; it DOES honor the effort/pass deep-link scope. Returns
-  // householdIds only — we ring whichever of those are currently loaded on the map.
+  // Overlap doors — opt-in highlight of houses knocked by 2+ distinct canvassers in the same
+  // pass. DATE-SCOPED like every other layer here (the map is a filtered view), and it honors the
+  // canvasser filter + effort/pass scope. The server still groups over the whole pass so it can
+  // return `outOfRangeTotal` — same-pass collisions whose knocks fall outside these dates, which we
+  // surface as a hint rather than drop. Returns householdIds; we ring whichever are loaded.
   const overlapDoorsQ = useQuery({
-    queryKey: ['admin', 'overlap-doors', cId, effortId, passId],
+    queryKey: ['admin', 'overlap-doors', cId, effortId, passId, range?.from, range?.to, canvasserId],
     queryFn: () => {
       const p = new URLSearchParams({ campaignId: String(cId) });
       if (effortId) p.set('effortId', effortId);
       if (passId) p.set('passId', passId);
+      if (range?.from) p.set('from', range.from);
+      if (range?.to) p.set('to', range.to);
+      if (canvasserId) p.set('userId', canvasserId);
       return api(`/admin/reports/overlap-doors?${p.toString()}`);
     },
     enabled: !!cId && showOverlaps,
-    refetchInterval: live && showOverlaps ? 20 * 1000 : false,
+    // Deliberately NOT polled: a whole-pass aggregation whose answer barely moves minute to minute.
+    // One fetch when the toggle goes on, and again only when the scope changes.
+    refetchInterval: false,
     ...useFocusedPoll(),
   });
 
@@ -688,6 +696,8 @@ export default function AdminMap() {
     };
   }, [showOverlaps, households, overlapIds]);
   const overlapDoorCount = overlapDoorsQ.data?.total ?? 0;
+  const overlapOutOfRange = overlapDoorsQ.data?.outOfRangeTotal ?? 0;
+  const overlapDoors = overlapDoorsQ.data?.doors || [];
 
   // Selected-door detail (web parity). `hhRounds` is the per-pass history; the inline
   // overlap badge fires when any single pass has 2+ distinct canvassers among its
@@ -1263,6 +1273,25 @@ export default function AdminMap() {
             </View>
           </View>
 
+          {/* Overlap review line — the ring says WHICH doors, this says WHO and WHEN. Only while
+              the layer is on and there is something to say. */}
+          {showOverlaps && (overlapDoorCount > 0 || overlapOutOfRange > 0) ? (
+            <View style={styles.overlapReviewRow}>
+              {overlapDoorCount > 0 ? (
+                <Pressable onPress={() => setShowOverlapList(true)} hitSlop={6}>
+                  <Text style={styles.overlapReviewLink}>
+                    ⚠ {overlapDoorCount} double-knocked · Review
+                  </Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.overlapReviewMuted}>No double-knocks in these dates</Text>
+              )}
+              {overlapOutOfRange > 0 ? (
+                <Text style={styles.overlapReviewMuted}>+{overlapOutOfRange} outside your dates</Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {/* Row 3: live status (left) + the house count (right). */}
           <View style={styles.statusBar}>
             <LiveStatus
@@ -1349,6 +1378,51 @@ export default function AdminMap() {
           </View>
         )}
       </SafeAreaView>
+
+      {/* Overlap review — who double-knocked what, and when. Doors outside the loaded viewport
+          still list (the endpoint isn't viewport-bound); they just have no address to show. */}
+      <Modal
+        visible={showOverlapList}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowOverlapList(false)}
+      >
+        <Pressable style={styles.overlapBackdrop} onPress={() => setShowOverlapList(false)}>
+          <Pressable style={styles.overlapSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.overlapSheetHeader}>
+              <Text style={styles.overlapSheetTitle}>Double-knocked doors ({overlapDoors.length})</Text>
+              <Pressable onPress={() => setShowOverlapList(false)} hitSlop={8}>
+                <Text style={styles.overlapSheetClose}>×</Text>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+              {overlapDoors.map((d) => {
+                const h = households.find((x) => String(x.id) === String(d.householdId));
+                return (
+                  <View key={String(d.householdId)} style={styles.overlapDoorRow}>
+                    <Text style={styles.overlapDoorAddress}>
+                      {h ? h.addressLine1 : 'Door outside the current view'}
+                    </Text>
+                    {d.passes.map((p) => (
+                      <View key={p.passId || 'legacy'} style={{ marginTop: 4 }}>
+                        <Text style={styles.overlapPassLabel}>{p.roundLabel}</Text>
+                        {p.canvassers.map((c) => (
+                          <View key={c.userId} style={styles.overlapCanvasserRow}>
+                            <Text style={c.inRange ? styles.overlapNameIn : styles.overlapNameOut}>
+                              {c.name}{c.inRange ? '' : ' (earlier)'}
+                            </Text>
+                            <Text style={styles.overlapWhen}>{formatExact(c.lastAt, tz)}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    ))}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Custom date range picker — opened from the date chip's "Custom" item. */}
       <DateRangePickerModal
@@ -2225,6 +2299,53 @@ function makeStyles(t) {
   },
 
   // Overlaps toggle count badge (subBar) — amber, mirrors the flag badge.
+  overlapReviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xs,
+    gap: spacing.sm,
+  },
+  overlapReviewLink: { fontSize: 12, fontWeight: '700', color: colors.warnFg },
+  overlapReviewMuted: { fontSize: 11, color: colors.textMuted },
+
+  overlapBackdrop: { flex: 1, backgroundColor: colors.backdrop, justifyContent: 'flex-end' },
+  overlapSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    maxHeight: '80%',
+  },
+  overlapSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  overlapSheetTitle: { ...type.h3, fontSize: 15 },
+  overlapSheetClose: { fontSize: 22, color: colors.textMuted },
+  overlapDoorRow: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  overlapDoorAddress: { ...type.bodyStrong, fontSize: 13 },
+  overlapPassLabel: { fontSize: 11, color: colors.textSecondary },
+  overlapCanvasserRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  overlapNameIn: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
+  overlapNameOut: { fontSize: 12, color: colors.textMuted },
+  overlapWhen: { fontSize: 11, color: colors.textMuted, fontVariant: ['tabular-nums'] },
+
   overlapBadge: {
     minWidth: 18,
     paddingHorizontal: 5,

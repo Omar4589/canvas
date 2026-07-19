@@ -13,7 +13,11 @@ Billing is simple and predictable, and it never gets in the way of work you've a
 
 ## What you pay
 
-Pricing is **$300 per campaign, per month**. A campaign starts billing in the month it records its **first knock** — setup months, where you've created the campaign, imported voters, and cut turf but nobody's knocked yet, are free. Billing then runs through the month you [archive the campaign](archive-vs-delete-campaign), so archiving is what stops it.
+Pricing is **$300 per campaign, per month**. A campaign starts billing in the month of its **first field visit** — a knock, or a restricted home a canvasser walked to and couldn't get into. Setup months, where you've created the campaign, imported voters, and cut turf but nobody's been out yet, are free. (Marking a book restricted from your desk isn't a field visit and doesn't start anything.) Billing then runs through the month you [archive the campaign](archive-vs-delete-campaign), so archiving is what stops it.
+
+Each campaign on your Billing page shows **Billing started** with the date it began — or *billing not started*, if it hasn't yet.
+
+The price never depends on how many doors you knock. If **you** invoice your own client per door, see [Can I bill for restricted doors?](bill-restricted-doors) — that setting changes your reports, not your Doorline bill.
 
 Your **Billing** page shows a running estimate of this month's cost — how many campaigns are canvassing and the expected total — so there are never any surprises. (See [Who can see the Billing page?](who-sees-billing) — it's limited to specific admins.)
 

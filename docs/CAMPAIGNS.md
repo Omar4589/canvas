@@ -135,6 +135,13 @@ in the drawer). The rules protect your data once canvassing has started:
 - **Name, state** — always editable.
 - **Key dates + note** — always editable, **org admins only** (a lead can edit the campaign's name,
   survey, and timezone, but not its dates).
+- **Restricted doors on invoices** — always editable, **org admins only.** Three choices: *use the
+  organization default* (which the drawer spells out for you), *count them*, or *don't count them*.
+  Deliberately **not** locked by canvassing activity, unlike Type: it's a reporting policy that's
+  recomputed live on every read, so flipping it mid-campaign is safe and fully reversible — it
+  changes how door totals are presented, never what was recorded. See
+  [METRICS.md](METRICS.md) → **Billable doors** for what actually moves (spoiler: only the door
+  totals on invoice-facing surfaces, never a rate or the coverage funnel).
 - **Timezone** — editable, but once you have activity you'll see a warning: changing it **re-buckets
   every past daily stat** (a knock near midnight can move to a different calendar day). Nothing is
   lost and all-time totals are unchanged, but day-by-day numbers shift. See [TIMEZONES.md](TIMEZONES.md).
@@ -205,8 +212,11 @@ in [validators.js](../server/src/utils/validators.js)), `surveyTemplateId` (null
 archive flag), `timeZone`, and the key dates: `electionDay` / `earlyVotingStart` / `earlyVotingEnd`
 (**`'YYYY-MM-DD'` strings, default null** — civil dates interpreted in the campaign's `timeZone`;
 strings on purpose, a `Date` at UTC midnight would render a day early in US zones) plus `datesNote`
-(trimmed string, max 280). ISO date strings order chronologically as plain strings, so all window
-checks are lexicographic — no `Date` parsing. A `pre('validate')` invariant enforces that a `survey`
+(trimmed string, max 280), and `billRestrictedDoors` (**tri-state Boolean, default `null`** — `null`
+= inherit `Organization.billRestrictedDoors`, `true`/`false` = explicit override; always resolve via
+[billRestricted.js](../server/src/services/reports/billRestricted.js), since reading the field raw
+collapses "inherit" into "off"). ISO date strings order chronologically as plain strings, so all
+window checks are lexicographic — no `Date` parsing. A `pre('validate')` invariant enforces that a `survey`
 campaign has a `surveyTemplateId` and a `lit_drop` campaign never does (it nulls it on save). There
 is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archived).
 
@@ -233,6 +243,12 @@ is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archiv
   ignore them; bootstrap carries them so the Books header + mobile admin detail can show the chip
   in-campaign, not just on the picker). Covered end-to-end by
   [campaignDates.int.test.js](../server/test/campaignDates.int.test.js).
+- **`billRestrictedDoors` surfaces differently** — it is a *policy*, not a display field, so nothing
+  ships the raw tri-state to a client except the edit drawer. `GET /admin/campaigns` returns it via
+  the lean spread **plus** an envelope-level `orgBillRestrictedDoors` (so the drawer can label what
+  "use the organization default" resolves to); every report surface ships the **resolved** boolean
+  alongside the numbers it affects. Covered by
+  [billableRestricted.int.test.js](../server/test/billableRestricted.int.test.js).
 - **DELETE `/admin/campaigns/:id`** — **only when `!hasCanvassed`** (else `400 { code: 'has-activity' }`).
   Cascades via [deleteCampaign.js](../server/src/services/campaigns/deleteCampaign.js):
   `deleteCampaignCascade()` removes the voters housed in the campaign's households, then

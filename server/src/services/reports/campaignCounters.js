@@ -27,15 +27,29 @@ import { KNOCK_ACTIONS, NOT_BULK, knocksPipeline } from './aggregations.js';
 // Billable-knock state of one (household, pass) pair, derived from its activity rows.
 // Mirrors knocksPipeline's inner $group: knock = any KNOCK_ACTIONS row; surveyed/lit/refused =
 // $max over the matching actionType.
+//
+// `restrictedDoor` mirrors the same pipeline run with includeRestricted: a pair counts as a
+// restricted DOOR only when it has a non-bulk `restricted` mark and NO knock — so knockCount and
+// restrictedDoorCount are disjoint and sum to billableDoors. The moment a real disposition lands
+// on the pair, the door flips out of restricted and into knocks, which is exactly the transition
+// the surveyed/lit/refused flags already model. Bulk marks are skipped for the same reason the
+// pipeline skips them: a desk-authored bulk restrict is not field work (see aggregations.js).
+// Callers MUST project `via` alongside `actionType`, or every bulk mark would look like a walk.
 export function knockStateOf(rows) {
-  const state = { knock: false, surveyed: false, lit: false, refused: false };
+  const state = { knock: false, surveyed: false, lit: false, refused: false, restrictedDoor: false };
+  let restricted = false;
   for (const r of rows) {
+    if (r.actionType === 'restricted') {
+      if (r.via !== 'bulk') restricted = true;
+      continue;
+    }
     if (!KNOCK_ACTIONS.includes(r.actionType)) continue;
     state.knock = true;
     if (r.actionType === 'survey_submitted') state.surveyed = true;
     else if (r.actionType === 'lit_dropped') state.lit = true;
     else if (r.actionType === 'refused') state.refused = true;
   }
+  state.restrictedDoor = restricted && !state.knock;
   return state;
 }
 
@@ -47,6 +61,7 @@ export function knockStateDelta(before, after) {
     surveyedKnockCount: d(before.surveyed, after.surveyed),
     litKnockCount: d(before.lit, after.lit),
     refusedKnockCount: d(before.refused, after.refused),
+    restrictedDoorCount: d(before.restrictedDoor, after.restrictedDoor),
   };
 }
 
@@ -79,7 +94,11 @@ export async function computeCampaignStats(campaignId) {
   const [activityCount, knockAgg, litDroppedCount, surveyCount, lastRow, canvasserIds] =
     await Promise.all([
       CanvassActivity.countDocuments({ campaignId }),
-      CanvassActivity.aggregate(knocksPipeline({ campaignId })),
+      // includeRestricted so ONE pass yields both knockCount (unchanged — `knocks` means the same
+      // thing in both modes) and restrictedDoorCount. Storing them unconditionally keeps the
+      // counters flag-independent: flipping billRestrictedDoors is a read-time decision and must
+      // never require a recompute.
+      CanvassActivity.aggregate(knocksPipeline({ campaignId }, { includeRestricted: true })),
       CanvassActivity.countDocuments({ campaignId, actionType: 'lit_dropped' }),
       SurveyResponse.countDocuments({ campaignId }),
       CanvassActivity.findOne({ campaignId, ...NOT_BULK }, { timestamp: 1 })
@@ -94,6 +113,7 @@ export async function computeCampaignStats(campaignId) {
     surveyedKnockCount: k.surveyedKnocks || 0,
     litKnockCount: k.litKnocks || 0,
     refusedKnockCount: k.refusedKnocks || 0,
+    restrictedDoorCount: k.restrictedDoors || 0,
     litDroppedCount,
     surveyCount,
     lastActivityAt: lastRow?.timestamp || null,

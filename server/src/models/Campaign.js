@@ -21,6 +21,18 @@ const campaignSchema = new mongoose.Schema(
       default: null,
     },
     isActive: { type: Boolean, default: true, index: true },
+    // Do restricted (inaccessible) doors count toward this campaign's BILLABLE DOOR totals —
+    // the number an org invoices its client from? TRI-STATE: null = inherit
+    // Organization.billRestrictedDoors, true/false = explicit override. Always resolve through
+    // services/reports/billRestricted.js; reading this field raw treats "inherit" as "off".
+    // Scope is deliberately narrow: it moves `billableDoors` on invoice-facing surfaces only.
+    // `knocks`, connection/contact rate, homesKnocked, and the coverage funnel are IDENTICAL in
+    // both states — nobody answered a restricted door, so it can never enter a rate denominator
+    // (docs/METRICS.md). Unrelated to what Doorline charges (flat per campaign per month) and to
+    // when billing STARTS (a first non-bulk restricted mark starts the clock either way —
+    // services/billing/statement.js). Not locked by hasCanvassed: it's a reporting policy and
+    // every read is live, so flipping it mid-campaign is legitimate and fully reversible.
+    billRestrictedDoors: { type: Boolean, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     // The project's timezone (defines "a day" for the same-day collision /
     // per-day knock reporting). Admin-set in the UI.
@@ -53,7 +65,10 @@ const campaignSchema = new mongoose.Schema(
     // instead of re-aggregating the whole CanvassActivity/SurveyResponse ledgers on every load.
     // Semantics mirror the live aggregations EXACTLY (see aggregations.js):
     //   knockCount..refusedKnockCount = knocksPipeline (distinct household×pass, billable);
-    //   litDroppedCount = lit_dropped row volume; activityCount = every activity row (any type,
+    //   restrictedDoorCount = distinct household×pass doors whose ONLY disposition is a non-bulk
+    //   `restricted` mark (knocksPipeline with includeRestricted, `restrictedDoors`) — so
+    //   knockCount + restrictedDoorCount = billableDoors, and the two never double-count the
+    //   same door; litDroppedCount = lit_dropped row volume; activityCount = every activity row (any type,
     //   bulk included — powers hasCanvassed); surveyCount = SurveyResponse rows;
     //   lastActivityAt / canvasserIds = NON-bulk only (matching NOT_BULK canvasser surfaces;
     //   canvasserIds is bounded by the campaign roster, ~dozens).
@@ -66,6 +81,7 @@ const campaignSchema = new mongoose.Schema(
       surveyedKnockCount: { type: Number, default: 0 },
       litKnockCount: { type: Number, default: 0 },
       refusedKnockCount: { type: Number, default: 0 },
+      restrictedDoorCount: { type: Number, default: 0 },
       litDroppedCount: { type: Number, default: 0 },
       surveyCount: { type: Number, default: 0 },
       lastActivityAt: { type: Date, default: null },

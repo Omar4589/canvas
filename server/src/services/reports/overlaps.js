@@ -16,44 +16,109 @@ import { KNOCK_ACTIONS } from './aggregations.js';
 // has always returned) plus UNCAPPED `total`/`householdIds`/`overlapUserIds` — the card list
 // truncates at `limit` (the worst collisions first), but reconciliation counts and the
 // per-canvasser inOverlap flags must not silently degrade on long date ranges.
-// Pass-wide overlap SET — the households (with their colliding pass + canvassers) where 2+
-// distinct canvassers knocked the same (household, pass). Unlike computeOverlaps this does
-// NOT $push every event, so it is cheap enough to run WITHOUT a date window over a whole
-// campaign — and it MUST run un-windowed: a same-pass overlap is a fact about the pass, not
-// a calendar range, so two knocks days apart in one pass still collide. (computeOverlaps'
-// callers are date-scoped, which silently hides exactly those cross-day collisions.) Powers
-// the map / household-panel audit indicator. `match` = org/campaign/effort (+passId?) — do
-// NOT pass a date range.
-export async function computeOverlapDoors(match, { organizationId } = {}) {
+// Overlap SET for the map / household-panel indicator — the households where 2+ distinct
+// canvassers knocked the same (household, pass). Unlike computeOverlaps this does NOT $push
+// every event, so one pass over the campaign answers both questions below.
+//
+// DATE SCOPING is ANCHORED, not windowed (owner decision 2026-07-19). The driving scenario: a door
+// is knocked 4/5 in pass 1, then a different canvasser knocks it again 4/11. Viewing 4/11, the
+// admin MUST get the alert — that is the whole point of the indicator. So:
+//   • DETECT the collision across the WHOLE pass (2+ distinct canvassers on one household+pass).
+//   • SURFACE it when AT LEAST ONE of its knocks lands inside the chosen dates.
+// A plain windowed $match cannot do this: on 4/11 it sees one lone knock, finds no collision, and
+// stays silent — exactly the miss the date-scoped /overlaps below suffers from. Hence the date test
+// is an EXPRESSION inside $group, never a $match. The rendered detail lists EVERY canvasser in the
+// pass (including the 4/5 one), so the admin reads "today's knock hit a door X already did".
+// Collisions with NO knock in the window are still real but purely historical — they come back as
+// `outOfRangeTotal` for the map's "N more outside your dates" hint.
+//
+// `match` = org/campaign/effort (+passId?) and must NOT carry a date range.
+// `userId` filters to collisions INVOLVING that canvasser — deliberately applied after grouping,
+// never as a $match: narrowing the rows to one canvasser first would leave every group with a
+// single distinct canvasser, so nothing could ever collide and the layer would read empty.
+export async function computeOverlapDoors(match, { dateRange = null, userId = null } = {}) {
+  const from = dateRange?.from || null;
+  const to = dateRange?.to || null;
+  const rangeConds = [];
+  if (from) rangeConds.push({ $gte: ['$timestamp', from] });
+  if (to) rangeConds.push({ $lt: ['$timestamp', to] }); // parseDateRange's upper bound is exclusive
+  const inRangeExpr = rangeConds.length ? { $and: rangeConds } : true;
+
+  // One row per (household, pass, canvasser) — NOT per event. That is the whole trick: it carries
+  // each canvasser's latest knock and whether they knocked in-window, at a cost bounded by distinct
+  // triples rather than by knock volume, so this stays safe to run across an entire pass.
   const rows = await CanvassActivity.aggregate([
     { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },
-    { $group: { _id: { householdId: '$householdId', passId: '$passId' }, canvassers: { $addToSet: '$userId' } } },
-    { $match: { 'canvassers.1': { $exists: true } } }, // 2+ distinct canvassers
+    {
+      $group: {
+        _id: { householdId: '$householdId', passId: '$passId', userId: '$userId' },
+        lastAt: { $max: '$timestamp' },
+        inRangeKnocks: { $sum: { $cond: [inRangeExpr, 1, 0] } },
+      },
+    },
   ]);
-  if (!rows.length) return { householdIds: [], doors: [], total: 0 };
+  if (!rows.length) return { householdIds: [], doors: [], total: 0, outOfRangeTotal: 0 };
 
-  const passIds = [...new Set(rows.map((r) => r._id.passId).filter(Boolean).map(String))];
-  const userIds = [...new Set(rows.flatMap((r) => r.canvassers.map(String)))];
+  // Regroup into (household, pass) → its canvassers. A collision is 2+ distinct canvassers in the
+  // pass; it is SURFACED when at least one knock — anyone's — landed in the window.
+  const groups = new Map();
+  for (const r of rows) {
+    const key = `${r._id.householdId}|${r._id.passId || ''}`;
+    if (!groups.has(key)) {
+      groups.set(key, { householdId: r._id.householdId, passId: r._id.passId || null, canvassers: [] });
+    }
+    groups.get(key).canvassers.push({
+      userId: String(r._id.userId),
+      lastAt: r.lastAt,
+      inRange: r.inRangeKnocks > 0,
+    });
+  }
+
+  const wanted = userId ? String(userId) : null;
+  const surfaced = [];
+  const outOfRangeHouseholds = new Set();
+  for (const g of groups.values()) {
+    if (g.canvassers.length < 2) continue; // no collision in this pass at all
+    if (wanted && !g.canvassers.some((c) => c.userId === wanted)) continue; // not this canvasser's
+    if (g.canvassers.some((c) => c.inRange)) surfaced.push(g);
+    else outOfRangeHouseholds.add(String(g.householdId)); // real, but entirely before/after the window
+  }
+
+  const passIds = [...new Set(surfaced.map((g) => g.passId).filter(Boolean).map(String))];
+  const userIds = [...new Set(surfaced.flatMap((g) => g.canvassers.map((c) => c.userId)))];
   const [users, passes] = await Promise.all([
-    User.find({ _id: { $in: userIds } }, 'firstName lastName').lean(),
+    userIds.length ? User.find({ _id: { $in: userIds } }, 'firstName lastName').lean() : [],
     passIds.length ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean() : [],
   ]);
   const uMap = new Map(users.map((u) => [String(u._id), `${u.firstName || ''} ${u.lastName || ''}`.trim()]));
   const pMap = new Map(passes.map((p) => [String(p._id), p]));
 
   const byHousehold = new Map();
-  for (const r of rows) {
-    const hid = String(r._id.householdId);
+  for (const g of surfaced) {
+    const hid = String(g.householdId);
     if (!byHousehold.has(hid)) byHousehold.set(hid, { householdId: hid, passes: [] });
-    const pass = r._id.passId ? pMap.get(String(r._id.passId)) : null;
+    const pass = g.passId ? pMap.get(String(g.passId)) : null;
     byHousehold.get(hid).passes.push({
-      passId: r._id.passId ? String(r._id.passId) : null,
+      passId: g.passId ? String(g.passId) : null,
       roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
-      canvassers: r.canvassers.map((u) => ({ userId: String(u), name: uMap.get(String(u)) || 'Unknown' })),
+      // Newest first so "who hit it most recently" reads off the top. `inRange` lets the UI mark
+      // which knock is the one you're looking at vs the earlier one that made it a collision.
+      canvassers: g.canvassers
+        .slice()
+        .sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt))
+        .map((c) => ({ userId: c.userId, name: uMap.get(c.userId) || 'Unknown', lastAt: c.lastAt, inRange: c.inRange })),
     });
   }
   const doors = [...byHousehold.values()];
-  return { householdIds: doors.map((d) => d.householdId), doors, total: doors.length };
+  // Only doors the window does NOT already ring count as "more outside your dates" — a door with
+  // one in-range collision and another out-of-range one is already on screen.
+  for (const d of doors) outOfRangeHouseholds.delete(d.householdId);
+  return {
+    householdIds: doors.map((d) => d.householdId),
+    doors,
+    total: doors.length,
+    outOfRangeTotal: outOfRangeHouseholds.size,
+  };
 }
 
 export async function computeOverlaps(match, { organizationId, limit = 200 } = {}) {

@@ -193,9 +193,15 @@ router.get('/:voterId/staff-access', async (req, res, next) => {
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
 
     const subjectIds = [voter._id, voter.householdId, voter.personId].filter(Boolean);
+    // $slice:2 on subjects, NOT the whole array. The export heuristic below only needs to know
+    // "one subject or more than one", and an export row can carry up to SUBJECT_CAP (20k) ids —
+    // projecting them all meant a routine profile view could pull 50 x 20k subdocs into the dyno
+    // for a boolean. Two entries answer `> 1` for every case, and truncated rows still short-circuit
+    // on subjectsTotal (capSubjects sets it only past the cap). Never widen this without moving the
+    // heuristic to a stored count.
     const rows = await AccessLog.find(
       { organizationId: activeOrgId(req), 'subjects.id': { $in: subjectIds } },
-      'at route resource actorUserId grantId subjects subjectsTotal'
+      { at: 1, route: 1, resource: 1, actorUserId: 1, grantId: 1, subjectsTotal: 1, subjects: { $slice: 2 } }
     )
       .populate('actorUserId', 'firstName')
       .populate('grantId', 'reason kind')
