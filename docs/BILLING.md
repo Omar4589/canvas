@@ -62,9 +62,11 @@ input — **pricing is unchanged** ($300 per campaign per month); the statement 
 document. See [METRICS.md](METRICS.md) (Part 1 "By round").
 
 **Onboarding a new client is one step:** creating the org also seats its **first admin** (name +
-email → a temp password to hand over — type a simple one or leave it blank to auto-generate; either
-way it's shown once and they reset it on first login) and starts the trial at your chosen length.
-Without this the org would have no admin and no way to seat one (adding members needs an existing admin).
+email — they get a **set-password invite by email**, valid 72 hours, and choose their own password;
+optionally type a simple temp password instead to hand over out-of-band, shown once, for a client
+who can't receive email — left blank, no credential exists anywhere) and starts the trial at your
+chosen length. Without this the org would have no admin and no way to seat one (adding members
+needs an existing admin).
 
 **Not every admin sees billing.** Billing is gated per-admin by a **billing-access** flag — only
 the people who actually pay the bill. The seated first admin gets it; other admins don't until a

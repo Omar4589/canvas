@@ -19,6 +19,16 @@ Every house is a pin colored by its current status — gray (unknocked), blue (n
 
 Turn pings on and each dot marks **where a canvasser stood** when they logged a knock, with a faint line back to the house. Filter to a **single canvasser** and the map rings two of their doors — a **Start** ring on their first knock and a **Latest** ring on their most recent — so you can trace their day. To flag GPS that looks off, see [Audit](audit).
 
+## Filter to a canvasser to see just their work
+
+Normally each house is colored by its status across the **whole campaign** — has *anyone* surveyed it, found nobody home, and so on. **Filter the map to a single canvasser** and the colors change to show **only what that person did**: green where *they* surveyed, blue where *they* got no answer, and gray for any door they never touched — even if a teammate worked it. It's the quickest way to see one canvasser's own results on the map. Clear the filter and the colors go back to the shared campaign status. (The pins stay put — only their color changes.)
+
+## Overlaps: doors worked by more than one canvasser
+
+Turn on **Show overlaps** and the map rings the doors that **more than one canvasser knocked in the same pass** — an amber ring around each, with an **"N overlaps"** count up top. Tap one and its detail panel names the other canvassers who worked it. Once a pass has covered a door, nobody should knock it again until the next pass, so an overlap is a turf collision worth a look — usually two walk lists that ran into each other.
+
+This toggle shows the **complete** picture: **the same pass, on any day** — so it catches two canvassers on one door even when they knocked it on **different days**. (The Timeline's overlap line only reconciles the date range you're viewing, so it can miss a cross-day collision — see [Understanding the numbers](metrics).) Nobody is ever billed twice for an overlap; this is purely to help you coach and coordinate. It's off by default.
+
 ## Arriving pre-filtered from a drill
 
 You don't always have to set the map's filters by hand. Drill into a survey answer — from the campaign Home or the [Survey Explorer](page-survey-explorer) — and **Open in Map** lands here with the same answer, canvasser, and date range already applied, so the pins are exactly the doors behind the number you were looking at. Each entry in those lists also has its own **Map** link that jumps straight to that one door. The same works on your phone: **View on map** from an answer's voter list pre-filters the mobile admin map.

@@ -16,7 +16,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { Turf } from '../../models/Turf.js';
 import { Pass } from '../../models/Pass.js';
-import { getPassStatusMap } from '../../services/passes/passStatus.js';
+import { getPassStatusMap, getUserStatusMap } from '../../services/passes/passStatus.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 
 const router = Router();
@@ -219,9 +219,10 @@ router.get('/map', async (req, res, next) => {
         }
       }
     }
-    // When scoped to a round we filter by PER-ROUND status (resolved below), not
-    // the global Household.status — so the door set matches the colors shown.
-    if (status && status.length && !passId) householdFilter.status = { $in: status };
+    // When scoped to a round (passId) or a single canvasser (userId) we filter by that
+    // scope's resolved status (below), not the global Household.status — so the door set
+    // matches the colors shown. Only a pure global view filters the stored status here.
+    if (status && status.length && !passId && !userId) householdFilter.status = { $in: status };
     if (campaignId) householdFilter.campaignId = campaignId;
     if (effortId) householdFilter.effortId = effortId;
     if (importId) {
@@ -314,15 +315,19 @@ router.get('/map', async (req, res, next) => {
     let householdIds = households.map((h) => h._id);
     const includeActivities = req.query.includeActivities === '1';
 
-    // Per-round door status when scoped to a pass (else the global Household.status).
-    let passStatusMap = null;
-    if (passId) {
+    // Door status: filtered to one canvasser → THAT canvasser's own status; else scoped
+    // to a pass → per-round status; else the global Household.status. A per-user or
+    // per-pass status map recolors the house AND re-narrows the status-chip filter so the
+    // door set matches the colors shown.
+    let statusMap = null;
+    if (userId || passId) {
       const camp = campaignId ? await Campaign.findById(campaignId, { type: 1 }).lean() : null;
-      passStatusMap = await getPassStatusMap(passId, householdIds, camp?.type);
-      // Apply the status filter against per-round status (not the global one).
+      statusMap = userId
+        ? await getUserStatusMap(userId, householdIds, camp?.type, passId)
+        : await getPassStatusMap(passId, householdIds, camp?.type);
       if (status && status.length) {
         const wanted = new Set(status);
-        households = households.filter((h) => wanted.has(passStatusMap.get(String(h._id))?.status || 'unknocked'));
+        households = households.filter((h) => wanted.has(statusMap.get(String(h._id))?.status || 'unknocked'));
         householdIds = households.map((h) => h._id);
       }
     }
@@ -345,7 +350,9 @@ router.get('/map', async (req, res, next) => {
         .populate('userId', 'firstName lastName')
         .lean(),
       CanvassActivity.aggregate([
-        { $match: { householdId: { $in: householdIds }, organizationId: orgId, ...(passId ? { passId } : {}) } },
+        // Filtered to one canvasser → their own last action (matches the per-user color);
+        // else the latest by anyone (optionally pass-scoped).
+        { $match: { householdId: { $in: householdIds }, organizationId: orgId, ...(passId ? { passId } : {}), ...(userId ? { userId } : {}) } },
         { $sort: { timestamp: -1 } },
         {
           $group: {
@@ -425,10 +432,10 @@ router.get('/map', async (req, res, next) => {
         location: h.location?.coordinates
           ? { lng: h.location.coordinates[0], lat: h.location.coordinates[1] }
           : null,
-        // Per-round: a door untouched THIS round reads 'unknocked' (fresh), not its
-        // global latest. Only fall back to global status when not pass-scoped.
-        status: passId ? passStatusMap?.get(String(h._id))?.status || 'unknocked' : h.status,
-        lastActionAt: (passId ? last?.timestamp : h.lastActionAt) || last?.timestamp || null,
+        // Filtered to a canvasser or a round → that scope's resolved status (a door
+        // untouched in scope reads 'unknocked'); else the global "ever surveyed" status.
+        status: statusMap ? statusMap.get(String(h._id))?.status || 'unknocked' : h.status,
+        lastActionAt: ((passId || userId) ? last?.timestamp : h.lastActionAt) || last?.timestamp || null,
         lastAction: last
           ? {
               actionType: last.actionType,
@@ -563,9 +570,20 @@ router.get('/:householdId/activity', async (req, res, next) => {
         .lean(),
     ]);
 
+    // A survey is written to BOTH ledgers (a survey_submitted CanvassActivity + a
+    // SurveyResponse), so listing both would show every survey twice. The SurveyResponse
+    // line is the richer one (it names the voter), so suppress the survey_submitted knock
+    // entry when a matching SurveyResponse exists for the same door+pass+canvasser; keep it
+    // only if genuinely orphaned (legacy/partial data).
+    const surveyKeys = new Set(surveys.map((s) => `${s.passId ? String(s.passId) : 'none'}|${String(s.userId?._id || s.userId)}`));
+    // canvasserId (stable) so the client overlap badge dedupes distinct canvassers the same
+    // way the authoritative /overlap-doors set does (by id, not display name).
+    const idOf = (u) => (u ? String(u._id || u) : null);
     const entries = [
-      ...acts.map((a) => ({ kind: 'knock', actionType: a.actionType, at: a.timestamp, passId: a.passId ? String(a.passId) : null, canvasser: name(a.userId), note: a.note && a.note.trim() ? a.note : null })),
-      ...surveys.map((s) => ({ kind: 'survey', actionType: 'survey_submitted', at: s.submittedAt, passId: s.passId ? String(s.passId) : null, canvasser: name(s.userId), voter: s.voterId?.fullName || null })),
+      ...acts
+        .filter((a) => !(a.actionType === 'survey_submitted' && surveyKeys.has(`${a.passId ? String(a.passId) : 'none'}|${String(a.userId?._id || a.userId)}`)))
+        .map((a) => ({ kind: 'knock', actionType: a.actionType, at: a.timestamp, passId: a.passId ? String(a.passId) : null, canvasser: name(a.userId), canvasserId: idOf(a.userId), note: a.note && a.note.trim() ? a.note : null })),
+      ...surveys.map((s) => ({ kind: 'survey', actionType: 'survey_submitted', at: s.submittedAt, passId: s.passId ? String(s.passId) : null, canvasser: name(s.userId), canvasserId: idOf(s.userId), voter: s.voterId?.fullName || null })),
     ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
     const passIds = [...new Set(entries.map((e) => e.passId).filter(Boolean))];

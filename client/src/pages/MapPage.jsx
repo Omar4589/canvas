@@ -19,6 +19,7 @@ import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
 import {
   householdsToGeoJSON,
+  overlapDoorsToGeoJSON,
   activitiesToPingsGeoJSON,
   activitiesToLinesGeoJSON,
   flagsToGeoJSON,
@@ -150,6 +151,9 @@ export default function MapPage() {
     templateId: searchParams.get('surveyTemplateId') || '',
   }));
   const [showCanvasserPins, setShowCanvasserPins] = useState(false);
+  // Opt-in overlap overlay: rings doors worked by 2+ distinct canvassers in the same pass
+  // (a turf collision / potential double-count). Default OFF — the default map is unchanged.
+  const [showOverlaps, setShowOverlaps] = useState(false);
   // Live auto-refresh of the map (web admins are at a desk + connected). Gates
   // the poll interval below; pauses automatically when the tab is backgrounded.
   const [live, setLive] = useState(true);
@@ -330,6 +334,29 @@ export default function MapPage() {
   });
   const flagEntries = flagsQ.data?.entries || [];
   const flagSummary = flagsQ.data?.summary || null;
+
+  // Overlap doors — a SEPARATE query (only when the layer is on) so toggling it never
+  // refetches households. Pass-wide and DAY-AGNOSTIC (unlike the date-scoped Map): it honors
+  // the campaign + any effort/pass scope, but NOT the date range. Returns the household ids
+  // (+ per-door collision detail) we ring on the map.
+  const overlapDoorsQ = useQuery({
+    queryKey: ['admin', 'overlap-doors', campaignId, scopeEffortId, scopePassId],
+    queryFn: () =>
+      api(
+        `/admin/reports/overlap-doors${buildQuery({
+          campaignId,
+          effortId: scopeEffortId,
+          passId: scopePassId,
+        })}`
+      ),
+    enabled: !!campaignId && showOverlaps,
+    ...livePollOptions(live),
+    placeholderData: keepPreviousData,
+  });
+  const overlapIds = useMemo(
+    () => new Set(overlapDoorsQ.data?.householdIds || []),
+    [overlapDoorsQ.data]
+  );
 
   const shownFlags = useMemo(() => {
     if (!flagReasonFilter.length) return flagEntries;
@@ -543,6 +570,16 @@ export default function MapPage() {
     linesSrc.setData(flagsToLinesGeoJSON(list));
   }, [shownFlags, showFlags, mapReady, styleEpoch]);
 
+  // Push the overlap ring overlay — rings the loaded doors whose id is in the overlap set.
+  // Re-runs when the set changes OR when households change (a viewport refetch loads new doors
+  // that may need ringing). Empty when the layer is off.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const src = mapRef.current.getSource('overlap-doors');
+    if (!src) return;
+    src.setData(overlapDoorsToGeoJSON(showOverlaps ? households : [], overlapIds));
+  }, [showOverlaps, overlapIds, households, mapReady, styleEpoch]);
+
   // Deep-link focus: when arriving via "View on map" (?focusActivityId), fly to that flag
   // once its data lands. Runs a single time so it doesn't fight later panning.
   useEffect(() => {
@@ -690,19 +727,31 @@ export default function MapPage() {
                 : `${households.length.toLocaleString()} households shown`}
             </span>
             <span className="text-fg-subtle" aria-hidden="true">·</span>
-            {/* Both polled layers. The flags layer is a number on this page too (the open-flag
-                chip), so the pill has to answer for it — not just for households. */}
+            {/* Every polled count on the page feeds the pill (it reports the OLDEST). The flags
+                and overlaps layers are each a number here (their chips below), so the pill has to
+                answer for them too — not just for households. */}
             <LiveStatus
-              {...liveStatusProps(showFlags ? [householdsQ, flagsQ] : [householdsQ], {
-                live,
-                onToggle: () => setLive((v) => !v),
-              })}
+              {...liveStatusProps(
+                [householdsQ, ...(showFlags ? [flagsQ] : []), ...(showOverlaps ? [overlapDoorsQ] : [])],
+                {
+                  live,
+                  onToggle: () => setLive((v) => !v),
+                }
+              )}
             />
             {showFlags && flagSummary?.totals?.open > 0 && (
               <>
                 <span className="text-fg-subtle" aria-hidden="true">·</span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-danger-tint px-2 py-0.5 font-medium text-danger">
                   ⚠ {flagSummary.totals.open.toLocaleString()} flagged
+                </span>
+              </>
+            )}
+            {showOverlaps && overlapDoorsQ.data?.total > 0 && (
+              <>
+                <span className="text-fg-subtle" aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-2 py-0.5 font-medium text-warning-fg">
+                  ⚠ {overlapDoorsQ.data.total.toLocaleString()} overlaps
                 </span>
               </>
             )}
@@ -738,6 +787,9 @@ export default function MapPage() {
             statusLabels={STATUS_LABELS}
             showCanvasserPins={showCanvasserPins}
             onShowCanvasserPinsChange={setShowCanvasserPins}
+            showOverlaps={showOverlaps}
+            onShowOverlapsChange={setShowOverlaps}
+            overlapCount={overlapDoorsQ.data?.total || 0}
             showFlags={showFlags}
             onShowFlagsChange={setShowFlags}
             flagReasonFilter={flagReasonFilter}

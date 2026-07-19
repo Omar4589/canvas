@@ -56,6 +56,10 @@ export default function MapFilters({
   statusLabels,
   showCanvasserPins = false,
   onShowCanvasserPinsChange,
+  // Overlap overlay (admin map only): doors worked by 2+ canvassers in the same pass.
+  showOverlaps = false,
+  onShowOverlapsChange,
+  overlapCount = 0,
   // GPS-audit flags overlay (admin map only).
   showFlags = false,
   onShowFlagsChange,
@@ -127,6 +131,29 @@ export default function MapFilters({
           <div className="mt-1 text-xs text-fg-muted">
             Where each survey, not-home, or wrong-address was submitted from, labeled
             with the canvasser&apos;s initials.
+          </div>
+
+          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showOverlaps}
+              onChange={(e) => onShowOverlapsChange?.(e.target.checked)}
+              className="h-4 w-4 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
+            />
+            <span className="text-fg">Show overlaps</span>
+            {overlapCount > 0 && (
+              <span className="ml-auto rounded-full bg-warning-tint px-1.5 text-xs font-medium text-warning-fg">
+                {overlapCount}
+              </span>
+            )}
+          </label>
+          <div className="mt-1 flex items-center gap-2 text-xs text-fg-muted">
+            <span
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2"
+              style={{ borderColor: '#f59e0b' }}
+            />
+            Doors worked by two or more canvassers in the same pass — a turf collision or
+            possible double-count.
           </div>
         </div>
       )}

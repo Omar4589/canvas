@@ -27,6 +27,13 @@ It happens — usually because two walk lists overlapped. The Timeline shows bot
 
 Click **Review overlap doors** to see exactly which houses, and who knocked them. **Each canvasser still gets credit** for the door they knocked — it shows on both their rows. It's only the *campaign* total that counts the house once.
 
+**Two places show overlaps, and they scope differently:**
+
+- The **Timeline** reconciles the overlaps **inside the date range you're viewing** — great for checking a specific day's or week's numbers. Because it's tied to that window, it can **miss** a collision whose two knocks happened on **different days** of the same pass.
+- The **map's Overlaps toggle** (and a door's detail panel) take the other view — **the same pass, any day** — so it's the **complete** list of doors more than one canvasser worked in a pass, even across days. See [Using the maps](maps).
+
+Either way, an overlap is **never billed twice** — this is just there to help you spot and coach the wasted effort.
+
 ## Surveys: two numbers, two questions
 
 You'll see **two** survey figures, and they are both correct. They answer different questions:

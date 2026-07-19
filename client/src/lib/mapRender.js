@@ -109,6 +109,23 @@ export function householdsToGeoJSON(households) {
   };
 }
 
+// Overlap doors → point features for the ring highlight. Only the households currently
+// loaded (so we have their coordinates) whose id is in the overlap set are ringed — the
+// /overlap-doors endpoint returns ids only, and we already hold the coordinates on the map.
+export function overlapDoorsToGeoJSON(households, overlapIds) {
+  const set = overlapIds instanceof Set ? overlapIds : new Set(overlapIds || []);
+  return {
+    type: 'FeatureCollection',
+    features: households
+      .filter((h) => set.has(h.id) && h.location?.lng != null && h.location?.lat != null)
+      .map((h) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [h.location.lng, h.location.lat] },
+        properties: { id: h.id },
+      })),
+  };
+}
+
 export function initialsFor(canvasser) {
   if (!canvasser) return '';
   const f = (canvasser.firstName || '').trim();
@@ -394,6 +411,24 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       },
     });
   }
+
+  // Overlap highlight — doors worked by 2+ distinct canvassers in the same pass (a turf
+  // collision / potential double-count). A hollow amber ring AROUND the existing house icon
+  // (not a new pin, never clustered), toggled from MapFilters. Empty until MapPage pushes the
+  // overlapping doors currently in view.
+  map.addSource('overlap-doors', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'overlap-doors-ring',
+    type: 'circle',
+    source: 'overlap-doors',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 10, 13, 14, 16, 18, 18, 22],
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-color': '#f59e0b',
+      'circle-stroke-width': 3,
+      'circle-stroke-opacity': 0.95,
+    },
+  });
 
   // Selection highlight — a bold ring around the door the admin last tapped or focused
   // via a Notes "view on map" link. On top; MapPage pushes the single selected point.

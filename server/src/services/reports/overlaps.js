@@ -16,6 +16,46 @@ import { KNOCK_ACTIONS } from './aggregations.js';
 // has always returned) plus UNCAPPED `total`/`householdIds`/`overlapUserIds` — the card list
 // truncates at `limit` (the worst collisions first), but reconciliation counts and the
 // per-canvasser inOverlap flags must not silently degrade on long date ranges.
+// Pass-wide overlap SET — the households (with their colliding pass + canvassers) where 2+
+// distinct canvassers knocked the same (household, pass). Unlike computeOverlaps this does
+// NOT $push every event, so it is cheap enough to run WITHOUT a date window over a whole
+// campaign — and it MUST run un-windowed: a same-pass overlap is a fact about the pass, not
+// a calendar range, so two knocks days apart in one pass still collide. (computeOverlaps'
+// callers are date-scoped, which silently hides exactly those cross-day collisions.) Powers
+// the map / household-panel audit indicator. `match` = org/campaign/effort (+passId?) — do
+// NOT pass a date range.
+export async function computeOverlapDoors(match, { organizationId } = {}) {
+  const rows = await CanvassActivity.aggregate([
+    { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },
+    { $group: { _id: { householdId: '$householdId', passId: '$passId' }, canvassers: { $addToSet: '$userId' } } },
+    { $match: { 'canvassers.1': { $exists: true } } }, // 2+ distinct canvassers
+  ]);
+  if (!rows.length) return { householdIds: [], doors: [], total: 0 };
+
+  const passIds = [...new Set(rows.map((r) => r._id.passId).filter(Boolean).map(String))];
+  const userIds = [...new Set(rows.flatMap((r) => r.canvassers.map(String)))];
+  const [users, passes] = await Promise.all([
+    User.find({ _id: { $in: userIds } }, 'firstName lastName').lean(),
+    passIds.length ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean() : [],
+  ]);
+  const uMap = new Map(users.map((u) => [String(u._id), `${u.firstName || ''} ${u.lastName || ''}`.trim()]));
+  const pMap = new Map(passes.map((p) => [String(p._id), p]));
+
+  const byHousehold = new Map();
+  for (const r of rows) {
+    const hid = String(r._id.householdId);
+    if (!byHousehold.has(hid)) byHousehold.set(hid, { householdId: hid, passes: [] });
+    const pass = r._id.passId ? pMap.get(String(r._id.passId)) : null;
+    byHousehold.get(hid).passes.push({
+      passId: r._id.passId ? String(r._id.passId) : null,
+      roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
+      canvassers: r.canvassers.map((u) => ({ userId: String(u), name: uMap.get(String(u)) || 'Unknown' })),
+    });
+  }
+  const doors = [...byHousehold.values()];
+  return { householdIds: doors.map((d) => d.householdId), doors, total: doors.length };
+}
+
 export async function computeOverlaps(match, { organizationId, limit = 200 } = {}) {
   const [facets] = await CanvassActivity.aggregate([
     { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },

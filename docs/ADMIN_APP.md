@@ -70,6 +70,24 @@ opens the **response detail**, which now shows an *"Edited by …"* line when an
 *"Synced"* line for offline submissions. Same tool as the web **Survey Explorer** — see
 [SURVEYS.md](SURVEYS.md) (Part 1 → *Auditing answers*).
 
+### The Map tab's door detail (now at web parity)
+Tapping a house on the mobile admin **Map** opens a bottom sheet that now matches the web console's
+door panel: the **status + address** header, **Last action**, a **History by pass** list (every round
+the door was worked, so a door knocked in Round 1 *and* Round 2 shows both — the survey line names the
+voter, and it's **de-duped** so a survey never lists twice), its **voters**, and its **surveys** with
+the answers **lazy-loaded** on open (they don't ride the map's live refetch). Two overlap surfaces ride
+along, mirroring the web map:
+- **A door's ⚠ Overlap badge.** If **more than one canvasser knocked the door in the same pass**, the
+  sheet flags it and **names the others** ("Also worked by …") — a turf collision worth a look. This is
+  computed straight from the door's own history (no extra fetch), pass-by-pass.
+- **An opt-in Overlaps map toggle.** Turn it on and every door worked by 2+ canvassers in the same pass
+  gets an **amber ring** beneath its pin — the same pass-wide, day-agnostic set as the web map (it
+  catches collisions even across different days). Off by default; **no clustering**, ever.
+
+Filtering the mobile admin map to a **single canvasser** also recolors each door by **that canvasser's
+own disposition** (green only where *they* surveyed, etc.), exactly like the web map — see
+[MAPS.md](MAPS.md).
+
 ### The More hub
 - **Manage:** Users; **GPS audit** ([AUDIT.md](AUDIT.md)); **Notes** — the campaign Notes hub, door/
   survey/admin notes in one feed ([NOTES.md](NOTES.md)); Voter search; Switch to canvass mode. (More
@@ -228,6 +246,26 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 
 Every fetch carries `campaignId` (the reports router 403s a lead without a managed one). All of this
 is JS-only — ships via OTA, no native build.
+
+## The admin Map screen — door detail + overlaps
+
+[admin/map.jsx](../mobile/app/(app)/admin/map.jsx) also hosts the tapped-door **bottom sheet at web
+parity** and the **Overlaps** overlay (Part 1 above). Both reuse the shipped server shapes, so this is
+client-only:
+
+- **Door sheet:** lazy-loads `GET /admin/households/:householdId/activity` (the per-round history,
+  de-duped server-side to one entry per survey) and `GET /admin/households/:householdId/surveys` (answers
+  on open only) — the same two endpoints the web `HouseholdDetailPanel` uses. The inline **⚠ Overlap**
+  badge is derived from the loaded `rounds` (2+ distinct canvassers among real knock + survey entries in
+  a pass), naming the others.
+- **Overlaps toggle:** an opt-in query to `GET /admin/reports/overlap-doors` (carrying
+  `campaignId` + `effortId`/`passId`), folded into the map's live-poll pill; rings the loaded overlap
+  doors beneath the pins (`admin-overlaps` `ShapeSource` + `CircleLayer`).
+- **Per-canvasser coloring** is automatic from the server `status` field (`?userId` now returns that
+  canvasser's own disposition).
+
+The full server/data/render depth for all three lives in [MAPS.md](MAPS.md) (§D endpoints, §E render,
+§J file map) and [METRICS.md](METRICS.md) §D (the two overlap surfaces) — not duplicated here.
 
 ## Web-dashboard admin surfaces (file map)
 These tools are web-only (the mobile More hub links out to the web for them). Listed here so the file

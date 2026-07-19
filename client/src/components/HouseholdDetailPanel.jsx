@@ -1,7 +1,13 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { formatInTz } from '../lib/datetime.js';
+
+// The billable knock set — MUST mirror the server's KNOCK_ACTIONS
+// (services/reports/aggregations.js) so the inline overlap badge counts collisions the same
+// way /overlap-doors (the map ring) does. `restricted` and `note_added` are deliberately out.
+const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped']);
 
 function formatDateTime(d, tz) {
   if (!d) return '—';
@@ -71,6 +77,43 @@ export default function HouseholdDetailPanel({
     enabled: !!h?.id,
   });
   const rounds = activityQ.data?.rounds || [];
+
+  // Overlap detection — day-agnostic, straight from the already-loaded activity rounds (no
+  // extra fetch). Counted EXACTLY like the authoritative /overlap-doors ring so the badge and
+  // the map can never disagree: distinct canvassers by USER ID (not display name — two
+  // same-named volunteers are two canvassers) among KNOCK_ACTIONS only (restricted is a
+  // marker, not a knock — excluded, matching the server's KNOCK_ACTIONS). 2+ in one pass = an
+  // overlap. Each pass maps id → name (for display).
+  const overlapByPass = useMemo(() => {
+    const m = new Map();
+    for (const r of rounds) {
+      const byId = new Map();
+      for (const e of r.entries || []) {
+        if (!OVERLAP_KNOCK_ACTIONS.has(e.actionType)) continue;
+        const id = e.canvasserId || e.canvasser; // fall back to name only if an old server omits the id
+        if (id) byId.set(id, e.canvasser || 'Unknown');
+      }
+      if (byId.size >= 2) m.set(r.passId || 'none', byId);
+    }
+    return m;
+  }, [rounds]);
+  const hasOverlap = overlapByPass.size > 0;
+  // Name the colliding canvassers other than this door's own status owner (its last action)
+  // — "also worked by …" reads relative to whoever owns the door now.
+  const primaryId = h.lastAction?.canvasser?.id || null;
+  const primaryName = h.lastAction?.canvasser
+    ? `${h.lastAction.canvasser.firstName || ''} ${h.lastAction.canvasser.lastName || ''}`.trim()
+    : '';
+  const overlapOthers = useMemo(() => {
+    const s = new Map(); // id → name, so same-named distinct canvassers both appear
+    for (const byId of overlapByPass.values()) {
+      for (const [id, nm] of byId) {
+        if (primaryId ? id !== primaryId : nm !== primaryName) s.set(id, nm);
+      }
+    }
+    return [...s.values()];
+  }, [overlapByPass, primaryId, primaryName]);
+
   return (
     <div>
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
@@ -83,6 +126,14 @@ export default function HouseholdDetailPanel({
             <span className="text-xs uppercase tracking-wide text-fg-muted">
               {statusLabels[h.status]}
             </span>
+            {hasOverlap && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg"
+                title="Worked by two or more canvassers in the same pass"
+              >
+                ⚠ Overlap
+              </span>
+            )}
           </div>
           <div className="mt-1 truncate font-medium text-fg">{h.addressLine1}</div>
           {h.addressLine2 && (
@@ -91,6 +142,12 @@ export default function HouseholdDetailPanel({
           <div className="text-xs text-fg-muted">
             {h.city}, {h.state} {h.zipCode}
           </div>
+          {overlapOthers.length > 0 && (
+            <div className="mt-1.5 text-[11px] font-medium text-warning-fg">
+              ⚠ Also worked by {overlapOthers.join(', ')}{' '}
+              {overlapByPass.size > 1 ? 'in the same pass' : 'this pass'}
+            </div>
+          )}
           {h.coordSource === 'corrected' ? (
             <div className="mt-1.5 inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
               Pin corrected{h.correctedAt ? ` · ${formatInTz(h.correctedAt, zone, { month: 'short', day: 'numeric' }, false)}` : ''}
@@ -146,9 +203,16 @@ export default function HouseholdDetailPanel({
           <div className="space-y-2">
             {rounds.map((r) => (
               <div key={r.passId || 'none'}>
-                <div className="text-xs font-semibold text-fg">
-                  {r.roundNumber != null ? `Pass ${r.roundNumber}` : r.name}
-                  {r.roundNumber != null && r.name ? <span className="font-normal text-fg-muted"> · {r.name}</span> : null}
+                <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-fg">
+                  <span>
+                    {r.roundNumber != null ? `Pass ${r.roundNumber}` : r.name}
+                    {r.roundNumber != null && r.name ? <span className="font-normal text-fg-muted"> · {r.name}</span> : null}
+                  </span>
+                  {overlapByPass.has(r.passId || 'none') && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
+                      ⚠ Overlap
+                    </span>
+                  )}
                 </div>
                 <ul className="mt-0.5 space-y-0.5">
                   {r.entries.map((e, i) => (

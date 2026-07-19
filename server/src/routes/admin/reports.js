@@ -27,7 +27,7 @@ import {
   teamFoldStage,
 } from '../../services/reports/aggregations.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
-import { computeOverlaps } from '../../services/reports/overlaps.js';
+import { computeOverlaps, computeOverlapDoors } from '../../services/reports/overlaps.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import { detectFlags } from '../../services/audit/flagDetection.js';
 import { FLAG_THRESHOLDS, SEVERITY_RANK, AUDIT_WINDOW_MAX_DAYS } from '../../services/audit/flagThresholds.js';
@@ -1571,6 +1571,26 @@ router.get('/overlaps', async (req, res, next) => {
     const match = { ...baseFilter(req), ...parseDateRange(req, 'timestamp') };
     const { overlaps, total } = await computeOverlaps(match, { organizationId: activeOrgId(req) });
     res.json({ overlaps, total });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Pass-wide overlap set for the map / household-panel indicator: the households where 2+
+// distinct canvassers knocked the same (household, pass), DELIBERATELY un-windowed — a
+// same-pass overlap split across days (e.g. a survey on the 14th, a not-home on the 18th)
+// is a real collision the date-scoped /overlaps above cannot see. Cheap (no per-event
+// arrays) so it's safe campaign-wide. baseFilter carries org/campaign/effort; ?passId
+// narrows to one round.
+router.get('/overlap-doors', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const match = { ...baseFilter(req) };
+    if (req.query.passId && mongoose.isValidObjectId(req.query.passId)) {
+      match.passId = new mongoose.Types.ObjectId(req.query.passId);
+    }
+    const result = await computeOverlapDoors(match, { organizationId: activeOrgId(req) });
+    res.json(result);
   } catch (err) {
     next(err);
   }

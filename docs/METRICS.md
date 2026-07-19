@@ -242,6 +242,15 @@ collision happened, with the canvassers involved. Because a same-pass double-kno
 **1 knock**, overlaps are never billed — the warning is just there to help you spot and coach
 the wasted effort.
 
+**Two places show overlaps, and they scope differently.** The **Timeline's** overlap
+reconciliation counts collisions **within the date range you're looking at** ("this window's raw
+knocks vs. the deduped total") — so it can miss a collision whose two knocks landed on **different
+days** of the same pass. The **map's Overlaps toggle** and a **door's detail panel** (⚠ Overlap)
+take the other view: **the same pass, any day** — the *complete* picture of which doors more than one
+canvasser worked in a pass, even across days. If you want the full list of collision doors, use the
+map/panel; if you want to reconcile a specific day's or week's numbers, use the Timeline. See
+[MAPS.md](MAPS.md) for the map toggle.
+
 ## Per-canvasser numbers (leaderboard & drilldowns)
 
 - A canvasser has **at most one knock record per (house, pass)**, so a single canvasser's
@@ -407,6 +416,49 @@ then rolls up to **one card per household** listing its colliding passes. Respon
 
 The aggregation+rollup above lives in `computeOverlaps` ([services/reports/overlaps.js](../server/src/services/reports/overlaps.js)) — a shared helper called by **both** `/overlaps` and `/canvasser-timeline` (so they can't drift). The **web Daily Timeline** (below) is the first web overlaps surface; the standalone web `/overlaps` page is still a backlog item.
 
+### The TWO overlap surfaces: the windowed reconciliation vs the pass-wide indicator
+
+Two functions in [overlaps.js](../server/src/services/reports/overlaps.js) answer the **same question**
+("which doors did 2+ distinct canvassers knock in the same pass?") for **two different jobs**, and they
+scope differently on purpose:
+
+| | `computeOverlaps` → `/overlaps` + `/canvasser-timeline` | `computeOverlapDoors` → `/overlap-doors` |
+|---|---|---|
+| **Job** | Event-level **reconciliation** — reconcile the Timeline's raw Σ-per-canvasser knocks against the deduped billable count, and list the colliding events (who, when, which action) | The map / household-panel **indicator** — ring the collision doors and name who else worked them |
+| **Date scope** | **Date-WINDOWED** — the caller passes the same `[from, to)` window as the dashboard ("collisions within the selected range") | **Pass-WIDE / day-agnostic** — runs with **no date window** ("same pass, any day"): the complete picture |
+| **Cost** | Heavy: `$push`es every colliding event into per-door arrays, so it's bounded to the window (and skipped entirely in the campaign-to-date `totals` mode — a whole campaign can breach Mongo's 100MB per-stage limit) | Cheap: `$addToSet` of the distinct canvassers only, **no** `$push` — light enough to run un-windowed over a whole campaign |
+| **Returns** | `{ overlaps[], total, householdIds, overlapUserIds }` — cards + the pre-cap reconciliation counts | `{ householdIds, doors[{ householdId, passes[{ passId, roundLabel, canvassers[{userId,name}] }] }], total }` — ids + who, no addresses |
+
+**Why the windowed one exists at all** — and why it isn't just the pass-wide set filtered to a range:
+the Timeline reconciliation is an **event-level** audit (it must show *which knock* collided, when, and
+by whom), and that per-event `$push` is what makes it memory-bound, so it has to be scoped to a window.
+The pass-wide indicator carries none of that event payload, so it can afford to be un-windowed.
+
+**The consequence to remember:** a same-pass overlap is a fact about the **pass**, not a calendar range,
+so **two knocks days apart in one pass still collide** — but the windowed `/overlaps` (and the Timeline
+reconciliation built on it) **can only see collisions whose events both fall inside the selected date
+window**, so it **silently misses cross-day same-pass overlaps**. The pass-wide `/overlap-doors` set
+(the map's Overlaps ring + the household panel's ⚠ badge) is the one that catches those — it is the
+**complete** overlap picture for a campaign/pass. Neither affects billing: an overlap is never
+double-billed (one knock per household × pass), so both surfaces are coach-and-coordinate signals, not
+money. See [MAPS.md](MAPS.md) (the Overlaps toggle + the ring layer) for the map side.
+
+### The survey dual-ledger no longer double-lists in the door activity feed
+
+A survey writes to **both** ledgers on purpose — a `survey_submitted` `CanvassActivity` **and** a
+`SurveyResponse` (the door-unit vs voter-unit split; see the dual-ledger note in §F and
+[SURVEYS.md](SURVEYS.md)). The door-detail **History by pass/round** feed
+(`GET /admin/households/:householdId/activity`, powering the web `HouseholdDetailPanel` and the mobile
+map sheet) reads **both** ledgers, so a naïve merge listed every survey **twice** — once as a knock
+entry, once as the survey entry. It now emits **one entry per survey**: the `survey_submitted`
+`CanvassActivity` line is **suppressed when a matching `SurveyResponse` exists** for the same
+door + pass + canvasser (the `SurveyResponse` line is the richer one — it names the voter), and kept
+only if genuinely orphaned (legacy/partial data). This is a **display de-dupe in the activity feed
+only** — both ledger rows still exist and every count query is unchanged (nothing sums both ledgers;
+GPS/door audits read `CanvassActivity`, survey/voter counts read `SurveyResponse`). The feed's overlap
+badge counts distinct canvassers per pass across those de-duped entries, so a single canvasser's survey
+never looks like a two-person collision.
+
 ## E. Endpoint reference
 
 | Endpoint | Scope | Key returns | Range basis |
@@ -421,7 +473,8 @@ The aggregation+rollup above lives in `computeOverlaps` ([services/reports/overl
 | `GET /admin/reports/canvassers/:id/daily` | one canvasser, per day | `days[{ homesKnocked, surveyKnocks, surveysSubmitted, connectionRatePct, … }]` | same |
 | `GET /admin/reports/knocks-by-pass` | one campaign, **per round** (`campaignId` REQUIRED — 400 without it; optional `effortId`, `from`/`to`) | `{ campaignId, timeZone, from, to, rounds[], totals{}, byCanvasser?, crossCanvasserDoors? }`. Each `rounds[]` row: `{ passId (null = legacy), effortId, effortName, roundNumber, roundName, roundLabel ("Pass N · name" \| "Legacy / no round"), status, activatedAt, archivedAt, knocks, surveyedKnocks, litKnocks, refusedKnocks, connectionRate, contactRate, coverageGained }`. Row set = **every Pass** of the campaign/effort (0-knock rounds are real information) + any agg bucket without a Pass doc (legacy `passId:null`, or a deleted pass); sorted walk list asc → round asc, legacy last. Everything is live aggregation via `knocksPipeline` — the round-blind `Campaign.stats` fast-path is never used here. **The contract: `Σ(rounds[].knocks) === totals.knocks`** (same for the survey/lit/refused tallies) — both run the same pipeline over the same match (`byPass` vs collapsed), so the rows always sum exactly to the headline (rates in `totals` are recomputed from the summed counts, not averaged). `coverageGained`: first-ever knock per household is found over the campaign **lifetime** (no date filter), then the window narrows to first-knocks that happened inside it — a re-knocked door credits only its first round. **`?groupBy=canvasser`** adds `byCanvasser[]`: **RAW per-user per-round rows — `NOT_BULK`, never team-folded** (the audit convention, like the answer drill: "who pressed the button", not "whose team gets credit"; admin bulk marks are excluded). A door two canvassers both knocked in the same round counts once for the round but once per canvasser; the over-claim is `crossCanvasserDoors` = Σ(per-canvasser knocks) − the NOT_BULK round totals (the `/team-breakdown` convention — computed against a NOT_BULK total so bulk marks can't masquerade as cross-canvasser overlap). | `timestamp` |
 | `GET /admin/reports/knocks-by-pass.csv` | the invoice-ready export (same params) | Same builder (`buildKnocksByPass`) as the JSON, so report and export can't drift. **Default:** one row per walk list × round + a **TOTAL** row — columns `Walk list, Round, Round name, Round status, Activated (ISO), Archived (ISO), Knocks, Survey doors, Lit knocks, Refused, Connection rate %, Contact rate %, New homes reached`. **`?groupBy=canvasser`:** per-user per-round rows (`Walk list, Round, Round name, Canvasser first/last name, Email, Status, Knocks, Survey doors, Lit knocks, Refused, Connection rate %, Contact rate %`) — **no coverage column** (first-ever-knock coverage has no honest per-canvasser attribution) and no TOTAL row (the rows over-claim by `crossCanvasserDoors`, by design). `text/csv` attachment `knocks-by-pass-YYYY-MM-DD.csv`. | same |
-| `GET /admin/reports/overlaps` | overlap review | see §D | `timestamp` |
+| `GET /admin/reports/overlaps` | overlap review (date-**windowed**, event-level) | see §D | `timestamp` |
+| `GET /admin/reports/overlap-doors` | the map/panel overlap **indicator** (pass-wide, **day-agnostic**) | `{ householdIds:[…], doors:[{ householdId, passes:[{ passId, roundLabel, canvassers:[{userId,name}] }] }], total }`. Params `campaignId` (+ optional `effortId`/`passId`); **no** date range (`computeOverlapDoors` — see §D). Lead-gated. | none (un-windowed) |
 | `GET /admin/reports/duplicate-surveys` | voters with >1 survey response | `duplicates[{ voter, household, responses[{ canvasser, submittedAt, roundLabel }], sameCanvasserSameDay, differentCanvassers }]` | `submittedAt` |
 | `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to`, max 62 days; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{} }` with per-canvasser `knocksByDay/surveysByDay`; `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
 

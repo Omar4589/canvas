@@ -28,7 +28,7 @@ import { primaryReason, reasonColor } from '../../../lib/flags';
 import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { initMapbox } from '../../../lib/mapbox';
-import { timeAgo, formatExact } from '../../../lib/datetime';
+import { timeAgo, formatExact, formatInTz } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -55,6 +55,9 @@ const STATUS_OPTIONS = [
 // read as route endpoints, not statuses (matches the web mapRender constants).
 const FIRST_KNOCK_COLOR = '#0891b2'; // cyan
 const LAST_KNOCK_COLOR = '#db2777'; // pink
+// Mirror the server's KNOCK_ACTIONS so the inline overlap badge matches the /overlap-doors
+// ring (restricted / note_added are not knocks — excluded).
+const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped']);
 
 const one = (v) => (Array.isArray(v) ? v[0] : v) || '';
 
@@ -232,6 +235,7 @@ export default function AdminMap() {
   const [campaign, setCampaign] = useState(undefined);
   const [showPings, setShowPings] = useState(false);
   const [showFlags, setShowFlags] = useState(false);
+  const [showOverlaps, setShowOverlaps] = useState(false);
   const [selected, setSelected] = useState(null);
   const [selectedPing, setSelectedPing] = useState(null);
   const [selectedFlagId, setSelectedFlagId] = useState(null);
@@ -307,6 +311,22 @@ export default function AdminMap() {
     queryFn: () => api(`/admin/activities/${selectedPing.id}`),
     enabled: !!selectedPing?.id,
     staleTime: 60 * 1000,
+  });
+
+  // Household detail — lazy-loaded when a door sheet opens, matching the web
+  // HouseholdDetailPanel. `/activity` gives the full per-round history (deduped
+  // server-side: one line per survey) + powers the inline overlap badge; `/surveys`
+  // gives per-survey answers (the map payload ships survey meta only). `passId`
+  // mirrors the map's round scoping so the panel shows the same survey set as the pins.
+  const hhActivityQ = useQuery({
+    queryKey: ['admin', 'household-activity', selected?.id],
+    queryFn: () => api(`/admin/households/${selected.id}/activity`),
+    enabled: !!selected?.id,
+  });
+  const hhSurveysQ = useQuery({
+    queryKey: ['admin', 'household-surveys', selected?.id, passId || ''],
+    queryFn: () => api(`/admin/households/${selected.id}/surveys${passId ? `?passId=${passId}` : ''}`),
+    enabled: !!selected?.id && (selected?.surveys?.length || 0) > 0,
   });
 
   // Re-sync the active campaign every time the map regains focus — a per-campaign
@@ -431,6 +451,23 @@ export default function AdminMap() {
     },
     enabled: !!cId && showFlags,
     refetchInterval: live && showFlags ? 20 * 1000 : false,
+    ...useFocusedPoll(),
+  });
+
+  // Overlap doors — opt-in highlight of houses knocked by 2+ distinct canvassers in the
+  // same pass. Pass-wide and DAY-AGNOSTIC (unlike the date-scoped /overlaps list), so it
+  // ignores the map's date range; it DOES honor the effort/pass deep-link scope. Returns
+  // householdIds only — we ring whichever of those are currently loaded on the map.
+  const overlapDoorsQ = useQuery({
+    queryKey: ['admin', 'overlap-doors', cId, effortId, passId],
+    queryFn: () => {
+      const p = new URLSearchParams({ campaignId: String(cId) });
+      if (effortId) p.set('effortId', effortId);
+      if (passId) p.set('passId', passId);
+      return api(`/admin/reports/overlap-doors?${p.toString()}`);
+    },
+    enabled: !!cId && showOverlaps,
+    refetchInterval: live && showOverlaps ? 20 * 1000 : false,
     ...useFocusedPoll(),
   });
 
@@ -628,6 +665,72 @@ export default function AdminMap() {
     return m;
   }, [flagEntries]);
   const selectedFlag = selectedFlagId ? flagsById.get(String(selectedFlagId)) : null;
+
+  // Overlap doors → an amber ring on whichever loaded households are in the overlap set.
+  // The endpoint returns ids only, so we intersect with the currently loaded (date/
+  // viewport-scoped) pins; switch the date to "All time" to surface every overlap.
+  const overlapIds = useMemo(
+    () => new Set((overlapDoorsQ.data?.householdIds || []).map(String)),
+    [overlapDoorsQ.data]
+  );
+  const overlapFeatures = useMemo(() => {
+    if (!showOverlaps || overlapIds.size === 0) return { type: 'FeatureCollection', features: [] };
+    return {
+      type: 'FeatureCollection',
+      features: households
+        .filter((h) => h.location?.lat != null && h.location?.lng != null && overlapIds.has(String(h.id)))
+        .map((h) => ({
+          type: 'Feature',
+          id: String(h.id),
+          properties: { id: String(h.id) },
+          geometry: { type: 'Point', coordinates: [h.location.lng, h.location.lat] },
+        })),
+    };
+  }, [showOverlaps, households, overlapIds]);
+  const overlapDoorCount = overlapDoorsQ.data?.total ?? 0;
+
+  // Selected-door detail (web parity). `hhRounds` is the per-pass history; the inline
+  // overlap badge fires when any single pass has 2+ distinct canvassers among its
+  // knock+survey entries, and names them. `hhSurveyDetailById` merges the lazily-loaded
+  // answers onto the survey meta already on the household.
+  const hhRounds = hhActivityQ.data?.rounds || [];
+  const hhSurveyDetailById = useMemo(
+    () => new Map((hhSurveysQ.data?.surveys || []).map((s) => [s.id, s])),
+    [hhSurveysQ.data]
+  );
+  // Per-pass overlap, counted EXACTLY like the authoritative /overlap-doors ring so the badge
+  // and the map can never disagree: distinct canvassers by USER ID (not display name) among
+  // OVERLAP_KNOCK_ACTIONS only (restricted is a marker, not a knock — excluded, matching the
+  // server's KNOCK_ACTIONS). Keyed by passId → Map(id → name). Matches web HouseholdDetailPanel.
+  const overlapByPass = useMemo(() => {
+    const m = new Map();
+    for (const r of hhActivityQ.data?.rounds || []) {
+      const byId = new Map();
+      for (const e of r.entries || []) {
+        if (!OVERLAP_KNOCK_ACTIONS.has(e.actionType)) continue;
+        const id = e.canvasserId || e.canvasser; // fall back to name only if an old server omits the id
+        if (id) byId.set(id, e.canvasser || 'Unknown');
+      }
+      if (byId.size >= 2) m.set(r.passId || 'none', byId);
+    }
+    return m;
+  }, [hhActivityQ.data]);
+  const hasOverlap = overlapByPass.size > 0;
+  // Name the colliding canvassers OTHER than this door's own status owner (its last action)
+  // — "also worked by …" reads relative to whoever owns the door now.
+  const primaryId = selected?.lastAction?.canvasser?.id || null;
+  const primaryName = selected?.lastAction?.canvasser
+    ? `${selected.lastAction.canvasser.firstName || ''} ${selected.lastAction.canvasser.lastName || ''}`.trim()
+    : '';
+  const overlapOthers = useMemo(() => {
+    const s = new Map();
+    for (const byId of overlapByPass.values()) {
+      for (const [id, nm] of byId) {
+        if (primaryId ? id !== primaryId : nm !== primaryName) s.set(id, nm);
+      }
+    }
+    return [...s.values()];
+  }, [overlapByPass, primaryId, primaryName]);
 
   // First & last knock — only when auditing ONE canvasser with pings on. The endpoint
   // already scopes activities to that userId + date window; first = earliest, last = most recent.
@@ -901,6 +1004,31 @@ export default function AdminMap() {
           </Mapbox.ShapeSource>
         )}
 
+        {/* Overlap highlight — an amber ring beneath any household knocked by 2+ distinct
+            canvassers in the same pass (opt-in "Overlaps" toggle). Under the house icon so
+            the pin stays legible; not pressable — tap the pin to open its detail + badge. */}
+        {showOverlaps && (
+          <Mapbox.ShapeSource id="admin-overlaps" shape={overlapFeatures}>
+            <Mapbox.CircleLayer
+              id="admin-overlap-halo"
+              style={{
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 17, 28],
+                circleColor: colors.warn,
+                circleOpacity: 0.16,
+              }}
+            />
+            <Mapbox.CircleLayer
+              id="admin-overlap-ring"
+              style={{
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 17, 17, 24],
+                circleColor: 'rgba(0,0,0,0)',
+                circleStrokeColor: colors.warn,
+                circleStrokeWidth: 3,
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
+
         <Mapbox.ShapeSource id="admin-households" shape={householdFeatures} onPress={onPinPress}>
           {/* Amber "approximate" ring under any interpolated (non-rooftop) geocode, so
               admins can spot the pins most likely to be off. Below the house icon. */}
@@ -1121,6 +1249,15 @@ export default function AdminMap() {
                 </View>
               ) : null}
             </View>
+            <View style={styles.toggleChip}>
+              <Switch value={showOverlaps} onValueChange={setShowOverlaps} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
+              <Text style={styles.toggleLabel}>Overlaps</Text>
+              {showOverlaps && overlapDoorCount > 0 ? (
+                <View style={styles.overlapBadge}>
+                  <Text style={styles.overlapBadgeText}>{overlapDoorCount}</Text>
+                </View>
+              ) : null}
+            </View>
             <LiveStatus
               live={live}
               onToggle={() => setLive((v) => !v)}
@@ -1128,7 +1265,6 @@ export default function AdminMap() {
               updatedAt={mapQ.dataUpdatedAt}
               onRefresh={() => mapQ.refetch()}
             />
-            <View style={{ flex: 1 }} />
             <View style={styles.countChip}>
               <Text style={styles.countText}>
                 <Text style={styles.countStrong}>{households.length}</Text> houses
@@ -1301,6 +1437,14 @@ export default function AdminMap() {
               <Text style={styles.sheetSub}>
                 {selected.city}, {selected.state} {selected.zipCode}
               </Text>
+              {selected.coordSource === 'corrected' ? (
+                <Text style={styles.coordChipCorrected}>
+                  ● Pin corrected
+                  {selected.correctedAt ? ` · ${formatInTz(selected.correctedAt, tz, { month: 'short', day: 'numeric' }, false)}` : ''}
+                </Text>
+              ) : selected.coordConfidence === 'interpolated' ? (
+                <Text style={styles.coordChipApprox}>● Approximate location</Text>
+              ) : null}
             </View>
             <View style={[styles.statusPill, { borderColor: colors.status[selected.status] || colors.border }]}>
               <View style={[styles.statusDot, { backgroundColor: colors.status[selected.status] }]} />
@@ -1308,24 +1452,158 @@ export default function AdminMap() {
             </View>
           </View>
 
-          {selected.lastAction && (
-            <View style={styles.lastActionRow}>
-              <Text style={styles.lastActionText}>
-                <Text style={styles.lastActionStrong}>
-                  {selected.lastAction.canvasser
-                    ? `${selected.lastAction.canvasser.firstName} ${selected.lastAction.canvasser.lastName}`
-                    : 'Unknown'}
-                </Text>{' '}
-                — {colors.statusLabels[selected.status]}{' '}
-                <Text style={styles.lastActionSub}>
-                  ({timeAgo(selected.lastAction.timestamp)})
+          {/* Inline overlap badge — same detection as web: any single pass worked by 2+
+              distinct canvassers among its knock+survey entries. Names the OTHERS. */}
+          {hasOverlap && (
+            <View style={styles.overlapWarnBadge}>
+              <Text style={styles.overlapWarnText}>⚠ Overlap</Text>
+              {overlapOthers.length > 0 && (
+                <Text style={styles.overlapWarnSub}>
+                  Also worked by {overlapOthers.join(', ')}{' '}
+                  {overlapByPass.size > 1 ? 'in the same pass' : 'this pass'}
                 </Text>
-              </Text>
-              <Text style={styles.lastActionTimestamp}>
-                {formatExact(selected.lastAction.timestamp, campaign?.timeZone)}
-              </Text>
+              )}
             </View>
           )}
+
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {selected.lastAction && (
+              <View style={styles.detailSection}>
+                <Text style={styles.detailLabel}>Last action</Text>
+                <Text style={styles.detailValue}>{actionLabel(selected.lastAction.actionType)}</Text>
+                <Text style={styles.detailSub}>
+                  {timeAgo(selected.lastAction.timestamp)}
+                  {selected.lastAction.canvasser
+                    ? ` · ${selected.lastAction.canvasser.firstName} ${selected.lastAction.canvasser.lastName}`
+                    : ''}
+                </Text>
+                <Text style={styles.detailTimestamp}>
+                  {formatExact(selected.lastAction.timestamp, tz)}
+                </Text>
+              </View>
+            )}
+
+            {hhRounds.length > 0 && (
+              <View style={styles.detailSection}>
+                <Text style={styles.detailLabel}>History by pass</Text>
+                {hhRounds.map((r) => (
+                  <View key={r.passId || 'none'} style={styles.roundBlock}>
+                    <View style={styles.roundHeadingRow}>
+                      <Text style={styles.roundHeading}>
+                        {r.roundNumber != null ? `Pass ${r.roundNumber}` : r.name}
+                        {r.roundNumber != null && r.name ? (
+                          <Text style={styles.roundHeadingSub}> · {r.name}</Text>
+                        ) : null}
+                      </Text>
+                      {overlapByPass.has(r.passId || 'none') && (
+                        <View style={styles.roundOverlapChip}>
+                          <Text style={styles.roundOverlapChipText}>⚠ Overlap</Text>
+                        </View>
+                      )}
+                    </View>
+                    {r.entries.map((e, i) => (
+                      <View key={i} style={styles.historyEntry}>
+                        <View
+                          style={[styles.historyDot, { backgroundColor: actionColor(colors, e.actionType) }]}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.historyText}>
+                            {actionLabel(e.actionType)}
+                            {e.canvasser ? ` · ${e.canvasser}` : ''}
+                          </Text>
+                          <Text style={styles.historyTimestamp}>{formatExact(e.at, tz)}</Text>
+                          {e.note ? (
+                            <View style={styles.noteBox}>
+                              <Text style={styles.noteText}>{e.note}</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.detailSection}>
+              <Text style={styles.detailLabel}>Voters ({selected.voters?.length || 0})</Text>
+              {selected.voters?.length ? (
+                selected.voters.map((v) => (
+                  <View key={v.id} style={styles.voterLine}>
+                    <Text style={styles.voterLineName} numberOfLines={1}>
+                      {v.fullName}
+                    </Text>
+                    <View style={styles.voterLineRight}>
+                      {v.party ? (
+                        <View style={styles.partyPill}>
+                          <Text style={styles.partyPillText}>{v.party}</Text>
+                        </View>
+                      ) : null}
+                      {v.surveyStatus === 'surveyed' ? (
+                        <View style={styles.surveyedPill}>
+                          <Text style={styles.surveyedPillText}>surveyed</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.notSurveyedPill}>
+                          <Text style={styles.notSurveyedPillText}>not surveyed</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.detailEmpty}>No voters on file.</Text>
+              )}
+            </View>
+
+            <View style={styles.detailSection}>
+              <Text style={styles.detailLabel}>Surveys ({selected.surveys?.length || 0})</Text>
+              {selected.surveys?.length ? (
+                selected.surveys.map((s) => {
+                  const answers = hhSurveyDetailById.get(s.id)?.answers || [];
+                  return (
+                    <View key={s.id} style={styles.surveyCard}>
+                      <View style={styles.surveyCardHead}>
+                        <Text style={styles.surveyVoter} numberOfLines={1}>
+                          {s.voter?.fullName || 'Unknown voter'}
+                        </Text>
+                        <Text style={styles.surveyWhen}>{formatExact(s.submittedAt, tz)}</Text>
+                      </View>
+                      {s.canvasser ? (
+                        <Text style={styles.surveyBy}>
+                          by {s.canvasser.firstName} {s.canvasser.lastName}
+                        </Text>
+                      ) : null}
+                      {hhSurveysQ.isLoading ? (
+                        <Text style={styles.surveyLoading}>Loading answers…</Text>
+                      ) : null}
+                      {answers.length > 0 ? (
+                        <View style={styles.answerList}>
+                          {answers.map((a, i) => (
+                            <View key={i} style={styles.surveyAnswerRow}>
+                              <Text style={styles.answerQuestion}>{a.questionLabel}</Text>
+                              <Text style={styles.answerValue}>{formatAnswer(a.answer)}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
+                      {s.note ? (
+                        <View style={styles.noteBox}>
+                          <Text style={styles.noteText}>{s.note}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={styles.detailEmpty}>No surveys at this household yet.</Text>
+              )}
+            </View>
+          </ScrollView>
 
           <View style={styles.sheetButtons}>
             <Pressable
@@ -1562,6 +1840,7 @@ function makeStyles(t) {
 
   subBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     gap: spacing.sm,
@@ -1795,22 +2074,6 @@ function makeStyles(t) {
   statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
   statusText: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
 
-  lastActionRow: {
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  lastActionText: { fontSize: 13, color: colors.textSecondary },
-  lastActionStrong: { color: colors.textPrimary, fontWeight: '700' },
-  lastActionSub: { color: colors.textMuted },
-  lastActionTimestamp: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 2,
-    fontVariant: ['tabular-nums'],
-  },
-
   closeButton: {
     marginTop: spacing.md,
     marginBottom: spacing.sm,
@@ -1938,5 +2201,129 @@ function makeStyles(t) {
     fontStyle: 'italic',
     lineHeight: 18,
   },
+
+  // Overlaps toggle count badge (subBar) — amber, mirrors the flag badge.
+  overlapBadge: {
+    minWidth: 18,
+    paddingHorizontal: 5,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.warnBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  overlapBadgeText: { fontSize: 11, fontWeight: '800', color: colors.warnFg },
+
+  // Header pin-quality chips (web parity).
+  coordChipCorrected: { color: colors.brand, fontSize: 12, fontWeight: '700', marginTop: 4 },
+  coordChipApprox: { color: colors.warnFg, fontSize: 12, fontWeight: '700', marginTop: 4 },
+
+  // Inline overlap warning banner inside the household sheet.
+  overlapWarnBadge: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.warnBg,
+    borderWidth: 1,
+    borderColor: colors.warnBorder,
+    borderRadius: radius.md,
+  },
+  overlapWarnText: { color: colors.warnFg, fontWeight: '700', fontSize: 13 },
+  overlapWarnSub: { color: colors.warnFg, fontSize: 12, marginTop: 2 },
+
+  // Household-detail sections (Last action / History by pass / Voters / Surveys).
+  detailSection: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  detailLabel: { ...type.micro, marginBottom: 6 },
+  detailValue: { ...type.bodyStrong, fontSize: 14 },
+  detailSub: { ...type.caption, marginTop: 2 },
+  detailTimestamp: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
+  detailEmpty: { ...type.caption },
+
+  roundBlock: { marginTop: spacing.sm },
+  roundHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  roundHeading: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, flexShrink: 1 },
+  roundHeadingSub: { fontWeight: '400', color: colors.textSecondary },
+  roundOverlapChip: {
+    backgroundColor: colors.warnBg,
+    borderWidth: 1,
+    borderColor: colors.warnBorder,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 1,
+    borderRadius: radius.pill,
+  },
+  roundOverlapChipText: { fontSize: 10, fontWeight: '800', color: colors.warnFg },
+  historyEntry: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  historyDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
+  historyText: { fontSize: 13, color: colors.textSecondary },
+  historyTimestamp: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
+    fontVariant: ['tabular-nums'],
+  },
+
+  voterLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: 6,
+  },
+  voterLineName: { fontSize: 14, color: colors.textPrimary, flex: 1 },
+  voterLineRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  surveyedPill: {
+    backgroundColor: colors.successBg,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  surveyedPillText: { fontSize: 11, fontWeight: '700', color: colors.success },
+  notSurveyedPill: {
+    backgroundColor: colors.sunken,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  notSurveyedPillText: { fontSize: 11, fontWeight: '600', color: colors.textSecondary },
+
+  surveyCard: {
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  surveyCardHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  surveyVoter: { ...type.bodyStrong, fontSize: 14, flex: 1 },
+  surveyWhen: { fontSize: 11, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+  surveyBy: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  surveyLoading: { fontSize: 12, color: colors.textMuted, marginTop: spacing.sm },
+  answerList: { marginTop: spacing.sm },
+  surveyAnswerRow: { marginTop: spacing.sm },
   });
 }
