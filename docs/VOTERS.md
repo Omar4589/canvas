@@ -63,6 +63,18 @@ voted-list upload is exactly what you'd expect; the two stay true side by side a
 - A `· fully voted` tag on the **Campaign** line means the **whole door has dropped** off the
   canvassers' books. If it's **absent**, the door is still on the books.
 
+### "Doorline staff access" — the audit footnote at the bottom of the profile
+
+Every voter profile ends with a quiet card answering one question: **has anyone at Doorline
+looked at this record?** Most of the time it reads *"Never accessed by Doorline staff."* — and
+that's a real answer, not a default: Doorline staff can only open a customer org under a
+time-limited, reasoned support grant, and every record they open or export under one is logged.
+When there ARE entries, each shows the date, the staff member's first name, the reason they gave
+for the support session, and an **export** tag when the record was swept up in a file export
+rather than opened individually. Record-level detail begins July 19, 2026; earlier staff access
+(if any) was logged per-request only. If a voter ever asks "who has seen my information?", this
+panel is the answer you read them.
+
 ### Are houses with un-voted people being dropped? No.
 
 A door drops off the canvassers' map and books **only when *every* resident has voted**. A single
@@ -148,6 +160,15 @@ by different endpoints; it is no longer in the map/door bootstrap payload at all
 members, voted status, surveys **with their template question defs** for editing, household canvass
 activity, and notes = admin `VoterNote`s + derived field notes). Used by **both** the admin and
 mobile routes so the shape is identical.
+
+**Staff-access panel**: `GET /admin/voters/:voterId/staff-access` (admin-gated, org-scoped in
+[routes/admin/voters.js](../server/src/routes/admin/voters.js)) reads the org's `AccessLog` rows
+whose record-level `subjects` include this voter, its household, or its person identity →
+`{count, entries:[{at, staffFirstName, reason, kind, export}]}` (first-name-only — the same
+disclosure the support-grant notice email makes). Subjects are written only for staff access
+under a support grant (single-record opens + exports; see PLATFORM.md + the v4 stamps in
+PRIVACY_VERIFICATION.md), so zero entries genuinely means never accessed. Multikey index
+`{'subjects.id': 1, at: -1}` — needs `migrate:build-indexes --apply`.
 
 ## C. Endpoints
 

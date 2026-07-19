@@ -58,10 +58,17 @@ async function call(method, path, { token, orgId, body } = {}) {
   return { status: res.status, json };
 }
 
+// ONE before hook on purpose. A failed hook does NOT stop later hooks from running, so a
+// second hook depending on state this one builds turns any transient failure here (e.g. a
+// mongod still warming up) into a misleading TypeError from the second hook instead of the
+// real error. Everything sequential, one hook, one failure story.
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Subscription, SupportAccessGrant, AccessLog]) await M.deleteMany({});
+  for (const M of [
+    Organization, User, Subscription, SupportAccessGrant, AccessLog,
+    Membership, Campaign, Household, Voter, Person, SavedSearch,
+  ]) await M.deleteMany({});
 
   const org = await Organization.create({ name: 'Coverage Co', slug: 'coverage', isActive: true });
   await Subscription.create({ organizationId: org._id, status: 'active' });
@@ -70,6 +77,57 @@ before(async () => {
     passwordHash: 'x', isActive: true, isSuperAdmin: true, platformRole: 'support',
   });
   Object.assign(ctx, { org, support: { token: signUserToken(support), orgId: org._id, _id: support._id } });
+
+  // Record-level fixtures (the tests added 2026-07-19): a campaign with one door, two voters,
+  // a person, a frozen walk list, a member admin + canvasser in-org, a break-glass staffer,
+  // and a second org for the isolation case.
+  const camp = await Campaign.create({ organizationId: org._id, name: 'Cov Camp', type: 'survey', state: 'FL', isActive: true });
+  const hh = await Household.create({
+    organizationId: org._id, campaignId: camp._id,
+    addressLine1: '1 Audit Way', city: 'T', state: 'FL', zipCode: '1',
+    normalizedAddress: '1 AUDIT WAY|coverage',
+    location: { type: 'Point', coordinates: [-81, 28] },
+  });
+  const voter = await Voter.create({
+    organizationId: org._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-1',
+    firstName: 'Vera', lastName: 'Subject', fullName: 'Vera Subject',
+  });
+  const voter2 = await Voter.create({
+    organizationId: org._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-2',
+    firstName: 'Vic', lastName: 'Second', fullName: 'Vic Second',
+  });
+  const person = await Person.create({
+    organizationId: org._id, firstName: 'Pera', lastName: 'Identity', fullName: 'Pera Identity',
+  });
+  const walklist = await SavedSearch.create({
+    organizationId: org._id, campaignId: camp._id, name: 'Audit WL',
+    voterIds: [voter._id, voter2._id], householdIds: [hh._id],
+  });
+  const memberAdmin = await User.create({
+    firstName: 'Mia', lastName: 'Member', email: 'mia.member@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: memberAdmin._id, organizationId: org._id, role: 'admin', isActive: true });
+  const walker = await User.create({
+    firstName: 'Wal', lastName: 'Walker', email: 'wal.cov@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: walker._id, organizationId: org._id, role: 'canvasser', isActive: true });
+  const breakGlass = await User.create({
+    firstName: 'Bree', lastName: 'Glass', email: 'bg@doorline.app',
+    passwordHash: 'x', isActive: true, isSuperAdmin: true, platformRole: 'break_glass',
+  });
+  const org2 = await Organization.create({ name: 'Other Co', slug: 'other-cov', isActive: true });
+  const admin2 = await User.create({
+    firstName: 'Ann', lastName: 'Other', email: 'ann.other@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: admin2._id, organizationId: org2._id, role: 'admin', isActive: true });
+
+  Object.assign(ctx, {
+    camp, hh, voter, voter2, person, walklist,
+    member: { token: signUserToken(memberAdmin), orgId: org._id },
+    walker: { token: signUserToken(walker), orgId: org._id },
+    bg: { token: signUserToken(breakGlass), orgId: org._id, _id: breakGlass._id },
+    other: { token: signUserToken(admin2), orgId: org2._id },
+  });
 
   server = http.createServer(createApp());
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -176,62 +234,6 @@ async function pollLogs(filter, want = 1) {
   }
   return logs;
 }
-
-// Fixtures for the record-level cases (built once; AccessLog/grants are wiped per test).
-before(async () => {
-  if (!URI) return;
-  for (const M of [Membership, Campaign, Household, Voter, Person, SavedSearch]) await M.deleteMany({});
-
-  const camp = await Campaign.create({ organizationId: ctx.org._id, name: 'Cov Camp', type: 'survey', state: 'FL', isActive: true });
-  const hh = await Household.create({
-    organizationId: ctx.org._id, campaignId: camp._id,
-    addressLine1: '1 Audit Way', city: 'T', state: 'FL', zipCode: '1',
-    normalizedAddress: '1 AUDIT WAY|coverage',
-    location: { type: 'Point', coordinates: [-81, 28] },
-  });
-  const voter = await Voter.create({
-    organizationId: ctx.org._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-1',
-    firstName: 'Vera', lastName: 'Subject', fullName: 'Vera Subject',
-  });
-  const voter2 = await Voter.create({
-    organizationId: ctx.org._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-2',
-    firstName: 'Vic', lastName: 'Second', fullName: 'Vic Second',
-  });
-  const person = await Person.create({
-    organizationId: ctx.org._id, firstName: 'Pera', lastName: 'Identity', fullName: 'Pera Identity',
-  });
-  const walklist = await SavedSearch.create({
-    organizationId: ctx.org._id, campaignId: camp._id, name: 'Audit WL',
-    voterIds: [voter._id, voter2._id], householdIds: [hh._id],
-  });
-
-  const memberAdmin = await User.create({
-    firstName: 'Mia', lastName: 'Member', email: 'mia.member@t.co', passwordHash: 'x', isActive: true,
-  });
-  await Membership.create({ userId: memberAdmin._id, organizationId: ctx.org._id, role: 'admin', isActive: true });
-  const walker = await User.create({
-    firstName: 'Wal', lastName: 'Walker', email: 'wal.cov@t.co', passwordHash: 'x', isActive: true,
-  });
-  await Membership.create({ userId: walker._id, organizationId: ctx.org._id, role: 'canvasser', isActive: true });
-  const breakGlass = await User.create({
-    firstName: 'Bree', lastName: 'Glass', email: 'bg@doorline.app',
-    passwordHash: 'x', isActive: true, isSuperAdmin: true, platformRole: 'break_glass',
-  });
-
-  const org2 = await Organization.create({ name: 'Other Co', slug: 'other-cov', isActive: true });
-  const admin2 = await User.create({
-    firstName: 'Ann', lastName: 'Other', email: 'ann.other@t.co', passwordHash: 'x', isActive: true,
-  });
-  await Membership.create({ userId: admin2._id, organizationId: org2._id, role: 'admin', isActive: true });
-
-  Object.assign(ctx, {
-    camp, hh, voter, voter2, person, walklist,
-    member: { token: signUserToken(memberAdmin), orgId: ctx.org._id },
-    walker: { token: signUserToken(walker), orgId: ctx.org._id },
-    bg: { token: signUserToken(breakGlass), orgId: ctx.org._id, _id: breakGlass._id },
-    other: { token: signUserToken(admin2), orgId: org2._id },
-  });
-});
 
 async function grantFor(actorToken) {
   const r = await call('POST', '/super-admin/access/grants', {

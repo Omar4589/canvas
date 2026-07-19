@@ -143,6 +143,16 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
    no-approver half stands; do not write "approved."]*
 3. **The audit log is request-level.** No record ids; *"was MY record accessed?"* is unanswerable. The
    staff-facing strings ("every record you open is logged") still overstate granularity.
+   *[v4 2026-07-19: **NARROWED — record-level for what matters.** AccessLog rows now carry
+   `subjects` (voter/person/household/user ids) for SINGLE-RECORD opens/writes and for EXPORTS
+   (the exact id set written to the file, capped with an honest truncation marker). Captured via
+   `router.param` hooks (voters/households/mobile/reports) + the walk-list export + the person
+   console's direct calls; queryable via `GET /super-admin/access/log?subjectId=` and — customer-
+   facing — `GET /admin/voters/:voterId/staff-access`, a panel on the voter profile answering
+   "was this record accessed by Doorline?" with date/staff-first-name/reason/export-flag.
+   Honest scope, stated everywhere: LIST/BROWSE stays request-level (a directory page listing
+   200 names is one browse, not 200 record accesses), and rows before 2026-07-19 are request-
+   level history. Guard tests: `test/accessLogCoverage.int.test.js` (record-level section).]*
 4. **The cross-org password-reset path is unprevented by decision** (v1 F14 Exc 3): an admin of any org
    a user belongs to can reset that user's global password. Mitigation: the reset issues a visible
    forced-change temp password. Rationale recorded at `memberships.js:423-432` (admin reset is the only
@@ -1225,7 +1235,7 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 > (`VENDOR_READ_ONLY`) · **14** open by decision (documented at `memberships.js:423-432`) · **15**
 > closed (cross-org merge 409s) · **16** closed *(v4: delivery-gated warnings)* · **17** narrowed (one TTL
 > now exists — GeocodeCache; every other retention promise is still cron-kept) · **18** closed
-> (retries + red health) · **19** open (request-level log, by design) · **20** open (pseudonymous end
+> (retries + red health) · **19** narrowed *(v4: record-level subjects for single-record opens + exports; browse stays request-level)* · **20** open (pseudonymous end
 > state; policy language now honest) · **21** open (no User-row retention limit).
 
 **This is the list you take to the lawyer. These are the places where the product does not yet do what a policy would want to promise.**
@@ -1258,7 +1268,7 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 
 17. **There is no TTL index anywhere in the entire codebase.** No collection expires on its own. Every retention promise depends on a **cron job running on a worker dyno** — and repo history records a prior incident where the worker was scaled to 0 by a bad deploy. The code's own health text contemplates the purge having **"NEVER run"** and says *"we are promising a retention limit we are not enforcing."* **Write "we aim to purge within ~180 days," not "is deleted after 180 days."** (A2)
 18. **A failed customer deletion request produces a green success receipt and is never retried.** (B6)
-19. **Doorline cannot answer "was MY record accessed?"** — `AccessLog` stores a route template and a resource class, never a record id. **Do not offer record-level access transparency.** (E12)
+19. **Doorline cannot answer "was MY record accessed?"** — `AccessLog` stores a route template and a resource class, never a record id. **Do not offer record-level access transparency.** (E12) *[v4 2026-07-19: NARROWED — single-record opens and exports now carry subject ids, and org admins can read a per-voter staff-access panel. The advisory flips to: you MAY offer record-level transparency for staff access, scoped exactly as the v3-gap-3 stamp states (browse stays request-level; pre-2026-07-19 rows are request-level history).]*
 20. **After the 180-day purge, the field data is PSEUDONYMOUS, not anonymous.** The GPS trail, timestamps, notes and survey submissions remain permanently linked to a stable identifier, and the tombstoned `User` row still exists carrying that identifier and `lastLoginAt`. **Two code comments call this "permanently anonymous." They are wrong, and one of them is already user-facing copy.** (A3)
 21. **`User` accounts have no retention limit at all.** A volunteer who canvassed for one weekend in 2024 still has a live row — name, email, phone, bcrypt hash, `lastLoginAt` — indefinitely, unless they personally delete their account **from the mobile app** (there is no web deletion, and the operator CLI cannot delete a sole admin, sole billing admin, sole super-admin, or a `deletionLocked` account). (A1, B5)
 22. **Voters — the actual data subjects, who never consented to anything — have no account, no access, no correction, no deletion, no opt-out, and no do-not-contact mechanism.** Every request from a voter is a manual process with no tooling behind it. **This is the largest structural gap in the product from a privacy-law standpoint, and no sentence you write can paper over it.** (H16(d)) *[v3 2026-07-17: narrowed — do-not-contact is now admin-tooled (see v3 gap 1); the voter-initiated half of this finding is unchanged.]*
