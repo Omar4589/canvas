@@ -2,8 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { Subscription } from '../../models/Subscription.js';
+import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
 import { currentUsage } from '../../services/billing/statement.js';
 
@@ -63,10 +65,25 @@ router.patch('/settings', async (req, res, next) => {
   try {
     if (!req.activeOrg) return res.status(400).json({ error: 'Active organization required' });
     const data = settingsSchema.parse(req.body);
+    const before = await Organization.findById(req.activeOrg._id, { billRestrictedDoors: 1 }).lean();
+    const changed = Boolean(before?.billRestrictedDoors) !== data.billRestrictedDoors;
     await Organization.updateOne(
       { _id: req.activeOrg._id },
       { $set: { billRestrictedDoors: data.billRestrictedDoors } }
     );
+    // Refresh the denormalized counters for every campaign that INHERITS this default (an
+    // explicit per-campaign override is unaffected by an org-level flip, and recomputing it
+    // would be wasted work). Campaigns created before this feature carry trusted stats with no
+    // restrictedDoorCount, so without this the counter-backed dashboard would disagree with the
+    // live-aggregated invoice export the moment someone opts in. Rare admin op, same hook as
+    // re-cut/bulk-restrict; swallowErrors so a slow recompute can't fail a setting that saved.
+    if (changed) {
+      const inheriting = await Campaign.find(
+        { organizationId: req.activeOrg._id, billRestrictedDoors: null },
+        { _id: 1 }
+      ).lean();
+      await recomputeCampaignStats(inheriting.map((c) => c._id), { swallowErrors: true });
+    }
     res.json({ billRestrictedDoors: data.billRestrictedDoors });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });

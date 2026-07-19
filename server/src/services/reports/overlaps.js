@@ -36,7 +36,7 @@ import { KNOCK_ACTIONS } from './aggregations.js';
 // `userId` filters to collisions INVOLVING that canvasser — deliberately applied after grouping,
 // never as a $match: narrowing the rows to one canvasser first would leave every group with a
 // single distinct canvasser, so nothing could ever collide and the layer would read empty.
-export async function computeOverlapDoors(match, { dateRange = null, userId = null } = {}) {
+export async function computeOverlapDoors(match, { dateRange = null, userId = null, organizationId = null } = {}) {
   const from = dateRange?.from || null;
   const to = dateRange?.to || null;
   const rangeConds = [];
@@ -52,7 +52,11 @@ export async function computeOverlapDoors(match, { dateRange = null, userId = nu
     {
       $group: {
         _id: { householdId: '$householdId', passId: '$passId', userId: '$userId' },
-        lastAt: { $max: '$timestamp' },
+        // $max over a COMPOSITE object, not just the timestamp: BSON compares objects field-by-field
+        // in declared order, so this yields the latest knock AND the action it was — without a $sort
+        // stage and without $top (which no query in this codebase uses, so server support for it is
+        // unproven). Verified empirically before adoption.
+        last: { $max: { at: '$timestamp', action: '$actionType' } },
         inRangeKnocks: { $sum: { $cond: [inRangeExpr, 1, 0] } },
       },
     },
@@ -69,7 +73,8 @@ export async function computeOverlapDoors(match, { dateRange = null, userId = nu
     }
     groups.get(key).canvassers.push({
       userId: String(r._id.userId),
-      lastAt: r.lastAt,
+      lastAt: r.last?.at || null,
+      actionType: r.last?.action || null,
       inRange: r.inRangeKnocks > 0,
     });
   }
@@ -86,30 +91,79 @@ export async function computeOverlapDoors(match, { dateRange = null, userId = nu
 
   const passIds = [...new Set(surfaced.map((g) => g.passId).filter(Boolean).map(String))];
   const userIds = [...new Set(surfaced.flatMap((g) => g.canvassers.map((c) => c.userId)))];
-  const [users, passes] = await Promise.all([
+  const surfacedHouseholdIds = [...new Set(surfaced.map((g) => String(g.householdId)))];
+  // Addresses for the SURFACED doors only — bounded by what we're about to return, not by the
+  // campaign. organizationId is a real guard here (mirrors computeOverlaps): the ids come from an
+  // aggregation whose match the caller supplies, so the lookup re-asserts the tenant boundary.
+  const [households, users, passes] = await Promise.all([
+    surfacedHouseholdIds.length
+      ? Household.find(
+          { _id: { $in: surfacedHouseholdIds }, ...(organizationId ? { organizationId } : {}) },
+          'addressLine1 addressLine2 city state zipCode location'
+        ).lean()
+      : [],
     userIds.length ? User.find({ _id: { $in: userIds } }, 'firstName lastName').lean() : [],
     passIds.length ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean() : [],
   ]);
-  const uMap = new Map(users.map((u) => [String(u._id), `${u.firstName || ''} ${u.lastName || ''}`.trim()]));
+  const uMap = new Map(users.map((u) => [String(u._id), u]));
   const pMap = new Map(passes.map((p) => [String(p._id), p]));
+  const hMap = new Map(households.map((h) => [String(h._id), h]));
 
   const byHousehold = new Map();
   for (const g of surfaced) {
     const hid = String(g.householdId);
-    if (!byHousehold.has(hid)) byHousehold.set(hid, { householdId: hid, passes: [] });
+    if (!byHousehold.has(hid)) {
+      const h = hMap.get(hid);
+      byHousehold.set(hid, {
+        householdId: hid,
+        // Same shape /overlaps returns, so one card component renders both surfaces. Null when the
+        // org guard filtered it out — the door still counts, it just has no address to show.
+        household: h
+          ? {
+              id: hid,
+              addressLine1: h.addressLine1,
+              addressLine2: h.addressLine2 || null,
+              city: h.city,
+              state: h.state,
+              zipCode: h.zipCode,
+              location: h.location || null,
+            }
+          : null,
+        passes: [],
+      });
+    }
     const pass = g.passId ? pMap.get(String(g.passId)) : null;
     byHousehold.get(hid).passes.push({
       passId: g.passId ? String(g.passId) : null,
       roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
       // Newest first so "who hit it most recently" reads off the top. `inRange` lets the UI mark
       // which knock is the one you're looking at vs the earlier one that made it a collision.
+      // firstName/lastName/actionType mirror /overlaps so the shared card needs no adapter.
       canvassers: g.canvassers
         .slice()
         .sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt))
-        .map((c) => ({ userId: c.userId, name: uMap.get(c.userId) || 'Unknown', lastAt: c.lastAt, inRange: c.inRange })),
+        .map((c) => {
+          const u = uMap.get(c.userId);
+          const first = u?.firstName || '';
+          const last = u?.lastName || '';
+          return {
+            userId: c.userId,
+            firstName: first,
+            lastName: last,
+            name: `${first} ${last}`.trim() || 'Unknown',
+            actionType: c.actionType,
+            lastAt: c.lastAt,
+            inRange: c.inRange,
+          };
+        }),
     });
   }
   const doors = [...byHousehold.values()];
+  // Distinct canvassers across the door's passes — the report's "N canvassers" badge. Computed here
+  // so neither client has to dedupe.
+  for (const d of doors) {
+    d.totalCanvassers = new Set(d.passes.flatMap((p) => p.canvassers.map((c) => c.userId))).size;
+  }
   // Only doors the window does NOT already ring count as "more outside your dates" — a door with
   // one in-range collision and another out-of-range one is already on screen.
   for (const d of doors) outOfRangeHouseholds.delete(d.householdId);

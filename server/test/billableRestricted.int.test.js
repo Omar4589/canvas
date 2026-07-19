@@ -388,6 +388,34 @@ test('Campaign.stats counters agree with the live pipeline', { skip }, async () 
   await setCampaignFlag(null);
 });
 
+test('opting in self-heals a pre-feature campaign whose counters lack restrictedDoorCount', { skip }, async () => {
+  // A campaign created before this feature has TRUSTED stats (reconciledAt set) that simply have
+  // no restrictedDoorCount. The counter-backed /overview would then report billableDoors = knocks
+  // while the live-aggregated invoice export reported the real, higher number — the toggle would
+  // look broken on one screen and correct on another. Turning it on must repair the counters.
+  await setCampaignFlag(null);
+  await Campaign.updateOne({ _id: ctx.campaign._id }, { $unset: { 'stats.restrictedDoorCount': '' } });
+
+  await setCampaignFlag(true);
+  const ov = await call('GET', `/admin/reports/overview?campaignId=${ctx.campaign._id}`, auth());
+  const kbp = await call('GET', `/admin/reports/knocks-by-pass?campaignId=${ctx.campaign._id}`, auth());
+  assert.equal(
+    ov.json.totals.billableDoors,
+    kbp.json.totals.billableDoors,
+    'the counter path and the live path must not disagree after opting in'
+  );
+  assert.equal(ov.json.totals.billableDoors, EXPECTED_KNOCKS + EXPECTED_RESTRICTED_DOORS);
+
+  // Same story for the ORG-level default, which affects every inheriting campaign at once.
+  await setCampaignFlag(null);
+  await setOrgFlag(false);
+  await Campaign.updateOne({ _id: ctx.campaign._id }, { $unset: { 'stats.restrictedDoorCount': '' } });
+  await setOrgFlag(true);
+  const ov2 = await call('GET', `/admin/reports/overview?campaignId=${ctx.campaign._id}`, auth());
+  assert.equal(ov2.json.totals.billableDoors, EXPECTED_KNOCKS + EXPECTED_RESTRICTED_DOORS);
+  await setOrgFlag(false);
+});
+
 test('a team lead cannot change the billable-door policy', { skip }, async () => {
   const r = await call('PATCH', `/admin/campaigns/${ctx.campaign._id}`, {
     token: ctx.leadTok, orgId: ctx.org._id, body: { billRestrictedDoors: true },

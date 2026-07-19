@@ -326,6 +326,33 @@ test('ANCHORED: ?userId keeps collisions INVOLVING that canvasser and drops the 
   assert.strictEqual(other.json.total, 0, 'a canvasser who never knocked H sees no collision');
 });
 
+test('/overlap-doors payload is self-contained: address, per-canvasser action, and a canvasser count', { skip }, async () => {
+  // The report renders from this alone — no second call, no client-side join. Field names mirror
+  // /overlaps so one card component serves both surfaces.
+  const { adminTok, org, camp, H, chad, chris } = ctx;
+  const r = await call('GET', `/api/admin/reports/overlap-doors?campaignId=${camp._id}`, { token: adminTok, orgId: org._id });
+  assert.strictEqual(r.status, 200);
+  const doorH = r.json.doors.find((d) => String(d.householdId) === String(H._id));
+
+  assert.ok(doorH.household, 'the door carries its address inline');
+  assert.strictEqual(String(doorH.household.id), String(H._id));
+  assert.strictEqual(doorH.household.addressLine1, H.addressLine1);
+  assert.ok('location' in doorH.household, 'location travels too, so the report can link to the map');
+  assert.strictEqual(doorH.totalCanvassers, 2, 'distinct canvassers across the door, counted server-side');
+
+  // Each canvasser's LATEST knock action, correctly attributed — the wiring risk in the composite
+  // $max accumulator is swapping actions between people, so pin both.
+  const pass1Row = doorH.passes.find((p) => String(p.passId) === String(ctx.pass1._id));
+  const byId = new Map(pass1Row.canvassers.map((c) => [c.userId, c]));
+  assert.strictEqual(byId.get(String(chris._id)).actionType, 'not_home', "Chris's knock was a not_home");
+  assert.strictEqual(byId.get(String(chad._id)).actionType, 'survey_submitted', "Chad's was the survey");
+  for (const c of pass1Row.canvassers) {
+    assert.ok(c.firstName && c.lastName, 'firstName/lastName present (the shared card reads these)');
+    assert.strictEqual(c.name, `${c.firstName} ${c.lastName}`, 'name is the convenience join');
+    assert.ok(c.lastAt, 'each carries the date of their knock');
+  }
+});
+
 test('/overlap-doors requires campaignId (unscoped it would scan the org ledger)', { skip }, async () => {
   const { adminTok, org } = ctx;
   const bare = await call('GET', '/api/admin/reports/overlap-doors', { token: adminTok, orgId: org._id });

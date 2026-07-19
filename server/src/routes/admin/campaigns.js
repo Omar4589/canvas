@@ -13,6 +13,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
 import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
+import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { deleteCampaignCascade } from '../../services/campaigns/deleteCampaign.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 
@@ -241,7 +242,18 @@ router.patch('/:campaignId', async (req, res, next) => {
     // Explicit null restores "inherit the org default". Deliberately NOT locked by
     // hasCanvassed like `type` is: this is a read-time reporting policy — no stored count
     // changes — so flipping it mid-campaign is legitimate and fully reversible.
-    if (data.billRestrictedDoors !== undefined) campaign.billRestrictedDoors = data.billRestrictedDoors;
+    //
+    // `restrictedDoorsChanged` triggers a counter recompute AFTER the save (below). A campaign
+    // that predates this feature has trusted stats with NO restrictedDoorCount, so the
+    // counter-backed dashboard would report billableDoors = knocks while the live-aggregated
+    // invoice export reported the real, higher number — the toggle would look broken on one
+    // screen and work on another. Self-healing here beats a deploy-time migration nobody
+    // remembers to run before flipping the switch.
+    let restrictedDoorsChanged = false;
+    if (data.billRestrictedDoors !== undefined) {
+      restrictedDoorsChanged = campaign.billRestrictedDoors !== data.billRestrictedDoors;
+      campaign.billRestrictedDoors = data.billRestrictedDoors;
+    }
     if (data.isActive !== undefined && data.isActive !== campaign.isActive) {
       campaign.isActive = data.isActive;
       // Billing reads this: a campaign bills through its ARCHIVE month, not
@@ -265,6 +277,12 @@ router.patch('/:campaignId', async (req, res, next) => {
     // No survey-required guard here — a survey campaign may exist without a template; the
     // requirement is enforced at round activation (passes.js) instead.
     await campaign.save();
+    // Rare admin op → full recompute, the same hook re-cut/bulk-restrict use. swallowErrors
+    // because counters are a read optimization: a failed recompute must not fail a save that
+    // already committed (the next reconcile repairs it).
+    if (restrictedDoorsChanged) {
+      await recomputeCampaignStats(campaign._id, { swallowErrors: true });
+    }
     res.json({ campaign });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });

@@ -1,0 +1,38 @@
+process.env.JWT_SECRET = 'stale';
+import http from 'node:http';
+import mongoose from 'mongoose';
+const { createApp } = await import('./src/app.js');
+const { signUserToken } = await import('./src/services/auth/tokens.js');
+const M = (n) => import(`./src/models/${n}.js`).then((m) => m[n]);
+const [Organization,User,Membership,Campaign,Subscription,Household,CanvassActivity,Effort,Pass] =
+  await Promise.all(['Organization','User','Membership','Campaign','Subscription','Household','CanvassActivity','Effort','Pass'].map(M));
+const { recomputeCampaignStats } = await import('./src/services/reports/campaignCounters.js');
+await mongoose.connect(process.env.MONGODB_URI_TEST);
+for (const Mod of [Organization,User,Membership,Campaign,Subscription,Household,CanvassActivity,Effort,Pass]) await Mod.deleteMany({});
+const org = await Organization.create({ name:'S', slug:'s', isActive:true });
+const admin = await User.create({ firstName:'A', lastName:'D', email:'a@s.co', passwordHash:'x', isActive:true });
+await Membership.create({ userId:admin._id, organizationId:org._id, role:'admin', isActive:true, billingAccess:true });
+await Subscription.create({ organizationId:org._id, status:'active' });
+const camp = await Campaign.create({ organizationId:org._id, name:'C', type:'survey', state:'TX' });
+const eff = await Effort.create({ organizationId:org._id, campaignId:camp._id, name:'I' });
+const pass = await Pass.create({ organizationId:org._id, campaignId:camp._id, effortId:eff._id, roundNumber:1, name:'R1', status:'active', activatedAt:new Date() });
+const hs=[];
+for (let i=0;i<5;i++) hs.push(await Household.create({ organizationId:org._id, campaignId:camp._id, addressLine1:i+' A', city:'X', state:'TX', zipCode:'1', normalizedAddress:i+'a', status:'unknocked', isActive:true }));
+const act=(h,a)=>CanvassActivity.create({ organizationId:org._id, campaignId:camp._id, householdId:h._id, userId:admin._id, actionType:a, passId:pass._id, timestamp:new Date(), location:{lat:30,lng:-97} });
+for (let i=0;i<3;i++) await act(hs[i],'not_home');
+for (let i=3;i<5;i++) await act(hs[i],'restricted');
+await recomputeCampaignStats(camp._id);
+// SIMULATE a campaign that predates this feature: counters trusted, but the new field absent.
+await Campaign.updateOne({ _id: camp._id }, { $unset: { 'stats.restrictedDoorCount': '' } });
+const server = http.createServer(createApp());
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const base=`http://127.0.0.1:${server.address().port}/api`;
+const tok=signUserToken(admin);
+const H={ Authorization:`Bearer ${tok}`, 'X-Org-Id':String(org._id), 'Content-Type':'application/json' };
+await fetch(`${base}/admin/campaigns/${camp._id}`,{method:'PATCH',headers:H,body:JSON.stringify({billRestrictedDoors:true})});
+const ov=await (await fetch(`${base}/admin/reports/overview?campaignId=${camp._id}`,{headers:H})).json();
+const kbp=await (await fetch(`${base}/admin/reports/knocks-by-pass?campaignId=${camp._id}`,{headers:H})).json();
+console.log(`overview (counter path):     billableDoors=${ov.totals.billableDoors}`);
+console.log(`knocks-by-pass (live path):  billableDoors=${kbp.totals.billableDoors}`);
+console.log(ov.totals.billableDoors === kbp.totals.billableDoors ? 'AGREE' : '*** SURFACES DISAGREE ***');
+await new Promise(r=>server.close(r)); await mongoose.disconnect();

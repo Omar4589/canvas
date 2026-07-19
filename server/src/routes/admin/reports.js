@@ -1669,6 +1669,7 @@ router.get('/overlap-doors', async (req, res, next) => {
     const result = await computeOverlapDoors(match, {
       dateRange: range ? { from: range.$gte || null, to: range.$lt || null } : null,
       userId,
+      organizationId: activeOrgId(req), // org guard on the address lookup
     });
     res.json(result);
   } catch (err) {

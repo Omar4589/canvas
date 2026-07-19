@@ -395,6 +395,16 @@ would silently delete a door from the invoice. That is not hypothetical — it i
 `knocksByPass.int.test.js`, which caught exactly this mistake. `$nor` rather than a top-level `$or`
 so it can never clobber an `$or` the caller put in `match` (the team/crew filters do).
 
+`Campaign.stats.restrictedDoorCount` denormalizes the same number for the no-date-window counter
+fast path. **Turning the policy on recomputes the affected campaigns' stats** — the campaign PATCH
+recomputes that campaign, the org-level `PATCH /admin/billing/settings` recomputes every campaign
+that *inherits* the default (`billRestrictedDoors: null`, which in Mongo also matches the field
+being absent). This is not tidiness: a campaign created before this feature has **trusted** stats
+(`reconciledAt` set) that simply have no `restrictedDoorCount`, so without the recompute the
+counter-backed `/overview` would report `billableDoors = knocks` while the live-aggregated invoice
+export reported the real, higher number — the toggle would look broken on one screen and correct on
+another. Self-healing on the write beats a deploy-time migration nobody remembers to run first.
+
 Whether `restrictedDoors` actually counts is then decided in exactly one place,
 `billableDoorsOf(row, billRestricted)`, so `restrictedDoors` means "how many exist" on every surface
 rather than "how many are billed" on some and "exists" on others. The policy itself resolves
