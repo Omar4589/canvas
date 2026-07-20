@@ -39,6 +39,7 @@
     "migrate:platform-stats": "node src/migrations/backfillPlatformStats.js",
     "migrate:candidate-orgs": "node src/migrations/backfillCandidateOrgs.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
+    "audit:stale-overwrites": "node src/migrations/auditStaleOverwrites.js",
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
     "migrate:activity-coordinator": "node src/migrations/migrateActivityCoordinator.js",
     "audit:team-counts": "node src/migrations/auditTeamCounts.js",

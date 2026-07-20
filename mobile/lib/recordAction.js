@@ -120,8 +120,17 @@ export function reconcilePendingLocations(households) {
 
 // In-flight de-dup: request paths currently being submitted, so a rapid double-fire to the SAME
 // target (a double-tap, or an offline-queue flush racing a live submit) collapses to one request.
-// The server's unique (voter, pass) index is the final backstop; this just avoids the wasted second
-// call + benign duplicate activity row. Cleared when the submit settles.
+// This is a cheap optimisation ONLY — it avoids the wasted second call, nothing more. Note it is
+// keyed by PATH, and every action has its own path (ACTION_PATHS above), so `not-home` and
+// `refused` on one door never collide here.
+//
+// What actually backstops a duplicate submit differs by resource, and it is worth being exact
+// because a previous version of this comment credited CanvassActivity with a guard it does not have:
+//   • SurveyResponse — a real unique index on (voterId, passId) (models/SurveyResponse.js).
+//   • CanvassActivity — NO unique index of any kind. The server's replace-then-create
+//     (routes/mobile/canvass.js) is what keeps one row per (user, household, pass), and its
+//     `supersededByNewer` guard is what stops a queued replay clobbering a newer disposition.
+// Cleared when the submit settles.
 const inFlightPaths = new Set();
 
 // Per-code "you're blocked" alert for a failed location gate. Cancel resolves the

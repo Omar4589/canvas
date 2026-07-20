@@ -162,6 +162,34 @@ function buildReplacedSnapshot(mineRows) {
   };
 }
 
+// Has a QUEUED REPLAY arrived after the door already moved on?
+//
+// Both write paths below are replace-then-create: they deleteMany this canvasser's rows for the
+// (household, pass) and insert one. That is correct for a live correction — last arrival wins — but
+// the offline queue can deliver an action minutes or hours after it was recorded, and without this
+// check a replayed `not_home` DELETES a newer `refused` (and, via the SurveyResponse cleanup below,
+// a newer survey's ANSWERS) and reinstates itself, dragging household.lastActionAt backwards. That
+// was reproduced returning HTTP 201, so nothing anywhere reported a problem.
+//
+// Two things make this decidable, and both are already on the wire:
+//   • `wasOfflineSubmission` is stamped by the client at ENQUEUE time (mobile/lib/offlineQueue.js),
+//     never at record time — so it marks exactly the replay population, including the
+//     timed-out-while-online replay that causes this. A first attempt never carries it.
+//   • the body's `timestamp` is frozen when the canvasser taps (mobile/lib/recordAction.js), so a
+//     replay reports when it actually happened rather than when it finally arrived.
+//
+// Deliberately scoped to replays: a live write is never rejected, so online semantics are untouched
+// and no clock-skewed phone can lock itself out. The comparison is also always against THIS
+// canvasser's own rows (`mineRows`, mirroring the deleteMany's userId scope), so both timestamps
+// come from one device — cross-device clock skew cannot affect it. That is what makes trusting a
+// client timestamp defensible here and nowhere else.
+function supersededByNewer(data, mineRows, ts) {
+  if (!data.wasOfflineSubmission) return null;
+  return (
+    mineRows.find((r) => r.timestamp && new Date(r.timestamp).getTime() > ts.getTime()) || null
+  );
+}
+
 // Deterministic attribution: a door belongs to its book on one of the campaign's
 // ACTIVE rounds. Efforts are door-disjoint, so a household is in at most one
 // active round's books — no time-window guessing needed (works with several
@@ -212,6 +240,15 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     'actionType via userId timestamp location distanceFromHouseMeters replaced'
   ).lean();
   const mineRows = pairRows.filter((r) => String(r.userId) === String(userId));
+
+  // MUST come before every mutation below — the deleteMany, the SurveyResponse cleanup, the create,
+  // the status recompute, the lastActionAt write and the counter bumps. Returning the household
+  // lets the client's optimistic overlay reconcile to server truth for free (it reads
+  // response.household.status), so a superseded replay self-corrects the pin with no client change.
+  if (supersededByNewer(data, mineRows, ts)) {
+    return { household, superseded: true };
+  }
+
   const replaced = buildReplacedSnapshot(mineRows);
 
   // Replace this canvasser's prior action at this house for THIS pass.
@@ -345,7 +382,9 @@ router.post('/households/:householdId/not-home', async (req, res, next) => {
       requireCampaignType: 'survey',
     });
     if (result.error) return sendRouteError(res, result.error);
-    res.status(201).json(result);
+    // 200 = accepted but written nothing (a superseded replay); 201 = a real write. The queue
+    // drains on any 2xx, so this drops the stale item without the client reporting a failure.
+    res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -363,7 +402,9 @@ router.post('/households/:householdId/wrong-address', async (req, res, next) => 
       requireCampaignType: 'survey',
     });
     if (result.error) return sendRouteError(res, result.error);
-    res.status(201).json(result);
+    // 200 = accepted but written nothing (a superseded replay); 201 = a real write. The queue
+    // drains on any 2xx, so this drops the stale item without the client reporting a failure.
+    res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -381,7 +422,9 @@ router.post('/households/:householdId/refused', async (req, res, next) => {
       requireCampaignType: 'survey',
     });
     if (result.error) return sendRouteError(res, result.error);
-    res.status(201).json(result);
+    // 200 = accepted but written nothing (a superseded replay); 201 = a real write. The queue
+    // drains on any 2xx, so this drops the stale item without the client reporting a failure.
+    res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -399,7 +442,9 @@ router.post('/households/:householdId/lit-drop', async (req, res, next) => {
       requireCampaignType: 'lit_drop',
     });
     if (result.error) return sendRouteError(res, result.error);
-    res.status(201).json(result);
+    // 200 = accepted but written nothing (a superseded replay); 201 = a real write. The queue
+    // drains on any 2xx, so this drops the stale item without the client reporting a failure.
+    res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -425,7 +470,9 @@ router.post('/households/:householdId/restricted', async (req, res, next) => {
       body: req.body,
     });
     if (result.error) return sendRouteError(res, result.error);
-    res.status(201).json(result);
+    // 200 = accepted but written nothing (a superseded replay); 201 = a real write. The queue
+    // drains on any 2xx, so this drops the stale item without the client reporting a failure.
+    res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -506,6 +553,15 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       'actionType via userId timestamp location distanceFromHouseMeters replaced'
     ).lean();
     const mineRows = pairRows.filter((r) => String(r.userId) === String(req.user._id));
+
+    // Same guard as the disposition path, and here it has to sit BEFORE the SurveyResponse upsert
+    // below — that upsert runs ahead of this route's deleteMany and is keyed on (voterId, passId)
+    // alone, not on user or time, so a stale replay would blindly overwrite a newer submission's
+    // answers and clear its editedBy/editedAt audit trail before we ever reached the delete.
+    if (supersededByNewer(data, mineRows, ts)) {
+      return res.status(200).json({ household, superseded: true });
+    }
+
     const replaced = buildReplacedSnapshot(mineRows);
 
     // Normalize answers against the template (stable optionIds, retired-inclusive,

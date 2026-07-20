@@ -486,6 +486,59 @@ tokens are defined in [lib/theme.js](../mobile/lib/theme.js): `status.refused` /
 `/restricted` route writes a `restricted` `CanvassActivity` + `Household.status='restricted'` but the
 action is **excluded from `KNOCK_ACTIONS`**, so it never bills as a knock (see [METRICS.md](METRICS.md)).
 
+## Recording, replacement, and the offline queue's ordering rule
+
+Both mobile write paths (`recordHouseholdAction` and the survey route in
+[routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)) are **replace-then-create**: they
+`deleteMany` this canvasser's rows for the `(household, pass)` and insert one. That keeps exactly one
+disposition per canvasser per door per round, and it is why a correction "just works" — last arrival
+wins. A `replaced` snapshot of the deleted row is stamped onto the new one so the GPS audit doesn't
+read an honest correction as a phantom knock (see [AUDIT.md](AUDIT.md)).
+
+**The hazard that creates, and the guard.** The offline queue can deliver an action long after it was
+recorded. A `not_home` that times out at 20s is queued (a timeout carries no HTTP status, so
+[offlineQueue.js](../mobile/lib/offlineQueue.js) treats it as retryable) — and because
+[recordAction.js](../mobile/lib/recordAction.js) fires `flushQueue()` at the tail of **every** submit,
+including a successful one, that stale action can replay *milliseconds* after the canvasser corrects
+the door to `refused`. Un-guarded, the replay deleted the newer `refused`, reinstated itself, dragged
+`household.lastActionAt` **backwards**, and returned **201** — so nothing anywhere reported a problem.
+
+`supersededByNewer` rejects it. Two things already on the wire make it decidable:
+
+| | where it comes from | why it is trustworthy |
+|---|---|---|
+| `wasOfflineSubmission` | stamped at **enqueue** time, never at record time (`offlineQueue.js`) | marks exactly the replay population — including a replay caused by a timeout *while online* |
+| `timestamp` | frozen when the canvasser taps (`recordAction.js`) | reports when the action happened, not when it arrived |
+
+**Scoped to replays on purpose.** A live write is never rejected, so online last-arrival-wins is
+untouched and no clock-skewed phone can lock itself out. The comparison is also always against *this
+canvasser's own* rows (`mineRows`, mirroring the `deleteMany`'s `userId` scope), so both timestamps
+come from one device — cross-device clock skew cannot affect it. That is what makes trusting a client
+timestamp defensible here and nowhere else.
+
+**A superseded replay returns `200 { household, superseded: true }`**, not a 4xx. The queue drains on
+any 2xx, and the client's optimistic overlay reads `response.household.status`
+(`recordAction.js`), so the pin reconciles to server truth for free — **no client release was needed,
+and phones already in the field are covered.** A 409 would have been the repo's usual shape for "your
+write lost a race", but `recordAction.js` raises an "Action not saved" alert for unrecognised 4xx
+codes, which would have told a canvasser their correctly-superseded write had failed. `201` still
+means a real write, so the two remain distinguishable in logs.
+
+In the survey route the guard sits **before the `SurveyResponse` upsert** — that upsert runs ahead of
+its own `deleteMany` and is keyed on `(voterId, passId)` alone, not on user or time, so a stale replay
+would otherwise overwrite a newer submission's answers and clear its `editedBy`/`editedAt` audit trail.
+The disposition path matters just as much: it also deletes this canvasser's `SurveyResponse` rows for
+the pair, so an unguarded replayed `not_home` destroyed a newer survey's **answers**, not just a label.
+
+**Doors corrupted before the guard shipped** are findable: a surviving row whose `replaced.timestamp`
+is *newer* than its own `timestamp` cannot occur in order. `npm run audit:stale-overwrites`
+([auditStaleOverwrites.js](../server/src/migrations/auditStaleOverwrites.js)) reports them and writes
+nothing — the snapshot carries no `note`, so restoring is a deliberate decision, not an automatic one.
+
+**Not covered by this guard** (deliberate): the location-correction path
+(`/mobile/households/:id/location`) is a coordinate write with no disposition semantics and must stay
+replayable verbatim.
+
 ## The at-door survey
 
 [app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) — resolves the voter,

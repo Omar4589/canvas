@@ -32,6 +32,7 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Subscription } = await import('../src/models/Subscription.js');
+const { KNOCK_ACTIONS } = await import('../src/services/reports/aggregations.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -44,6 +45,12 @@ const ctx = {};
 // 0.000045° lat ≈ 5 m, 0.0027° lat ≈ 300 m.
 const D1 = { lng: -81.4, lat: 28.3 };
 const D2 = { lng: -81.39, lat: 28.3 };
+// Three more doors so each stale-replay test owns its own door — these tests assert absolute row
+// counts and door status, so sharing a door with another test would couple them through the ledger.
+const D3 = { lng: -81.38, lat: 28.3 };
+const D4 = { lng: -81.37, lat: 28.3 };
+const D5 = { lng: -81.36, lat: 28.3 };
+const D6 = { lng: -81.35, lat: 28.3 }; // its own door + voter for the survey-replay test
 const near = (pin) => ({ lat: pin.lat + 0.000045, lng: pin.lng, accuracy: 5 });
 const far = (pin) => ({ lat: pin.lat + 0.0027, lng: pin.lng, accuracy: 5 });
 
@@ -86,7 +93,14 @@ before(async () => {
 
   const effort = await Effort.create({ organizationId: org._id, campaignId: camp._id, name: 'North' });
   const pass = await Pass.create({ organizationId: org._id, campaignId: camp._id, effortId: effort._id, roundNumber: 1, name: 'Round 1', status: 'active' });
-  const homes = await Household.insertMany([hh(org._id, camp._id, effort._id, 1, D1), hh(org._id, camp._id, effort._id, 2, D2)]);
+  const homes = await Household.insertMany([
+    hh(org._id, camp._id, effort._id, 1, D1),
+    hh(org._id, camp._id, effort._id, 2, D2),
+    hh(org._id, camp._id, effort._id, 3, D3),
+    hh(org._id, camp._id, effort._id, 4, D4),
+    hh(org._id, camp._id, effort._id, 5, D5),
+    hh(org._id, camp._id, effort._id, 6, D6),
+  ]);
   const turf = await Turf.create({
     organizationId: org._id, campaignId: camp._id, passId: pass._id, name: 'Book C', mode: 'geometric',
     status: 'published', householdIds: homes.map((h) => h._id), doorCount: homes.length,
@@ -97,6 +111,12 @@ before(async () => {
     organizationId: org._id, householdId: homes[1]._id, stateVoterId: 'FLC1',
     firstName: 'Vi', lastName: 'Voter', fullName: 'Vi Voter',
   });
+  // A second voter on its own door, so the survey-replay test never shares a SurveyResponse with
+  // the snapshot test above (these assert absolute row counts).
+  const voter2 = await Voter.create({
+    organizationId: org._id, householdId: homes[5]._id, stateVoterId: 'FLC2',
+    firstName: 'Sam', lastName: 'Second', fullName: 'Sam Second',
+  });
 
   const app = createApp();
   server = http.createServer(app);
@@ -104,7 +124,8 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
     org, camp, pass, admin, canv, voter, template,
-    d1: homes[0], d2: homes[1],
+    d1: homes[0], d2: homes[1], d3: homes[2], d4: homes[3], d5: homes[4], d6: homes[5],
+    voter2,
     adminTok: signUserToken(admin), tok: signUserToken(canv),
   });
 });
@@ -228,4 +249,164 @@ test('end-to-end: /flags returns the corrections as DOWNGRADED low-severity far 
   assert.strictEqual(sFar.severity, 'low');
   assert.strictEqual(sFar.detail.downgraded, true);
   assert.strictEqual(sFar.detail.priorActionType, 'not_home');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stale REPLAY ordering. Every helper above hands out strictly increasing
+// timestamps, which is exactly why none of the tests above catch this.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A queued replay: the ORIGINAL tap time (older than what is already stored) plus the flag
+// offlineQueue.js stamps on every enqueued body. Both halves are what the server needs to
+// recognise "this arrived late, and the world moved on".
+function staleKnock(doorId, kind, location, tsIso) {
+  return call('POST', `/mobile/households/${doorId}/${kind}`, {
+    token: ctx.tok,
+    orgId: ctx.org._id,
+    body: { location, timestamp: tsIso, wasOfflineSubmission: true },
+  });
+}
+
+test('a stale REPLAY does not destroy a newer disposition', { skip }, async () => {
+  // The reproduced bug: not_home times out (but persists), the canvasser re-dispositions to
+  // refused online, then the queue flushes the stale not_home milliseconds later.
+  const door = ctx.d3._id;
+  const t1 = new Date(Date.now() - 30 * 60_000).toISOString(); // the original tap
+  assert.strictEqual((await staleKnock(door, 'not-home', near(D3), t1)).status, 201);
+
+  const t2 = new Date(Date.now() - 5 * 60_000).toISOString(); // the correction, online, newer
+  const live = await call('POST', `/mobile/households/${door}/refused`, {
+    token: ctx.tok, orgId: ctx.org._id, body: { location: near(D3), timestamp: t2 },
+  });
+  assert.strictEqual(live.status, 201);
+
+  const before = await Household.findById(door).lean();
+  assert.strictEqual(before.status, 'refused');
+
+  // THE REPLAY — same body as the first write, arriving after the correction.
+  const replay = await staleKnock(door, 'not-home', near(D3), t1);
+
+  // It must be accepted (so the queue drains) but must not have written anything.
+  assert.ok(replay.status === 200 || replay.status === 201, `replay got ${replay.status}`);
+  assert.strictEqual(replay.status, 200, 'a superseded replay is a 200 no-op, not a 201 write');
+  assert.strictEqual(replay.json?.superseded, true, 'and says so explicitly');
+  assert.strictEqual(
+    replay.json?.household?.status, 'refused',
+    'and carries the authoritative household so the client overlay reconciles'
+  );
+
+  const rows = await myRows(door);
+  assert.strictEqual(rows.length, 1, 'still exactly one row');
+  assert.strictEqual(rows[0].actionType, 'refused', 'the NEWER disposition survives');
+
+  const after = await Household.findById(door).lean();
+  assert.strictEqual(after.status, 'refused', 'door status is untouched');
+  assert.strictEqual(
+    new Date(after.lastActionAt).getTime(), new Date(before.lastActionAt).getTime(),
+    'lastActionAt does NOT regress'
+  );
+});
+
+test('an out-of-order body WITHOUT the replay flag still replaces (online semantics unchanged)', { skip }, async () => {
+  // The guard is scoped to queued replays on purpose. A live write keeps last-arrival-wins, so
+  // nothing about the ordinary correction path changes.
+  const door = ctx.d4._id;
+  const t2 = new Date(Date.now() - 5 * 60_000).toISOString();
+  assert.strictEqual((await call('POST', `/mobile/households/${door}/refused`, {
+    token: ctx.tok, orgId: ctx.org._id, body: { location: near(D4), timestamp: t2 },
+  })).status, 201);
+
+  const t1 = new Date(Date.now() - 30 * 60_000).toISOString(); // older, but NOT flagged
+  const res = await call('POST', `/mobile/households/${door}/not-home`, {
+    token: ctx.tok, orgId: ctx.org._id, body: { location: near(D4), timestamp: t1 },
+  });
+  assert.strictEqual(res.status, 201, 'a live write is never rejected as stale');
+
+  const rows = await myRows(door);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].actionType, 'not_home', 'last arrival still wins when online');
+});
+
+test('a genuine offline write still lands when it is NEWER than what is stored', { skip }, async () => {
+  // The real-outage case: the phone was offline, the queue drains later, and the queued action is
+  // the newest thing that happened at that door. Rejecting this would break offline canvassing.
+  const door = ctx.d5._id;
+  const t1 = new Date(Date.now() - 30 * 60_000).toISOString();
+  assert.strictEqual((await call('POST', `/mobile/households/${door}/not-home`, {
+    token: ctx.tok, orgId: ctx.org._id, body: { location: near(D5), timestamp: t1 },
+  })).status, 201);
+
+  const t2 = new Date(Date.now() - 5 * 60_000).toISOString(); // queued, but NEWER
+  const res = await staleKnock(door, 'refused', near(D5), t2);
+  assert.strictEqual(res.status, 201, 'a newer queued write is a real write');
+
+  const rows = await myRows(door);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].actionType, 'refused', 'the queued action replaced the older one');
+  assert.strictEqual(rows[0].wasOfflineSubmission, true, 'and is still marked as an offline write');
+});
+
+test('a stale REPLAY does not destroy a newer SURVEY — answers survive', { skip }, async () => {
+  // The severe half: canvass.js also deletes this canvasser's SurveyResponses for the pair, so a
+  // replayed disposition wipes a newer survey's ANSWERS and regresses the voter to not_surveyed.
+  const door = ctx.d6._id;
+  const t1 = new Date(Date.now() - 30 * 60_000).toISOString();
+  assert.strictEqual((await staleKnock(door, 'not-home', near(D6), t1)).status, 201);
+
+  const t2 = new Date(Date.now() - 5 * 60_000).toISOString();
+  const survey = await call('POST', `/mobile/voters/${ctx.voter2._id}/survey`, {
+    token: ctx.tok,
+    orgId: ctx.org._id,
+    // The fixture template carries no questions, so an empty answer set is the valid submission.
+    body: {
+      location: near(D6),
+      timestamp: t2,
+      surveyTemplateId: String(ctx.template._id),
+      answers: [],
+    },
+  });
+  assert.strictEqual(survey.status, 201, 'the survey landed');
+  const storedBefore = await SurveyResponse.findOne({ voterId: ctx.voter2._id }).lean();
+  assert.ok(storedBefore, 'a response exists');
+
+  // The stale disposition replays AFTER the survey.
+  const replay = await staleKnock(door, 'not-home', near(D2), t1);
+  assert.strictEqual(replay.status, 200, 'superseded');
+
+  const storedAfter = await SurveyResponse.findOne({ voterId: ctx.voter2._id }).lean();
+  assert.ok(storedAfter, 'the survey response SURVIVES the replay');
+  assert.strictEqual(
+    String(storedAfter._id), String(storedBefore._id),
+    'and it is the same row, not a re-created one'
+  );
+  const voterAfter = await Voter.findById(ctx.voter2._id).lean();
+  assert.strictEqual(voterAfter.surveyStatus, 'surveyed', 'the voter is not regressed to not_surveyed');
+
+  const rows = await myRows(door);
+  assert.strictEqual(rows[0].actionType, 'survey_submitted', 'the survey activity row survives too');
+});
+
+test('an ignored replay cannot move the billing clock', { skip }, async () => {
+  // "First field visit" is a MIN over KNOCK_ACTIONS timestamps (services/billing/statement.js) and
+  // it decides WHICH MONTHS a campaign bills. Because replacement rewrites timestamps that MIN is
+  // not stable, so a stale replay reinstating an older row could in principle pull the first-visit
+  // date earlier and add a billable month. The guard has to leave it alone.
+  const firstVisit = async () => {
+    const r = await CanvassActivity.find({
+      campaignId: ctx.camp._id,
+      actionType: { $in: KNOCK_ACTIONS },
+    }).sort({ timestamp: 1 }).limit(1).lean();
+    return r[0] ? new Date(r[0].timestamp).getTime() : null;
+  };
+
+  const door = ctx.d3._id; // already ends on `refused` from the stale-replay test above
+  const before = await firstVisit();
+  assert.ok(before, 'the campaign has a first field visit');
+
+  // Replay something far older than anything in the campaign.
+  const ancient = new Date(Date.now() - 90 * 24 * 3600_000).toISOString();
+  const res = await staleKnock(door, 'not-home', near(D3), ancient);
+  assert.strictEqual(res.status, 200, 'superseded');
+
+  assert.strictEqual(await firstVisit(), before, 'the first-visit timestamp did not move');
 });
