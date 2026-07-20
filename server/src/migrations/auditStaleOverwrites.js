@@ -38,12 +38,28 @@ function fmt(d) {
 async function main() {
   await connectDb(process.env.MONGODB_URI);
 
+  // The population being checked, reported alongside the result. "Nothing found" and "nothing to
+  // look at" print identically otherwise, and this script is meant to be re-run periodically to
+  // confirm the guard is holding — a clean result is only reassuring if you can see it examined
+  // a real number of replacements.
+  const replacements = await CanvassActivity.countDocuments({ 'replaced.timestamp': { $ne: null } });
+
   const rows = await CanvassActivity.find(
     STALE_MATCH,
     'campaignId householdId userId actionType timestamp replaced wasOfflineSubmission'
   )
     .sort({ timestamp: 1 })
     .lean();
+
+  console.log(`Checked ${replacements.toLocaleString()} replacement(s) in the ledger.\n`);
+  if (!replacements) {
+    console.log(
+      'NOTE: no replacements exist at all, so this run proves nothing yet — no door has been\n' +
+      're-dispositioned, which is the only situation the bug could have corrupted.'
+    );
+    await mongoose.disconnect();
+    return;
+  }
 
   if (!rows.length) {
     console.log('No stale overwrites found — every replacement in the ledger is in order.');
