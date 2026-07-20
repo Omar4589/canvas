@@ -28,6 +28,10 @@ export const WEB_URL = 'https://doorline.app';
 
 // Where "get the update" sends people. One copy, used by both update surfaces
 // (the /update-required contract wall and the UpdateGate build nag).
+// The PUBLIC store listings — deliberately NOT the same pair a new canvasser is sent to. This is
+// the UPDATE path (someone who already has the app; overridable via MOBILE_STORE_URL_*), while
+// first-INSTALL links live in server/src/config/storeLinks.js and go in the invite email. They
+// converge at public launch.
 export const STORE_URL = Platform.select({
   android: 'https://play.google.com/store/apps/details?id=com.canvassapp.mobile',
   ios: 'https://apps.apple.com/app/doorline/id6764581850',

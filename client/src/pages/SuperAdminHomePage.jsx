@@ -171,7 +171,7 @@ export default function SuperAdminHomePage() {
           <StatCard
             label="Today"
             value={totals?.today?.doorsKnocked?.toLocaleString() ?? '—'}
-            hint={`${totals?.today?.surveysSubmitted ?? 0} voters surveyed · ${
+            hint={`${totals?.today?.surveysSubmitted ?? 0} survey doors · ${
               totals?.today?.litDropped ?? 0
             } lit drops`}
             help={OVERVIEW_HELP.today}

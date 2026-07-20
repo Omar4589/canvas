@@ -145,10 +145,11 @@ function DayRow({ day, todayStr, yesterdayStr, bestDate, isLitDrop, onPress }) {
   const isToday = day.date === todayStr;
   const isYesterday = day.date === yesterdayStr;
   const isBest = bestDate && day.date === bestDate;
-  // "voters surveyed", not "surveys": the count is voter-unit (survey forms) but the rate on the
-  // same line is door-unit — a canvasser who surveys 2 voters per house would read "37 surveys ·
-  // 95%" and reasonably conclude the math is broken.
-  const secondaryLabel = isLitDrop ? 'lit' : 'voters surveyed';
+  // "surveys taken", not "surveys" and not "voters surveyed": the count is RESPONSE ROWS while the
+  // rate on the same line is door-unit, so the label has to name its own unit — a canvasser who
+  // surveys 2 voters per house would otherwise read "37 surveys · 95%" and reasonably conclude the
+  // math is broken. Must match the summary card above, which sums this very field.
+  const secondaryLabel = isLitDrop ? 'lit' : 'surveys taken';
   const secondaryValue = isLitDrop ? day.litDropped || 0 : day.responses || 0;
   // Rate = surveyed/lit HOMES ÷ knocked homes (bounded), matching the report; the volume counts
   // (surveys/lit, doors) above stay raw.
@@ -315,7 +316,9 @@ export default function StatsScreen() {
         <View style={styles.summaryCard}>
           <View style={styles.summaryRow}>
             <Stat value={totalDoors.toLocaleString()} label="Doors" />
-            <Stat value={primaryValue.toLocaleString()} label={isLitDrop ? 'Lit drops' : 'Voters surveyed'} />
+            {/* Σ of each day's `responses` — RESPONSE rows, not distinct people. Survey the same
+                voter again in a later round and that is another survey. */}
+            <Stat value={primaryValue.toLocaleString()} label={isLitDrop ? 'Lit drops' : 'Surveys taken'} />
             <Stat
               value={rate ? rate.value : '—'}
               label={isLitDrop ? 'Lit rate' : 'Connection'}

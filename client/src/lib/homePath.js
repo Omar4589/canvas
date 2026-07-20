@@ -55,4 +55,15 @@ export function resolveHomePath({ user, memberships = [], activeOrgId } = {}) {
   return '/select-org';
 }
 
+// The path to send someone to right after they authenticate. `resolveHomePath`'s null is not an
+// error — it means "no console home anywhere", and this file's contract (above) has always said the
+// answer to that is /select-org, which explains the console/app split and links the mobile app.
+//
+// ChangePasswordPage always did this by hand; LoginPage showed a dead-end error instead, so an
+// invited canvasser who set their password from the emailed link had nowhere to go. One rule, so
+// the two can't drift again.
+export function postAuthPath(args) {
+  return resolveHomePath(args) || '/select-org';
+}
+
 export { isConsoleRole };

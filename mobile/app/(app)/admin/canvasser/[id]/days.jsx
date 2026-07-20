@@ -125,7 +125,7 @@ export default function DaysScreen() {
                   {isLitDrop ? (
                     <Stat label="Lit drops" value={d.litDropped} />
                   ) : (
-                    <Stat label="Voters surveyed" value={d.surveysSubmitted} />
+                    <Stat label="Surveys taken" value={d.surveysSubmitted} />
                   )}
                   {!isLitDrop ? (
                     <Stat label="Connection" value={`${Math.round(d.connectionRatePct)}%`} />

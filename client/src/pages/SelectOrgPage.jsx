@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { consoleHomePath } from '../lib/homePath.js';
 import { consoleMemberships, nonConsoleMemberships } from '../lib/roles.js';
+import { IOS_INSTALL_URL, ANDROID_INSTALL_URL } from '../lib/appLinks.js';
 import Logo from '../components/Logo.jsx';
 
 // Show the orgs where the user is a canvasser as a muted, non-clickable section (true), or
@@ -89,6 +90,40 @@ export default function SelectOrgPage() {
               : `Hi ${user?.firstName}. Pick the org you want to work in.`}
           </p>
         </div>
+
+        {/* The install hand-off. Sits ABOVE the org list because for this user it is the ACTION and
+            the list is only context. Gated on noConsoleOnly, not merely "not an admin": someone
+            with no memberships at all can't use the app either, and they get the
+            "not a member of any organization yet" empty state below instead. */}
+        {noConsoleOnly && (
+          <div className="mb-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+            <p className="text-sm font-semibold text-fg">Get the app</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a
+                href={IOS_INSTALL_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border border-border-strong px-3 py-2 text-sm font-semibold text-fg transition-colors hover:bg-sunken"
+              >
+                iPhone
+              </a>
+              <a
+                href={ANDROID_INSTALL_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border border-border-strong px-3 py-2 text-sm font-semibold text-fg transition-colors hover:bg-sunken"
+              >
+                Android
+              </a>
+            </div>
+            {/* Play internal testing needs the tester's Google account on an explicit list, so this
+                link CAN wall someone. One line, so a wall reads as "ask" rather than "Doorline is
+                broken" — see server/src/config/storeLinks.js. */}
+            <p className="mt-2 text-xs text-fg-muted">
+              The app is still in a closed test — if a link doesn’t work, ask whoever invited you.
+            </p>
+          </div>
+        )}
 
         {isSuperAdmin && (
           <button

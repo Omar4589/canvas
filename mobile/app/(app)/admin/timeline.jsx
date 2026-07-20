@@ -49,7 +49,10 @@ const SORT_OPTIONS = [
   { key: 'connection', label: 'Connection rate' },
   { key: 'hours', label: 'Hours on doors' },
   { key: 'knocksPerHour', label: 'Knocks / hour' },
-  { key: 'surveysPerHour', label: 'Surveys / hour' },
+  // Door-unit: the sort divides `daySurveys` (survey DOORS) by hours. The canvasser-detail
+  // screen shows a RESPONSE-unit "Surveys taken / hour" from the server under what used to be this
+  // exact label — same words, two units, one app.
+  { key: 'surveysPerHour', label: 'Survey doors / hour' },
 ];
 
 // Inclusive day count between two YYYY-MM-DD strings (UTC calendar math).
@@ -306,18 +309,22 @@ export default function AdminTimeline() {
   const kpis = useMemo(() => {
     const doors = data.billableKnocks ?? 0;
     let surveys = data.billableSurveyDoors ?? null;
+    let lit = data.billableLitDoors ?? null;
     let rawSurveys = 0;
-    let lit = 0;
+    let rawLit = 0;
     let hours = 0;
     let rawDoors = 0;
     for (const r of coordRows) {
       rawDoors += r.dayKnocks || 0;
       rawSurveys += r.daySurveys || 0;
-      lit += r.dayLit || 0;
+      rawLit += r.dayLit || 0;
       hours += r.hoursOnDoors || 0;
     }
-    // Older server: fall back to the raw sum rather than render a blank card.
+    // Older server: fall back to the raw sums rather than render a blank card. BOTH numerator
+    // terms are deduped when the server ships them — a raw lit term over a deduped denominator was
+    // the survey bug's surviving twin.
     if (surveys == null) surveys = rawSurveys;
+    if (lit == null) lit = rawLit;
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
     // Pace stays raw effort: it's a per-person rate, not a billing figure.
     const doorsPerHour = hours > 0 ? rawDoors / hours : null;
@@ -336,6 +343,7 @@ export default function AdminTimeline() {
     coordRows,
     data.billableKnocks,
     data.billableSurveyDoors,
+    data.billableLitDoors,
     data.billableDoors,
     data.restrictedDoors,
     data.billRestrictedDoors,

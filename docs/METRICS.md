@@ -536,7 +536,7 @@ never looks like a two-person collision.
 | `GET /admin/reports/overview` | one campaign or org-wide | `totals{ households, voters, activeUsers, surveysSubmitted, surveyedVoters, homesKnocked, knocks, surveyedKnocks, litKnocks, refusedKnocks, connectionRate, contactRate }`, `canvass{}` (incl. `refused`, `restricted`), `events{}` (incl. `refused`, `restricted`) | **all-time** (no `from/to`) |
 | `GET /admin/reports/campaign-rollup` | `scope=active\|archived\|all` or `campaignId` | `cumulative{…}` + `campaigns[ row{ households, homesKnocked, knockedPct, knocks, surveyedKnocks, litKnocks, refusedKnocks, surveysSubmitted, surveyedVoters, litDropped, connectionRate, contactRate, activeCanvassers, coverage{} } ]` | activity on `timestamp`, surveys on `submittedAt`; households/coverage all-time |
 | `GET /admin/reports/canvassers` | leaderboard | rows `{ surveysSubmitted, surveyKnocks, notHome, wrongAddress, refused, restricted, litDropped, knocks, homesKnocked(=knocks), connectionRate, contactRate, status, hoursOnDoors, daysActive, doorsPerHour, coordinatorId, coordinatorName ('Multiple' when the window spans two teams — resolved from the LEDGER via the shared ledgerCoordinatorLabels, same as the timeline, so the Home leaderboard and the Timeline cannot disagree about a person's team), … }` (per-canvasser refused is the bare `refused` field, not `refusedKnocks`, and feeds `contactRate`; `restricted` is a standalone tally that feeds **no** rate. **`hoursOnDoors`/`doorsPerHour` are computed here as the SUM OF PER-DAY spans** — clients must not re-derive them from `firstActivityAt`/`lastActivityAt`, which is a *calendar* span and under-reports pace ~3×) | activity `timestamp`, surveys `submittedAt` |
-| `GET /admin/reports/team-breakdown` | every TEAM at once, with the reconciliation | `{ ready, teams[{ coordinatorId, coordinatorName, people, doors, surveyDoors, votersSurveyed, connectionRate, contactRate }], campaign{ doors, surveyDoors, connectionRate, … }, teamSum, crossTeamDoors }`. `coordinatorName: null` = the **No team** bucket. `doors` is distinct `(household, pass)` **within** a team, so a same-team double-knock is absorbed. **`ready: false`** when `Organization.teamAttributionReadyAt` is unset (the backfill hasn't run) — the endpoint returns empty rather than report every team as ~0 and No-team as enormous, which would look like data instead of an error. | `timestamp` |
+| `GET /admin/reports/team-breakdown` | every TEAM at once, with the reconciliation | `{ ready, teams[{ coordinatorId, coordinatorName, people, doors, surveyDoors, surveysTaken, connectionRate, contactRate }], campaign{ doors, surveyDoors, connectionRate, … }, teamSum, crossTeamDoors }`. `coordinatorName: null` = the **No team** bucket. `doors` is distinct `(household, pass)` **within** a team, so a same-team double-knock is absorbed. **`ready: false`** when `Organization.teamAttributionReadyAt` is unset (the backfill hasn't run) — the endpoint returns empty rather than report every team as ~0 and No-team as enormous, which would look like data instead of an error. | `timestamp` |
 | `GET /admin/reports/canvassers.csv` | leaderboard export | columns incl. `Knocks`, `Connection rate %`, **`Refused`**, **`Restricted`** | same |
 | `GET /admin/reports/team-averages` | org averages | `avg{ homesKnocked, surveysSubmitted, connectionRatePct, doorsPerHour, … }` (rate = Σ completion knocks / Σ knocks) | same |
 | `GET /admin/reports/canvassers/:id/summary` | one canvasser | `kpi{ homesKnocked(=knocks, **refused included** — it once wasn't, so this panel read fewer doors than the Timeline for the same person and over-stated the rate), surveyDoors (door-unit, the rate numerator), surveysSubmitted (voter-unit), refused, connectionRatePct + contactRatePct (the **shared** `connectionRate()`/`contactRate()` helpers, integer %), doorsPerHour, … }` | same |
@@ -546,7 +546,7 @@ never looks like a two-person collision.
 | `GET /admin/reports/overlaps` | overlap review (date-**windowed**, event-level) | see §D | `timestamp` |
 | `GET /admin/reports/overlap-doors` | the map's overlap **indicator + review list** (**anchored** to the window) | `{ householdIds:[…], doors:[{ householdId, household{id,addressLine1,addressLine2,city,state,zipCode,location}, totalCanvassers, passes:[{ passId, roundLabel, canvassers:[{userId, firstName, lastName, name, actionType, lastAt, inRange}] }] }], total, outOfRangeTotal }` — **self-contained, so the Overlaps report renders from this alone**. Params: `campaignId` **required** (400 without — unscoped it would scan the org ledger), optional `effortId`/`passId`/`userId`/`from`/`to` (`computeOverlapDoors` — see §D). Lead-gated. | anchored: detected pass-wide, surfaced when ≥1 knock is in `[from, to)` |
 | `GET /admin/reports/duplicate-surveys` | voters with >1 survey response | `duplicates[{ voter, household, responses[{ canvasser, submittedAt, roundLabel }], sameCanvasserSameDay, differentCanvassers }]` | `submittedAt` |
-| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to`, max 62 days; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{} }` with per-canvasser `knocksByDay/surveysByDay`; `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). Also returns **`billableSurveyDoors`** — survey doors deduped by (household, pass), the survey-side twin of `billableKnocks`. Both exist because the per-canvasser rows are RAW: clients must render these two fields and never sum the columns (see the survey-doors callout in §"Survey DOORS vs survey VOTERS"). | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
+| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to`, max 62 days; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{} }` with per-canvasser `knocksByDay/surveysByDay`; `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). Also returns **`billableSurveyDoors`** and **`billableLitDoors`** — survey/lit doors deduped by (household, pass), the twins of `billableKnocks`. All three exist because the per-canvasser rows are RAW: clients must render these fields and never sum the columns (see the survey-doors callout in §"Survey DOORS vs survey VOTERS"). **Both connection-rate numerator terms ship deduped on purpose** — when only the survey term was, the clients still summed `dayLit` across canvassers, putting a RAW term over a DEDUPED denominator: invisible on a survey campaign (lit ≈ 0), live on a lit-drop one. | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
 
 ### The 62-day cap, and why `totals` escapes it
 
@@ -666,7 +666,8 @@ team.
 | Number | Source | Meaning |
 |---|---|---|
 | **Survey doors** | `CanvassActivity.survey_submitted` (`surveyKnocks` / `daySurveys` raw; `billableSurveyDoors` deduped) | doors where ≥1 survey was taken — **the connection-rate numerator** |
-| **Voters surveyed** | `SurveyResponse` rows (`surveysSubmitted` / `dayVoterSurveys`) | people surveyed — one door can survey several |
+| **Voters surveyed** | `SurveyResponse` **distinct `voterId`** (`surveyedVoters`) | people surveyed, counted once each however many rounds — one door can survey several |
+| **Surveys taken** | `SurveyResponse` **rows** (`surveysSubmitted` / `surveysTaken` / `dayVoterSurveys`) | forms filled out — a later-round re-survey of the same person is another one |
 
 `connectionRate = (surveyedKnocks + litKnocks) ÷ knocks` — **doors, not voters**. Live check: 273 ÷
 1,252 = 22% (voters would give 297/1,252 = 24%, which is not what the app shows).
@@ -688,8 +689,31 @@ Home, and the Home KPI row showed **neither** the number its own connection rate
 unique index on `{voterId, passId}` allows one response per voter per pass — so one card was always
 redundant.)
 
-**The labelling rule, applied everywhere a stat renders:** the door-unit shows as **"Survey doors"**
-and the voter-unit as **"Voters surveyed"** — never a bare "Surveys" next to a number. Swept across:
+> ### ⚠️ THREE units, not two — and a one-round campaign cannot tell them apart
+>
+> `SurveyResponse` is unique on `{voterId, passId}`: **one response per voter per round.** In a
+> single-round campaign a distinct-voter count and a raw row count are therefore **numerically
+> identical**, which is exactly why every "voters surveyed" surface in the app agreed for months
+> while computing different things. Run a second round and they part company.
+>
+> | Label | Counts | Same voter surveyed in R1 **and** R2 |
+> |---|---|---|
+> | **Survey doors** | doors with ≥1 survey, per house **per round** | **2** |
+> | **Voters surveyed** | DISTINCT `voterId` | **1** |
+> | **Surveys taken** | response ROWS | **2** |
+>
+> Option counts (a yard-sign "Yes") are **response-unit**: asked in both rounds means two signs were
+> handed out, so it counts 2. All three are deliberately correct — the rule is that a surface must
+> compute the unit its label claims. Locked by
+> [test/multiPassUnits.int.test.js](../server/test/multiPassUnits.int.test.js), the only fixture with
+> two rounds and one repeat voter; it also pins that a distinct-voter *team* column would break
+> `Σ(teams) === campaign`, because `teamFoldStage` puts each response on exactly one team while a
+> voter can belong to two.
+
+**The labelling rule, applied everywhere a stat renders:** the door-unit shows as **"Survey doors"**,
+the voter-unit as **"Voters surveyed"**, and the response-unit as **"Surveys taken"** — never a bare
+"Surveys" next to a number. **The response-unit row was the missing third axis**, and its absence is
+what let row counts render under "Voters surveyed" across the app. Swept across:
 Home/Dashboard, the Timeline + `CanvasserSummaryTable`, the Team member panel, the org **Overview**
 (whose old KPI row rendered the *same voter count twice* under two labels), `TeamBreakdown`, the
 campaigns card/table, the org user profile (web modal + mobile), the mobile org dashboard + campaign
@@ -698,6 +722,19 @@ My Stats** (voter count beside a door-unit rate — a deep-surveying canvasser r
 and reasonably concluded the math was broken). The only bare "Surveys" left are non-stat labels: the
 Knocks|Surveys heatmap **view toggles**, the survey-template **library** page/nav, and an activity
 **filter chip** — none of them sit next to a number in a different unit.
+
+**Second sweep (the response unit).** The rule above had only two axes, so every row count in the
+app was labelled "Voters surveyed" — right in a one-round campaign, wrong the day a second round
+re-surveys anyone. Renamed to **"Surveys taken"**: `/team-breakdown`'s payload field
+(`votersSurveyed` → `surveysTaken`, kept as `{$sum: 1}` because that is what makes team rows
+partition), `CanvasserSummaryTable`, the campaigns card/table, the org user profile (web + mobile),
+`CampaignTeamPage`, and the mobile canvasser detail/compare/day screens. Three genuine unit *swaps*
+were also fixed — the mobile campaign screen fed `surveysSubmitted` (voters) into a slot its own
+hint called "Survey doors"; `CanvasserCard` took door-unit from one caller and voter-unit from
+another under a bare "surveys"; and the super-admin Today card rendered a **door** count as "voters
+surveyed" on web and bare "Surveys" on mobile. `surveysPerHour` also named two different units in
+one app and is now "Survey doors / hour" (mobile timeline) vs "Surveys taken / hour" (server-computed
+canvasser detail).
 
 ### A live page's pill must answer for EVERY number under it
 

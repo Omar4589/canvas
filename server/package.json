@@ -46,6 +46,7 @@
     "purge:deleted-identities": "node src/migrations/purgeDeletedIdentities.js",
     "lock:account": "node src/utils/lockAccountDeletion.js",
     "delete:account": "node src/utils/deleteAccountByEmail.js",
+    "mail:preview": "node src/scripts/previewEmails.js",
     "request:org-deletion": "node src/utils/requestOrgDeletion.js",
     "audit:cross-org-identity": "node src/utils/auditCrossOrgIdentity.js",
     "migrate:persons-org-scope": "node src/migrations/migratePersonsOrgScope.js",

@@ -147,6 +147,28 @@ function baseFilter(req) {
   return filter;
 }
 
+// Optional per-ROUND scoping for the SURVEY surfaces — deliberately NOT part of baseFilter().
+//
+// A walk-list filter is not a substitute: `roundNumber` auto-increments per EFFORT (models/Pass.js),
+// so "Pass 2" names a different round in every walk list, and filtering to an effort still merges
+// that effort's rounds. Nor is a date range: rounds in different efforts can be active at the same
+// time, so one window can straddle several.
+//
+// Kept out of baseFilter because /knocks-by-pass builds its ROW SET from every Pass of the campaign
+// while counting through the same filter — narrowing the counts there would render every other
+// round as a real-looking zero. Only surfaces that show one scope at a time may spread this in.
+function passFilterOf(req) {
+  // `?passId=legacy` selects the pre-turf bucket — rows whose passId is null. Without it, those
+  // responses belong to "All rounds" and to no selectable round, so Σ(rounds) would silently fall
+  // short of the all-rounds total on any org with pre-turf history. /knocks-by-pass has always
+  // surfaced this bucket as a "Legacy / no round" row for exactly the same reason.
+  if (req.query.passId === 'legacy') return { passId: null };
+  if (req.query.passId && mongoose.isValidObjectId(req.query.passId)) {
+    return { passId: new mongoose.Types.ObjectId(req.query.passId) };
+  }
+  return {};
+}
+
 // Optional TEAM (coordinator) scoping — deliberately NOT part of baseFilter().
 //
 // baseFilter's result is spread into HOUSEHOLD queries (see /overview: `{ isActive: true,
@@ -1090,7 +1112,7 @@ router.get('/survey-results', async (req, res, next) => {
         ? new mongoose.Types.ObjectId(req.query.userId)
         : null;
     const compareToOrg = req.query.compareToOrg === 'true' && !!userIdParam;
-    const baseMatch = { surveyTemplateId: template._id, ...dateRange, ...cFilter };
+    const baseMatch = { surveyTemplateId: template._id, ...dateRange, ...cFilter, ...passFilterOf(req) };
     const match = userIdParam ? { ...baseMatch, userId: userIdParam } : baseMatch;
     const [totalResponses, orgTotalResponses] = await Promise.all([
       SurveyResponse.countDocuments(match),
@@ -1312,7 +1334,12 @@ async function buildVotersByAnswerFilter(req) {
   } else {
     answerClause = voterAnswerClause(questionKey, optionId || null, option ?? null);
   }
-  const filter = { ...parseDateRange(req, 'submittedAt'), ...baseFilter(req), ...answerClause };
+  const filter = {
+    ...parseDateRange(req, 'submittedAt'),
+    ...baseFilter(req),
+    ...passFilterOf(req),
+    ...answerClause,
+  };
   if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
     filter.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
   }
@@ -1400,7 +1427,31 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
       .populate('voterId', 'fullName party doNotContact.flagged')
       .populate('householdId', 'addressLine1 addressLine2 city state zipCode')
       .populate('userId', 'firstName lastName')
+      // The ROUND each response was taken in. Without it, a voter surveyed in two passes produces
+      // two rows distinguishable only by date — and the whole point of a second pass is comparing
+      // the rounds. `roundNumber` restarts per walk list, so the effort name goes in the column too.
+      .populate({ path: 'passId', select: 'roundNumber name effortId' })
       .lean();
+
+    // Walk-list names for the Round column, looked up by the effortIds actually present in THESE
+    // rows. Scoping to the returned set rather than to `filter.campaignId` matters because this
+    // route serves org-wide drills too: Mongoose strips an undefined `campaignId` from a query, so a
+    // campaign-scoped lookup would silently widen to every effort in the org on exactly the request
+    // where the result set is largest. Still org-scoped, so a foreign id can never resolve to a
+    // name. An empty id set skips the query entirely.
+    const rowEffortIds = [
+      ...new Set(responses.map((r) => r.passId?.effortId).filter(Boolean).map(String)),
+    ];
+    const effortNameById = new Map(
+      rowEffortIds.length
+        ? (
+            await Effort.find(
+              { organizationId: activeOrgId(req), _id: { $in: rowEffortIds } },
+              'name'
+            ).lean()
+          ).map((e) => [String(e._id), e.name])
+        : []
+    );
 
     // The Question/Answer columns show the drilled question's SNAPSHOT (what was actually
     // recorded at the door — honest even after an option rename). Tag mode spans questions,
@@ -1439,7 +1490,7 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
     const headers = [
       'Submitted (ISO)', 'Date', `Time (${tzAbbrev(tz) || tz})`,
       'Voter', 'Party', 'Do not contact', 'Address', 'City', 'State', 'Zip',
-      'Canvasser first name', 'Canvasser last name',
+      'Canvasser first name', 'Canvasser last name', 'Walk list', 'Round',
       'Question', 'Answer', 'Note', 'Offline submission', 'Response id',
     ];
     const rows = responses.map((r) => {
@@ -1460,6 +1511,8 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
         h?.zipCode || '',
         r.userId?.firstName || '',
         r.userId?.lastName || '',
+        effortNameById.get(String(r.passId?.effortId)) || '',
+        r.passId ? `Pass ${r.passId.roundNumber}` : 'Legacy / no round',
         matched.map((a) => a.questionLabel).join(' | '),
         matched.map(answerText).join(' | '),
         r.note || '',
@@ -1505,7 +1558,7 @@ router.get('/answer-canvassers', async (req, res, next) => {
     if (!questionKey || (!option && !optionId)) {
       return res.status(400).json({ error: 'questionKey and option (or optionId) are required' });
     }
-    const match = { ...parseDateRange(req, 'submittedAt'), ...baseFilter(req) };
+    const match = { ...parseDateRange(req, 'submittedAt'), ...baseFilter(req), ...passFilterOf(req) };
     if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
       match.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
     }
@@ -1805,7 +1858,13 @@ router.get('/team-breakdown', async (req, res, next) => {
           people: new Set(r.people.flat().map(String)).size,
           doors: knocks, // DISTINCT (household, pass) worked by this team
           surveyDoors: r.surveyedKnocks, // door-unit — the connection-rate numerator
-          votersSurveyed: votersByTeam.get(String(id)) || 0, // voter-unit — a different question
+          // RESPONSE-unit, and named for it. This was `votersSurveyed`, which promised distinct
+          // PEOPLE while counting rows — identical numbers in a one-round campaign (one response
+          // per voter per round) and different the moment a second round re-surveys anyone.
+          // The row count is also the only unit that partitions: teamFoldStage puts each response
+          // on exactly one team, so Σ(teams) === the campaign's response total, always. A distinct
+          // column could not — a voter surveyed by two teams belongs to both rows.
+          surveysTaken: votersByTeam.get(String(id)) || 0,
           litKnocks: r.litKnocks,
           connectionRate: connectionRate({
             knocks,
@@ -2170,6 +2229,12 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       // which over-reported by exactly the cross-canvasser overlap. Like billableKnocks, it cannot
       // be derived client-side — the dedup needs the ledger.
       billableSurveyDoors: knockAgg[0]?.surveyedKnocks || 0,
+      // Lit DOORS, same dedup — and it ships for the same reason. The connection rate is
+      // (surveyDoors + litDoors) / doors; when only the survey term was deduped the clients still
+      // summed `dayLit` across canvassers, putting a RAW numerator term over a DEDUPED denominator.
+      // Invisible on a survey campaign (lit ≈ 0) and live on a lit-drop one, which is exactly the
+      // kind of bug that waits. Both numerator terms now come from this one pipeline row.
+      billableLitDoors: knockAgg[0]?.litKnocks || 0,
       // The invoice figure when this campaign bills for restricted doors; equal to
       // billableKnocks otherwise. Deliberately a SEPARATE field: billableKnocks feeds the
       // overlap subtraction below, whose other side (grandKnocks) counts knock events only.
@@ -2497,8 +2562,8 @@ router.get('/canvassers.csv', async (req, res, next) => {
 
     const headers = [
       'Rank', 'First name', 'Last name', 'Email', 'Phone', 'Status',
-      'Knocks', 'Surveys', 'Lit drops', 'Not home', 'Wrong address',
-      'Connection rate %', 'Hours on doors', 'Days active', 'Knocks/hr', 'Surveys/hr',
+      'Knocks', 'Surveys taken', 'Lit drops', 'Not home', 'Wrong address',
+      'Connection rate %', 'Hours on doors', 'Days active', 'Knocks/hr', 'Surveys taken/hr',
       'First activity', 'Last activity', 'Refused', 'Restricted',
     ];
     const enriched = Array.from(byUser.values())

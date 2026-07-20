@@ -571,7 +571,12 @@ export default function QuestionResults({
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
   const { key, label, type, options = [] } = question;
+  // Σ of the option counts — i.e. SELECTIONS, not people. On a multiple-choice question one
+  // respondent picking three options adds three, so this exceeds the number of responses and each
+  // percentage is a share of picks rather than a share of people. Same number the percentages
+  // divide by, so the bars stay internally consistent either way.
   const totalAnswered = options.reduce((sum, o) => sum + (o.count || 0), 0);
+  const multi = type === 'multiple_choice';
   // Round so the question's options total exactly 100.0% (largest-remainder, from the counts).
   const percents = percentsTo100(options.map((o) => o.count || 0));
   const [expandedOption, setExpandedOption] = useState(null);
@@ -582,8 +587,15 @@ export default function QuestionResults({
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h3 className="font-medium text-fg">{label}</h3>
-        <span className="shrink-0 text-xs uppercase tracking-wide text-fg-muted">
-          {type.replace('_', ' ')} · {totalAnswered} answered
+        <span
+          className="shrink-0 text-xs uppercase tracking-wide text-fg-muted"
+          title={
+            multi
+              ? 'Counts SELECTIONS, not people — someone picking three options adds three. Percentages are a share of picks.'
+              : 'Counts answers to this question. Survey the same person again in a later round and that is another answer.'
+          }
+        >
+          {type.replace('_', ' ')} · {totalAnswered} {multi ? 'selections' : 'answered'}
         </span>
       </div>
       {type === 'text' ? (

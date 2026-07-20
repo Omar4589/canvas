@@ -41,7 +41,13 @@ const CONTACT_HELP = {
 const KPI_HELP = {
   doorsKnocked: 'Every door we knocked, counted once per round. Going back in a later round counts again.',
   surveysTaken: 'Total survey forms collected — one per voter per pass. A home with two voters surveyed in one visit counts as two surveys.',
-  surveyedVoters: 'How many distinct people we surveyed — not how many forms were filled out.',
+  // The weekly caveat is deliberate. `period` and `cumulative` run the SAME distinct-voter
+  // aggregation over two ranges, so someone surveyed in two different weeks is counted in BOTH
+  // weekly figures but once in the running total — the weeks will not add up to it once a second
+  // round re-surveys anyone. "Surveys taken" is the number that does add up. We say so rather than
+  // re-defining the metric: issued reports are frozen artifacts, and changing what this counts
+  // would make new reports incomparable with ones already sent to a client.
+  surveyedVoters: 'How many distinct people we surveyed — counted once each, however many rounds we surveyed them in. Not how many forms were filled out. A week\'s figure counts the people surveyed that week, so someone surveyed in two different weeks appears in both; the weekly numbers will not add up to the running total. "Surveys taken" is the one that adds up.',
   litDropped: 'Doors where we dropped literature, counted once per door per pass.',
   homesKnocked: 'Distinct homes we have reached at least once (a home counts once no matter how many passes).',
   surveyRate: 'Of the doors we knocked, the share where we completed at least one survey.',

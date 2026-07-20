@@ -41,7 +41,10 @@ export default function CanvasserCard({
   const lvl = rateFromPct(row.connectionRate)?.level;
   const shift = formatRange(row.firstActivityAt, row.lastActivityAt, tz);
   const primaryVal = litMode ? row.dayLit || 0 : row.daySurveys || 0;
-  const primaryLabel = litMode ? 'lit' : 'surveys';
+  // "survey doors", never a bare "surveys". `daySurveys` is DOOR-unit on every screen that feeds
+  // this card, and it sits beside a connectionRate built from the same doors — a bare label let one
+  // caller quietly pass a voter-unit count into the same slot without anything looking wrong.
+  const primaryLabel = litMode ? 'lit' : 'survey doors';
   const handlePress = selectable ? onToggle : onPress;
 
   return (

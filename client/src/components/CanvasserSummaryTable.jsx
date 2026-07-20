@@ -39,7 +39,7 @@ function columnsFor(litMode) {
       ? [{ key: 'dayLit', label: 'Lit drops', numeric: true, help: metricHelp.litDrops }]
       : [
           { key: 'daySurveys', label: 'Survey doors', numeric: true, help: metricHelp.surveyDoors },
-          { key: 'dayVoterSurveys', label: 'Voters surveyed', numeric: true, help: metricHelp.surveyedVoters },
+          { key: 'dayVoterSurveys', label: 'Surveys taken', numeric: true, help: metricHelp.surveysTaken },
         ]),
     { key: 'connectionRate', label: 'Conn %', numeric: true, help: metricHelp.connectionRate },
     { key: 'contactRate', label: 'Contact %', numeric: true, help: metricHelp.contactRate },

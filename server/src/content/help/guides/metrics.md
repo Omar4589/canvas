@@ -39,9 +39,10 @@ Either way, an overlap is **never billed twice** — this is just there to help 
 You'll see **two** survey figures, and they are both correct. They answer different questions:
 
 - **Survey doors** — houses where at least one survey was taken. **This is what the connection rate divides by.**
-- **Surveyed voters** — how many *people* were surveyed. One house can have several voters, so this is usually the higher number.
+- **Voters surveyed** — how many *people* were surveyed, counted once each however many rounds you spoke to them in. One house can have several voters, so this is usually higher than survey doors.
+- **Surveys taken** — how many *forms* were filled out. Same as "Voters surveyed" until you run a second round; survey the same person again in Round 2 and that's another survey but still one person.
 
-If a canvasser shows 18 survey doors but 37 surveyed voters, they've been working houses deeply — two voters per door on average. Neither number is wrong, and **nothing adds them together**.
+If a canvasser shows 18 survey doors but 37 voters surveyed, they've been working houses deeply — two voters per door on average. Neither number is wrong, and **nothing adds them together**. See [Why do I see different survey numbers?](two-survey-numbers).
 
 ## Rates
 

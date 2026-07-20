@@ -301,7 +301,7 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
                     label="Survey doors"
                     value={(kpi.surveyDoors ?? kpi.surveysSubmitted ?? 0).toLocaleString()}
                   />
-                  <StatBox label="Voters surveyed" value={(kpi.surveysSubmitted ?? 0).toLocaleString()} />
+                  <StatBox label="Surveys taken" value={(kpi.surveysSubmitted ?? 0).toLocaleString()} />
                 </>
               ) : (
                 <StatBox label="Lit drops" value={(kpi.litDropped ?? 0).toLocaleString()} />

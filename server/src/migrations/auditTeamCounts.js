@@ -26,7 +26,7 @@ import {
 // It checks two independent things:
 //
 //  1. RECONCILIATION.  Σ teams + "no team" − crossTeamDoors == campaign billable, on EVERY column
-//     (doors, survey doors, voters surveyed) — not just doors. A team's number is the same
+//     (doors, survey doors, surveys taken) — not just doors. A team's number is the same
 //     dedupe-by-(house,round) applied within the team, so two people on the SAME team double-knocking
 //     a house collapses to one door inside their own total. Only a house worked by two DIFFERENT
 //     teams is claimed twice, and that difference is crossTeamDoors.
@@ -123,7 +123,7 @@ async function main() {
     .sort((a, b) => b.doors - a.doors);
 
   const W = 22;
-  console.log(`${pad('TEAM', W)}${padL('PEOPLE', 8)}${padL('DOORS', 10)}${padL('SURVEY DOORS', 15)}${padL('VOTERS', 9)}${padL('CONN', 7)}`);
+  console.log(`${pad('TEAM', W)}${padL('PEOPLE', 8)}${padL('DOORS', 10)}${padL('SURVEY DOORS', 15)}${padL('SURVEYS', 9)}${padL('CONN', 7)}`);
   for (const r of rows) {
     console.log(`${pad(r.name, W)}${padL(r.people, 8)}${padL(n(r.doors), 10)}${padL(n(r.surveyDoors), 15)}${padL(n(r.voters), 9)}${padL(`${r.conn}%`, 7)}`);
   }
@@ -143,7 +143,9 @@ async function main() {
   const checks = [
     ['doors', sum - cross, campaignK?.knocks || 0],
     ['survey doors', sumSurveyDoors, campaignK?.surveyedKnocks || 0],
-    ['voters surveyed', sumVoters, campaignVoters],
+    // Response ROWS, matching the renamed `surveysTaken` payload field — the aggregate above is
+    // {$sum: 1} over SurveyResponse, never a distinct-voter count.
+    ['surveys taken', sumVoters, campaignVoters],
   ];
   let failed = 0;
   for (const [label, got, want] of checks) {

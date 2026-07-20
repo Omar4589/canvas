@@ -61,3 +61,6 @@ Target-Universe*.csv
 
 /*.xlsx
 /*.csv
+
+# Rendered email previews (npm run mail:preview) — regenerated on demand, never committed
+.preview-emails/

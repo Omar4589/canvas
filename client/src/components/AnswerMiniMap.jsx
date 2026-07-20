@@ -23,7 +23,7 @@ function buildQuery(params) {
 // pins as the admin map (mapRender helpers), no polling, no bbox (the filtered set is
 // small). The camera fits the RETURNED features; includeBounds is deliberately not used
 // (it returns the campaign-wide extent, which would mis-frame a filtered subset).
-export default function AnswerMiniMap({ campaignId, questionKey, option, optionId, surveyTemplateId, userId, effortId, from, to }) {
+export default function AnswerMiniMap({ campaignId, questionKey, option, optionId, surveyTemplateId, userId, effortId, passId, from, to }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
@@ -35,10 +35,10 @@ export default function AnswerMiniMap({ campaignId, questionKey, option, optionI
     staleTime: 5 * 60 * 1000,
   });
   const mapQ = useQuery({
-    queryKey: ['admin', 'answer-map', campaignId, questionKey, option, optionId, surveyTemplateId, userId, effortId, from, to],
+    queryKey: ['admin', 'answer-map', campaignId, questionKey, option, optionId, surveyTemplateId, userId, effortId, passId, from, to],
     queryFn: () =>
       api(
-        `/admin/households/map${buildQuery({ campaignId, questionKey, option, optionId, surveyTemplateId, userId, effortId, from, to })}`
+        `/admin/households/map${buildQuery({ campaignId, questionKey, option, optionId, surveyTemplateId, userId, effortId, passId, from, to })}`
       ),
     enabled: !!campaignId && !!questionKey && !!(option || optionId),
   });
@@ -91,7 +91,8 @@ export default function AnswerMiniMap({ campaignId, questionKey, option, optionI
 
   // The Map page's answer chips key on option TEXT, so the deep link always carries it.
   // surveyTemplateId rides along so the Map's filter stays scoped to THIS survey.
-  const mapHref = `/campaigns/${campaignId}/map${buildQuery({ questionKey, option, optionId, surveyTemplateId, userId, effortId, from, to })}`;
+  // Carries passId too, so "Open in Map" lands on the same round the mini map is showing.
+  const mapHref = `/campaigns/${campaignId}/map${buildQuery({ questionKey, option, optionId, surveyTemplateId, userId, effortId, passId, from, to })}`;
 
   if (!tokenQ.isLoading && !tokenQ.data?.isReady) {
     return (

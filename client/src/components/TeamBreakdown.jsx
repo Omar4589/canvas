@@ -28,7 +28,7 @@ export default function TeamBreakdown({ data, onPick }) {
             <th className="px-3 py-2 text-right font-medium">People</th>
             <th className="px-3 py-2 text-right font-medium">Doors</th>
             <th className="px-3 py-2 text-right font-medium">Survey doors</th>
-            <th className="px-3 py-2 text-right font-medium">Voters surveyed</th>
+            <th className="px-3 py-2 text-right font-medium">Surveys taken</th>
             <th className="px-3 py-2 text-right font-medium">Conn %</th>
           </tr>
         </thead>
@@ -47,7 +47,7 @@ export default function TeamBreakdown({ data, onPick }) {
               <td className="px-3 py-2 text-right text-fg-muted">{t.people.toLocaleString()}</td>
               <td className="px-3 py-2 text-right font-medium text-fg">{t.doors.toLocaleString()}</td>
               <td className="px-3 py-2 text-right text-fg">{t.surveyDoors.toLocaleString()}</td>
-              <td className="px-3 py-2 text-right text-fg-muted">{t.votersSurveyed.toLocaleString()}</td>
+              <td className="px-3 py-2 text-right text-fg-muted">{(t.surveysTaken || 0).toLocaleString()}</td>
               <td className={`px-3 py-2 text-right font-medium ${rateClass(t.connectionRate)}`}>
                 {ratePct(t.connectionRate)}
               </td>

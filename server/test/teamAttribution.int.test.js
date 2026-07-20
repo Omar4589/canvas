@@ -311,8 +311,11 @@ test('a LEAD who knocks: their doors AND their surveyed voters both land on thei
   const noTeam = res.json.teams.find((t) => !t.coordinatorId);
 
   assert.equal(asaRow.surveyDoors, 1, "the lead's survey DOOR is on his own team");
-  assert.equal(asaRow.votersSurveyed, 1, "and so is his surveyed VOTER — the two must not disagree");
-  assert.equal(noTeam.votersSurveyed, 0, 'and "No team" is NOT inflated by the lead\'s survey');
+  // `surveysTaken` was `votersSurveyed` — renamed because it counts RESPONSE ROWS, not distinct
+  // people. Same fold, same number here; the name now matches the unit.
+  assert.equal(asaRow.surveysTaken, 1, "and so is his survey — the two must not disagree");
+  assert.equal(noTeam.surveysTaken, 0, 'and "No team" is NOT inflated by the lead\'s survey');
+  assert.equal(asaRow.votersSurveyed, undefined, 'the misleading old field name is gone');
 });
 
 test('ADMINS and SUPER-ADMINS who knock land in "No team" — and everything still reconciles', { skip }, async () => {

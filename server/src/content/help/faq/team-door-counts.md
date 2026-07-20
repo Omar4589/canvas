@@ -9,7 +9,7 @@ summary: Open the Timeline — the by-team table shows every team's doors, surve
 tags: team, coordinator, crew, doors, counts, client, how many doors
 ---
 
-Open the **Timeline**. Above the canvasser table there's a **by-team** breakdown: each team's people, doors, survey doors, voters surveyed and connection rate — plus a **Campaign** row underneath.
+Open the **Timeline**. Above the canvasser table there's a **by-team** breakdown: each team's people, doors, survey doors, surveys taken and connection rate — plus a **Campaign** row underneath.
 
 That last row matters. The teams **add up to the campaign total**, so you can read one team's number to a client and know it's consistent with the number you'd quote for the whole campaign. Click any team to drill into just their canvassers.
 
@@ -34,6 +34,6 @@ If you ever see that note under the by-team table, two teams have worked some of
 You'll see **two** survey numbers, because they answer different questions:
 
 - **Survey doors** — houses where at least one survey was taken. This is what the **connection rate** divides by.
-- **Voters surveyed** — people surveyed. One house can have several voters, so this is usually the higher number.
+- **Surveys taken** — how many survey forms were filled out. One house can have several voters, so this is usually higher than survey doors. Survey the same person again in a later round and that's another survey — see [Why do I see different survey numbers?](two-survey-numbers).
 
 Neither is wrong; they're just counting different things.

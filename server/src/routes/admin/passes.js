@@ -7,6 +7,7 @@ import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
 import { Household } from '../../models/Household.js';
+import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
@@ -60,7 +61,16 @@ router.get('/', async (req, res, next) => {
     );
     const kMap = new Map(knockAgg.map((c) => [String(c._id), c]));
     const activeIds = await activePassIds(req.campaign._id);
+    // Pre-turf survey responses belong to no Pass document. A client building a ROUND PICKER needs
+    // to know they exist, or its rounds silently fail to add up to the all-rounds headline — the
+    // same reason the knocks-by-pass report emits a "Legacy / no round" row.
+    const legacyResponseCount = await SurveyResponse.countDocuments({
+      organizationId: req.campaign.organizationId,
+      campaignId: req.campaign._id,
+      passId: null,
+    });
     res.json({
+      legacyResponseCount,
       passes: passes.map((p) => {
         const k = kMap.get(String(p._id)) || null;
         return {

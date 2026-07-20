@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import Logo from '../components/Logo.jsx';
 import { demoMailto } from './contact.js';
 import { useAuthCta } from './useAuthCta.js';
+import { IOS_INSTALL_URL, ANDROID_INSTALL_URL } from '../lib/appLinks.js';
 
 // Public marketing footer — brand mark, an honest one-line description of the
 // product, the beta install badges, and the small link row. "Contact" routes to the
@@ -9,9 +10,10 @@ import { useAuthCta } from './useAuthCta.js';
 // internal test), so they're framed as "beta" — NOT the official "Download on the App
 // Store" / "Get it on Google Play" badges, which are only for public store listings and
 // would be misleading (and against brand guidelines) for a beta. Swap to the official
-// badges once the apps are publicly listed.
-const IPHONE_BETA_URL = 'https://testflight.apple.com/join/8ZHW2nXH';
-const ANDROID_BETA_URL = 'https://play.google.com/apps/internaltest/4700118043777481693';
+// badges once the apps are publicly listed — the URLs themselves live in lib/appLinks.js,
+// which the signed-in install card (SelectOrgPage) shares.
+const IPHONE_BETA_URL = IOS_INSTALL_URL;
+const ANDROID_BETA_URL = ANDROID_INSTALL_URL;
 // Privacy and Terms are static documents served by Express (client/public/*.html), not React
 // routes — they must be full-page loads (href), never client-side <Link> navigations, so every
 // visitor gets the same zero-JS artifact with its own canonical tag.

@@ -121,7 +121,7 @@ export default function CampaignCard({ campaign: c, menuItems, onAssign }) {
         {c.type === 'lit_drop' ? (
           <StatRow label="Lit drops" value={fmt(c.counts?.litDropped)} />
         ) : (
-          <StatRow label="Voters surveyed" value={fmt(c.counts?.surveysSubmitted)} />
+          <StatRow label="Surveys taken" value={fmt(c.counts?.surveysSubmitted)} />
         )}
         <StatRow label="Created" value={formatDateInTz(c.createdAt, c.timeZone) || '—'} />
       </div>

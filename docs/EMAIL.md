@@ -100,7 +100,40 @@ recipient.
 `routes/superAdmin/access.js` (supportGrantNotice — only when `createGrant` reports
 `created: true`) · `services/retention/triggers.js` (windDownWarning / dormancyWarning via
 `deliverWarning`). All route sends are fire-and-forget (sendMail never rejects); token issuance
-is awaited first. `services/campaignRoster.js`'s silent auto-add is comment- and test-guarded to
+is awaited first.
+
+### Role-aware copy — canvassers are pointed at the app, not the console
+
+`inviteSetPassword`, `addedToOrg` and `addedToCampaign` take a **`role`**. When it is
+`'canvasser'` they carry an **install block** (both store links + a one-line closed-test note);
+otherwise they render the console wording unchanged. `provisioningWelcome` never does — it is always
+an org's first admin.
+
+This exists because a canvasser's whole job is in the mobile app, but their set-password link is a
+**web** URL: they set a password in a browser, land on the web login, and (before this) hit a
+dead-end error naming roles they don't have. Nothing told them the app existed. See
+[ROLES.md](ROLES.md) for the matching `/select-org` hand-off.
+
+The gate is `role === 'canvasser'`, deliberately **not** `!isConsoleRole(role)` — that helper is
+client-side only, and explicit equality means a call site that forgets to pass `role` renders today's
+email byte-for-byte. Fails safe: an admin is never told to install a field app.
+
+Role reaches the three send sites without new queries: `memberships.js` already has `data.role`;
+`leadCrew.js` only ever creates canvassers (hard-coded); `assignments.js` builds a `userId → role`
+map from the `memberships` array **it already loaded** for the is-a-member check.
+
+Install URLs live in [`config/storeLinks.js`](../server/src/config/storeLinks.js) →
+`installLinks()`, overridable per-platform with `MOBILE_INSTALL_URL_IOS` /
+`MOBILE_INSTALL_URL_ANDROID` and defaulting to the closed-beta join links. **These are not
+`MOBILE_STORE_URL_*`** — those override where the in-app *update* button sends someone who already
+has the app ([mobile/README.md](../mobile/README.md)), and their absent-means-null is load-bearing
+there. At public launch you *set* `MOBILE_INSTALL_URL_*` and *unset* `MOBILE_STORE_URL_*`. The web
+mirror is [`client/src/lib/appLinks.js`](../client/src/lib/appLinks.js) (no shared module in this
+repo — keep the two in sync; `storeLinks.js` carries the full four-location map).
+
+⚠️ Google Play **internal testing** only admits testers on an explicit list (100 max), so that link
+can wall someone. Every surface rendering it therefore ends with a short "if a link doesn't work,
+ask/reply" line rather than promising a download. `services/campaignRoster.js`'s silent auto-add is comment- and test-guarded to
 never email.
 
 ## Reset/invite tokens (`services/auth/passwordReset.js`)
@@ -150,12 +183,30 @@ The TTL + query indexes are schema-declared — run `migrate:build-indexes --app
 
 ## Previewing templates
 
-`node scripts/renderEmailPreviews.js` (from `server/`) renders every template with sample data —
-including both optional-campaign variants and a hostile-input example proving `esc()` works —
-into a self-contained `scripts/email-previews.html` (gitignored) to open in a browser.
-`--send you@address` fires the same set through the live mailer instead.
+`npm run mail:preview` (from the repo root or `server/`) renders **every template, and every role
+variant of it**, into `.preview-emails/` (gitignored) — one scrollable index plus the HTML and
+plain-text alternative per email. Nothing is sent: it imports `services/mail/templates.js` directly,
+so what you see is byte-identical to what Resend receives. Sample data is deliberately awkward
+(`O'Brien`, `Smith & Sons Consulting`) so `esc()` is visible rather than assumed.
+
+It also **fetches the logo URL and reports whether it resolves**, in a green/red banner. That check
+matters because the brand row loads `${WEB_ORIGIN}/apple-touch-icon.png` over the network: if
+`WEB_ORIGIN` is ever wrong on the server, every email silently ships a broken image and nothing else
+would tell you. Point it anywhere to verify:
+`WEB_ORIGIN=http://localhost:5173 npm run mail:preview`. Add `-- --open` to open it (macOS).
+
+(Resend's own dashboard preview pane blocks remote images, so the logo **always** looks broken
+there. That is a preview artifact, not a bug — check it here or in a real inbox.)
 
 ## Guard tests
+
+`test/mailTemplates.test.js` — **pure, no mongod, never skips.** Locks the role→install-links rule:
+canvasser gets both URLs in HTML *and* text; admin, lead and an *absent* role get none;
+`provisioningWelcome` never does; `addedToOrg` drops the console-only "switch into it" wording for a
+canvasser; and the env override renders `&` escaped in HTML but raw in text. Every other content
+assertion in this file is an integration test that silently skips without `MONGODB_URI_TEST` —
+which is precisely how the canvasser dead-end shipped.
+
 
 `test/mailFlow.int.test.js` (reset flow: oracle parity, hashed storage, single-use, expiry,
 throttles) · `test/mailTriggers.int.test.js` (every trigger fires exactly when specified;

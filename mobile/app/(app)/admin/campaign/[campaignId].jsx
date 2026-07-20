@@ -122,9 +122,18 @@ export default function CampaignDetail() {
     queryFn: () => api(`/admin/campaigns/${cId}/assignments`),
     enabled: !!cId,
   });
+  // Round scoping for the survey results. '' = all rounds. A Pass _id, never a round NUMBER:
+  // roundNumber restarts per walk list, so "Pass 2" names a different round in each one.
+  const [surveyPassId, setSurveyPassId] = useState('');
   const surveyResultsQ = useQuery({
-    queryKey: ['admin', 'reports', 'survey-results', cId, range?.from, range?.to],
-    queryFn: () => api(`/admin/reports/survey-results?${rangeParams({ voterPreview: '5' }).toString()}`),
+    queryKey: ['admin', 'reports', 'survey-results', cId, range?.from, range?.to, surveyPassId],
+    queryFn: () =>
+      api(
+        `/admin/reports/survey-results?${rangeParams({
+          voterPreview: '5',
+          ...(surveyPassId ? { passId: surveyPassId } : {}),
+        }).toString()}`
+      ),
     enabled: !!cId && !isLitDrop && !!range,
   });
   // In-range totals from the same rollup the landing uses (deduped door-days),
@@ -155,6 +164,18 @@ export default function CampaignDetail() {
 
   const questions = surveyResultsQ.data?.questions || [];
   const rounds = roundsQ.data?.rounds || [];
+  // Round chips: "All rounds" + every real Pass, plus the pre-turf bucket when one exists.
+  // knocks-by-pass emits that bucket as a passId:null row ("Legacy / no round") — without an option
+  // for it those responses would sit in All rounds and in no selectable round, so the rounds would
+  // not add up to the headline. 'legacy' is the server-side sentinel for passId:null.
+  const roundChipOptions = useMemo(() => {
+    const real = rounds.filter((r) => r.passId);
+    const opts = [{ passId: '', roundLabel: 'All rounds' }, ...real];
+    if (real.length && rounds.some((r) => !r.passId)) {
+      opts.push({ passId: 'legacy', roundLabel: 'Legacy / no round' });
+    }
+    return opts;
+  }, [rounds]);
 
   // Top-5 canvassers normalized to the shared CanvasserCard shape: rename Doors/
   // Surveys/Lit, compute doors-per-hour from first→last, join the coordinator.
@@ -166,7 +187,14 @@ export default function CampaignDetail() {
     return m;
   }, [assignmentsQ.data]);
   const topCanvasserRows = useMemo(() => {
-    return (canvassersQ.data || []).slice(0, 5).map((c) => {
+    // Re-sort by the DOOR count this card actually displays. /admin/reports/canvassers sorts by
+    // surveysSubmitted (response rows); once the card switched to surveyKnocks (survey doors) the
+    // displayed number stopped being the sort key, so a top-5 taken off the server order could
+    // render visibly out of order.
+    return [...(canvassersQ.data || [])]
+      .sort((a, b) => (b.surveyKnocks ?? 0) - (a.surveyKnocks ?? 0) || (b.knocks ?? 0) - (a.knocks ?? 0))
+      .slice(0, 5)
+      .map((c) => {
       const dayKnocks = c.knocks ?? c.homesKnocked ?? 0;
       const first = c.firstActivityAt ? new Date(c.firstActivityAt).getTime() : null;
       const last = c.lastActivityAt ? new Date(c.lastActivityAt).getTime() : null;
@@ -174,7 +202,12 @@ export default function CampaignDetail() {
       return {
         ...c,
         dayKnocks,
-        daySurveys: c.surveysSubmitted ?? 0,
+        // Survey DOORS, matching the web leaderboard (DashboardPage maps `surveyKnocks` here too)
+        // and the InfoHint below, which labels this column "Survey doors". It read
+        // `surveysSubmitted` — a VOTER-unit count in a door-unit slot, so the card's own
+        // server-computed connectionRate (built from surveyKnocks) could not be checked against the
+        // number printed beside it.
+        daySurveys: c.surveyKnocks ?? 0,
         dayLit: c.litDropped ?? 0,
         hoursOnDoors: Math.round(hours * 100) / 100,
         doorsPerHour: hours > 0 ? Math.round((dayKnocks / hours) * 100) / 100 : 0,
@@ -195,6 +228,9 @@ export default function CampaignDetail() {
         optionId: String(opt.id ?? ''),
         label: qn.label,
         ...(tplId ? { surveyTemplateId: String(tplId) } : {}),
+        // Carry the ROUND. The on-screen option count is round-scoped when a chip is active, and
+        // the drill must sum to it — the counting contract /answer-canvassers is built on.
+        ...(surveyPassId ? { passId: String(surveyPassId) } : {}),
         ...(range?.from ? { from: range.from } : {}),
         ...(range?.to ? { to: range.to } : {}),
       },
@@ -412,7 +448,38 @@ export default function CampaignDetail() {
           {/* Survey results */}
           {!isLitDrop && questions.length > 0 && (
             <>
-              <SectionHeader title="Survey results" subtitle={`${surveyResultsQ.data?.totalResponses ?? 0} responses`} />
+              <SectionHeader
+                title="Survey results"
+                subtitle={`${surveyResultsQ.data?.totalResponses ?? 0} surveys taken`}
+              />
+              {/* Round filter. Only worth showing once a campaign HAS a second round — before that
+                  "All rounds" is the only answer. Labelled per walk list because roundNumber
+                  restarts in each one. */}
+              {roundChipOptions.length > 1 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.roundChips}
+                >
+                  {roundChipOptions.map(
+                    (r) => {
+                      const active = String(surveyPassId) === String(r.passId || '');
+                      return (
+                        <Pressable
+                          key={r.passId || 'all'}
+                          onPress={() => setSurveyPassId(r.passId || '')}
+                          style={[styles.roundChip, active && styles.roundChipOn]}
+                        >
+                          <Text style={[styles.roundChipText, active && styles.roundChipTextOn]}>
+                            {r.effortName ? `${r.effortName} · ` : ''}
+                            {r.roundLabel}
+                          </Text>
+                        </Pressable>
+                      );
+                    }
+                  )}
+                </ScrollView>
+              )}
               {questions.map((qn) => (
                 <View key={qn.key} style={styles.card}>
                   <Text style={styles.qLabel}>{qn.label}</Text>
@@ -503,6 +570,18 @@ function makeStyles(t) {
     ...shadow.card,
     marginBottom: spacing.sm,
   },
+  roundChips: { gap: spacing.xs, paddingBottom: spacing.sm },
+  roundChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  roundChipOn: { backgroundColor: colors.brandTint, borderColor: colors.brand },
+  roundChipText: { ...type.small, color: colors.textMuted },
+  roundChipTextOn: { color: colors.brand, fontWeight: '600' },
   cardTitle: { ...type.h3, marginBottom: spacing.md },
   cardHeaderRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: spacing.sm },
   cardLink: { color: colors.brand, fontWeight: '700', fontSize: 13 },

@@ -15,11 +15,12 @@ Welcome! Here's the whole flow on your first day in the field.
 
 Everything you need is right here in the app — the web console is for admins and team leads, so there's nothing there for you to do. If you're *also* an admin somewhere else, that organization is the one you'd open in the console; this one lives in the app.
 
-1. **Sign in** — either open the set-password link from your invitation email, or use the email and temporary password your admin or team lead gave you (on that first sign-in you'll be asked to set your own strong password). Forgot it later? The sign-in screen's **Forgot password?** link emails you a reset link.
-2. **Allow location** when the app asks — and on iPhone, leave **Precise Location** on. Every door you record carries a GPS stamp (it's how your work is verified), and the app can't record doors without it. You can canvass with no signal, but not with location off.
-3. **Pick your campaign** on the "Pick a campaign" screen. If a campaign is split into several walk lists, it expands so you can pick the one you're working — then you land on your books.
-4. **Open a book** — your assigned books are waiting as pins on a map. Each book is an ordered list of houses for you to walk. The card at the top tells you two things: the campaign's **key dates** (Election Day with the actual date and how far off it is, plus the early-voting window) and a **legend** showing what the book pins mean — **Not started**, **In progress**, **Done**. Tap a book, then **Enter** to start.
-5. **Knock a door** — tap a house to see who lives there and record what happened. Each voter shows their party, age, and gender, when the record has them.
+1. **Get the app.** Your invitation email has the install links for iPhone and Android, and they're also on the web page you land on after setting your password. Doorline is still in a closed test, so if a link doesn't work — on Android especially, where testers have to be added by name — just reply to the person who invited you and ask them to add you.
+2. **Sign in** — either open the set-password link from your invitation email, or use the email and temporary password your admin or team lead gave you (on that first sign-in you'll be asked to set your own strong password). The set-password link opens in your web browser, which is normal; once your password is set, sign in here in the app with that same email and password. Forgot it later? The sign-in screen's **Forgot password?** link emails you a reset link.
+3. **Allow location** when the app asks — and on iPhone, leave **Precise Location** on. Every door you record carries a GPS stamp (it's how your work is verified), and the app can't record doors without it. You can canvass with no signal, but not with location off.
+4. **Pick your campaign** on the "Pick a campaign" screen. If a campaign is split into several walk lists, it expands so you can pick the one you're working — then you land on your books.
+5. **Open a book** — your assigned books are waiting as pins on a map. Each book is an ordered list of houses for you to walk. The card at the top tells you two things: the campaign's **key dates** (Election Day with the actual date and how far off it is, plus the early-voting window) and a **legend** showing what the book pins mean — **Not started**, **In progress**, **Done**. Tap a book, then **Enter** to start.
+6. **Knock a door** — tap a house to see who lives there and record what happened. Each voter shows their party, age, and gender, when the record has them.
 
 ## Recording a door
 

@@ -165,7 +165,7 @@ export default function DayDetailScreen() {
         <View style={styles.metaRow}>
           <MetaStat
             value={primaryValue.toLocaleString()}
-            label={isLitDrop ? 'Lit drops' : 'Surveys'}
+            label={isLitDrop ? 'Lit drops' : 'Surveys taken'}
           />
           <MetaStat
             value={rate ? rate.value : '—'}

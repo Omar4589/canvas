@@ -19,7 +19,7 @@ While you're looking at **today**, the page refreshes about every 20 seconds —
 
 ## Each team's numbers
 
-Above the canvasser table there's a **by-team** breakdown: every team's people, doors, survey doors, voters surveyed and connection rate — with a **Campaign** row underneath. The teams **add up to the campaign total**, so a number you read off one team's row is consistent with the campaign figure. Click a team to drill into just their canvassers — and **← All teams** brings you back. See [How many doors has one team knocked?](team-door-counts).
+Above the canvasser table there's a **by-team** breakdown: every team's people, doors, survey doors, surveys taken and connection rate — with a **Campaign** row underneath. The teams **add up to the campaign total**, so a number you read off one team's row is consistent with the campaign figure. Click a team to drill into just their canvassers — and **← All teams** brings you back. See [How many doors has one team knocked?](team-door-counts).
 
 ## What "Doors" counts
 

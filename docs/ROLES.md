@@ -211,8 +211,14 @@ persists in `localStorage`.
 
 `homePathForRole` is now a lookup (`{admin: '/admin', lead: '/campaigns'}`) that returns **`null`** for
 any other role, so no role can silently land on `/admin` again. `resolveHomePath` counts *console*
-memberships: exactly one → enter it and skip the picker; two or more → the picker; zero → `null`, and the
-caller shows "you need an admin or team-lead role".
+memberships: exactly one → enter it and skip the picker; two or more → the picker; zero → `null`.
+
+**`null` is a destination, not an error.** `postAuthPath()` (same file) is `resolveHomePath(args) || '/select-org'`,
+and every post-auth caller uses it — `LoginPage` (both the submit path and the already-signed-in guard) and
+`ChangePasswordPage`. `/select-org` explains that the console is admins-and-leads only and carries the
+**Get the app** install card. Before this, `LoginPage` rendered a dead-end red error naming roles the user
+doesn't have, so a canvasser who set their password from an emailed invite link had nowhere to go at all —
+the one path `ChangePasswordPage` had always handled correctly.
 
 ## The gate invariant
 

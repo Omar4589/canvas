@@ -690,7 +690,7 @@ export default function AdminUserDetail() {
                     value={(stats.doorsKnocked ?? 0).toLocaleString()}
                   />
                   <StatCell
-                    label="Voters surveyed"
+                    label="Surveys taken"
                     value={(stats.surveysSubmitted ?? 0).toLocaleString()}
                   />
                   <StatCell

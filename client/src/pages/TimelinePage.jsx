@@ -204,16 +204,22 @@ export default function TimelinePage() {
     // Deduped server-side for exactly the reason DOORS is, and it must be: summing the
     // per-canvasser survey column double-counts a door two canvassers both surveyed, which is
     // what this card used to do. Falls back to the row sum only for a server too old to send it.
+    // BOTH connection-rate numerator terms are deduped server-side, for the same reason DOORS is:
+    // summing a per-canvasser column counts a door two canvassers both worked twice. Deduping only
+    // the survey term left a raw `lit` over a deduped denominator — two units in one fraction.
+    // Raw sums stay as the old-server fallback and for the reconciliation line below.
     let surveys = data.billableSurveyDoors ?? null;
+    let lit = data.billableLitDoors ?? null;
     let rawSurveys = 0;
-    let lit = 0;
+    let rawLit = 0;
     let hours = 0;
     for (const r of filteredRows) {
       rawSurveys += r.daySurveys || 0;
-      lit += r.dayLit || 0;
+      rawLit += r.dayLit || 0;
       hours += r.hoursOnDoors || 0;
     }
     if (surveys == null) surveys = rawSurveys;
+    if (lit == null) lit = rawLit;
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
     // Pace stays raw effort: it's per-person time on doors, not a billing figure.
     const rawDoors = filteredRows.reduce((n, r) => n + (r.dayKnocks || 0), 0);
@@ -233,6 +239,7 @@ export default function TimelinePage() {
     filteredRows,
     data.billableKnocks,
     data.billableSurveyDoors,
+    data.billableLitDoors,
     data.billableDoors,
     data.restrictedDoors,
     data.billRestrictedDoors,

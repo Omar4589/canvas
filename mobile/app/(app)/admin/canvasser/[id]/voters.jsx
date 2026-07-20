@@ -93,7 +93,7 @@ export default function VotersScreen() {
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Text style={styles.back}>‹ Back</Text>
         </Pressable>
-        <Text style={styles.title}>Voters surveyed</Text>
+        <Text style={styles.title}>Surveys taken</Text>
         <View style={{ width: 80 }} />
       </View>
 
@@ -104,12 +104,15 @@ export default function VotersScreen() {
           <ActivityIndicator color={colors.brand} />
         ) : voters.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No voters surveyed in this range.</Text>
+            <Text style={styles.emptyText}>No surveys taken in this range.</Text>
           </View>
         ) : (
           <>
             <Text style={styles.countLabel}>
-              {q.data.total} voter{q.data.total === 1 ? '' : 's'} surveyed
+              {/* RESPONSE rows, not distinct people: the endpoint returns one entry per survey
+                  (countDocuments over SurveyResponse), so a voter surveyed in two rounds is two
+                  entries. */}
+              {q.data.total} survey{q.data.total === 1 ? '' : 's'} taken
             </Text>
 
             <SectionHeader title="Party breakdown" />

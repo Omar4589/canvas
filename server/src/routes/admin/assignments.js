@@ -142,9 +142,20 @@ router.post('/', async (req, res, next) => {
     // campaign (leadCrew), so a second "added to a campaign" note before they've even set a password is noise.
     if (newlyAdded.length) {
       const users = await User.find({ _id: { $in: newlyAdded } }).select('firstName email mustChangePassword').lean();
+      // Role decides whether the mail points at the app or the console (services/mail/templates.js).
+      // Reuses the `memberships` already loaded above for the is-a-member check — that query is
+      // .lean() with no projection, so `role` is already on every row, and `newlyAdded ⊆ validIds`
+      // by construction. No second round trip.
+      //
+      // The `|| 'canvasser'` is unreachable, not a real default: every id in `newlyAdded` passed the
+      // membership check, and {userId, organizationId} is uniquely indexed (models/Membership.js).
+      // It is here so a missing row degrades to the field-role email rather than throwing inside a
+      // best-effort notify — do NOT "tidy" it into a throw.
+      const roleByUser = new Map(memberships.map((m) => [String(m.userId), m.role]));
       for (const u of users) {
         if (u.mustChangePassword || !u.email) continue;
-        sendMail({ to: u.email, ...addedToCampaign({ firstName: u.firstName, orgName: req.activeOrg.name, campaignName: campaign.name }), kind: 'addedToCampaign', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: u._id } });
+        const role = roleByUser.get(String(u._id)) || 'canvasser';
+        sendMail({ to: u.email, ...addedToCampaign({ firstName: u.firstName, orgName: req.activeOrg.name, campaignName: campaign.name, role }), kind: 'addedToCampaign', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: u._id } });
       }
     }
     res.status(201).json({ created, total: validIds.length });

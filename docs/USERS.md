@@ -132,7 +132,7 @@ you want:
 - **"No coordinator" stays meaningful.** A candidate knocking their own district genuinely has no team,
   and that bucket is theirs — not a dumping ground for anyone the system lost track of.
 
-The **Timeline** shows a **by-team breakdown**: every team's doors, survey doors, voters surveyed and
+The **Timeline** shows a **by-team breakdown**: every team's doors, survey doors, surveys taken and
 connection rate, with a Campaign row that the teams add up to. See
 [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract) for exactly how a team's doors are
 counted (and what happens in the rare case two teams knock the same house).
@@ -149,7 +149,7 @@ campaign, people are grouped by coordinator:
 This lets you run, say, a paid team and a volunteer team in **one** walk list: put both crews on the
 Team, set each person's coordinator, cut the books, then assign each crew to its books. **You get
 per-crew totals for free** — the campaign **Timeline** has a by-team table showing each crew's doors,
-survey doors, voters surveyed and connection rate, with a Campaign row they add up to. Dividing the
+survey doors, surveys taken and connection rate, with a Campaign row they add up to. Dividing the
 *doors* into disjoint areas is still what separate walk lists do ([EFFORTS.md](EFFORTS.md)) —
 coordinators divide the *people*, walk lists divide the *territory*; use whichever (or both) fits.
 

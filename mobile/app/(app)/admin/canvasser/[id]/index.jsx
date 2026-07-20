@@ -127,10 +127,12 @@ export default function CanvasserOverview() {
     const k = s.kpi;
     // Server-computed connection rate (completion knocks ÷ knocks, capped at 100).
     const cr = rateFromPct(k.connectionRatePct);
-    // "Voters surveyed", not a bare "Surveys": this value is VOTER-unit (SurveyResponse rows), and
-    // the team-average delta compares against the same voter-unit figure — the label just has to
-    // say so, or it looks like it contradicts the door-unit survey counts on the Timeline.
-    const primaryLabel = isLitDrop ? 'Lit drops' : 'Voters surveyed';
+    // "Surveys taken", not a bare "Surveys" and not "Voters surveyed": this value is a COUNT OF
+    // RESPONSE ROWS (SurveyResponse), and the team-average delta compares against the same
+    // response-unit figure. It read "Voters surveyed" — right number in a one-round campaign (one
+    // response per voter per round), wrong the moment a second round re-surveys anyone. The label
+    // has to name the unit, or it looks like it contradicts the door-unit counts on the Timeline.
+    const primaryLabel = isLitDrop ? 'Lit drops' : 'Surveys taken';
     const primaryValue = isLitDrop ? k.litDropped : k.surveysSubmitted;
     return [
       {
@@ -165,7 +167,7 @@ export default function CanvasserOverview() {
         delta: team ? delta(k.doorsPerHour, team.doorsPerHour) : null,
       },
       {
-        label: 'Surveys / hour',
+        label: 'Surveys taken / hour',
         value: (k.surveysPerHour || 0).toFixed(1),
         delta: team ? delta(k.surveysPerHour, team.surveysPerHour) : null,
       },
@@ -465,7 +467,7 @@ export default function CanvasserOverview() {
           />
           {!isLitDrop ? (
             <QuickLink
-              label="Voters surveyed"
+              label="Surveys taken"
               sub="With demographics"
               onPress={() =>
                 router.push({

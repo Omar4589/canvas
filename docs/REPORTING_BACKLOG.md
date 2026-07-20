@@ -47,6 +47,24 @@ The metrics are correct but the distinction is subtle and could be misread (esp.
 > global distinction reads clearer. The **round breakdown** (Round 1 vs Round 2 side by side) has
 > since shipped too — see item 1's Done block.
 
+> **Done (2026-07, second pass — the SURVEY units)** — the first sweep gave the labelling rule two
+> axes (door-unit "Survey doors", voter-unit "Voters surveyed") and there are **three**. The missing
+> response-unit meant every raw row count in the app rendered as **"Voters surveyed"** — correct
+> *while a campaign has one round* (`SurveyResponse` is unique on `{voterId, passId}`, so rows and
+> people coincide) and wrong the day a second round re-surveys anyone. Added **"Surveys taken"** and
+> swept it across `/team-breakdown` (payload `votersSurveyed` → `surveysTaken`, still `{$sum: 1}` so
+> team rows keep partitioning), `CanvasserSummaryTable`, the campaigns card/table, the user profile
+> (web + mobile), `CampaignTeamPage`, and the mobile canvasser screens. Three real unit *swaps* fixed
+> alongside (mobile campaign leaderboard, `CanvasserCard`, the super-admin Today card), plus the
+> `surveysPerHour` name collision and the household-only key in `mobile/me.js`. Also shipped
+> **`billableLitDoors`**: the survey-doors fix had deduped only the survey term of the Timeline
+> connection rate, leaving a raw client-summed `lit` over a deduped denominator. **Per-round survey
+> results** landed too — `?passId=` on `survey-results` / `voters-by-answer`(+`.csv`) /
+> `answer-canvassers`, an effort-aware round selector on the web Explorer and the mobile campaign
+> screen, and Walk list + Round columns in the answers CSV. This closes the survey half of item 1,
+> which had shipped for knocks only. Contract in [METRICS.md](METRICS.md) and [SURVEYS.md](SURVEYS.md);
+> locked by [multiPassUnits.int.test.js](../server/test/multiPassUnits.int.test.js).
+
 ## 3. Walk one surface in depth (do last)
 After 1–2, pick **Dashboard**, **Overview**, or the public **Client Reports** and walk it the way we
 walked Turf Cutting ("what do we see / what should we see / what can/can't we do"), gap-analysis first.

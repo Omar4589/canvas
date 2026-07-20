@@ -48,6 +48,8 @@ export default function SurveyExplorerPage() {
   const option = searchParams.get('option') || '';
   const userId = searchParams.get('userId') || '';
   const effortId = searchParams.get('effortId') || '';
+  // Round scoping. `roundNumber` restarts per walk list, so this is a Pass _id, never a number.
+  const passId = searchParams.get('pass') || '';
   const tag = searchParams.get('tag') || '';
   const view = searchParams.get('view') === 'canvassers' ? 'canvassers' : 'voters';
 
@@ -135,6 +137,37 @@ export default function SurveyExplorerPage() {
   });
   const efforts = effortsQ.data?.efforts || [];
 
+  // Rounds, for the round filter. Labelled "walk list · Pass N" because `roundNumber` restarts per
+  // effort (models/Pass.js) — a bare "Pass 2" names a different round in every walk list. Same
+  // effort-then-round ordering the knocks-by-pass report uses, so the two read alike.
+  const passesQ = useQuery({
+    queryKey: ['admin', 'passes', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
+    enabled: !!campaignId,
+  });
+  const roundOptions = useMemo(() => {
+    const effortName = new Map(efforts.map((ef) => [String(ef._id), ef.name]));
+    const rows = (passesQ.data?.passes || [])
+      .map((p) => ({
+        id: String(p._id),
+        effortName: effortName.get(String(p.effortId)) || '',
+        roundNumber: p.roundNumber,
+        label: `${effortName.get(String(p.effortId)) || 'Walk list'} · Pass ${p.roundNumber}`,
+      }))
+      .sort(
+        (a, b) =>
+          (a.effortName || '￿').localeCompare(b.effortName || '￿') ||
+          (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity)
+      );
+    // Pre-turf responses carry passId:null and belong to no Pass document. Without this option
+    // they'd sit in "All rounds" and in no selectable round, so the rounds would not add up to the
+    // headline. Sorted last, mirroring the "Legacy / no round" row on the knocks-by-pass report.
+    if ((passesQ.data?.legacyResponseCount || 0) > 0) {
+      rows.push({ id: 'legacy', effortName: '￿', roundNumber: Infinity, label: 'Legacy / no round' });
+    }
+    return rows;
+  }, [passesQ.data, efforts]);
+
   // allMembers, not members: the canvasser filter must list whoever RECORDED responses,
   // including someone since deactivated — their entries are still on the page.
   const { allMembers } = useCampaignTeam(campaignId);
@@ -165,6 +198,7 @@ export default function SurveyExplorerPage() {
       'explorer',
       campaignId,
       effortId,
+      passId,
       survey,
       userId,
       dateRange?.from,
@@ -175,6 +209,7 @@ export default function SurveyExplorerPage() {
         `/admin/reports/survey-results${buildQuery({
           campaignId,
           effortId,
+          passId,
           surveyTemplateId: survey,
           userId,
           from: dateRange?.from,
@@ -226,6 +261,7 @@ export default function SurveyExplorerPage() {
       option,
       resolvedTemplateId,
       effortId,
+      passId,
       dateRange?.from,
       dateRange?.to,
     ],
@@ -238,6 +274,7 @@ export default function SurveyExplorerPage() {
           surveyTemplateId: resolvedTemplateId,
           campaignId,
           effortId,
+          passId,
           from: dateRange?.from,
           to: dateRange?.to,
         })}`
@@ -253,6 +290,7 @@ export default function SurveyExplorerPage() {
         campaignId,
         userId,
         effortId,
+        passId,
         from: dateRange?.from,
         to: dateRange?.to,
       }
@@ -264,6 +302,7 @@ export default function SurveyExplorerPage() {
         campaignId,
         userId,
         effortId,
+        passId,
         from: dateRange?.from,
         to: dateRange?.to,
       };
@@ -271,7 +310,7 @@ export default function SurveyExplorerPage() {
   // Any filter change returns to the first page.
   useEffect(() => {
     setPage(0);
-  }, [q, optionId, option, tag, survey, userId, effortId, dateRange?.from, dateRange?.to]);
+  }, [q, optionId, option, tag, survey, userId, effortId, passId, dateRange?.from, dateRange?.to]);
 
   const listQ = useQuery({
     queryKey: [
@@ -286,6 +325,7 @@ export default function SurveyExplorerPage() {
       resolvedTemplateId,
       userId,
       effortId,
+      passId,
       dateRange?.from,
       dateRange?.to,
       page,
@@ -442,6 +482,21 @@ export default function SurveyExplorerPage() {
               {efforts.map((ef) => (
                 <option key={ef._id} value={ef._id}>
                   {ef.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {roundOptions.length > 1 && (
+            <select
+              value={passId}
+              onChange={(e) => updateParams({ pass: e.target.value })}
+              title="Filter to one round"
+              className={SELECT_CLS}
+            >
+              <option value="">All rounds</option>
+              {roundOptions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
                 </option>
               ))}
             </select>
@@ -696,7 +751,9 @@ export default function SurveyExplorerPage() {
           )}
 
           {/* Where those answers live. Tag mode is skipped: the map endpoint's answer
-              filter is per question+option only. */}
+              filter is per question+option only. `passId` keeps the dots on the same round as the
+              list beside them; the 'legacy' sentinel is not an ObjectId so the map endpoint would
+              ignore it — send nothing rather than silently mis-scope. */}
           {!tag && hasOption && (
             <AnswerMiniMap
               campaignId={campaignId}
@@ -706,6 +763,7 @@ export default function SurveyExplorerPage() {
               surveyTemplateId={resolvedTemplateId}
               userId={userId}
               effortId={effortId}
+              passId={passId && passId !== 'legacy' ? passId : undefined}
               from={dateRange?.from}
               to={dateRange?.to}
             />

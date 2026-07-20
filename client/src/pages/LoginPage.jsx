@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId } from '../api/client.js';
-import { resolveHomePath } from '../lib/homePath.js';
+import { postAuthPath } from '../lib/homePath.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import Logo from '../components/Logo.jsx';
 
@@ -26,15 +26,14 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const res = await login(email, password);
-      const dest = resolveHomePath({
+      // No console home (a canvasser) is a DESTINATION, not an error: /select-org explains that the
+      // web console is admins-and-leads only and links the mobile app. This used to be a red error
+      // box naming roles they don't have, which dead-ended every invited canvasser.
+      const dest = postAuthPath({
         user: res.user,
         memberships: res.memberships || [],
         activeOrgId: getActiveOrgId(),
       });
-      if (!dest) {
-        setError('You need an admin or team-lead role on at least one organization to use the dashboard.');
-        return;
-      }
       // Restore a deep link (stashed by ProtectedRoute) only when landing on the user's
       // actual home — never skip the change-password / org-picker / super-admin routes.
       const from = location.state?.from?.pathname;
@@ -55,11 +54,10 @@ export default function LoginPage() {
       <div className="flex h-screen items-center justify-center text-fg-muted">Loading…</div>
     );
   }
-  if (user) {
-    const dest = resolveHomePath({ user, memberships, activeOrgId });
-    // Canvassers (no console access → null) fall through to the form.
-    if (dest) return <Navigate to={dest} replace />;
-  }
+  // Already signed in. Canvassers used to fall through to a bare form with no explanation at all —
+  // strictly worse than the old error. Same destination as onSubmit now; /select-org has its own
+  // Sign out button for "I want to log in as someone else".
+  if (user) return <Navigate to={postAuthPath({ user, memberships, activeOrgId })} replace />;
 
   return (
     <div className="flex h-screen items-center justify-center bg-sunken px-4">

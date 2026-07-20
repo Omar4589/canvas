@@ -222,7 +222,10 @@ export default function SuperAdminHome() {
               <Text style={styles.todayValue}>
                 {totals?.today?.surveysSubmitted?.toLocaleString() ?? '—'}
               </Text>
-              <Text style={styles.todayCellLabel}>Surveys</Text>
+              {/* DOOR-unit: platform.js counts CanvassActivity 'survey_submitted' rows, not
+                  SurveyResponse. Web rendered the same field as "voters surveyed" and this one as a
+                  bare "Surveys" — one field, two labels, neither naming its unit. */}
+              <Text style={styles.todayCellLabel}>Survey doors</Text>
             </View>
             <View style={styles.todayCell}>
               <Text style={styles.todayValue}>

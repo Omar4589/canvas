@@ -291,3 +291,60 @@ test('survey DOORS are deduped server-side; the raw per-canvasser sum is not the
     'survey doors are a SUBSET of knocked doors, so the rate can never exceed 100%'
   );
 });
+
+test('lit DOORS are deduped server-side too — both connection-rate terms share the denominator’s unit', { skip }, async () => {
+  // The survey fix's surviving twin. connPct = (surveyDoors + litDoors) / doors. Once the survey
+  // term was deduped, `lit` was still a raw client-side sum of the per-canvasser column, so a
+  // lit-drop campaign put a RAW numerator term over a DEDUPED denominator. Invisible on a survey
+  // campaign (lit ~ 0), live on a lit-drop one.
+  const { org, ann, bob, token } = ctx;
+  const campaign = await Campaign.create({
+    organizationId: org._id, name: 'Lit Blitz', type: 'lit_drop', state: 'FL', isActive: true, timeZone: TZ,
+  });
+  const effort = await Effort.create({ organizationId: org._id, campaignId: campaign._id, name: 'East' });
+  const pass = await Pass.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    roundNumber: 1, name: 'Round 1', status: 'active',
+  });
+  const homes = await Household.insertMany([1, 2].map((n) => ({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: `${n} Flyer Ct`, city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: `${n} FLYER CT|TOWN|FL|34741`,
+    location: { type: 'Point', coordinates: [-81.6 + n * 0.001, 28.5] },
+  })));
+  const knock = (user, home, hour, actionType) => CanvassActivity.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: home._id, userId: user._id, actionType, timestamp: at('2026-02-11', hour),
+    location: { lat: 28.5, lng: -81.6 },
+  });
+
+  // BOTH canvassers lit-drop door 1 (the overlap); only Ann does door 2.
+  await knock(ann, homes[0], 9, 'lit_dropped');
+  await knock(bob, homes[0], 14, 'lit_dropped');
+  await knock(ann, homes[1], 10, 'lit_dropped');
+
+  const res = await call(
+    `/admin/reports/canvasser-timeline?campaignId=${campaign._id}&totals=1`, token, org._id
+  );
+  assert.equal(res.status, 200);
+
+  const rawLit = res.json.canvassers.reduce((n, c) => n + (c.dayLit || 0), 0);
+  assert.equal(rawLit, 3, 'three lit EVENTS across the two canvassers');
+  assert.equal(res.json.billableLitDoors, 2, 'lit DOORS dedupe the shared door');
+  assert.ok(
+    res.json.billableLitDoors < rawLit,
+    'the deduped lit count is strictly below the raw sum whenever canvassers overlap'
+  );
+
+  // THE point of the fix: numerator and denominator now share a unit, so the rate cannot exceed
+  // 100% by counting one door twice on top.
+  assert.equal(res.json.billableKnocks, 2, 'two distinct doors');
+  const connPct = Math.round(
+    ((res.json.billableSurveyDoors + res.json.billableLitDoors) / res.json.billableKnocks) * 100
+  );
+  assert.equal(connPct, 100, 'every door got lit — exactly 100%, not 150%');
+  assert.ok(
+    Math.round(((res.json.billableSurveyDoors + rawLit) / res.json.billableKnocks) * 100) > 100,
+    'and the OLD raw-lit arithmetic would have exceeded 100% — the bug this guards'
+  );
+});

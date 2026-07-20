@@ -555,7 +555,7 @@ export default function UserProfileModal({ membership, onClose }) {
                   value={(stats.doorsKnocked ?? 0).toLocaleString()}
                 />
                 <Stat
-                  label="Voters surveyed"
+                  label="Surveys taken"
                   value={(stats.surveysSubmitted ?? 0).toLocaleString()}
                 />
                 <Stat

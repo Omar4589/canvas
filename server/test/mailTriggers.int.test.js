@@ -27,6 +27,7 @@ const { Subscription } = await import('../src/models/Subscription.js');
 const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
 const { SupportAccessGrant } = await import('../src/models/SupportAccessGrant.js');
 const { outbox, clearOutbox } = await import('../src/services/mail/mailer.js');
+const { installLinks } = await import('../src/config/storeLinks.js');
 const { ensureCampaignAssignments } = await import('../src/services/campaignRoster.js');
 
 const URI = process.env.MONGODB_URI_TEST;
@@ -49,6 +50,11 @@ async function waitFor(pred, { timeout = 2000, interval = 50 } = {}) {
 
 const kinds = (kind) => outbox.filter((e) => e.kind === kind);
 const bodyOf = (entry) => `${entry?.html || ''}\n${entry?.text || ''}`;
+// A canvasser works in the mobile app, so their mail carries install links; an admin or lead works
+// in the web console and must never get them (services/mail/templates.js).
+const INSTALL = installLinks();
+const hasInstallLinks = (entry) =>
+  bodyOf(entry).includes(INSTALL.ios) && bodyOf(entry).includes(INSTALL.android);
 
 async function call(method, path, { token, orgId, body } = {}) {
   const res = await fetch(`${base}/api${path}`, {
@@ -132,6 +138,8 @@ test('memberships POST (new user): inviteSetPassword only, no password in the ma
   const entry = kinds('inviteSetPassword')[0];
   assert.deepStrictEqual(entry.to, [email]);
   assert.ok(!JSON.stringify(outbox).includes(tempPw), 'the email must not carry the temp password');
+  // No explicit role on the POST → defaults to 'canvasser', so this invite must carry the app.
+  assert.ok(hasInstallLinks(entry), 'a canvasser invite carries both install links');
 
   // The set-password link is a live INVITE token — consuming it via reset-password chooses a password.
   const m = bodyOf(entry).match(/reset-password\/([A-Za-z0-9_-]+)/);
@@ -145,6 +153,23 @@ test('memberships POST (new user): inviteSetPassword only, no password in the ma
 // 1b) The temp password is now OPTIONAL: a blank one is generated internally (shown to nobody),
 //     the invite still goes out, and the emailed link — the account's only way in — works. An
 //     empty-string password (a blank form field) is treated the same as absent.
+test('memberships POST (role: admin): the invite points at the console, never the app', { skip }, async () => {
+  // The mirror of the canvasser case above. This is what pins `data.role` actually reaching the
+  // template — passing it in the route but dropping it from the signature would be invisible
+  // otherwise, since the canvasser assertion would still pass on the default.
+  const res = await call('POST', '/admin/memberships', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+    body: { email: 'new.admin@t.co', firstName: 'New', lastName: 'Admin', role: 'admin' },
+  });
+  assert.strictEqual(res.status, 201);
+  assert.ok(await waitFor(() => kinds('inviteSetPassword').length === 1));
+  const entry = kinds('inviteSetPassword')[0];
+  assert.deepStrictEqual(entry.to, ['new.admin@t.co']);
+  assert.ok(!hasInstallLinks(entry), 'an admin invite carries no install links');
+  assert.ok(!bodyOf(entry).includes(INSTALL.ios), 'not even one of them');
+});
+
 test('memberships POST (new user, NO password): invite still sent, link works, nothing echoed', { skip }, async () => {
   const email = 'linkonly.hire@t.co';
   const res = await call('POST', '/admin/memberships', {
@@ -200,6 +225,8 @@ test('leadCrew POST: a single combined invite that mentions the campaign name', 
   assert.strictEqual(outbox[0].kind, 'inviteSetPassword');
   assert.deepStrictEqual(outbox[0].to, ['crew.new@t.co']);
   assert.ok(bodyOf(outbox[0]).includes(ctx.campaign.name), 'the combined email names the campaign');
+  // A lead can only create canvassers for their crew (routes/admin/leadCrew.js), so always the app.
+  assert.ok(hasInstallLinks(outbox[0]), 'a crew invite carries both install links');
 });
 
 // 4) AUTO-ADD GUARD: ensureCampaignAssignments is the SILENT side-effect add (a book handed out makes the
@@ -221,9 +248,11 @@ test('ensureCampaignAssignments creates the roster row and sends NO email', { sk
 // 5) assignments POST (the Team page): a genuinely-new roster row emails once; a re-add sends nothing; a
 //    mustChangePassword invitee is skipped (their invite already named the campaign).
 test('assignments POST: new row emails once, re-add is silent, mustChangePassword is skipped', { skip }, async () => {
-  const mkMember = async (email, extra = {}) => {
+  // `role` defaults to canvasser so the three original call sites are unchanged; the lead case
+  // below is what covers assignments.js's roleByUser map.
+  const mkMember = async (email, extra = {}, role = 'canvasser') => {
     const u = await User.create({ firstName: 'Ann', lastName: 'Assignee', email, passwordHash: 'x', isActive: true, ...extra });
-    await Membership.create({ userId: u._id, organizationId: ctx.org._id, role: 'canvasser', isActive: true });
+    await Membership.create({ userId: u._id, organizationId: ctx.org._id, role, isActive: true });
     return u;
   };
   const x = await mkMember('assignee.x@t.co');
@@ -237,6 +266,7 @@ test('assignments POST: new row emails once, re-add is silent, mustChangePasswor
   assert.strictEqual(add1.json.created, 1);
   assert.ok(await waitFor(() => kinds('addedToCampaign').length === 1), 'X gets one addedToCampaign');
   assert.deepStrictEqual(kinds('addedToCampaign')[0].to, ['assignee.x@t.co']);
+  assert.ok(hasInstallLinks(kinds('addedToCampaign')[0]), 'X is a canvasser → install links');
 
   // Re-adding X (row already present) inserts nothing → no second email.
   clearOutbox();
@@ -253,6 +283,16 @@ test('assignments POST: new row emails once, re-add is silent, mustChangePasswor
   assert.strictEqual(addY.json.created, 1, 'Y IS added to the roster');
   await sleep(250);
   assert.strictEqual(kinds('addedToCampaign').length, 0, 'a mustChangePassword invitee is not re-notified');
+
+  // A LEAD on the roster gets the same notice WITHOUT install links — they work in the web
+  // console. This is the only coverage of assignments.js's roleByUser map, and the one place a
+  // wrong-role email would go out silently.
+  clearOutbox();
+  const z = await mkMember('assignee.z@t.co', {}, 'lead');
+  const addZ = await call('POST', `/admin/campaigns/${ctx.campaign._id}/assignments`, { ...opt, body: { userIds: [String(z._id)] } });
+  assert.strictEqual(addZ.status, 201);
+  assert.ok(await waitFor(() => kinds('addedToCampaign').length === 1), 'Z gets one addedToCampaign');
+  assert.ok(!hasInstallLinks(kinds('addedToCampaign')[0]), 'a lead is never told to install the app');
 });
 
 // 6) Provisioning (super-admin org create with an admin block) → provisioningWelcome. A TYPED

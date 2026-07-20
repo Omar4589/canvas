@@ -55,6 +55,8 @@ export default function AnswerVoters() {
   const optionId = one(params.optionId);
   const label = one(params.label);
   const surveyTemplateId = one(params.surveyTemplateId);
+  // Round scope, forwarded by whoever opened this drill. Absent = all rounds.
+  const passId = one(params.passId);
   const from = one(params.from);
   const to = one(params.to);
 
@@ -69,7 +71,7 @@ export default function AnswerVoters() {
   // synchronously during render whenever the identifying params change. The
   // local canvasser filter is part of the identity (switching it must reset the
   // pages), while a fresh SET of route params also clears the filter itself.
-  const paramsKey = `${campaignId}|${questionKey}|${optionId}|${option}|${surveyTemplateId}|${from}|${to}`;
+  const paramsKey = `${campaignId}|${questionKey}|${optionId}|${option}|${surveyTemplateId}|${passId}|${from}|${to}`;
   const identityKey = `${paramsKey}|${canvasserId}`;
   const [prevParamsKey, setPrevParamsKey] = useState(paramsKey);
   const [prevKey, setPrevKey] = useState(identityKey);
@@ -96,7 +98,7 @@ export default function AnswerVoters() {
   const tz = campaign?.timeZone;
 
   const q = useQuery({
-    queryKey: ['admin', 'answer-voters', campaignId, questionKey, optionId, option, surveyTemplateId, canvasserId, from, to, skip],
+    queryKey: ['admin', 'answer-voters', campaignId, questionKey, optionId, option, surveyTemplateId, passId, canvasserId, from, to, skip],
     queryFn: () => {
       const p = new URLSearchParams({
         campaignId,
@@ -108,6 +110,7 @@ export default function AnswerVoters() {
       });
       if (optionId) p.set('optionId', optionId);
       if (surveyTemplateId) p.set('surveyTemplateId', surveyTemplateId);
+      if (passId) p.set('passId', passId);
       if (canvasserId) p.set('userId', canvasserId);
       if (from) p.set('from', from);
       if (to) p.set('to', to);
@@ -119,7 +122,7 @@ export default function AnswerVoters() {
   // Per-canvasser breakdown for this option — powers the "By canvasser" tab AND
   // the canvasser filter menu (its rows are the only canvassers worth listing).
   const canvassersQ = useQuery({
-    queryKey: ['admin', 'answer-canvassers', campaignId, questionKey, optionId, option, surveyTemplateId, from, to],
+    queryKey: ['admin', 'answer-canvassers', campaignId, questionKey, optionId, option, surveyTemplateId, passId, from, to],
     queryFn: () => {
       const p = new URLSearchParams({
         campaignId,
@@ -129,6 +132,7 @@ export default function AnswerVoters() {
       });
       if (optionId) p.set('optionId', optionId);
       if (surveyTemplateId) p.set('surveyTemplateId', surveyTemplateId);
+      if (passId) p.set('passId', passId);
       if (from) p.set('from', from);
       if (to) p.set('to', to);
       return api(`/admin/reports/answer-canvassers?${p.toString()}`);

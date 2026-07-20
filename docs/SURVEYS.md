@@ -785,6 +785,24 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 >   team-attribution model in [METRICS.md](METRICS.md).
 > - **Tag mode is a `400` by design**: a tag rollup is a **distinct-voter** count across questions
 >   (§I), which has no honest per-canvasser sum — three questions can feed one voter's tag.
+> - Option counts are **per RESPONSE**, and `SurveyResponse` is unique on `{voterId, passId}` — one
+>   response per voter **per round**. So the same voter asked in Round 1 and again in Round 2 counts
+>   **twice**: two forms, and (for a yard sign) two signs handed out. That is intended — contrast
+>   `surveyedVoters`, which is a `distinct('voterId')` and counts that person **once**. A one-round
+>   campaign cannot tell the two apart; see the three-units callout in [METRICS.md](METRICS.md).
+> - **`?passId=legacy` selects the PRE-TURF bucket** (rows with `passId: null`). Round pickers are
+>   built from Pass documents, so without this sentinel those responses would belong to "All rounds"
+>   and to no selectable round, and Σ(rounds) would quietly fall short of the headline on any org
+>   with pre-turf history. `GET /admin/campaigns/:id/passes` returns **`legacyResponseCount`** so a
+>   client can offer the option only when the bucket is non-empty. Mirrors the "Legacy / no round"
+>   row `/knocks-by-pass` has always emitted.
+> - **`?passId=` scopes any of these to one round** (`survey-results`, `voters-by-answer`(+`.csv`),
+>   `answer-canvassers`), via `passFilterOf` in [reports.js](../server/src/routes/admin/reports.js).
+>   Σ(rounds) === the all-rounds total. It is deliberately **not** part of `baseFilter`:
+>   `/knocks-by-pass` builds its row set from every Pass while counting through the same filter, so
+>   narrowing there would render every other round as a real-looking zero. A walk-list filter is no
+>   substitute — `roundNumber` restarts per effort — and neither is a date range, since rounds in
+>   different efforts can be active at once.
 > - `voters-by-answer`'s `total` (a `countDocuments` over `voterAnswerClause`) **can diverge** from
 >   the explode-based option count on the same rare dual-write legacy rows. The UIs therefore
 >   present them as two numbers — the headline "Answers" stat vs the list's own "Showing N of M
@@ -794,7 +812,7 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 
 | File | Role |
 |---|---|
-| [pages/SurveyExplorerPage.jsx](../client/src/pages/SurveyExplorerPage.jsx) | Route `/campaigns/:campaignId/explorer` ([App.jsx](../client/src/App.jsx), console group — **admins and leads**; `CAMPAIGN_NAV` slug `explorer` in [navItems.js](../client/src/components/navItems.js)). **The URL is the filter state** — `?survey&q&optionId&option&userId&effortId&tag&view&from&to`, written with `replace` so filter twiddling doesn't spam the back stack; a drill is shareable. Date range defaults to **Today** in the campaign tz (`rangeTouchedRef` + tz-ready seeding, the DashboardPage pattern); a `?from/&to` deep link seeds a custom range. The headline stats re-query `survey-results` with **identical** filters (incl. `userId`, which that endpoint accepts) so the headline can never disagree with the accordion; the By-canvasser table stays deliberately un-`userId`-filtered so a row click toggles the filter. Tag mode: voter list + CSV only (by-canvasser hidden with an explanation, minimap hidden — the map endpoint has no tag filter). CSV via authenticated `fetch` + blob (the WalkListsPage idiom). **Single-fetch, no live polling** (the repo's Live-pill contract — a page without polling carries no pill). Campaign-switch resets state (same mounted page). |
+| [pages/SurveyExplorerPage.jsx](../client/src/pages/SurveyExplorerPage.jsx) | Route `/campaigns/:campaignId/explorer` ([App.jsx](../client/src/App.jsx), console group — **admins and leads**; `CAMPAIGN_NAV` slug `explorer` in [navItems.js](../client/src/components/navItems.js)). **The URL is the filter state** — `?survey&q&optionId&option&userId&effortId&pass&tag&view&from&to` (`pass` = a **Pass `_id`**, never a round number — `roundNumber` restarts per walk list, so the selector reads "Walk list · Pass N"), written with `replace` so filter twiddling doesn't spam the back stack; a drill is shareable. Date range defaults to **Today** in the campaign tz (`rangeTouchedRef` + tz-ready seeding, the DashboardPage pattern); a `?from/&to` deep link seeds a custom range. The headline stats re-query `survey-results` with **identical** filters (incl. `userId`, which that endpoint accepts) so the headline can never disagree with the accordion; the By-canvasser table stays deliberately un-`userId`-filtered so a row click toggles the filter. Tag mode: voter list + CSV only (by-canvasser hidden with an explanation, minimap hidden — the map endpoint has no tag filter). CSV via authenticated `fetch` + blob (the WalkListsPage idiom). **Single-fetch, no live polling** (the repo's Live-pill contract — a page without polling carries no pill). Campaign-switch resets state (same mounted page). |
 | [components/AnswerCanvasserTable.jsx](../client/src/components/AnswerCanvasserTable.jsx) | The ranked breakdown table: rank, canvasser (+ muted status), count, `share`, `pctOfOwnAnswers` (with an info hint), last entry. Row click calls `onSelect(userId)` (toggle); active row highlighted. |
 | [components/ResponseDetailDrawer.jsx](../client/src/components/ResponseDetailDrawer.jsx) | The response detail — **the first lead-accessible response detail on web**. Fetches `responses/:id?campaignId=`; renders voter/household/canvasser, submitted time (`hh:mm:ss`, campaign tz), Offline badge + synced time, round, `formatDistanceImperial` distance (ft/mi rule), all Q/A pairs (+ `otherText`), note, the edited-by audit line, a small non-interactive Mapbox dot map, **View on map**, and a **Voter record** link gated on `isOrgAdmin` (mirrors the `/voters/:id` RoleGate — never offered to a lead). |
 | [components/AnswerMiniMap.jsx](../client/src/components/AnswerMiniMap.jsx) | Single-fetch `GET /admin/households/map` with the drill's filters and **no `bbox`** (the filtered set is small); renders via the shared `mapRender` helpers. Camera `fitBounds` over the **returned features** — **never `includeBounds`**, which is the campaign-wide extent and would mis-frame a filtered subset. The **Open in Map →** link always carries the option **text** alongside `optionId` (the Map page's answer chips key on text). |

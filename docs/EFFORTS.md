@@ -139,7 +139,7 @@ gets its own books:
 5. **Activate** the pass. Both crews go live.
 
 **Per-crew reporting comes for free.** Open the campaign's **Timeline**: the **by-team** table gives you
-each crew's doors, survey doors, voters surveyed and connection rate side by side, with a Campaign row
+each crew's doors, survey doors, surveys taken and connection rate side by side, with a Campaign row
 that the crews add up to. You no longer need two walk lists just to keep two crews' numbers apart —
 split the territory only if you actually want them working separate doors.
 

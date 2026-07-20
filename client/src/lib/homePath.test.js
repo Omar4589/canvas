@@ -7,7 +7,7 @@ import {
   autoSelectOrgId,
   activeOrgIdForLogin,
 } from './roles.js';
-import { homePathForRole, consoleHomePath, resolveHomePath } from './homePath.js';
+import { homePathForRole, consoleHomePath, resolveHomePath, postAuthPath } from './homePath.js';
 
 // The web console is an admin + team-lead surface. These two files are the ONE place that
 // rule lives, so this is where it gets locked down. The regression under test: a user who
@@ -149,5 +149,30 @@ test('the picker splits memberships into selectable and explain-only', () => {
   assert.deepEqual(
     nonConsoleMemberships(memberships).map((m) => m.organizationId),
     ['B']
+  );
+});
+
+// postAuthPath — where someone goes the instant they authenticate. resolveHomePath's null is not
+// an error, it's a destination: /select-org explains that the console is admins-and-leads only and
+// links the mobile app. LoginPage used to render a dead-end message instead, which is how an
+// invited canvasser who set their password from the emailed link ended up with nowhere to go.
+test('postAuthPath sends anyone without a console home to the org picker', () => {
+  assert.equal(postAuthPath({ user: USER, memberships: [M('A', 'canvasser')] }), '/select-org');
+  assert.equal(
+    postAuthPath({ user: USER, memberships: [M('A', 'canvasser'), M('B', 'canvasser')] }),
+    '/select-org'
+  );
+  assert.equal(postAuthPath({ user: USER, memberships: [] }), '/select-org', 'no memberships at all');
+  assert.equal(postAuthPath({ user: null }), '/select-org', 'no user — ProtectedRoute handles it');
+});
+
+test('postAuthPath leaves every real destination untouched', () => {
+  assert.equal(postAuthPath({ user: USER, memberships: [M('A', 'admin')] }), '/admin');
+  assert.equal(postAuthPath({ user: USER, memberships: [M('A', 'lead')] }), '/campaigns');
+  assert.equal(postAuthPath({ user: SUPER, memberships: [] }), '/super-admin');
+  // A forced password change must never be swallowed by the /select-org fallback.
+  assert.equal(
+    postAuthPath({ user: { ...USER, mustChangePassword: true }, memberships: [M('A', 'canvasser')] }),
+    '/change-password'
   );
 });

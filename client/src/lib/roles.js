@@ -30,8 +30,9 @@ export function nonConsoleMemberships(memberships = []) {
 
 // The org to enter automatically at sign-in: ONLY when the user has console access to
 // exactly one. An admin-in-A / canvasser-in-B user has one console org (A), so the picker
-// is skipped and they land straight in A. A canvasser-only user has none → null, and the
-// caller shows "you need an admin or team-lead role". The old rule keyed off
+// is skipped and they land straight in A. A canvasser-only user has none → null, and
+// postAuthPath() (lib/homePath.js) routes them to /select-org, which explains the split and
+// links the mobile app. The old rule keyed off
 // `memberships.length === 1`, which happily auto-selected a canvasser org and dead-ended.
 export function autoSelectOrgId(memberships = []) {
   const consoles = consoleMemberships(memberships);

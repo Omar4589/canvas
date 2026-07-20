@@ -65,7 +65,7 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
       via: { $ne: 'bulk' }, // admin bulk marks aren't this user's field work
     })
       .sort({ timestamp: 1 })
-      .select('timestamp location actionType householdId')
+      .select('timestamp location actionType householdId passId')
       .lean(),
     SurveyResponse.countDocuments({
       userId,
@@ -93,7 +93,12 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
   const refusedHomeSet = new Set();
   const restrictedHomeSet = new Set();
   for (const a of activities) {
-    const hid = String(a.householdId);
+    // Keyed on (household, PASS), matching knocksPipeline. Household alone was the only key in the
+    // codebase that could not represent a deliberate revisit: re-knock the same house in a new
+    // round and that is a second door everywhere else, but collapsed to one here. Narrow in
+    // practice (these screens are day-bounded, so it needs a round activated mid-shift) and wrong
+    // in the same direction as the reports it is meant to match.
+    const hid = `${a.householdId}\u0000${a.passId || ''}`;
     // Shift window + travel distance include every stop, restricted ones too (time spent
     // reaching an inaccessible home still counts as time worked).
     if (!firstDoorAt) firstDoorAt = a.timestamp;
@@ -320,7 +325,7 @@ router.get('/history', async (req, res, next) => {
       via: { $ne: 'bulk' }, // admin bulk marks aren't this user's field work
       })
         .sort({ timestamp: 1 })
-        .select('timestamp location actionType householdId')
+        .select('timestamp location actionType householdId passId')
         .lean(),
       SurveyResponse.find({
         userId,
@@ -372,7 +377,7 @@ router.get('/history', async (req, res, next) => {
     for (const a of activities) {
       const d = dayStr(a.timestamp);
       const day = ensureDay(d);
-      const hid = String(a.householdId);
+      const hid = `${a.householdId}\u0000${a.passId || ''}`; // (household, pass) — see computeDailyStats
       // Window + travel include every stop (restricted too); knock tallies exclude restricted.
       const ts = a.timestamp.toISOString();
       if (!day.firstDoorAt) day.firstDoorAt = ts;

@@ -13,6 +13,8 @@
 // name is an injection into the customer's inbox. The plain-text alternative and the Subject are NOT
 // HTML — they carry the raw value; the mailer strips control chars from the Subject on the way out.
 
+import { installLinks } from '../../config/storeLinks.js';
+
 // Brand tokens (mirror the web design tokens; hard-coded here because email has no stylesheet).
 const ACCENT = '#DC2626';
 const PAGE_BG = '#F9FAFB';
@@ -61,6 +63,47 @@ function button(label, url) {
       </table>
       <p style="margin:0 0 4px;font-family:${FONT};font-size:13px;line-height:20px;color:${MUTED};">Or paste this link into your browser:</p>
       <p style="margin:0 0 16px;font-family:${FONT};font-size:13px;line-height:20px;word-break:break-all;"><a href="${safeUrl}" style="color:${ACCENT};">${safeUrl}</a></p>`;
+}
+
+// "Doorline is a phone app" — the install block for a CANVASSER, whose work happens entirely in
+// the mobile app while the set-password link in this very email opens a browser.
+//
+// Deliberately NOT two more button() calls: that helper prints an "Or paste this link into your
+// browser:" echo under each one, and a second accent-filled button would compete with the
+// email's real CTA ("Set your password"). Bordered links instead — present, clearly secondary.
+function appLinks() {
+  const { ios, android } = installLinks();
+  const link = (label, url) =>
+    `<a href="${esc(url)}" style="display:inline-block;margin:0 8px 8px 0;padding:9px 16px;font-family:${FONT};font-size:14px;font-weight:600;color:${TEXT};text-decoration:none;border:1px solid ${BORDER};border-radius:8px;">${esc(label)}</a>`;
+  return (
+    para('<strong>Doorline is a phone app</strong> — that’s where you knock doors. The web dashboard is only for admins and team leads.') +
+    `      <p style="margin:0 0 8px;">${link('Get it for iPhone', ios)}${link('Get it for Android', android)}</p>\n` +
+    muted('The app is still in a closed test — if a link doesn’t work, just reply to this email.')
+  );
+}
+
+// The plain-text half of appLinks(). Returns lines to spread into a template's `text` array,
+// matching the existing `...(campaignName ? [...] : [])` idiom. URLs are RAW here — only the HTML
+// side escapes them (same split as button()), which matters the moment a Play URL carries `&`.
+function appLinksText() {
+  const { ios, android } = installLinks();
+  return [
+    '',
+    'Doorline is a phone app — that’s where you knock doors. The web dashboard is only for admins and team leads.',
+    '',
+    `iPhone:  ${ios}`,
+    `Android: ${android}`,
+    '',
+    'The app is still in a closed test — if a link doesn’t work, just reply to this email.',
+  ];
+}
+
+// Does this recipient work in the app rather than the console? Explicit equality, NOT
+// `!isConsoleRole(role)`: that helper is client-side only, and an un-updated call site passing
+// `undefined` must render exactly today's email. Fails safe — an admin is never told to install
+// a field app.
+function isFieldRole(role) {
+  return role === 'canvasser';
 }
 
 // The logomark PNG, served from the public site (client/public/apple-touch-icon.png — the
@@ -131,8 +174,11 @@ export function passwordReset({ firstName, resetUrl }) {
   return { subject, html, text };
 }
 
-export function inviteSetPassword({ firstName, orgName, campaignName, setPasswordUrl }) {
+// `role` decides whether the recipient is pointed at the app or the console. Omitting it renders
+// the console version — see isFieldRole().
+export function inviteSetPassword({ firstName, orgName, campaignName, setPasswordUrl, role }) {
   const subject = `Set your password for ${orgName} on Doorline`;
+  const field = isFieldRole(role);
   const campaignLineHtml = campaignName
     ? para(`You've also been added to the <strong>${esc(campaignName)}</strong> campaign.`)
     : '';
@@ -142,6 +188,9 @@ export function inviteSetPassword({ firstName, orgName, campaignName, setPasswor
     campaignLineHtml +
     para('Set your password to get started. This link is valid for 72 hours.') +
     button('Set your password', setPasswordUrl) +
+    // After the CTA, never before it: setting the password is step one for everyone, and it's
+    // the same link whichever device they finish on.
+    (field ? appLinks() : '') +
     muted('For your security, this email never contains a password — you choose your own at the link above.')
   );
   const text = [
@@ -150,6 +199,7 @@ export function inviteSetPassword({ firstName, orgName, campaignName, setPasswor
     '',
     'Set your password to get started (this link is valid for 72 hours):',
     setPasswordUrl,
+    ...(field ? appLinksText() : []),
     '',
     'For your security, this email never contains a password — you choose your own at the link above.',
     '',
@@ -158,8 +208,9 @@ export function inviteSetPassword({ firstName, orgName, campaignName, setPasswor
   return { subject, html, text };
 }
 
-export function addedToOrg({ firstName, orgName, campaignName }) {
+export function addedToOrg({ firstName, orgName, campaignName, role }) {
   const subject = `You've been added to ${orgName} on Doorline`;
+  const field = isFieldRole(role);
   const campaignLineHtml = campaignName
     ? para(`You've also been added to the <strong>${esc(campaignName)}</strong> campaign.`)
     : '';
@@ -167,30 +218,45 @@ export function addedToOrg({ firstName, orgName, campaignName }) {
     heading(`You've been added to ${esc(orgName)}`) +
     para(`${greeting(firstName)} your Doorline account now has access to <strong>${esc(orgName)}</strong>.`) +
     campaignLineHtml +
-    para('Sign in to Doorline with your existing email and password, then switch into it — no new credentials needed.')
+    // "switch into it" is a CONSOLE concept (the org picker) and means nothing to a canvasser,
+    // who has no console to switch inside.
+    (field
+      ? para('Sign in with your existing email and password — no new credentials needed.') + appLinks()
+      : para('Sign in to Doorline with your existing email and password, then switch into it — no new credentials needed.'))
   );
   const text = [
     `${firstName ? `Hi ${firstName},` : 'Hi,'} your Doorline account now has access to ${orgName}.`,
     ...(campaignName ? [`You've also been added to the ${campaignName} campaign.`] : []),
     '',
-    'Sign in to Doorline with your existing email and password, then switch into it — no new credentials needed.',
+    field
+      ? 'Sign in with your existing email and password — no new credentials needed.'
+      : 'Sign in to Doorline with your existing email and password, then switch into it — no new credentials needed.',
+    ...(field ? appLinksText() : []),
     '',
     '— Doorline',
   ].join('\n');
   return { subject, html, text };
 }
 
-export function addedToCampaign({ firstName, orgName, campaignName }) {
+export function addedToCampaign({ firstName, orgName, campaignName, role }) {
   const subject = `You've been added to ${campaignName}`;
+  const field = isFieldRole(role);
+  // "start canvassing" was the most wrong-footed line in the whole set: it named the action and
+  // then pointed nowhere — a canvasser cannot canvass from the web console at all.
+  const signIn = field
+    ? 'Sign in with your existing email and password to start canvassing.'
+    : 'Sign in to Doorline with your existing email and password.';
   const html = layout(
     heading(`You've been added to ${esc(campaignName)}`) +
     para(`${greeting(firstName)} you've been added to the <strong>${esc(campaignName)}</strong> campaign in <strong>${esc(orgName)}</strong> on Doorline.`) +
-    para('Sign in to Doorline with your existing email and password to start canvassing.')
+    para(signIn) +
+    (field ? appLinks() : '')
   );
   const text = [
     `${firstName ? `Hi ${firstName},` : 'Hi,'} you've been added to the ${campaignName} campaign in ${orgName} on Doorline.`,
     '',
-    'Sign in to Doorline with your existing email and password to start canvassing.',
+    signIn,
+    ...(field ? appLinksText() : []),
     '',
     '— Doorline',
   ].join('\n');
