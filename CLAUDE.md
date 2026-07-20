@@ -107,6 +107,31 @@ TestFlight-era Update button — see [`mobile/README.md`](mobile/README.md).)
 two-store window, the dual-publish compat step for un-migrated phones, and the cutover checklist — is in
 [`mobile/README.md`](mobile/README.md) → **The two-store window (Play relaunch)**.
 
+## Ops is run from the Heroku DASHBOARD, never the CLI.
+
+**The owner does not use the `heroku` CLI. Ever.** Everything operational happens in the Heroku
+dashboard — config vars, dyno scaling, and one-off scripts via **More → Run console**. Never hand over
+a `heroku run …` / `heroku ps` / `heroku config:set …` command as the instruction; give the thing that
+gets typed into the dashboard, and say where in the dashboard it goes.
+
+**The consequence that actually bites:** the dashboard's Run console starts at the **app root**, not in
+`server/`. A script registered only in `server/package.json` is *unreachable* from it. So any script
+meant to be run in production MUST be proxied in the **root `package.json`**, following the existing
+convention — trailing `--` so flags drill through to the inner script:
+
+```jsonc
+// root package.json
+"audit:stale-overwrites": "npm --prefix server run audit:stale-overwrites --",
+// server/package.json
+"audit:stale-overwrites": "node src/migrations/auditStaleOverwrites.js",
+```
+
+Then the console command is just `npm run audit:stale-overwrites` (add `-- --apply` for a script that
+takes flags — the `--` in the proxy is what lets that through).
+
+Before handing over any operational command, **run it from the repo root yourself** — not from
+`server/` — or you will hand over something that fails the moment it is pasted in.
+
 ## Help Center content, at a glance
 
 Each article is a markdown file under `server/src/content/help/` (subfolder = `kind`) with a small
