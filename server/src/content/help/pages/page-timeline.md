@@ -25,6 +25,8 @@ Above the canvasser table there's a **by-team** breakdown: every team's people, 
 
 **One door = one house, in one round.** If two canvassers knock the same house in the same round, that's **one** door — the second knock was almost certainly a mistake and isn't counted twice. Go back in a **new round** and it counts again, because that's a deliberate revisit.
 
+**Survey doors work the same way.** If two canvassers each survey the same house in the same round, that's **one** survey door. So the **Survey doors** figure at the top of the page can be a little lower than what you'd get by adding up the Survey doors column in the table below it — the table credits each canvasser for the door they worked, while the total counts the house once. That's the same reason the team rows can add up to slightly more than the campaign total, explained in [How many doors has one team knocked?](team-door-counts).
+
 The line under the table shows the raw count of everything everyone recorded and how many doors were knocked more than once, so the two numbers always reconcile. **Review overlap doors** shows you exactly which houses. This reconciliation covers the **date range you're viewing**, so a collision whose two knocks fell on different days can slip past it — for the complete, cross-day list of overlapping doors, use the map's **Show overlaps** toggle (see [Using the maps](maps)).
 
 ## Seeing the whole campaign

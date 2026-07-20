@@ -546,7 +546,7 @@ never looks like a two-person collision.
 | `GET /admin/reports/overlaps` | overlap review (date-**windowed**, event-level) | see §D | `timestamp` |
 | `GET /admin/reports/overlap-doors` | the map's overlap **indicator + review list** (**anchored** to the window) | `{ householdIds:[…], doors:[{ householdId, household{id,addressLine1,addressLine2,city,state,zipCode,location}, totalCanvassers, passes:[{ passId, roundLabel, canvassers:[{userId, firstName, lastName, name, actionType, lastAt, inRange}] }] }], total, outOfRangeTotal }` — **self-contained, so the Overlaps report renders from this alone**. Params: `campaignId` **required** (400 without — unscoped it would scan the org ledger), optional `effortId`/`passId`/`userId`/`from`/`to` (`computeOverlapDoors` — see §D). Lead-gated. | anchored: detected pass-wide, surfaced when ≥1 knock is in `[from, to)` |
 | `GET /admin/reports/duplicate-surveys` | voters with >1 survey response | `duplicates[{ voter, household, responses[{ canvasser, submittedAt, roundLabel }], sameCanvasserSameDay, differentCanvassers }]` | `submittedAt` |
-| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to`, max 62 days; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{} }` with per-canvasser `knocksByDay/surveysByDay`; `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
+| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to`, max 62 days; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{} }` with per-canvasser `knocksByDay/surveysByDay`; `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). Also returns **`billableSurveyDoors`** — survey doors deduped by (household, pass), the survey-side twin of `billableKnocks`. Both exist because the per-canvasser rows are RAW: clients must render these two fields and never sum the columns (see the survey-doors callout in §"Survey DOORS vs survey VOTERS"). | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
 
 ### The 62-day cap, and why `totals` escapes it
 
@@ -665,11 +665,21 @@ team.
 
 | Number | Source | Meaning |
 |---|---|---|
-| **Survey doors** | `CanvassActivity.survey_submitted` (`surveyKnocks` / `daySurveys`) | doors where ≥1 survey was taken — **the connection-rate numerator** |
+| **Survey doors** | `CanvassActivity.survey_submitted` (`surveyKnocks` / `daySurveys` raw; `billableSurveyDoors` deduped) | doors where ≥1 survey was taken — **the connection-rate numerator** |
 | **Voters surveyed** | `SurveyResponse` rows (`surveysSubmitted` / `dayVoterSurveys`) | people surveyed — one door can survey several |
 
 `connectionRate = (surveyedKnocks + litKnocks) ÷ knocks` — **doors, not voters**. Live check: 273 ÷
 1,252 = 22% (voters would give 297/1,252 = 24%, which is not what the app shows).
+
+> ⚠️ **A survey-door count must be DEDUPED server-side — summing the per-canvasser column is not it.**
+> Per-canvasser rows are RAW by design (see the `grandKnocks > billableKnocks` guard above), so two
+> canvassers who both surveyed one house each carry that door. Summing the column therefore yields a
+> survey *event* count, not doors. The Timeline KPI card did exactly this and read **990** where the
+> campaign total was **986** — four shared doors, counted twice — while also feeding that raw number
+> into a connection rate whose denominator was deduped: two different units in one fraction. The
+> deduped figure is `billableSurveyDoors` on `/canvasser-timeline`, the survey-side twin of
+> `billableKnocks` and, like it, **underivable in the browser**. Pinned by
+> [test/timelineTotals.int.test.js](../server/test/timelineTotals.int.test.js).
 
 Both are correct; the dual ledger is deliberate (see [SURVEYS.md](SURVEYS.md)). But they were both
 labelled "Surveys" on different pages, so the same canvasser read 143 on the Timeline and 147 on
@@ -914,6 +924,17 @@ per-campaign recompute. Locked by
 [test/campaignStats.int.test.js](../server/test/campaignStats.int.test.js) — parity against an
 independent ledger recompute after every operation type.
 
+**The recompute oracle is ORG-SCOPED** (`computeCampaignStats` matches `organizationId` +
+`campaignId`), because every live reader is — `/campaign-rollup`'s fallback, `/knocks-by-pass` via
+`baseFilter`, the timeline. It once matched on `campaignId` alone, so it answered a marginally
+*wider* question than the dashboards it feeds: a row with the right `campaignId` but a missing or
+foreign `organizationId` counted toward the cached card while staying invisible to every live
+report. That flavour of drift was **un-repairable** — the drift check recomputed with the same wide
+match, agreed with the inflated number, and reported "nothing to do" — so the counter could sit one
+knock above the live per-round table indefinitely. Scoping both sides identically is what makes
+"identical by construction" above literally true, and it is what makes any surviving disagreement
+real drift a reconcile can actually fix.
+
 **Who reads them:** `/campaign-rollup` with no date window and no effort filter (knocks quadruple,
 `litDropped`, `activeCanvassers`, `lastActivityAt`); `/overview`'s knocks + survey volume; and
 `campaignSummaries.hasCanvassed` (the archive/delete gate). Date-ranged and effort-scoped requests
@@ -927,3 +948,19 @@ never approximate. Seed/repair with `npm run migrate:campaign-stats -- --apply`
 dry run lists unseeded/drifted campaigns). `reconcileCounts --apply` also re-syncs stats after its
 ledger dedups. Known limit: two truly simultaneous writes on the same (household, pass) can drift a
 pair counter by 1 until the next reconcile — documented in the service header.
+
+**The reconcile runs NIGHTLY** (`CAMPAIGN_STATS_JOB`, 04:07 UTC, `CAMPAIGN_STATS_CRON`) — registered
+in `MAINTENANCE_JOBS` in [services/retention/scheduler.js](../server/src/services/retention/scheduler.js)
+and deliberately **kept out of `REPEATABLE_JOBS`** (the `/health/retention` banner reports on every
+entry there, so a counter reconcile going quiet must never read "Retention: NOT ENFORCED"). Both the
+job and the `migrate:campaign-stats` CLI call the same `reconcileAllCampaignStats` sweep, so an
+operator's dry run and the scheduled repair can never disagree about what "drifted" means. The job
+logs at `warn` naming each campaign it repaired: a counter that drifts *every* night is a bug in the
+bump hooks, and the log line is the only way anyone would find out.
+
+**Why it is scheduled rather than run on demand:** counter drift is **silent**. Nothing errors — the
+Home card simply renders a stale number that disagrees with the live By-round table directly beneath
+it, and the disagreement is only visible to someone comparing the two. A real campaign shipped a
+client report reading 4,138 knocks / 987 survey doors against a live 4,136 / 986 for exactly this
+reason. `surveyedVoters` was unaffected, being the one Activity figure that never touches the cache
+— which is also the quickest way to recognise the failure mode.

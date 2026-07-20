@@ -455,3 +455,39 @@ test('the campaign-counter reconcile is actually scheduled', { skip: false }, as
     'kept out of the retention list'
   );
 });
+
+test('the counter oracle is ORG-SCOPED, so drift it reports is drift a repair can fix', { skip }, async () => {
+  // A row with the right campaignId but a FOREIGN organizationId. Every live reader matches on
+  // organizationId + campaignId, so this row is invisible to them. The counter oracle used to match
+  // on campaignId alone, so it counted the row — the cached Home card read one knock higher than the
+  // live per-round table forever, AND the reconcile recomputed the same inflated number and
+  // reported "nothing to do". Un-repairable drift, which is worse than drift.
+  const before = await computeCampaignStats(ctx.camp._id);
+  const orphanId = new mongoose.Types.ObjectId();
+  await CanvassActivity.collection.insertOne({
+    organizationId: new mongoose.Types.ObjectId(), // some other org
+    campaignId: ctx.camp._id,
+    householdId: orphanId,
+    userId: ctx.canvA._id,
+    actionType: 'not_home',
+    passId: ctx.pass._id,
+    timestamp: new Date(),
+  });
+
+  const after = await computeCampaignStats(ctx.camp._id);
+  assert.strictEqual(after.knockCount, before.knockCount, 'a foreign-org row does not reach the counter');
+  assert.strictEqual(after.activityCount, before.activityCount, 'nor the activity count');
+
+  // And the live reader agrees — which is the whole point: cache and live now answer the SAME
+  // question, so any difference between them is real drift the sweep can repair.
+  await recomputeCampaignStats(ctx.camp._id);
+  const r = await call('GET', '/admin/reports/campaign-rollup?scope=all', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+  });
+  const row = r.json.campaigns.find((c) => c.id === String(ctx.camp._id));
+  assert.strictEqual(row.knocks, before.knockCount, 'cached card matches the org-scoped ledger');
+
+  await CanvassActivity.deleteOne({ householdId: orphanId });
+  await recomputeCampaignStats(ctx.camp._id);
+});
