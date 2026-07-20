@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getActiveOrgId } from '../api/client.js';
-import { BillingPill, fmtUsd } from '../lib/billingStatus.jsx';
+import { BillingPill } from '../lib/billingStatus.jsx';
 
 const CONTACT = 'mailto:hello@doorline.app?subject=Doorline%20account';
 
@@ -19,11 +19,6 @@ function monthLabel(ym) {
   const [y, m] = String(ym).split('-').map(Number);
   if (!y || !m) return 'this month';
   return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-}
-
-// A short 'Jul 8' date for the per-campaign breakdown.
-function fmtShort(d) {
-  return d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
 }
 
 // The org-admin view of the subscription: status and the plan summary. Rates, status changes,
@@ -83,10 +78,17 @@ export default function BillingPage() {
                 .
               </p>
             )}
+            {/* No price here, deliberately: rates are negotiated per client and per race, so the
+                number belongs in a conversation with your account manager, not on a dashboard. The
+                server strips it too (services/billing/statement.js → publicUsage) — this is not a
+                hidden field. What DOES belong here is when the meter starts and stops, because
+                that is the part customers act on. */}
             <p className="mt-3 text-sm text-fg-muted">
-              Plan: <span className="font-medium text-fg">{fmtUsd(data.pricePerCampaignCents)} per active campaign / month</span>
-              . A campaign starts billing the month of its first field visit — a knock, or a
-              restricted home a canvasser walked to — and stops after the month it’s archived.
+              A campaign starts billing the month of its first field visit — a knock, or a restricted
+              home a canvasser walked to. Start in the <span className="font-medium text-fg">last
+              week of a month</span> and that month is on us. Billing then runs every month until you{' '}
+              <span className="font-medium text-fg">archive</span> the campaign, whether or not anyone
+              knocks, so archiving a finished race is what stops it.
             </p>
             {data.usage && (
               <div className="mt-3 rounded-lg border border-border bg-sunken px-3 py-2.5">
@@ -96,36 +98,22 @@ export default function BillingPage() {
                     {data.usage.billableCampaigns}{' '}
                     {data.usage.billableCampaigns === 1 ? 'campaign' : 'campaigns'}
                   </span>{' '}
-                  canvassing · about{' '}
-                  <span className="font-semibold">{fmtUsd(data.usage.totalCents)}</span> expected.
+                  canvassing.
                 </p>
                 <p className="mt-1 text-xs text-fg-muted">
-                  A running estimate for {monthLabel(data.usage.month)}. Campaigns still in setup are
-                  free until their first knock, so this can rise as more start canvassing.
+                  For {monthLabel(data.usage.month)}. Campaigns still in setup are free until their
+                  first knock.
                 </p>
-
-                {data.usage.billing?.length > 0 && (
-                  <ul className="mt-2 space-y-1 border-t border-border pt-2 text-xs">
-                    {data.usage.billing.map((c) => (
-                      <li key={c.campaignId} className="flex items-center justify-between gap-2">
-                        <span className="min-w-0 truncate text-fg">
-                          {c.name}
-                          <span className="text-fg-subtle">
-                            {c.isActive ? ' · active' : ` · archived ${fmtShort(c.archivedAt)}`}
-                            {c.firstKnockAt
-                              ? ` · billing started ${fmtShort(c.firstKnockAt)}`
-                              : ' · billing not started'}
-                          </span>
-                        </span>
-                        <span className="shrink-0 font-medium text-fg">{fmtUsd(c.amountCents)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
                 {data.usage.setupCount > 0 && (
                   <p className="mt-1.5 text-xs text-fg-subtle">
-                    {data.usage.setupCount} more campaign{data.usage.setupCount === 1 ? '' : 's'} in
-                    setup — free until the first knock.
+                    {data.usage.setupCount} campaign{data.usage.setupCount === 1 ? '' : 's'} in setup —
+                    free until the first knock.
+                  </p>
+                )}
+                {data.usage.graceCount > 0 && (
+                  <p className="mt-1.5 text-xs text-fg-subtle">
+                    {data.usage.graceCount} campaign{data.usage.graceCount === 1 ? '' : 's'} started in
+                    the last week of the month — free this month.
                   </p>
                 )}
               </div>

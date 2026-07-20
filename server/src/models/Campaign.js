@@ -33,6 +33,19 @@ const campaignSchema = new mongoose.Schema(
     // services/billing/statement.js). Not locked by hasCanvassed: it's a reporting policy and
     // every read is live, so flipping it mid-campaign is legitimate and fully reversible.
     billRestrictedDoors: { type: Boolean, default: null },
+    // What DOORLINE charges for this campaign per month, in cents. TRI-STATE like the flag above:
+    // null = inherit Subscription.pricePerCampaignCents, a number = negotiated override. This is
+    // how a firm running a governor's race and a school-board race prices them differently inside
+    // one org. Always resolve through services/billing/rate.js — reading it raw turns "inherit"
+    // into "free". 0 is a LEGAL value (a comped campaign), so never coalesce it with `||`.
+    //
+    // `select: false` is load-bearing, not tidiness: routes/admin/campaigns.js returns campaigns by
+    // spreading a lean doc (`...c`) and by returning the mongoose doc from PATCH, and org admins AND
+    // team leads reach that router. Without this, the negotiated price would appear in their API
+    // responses the moment this field existed. Writes are super-admin-only
+    // (routes/superAdmin/billing.js); mongoose skips unselected paths on save(), so an org-admin
+    // PATCH that loads the campaign without this path can never clear it.
+    pricePerCampaignCents: { type: Number, default: null, select: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     // The project's timezone (defines "a day" for the same-day collision /
     // per-day knock reporting). Admin-set in the UI.

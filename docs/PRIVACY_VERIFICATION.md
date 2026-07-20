@@ -437,9 +437,18 @@ Restoration is **org-scoped and membership-scoped**: only orgs where the person'
 
 **VERIFIED, with two material exceptions.**
 
-`deleteOrganization()` hard-deletes rows from **30 org-scoped collections** via `deleteMany({organizationId})` (`server/src/services/platform/deleteOrganization.js:44-51`, sweep at `:102-105`). The list includes `Voter`, `Household`, `CanvassActivity`, `SurveyResponse`, `VoterNote`, `FlagReview`, `HouseholdLocationChange`, `TurfAssignment`, `ImportJob`, `Turf`, `Pass`, `Effort`, `ClientReport`, `ClientReportMapPoint`, `ReportShareLink`, `Membership`, `Subscription`, `SubscriptionEvent`, `SavedSearch`, `SurveyTemplate`, `Tag`, `VotedVoter`. **Persons are deleted unconditionally** (`:118-131`). The **original uploaded CSV/XLSX** is deleted from GridFS **before** the ImportJob rows that name it (`:84-85`). Then the Organization itself (`:133`).
+`deleteOrganization()` hard-deletes rows from **31 org-scoped collections** via `deleteMany({organizationId})` (`server/src/services/platform/deleteOrganization.js:45-52`, sweep at `:102-105`). The list includes `Voter`, `Household`, `CanvassActivity`, `SurveyResponse`, `VoterNote`, `FlagReview`, `HouseholdLocationChange`, `TurfAssignment`, `ImportJob`, `Turf`, `Pass`, `Effort`, `ClientReport`, `ClientReportMapPoint`, `ReportShareLink`, `Membership`, `Statement`, `Subscription`, `SubscriptionEvent`, `SavedSearch`, `SurveyTemplate`, `Tag`, `VotedVoter`. **Persons are deleted unconditionally** (`:118-131`). The **original uploaded CSV/XLSX** is deleted from GridFS **before** the ImportJob rows that name it (`:84-85`). Then the Organization itself (`:133`).
 
-**Contrary to what a lawyer might assume: there is no invoice retention.** `Membership`, `Subscription`, `SubscriptionEvent` and `ReportShareLink` are all in `ORG_SCOPED` and are destroyed. **There is no `Invoice` collection anywhere in the codebase** — billing statements are computed on the fly from `Campaign` + `CanvassActivity` (`server/src/services/billing/statement.js:35`, `:50`), both of which are deleted. `models/Subscription.js:3-5` confirms invoices are sent out-of-band.
+**Contrary to what a lawyer might assume: there is no invoice retention.** `Membership`, `Subscription`, `SubscriptionEvent`, `Statement` and `ReportShareLink` are all in `ORG_SCOPED` and are destroyed.
+
+> **[v4 update — Jul 2026.] The earlier claim that "there is no `Invoice` collection anywhere in the codebase" is no longer literally true, but the conclusion is unchanged.** A `Statement` model now exists (`server/src/models/Statement.js`): a frozen copy of a month's billing figures, written only when an account manager explicitly issues one, so that renegotiating a rate or reactivating a campaign can't silently rewrite what was already invoiced. Two things keep this section accurate:
+>
+> - **It holds no personal data.** Campaign names, door/knock counts, dates and dollar amounts — no voter, household, or contact information of any kind (`models/Statement.js` field list).
+> - **It is deleted with the organization**, by owner decision, exactly like `Subscription` and `SubscriptionEvent`. Asserted in `server/test/statement.int.test.js` ("deleting an organization takes its statements with it") and swept by `orgDelete.int.test.js`, which iterates `ORG_SCOPED`.
+>
+> **No Privacy Policy, ToS, or DPA text changes as a result** — nothing new is collected, retained longer, shared, or exposed. Un-issued months are still computed on the fly from `Campaign` + `CanvassActivity`, both of which are deleted. `models/Subscription.js:3-5` still confirms invoices are sent out-of-band.
+>
+> **Watchlist:** if statements are ever made to *survive* organization deletion — a legitimate thing a business might want for tax or dispute purposes — that **is** a retention change and requires editing the Privacy Policy's retention section and `docs/DPA.md` **before** it ships.
 
 > **Do NOT write:** *"We retain billing and tax records for [N] years."* on the strength of this application. Nothing in this codebase preserves them. If the business retains them, that happens outside this system.
 
@@ -618,7 +627,7 @@ if (!WRITE_METHODS.has(req.method)) return next();            // entitlement.js:
 
 **Also exportable, driven by survey answers:** walk-list filters include `surveyResponse` exists/not-exists, per-question `answerFilters`, and cross-question `answerTagFilters` (`resolveWalkList.js:89-128`). So "every voter who answered X" or "every voter tagged Supporter" can be resolved to a named, addressed, phone-bearing CSV.
 
-**Client-side (browser-generated) downloads not counted above:** a jsPDF client-report PDF (`client/src/lib/reportPdf.js:33`), unmatched-voter-ID CSVs (`WalkListsPage.jsx:227-231`, `EarlyVotingPage.jsx:84-88`), and a billing-statement CSV (`client/src/components/OrgBillingPanel.jsx:99-118` — **platform-staff only**, rendered solely from the super-admin Organizations page).
+**Client-side (browser-generated) downloads not counted above:** a jsPDF client-report PDF (`client/src/lib/reportPdf.js:33`), unmatched-voter-ID CSVs (`WalkListsPage.jsx:227-231`, `EarlyVotingPage.jsx:84-88`), and a billing-statement CSV (`client/src/components/OrgBillingPanel.jsx` → `downloadCsv()` — **platform-staff only**, rendered solely from the super-admin Organizations page; campaign-level counts and dollars, no personal data).
 
 **Not exportable by any route:** full `SurveyResponse` documents (the voters-by-answer CSV carries only the **drilled** question's snapshot answer(s) — or the tag's matching entries — plus the response's door note, never the response's whole answer set), `VoterNote` bodies, tags, turf/book definitions, flag reviews, import history. **The original uploaded voter file cannot be re-downloaded** — `loadRawImport()` is called only by the background import worker (`services/import/importProcessor.js:56`) and is exposed by no route.
 
@@ -778,7 +787,21 @@ A grant:
 - requires a typed free-text **reason of ≥10 characters** (`routes/superAdmin/access.js:24`; required on the model, `models/SupportAccessGrant.js:37`)
 - is **idempotent** — an existing live grant is reused, not stacked (`supportAccess.js:29-30`)
 - is revocable, effective on the next request (no server-side grant cache)
-- carries a `kind` (`support | incident | migration | audit | other`) — **but `kind` is OPTIONAL, defaults to `'support'`, and the staff console never sends it** (`access.js:25`; `supportAccess.js:25`; `client/src/components/SupportAccessGate.jsx:91`). In practice every grant is `'support'`.
+- carries a `kind` (`support | incident | migration | audit | other`) — **but `kind` is OPTIONAL, defaults to `'support'`, and the staff console never sends it** (`access.js:25`; `supportAccess.js:25`; `client/src/components/SupportAccessGate.jsx:91`). In practice every grant is `'support'`. *[v4 2026-07-19: **STALE — the second half of this is now false.** The grant form was extracted from `SupportAccessGate.jsx` into `client/src/components/StartSupportSessionForm.jsx`, and it DOES send `kind`: a real `<select>` at `:91-92` over all five values, posted at `:41`. The cited `SupportAccessGate.jsx:91` now points at a closing brace. `kind` remains optional server-side and still defaults to `'support'`, so nothing about the gate changed — but "every grant is `'support'`" can no longer be assumed when reading the log. **The mobile sheet sends `kind` too** (`mobile/components/SupportAccessGate.jsx`), from the same five values.]*
+
+*[v4 2026-07-19: **the grant path now has a SECOND CLIENT — no boundary change.** Mobile previously
+had no handling for `SUPPORT_ACCESS_REQUIRED` at all: the 403 was untagged, so tapping a customer org
+from the mobile Orgs tab entered a console where every query failed with no recovery. Mobile can now
+start a session from the phone (`mobile/components/SupportAccessGate.jsx` → the same
+`POST /super-admin/access/grants`), with a field set deliberately identical to the web form — same
+five `kind` values, same 1/4/8/24 hours, same **≥10-character reason**, enforced client-side on both
+and by `access.js:24` regardless. **Nothing about the gate, the cap, the reason requirement, the
+idempotency, or the AccessLog moved**: this is one more caller of an already-verified endpoint, not a
+new path into customer data. The only new surface is presentational — the mobile Orgs tab labels
+which orgs need a session, computed from membership + `isInternal` + the caller's OWN live grants
+(`GET /super-admin/access/grants` unscoped; `?all=1` is deliberately NOT used, since for a
+`break_glass` operator it returns colleagues' grants). Verified end-to-end against a live server:
+403 → grant → entry → `AccessLog` row written.]*
 
 **A customer's own admins and members are neither grant-gated nor logged, and that is correct.** `orgContext` finds an active Membership and returns `next()` before it ever considers super-admin status, never setting `req.supportGrant`; `accessLog` then short-circuits (`orgContext.js:61-70`; `accessLog.js:40`). **No AccessLog row is ever written for a customer reading their own organization's data.**
 

@@ -7,7 +7,7 @@ import { Organization } from '../../models/Organization.js';
 import { Subscription } from '../../models/Subscription.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
-import { currentUsage } from '../../services/billing/statement.js';
+import { currentUsage, publicUsage } from '../../services/billing/statement.js';
 
 // The org-admin-facing slice of the subscription: enough to render the plan summary and the
 // banner. The billing contact and internal fields (notes, source, Stripe ids) never leave the
@@ -22,13 +22,15 @@ router.use((req, res, next) => {
   return res.status(403).json({ error: 'Billing is restricted to billing admins.', code: 'billing-access-required' });
 });
 
+// No rate here, deliberately. Pricing is negotiated per client and per race, so it belongs in a
+// conversation with the account manager rather than on the customer's dashboard — see
+// publicUsage() in services/billing/statement.js for the same reasoning applied to the meter.
 function publicView(sub) {
   const ent = entitlementFor(sub);
   return {
     status: sub?.status ?? 'active',
     entitlement: ent,
     trialEndsAt: sub?.trialEndsAt ?? null,
-    pricePerCampaignCents: sub?.pricePerCampaignCents ?? 30000,
   };
 }
 
@@ -40,11 +42,11 @@ router.get('/', async (req, res, next) => {
       currentUsage(req.activeOrg._id),
       Organization.findById(req.activeOrg._id, { billRestrictedDoors: 1 }).lean(),
     ]);
-    // `usage` = this month's live meter (billable campaigns × rate) so the bill-payer
-    // sees the running cost, not just the rate — no invoice surprises.
+    // `usage` = which campaigns are canvassing this month and which are still free, with the
+    // dollar figures stripped by publicUsage() before it leaves the server.
     res.json({
       ...publicView(sub),
-      usage,
+      usage: publicUsage(usage),
       // The org-wide DEFAULT, not a resolved value: individual campaigns may override it
       // (services/reports/billRestricted.js). Affects only the org's own door totals — never
       // what Doorline charges, which is flat per campaign per month.

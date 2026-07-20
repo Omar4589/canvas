@@ -201,14 +201,19 @@ export default function TimelinePage() {
   // tab and the client report instead of quietly using a different base.
   const kpis = useMemo(() => {
     const doors = data.billableKnocks ?? 0;
-    let surveys = 0;
+    // Deduped server-side for exactly the reason DOORS is, and it must be: summing the
+    // per-canvasser survey column double-counts a door two canvassers both surveyed, which is
+    // what this card used to do. Falls back to the row sum only for a server too old to send it.
+    let surveys = data.billableSurveyDoors ?? null;
+    let rawSurveys = 0;
     let lit = 0;
     let hours = 0;
     for (const r of filteredRows) {
-      surveys += r.daySurveys || 0; // survey DOORS — the connection-rate numerator
+      rawSurveys += r.daySurveys || 0;
       lit += r.dayLit || 0;
       hours += r.hoursOnDoors || 0;
     }
+    if (surveys == null) surveys = rawSurveys;
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
     // Pace stays raw effort: it's per-person time on doors, not a billing figure.
     const rawDoors = filteredRows.reduce((n, r) => n + (r.dayKnocks || 0), 0);
@@ -224,7 +229,14 @@ export default function TimelinePage() {
       restrictedDoors: data.restrictedDoors ?? 0,
       billRestricted: Boolean(data.billRestrictedDoors),
     };
-  }, [filteredRows, data.billableKnocks, data.billableDoors, data.restrictedDoors, data.billRestrictedDoors]);
+  }, [
+    filteredRows,
+    data.billableKnocks,
+    data.billableSurveyDoors,
+    data.billableDoors,
+    data.restrictedDoors,
+    data.billRestrictedDoors,
+  ]);
 
   // "Knocking N of M": M = the people this campaign could expect work from in this range, N =
   // how many actually knocked.

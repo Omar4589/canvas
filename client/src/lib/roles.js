@@ -37,3 +37,25 @@ export function autoSelectOrgId(memberships = []) {
   const consoles = consoleMemberships(memberships);
   return consoles.length === 1 ? consoles[0].organizationId : null;
 }
+
+// What sign-in should set as the active org. Same as autoSelectOrgId EXCEPT for a super admin,
+// who always gets null: their home is the platform Control Room, not a customer's console.
+//
+// Two reasons this is a rule and not a preference. First, the clients disagreed — mobile has
+// always cleared the org on login and refused this auto-pick (app/login.jsx), while web skipped
+// the whole block for super admins, so a remembered org id survived every login and silently
+// decided the landing page. Same account, same action, different destination per client.
+// Second, web's key outlived a session: logout() cleared it but an EXPIRED session didn't, so
+// "Sign Out then log in" and "session expired then log in" landed in different places.
+//
+// Note this cannot be expressed by dropping the isSuperAdmin guard at the call site and letting
+// autoSelectOrgId run: a super admin who is also an admin of exactly ONE org would still be
+// auto-entered — precisely the behavior being removed.
+//
+// Scope: sign-in only. Session RESTORE (AuthContext's /auth/me effect) deliberately leaves the
+// stored org alone, so reloading a tab keeps you where you were. Typing your password starts you
+// at your home; reloading does not.
+export function activeOrgIdForLogin(user, memberships = []) {
+  if (user?.isSuperAdmin) return null;
+  return autoSelectOrgId(memberships);
+}

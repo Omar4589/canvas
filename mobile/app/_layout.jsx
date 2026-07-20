@@ -13,6 +13,7 @@ import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-c
 import { StatusBar } from 'expo-status-bar';
 import { clearActiveOrgId, clearActiveCampaign } from '../lib/cache';
 import { signOut } from '../lib/authState';
+import { promptSupportAccess } from '../lib/supportAccessState';
 import { refreshSession } from '../lib/session';
 import { loadRoleContext } from '../lib/role';
 import { ThemeProvider, useTheme } from '../lib/ThemeContext';
@@ -104,6 +105,11 @@ function onGlobalError(err) {
   // Queued knocks survive: signOut clears identity caches, never the offline queue.
   else if (err?.code === 'SESSION_REVOKED') signOut();
   else if (err?.status === 403 && err?.data?.code === 'PASSWORD_CHANGE_REQUIRED') routeToForcedChange();
+  // A customer org needs a support session. Unlike the recoveries above this does NOT eject —
+  // it offers the grant sheet (components/SupportAccessGate) so the operator can state a reason
+  // and go in; ejecting is what DECLINING does. No debounce flag needed: promptSupportAccess
+  // ignores everything after the first, so the burst of 403s from entering an org opens one sheet.
+  else if (err?.code === 'SUPPORT_ACCESS_REQUIRED') promptSupportAccess(err?.data);
 }
 
 const queryClient = new QueryClient({

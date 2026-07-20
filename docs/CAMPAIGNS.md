@@ -157,6 +157,13 @@ in the drawer). The rules protect your data once canvassing has started:
 
 - **Archive** is always available and **reversible**: the campaign becomes read-only (canvassers
   stop seeing it) and you can **Reactivate** it anytime. This is the normal "we're done" action.
+  **It is also what stops the campaign billing** — a live campaign bills every month whether or not
+  anyone knocks, so a finished race left un-archived quietly keeps costing money. Once a campaign's
+  `electionDay` has passed and it is still active, the Campaigns page and the campaign dashboard show
+  an **archive nudge** ([ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx)); archiving in
+  the first 3 days of a month with no field activity that month also makes that month free. Full
+  rules in [BILLING.md](BILLING.md). Note that **reactivating clears `archivedAt`**, which makes the
+  skipped months billable again on any statement that hasn't been issued.
 - **Delete** is permanent and is **only allowed before any canvassing** (no knocks or surveys
   recorded). When allowed, it cascades — it removes the campaign and everything it owns (its
   imported voters and doors, efforts, draft rounds, books, walk lists, early-vote marks, reports).

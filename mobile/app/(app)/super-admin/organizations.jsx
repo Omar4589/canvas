@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -21,8 +21,10 @@ import { formatRelative } from '../../../lib/dates';
 import { useRefresh } from '../../../lib/useRefresh';
 import {
   saveActiveOrgId,
+  saveActiveOrgName,
   clearActiveCampaign,
   clearBootstrap,
+  loadMemberships,
 } from '../../../lib/cache';
 import LiveStatus from '../../../components/LiveStatus';
 import { radius, spacing } from '../../../lib/theme';
@@ -64,6 +66,46 @@ export default function OrganizationsScreen() {
     ...useFocusedPoll(),
   });
 
+  // Which orgs can this account walk straight into? Mirrors middleware/orgContext.js, which
+  // checks membership FIRST, then Organization.isInternal, and only then requires a grant.
+  //
+  // Deliberately NOT `?all=1`: that widens to everyone's grants for a break_glass operator
+  // (routes/superAdmin/access.js), which would label an org enterable on the strength of a
+  // COLLEAGUE's session. Unscoped returns only mine, which is the question being asked. No
+  // liveness filter needed either — the endpoint already scopes to
+  // { revokedAt: null, expiresAt: { $gt: now } }.
+  const myGrantsQ = useQuery({
+    queryKey: ['support-grants', 'mine'],
+    queryFn: () => api('/super-admin/access/grants'),
+  });
+  const [memberOrgIds, setMemberOrgIds] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    loadMemberships()
+      .then((ms) => {
+        if (alive) setMemberOrgIds(new Set((ms || []).map((m) => String(m.organizationId))));
+      })
+      .catch(() => {
+        if (alive) setMemberOrgIds(new Set());
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const grantedOrgIds = useMemo(
+    () => new Set((myGrantsQ.data?.grants || []).map((g) => String(g.organization?.id)).filter(Boolean)),
+    [myGrantsQ.data]
+  );
+  // Undefined while memberships are still loading — the label renders nothing rather than
+  // briefly claiming an org needs a session when it doesn't.
+  function entryFor(o) {
+    if (!memberOrgIds) return null;
+    if (o.isInternal) return 'internal';
+    if (memberOrgIds.has(String(o.id))) return 'member';
+    if (grantedOrgIds.has(String(o.id))) return 'granted';
+    return 'needs-session';
+  }
+
   const createMut = useMutation({
     mutationFn: (body) => api('/super-admin/organizations', { method: 'POST', body }),
     onSuccess: () => {
@@ -81,10 +123,15 @@ export default function OrganizationsScreen() {
   });
 
   // Enter the org's admin console — a cache-clearing state transition (same body the Control Room
-  // used to own before the org cards moved here).
-  async function pickOrg(orgId) {
+  // used to own before the org cards moved here). Entering a CUSTOMER org this account isn't a
+  // member of will 403 SUPPORT_ACCESS_REQUIRED and raise the grant sheet
+  // (components/SupportAccessGate); the card labels below say so up front.
+  async function pickOrg(orgId, orgName) {
     qc.clear();
     await saveActiveOrgId(orgId);
+    // The name too — select-org.jsx has always saved both, and without it every header that
+    // reads the cached org name comes up blank after entering from this tab.
+    await saveActiveOrgName(orgName);
     await clearActiveCampaign();
     await clearBootstrap();
     router.replace('/(app)/admin');
@@ -156,6 +203,25 @@ export default function OrganizationsScreen() {
                         <Text style={[styles.pillText, styles.pillTextSuccess]}>🟢 {o.activeNowCount} active</Text>
                       </View>
                     )}
+                    {/* How you get in. `internal` and `member` need no grant (orgContext.js
+                        short-circuits on both); `granted` means a session is already open.
+                        Nothing renders while memberships are still loading, rather than
+                        briefly mislabelling an org you can walk into. */}
+                    {entryFor(o) === 'internal' && (
+                      <View style={[styles.pill, styles.pillNeutral]}>
+                        <Text style={[styles.pillText, styles.pillTextNeutral]}>internal</Text>
+                      </View>
+                    )}
+                    {entryFor(o) === 'granted' && (
+                      <View style={[styles.pill, styles.pillSuccess]}>
+                        <Text style={[styles.pillText, styles.pillTextSuccess]}>session open</Text>
+                      </View>
+                    )}
+                    {entryFor(o) === 'needs-session' && (
+                      <View style={[styles.pill, styles.pillNeutral]}>
+                        <Text style={[styles.pillText, styles.pillTextNeutral]}>needs a session</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
 
@@ -176,14 +242,20 @@ export default function OrganizationsScreen() {
 
                 <View style={styles.actionsRow}>
                   <Pressable
-                    onPress={() => pickOrg(o.id)}
+                    onPress={() => pickOrg(o.id, o.name)}
                     disabled={!o.isActive}
                     style={({ pressed }) => [
                       styles.switchBtn,
                       { opacity: pressed ? 0.85 : o.isActive ? 1 : 0.5 },
                     ]}
                   >
-                    <Text style={styles.switchBtnText}>Switch into this org →</Text>
+                    {/* Still tappable when a session is needed — it enters and the grant sheet
+                        opens. The label just removes the surprise. */}
+                    <Text style={styles.switchBtnText}>
+                      {entryFor(o) === 'needs-session'
+                        ? 'Start a support session →'
+                        : 'Switch into this org →'}
+                    </Text>
                   </Pressable>
                   <Pressable
                     onPress={() => toggleMut.mutate({ id: o.id, isActive: !o.isActive })}

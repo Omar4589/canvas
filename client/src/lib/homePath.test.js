@@ -5,6 +5,7 @@ import {
   consoleMemberships,
   nonConsoleMemberships,
   autoSelectOrgId,
+  activeOrgIdForLogin,
 } from './roles.js';
 import { homePathForRole, consoleHomePath, resolveHomePath } from './homePath.js';
 
@@ -107,6 +108,36 @@ test('autoSelectOrgId enters the ONE console org and never a canvasser org', () 
   // The old rule (memberships.length === 1) set B here and dead-ended on /admin.
   assert.equal(autoSelectOrgId([M('B', 'canvasser')]), null);
   assert.equal(autoSelectOrgId([]), null);
+});
+
+test('activeOrgIdForLogin never picks an org for a super admin', () => {
+  // The reported case: a super admin who is ALSO an admin of one org. autoSelectOrgId would
+  // hand back that org, so login silently entered it and the Control Room became unreachable
+  // without using the switcher. A super admin's home is the platform.
+  assert.equal(activeOrgIdForLogin(SUPER, [M('A', 'admin')]), null);
+  assert.equal(activeOrgIdForLogin(SUPER, [M('A', 'admin'), M('B', 'lead')]), null);
+  assert.equal(activeOrgIdForLogin(SUPER, []), null);
+
+  // Everyone else is unchanged — this must not disturb the ordinary auto-pick.
+  assert.equal(activeOrgIdForLogin(USER, [M('A', 'admin'), M('B', 'canvasser')]), 'A');
+  assert.equal(activeOrgIdForLogin(USER, [M('A', 'admin'), M('B', 'lead')]), null);
+  assert.equal(activeOrgIdForLogin(USER, [M('B', 'canvasser')]), null);
+  assert.equal(activeOrgIdForLogin(USER, []), null);
+
+  // Defensive: callers pass res.user straight from the API.
+  assert.equal(activeOrgIdForLogin(undefined, [M('A', 'admin')]), 'A');
+  assert.equal(activeOrgIdForLogin(USER), null);
+});
+
+test('a super admin landing follows the org that login just cleared', () => {
+  // The two halves of the rule, together: login writes null (above), and the resolver then
+  // sends them to the platform. Reload is the other half — it does NOT clear, so a remembered
+  // org still resolves to /admin, which is why this assertion stays as it was.
+  assert.equal(
+    resolveHomePath({ user: SUPER, memberships: [M('A', 'admin')], activeOrgId: null }),
+    '/super-admin'
+  );
+  assert.equal(resolveHomePath({ user: SUPER, memberships: [], activeOrgId: 'A' }), '/admin');
 });
 
 test('the picker splits memberships into selectable and explain-only', () => {

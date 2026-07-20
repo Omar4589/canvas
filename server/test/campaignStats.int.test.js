@@ -14,9 +14,14 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-campaign-stats';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
-const { computeCampaignStats, recomputeCampaignStats, bumpCampaignStats } = await import(
-  '../src/services/reports/campaignCounters.js'
-);
+const {
+  computeCampaignStats,
+  recomputeCampaignStats,
+  bumpCampaignStats,
+  reconcileAllCampaignStats,
+  CAMPAIGN_STATS_JOB,
+} = await import('../src/services/reports/campaignCounters.js');
+const { MAINTENANCE_JOBS, REPEATABLE_JOBS } = await import('../src/services/retention/scheduler.js');
 const { Organization } = await import('../src/models/Organization.js');
 const { User } = await import('../src/models/User.js');
 const { Membership } = await import('../src/models/Membership.js');
@@ -361,4 +366,92 @@ test('unseeded legacy campaign: bumps no-op, dashboards fall back to exact live 
   assert.strictEqual(seeded.stats.activityCount, 1);
   assert.strictEqual(seeded.stats.knockCount, 1);
   assert.ok(seeded.stats.reconciledAt, 'reconcile stamps the trust marker');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The nightly sweep: silent drift is the whole reason it exists
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('reconcileAllCampaignStats: detects drift, reports the diff, and repairs on apply', { skip }, async () => {
+  // The production symptom this was written for: the campaign Home card read 4,138 knocks / 987
+  // survey doors while the live per-round table beneath it read 4,136 / 986. The counter had been
+  // double-bumped by the documented same-door write race. Reproduce it directly — corrupt the
+  // stored counters and confirm nothing in the product notices until the sweep runs.
+  const before = await computeCampaignStats(ctx.camp._id);
+  await Campaign.updateOne(
+    { _id: ctx.camp._id },
+    { $inc: { 'stats.knockCount': 2, 'stats.surveyedKnockCount': 1 } }
+  );
+
+  // The drifted counter is served to the dashboard as fact — no error, no warning.
+  const drifted = await call('GET', '/admin/reports/campaign-rollup?scope=all', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+  });
+  const badRow = drifted.json.campaigns.find((c) => c.id === String(ctx.camp._id));
+  assert.strictEqual(badRow.knocks, before.knockCount + 2, 'drift is served silently');
+
+  // Dry run reports it and changes nothing.
+  const dry = await reconcileAllCampaignStats({ apply: false });
+  const found = dry.details.find((d) => d.campaignId === String(ctx.camp._id));
+  assert.ok(found, 'the drifted campaign is reported');
+  assert.strictEqual(found.state, 'drifted');
+  assert.ok(
+    found.diffs.some((s) => s.startsWith('knockCount')),
+    `knockCount drift named in the diff (got ${found.diffs.join(', ')})`
+  );
+  assert.ok(
+    found.diffs.some((s) => s.startsWith('surveyedKnockCount')),
+    'surveyedKnockCount drift named too'
+  );
+  const stillBad = await Campaign.findById(ctx.camp._id).lean();
+  assert.strictEqual(stillBad.stats.knockCount, before.knockCount + 2, 'dry run wrote nothing');
+
+  // Apply repairs it, and the dashboard agrees with the ledger again.
+  const applied = await reconcileAllCampaignStats({ apply: true });
+  assert.ok(applied.drifted >= 1, 'apply run counted the drift it repaired');
+  const fixed = await Campaign.findById(ctx.camp._id).lean();
+  assert.strictEqual(fixed.stats.knockCount, before.knockCount, 'knock counter repaired');
+  assert.strictEqual(fixed.stats.surveyedKnockCount, before.surveyedKnockCount, 'survey counter repaired');
+
+  const clean = await reconcileAllCampaignStats({ apply: false });
+  assert.strictEqual(
+    clean.details.filter((d) => d.campaignId === String(ctx.camp._id)).length,
+    0,
+    'a repaired campaign no longer reports as drifted'
+  );
+});
+
+test('reconcileAllCampaignStats: restrictedDoorCount drift is caught too', { skip }, async () => {
+  // restrictedDoorCount is a stored counter that the original drift check did NOT compare, so a
+  // campaign could drift on it forever and every sweep would report "nothing to do".
+  const before = await computeCampaignStats(ctx.camp._id);
+  await Campaign.updateOne({ _id: ctx.camp._id }, { $inc: { 'stats.restrictedDoorCount': 3 } });
+
+  const dry = await reconcileAllCampaignStats({ apply: false });
+  const found = dry.details.find((d) => d.campaignId === String(ctx.camp._id));
+  assert.ok(found, 'restricted-door drift is detected');
+  assert.ok(
+    found.diffs.some((s) => s.startsWith('restrictedDoorCount')),
+    `restrictedDoorCount named in the diff (got ${found.diffs.join(', ')})`
+  );
+
+  await reconcileAllCampaignStats({ apply: true });
+  const fixed = await Campaign.findById(ctx.camp._id).lean();
+  assert.strictEqual(fixed.stats.restrictedDoorCount, before.restrictedDoorCount, 'repaired');
+});
+
+test('the campaign-counter reconcile is actually scheduled', { skip: false }, async () => {
+  // Same guard as the platform-stats job: the repair is only worth anything if it RUNS. If someone
+  // drops it from the schedule, this goes red instead of counters quietly drifting again.
+  const job = MAINTENANCE_JOBS.find((j) => j.name === CAMPAIGN_STATS_JOB);
+  assert.ok(job, 'the reconcile job is registered in MAINTENANCE_JOBS');
+  assert.ok(job.cron && job.label, 'it carries a cron + an operator-readable label');
+
+  // …and it must NOT be in REPEATABLE_JOBS: the /health/retention banner reports on every entry
+  // there, so a counter reconcile going quiet must never read "Retention: NOT ENFORCED".
+  assert.ok(
+    !REPEATABLE_JOBS.some((j) => j.name === CAMPAIGN_STATS_JOB),
+    'kept out of the retention list'
+  );
 });

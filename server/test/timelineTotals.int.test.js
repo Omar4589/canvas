@@ -230,3 +230,64 @@ test('hoursOnDoors stays a sum of per-DAY spans, not first-ever to last-ever', {
   assert.equal(a.hoursOnDoors, 3, 'three hours, not ten weeks');
   assert.ok(a.doorsPerHour > 0 && a.doorsPerHour <= 3, `doors/hour stays sane (${a.doorsPerHour})`);
 });
+
+test('survey DOORS are deduped server-side; the raw per-canvasser sum is not the door count', { skip }, async () => {
+  // The production bug this pins: the Timeline KPI card summed the per-canvasser "Survey doors"
+  // column in the browser and labelled the result "Doors with a survey". On a real campaign that
+  // read 990 where the campaign total was 986 — four doors that two canvassers had each surveyed,
+  // counted twice. Doors were already deduped server-side for exactly this reason; surveys were
+  // not, so the connection rate also divided a RAW numerator by a DEDUPED denominator.
+  //
+  // Its own campaign, so the calibrated fixture above keeps its absolute numbers.
+  const { org, boss, ann, bob, token } = ctx;
+  const campaign = await Campaign.create({
+    organizationId: org._id, name: 'Sign Push', type: 'survey', state: 'FL', isActive: true, timeZone: TZ,
+  });
+  const effort = await Effort.create({ organizationId: org._id, campaignId: campaign._id, name: 'South' });
+  const pass = await Pass.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    roundNumber: 1, name: 'Round 1', status: 'active',
+  });
+  const homes = await Household.insertMany([1, 2].map((n) => ({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: `${n} Sign Way`, city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: `${n} SIGN WAY|TOWN|FL|34741`,
+    location: { type: 'Point', coordinates: [-81.5 + n * 0.001, 28.4] },
+  })));
+  const knock = (user, home, hour, actionType) => CanvassActivity.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: home._id, userId: user._id, actionType, timestamp: at('2026-02-10', hour),
+    location: { lat: 28.4, lng: -81.5 },
+  });
+
+  // BOTH canvassers survey door 1 (the overlap); only Ann surveys door 2.
+  await knock(ann, homes[0], 9, 'survey_submitted');
+  await knock(bob, homes[0], 14, 'survey_submitted');
+  await knock(ann, homes[1], 10, 'survey_submitted');
+
+  const res = await call(
+    `/admin/reports/canvasser-timeline?campaignId=${campaign._id}&totals=1`, token, org._id
+  );
+  assert.equal(res.status, 200);
+
+  // The raw sum — what the card used to show. Still reported, still correct as an EVENT count.
+  assert.equal(res.json.grandSurveys, 3, 'three survey events across the two canvassers');
+  const rowSum = res.json.canvassers.reduce((n, c) => n + (c.daySurveys || 0), 0);
+  assert.equal(rowSum, 3, 'and it is exactly what summing the per-canvasser column gives');
+
+  // The number to put in front of a client: two distinct doors.
+  assert.equal(res.json.billableSurveyDoors, 2, 'survey DOORS dedupe the shared door');
+  assert.ok(
+    res.json.billableSurveyDoors < rowSum,
+    'the deduped door count is strictly below the raw sum whenever canvassers overlap — ' +
+    'which is precisely why the card cannot compute it client-side'
+  );
+
+  // The survey-side twin of billableKnocks: same dedup, same (household, pass) key, so the
+  // connection rate is now a deduped numerator over a deduped denominator.
+  assert.equal(res.json.billableKnocks, 2, 'two distinct doors knocked');
+  assert.ok(
+    res.json.billableSurveyDoors <= res.json.billableKnocks,
+    'survey doors are a SUBSET of knocked doors, so the rate can never exceed 100%'
+  );
+});

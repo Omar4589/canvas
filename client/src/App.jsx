@@ -54,6 +54,7 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage.jsx'));
 const SelectOrgPage = lazy(() => import('./pages/SelectOrgPage.jsx'));
 const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage.jsx'));
 const SuperAdminHomePage = lazy(() => import('./pages/SuperAdminHomePage.jsx'));
+const MonthClosePage = lazy(() => import('./pages/MonthClosePage.jsx'));
 const SuperAdminUsersPage = lazy(() => import('./pages/SuperAdminUsersPage.jsx'));
 const SuperAdminPeoplePage = lazy(() => import('./pages/SuperAdminPeoplePage.jsx'));
 const SuperAdminImportsPage = lazy(() => import('./pages/SuperAdminImportsPage.jsx'));
@@ -226,6 +227,7 @@ export default function App() {
             <Route path="/super-admin/access" element={<SupportAccessPage />} />
             {/* The transactional-email log — platform-scoped, metadata only (content lives in Resend). */}
             <Route path="/super-admin/emails" element={<SuperAdminEmailsPage />} />
+            <Route path="/super-admin/billing" element={<MonthClosePage />} />
             <Route path="/organizations" element={<OrganizationsPage />} />
             <Route path="/organizations/:orgId" element={<OrgDetailPage />} />
             {/* Jobs (Bull Board) is a PLATFORM page, not an org one: the server gates the

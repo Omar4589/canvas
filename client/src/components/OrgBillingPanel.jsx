@@ -16,6 +16,17 @@ function fmtDate(d) {
 
 const EVENTS_LIMIT = 25;
 
+// Why a line is (or isn't) on the invoice. Mirrors the reason codes in
+// server/src/services/billing/billingMonths.js. 'billable' needs no label — it's the default —
+// and 'before-start' is self-evident from the Billing-started column.
+const REASON_LABEL = {
+  'no-field-visit': 'not billing yet',
+  'start-grace': 'free — started in the last week',
+  'end-grace': 'free — archived with no knocks',
+  floor: 'minimum one month',
+  'archived-earlier': 'archived',
+};
+
 // Render a changes-only event from its stored before/after values instead of a bare "X updated" —
 // the numbers were always in SubscriptionEvent.changes, just never shown.
 function changeText(ch) {
@@ -29,7 +40,27 @@ function changeText(ch) {
   }
   if (ch.trialEndsAt) parts.push(`trial end ${fmtDate(ch.trialEndsAt.from)} → ${fmtDate(ch.trialEndsAt.to)}`);
   if (ch.notes) parts.push('notes updated');
-  const known = ['pricePerCampaignCents', 'billingContact', 'trialEndsAt', 'notes'];
+  if (ch.campaignRate) {
+    const { campaignName, from, to } = ch.campaignRate;
+    parts.push(
+      `rate for ${campaignName || 'a campaign'} ${from == null ? 'org default' : fmtUsd(from)} → ${
+        to == null ? 'org default' : fmtUsd(to)
+      }`
+    );
+  }
+  if (ch.statementIssued) {
+    const s = ch.statementIssued;
+    parts.push(
+      `statement ${s.month} issued · ${fmtUsd(s.totalCents)}${s.externalRef ? ` · ref ${s.externalRef}` : ''}`
+    );
+  }
+  if (ch.statementVoided) {
+    parts.push(`statement ${ch.statementVoided.month} voided · ${fmtUsd(ch.statementVoided.totalCents)}`);
+  }
+  const known = [
+    'pricePerCampaignCents', 'billingContact', 'trialEndsAt', 'notes',
+    'campaignRate', 'statementIssued', 'statementVoided',
+  ];
   const rest = Object.keys(ch).filter((k) => !known.includes(k));
   if (rest.length) parts.push(`${rest.join(', ')} updated`);
   return parts.join(' · ');
@@ -47,6 +78,9 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
   const [notes, setNotes] = useState('');
   const thisMonth = currentMonthStr();
   const [month, setMonth] = useState(thisMonth);
+  const [externalRef, setExternalRef] = useState('');
+  // { campaignId, dollars } while a per-campaign rate is being edited inline.
+  const [rateEdit, setRateEdit] = useState(null);
   // Custom trial control: extend BY N days, or set an explicit end date.
   const [extendDays, setExtendDays] = useState('7');
   const [trialUntil, setTrialUntil] = useState('');
@@ -127,18 +161,80 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
     },
     onError: onErr,
   });
+  // Freeze / unfreeze a month. refetchAll() already prefix-invalidates [...key, 'statement', month],
+  // so the statement view refreshes without naming it.
+  const issueMut = useMutation({
+    mutationFn: (body) =>
+      api(`/super-admin/organizations/${orgId}/billing/statement/${month}/issue`, { method: 'POST', body }),
+    onSuccess: () => {
+      setExternalRef('');
+      setError(null);
+      refetchAll();
+    },
+    onError: onErr,
+  });
+  const voidMut = useMutation({
+    mutationFn: ({ statementId, reason: why }) =>
+      api(`/super-admin/organizations/${orgId}/billing/statement/${statementId}/void`, {
+        method: 'POST',
+        body: { reason: why },
+      }),
+    onSuccess: () => {
+      setError(null);
+      refetchAll();
+    },
+    onError: onErr,
+  });
+  // Per-campaign negotiated rate. Empty input clears the override back to the org default.
+  const campaignRateMut = useMutation({
+    mutationFn: ({ campaignId, pricePerCampaignCents }) =>
+      api(`/super-admin/organizations/${orgId}/billing/campaigns/${campaignId}`, {
+        method: 'PATCH',
+        body: { pricePerCampaignCents },
+      }),
+    onSuccess: () => {
+      setRateEdit(null);
+      setError(null);
+      refetchAll();
+    },
+    onError: onErr,
+  });
 
   const ent = billingQ.data?.entitlement;
   const needsReason = ['suspended', 'canceled'].includes(statusTo);
   const stmt = statementQ.data;
   const thisStmt = thisMonthQ.data;
   const thisBillable = thisStmt ? thisStmt.lines.filter((l) => l.billable).length : null;
+  // Once a month is issued, the FROZEN statement is what the table, the totals and the CSV show —
+  // that is the number that was invoiced. The live recompute stays available underneath, and any
+  // divergence between them surfaces as `drift` rather than silently replacing what you sent.
+  const issued = stmt?.statement || null;
+  const view = issued || stmt;
+  const drift = stmt?.drift || null;
+  const issuedBy = issued?.issuedByUserId
+    ? `${issued.issuedByUserId.firstName || ''} ${issued.issuedByUserId.lastName || ''}`.trim()
+    : '';
+  const monthEnded = month < thisMonth;
+  const billingLines = view ? view.lines.filter((l) => l.billable) : [];
+  // Do all billing campaigns share the org rate? Decides whether the totals row can honestly
+  // show "n × rate" (see the note on that row).
+  const uniformRate = billingLines.every((l) => l.rateCents === view?.rateCents);
 
   function downloadCsv() {
     if (!stmt) return;
+    // A statement CSV is the artifact most likely to end up attached to an invoice email, so it
+    // has to say on its face whether it is the FROZEN issued figure or a live recompute. Exporting
+    // an unlabelled sheet is how the two get confused six months later.
+    const src = issued
+      ? `ISSUED ${fmtDate(issued.issuedAt)}${issuedBy ? ` by ${issuedBy}` : ''} — rules v${issued.rulesVersion}${
+          issued.externalRef ? ` — ref ${issued.externalRef}` : ''
+        }`
+      : 'LIVE — not issued, recomputed on export';
     const rows = [
-      ['Campaign', 'Households', 'Billing started', 'Archived', 'Knocks this month', 'Restricted doors', 'Billable doors', 'Billable', 'Amount'],
-      ...stmt.lines.map((l) => [
+      ['Statement', month, src],
+      [],
+      ['Campaign', 'Households', 'Billing started', 'Archived', 'Knocks this month', 'Restricted doors', 'Billable doors', 'Billable', 'Reason', 'Rate', 'Amount'],
+      ...view.lines.map((l) => [
         l.name,
         l.households,
         l.firstKnockAt ? new Date(l.firstKnockAt).toISOString().slice(0, 10) : '',
@@ -148,15 +244,19 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
         // The org's own invoice figure; equals knocks when it doesn't bill restricted doors.
         l.billRestrictedDoors ? l.billableDoorsThisMonth : l.knocksThisMonth,
         l.billable ? 'yes' : 'no',
+        l.reason || '',
+        ((l.rateCents ?? 0) / 100).toFixed(2),
         (l.amountCents / 100).toFixed(2),
       ]),
-      ['Total', '', '', '', '', '', '', '', (stmt.totalCents / 100).toFixed(2)],
+      ['Total', '', '', '', '', '', '', '', '', '', (view.totalCents / 100).toFixed(2)],
     ];
     const csv = rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${(displayName || 'org').replaceAll(/\s+/g, '-').toLowerCase()}-statement-${month}.csv`;
+    a.download = `${(displayName || 'org').replaceAll(/\s+/g, '-').toLowerCase()}-statement-${month}-${
+      issued ? 'issued' : 'live'
+    }.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -414,17 +514,102 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
                 : '—'}
           </span>
         </div>
+        {/* Reality has moved since this invoice went out. Never reconciled automatically — voiding
+            and reissuing is an account-manager judgement, so all this does is refuse to hide it. */}
+        {drift && (
+          <div
+            className={`mb-3 rounded-md border px-3 py-2 text-xs ${
+              drift.material
+                ? 'border-amber-300 bg-amber-50 text-amber-900'
+                : 'border-border bg-sunken text-fg-muted'
+            }`}
+          >
+            <p className="font-semibold">
+              {drift.material
+                ? `Issued ${fmtUsd(drift.totalCents.issued)} — a live recompute now says ${fmtUsd(drift.totalCents.live)}.`
+                : 'Underlying data changed since this was issued (the total is unaffected).'}
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {drift.lines.slice(0, 6).map((l) => (
+                <li key={l.campaignId}>
+                  {l.name}: {Object.keys(l.fields).join(', ')} changed
+                </li>
+              ))}
+              {drift.addedCampaigns.map((c) => (
+                <li key={`a-${c.campaignId}`}>{c.name}: campaign added since issue</li>
+              ))}
+              {drift.removedCampaigns.map((c) => (
+                <li key={`r-${c.campaignId}`}>{c.name}: campaign no longer exists</li>
+              ))}
+              {drift.rulesVersion && (
+                <li>
+                  Billing rules changed (v{drift.rulesVersion.issued} → v{drift.rulesVersion.live})
+                </li>
+              )}
+            </ul>
+            <p className="mt-1">The issued figures below are unchanged — void and reissue if you want to correct them.</p>
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Monthly statement</h3>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Monthly statement</h3>
+            {issued ? (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                Issued {fmtDate(issued.issuedAt)}
+                {issuedBy ? ` by ${issuedBy}` : ''} · rules v{issued.rulesVersion}
+                {issued.externalRef ? ` · ${issued.externalRef}` : ''}
+              </span>
+            ) : (
+              <span className="text-xs text-fg-subtle">Live — not issued</span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className={inputCls + ' mt-0'} />
+            {!issued && (
+              <>
+                <input
+                  value={externalRef}
+                  onChange={(e) => setExternalRef(e.target.value)}
+                  placeholder="Invoice #"
+                  className={inputCls + ' mt-0 w-28'}
+                />
+                <button
+                  onClick={() => {
+                    // `force` is the deliberate override for issuing a month that hasn't closed —
+                    // a prepay or an early close-out. Asked for explicitly, never assumed.
+                    const force = !monthEnded;
+                    if (
+                      force &&
+                      !window.confirm(`${month} hasn't finished yet. Issue it anyway? Later knocks won't be included.`)
+                    ) return;
+                    issueMut.mutate({ externalRef: externalRef || undefined, force });
+                  }}
+                  disabled={!stmt || issueMut.isPending}
+                  className={btnCls + ' py-1.5 text-xs'}
+                >
+                  {issueMut.isPending ? 'Issuing…' : 'Issue statement'}
+                </button>
+              </>
+            )}
+            {issued && (
+              <button
+                onClick={() => {
+                  const why = window.prompt(`Void the ${month} statement? Give a reason (required):`);
+                  if (why && why.trim()) voidMut.mutate({ statementId: issued._id, reason: why.trim() });
+                }}
+                disabled={voidMut.isPending}
+                className="text-xs font-semibold text-danger hover:opacity-80 disabled:opacity-60"
+              >
+                {voidMut.isPending ? 'Voiding…' : 'Void'}
+              </button>
+            )}
             <button onClick={downloadCsv} disabled={!stmt} className="text-xs font-semibold text-brand-accent hover:opacity-80">
               Export CSV
             </button>
           </div>
         </div>
         {statementQ.isLoading && <p className="mt-2 text-sm text-fg-muted">Computing…</p>}
-        {stmt && (
+        {view && (
           <table className="mt-2 min-w-full text-sm">
             <thead className="text-left text-xs font-semibold uppercase tracking-wide text-fg-muted">
               <tr>
@@ -434,16 +619,21 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
                     restricted home a canvasser walked to (a desk bulk-restrict doesn't count). */}
                 <th className="py-1 pr-3">Billing started</th>
                 <th className="py-1 pr-3">Knocks ({month})</th>
+                <th className="py-1 pr-3">Rate</th>
                 <th className="py-1 pr-3 text-right">Amount</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {stmt.lines.map((l) => (
+              {view.lines.map((l) => (
                 <tr key={l.campaignId} className={l.billable ? '' : 'text-fg-subtle'}>
                   <td className="py-1.5 pr-3">
                     {l.name}
                     {!l.isActive && <span className="ml-1 text-xs">(archived {fmtDate(l.archivedAt)})</span>}
-                    {l.billable ? '' : l.firstKnockAt ? '' : ' — not billing yet'}
+                    {/* Why this line is or isn't on the invoice — the grace rules and the floor are
+                        invisible without it (services/billing/billingMonths.js). */}
+                    {REASON_LABEL[l.reason] && (
+                      <span className="ml-1 text-xs text-fg-subtle">— {REASON_LABEL[l.reason]}</span>
+                    )}
                   </td>
                   <td className="py-1.5 pr-3">{l.households.toLocaleString()}</td>
                   <td className="py-1.5 pr-3">{l.firstKnockAt ? fmtDate(l.firstKnockAt) : 'Not started'}</td>
@@ -458,13 +648,66 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
                       </span>
                     )}
                   </td>
+                  {/* Per-campaign negotiated rate. Editable only on a LIVE month — an issued
+                      statement is frozen, and letting someone retype a number on it would defeat
+                      the entire point of issuing. */}
+                  <td className="py-1.5 pr-3">
+                    {rateEdit?.campaignId === l.campaignId ? (
+                      <span className="flex items-center gap-1">
+                        <input
+                          autoFocus
+                          value={rateEdit.dollars}
+                          onChange={(e) => setRateEdit({ ...rateEdit, dollars: e.target.value })}
+                          placeholder="org rate"
+                          className={inputCls + ' mt-0 w-20 px-1.5 py-1 text-xs'}
+                        />
+                        <button
+                          onClick={() => {
+                            const raw = rateEdit.dollars.trim();
+                            // Empty clears the override back to the org default. 0 is a legal
+                            // rate (a comped campaign), so it must survive as 0, not become null.
+                            const cents = raw === '' ? null : Math.round(Number(raw) * 100);
+                            if (cents !== null && !Number.isFinite(cents)) return;
+                            campaignRateMut.mutate({ campaignId: l.campaignId, pricePerCampaignCents: cents });
+                          }}
+                          className="text-xs font-semibold text-brand-accent"
+                        >
+                          Save
+                        </button>
+                        <button onClick={() => setRateEdit(null)} className="text-xs text-fg-subtle">
+                          ✕
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          !issued &&
+                          setRateEdit({
+                            campaignId: l.campaignId,
+                            dollars: l.pricePerCampaignCents == null ? '' : String(l.pricePerCampaignCents / 100),
+                          })
+                        }
+                        disabled={Boolean(issued)}
+                        className={issued ? 'text-xs' : 'text-xs underline decoration-dotted underline-offset-2 hover:text-brand-accent'}
+                        title={issued ? 'Frozen — this statement is issued' : 'Set a negotiated rate for this campaign'}
+                      >
+                        {fmtUsd(l.rateCents)}
+                        {l.pricePerCampaignCents == null && (
+                          <span className="ml-1 text-fg-subtle">(inherits)</span>
+                        )}
+                      </button>
+                    )}
+                  </td>
                   <td className="py-1.5 pr-3 text-right">{l.billable ? fmtUsd(l.amountCents) : '—'}</td>
                 </tr>
               ))}
               <tr className="font-semibold text-fg">
-                <td className="py-1.5 pr-3">Total ({stmt.lines.filter((l) => l.billable).length} × {fmtUsd(stmt.rateCents)})</td>
-                <td colSpan={3} />
-                <td className="py-1.5 pr-3 text-right">{fmtUsd(stmt.totalCents)}</td>
+                {/* "n × rate" is only ARITHMETICALLY TRUE when every billing campaign is on the org
+                    rate. A campaign carrying a negotiated override (services/billing/rate.js) makes
+                    the product wrong, so fall back to a plain count rather than print a false sum. */}
+                <td className="py-1.5 pr-3">Total ({billingLines.length}{uniformRate ? ` × ${fmtUsd(view.rateCents)}` : ' campaigns'})</td>
+                <td colSpan={4} />
+                <td className="py-1.5 pr-3 text-right">{fmtUsd(view.totalCents)}</td>
               </tr>
             </tbody>
           </table>

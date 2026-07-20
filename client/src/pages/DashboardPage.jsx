@@ -11,6 +11,7 @@ import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector
 import InfoHint from '../components/InfoHint.jsx';
 import SetupProgress from '../components/SetupProgress.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
+import ArchiveNudge from '../components/ArchiveNudge.jsx';
 import { CountdownChip } from '../components/campaigns/CampaignCard.jsx';
 import { rateAccent, ratePct } from '../lib/rates.js';
 import { livePollOptions } from '../lib/livePoll.js';
@@ -452,6 +453,10 @@ export default function DashboardPage() {
           fake-GPS app and {openMockFlags === 1 ? "hasn't" : "haven't"} been reviewed.
         </NextStepBanner>
       )}
+      {/* Election day has passed and this campaign is still live — so it's still billing.
+          ArchiveNudge's own isActive check keeps it from ever appearing beside the archived
+          notice above. Archiving is offered from Campaigns, which owns the mutation. */}
+      {current && <ArchiveNudge campaigns={[current]} className="mb-6" />}
       {current && current.isActive !== false && (
         <div className="mb-6">
           <SetupProgress campaignId={campaignId} />

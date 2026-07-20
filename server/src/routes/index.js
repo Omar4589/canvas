@@ -34,6 +34,7 @@ import superAdminPersonsRouter from './superAdmin/persons.js';
 import superAdminAccessRouter from './superAdmin/access.js';
 import superAdminEmailsRouter from './superAdmin/emails.js';
 import superAdminImportsRouter from './superAdmin/imports.js';
+import superAdminStatementsRouter from './superAdmin/statements.js';
 import superAdminPlatformRouter from './superAdmin/platform.js';
 import mobileBootstrapRouter from './mobile/bootstrap.js';
 import mobileCanvassRouter from './mobile/canvass.js';
@@ -92,6 +93,8 @@ router.use('/super-admin/persons', superAdminPersonsRouter);
 router.use('/super-admin/access', superAdminAccessRouter);
 router.use('/super-admin/emails', superAdminEmailsRouter);
 router.use('/super-admin/imports', superAdminImportsRouter);
+// Must stay ABOVE the '/super-admin' catch-all below, or that mount swallows the path.
+router.use('/super-admin/billing', superAdminStatementsRouter);
 router.use('/super-admin', superAdminPlatformRouter);
 
 router.use('/admin/billing', adminBillingRouter);

@@ -11,7 +11,7 @@ tags: archive, delete, campaign
 
 Almost always: **archive**.
 
-- **Archive** is reversible. The campaign becomes read-only (canvassers stop seeing it) and you can **reactivate** it anytime. This is the normal "this one's finished" move, and it also stops the campaign's billing at month end.
+- **Archive** is reversible. The campaign becomes read-only (canvassers stop seeing it) and you can **reactivate** it anytime. This is the normal "this one's finished" move, and it's also what stops the campaign's billing: the month you archive in bills in full, and the campaign is free from the next month on. If you archive in the **first 3 days** of a month and nobody has been out that month, you don't owe that month either. (Reactivating it later starts the billing up again, including for any months it spent archived.)
 - **Delete** is permanent and is **only allowed before any canvassing** — no knocks or surveys recorded. When allowed, it removes the campaign and everything it owns. Once a campaign has any field activity, Delete is disabled and you'll archive instead, so you can never destroy real canvassing history.
 
 See [Creating and managing campaigns](campaigns-manage).

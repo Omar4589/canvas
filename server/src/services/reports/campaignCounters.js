@@ -91,20 +91,32 @@ export async function bumpCampaignStats(
 // Exact stats for one campaign, recomputed from the ledgers (the same aggregations the live
 // dashboards run). Every query rides a campaignId-prefixed index.
 export async function computeCampaignStats(campaignId) {
+  // ORG-SCOPED, and it must be: every live reader matches on organizationId AND campaignId
+  // (campaign-rollup's fallback at routes/admin/reports.js, /knocks-by-pass via baseFilter, the
+  // timeline). This oracle used to match on campaignId ALONE, which made the counter answer a
+  // slightly WIDER question than the dashboards it feeds. A row carrying the right campaignId but a
+  // missing or foreign organizationId then counted toward the cached card and was invisible to
+  // every live report — and because the drift check recomputed with the same wide match, the
+  // reconcile agreed with the bad number and reported "nothing to do". That is drift no repair
+  // could ever fix. Scoping here makes cache and live answer the same question by construction, so
+  // any disagreement is real drift the sweep can actually repair.
+  const campaign = await Campaign.findById(campaignId, { organizationId: 1 }).lean();
+  const scope = campaign ? { organizationId: campaign.organizationId, campaignId } : { campaignId };
+
   const [activityCount, knockAgg, litDroppedCount, surveyCount, lastRow, canvasserIds] =
     await Promise.all([
-      CanvassActivity.countDocuments({ campaignId }),
+      CanvassActivity.countDocuments(scope),
       // includeRestricted so ONE pass yields both knockCount (unchanged — `knocks` means the same
       // thing in both modes) and restrictedDoorCount. Storing them unconditionally keeps the
       // counters flag-independent: flipping billRestrictedDoors is a read-time decision and must
       // never require a recompute.
-      CanvassActivity.aggregate(knocksPipeline({ campaignId }, { includeRestricted: true })),
-      CanvassActivity.countDocuments({ campaignId, actionType: 'lit_dropped' }),
-      SurveyResponse.countDocuments({ campaignId }),
-      CanvassActivity.findOne({ campaignId, ...NOT_BULK }, { timestamp: 1 })
+      CanvassActivity.aggregate(knocksPipeline(scope, { includeRestricted: true })),
+      CanvassActivity.countDocuments({ ...scope, actionType: 'lit_dropped' }),
+      SurveyResponse.countDocuments(scope),
+      CanvassActivity.findOne({ ...scope, ...NOT_BULK }, { timestamp: 1 })
         .sort({ timestamp: -1 })
         .lean(),
-      CanvassActivity.distinct('userId', { campaignId, ...NOT_BULK }),
+      CanvassActivity.distinct('userId', { ...scope, ...NOT_BULK }),
     ]);
   const k = knockAgg[0] || {};
   return {
@@ -137,4 +149,77 @@ export async function recomputeCampaignStats(campaignIdOrIds, { swallowErrors = 
     if (!swallowErrors) throw err;
     console.error('[campaignCounters] recompute failed (stats stale until next reconcile):', err?.message || err);
   }
+}
+
+// The maintenance job's name. Lives here beside the service it reconciles, so the scheduler
+// imports the job identity from the thing that does the work (mirrors platformStats.js/STATS_JOB).
+export const CAMPAIGN_STATS_JOB = 'reconcile-campaign-stats';
+
+// The counters a drift check compares. lastActivityAt and canvasserIds are compared separately
+// below — they are not scalars.
+const COUNTER_KEYS = [
+  'activityCount',
+  'knockCount',
+  'surveyedKnockCount',
+  'litKnockCount',
+  'refusedKnockCount',
+  'restrictedDoorCount',
+  'litDroppedCount',
+  'surveyCount',
+];
+
+// Is the stored counter set still equal to a freshly computed one? ONE definition, shared by the
+// nightly reconcile and the migrate:campaign-stats CLI — a drift check that disagrees with the
+// repair it triggers is worse than no check at all.
+export function sameStats(stored, fresh) {
+  for (const k of COUNTER_KEYS) {
+    if ((stored?.[k] || 0) !== (fresh[k] || 0)) return false;
+  }
+  const storedLast = stored?.lastActivityAt ? new Date(stored.lastActivityAt).getTime() : null;
+  const freshLast = fresh.lastActivityAt ? new Date(fresh.lastActivityAt).getTime() : null;
+  if (storedLast !== freshLast) return false;
+  const a = new Set((stored?.canvasserIds || []).map(String));
+  const b = new Set((fresh.canvasserIds || []).map(String));
+  if (a.size !== b.size) return false;
+  for (const id of b) if (!a.has(id)) return false;
+  return true;
+}
+
+// Sweep every campaign: recompute from the ledgers, report which had drifted, and (when applying)
+// write the corrected counters back.
+//
+// This exists because the hot-path bump is best-effort by construction — the documented
+// same-door write race above, plus any ledger edit that bypasses the bump hooks. Drift is SILENT:
+// the dashboard card keeps rendering a stale number with no error anywhere, and the only tell is
+// that it disagrees with the live per-round table beside it. A campaign that has not drifted costs
+// one recompute and no write, so the sweep is safe to run on everything.
+//
+// Returns per-campaign detail so the CLI can print a dry-run report and the nightly job can log a
+// one-line summary, without either re-deriving what "drifted" means.
+export async function reconcileAllCampaignStats({ apply = false } = {}) {
+  const campaigns = await Campaign.find({}, { name: 1, stats: 1 }).lean();
+  const details = [];
+  let unseeded = 0;
+  let drifted = 0;
+
+  for (const c of campaigns) {
+    const fresh = await computeCampaignStats(c._id);
+    const seeded = Boolean(c.stats?.reconciledAt);
+    const changed = seeded && !sameStats(c.stats, fresh);
+    if (!seeded) unseeded += 1;
+    else if (changed) drifted += 1;
+    if (!seeded || changed) {
+      details.push({
+        campaignId: String(c._id),
+        name: c.name,
+        state: seeded ? 'drifted' : 'unseeded',
+        fresh,
+        diffs: COUNTER_KEYS.filter((k) => (c.stats?.[k] || 0) !== (fresh[k] || 0))
+          .map((k) => `${k} ${c.stats?.[k] || 0}→${fresh[k] || 0}`),
+      });
+    }
+    if (apply) await recomputeCampaignStats(c._id);
+  }
+
+  return { scanned: campaigns.length, unseeded, drifted, repaired: apply ? campaigns.length : 0, details };
 }

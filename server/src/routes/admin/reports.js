@@ -426,6 +426,16 @@ router.get('/overview', async (req, res, next) => {
         // already applied each campaign's own policy while summing; only the live single-scope
         // fallback still needs the helper.
         billableDoors: statTotals ? k.billableDoors : billableDoorsOf(k, liveBillRestricted),
+        // PRECONDITION before you render this or build on it: on the COUNTER path (statTotals)
+        // this is only guaranteed once the billable-door policy has been enabled, because that
+        // transition is what recomputes stats.restrictedDoorCount from the ledger. For a campaign
+        // that predates the feature and has never opted in, it can be partial.
+        //
+        // That is safe today precisely because nothing reads it in that state — billableDoors is
+        // plain `knocks` while the policy is off. Adding a "restricted homes" tile fed from here
+        // would break that, and would do so silently. Use the live-aggregated surfaces
+        // (/knocks-by-pass, /canvasser-timeline, the billing statement) if you need it
+        // unconditionally: they never touch the cache.
         restrictedDoors: k.restrictedDoors ?? 0,
         connectionRate: connectionRate(k),
         contactRate: contactRate(k),
@@ -725,6 +735,9 @@ router.get('/campaign-rollup', async (req, res, next) => {
           // This campaign's own answer — a rollup can span campaigns that disagree, so the
           // policy is resolved per row rather than once for the response.
           billRestrictedDoors: resolveBillRestricted(campaign, orgDefaults),
+          // Same precondition as /overview: on the counter path (useStats) this is only
+          // guaranteed once this campaign's billable-door policy has been enabled. Safe today
+          // because nothing renders it while the policy is off — see the note on /overview.
           restrictedDoors: c.restrictedDoors,
           billableDoors:
             c.knocks + (resolveBillRestricted(campaign, orgDefaults) ? c.restrictedDoors : 0),
@@ -2150,6 +2163,13 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       grandKnocks,
       grandSurveys,
       billableKnocks,
+      // Survey DOORS, deduped (household, pass) — the survey-side twin of billableKnocks, and the
+      // number to quote a client. grandSurveys above is the raw EVENT count: it sums the
+      // per-canvasser column, so a door two canvassers both surveyed lands in it twice. The KPI
+      // cards used to sum that column client-side and label the result "Doors with a survey",
+      // which over-reported by exactly the cross-canvasser overlap. Like billableKnocks, it cannot
+      // be derived client-side — the dedup needs the ledger.
+      billableSurveyDoors: knockAgg[0]?.surveyedKnocks || 0,
       // The invoice figure when this campaign bills for restricted doors; equal to
       // billableKnocks otherwise. Deliberately a SEPARATE field: billableKnocks feeds the
       // overlap subtraction below, whose other side (grandKnocks) counts knock events only.

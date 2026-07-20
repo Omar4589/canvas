@@ -22,6 +22,7 @@ import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
 import { PersonMergeLog } from '../../models/PersonMergeLog.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
+import { Statement } from '../../models/Statement.js';
 import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
@@ -46,7 +47,7 @@ export const ORG_SCOPED = [
   Campaign, CampaignAssignment, CampaignManager, CanvassActivity, ClientReport,
   ClientReportMapPoint, Effort, EffortMember, FlagReview, Household,
   HouseholdLocationChange, ImportJob, ImportProfile, Membership, Pass,
-  ReportShareLink, SavedSearch, Subscription, SubscriptionEvent, SurveyResponse,
+  ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyResponse,
   SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
   VotedUpload, VotedVoter, Voter, VoterNote,
 ];

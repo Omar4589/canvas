@@ -91,10 +91,9 @@ test('GET /admin/billing is gated to bill-payer admins', { skip }, async () => {
   assert.strictEqual(denied.json.code, 'billing-access-required');
 });
 
-test('usage meter counts only first-knock-started campaigns at the org rate', { skip }, async () => {
+test('usage meter counts only first-knock-started campaigns', { skip }, async () => {
   const before = await call('GET', '/admin/billing', ctx.billing);
-  assert.strictEqual(before.json.usage.billableCampaigns, 0, 'no canvassed campaigns yet → $0');
-  assert.strictEqual(before.json.usage.totalCents, 0);
+  assert.strictEqual(before.json.usage.billableCampaigns, 0, 'no canvassed campaigns yet');
 
   const camp = await Campaign.create({ organizationId: ctx.org._id, name: 'Fall', type: 'lit_drop', state: 'FL' });
   // Creating the campaign alone does NOT bill — it's in free setup.
@@ -104,18 +103,25 @@ test('usage meter counts only first-knock-started campaigns at the org rate', { 
   assert.strictEqual(afterCreate.json.usage.setupCount, 1, 'the un-canvassed campaign shows as free setup');
 
   // …a real knock this month starts billing.
+  //
+  // Pinned to the 1st at noon UTC rather than `new Date()`: a first visit in the LAST 7 DAYS of a
+  // month earns the start grace (services/billing/billingMonths.js), so a wall-clock fixture would
+  // make this suite pass for three weeks and fail for the last one. Noon UTC on day 1 is still
+  // day 1 in the campaign's America/New_York default, so no grace, no timezone edge.
+  const now = new Date();
+  const firstOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 12, 0, 0));
   await CanvassActivity.create({
     organizationId: ctx.org._id, campaignId: camp._id, householdId: new mongoose.Types.ObjectId(),
-    userId: ctx.billing.userId, actionType: 'lit_dropped', timestamp: new Date(),
+    userId: ctx.billing.userId, actionType: 'lit_dropped', timestamp: firstOfMonth,
     location: { lat: 30, lng: -81 },
   });
+  // The SERVICE still computes money — every super-admin surface needs it.
   const usage = await currentUsage(ctx.org._id);
   assert.strictEqual(usage.billableCampaigns, 1, 'a canvassed campaign is billable this month');
   assert.strictEqual(usage.totalCents, 30000, 'billed at the $300 default rate');
 
   const afterKnock = await call('GET', '/admin/billing', ctx.billing);
   assert.strictEqual(afterKnock.json.usage.billableCampaigns, 1);
-  assert.strictEqual(afterKnock.json.usage.totalCents, 30000);
 
   // The breakdown names WHICH campaign is billing and since when.
   const u = afterKnock.json.usage;
@@ -123,8 +129,21 @@ test('usage meter counts only first-knock-started campaigns at the org rate', { 
   assert.strictEqual(u.billableCampaigns, u.billing.length, 'count matches the breakdown');
   assert.strictEqual(u.billing[0].name, 'Fall');
   assert.ok(u.billing[0].firstKnockAt, 'the billing line carries its first-knock date');
-  assert.strictEqual(u.billing[0].amountCents, 30000);
   assert.strictEqual(u.setupCount, 0, 'Fall is now billing, not setup');
+
+  // …but NO DOLLAR FIGURE may reach the CUSTOMER. Pricing is negotiated per client and per race,
+  // so it belongs in a conversation with the account manager, never on their dashboard. Negative
+  // assertions on purpose: a regression that re-adds money to this payload has to fail here rather
+  // than ship quietly (services/billing/statement.js → publicUsage).
+  assert.ok(!('totalCents' in u), 'the customer meter carries no running total');
+  assert.ok(!('rateCents' in u), 'the customer meter carries no rate');
+  assert.ok(!('amountCents' in u.billing[0]), 'no per-campaign amount');
+  assert.ok(!('rateCents' in u.billing[0]), 'no per-campaign rate');
+  assert.ok(!('pricePerCampaignCents' in afterKnock.json), 'the plan summary carries no price');
+  assert.ok(
+    !JSON.stringify(afterKnock.json).includes('30000'),
+    'no dollar amount anywhere in the customer billing payload'
+  );
 
   // A second un-canvassed campaign shows in setup, never on the bill.
   await Campaign.create({ organizationId: ctx.org._id, name: 'Winter', type: 'lit_drop', state: 'FL' });

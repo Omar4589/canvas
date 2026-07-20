@@ -7,7 +7,7 @@ import {
   setActiveOrgId,
 } from '../api/client.js';
 import { consoleHomePath } from '../lib/homePath.js';
-import { autoSelectOrgId, consoleMemberships, isConsoleRole } from '../lib/roles.js';
+import { activeOrgIdForLogin, consoleMemberships, isConsoleRole } from '../lib/roles.js';
 
 const AuthContext = createContext(null);
 
@@ -48,12 +48,15 @@ export function AuthProvider({ children }) {
     // is no choice to make and the picker is skipped. The old rule (memberships.length === 1)
     // auto-selected a CANVASSER org for a canvasser-only user, and did nothing at all for an
     // admin-in-A / canvasser-in-B user, who then hit the picker and could choose the org
-    // they have no console in. See lib/roles.js.
-    if (!res.user.isSuperAdmin) {
-      const onlyOrg = autoSelectOrgId(res.memberships || []);
-      setActiveOrgId(onlyOrg); // null removes the key — see api/client.js
-      setActiveOrgIdState(onlyOrg);
-    }
+    // they have no console in. A super admin always gets null — see lib/roles.js.
+    //
+    // Runs UNCONDITIONALLY now. It used to be skipped for super admins, which didn't just
+    // decline to pick an org — it left whatever was already in localStorage untouched, so a
+    // remembered org silently decided the landing page on every future login. Writing null
+    // here actively clears the key (see api/client.js).
+    const onlyOrg = activeOrgIdForLogin(res.user, res.memberships || []);
+    setActiveOrgId(onlyOrg); // null removes the key — see api/client.js
+    setActiveOrgIdState(onlyOrg);
     return res;
   }
 

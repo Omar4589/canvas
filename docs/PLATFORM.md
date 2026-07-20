@@ -27,6 +27,20 @@ platform itself.
 Super admins work in a **platform view** (no single active organization). From there they can drop into
 any org to work inside it, then come back out.
 
+**Where you land, on both clients:** *signing in starts you in the platform view; reloading keeps you
+where you were.* Typing your password always clears the remembered organization, so a super admin who
+is also an admin of some org lands on the Control Room rather than that org's home — your home is the
+platform. Reload, session restore, and app resume deliberately leave the remembered org alone, so a
+refresh mid-task doesn't throw away your place.
+
+The rule lives in `activeOrgIdForLogin` ([client/src/lib/roles.js](../client/src/lib/roles.js)) and,
+on mobile, in `app/login.jsx`. Note it can't be expressed by simply not auto-picking: a super admin
+who is an admin of exactly **one** org would still be auto-entered by the ordinary single-membership
+rule, which is the behavior being removed. Web previously skipped the whole block for super admins,
+which didn't just decline to pick — it left a remembered org id in `localStorage` deciding the landing
+page on every future login, and only an explicit **Sign Out** cleared it (an expired session did not,
+so "signed out then in" and "session expired then in" landed in different places).
+
 ## The screens
 
 - **Control Room** — the platform's home page: headline totals (organizations, users, super admins,
@@ -168,7 +182,22 @@ server-searched, filtered, paged account list as the web (promote and clear-lock
 **Activity** is the cross-org live feed with "Load older" history. **More** holds your account,
 Help, the theme toggle, "Switch into an organization", and Sign out. The phone version is for
 monitoring and the handful of actions worth having in the field — billing changes, org deletion,
-imports/People/Support-access review stay on the web console.
+imports/People review stay on the web console.
+
+**Entering a customer org from the phone works the same way it does on the web.** Each org card says
+how you get in — `internal`, `session open`, or **needs a session** — and tapping one that needs a
+grant opens the same reason/kind/length sheet the web's 403 modal uses
+([SupportAccessGate.jsx](../mobile/components/SupportAccessGate.jsx), mounted once in
+`(app)/_layout.jsx` because the 403 can surface from any org-scoped query on any screen). The field
+set is deliberately identical to the web's `StartSupportSessionForm`, including the 10-character
+reason minimum, so the audit log reads the same whichever client wrote it. Declining **leaves the
+org** rather than just closing the sheet — a dismissed sheet over a still-org-scoped screen re-fires
+the 403 and reopens itself, which is the loop the web client shipped and fixed. Reviewing the access
+log and the grant history stays on the web console; the phone can start, see, and end a session.
+
+Before this, mobile had no handling for that 403 at all: tapping a customer org's card persisted the
+org id, navigated to the admin console, and every query failed with a Retry button that could never
+succeed and no way out but signing out.
 
 ## When Doorline staff can see customer data
 

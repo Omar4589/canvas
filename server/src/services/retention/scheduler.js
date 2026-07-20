@@ -4,6 +4,7 @@ import { QUEUE_NAMES } from '../../queues/index.js';
 import { purgeDeletedIdentities, JOB_NAME } from './purgeDeletedIdentities.js';
 import { runRetentionTriggers, TRIGGER_JOB } from './triggers.js';
 import { recomputeLive, recomputeDaily, STATS_JOB } from '../platform/platformStats.js';
+import { reconcileAllCampaignStats, CAMPAIGN_STATS_JOB } from '../reports/campaignCounters.js';
 import { PLATFORM_METRICS } from '../../models/PlatformStats.js';
 
 // Registers the repeatable maintenance jobs on the worker dyno.
@@ -27,6 +28,15 @@ export const TRIGGERS_CRON = process.env.RETENTION_TRIGGERS_CRON || '41 4 * * *'
 // (03:17) and the triggers (04:41).
 export const PLATFORM_STATS_CRON = process.env.PLATFORM_STATS_CRON || '47 3 * * *';
 
+// Nightly drift-correction for the per-campaign Campaign.stats counters. The write-side bump is a
+// non-transactional read-compute-write (services/reports/campaignCounters.js documents the
+// same-door race), and drift is SILENT: the campaign Home card keeps rendering a stale knock count
+// with no error, disagreeing with the live per-round table directly beneath it. That is exactly how
+// a client report goes out with the wrong number, so the repair runs on a schedule rather than
+// waiting for someone to notice and run the CLI. 04:07 keeps it clear of the platform-stats
+// recompute (03:47) and the retention triggers (04:41).
+export const CAMPAIGN_STATS_CRON = process.env.CAMPAIGN_STATS_CRON || '7 4 * * *';
+
 // The `label` is not decoration: the health surface reports on every job in this list, and when one
 // goes quiet the operator needs to be told WHICH promise stopped being kept.
 export const REPEATABLE_JOBS = [
@@ -46,6 +56,11 @@ export const REPEATABLE_JOBS = [
 export const MAINTENANCE_JOBS = [
   ...REPEATABLE_JOBS,
   { name: STATS_JOB, cron: PLATFORM_STATS_CRON, label: 'The nightly platform-stats reconcile' },
+  {
+    name: CAMPAIGN_STATS_JOB,
+    cron: CAMPAIGN_STATS_CRON,
+    label: 'The nightly campaign-counter reconcile',
+  },
 ];
 
 /** Producer side: declare the repeatable schedule. Idempotent — BullMQ dedupes on (name, cron). */
@@ -99,6 +114,22 @@ export async function processMaintenanceJob(job) {
       ` · daily series rebuilt (${daily.days} day rows)`
     );
     return live;
+  }
+  if (job.name === CAMPAIGN_STATS_JOB) {
+    const res = await reconcileAllCampaignStats({ apply: true });
+    // Named on purpose when something was actually wrong: a counter that drifts every night is a
+    // bug in the bump hooks, and the only way anyone finds out is if the repair says which campaign
+    // it kept repairing.
+    if (res.drifted || res.unseeded) {
+      console.warn(
+        `[maintenance] ${CAMPAIGN_STATS_JOB}: repaired ${res.drifted} drifted, ` +
+        `seeded ${res.unseeded} of ${res.scanned} campaign(s) — ` +
+        res.details.map((d) => `${d.name} (${d.diffs.join(', ') || d.state})`).join('; ')
+      );
+    } else {
+      console.log(`[maintenance] ${CAMPAIGN_STATS_JOB}: ${res.scanned} campaign(s) checked, no drift`);
+    }
+    return res;
   }
   throw new Error(`Unknown maintenance job: ${job.name}`);
 }

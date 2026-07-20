@@ -8,6 +8,7 @@ import StatCard from '../components/StatCard.jsx';
 import CampaignFormDrawer from '../components/campaigns/CampaignFormDrawer.jsx';
 import CampaignCard from '../components/campaigns/CampaignCard.jsx';
 import CampaignsTable from '../components/campaigns/CampaignsTable.jsx';
+import ArchiveNudge from '../components/ArchiveNudge.jsx';
 import {
   Modal,
   Button,
@@ -293,6 +294,14 @@ export default function CampaignsPage() {
         </div>
       ) : (
         <>
+          {/* Past their election day and still live — still billing. Org admins only: they're the
+              only ones who can act on it (the Archive menu item below is behind the same gate). */}
+          {isOrgAdmin && (
+            <ArchiveNudge
+              campaigns={campaigns}
+              onArchive={(c) => update.mutate({ id: c._id, body: { isActive: false } })}
+            />
+          )}
           <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatCard
               label="Campaigns"

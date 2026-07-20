@@ -378,12 +378,19 @@ export default function OrganizationsPage() {
               this month ({rollupQ.data.month}) · {rollupQ.data.billableCampaigns} billable campaign
               {rollupQ.data.billableCampaigns === 1 ? '' : 's'}
             </div>
-            <div className="flex flex-wrap gap-1.5 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
               {Object.entries(rollupQ.data.byStatus).map(([s, n]) => (
                 <span key={s} className="rounded-full bg-sunken px-2 py-0.5 font-medium text-fg-muted">
                   {n} {s.replace('_', ' ')}
                 </span>
               ))}
+              {/* This strip is the LIVE running month; closing a past month is the other job. */}
+              <button
+                onClick={() => navigate('/super-admin/billing')}
+                className="font-semibold text-brand-accent underline decoration-dotted underline-offset-2 hover:opacity-80"
+              >
+                Close a month →
+              </button>
             </div>
           </div>
           {rollupQ.data.organizations.some((r) => r.totalCents > 0) && (
@@ -462,7 +469,9 @@ export default function OrganizationsPage() {
                 { key: 'campaigns', label: 'Campaigns' },
                 { key: 'created', label: 'Created', sortable: true },
                 { key: 'trialEnds', label: 'Trial ends', sortable: true },
-                { key: 'rate', label: 'Rate' },
+                // "Org default" — individual campaigns can carry a negotiated override
+                // (services/billing/rate.js), so this column never implies rate × campaigns.
+                { key: 'rate', label: 'Org rate' },
                 { key: 'month', label: 'This month' },
                 { key: 'billing', label: 'Billing' },
                 { key: 'actions', label: '' },

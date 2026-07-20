@@ -299,18 +299,25 @@ export default function AdminTimeline() {
   // it. It cannot be computed here: summing rows gives the RAW event count, which counts a house two
   // canvassers both worked twice. (Web had the same flaw: its Doors card showed 1,255 while the
   // campaign Home tab showed 1,252.) The raw figure still lives in the reconciliation line below.
+  // SURVEY DOORS is deduped server-side for the same reason and was fixed alongside it: summing the
+  // per-canvasser survey column counts a door two canvassers both surveyed twice, so the card read
+  // 990 where the campaign total was 986. It also sat in the connection-rate numerator over a
+  // deduped denominator — two different units in one fraction.
   const kpis = useMemo(() => {
     const doors = data.billableKnocks ?? 0;
-    let surveys = 0;
+    let surveys = data.billableSurveyDoors ?? null;
+    let rawSurveys = 0;
     let lit = 0;
     let hours = 0;
     let rawDoors = 0;
     for (const r of coordRows) {
       rawDoors += r.dayKnocks || 0;
-      surveys += r.daySurveys || 0; // survey DOORS — the connection-rate numerator
+      rawSurveys += r.daySurveys || 0;
       lit += r.dayLit || 0;
       hours += r.hoursOnDoors || 0;
     }
+    // Older server: fall back to the raw sum rather than render a blank card.
+    if (surveys == null) surveys = rawSurveys;
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
     // Pace stays raw effort: it's a per-person rate, not a billing figure.
     const doorsPerHour = hours > 0 ? rawDoors / hours : null;
@@ -325,7 +332,14 @@ export default function AdminTimeline() {
       restrictedDoors: data.restrictedDoors ?? 0,
       billRestricted: Boolean(data.billRestrictedDoors),
     };
-  }, [coordRows, data.billableKnocks, data.billableDoors, data.restrictedDoors, data.billRestrictedDoors]);
+  }, [
+    coordRows,
+    data.billableKnocks,
+    data.billableSurveyDoors,
+    data.billableDoors,
+    data.restrictedDoors,
+    data.billRestrictedDoors,
+  ]);
 
   // "Knocking N of M": M = the current roster UNION everyone who knocked in the range; N = how
   // many of them actually knocked. The roster alone undercounted both numbers — a canvasser who

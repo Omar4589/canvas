@@ -107,6 +107,16 @@ export async function api(
         const current = getCurrentToken();
         if (!current || current === token) err.code = 'SESSION_REVOKED';
       }
+      // Entering a CUSTOMER org the super admin isn't a member of needs a time-boxed support
+      // grant (middleware/orgContext.js). Deliberately NOT in ORG_CONTEXT_ERRORS: that set
+      // routes into recoverOrgContext, which ejects to the platform view — and ejecting is the
+      // answer to DECLINING, not the default. The default is to offer the grant sheet, so the
+      // operator can state a reason and go in. err.data carries organizationId/organizationName
+      // for the prompt. Untagged, this 403 fell through to a Retry button that could never
+      // succeed — the same dead end the web client shipped and then fixed.
+      if (res.status === 403 && data?.code === 'SUPPORT_ACCESS_REQUIRED' && !err.code) {
+        err.code = 'SUPPORT_ACCESS_REQUIRED';
+      }
       throw err;
     }
     return data;

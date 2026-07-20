@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId, setActiveOrgId } from '../api/client.js';
 import { resolveHomePath } from '../lib/homePath.js';
-import { autoSelectOrgId } from '../lib/roles.js';
+import { activeOrgIdForLogin } from '../lib/roles.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import PasswordRequirements from '../components/PasswordRequirements.jsx';
 import { isStrongPassword, passwordProblem } from '../lib/validators.js';
@@ -36,7 +36,9 @@ export default function ChangePasswordPage() {
   // (mustChangePassword: false), so resolveHomePath won't bounce back to this page.
   function routeOnward(res) {
     const memberships = res.memberships || [];
-    if (!res.user.isSuperAdmin) setActiveOrgId(autoSelectOrgId(memberships)); // null clears
+    // Same rule as login — this screen IS a sign-in. Unconditional so a super admin's stale
+    // remembered org is actively cleared rather than left to decide the landing page.
+    setActiveOrgId(activeOrgIdForLogin(res.user, memberships)); // null clears
     const dest = resolveHomePath({
       user: res.user,
       memberships,

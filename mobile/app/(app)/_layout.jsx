@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { Stack, Redirect } from 'expo-router';
 import { useAuthToken, useAuthReady } from '../../lib/authState';
 import AddedToOrgBanner from '../../components/AddedToOrgBanner';
+import SupportAccessGate from '../../components/SupportAccessGate';
 import { DrawerProvider } from '../../lib/DrawerContext';
 import CanvasserDrawer from '../../components/CanvasserDrawer';
 import { refreshSession } from '../../lib/session';
@@ -46,6 +47,12 @@ export default function AppLayout() {
             notified when they're added to an org. Renders nothing when there's
             nothing new. */}
         <AddedToOrgBanner />
+        {/* Answers a SUPPORT_ACCESS_REQUIRED 403 with the grant sheet. Mounted here, once,
+            because that 403 can surface from ANY query on ANY org-scoped screen — a per-screen
+            handler is one somebody forgets on the next screen, and the gap is a dead end with no
+            way out. Sits below the auth gate above, so it can never appear over login. Renders
+            null when idle. */}
+        <SupportAccessGate />
         {/* Canvasser drawer overlay — painted last so it sits above the map and
             the bottom sheet. Inert (renders null) until a screen's header opens
             it, so it never appears on admin tab screens. */}

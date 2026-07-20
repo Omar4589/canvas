@@ -2,11 +2,15 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
+import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
+import { Statement } from '../../models/Statement.js';
 import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
-import { monthlyStatement } from '../../services/billing/statement.js';
+import { resolveRateCents } from '../../services/billing/rate.js';
+import { statementDrift } from '../../services/billing/statementDrift.js';
+import { currentMonth, monthDayBounds, monthlyStatement } from '../../services/billing/statement.js';
 
 // The account-manager surface: /super-admin/organizations/:orgId/billing.
 // Super-admin only — org admins get the read-mostly /admin/billing instead.
@@ -241,15 +245,289 @@ router.post('/extend-trial', async (req, res, next) => {
   }
 });
 
+// ── Per-campaign rates ────────────────────────────────────────────────────────────────────────
+// The negotiated price for ONE race, so a firm running a governor's race and a school-board race
+// can be billed differently inside a single org. Lives here, behind requireSuperAdmin, and
+// deliberately NOT on routes/admin/campaigns.js — org admins and team leads reach that router and
+// would be able to read (and set) their own price. `Campaign.pricePerCampaignCents` is
+// `select: false` so it can't leak through the campaign routes' lean-doc spreads either.
+
+const campaignRateSchema = z.object({
+  // .nullable() is the whole point: null restores "inherit the org rate", which a plain number
+  // makes unexpressible from the UI. Same tri-state discipline as billRestrictedDoors.
+  pricePerCampaignCents: z.number().int().min(0).max(10_000_000).nullable(),
+});
+
+router.get('/campaigns', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org, sub } = loaded;
+    const campaigns = await Campaign.find(
+      { organizationId: org._id },
+      { name: 1, isActive: 1, archivedAt: 1 }
+    )
+      .select('+pricePerCampaignCents')
+      .sort({ isActive: -1, createdAt: -1 })
+      .lean();
+    res.json({
+      orgRateCents: resolveRateCents(null, sub),
+      campaigns: campaigns.map((c) => ({
+        campaignId: String(c._id),
+        name: c.name,
+        isActive: c.isActive,
+        archivedAt: c.archivedAt ?? null,
+        pricePerCampaignCents: c.pricePerCampaignCents ?? null, // null = inherits
+        effectiveRateCents: resolveRateCents(c, sub),
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/campaigns/:campaignId', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org, sub } = loaded;
+    const { campaignId } = req.params;
+    if (!mongoose.isValidObjectId(campaignId)) {
+      return res.status(400).json({ error: 'Invalid campaign id' });
+    }
+    const data = campaignRateSchema.parse(req.body);
+    // Org-scoped, never findById: an unscoped lookup would let a foreign campaignId be repriced
+    // through this org's URL (same rule as services/reports/billRestricted.js).
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: org._id }).select(
+      '+pricePerCampaignCents'
+    );
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const from = campaign.pricePerCampaignCents ?? null;
+    const to = data.pricePerCampaignCents;
+    if (from !== to) {
+      campaign.pricePerCampaignCents = to;
+      await campaign.save();
+      await SubscriptionEvent.create({
+        organizationId: org._id,
+        byUserId: req.user._id,
+        changes: { campaignRate: { campaignId: String(campaign._id), campaignName: campaign.name, from, to } },
+        reason: to === null ? 'Per-campaign rate cleared' : 'Per-campaign rate set',
+      });
+    }
+    res.json({
+      campaignId: String(campaign._id),
+      name: campaign.name,
+      pricePerCampaignCents: to,
+      effectiveRateCents: resolveRateCents({ pricePerCampaignCents: to }, sub),
+    });
+  } catch (err) {
+    if (err?.name === 'ZodError') return res.status(400).json({ error: err.issues?.[0]?.message || 'Invalid input' });
+    next(err);
+  }
+});
+
+// The live statement for a month, PLUS the frozen one if it's been issued, plus the diff between
+// them. The live result is spread at the top level so every existing consumer keeps working.
 router.get('/statement', async (req, res, next) => {
   try {
     const loaded = await loadOrgSub(req, res);
     if (!loaded) return;
     const { org } = loaded;
-    const statement = await monthlyStatement(org._id, req.query.month);
-    res.json(statement);
+    const live = await monthlyStatement(org._id, req.query.month);
+    const issued = await Statement.findOne({
+      organizationId: org._id,
+      month: req.query.month,
+      status: 'issued',
+    })
+      .populate('issuedByUserId', 'firstName lastName')
+      .lean();
+    res.json({ ...live, statement: issued || null, drift: statementDrift(issued, live) });
   } catch (err) {
     if (err?.status === 400) return res.status(400).json({ error: err.message });
+    next(err);
+  }
+});
+
+// ── Issuing ───────────────────────────────────────────────────────────────────────────────────
+// Freeze a month. From here on that month reads from the frozen row, not from a recompute, and any
+// later divergence surfaces as drift rather than silently rewriting what you invoiced.
+
+const issueSchema = z.object({
+  externalRef: z.string().trim().max(200).optional(),
+  force: z.boolean().optional(),
+});
+
+router.post('/statement/:month/issue', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org, sub } = loaded;
+    const { month } = req.params;
+    if (!monthDayBounds(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
+    const data = issueSchema.parse(req.body || {});
+
+    // Internal orgs are permanently non-billable and never appear on a revenue surface. Check BOTH
+    // signals: billing-rollup filters on the subscription status and the status chokepoint on the
+    // org flag, so an org whose two drifted apart would otherwise slip past whichever we picked.
+    if (org.isInternal || sub.status === 'internal') {
+      return res.status(403).json({
+        error: 'Internal organizations are never billed and cannot have statements issued.',
+        code: 'INTERNAL_NOT_BILLABLE',
+      });
+    }
+    // Don't freeze a month that's still accumulating knocks. `currentMonth()` is UTC while each
+    // campaign's month boundary is its own timezone, so this is a deliberate approximation: it can
+    // let a behind-UTC org's October be issued during the first hours of Nov 1 UTC. `force` exists
+    // for the real cases that need it (a customer closing out early, a prepay).
+    if (!data.force && month >= currentMonth()) {
+      return res.status(422).json({
+        error: `${month} has not finished yet — issue it once the month closes, or pass force to override.`,
+        code: 'MONTH_NOT_ENDED',
+      });
+    }
+    // Cheap, friendly pre-check. The real guard is the duplicate-key catch below.
+    const existing = await Statement.findOne({ organizationId: org._id, month, status: 'issued' }).lean();
+    if (existing) {
+      return res.status(409).json({
+        error: `${month} is already issued. Void it first to reissue.`,
+        code: 'ALREADY_ISSUED',
+        statementId: String(existing._id),
+      });
+    }
+
+    const live = await monthlyStatement(org._id, month);
+    let statement;
+    try {
+      statement = await Statement.create({
+        organizationId: org._id,
+        month,
+        status: 'issued',
+        rateCents: live.rateCents,
+        rulesVersion: live.rulesVersion,
+        totalCents: live.totalCents,
+        lines: live.lines,
+        issuedAt: new Date(),
+        issuedByUserId: req.user._id,
+        externalRef: data.externalRef || '',
+      });
+    } catch (err) {
+      // THE race guard. Two concurrent issues both pass the pre-check; the partial unique index
+      // lets exactly one insert win and the loser lands here. No transactions exist in this
+      // codebase, so single-document atomicity is doing the work.
+      if (err?.code === 11000) {
+        return res.status(409).json({ error: `${month} was issued by someone else just now.`, code: 'ALREADY_ISSUED' });
+      }
+      throw err;
+    }
+
+    // Point the most recent voided row at its replacement. Best-effort: the statement is already
+    // committed and correct, and a broken back-reference must never fail an issue.
+    try {
+      const prior = await Statement.findOne({ organizationId: org._id, month, status: 'void' })
+        .sort({ voidedAt: -1 })
+        .select({ _id: 1 });
+      if (prior) {
+        await Statement.updateOne({ _id: prior._id }, { $set: { supersededByStatementId: statement._id } });
+      }
+    } catch {
+      /* leave the back-reference unset rather than fail a committed issue */
+    }
+
+    // If this throws, the statement still carries issuedAt/issuedByUserId — the audit is not lost,
+    // so do NOT roll the statement back.
+    await SubscriptionEvent.create({
+      organizationId: org._id,
+      byUserId: req.user._id,
+      changes: {
+        statementIssued: {
+          month,
+          totalCents: statement.totalCents,
+          rulesVersion: statement.rulesVersion,
+          statementId: String(statement._id),
+          externalRef: statement.externalRef || null,
+        },
+      },
+      reason: 'Statement issued',
+    });
+    res.status(201).json({ statement: statement.toObject() });
+  } catch (err) {
+    if (err?.name === 'ZodError') return res.status(400).json({ error: err.issues?.[0]?.message || 'Invalid input' });
+    next(err);
+  }
+});
+
+const voidSchema = z.object({ reason: z.string().trim().min(1).max(2000) });
+
+// Void an issued statement. Never an edit — the row survives so the history of what was invoiced,
+// and what replaced it, stays readable. A reason is required for the same purpose it is on suspend
+// and cancel: future-you reads it to learn why.
+router.post('/statement/:statementId/void', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org } = loaded;
+    const { statementId } = req.params;
+    if (!mongoose.isValidObjectId(statementId)) {
+      return res.status(400).json({ error: 'Invalid statement id' });
+    }
+    const data = voidSchema.parse(req.body || {});
+    // Atomic claim. The organizationId in the FILTER is what stops a cross-org void; the
+    // status:'issued' is what makes a double-void a clean 409 instead of a silent second write.
+    const statement = await Statement.findOneAndUpdate(
+      { _id: statementId, organizationId: org._id, status: 'issued' },
+      {
+        $set: {
+          status: 'void',
+          voidedAt: new Date(),
+          voidedByUserId: req.user._id,
+          voidReason: data.reason,
+        },
+      },
+      { new: true }
+    );
+    if (!statement) {
+      return res.status(409).json({
+        error: 'That statement is not issued — it may already be void, or belong to another organization.',
+        code: 'NOT_ISSUED',
+      });
+    }
+    await SubscriptionEvent.create({
+      organizationId: org._id,
+      byUserId: req.user._id,
+      changes: {
+        statementVoided: {
+          month: statement.month,
+          totalCents: statement.totalCents,
+          statementId: String(statement._id),
+        },
+      },
+      reason: data.reason,
+    });
+    res.json({ statement: statement.toObject() });
+  } catch (err) {
+    if (err?.name === 'ZodError') return res.status(400).json({ error: err.issues?.[0]?.message || 'Invalid input' });
+    next(err);
+  }
+});
+
+// Every statement ever issued or voided for this org, newest first — the paper trail.
+router.get('/statements', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org } = loaded;
+    const statements = await Statement.find(
+      { organizationId: org._id },
+      { lines: 0 } // the list doesn't need every campaign line
+    )
+      .sort({ month: -1, issuedAt: -1 })
+      .populate('issuedByUserId', 'firstName lastName')
+      .populate('voidedByUserId', 'firstName lastName')
+      .limit(200)
+      .lean();
+    res.json({ statements });
+  } catch (err) {
     next(err);
   }
 });
