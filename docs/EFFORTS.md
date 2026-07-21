@@ -129,9 +129,12 @@ Your campaign starts as one default walk list ("Main") owning every door.
 When two teams work the **same** territory, you don't need two walk lists — walk lists own *disjoint
 doors*, so splitting the territory is one option, but the simpler path is one walk list where each crew
 gets its own books:
-1. **Users** → set each canvasser's **Coordinator** to their crew lead (an org admin) — e.g. paid folks
-   under "Paid Lead", volunteers under "Vol Lead". This is what defines a crew. See [USERS.md](USERS.md).
-2. **Team** tab → add both crews to the campaign (grouped by crew, so you can see each team).
+1. **Team** tab → **Add to the campaign** → add everyone from both crews. This comes first: a crew is a
+   fact about *this campaign*, so it can only be set on someone already on the campaign's team.
+2. Still on the **Team** tab → click a canvasser → set their **Crew (coordinator)** to their crew lead
+   (an admin or team lead) — e.g. paid folks under "Paid Lead", volunteers under "Vol Lead". This is what
+   defines a crew, and the Team tab is the **only** place you set one. The team list then groups by crew,
+   so you can see each team. See [USERS.md](USERS.md).
 3. **Turf Cutting** → cut the walk list's pass into books (draw the crews' areas, or by size/precinct) → **Accept**.
 4. Still on Turf Cutting → in the assign panel, use the **crew filter** to show just "Paid Lead", **Select
    all**, and assign them to the paid books; repeat for the volunteers. Books are disjoint and each
@@ -143,9 +146,13 @@ each crew's doors, survey doors, surveys taken and connection rate side by side,
 that the crews add up to. You no longer need two walk lists just to keep two crews' numbers apart —
 split the territory only if you actually want them working separate doors.
 
-A team's numbers follow the **coordinator you have set today**: change someone's coordinator and *all*
-of their doors move onto the new crew, so a crew you forgot to set at the start is fixable after the
-fact. Someone *leaving* moves nothing — their doors stay on the crew they worked for. See
+A team's numbers follow the **crew you have set today, in this campaign**: change someone's crew and
+*all* of their doors **here** move onto the new crew, so a crew you forgot to set at the start is
+fixable after the fact — and their doors in your *other* campaigns don't budge. That holds for someone
+you've deactivated too, as long as they're still on this campaign's team, which is how you rescue their
+doors from the "No team" bucket. Someone *leaving* moves nothing — their doors stay on the crew they
+worked for. **Removing** them from the campaign takes their crew row with it, so if you need to move
+their doors to another crew later, add them back to the campaign first. See
 [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
 
 ### Assign new voters (Intake)

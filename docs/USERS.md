@@ -96,76 +96,106 @@ A membership's **role** decides what a person can do in that org:
 Team lead is how you hand a trusted person a campaign to run **without** making them a full org admin.
 The full power matrix and enforcement details are in [ROLES.md](ROLES.md).
 
-## Coordinators (who oversees whom)
+## Crews & coordinators (who oversees whom)
 
-Each member can optionally have a **coordinator** — an admin in the same org who oversees them. Use it
-when one campaign has several admins splitting the team (e.g. two vendors, or a paid vs. volunteer
-crew): tag each canvasser with the admin who runs their group, so you can see and report on "who
-reports to whom." A coordinator must be an **admin or team lead in this org**; you can leave it as
-*None*.
+Anyone on a campaign's team can be put on a **crew** — given a **coordinator**, an admin or team lead
+who oversees them **on that campaign**. Use it when one campaign has several people splitting the work
+(e.g. two vendors, or a paid vs. volunteer crew): put each canvasser under whoever runs their group, so
+you can see and report on "who reports to whom." A coordinator must be an **admin or team lead in this
+org**; leaving someone on *no coordinator* is a real, ordinary answer, not a gap.
 
-You set it two ways, both on the Users page:
+**A crew belongs to a campaign, not to the organization.** The same canvasser can work two races under
+two different coordinators — Maria walks HD54 for Asa and HD64 for Frank — and each campaign keeps its
+own answer. Changing her crew on one campaign moves nothing on the other. (This used to be one crew per
+person per *org*, one slot. Two leads doing their jobs normally overwrote each other, and the re-stamp
+below then dragged the first campaign's whole history onto the second lead's team.)
 
-- **When adding a member** — pick a "Coordinator (optional)" from the dropdown of this org's admins and
-  team leads.
-- **Later** — open a member's profile and choose/clear their coordinator (it saves immediately).
+### Where you set it
 
-The Users list shows a **Coordinator** column, and a **Coordinator filter** lets you narrow the list to
-everyone a given admin oversees (or "No coordinator").
+**One place: a campaign's Team tab, in the web console.** Open the campaign → **Team** → click the
+person → pick their crew. Before anything commits, a confirmation tells you how many of **that
+campaign's** doors the change would move, and what it will not touch; you can cancel. Admins can do this
+on any campaign; a team lead can on the campaigns they were granted. (The mobile admin app can add and
+create people on a campaign, but crews are set on the console.)
 
-### A team's numbers follow the coordinator you have set today
+The org **Users** page can no longer *set* a crew — it shows them. Open a member's profile and the
+**Crews** block lists **one row per campaign** they're on, with the crew they're on there, each row
+linking straight to that campaign's Team tab. There is no crew dropdown on the profile, no Coordinator
+column or filter on the Users list, and no coordinator field on "Add member": one value on a person's
+org profile cannot be true for somebody who is on two campaigns.
+
+### A team's numbers follow the crew you have set today
 
 This is the part that matters when you report a team's numbers to a client.
 
-**Whoever someone's coordinator is right now, all of that person's doors count for that team** —
-including doors they knocked before you set the coordinator. Three consequences, all of them the ones
-you want:
+**Whoever someone's coordinator is right now, all of that person's doors *in that campaign* count for
+that team** — including doors they knocked before you set the crew. Four consequences, all of them the
+ones you want:
 
-- **Forgetting to set a coordinator is fixable.** Add a canvasser, forget to put them on a crew, let
-  them knock all day — then set their coordinator, and *every* door they knocked moves onto that team.
-  You are not stuck with a permanent pile in "No coordinator" because of a setup step you missed.
-- **Moving someone between teams takes their history with them.** Their old doors go to the new team
-  too, across every campaign and all time. **This means a by-team figure you gave a client last month
-  can change if you reassign someone afterwards** — that is the deliberate trade for the point above.
-  It is reversible: set the coordinator back and the numbers return exactly. Every change is recorded
-  (who moved whom, from which team to which, and how many doors), and the console shows you the
-  count before it commits.
+- **Forgetting to set a crew is fixable.** Add a canvasser, forget to put them on a crew, let them
+  knock all day — then set their coordinator, and *every* door they knocked on that campaign moves onto
+  that team. You are not stuck with a permanent pile in "No coordinator" because of a setup step you
+  missed.
+- **Moving someone between crews takes their history with them — inside that campaign.** Their old
+  doors go to the new team too, all time; their work on your **other** campaigns is not touched.
+  **This means a by-team figure you gave a client last month can change if you reassign someone
+  afterwards** — that is the deliberate trade for the point above, and it is bounded to the one
+  campaign. It is reversible: set the crew back and the numbers return exactly. Every change is
+  recorded (who moved whom, on which campaign, from which crew to which, and how much moved), and the
+  console shows you the door count before it commits.
 - **Someone who leaves keeps their doors on their team.** Deactivate them, take them off the campaign,
   remove them from the org, delete their account — their doors stay where they belong. **Losing a
-  person never moves a number; only a coordinator change does.** (This used to be broken: the team was
-  read from the campaign roster, so removing someone deleted the row the lookup depended on and their
-  doors fell silently into "No coordinator" — the bucket admins deliberately *exclude*. On a live
-  campaign that under-reported one team by **104 doors**.)
+  person never moves a number; only a crew change does.** (This used to be broken: the team was read
+  from the campaign roster, so removing someone deleted the row the lookup depended on and their doors
+  fell silently into "No coordinator" — the bucket admins deliberately *exclude*. On a live campaign
+  that under-reported one team by **104 doors**.)
 - **"No coordinator" stays meaningful.** A candidate knocking their own district genuinely has no team,
   and that bucket is theirs — not a dumping ground for anyone the system lost track of.
 
-**What a coordinator change never touches:** the campaign's own totals, coverage, any rate, or your
-bill. Billing counts doors, not teams. It only changes which *team row* the doors are counted under.
+**What a crew change never touches:** the campaign's own totals, coverage, any rate, or your bill.
+Billing counts doors, not teams. It only changes which *team row* the doors are counted under.
 
-**One thing that surprises people:** if you give a coordinator to someone who *runs a crew*
-themselves, their **own** doors move onto their new coordinator's team. Their crew's doors stay with
-them. The confirmation says so before you commit.
+**Two things that surprise people:**
+
+- If you give a coordinator to someone who *runs a crew* themselves, their **own** doors move onto
+  their new coordinator's team, on that campaign. Their crew's doors stay with them. The confirmation
+  says so before you commit.
+- Because crews are per-campaign, so is "running a crew." Somebody who runs a crew on one campaign but
+  knocks on **another** campaign *without* a crew there lands in that second campaign's "No team"
+  bucket — they fold onto their own team row only where they actually run one.
+
+### Changing a crew after someone is gone
+
+Two different situations, and the difference is whether they're still on the campaign's team:
+
+- **Deactivated, still on the campaign.** Their crew is still settable, and their doors still move —
+  account state never gates the ledger. That matters more than it sounds: on one live org roughly
+  **1,700 doors** sat in "No team" belonging to canvassers who had since been switched off, and every
+  one of them is still fixable by setting the crew.
+- **Removed from the campaign.** Their place on that campaign is deleted, so there is no crew there to
+  set any more; their doors keep the team frozen on them (the 104-door rule above). If you need to move
+  them, **add them back to the campaign first**, then set the crew.
 
 The **Timeline** shows a **by-team breakdown**: every team's doors, survey doors, surveys taken and
 connection rate, with a Campaign row that the teams add up to. See
 [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract) for exactly how a team's doors are
 counted (and what happens in the rare case two teams knock the same house).
 
-**Coordinators are your "crews," and they drive book assignment.** Wherever you assign work in a
-campaign, people are grouped by coordinator:
+**Crews drive book assignment, within the campaign.** Wherever you assign work, people are grouped by
+their crew **on that campaign**:
 
-- The campaign **Team** page groups members into crews (a section per coordinator, plus "No
+- The campaign **Team** page groups the roster into crews (a section per coordinator, plus "No
   coordinator").
 - The **book-assignment** picker (Turf Cutting) has a **crew filter** — pick "Paid Lead" and you see
   only that crew, so you can select the whole team and assign them to the chosen books in one action.
   Each person shows their crew, and a book that ends up with **two crews** flags a "mixed crews" note.
 
 This lets you run, say, a paid team and a volunteer team in **one** walk list: put both crews on the
-Team, set each person's coordinator, cut the books, then assign each crew to its books. **You get
-per-crew totals for free** — the campaign **Timeline** has a by-team table showing each crew's doors,
-survey doors, surveys taken and connection rate, with a Campaign row they add up to. Dividing the
-*doors* into disjoint areas is still what separate walk lists do ([EFFORTS.md](EFFORTS.md)) —
-coordinators divide the *people*, walk lists divide the *territory*; use whichever (or both) fits.
+Team, set each person's crew, cut the books, then assign each crew to its books. **You get per-crew
+totals for free** — the campaign **Timeline** has a by-team table showing each crew's doors, survey
+doors, surveys taken and connection rate, with a Campaign row they add up to. Dividing the *doors* into
+disjoint areas is still what separate walk lists do ([EFFORTS.md](EFFORTS.md)) — crews divide the
+*people*, walk lists divide the *territory*; use whichever (or both) fits.
 
 ## The campaign team (who can work a campaign)
 
@@ -177,8 +207,8 @@ subset of org members who work it. The team is what:
 
 Manage it on the campaign's **Team** page (two panes: add org members on the left, the current team on
 the right — **click a team member** to open a quick, campaign-scoped panel: their activity in this
-campaign, set their crew/coordinator, or remove them from the campaign). A person joins a campaign's team
-these ways, all equivalent:
+campaign, set their crew/coordinator — this is the only place a crew is set — or remove them from the
+campaign). A person joins a campaign's team these ways, all equivalent:
 
 1. **Team page → Add** an existing org member — or **+ New canvasser** to create a brand-new person
    straight onto the team (works on the web console **and** the mobile admin app's Assignments screen).
@@ -186,9 +216,12 @@ these ways, all equivalent:
 3. **Assigning them a book** — an admin assigning a book adds that person to the team automatically.
 
 Because assignment is now **team-only**, the everyday flow is: add people on the Team page first, then
-assign their books. **Admins & super-admins are the exception** — they can be assigned (including
-themselves) on the fly and are added to the team at that moment, so an admin can always self-assign a
-book without a separate step. Everyone appears in these lists, including you — there's no "hide myself."
+assign their books. **Admins, super-admins and a campaign's team leads are the exception** — they can be
+assigned (including themselves) on the fly and are added to the team at that moment, so whoever is
+running the campaign can always self-assign a book without a separate step. (A lead's exception is
+scoped to the campaigns they were granted, and it is new: they used to be refused, so a lead cutting
+turf had to ask an admin to roster them onto their own campaign.) Everyone appears in these lists,
+including you — there's no "hide myself."
 
 ## Passwords & lockouts
 
@@ -244,7 +277,7 @@ Because the account is shared, some things are global and some are per-org:
 | Password | Shared | Any of their org's admins (as a *temporary* password) or the user |
 | Role | Per-org | Each org's admin (admin / team lead / canvasser) — see [ROLES.md](ROLES.md) |
 | Team-lead campaign grants | Per-org (`CampaignManager`) | Each org's admin — which campaigns a lead manages |
-| Coordinator | Per-org (membership) | Each org's admin — points to an admin or team lead in the same org |
+| Crew / coordinator | **Per-campaign** (the campaign roster) | An admin, or a team lead on that campaign — points to an admin or team lead in the same org |
 | Active / inactive | Per-org (membership) | Each org's admin, for their own org |
 | Removed from org | Per-org (membership) | Each org's admin — only removes *their* membership |
 
@@ -270,12 +303,17 @@ removed from the org, or their account is deleted. This matters when you report 
 client: before, removing someone from a campaign silently moved their doors into "No coordinator", the
 bucket you exclude, and a real campaign under-reported one team by **104 doors**.
 
-**Losing a person never moves a number. Reassigning one does** — deliberately. Changing someone's
-coordinator moves *all* of their doors onto the new team (see
-[A team's numbers follow the coordinator you have set today](#a-teams-numbers-follow-the-coordinator-you-have-set-today)),
+**Losing a person never moves a number. Reassigning one does** — deliberately. Changing someone's crew
+moves *all* of their doors **on that campaign** onto the new team (see
+[A team's numbers follow the crew you have set today](#a-teams-numbers-follow-the-crew-you-have-set-today)),
 which is what lets you fix a crew you forgot to set. The two are different events on purpose: a
 roster change you make moves the numbers; somebody leaving does not. See
 [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
+
+**A deactivated person can still be put on a crew; a removed one can't.** Deactivating somebody leaves
+them on the campaign, so their crew is still settable and their doors still move. Removing them from the
+campaign deletes their place on it, and with it the crew field — re-add them to the campaign if you need
+to move their doors.
 
 **Their name stays, within limits.** Deactivation, campaign-removal and org-removal all keep the
 person's name on reports. **Self-deletion is the exception**: the account is scrubbed (the App Store
@@ -290,7 +328,7 @@ The snapshot is **name-only**: email and phone die with the account, immediately
 | What you do | What they lose | What comes back |
 | --- | --- | --- |
 | **Deactivate** their account | Their login, in this org. Reversible any time. | Nothing — they keep their books, because you may well switch them back on tomorrow. |
-| **Remove from a campaign** | That campaign only. | Their books and effort-crew places **on that campaign**. Books they hold on *other* campaigns are untouched. |
+| **Remove from a campaign** | That campaign only, including their crew there. | Their books and effort-crew places **on that campaign**. Books they hold on *other* campaigns — and their crews there — are untouched. |
 | **Remove from the org** | Everything, in this org. | Their books, crews, campaign places and team-lead grants across **every** campaign in the org. |
 | **Delete the account** (the person does this themselves) | The account, permanently. | Everything they were holding, everywhere. |
 
@@ -368,8 +406,11 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   **no migration** is needed. Fields:
   - `acknowledgedAt: Date|null` — `null` = the "added to org" banner is still pending; a timestamp =
     dismissed.
-  - `coordinatorId: ObjectId|null` (ref `User`) — the supervising admin **or team lead** in this org, or
-    `null`. Indexed `{ organizationId, coordinatorId }`.
+  - `coordinatorId: ObjectId|null` (ref `User`) — **legacy, no longer read.** The crew moved to
+    `CampaignAssignment.coordinatorId` (below) when it became per-campaign. Nothing writes it any more
+    except the org-departure cleanup, and no surface reads it; it is left on disk deliberately so a
+    per-team row that moves unexpectedly can be compared against the value it moved *from*. Dropping
+    the field is a separate, later step.
 - **`CampaignManager`** ([server/src/models/CampaignManager.js](../server/src/models/CampaignManager.js))
   — a team lead's grant to manage one campaign: `{ campaignId, userId, organizationId, grantedBy,
   grantedAt }`, unique `(campaignId, userId)`, indexed `{ userId, organizationId }`. Deliberately
@@ -477,25 +518,56 @@ grant — the reset endpoint itself is identical.) The authz side of this is in 
   already have an account from another org; the same privacy guards apply (name revealed only on linking,
   `isMultiOrg` boolean only, added-to-org banner on next login).
 
-## Coordinators
+## Crews (coordinators) — a PER-CAMPAIGN link
 
-A per-org supervisory link: `Membership.coordinatorId` → a `User` who is an **active `admin` or `lead`
-in the same org**. Set on **create** (`POST /admin/memberships`, optional `coordinatorId`) and **update**
-(`PATCH /admin/memberships/:userId`, nullable `coordinatorId`); a shared validator (`resolveCoordinatorId`,
-in [createMember.js](../server/src/services/memberships/createMember.js)) rejects a non-admin/lead /
-cross-org / self reference with `400`, and `''`/`null` clears it. `GET /admin/memberships`
-returns each member's `coordinatorId` (a plain id — the client resolves the name from the same roster, so
-no extra query/populate). The web UI lives in [UsersPage.jsx](../client/src/pages/UsersPage.jsx) (Add-member
-dropdown + table column + filter) and [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx)
-(save-on-change dropdown). No migration needed — absent → `null`. Distinct from **Efforts**, which
-partition the *doors/work*; the coordinator partitions *people*.
+A supervisory link scoped to one campaign: **`CampaignAssignment.coordinatorId`**
+([CampaignAssignment.js](../server/src/models/CampaignAssignment.js), unique `{campaignId, userId}`,
+indexed `{campaignId, coordinatorId}`) → a `User` who is an **active `admin` or `lead` in the same org**.
+Distinct from **Efforts**, which partition the *doors/work*; the crew partitions *people*.
 
-**Surfaced in assignment.** The campaign-roster endpoint `GET /admin/campaigns/:id/assignments`
-([assignments.js](../server/src/routes/admin/assignments.js)) returns each member's `coordinatorId` +
-resolved `coordinatorName` (one `User` lookup over the distinct coordinators). [useCampaignTeam.js](../client/src/lib/useCampaignTeam.js)
-carries it to the book-assignment picker ([BookAssignmentPanel.jsx](../client/src/components/BookAssignmentPanel.jsx)
-— crew filter chips + per-row crew label + a "mixed crews" flag) and the Team page
-([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) — the roster grouped by crew).
+It lived on `Membership.coordinatorId` — unique `{userId, organizationId}`, so **one slot per person per
+org**. Two leads managing two campaigns with a shared canvasser overwrote each other, and the ledger
+re-stamp below then dragged the FIRST campaign's whole history onto the SECOND lead's team, in a race
+that lead does not manage. Reproduced end to end before the fix; locked by
+[perCampaignCrews.int.test.js](../server/test/perCampaignCrews.int.test.js), which is the first suite to
+build **two campaigns in ONE org** (teamAttribution's second campaign is in a different org, so all 22 of
+its tests stayed green through the bug and could never have caught it).
+
+**Read at KNOCK TIME ONLY.** `coordinatorForWrite` ([mobile/canvass.js](../server/src/routes/mobile/canvass.js))
+resolves the crew for the door's campaign and freezes it onto the new ledger row, with a per-request memo
+(a survey submit resolves the team twice — the `SurveyResponse` and its paired activity row must not
+drift). It replaced a zero-query read off `req.activeMembership`, which is per-*org* and is exactly what
+let two leads clobber each other. **Past attribution is never re-derived from the roster**; that is what
+lets a departed coordinator's team keep the doors it supervised, and why hard-deleting the roster row on
+campaign removal is safe.
+
+**Endpoints.**
+
+- **Set / clear** — `PATCH /admin/campaigns/:campaignId/crew/:userId/coordinator`
+  ([leadCrew.js](../server/src/routes/admin/leadCrew.js)), mounted behind `requireCampaignManager`
+  (org admin, super admin, or a lead granted *this* campaign). The `campaignId` comes from the **URL**,
+  which is load-bearing: the gate keys on the same param, so a lead physically cannot address a campaign
+  they weren't granted. Taking it from the body would reopen exactly that hole. `404` when the person
+  holds no roster row on this campaign — there is no crew there to set.
+- **Preview** — `GET …/crew/:userId/coordinator-preview?coordinatorId=<id|none>` returns
+  `{ from, to, doors, activities, surveys, subjectRunsCrew }` from the *same* filter the write uses
+  ([restampCoordinator.js](../server/src/services/memberships/restampCoordinator.js)). `doors` is the
+  deduped `knocksPipeline` count, not the row count — quoting rows next to the word "doors" would move
+  the team row by less than the confirmation promised.
+- **Read-only, org-wide** — `GET /admin/memberships/:userId/crews` returns one row per campaign the
+  person is rostered to (`campaignId`, `campaignName`, `campaignIsActive`, `coordinatorId`,
+  `coordinatorName`). This is what replaced the Users page's single dropdown.
+
+**Web UI.** Setting a crew lives in exactly one component:
+[CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx)'s member panel (picker → staged change →
+[CoordinatorConfirm.jsx](../client/src/components/CoordinatorConfirm.jsx) → commit). The panel is **not**
+gated on the member's active state: a deactivated-but-rostered person's crew must stay settable, which is
+what makes the ~1,700 doors sitting in "No team" on a live org — knocked by people since switched off —
+recoverable at all.
+[UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx) renders the read-only **Crews**
+block from `/crews`; [UsersPage.jsx](../client/src/pages/UsersPage.jsx) lost its Coordinator column,
+coordinator filter and add-member coordinator field. **Mobile has no crew-setting surface** — the campaign
+Team screen adds and creates members only.
 
 **Reports ARE team-scoped — but NOT through `baseFilter`.** `?coordinatorId=<id|none>` on
 `/canvasser-timeline`, plus `GET /admin/reports/team-breakdown` (every team at once, with the
@@ -503,15 +575,55 @@ reconciliation). The team lives on the **ledger** (`CanvassActivity.coordinatorI
 roster — a roster join is what used to lose a canvasser's doors the moment they were taken off a
 campaign.
 
-**Every write of `Membership.coordinatorId` goes through
-[`setMemberCoordinator`](../server/src/services/memberships/setCoordinator.js)**, which updates the
-membership, re-stamps that person's ledger history onto the new team, and files a `CoordinatorChange`
-audit row. It writes the membership *first* on purpose: if the ledger write fails, the drift is a
-finite, shrinking set that a retry or `repair:team-stamps` closes, whereas the reverse order would
-have every subsequent knock add more drift. `test/coordinatorChokePoint.test.js` asserts structurally
-that only three files write the field — the two above and
-[`deleteAccount.js`](../server/src/services/users/deleteAccount.js), **the sanctioned exception**:
-departure clears the crew's membership but must never touch the ledger, or the 104-door bug returns.
+**The lead set is derived from the LEDGER, scoped to the campaign.** `leadIdsForScope(scope)`
+([reports.js](../server/src/routes/admin/reports.js)) = the distinct non-null `coordinatorId` on
+`CanvassActivity` ∪ `SurveyResponse` in that scope — who folds onto their own team row via
+`teamFoldStage`, and who the "No team" bucket must therefore exclude. Both obvious alternatives are
+wrong now: **`Membership`** has no campaign and would fold a lead's doors onto their own team in
+campaigns where they run no crew at all; **`CampaignAssignment`** is a roster gate that is hard-*deleted*
+on removal, so a lead would lose their own folded doors the moment their last crew member came off the
+roster — the 104-door bug through the back door. The stamp already on the ledger cannot be un-said, so it
+survives departure, org removal and roster churn. [auditTeamCounts.js](../server/src/migrations/auditTeamCounts.js)
+imports the identical derivation and fold; an audit that can be wrong in a *different* way from the thing
+it audits is worse than no audit.
+**Consequence, and it is real:** somebody who runs a crew in campaign A but knocks in campaign B without
+one no longer folds onto their own team in B — they land in B's "No team", which is the correct
+per-campaign answer.
+
+**Every write of `CampaignAssignment.coordinatorId` goes through
+[`setMemberCoordinator`](../server/src/services/memberships/setCoordinator.js)**, which updates the roster
+row, re-stamps that person's ledger history *in that campaign* onto the new team, and files a
+`CoordinatorChange` audit row (a no-op re-pick is completely silent — no write, no audit row, or the log
+stops being able to answer "why did this team's number move?"). It writes the roster *first* on purpose:
+if the ledger write fails, the drift is a finite, shrinking set that a retry or `repair:team-stamps`
+closes, whereas the reverse order would have every subsequent knock add more drift.
+`test/coordinatorChokePoint.test.js` asserts structurally which files may write the field:
+`setCoordinator.js`, `leadCrew.js` (create-a-canvasser onto a campaign),
+[`deleteAccount.js`](../server/src/services/users/deleteAccount.js) — **the sanctioned exception**, since
+departure must never touch the ledger or the 104-door bug returns —
+[`migrateCampaignCoordinators.js`](../server/src/migrations/migrateCampaignCoordinators.js) (roster only,
+never the ledger) and `seedDemoOrg.js` (writes roster and ledger in the same run from one crew map, so
+there is no pre-existing history to re-stamp).
+
+**`restampFilter` REQUIRES a `campaignId` and throws without one.** Required rather than
+optional-with-a-default, because an omitted scope silently meaning "everything" *is* the bug this change
+removes. `organizationId` and `userId` are required for the same reason (a cross-tenant write). The rule
+it implements is now: *the current coordinator owns all of that canvasser's history — all time, in this
+campaign.* Changing a crew in campaign A moves zero doors in campaign B.
+
+**`CoordinatorChange`** ([model](../server/src/models/CoordinatorChange.js)) gained a **nullable**
+`campaignId` (`null` = a row written under the old org-wide model, which must stay readable) and an index
+`{campaignId, createdAt}` — "why did THIS campaign's team move?".
+
+> ⚠️ **Known gap (not part of the design).** `GET /admin/campaigns/:id/assignments`
+> ([assignments.js](../server/src/routes/admin/assignments.js)) still joins the crew label from
+> **`Membership.coordinatorId`**, the legacy org-wide field — it was not moved with the rest. Verified
+> against a live server: with `Membership` → Asa and the campaign roster row → Frank, the endpoint returns
+> Asa. Everything *counted* is unaffected (numbers come from the ledger stamp), but the Team page's crew
+> grouping, its member-panel dropdown default, and the book picker's crew filter / "mixed crews" flag all
+> read through [useCampaignTeam.js](../client/src/lib/useCampaignTeam.js) from this endpoint, so they show
+> the stale value and a crew set on the Team tab appears to revert on refetch. Fix = read
+> `CampaignAssignment.coordinatorId` for the campaign, then delete this note.
 
 > 🚨 **Do NOT "mirror the effort scoping" by adding the key to `baseFilter()`.** An earlier version of
 > this doc recommended exactly that, and it is a trap: `baseFilter`'s result is spread into **Household**
@@ -530,7 +642,10 @@ departure clears the crew's membership but must never touch the ledger, or the 1
 
 - **`CampaignAssignment`** ([server/src/models/CampaignAssignment.js](../server/src/models/CampaignAssignment.js))
   — the per-campaign roster, unique `{campaignId, userId}`. It's the source of truth for **campaign
-  membership** (distinct from org `Membership` and from per-walk-list `EffortMember`).
+  membership** (distinct from org `Membership` and from per-walk-list `EffortMember`) and, since crews
+  became per-campaign, it also carries `coordinatorId` — see [Crews (coordinators)](#crews-coordinators--a-per-campaign-link).
+  Removal from a campaign **hard-deletes** the row, crew and all; nothing that must survive a departure
+  may be derived from it.
 - **Team page endpoints** ([server/src/routes/admin/assignments.js](../server/src/routes/admin/assignments.js)):
   `GET /admin/campaigns/:id/assignments` returns the roster enriched with each member's `role` +
   `isSuperAdmin` (joined from `Membership`/`User`) so pickers/Team page can render badges; `POST`
@@ -540,7 +655,11 @@ departure clears the crew's membership but must never touch the ledger, or the 1
   bypass and see all.
 - **Assignment gate** — `partitionAssignable({campaignId, organizationId, userIds})`
   ([campaignRoster.js](../server/src/services/campaignRoster.js)) returns `{ allowed, notOnTeam }`:
-  allowed = already on the roster **or** an org admin/super-admin. Both assign paths use it —
+  allowed = already on the roster, **or** an org admin, **or** a team lead holding a `CampaignManager`
+  grant on **this** campaign (never "is a lead somewhere" — a grant elsewhere must not open this
+  campaign), each only if currently activated; super admins always. The lead branch is new: the check
+  matched `role: 'admin'` only, so a lead running a campaign could not put themselves on a book without
+  asking an admin to roster them first. Both assign paths use it —
   single-book [turfAssignments.js](../server/src/routes/admin/turfAssignments.js) `POST /` and bulk
   [turfs.js](../server/src/routes/admin/turfs.js) `assign-bulk` — returning `409 { code:'not-on-team',
   notOnTeam }` when nothing is allowed. `EffortMember` pre-staging ([efforts.js](../server/src/routes/admin/efforts.js)
@@ -718,8 +837,8 @@ The one place that hands back everything a person was holding. Three callers, th
 | Scope | Caller | Releases |
 |---|---|---|
 | `{}` (global) | account deletion | every org, every campaign |
-| `{ organizationId }` | `DELETE /admin/memberships/:userId` (remove from org) | all of that org's campaigns, **plus** `CampaignManager` grants and the org-level `coordinatorId` links |
-| `{ campaignId }` | `DELETE /admin/campaigns/:id/assignments/:userId` (remove from campaign) | **that campaign only** |
+| `{ organizationId }` | `DELETE /admin/memberships/:userId` (remove from org) | all of that org's campaigns, **plus** `CampaignManager` grants and the legacy org-level `Membership.coordinatorId` links |
+| `{ campaignId }` | `DELETE /admin/campaigns/:id/assignments/:userId` (remove from campaign) | **that campaign only** — including the `CampaignAssignment` row, so the crew goes with it |
 
 The campaign scope was the missing one, and it had the *identical* bug the org path had already
 fixed: it deleted the `CampaignAssignment` and nothing else, leaving the person holding their books.
@@ -728,9 +847,12 @@ Three things make the campaign scope correct, and each is a trap:
 - **It must not be the org scope.** All four work models (`TurfAssignment`, `EffortMember`,
   `CampaignAssignment`, `CampaignManager`) denormalize `campaignId`, so the scope is exact. Reusing
   `{ organizationId }` here would strip the person's books in **every other campaign in the org**.
-- **The coordinator reset is skipped.** `Membership` has **no** `campaignId`, so
+- **The `Membership` coordinator reset is skipped.** `Membership` has **no** `campaignId`, so
   `Membership.updateMany({ coordinatorId: userId })` is inherently org-level. Running it for a
-  campaign removal would sever a supervision link that has nothing to do with that campaign.
+  campaign removal would sever a supervision link that has nothing to do with that campaign. (That
+  field is now legacy — see [Models](#models) — but the org/global scopes still clear it, and it is
+  the one write the crew choke-point test sanctions outside `setCoordinator.js`, precisely because
+  departure must not touch the ledger.)
 - **`CampaignManager` is left alone.** The reason is *authorization*, not taxonomy: the route is
   mounted behind `requireCampaignManager`, which passes for **any lead holding a grant on that
   campaign** — cascading here would let one lead revoke another's grant (or their own) from a
@@ -814,9 +936,55 @@ npm run audit:team-counts -- --campaign=<id>          # READ-ONLY; exits 1 if an
 - **It stamps TODAY's teams onto ALL history.** No historical record of team membership exists to
   recover. Correct for anyone who never changed coordinators; an approximation for anyone who did. From
   the deploy onward, every knock freezes its own team as it happens.
-- **`audit:team-counts` is the gate.** It reconciles every column — doors, survey doors, voters
-  surveyed — on the live data and exits non-zero if the arithmetic doesn't close. Run it before you
-  quote any team's number to a client.
+- **`audit:team-counts` is the gate.** It reconciles every column — doors, survey doors, surveys taken —
+  on the live data, prints the per-team rows, and exits non-zero if the arithmetic doesn't close. Run it
+  before you quote any team's number to a client. With no flags it audits **every campaign in every org**
+  (`--org=<slug>` / `--campaign=<id>` narrow it): campaign ids only exist in the console URL, and a gate
+  nobody can run without hunting for ids is a gate that stops getting run. Read the trap below before
+  trusting a ✓.
+
+### Crews move to the campaign roster — `migrate:campaign-coordinators`
+
+Seeds `CampaignAssignment.coordinatorId` from the old `Membership.coordinatorId`, so the day after the
+migration every campaign answers exactly what the org used to answer — and from then on the answers can
+diverge. Same Run-console rules and the same trailing `--`.
+
+```
+npm run migrate:build-indexes -- --apply              # CampaignAssignment gained an index; prod is autoIndex:off
+npm run migrate:campaign-coordinators -- --preflight  # READ-ONLY. Run FIRST.
+npm run migrate:campaign-coordinators                 # dry run
+npm run migrate:campaign-coordinators -- --apply
+```
+
+- **It writes ONLY `CampaignAssignment`** — not one `CanvassActivity`, not one `SurveyResponse`. That is
+  what makes it re-runnable and reversible-by-doing-nothing: every frozen team stamp stays exactly where
+  it is, so **no door changes hands as a result of running it**.
+- **The idempotency key is `{ coordinatorId: null }` here** — the *inverse* of the ledger backfill above,
+  and correct for the opposite reason: an unset roster row means "no crew chosen", never "deliberately no
+  crew", because nothing has ever been able to choose one. It also means a crew a lead has already set
+  per-campaign is never overwritten by the stale org-level value.
+- **`--preflight` names the orphans**: people with knocks on a campaign they hold no roster row for
+  (removed from it, or an admin handed a book on the fly). Their history keeps the team already frozen on
+  it, so nothing is lost — but there is no row to seed and no future crew change can reach them.
+- **`Membership.coordinatorId` is deliberately left in place.** Dropping it is a separate, later step:
+  keeping it means that if a per-team row moves unexpectedly, the value it moved *from* is still on disk.
+- **Per-TEAM rows CAN move** across this deploy — not from the copy, but because the report's lead set is
+  now derived per campaign from the ledger (above). **Campaign totals are team-blind and cannot move.**
+  So diff the **per-team rows** against a pre-deploy `audit:team-counts` baseline; the totals will agree
+  either way and prove nothing.
+
+> 🚨 **A green reconciliation proves almost nothing. Diff the rows.** The identity `/team-breakdown` and
+> the audit print — `Σ teams − crossTeamDoors == campaign billable` — is **arithmetically incapable of
+> failing**: `crossTeamDoors = Math.max(0, teamSum − knocks)`, and `teamFoldStage` puts every row on
+> exactly one team, so `teamSum >= knocks` always and the check reduces to `knocks == knocks`. The
+> **surveys-taken** column is the same shape one level simpler — Σ of `{$sum: 1}` over a partition is the
+> total by construction. Only **survey doors** can genuinely fail, and only in one situation: two
+> *different* teams surveying the same door-pass (it has no cross-team subtraction to absorb the double
+> claim), which makes it an overlap detector, not a proof that any row landed in the right bucket. **A
+> wrong bucket is still counted, and no sum check can see a bucket** — which is exactly how the original
+> 104-door bug survived. So the verification that actually verifies is the **per-team ROW diff** against a
+> pre-deploy baseline, plus the audit's per-canvasser ledger cross-check. Same reason
+> `perCampaignCrews.int.test.js` asserts per-row.
 
 And **set `deletionLocked: true` on the App Review / Play reviewer demo accounts before you submit.** If a
 reviewer deletes the demo login while testing the delete button, the next submission can't be reviewed.

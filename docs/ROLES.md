@@ -30,9 +30,10 @@ then hand it off. A lead avoids the all-or-nothing choice of making a campaign r
 (which would give them every other campaign and all the org settings too).
 
 Inside a campaign they're granted, a lead is **as powerful as an admin**: import the voter file, attach
-a survey, build walk lists, cut turf, create and activate passes (rounds), assign books, build and
-manage the crew (including creating new canvassers), and see all the reporting — map, timeline,
-insights, early voting, and client reports.
+a survey, build walk lists, cut turf, create and activate passes (rounds), assign books — **including
+to themselves**, since a lead who runs a campaign shouldn't have to ask an admin to put them on a book —
+build and manage the crew (including creating new canvassers), and see all the reporting — map,
+timeline, insights, early voting, and client reports.
 
 ## What a team lead can never do
 
@@ -45,7 +46,9 @@ insights, early voting, and client reports.
   *read* both (to attach a survey to their campaign and to filter by tag) but not create/edit/delete
   templates or tags.
 - **The org Users administration, org settings, or the org voter directory.** A lead builds their crew
-  from a campaign-scoped screen instead (see below).
+  from their campaign's own **Team** tab instead (see below). That's not a consolation prize: a crew
+  belongs to a campaign, so the Team tab is where *everyone* — admins included — sets one. The org
+  Users page only *shows* a person's crews, one row per campaign, read-only.
 - **Grant the team-lead role** or change anyone's grants — only admins do that.
 - **See or touch any campaign they weren't granted** — everything is default-deny; a lead with no
   grants sees an empty console.
@@ -63,9 +66,13 @@ until an admin grants one.
   campaigns they manage. Inside a campaign, every tab an admin sees is there. The org-only areas
   (Overview, Surveys, Tags, Voters, Users) simply aren't in their nav.
 - **Mobile admin app** — they get the same admin tab (Overview / Insights / Map / Books), scoped to
-  their campaigns. If a lead also walks doors, that's a separate thing: they're added to a campaign's
-  walker roster like any canvasser and use the canvassing flow for their own books. When a lead
-  switches into canvass mode, the drawer's **Admin dashboard** row brings them straight back.
+  their campaigns. A campaign's **Team** tile opens that campaign's own crew + book assignments, which
+  a lead can use; the org-wide **Users** screen is a separate, admin-only place, and it isn't offered to
+  a lead at all. (If one reaches it anyway, it now says managing users is an admin task and points back
+  at the campaign Team screen — it used to read "No users yet".) If a lead also walks
+  doors, that's a separate thing: they're added to a campaign's walker roster like any canvasser and
+  use the canvassing flow for their own books. When a lead switches into canvass mode, the drawer's
+  **Admin dashboard** row brings them straight back.
 
 ## If you have different roles in different organizations
 
@@ -140,6 +147,13 @@ build alongside it.
 `campaignHouseholds`, `walklists`, `voted`, `efforts`, `passes`, `setup-status`, `turfs`,
 `turfs/:turfId/assignments`. A lead does everything an admin does inside a granted campaign.
 
+That parity extends past the router gate into the **assignability** check those routers share:
+`partitionAssignable` ([services/campaignRoster.js](../server/src/services/campaignRoster.js)) allows
+anyone on the campaign roster, **any active org `admin`**, **a lead holding a `CampaignManager` grant on
+_this_ campaign**, or a super admin — the lead arm scoped to the campaign, never "is a lead somewhere".
+Without it a lead could cut turf and hand out every book except their own: the check matched role
+`'admin'` only, so self-assignment 409'd as *not on the team*.
+
 **Campaign-targeted org routers** — role `('admin','lead')` at the router, then a per-request check:
 
 - **`campaigns`** ([campaigns.js](../server/src/routes/admin/campaigns.js)) — `GET /` returns only
@@ -181,17 +195,31 @@ cross-org canvasser is allowed here too, with the same privacy guards as the adm
 This is how a lead builds a crew without the org Users admin. Adding/removing *existing* members and
 reading the roster still go through `.../assignments`.
 
-> ⚠️ **A lead's coordinator change is ORG-WIDE, despite the campaign-scoped URL.** The write filter is
-> `{userId, organizationId}` — `Membership` has no `campaignId`, so a coordinator has never been
-> per-campaign. Since the change now also **re-stamps that person's knock history** onto the new crew
-> (see [USERS.md](USERS.md) and [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract)),
-> a lead reorganizing their crew inside one campaign moves that person's doors in **every** campaign
-> in the org. The preview endpoint exists so they see the door count before committing.
+**A lead's coordinator change is confined to the campaign in the URL — structurally, not by
+convention.** A crew lives on `CampaignAssignment.coordinatorId` (unique `{campaignId, userId}`), so
+both the roster write and the **ledger re-stamp** that follows it (see [USERS.md](USERS.md) and
+[METRICS.md](METRICS.md#teams-coordinators--the-counting-contract)) are keyed on
+**`req.params.campaignId`** — resolved through `loadOwnedCampaign`, which also re-checks org ownership.
+That is *the same param* `requireCampaignManager` gated the mount on, which is the whole guarantee: a
+lead physically cannot address a campaign they weren't granted, because there is no campaign id in the
+body to forge. Changing a crew in campaign A moves zero doors in campaign B. The preview endpoint still
+exists so they see the door count before committing — now **this campaign's** count.
+
+> ⚠️ **Take the scope from the URL, never from the body — and never let it default.**
+> `restampFilter` ([restampCoordinator.js](../server/src/services/memberships/restampCoordinator.js))
+> **requires** a `campaignId` and throws without one, rather than treating an omitted scope as
+> "everything". That was the bug: the crew used to live on `Membership` (unique
+> `{userId, organizationId}` — one slot per person per org), so two leads managing two campaigns with a
+> shared canvasser overwrote each other, and the org-wide re-stamp then dragged the **first** campaign's
+> entire history onto the **second** lead's team, in a race that lead does not manage.
 
 Member creation + validation is shared in
 [services/memberships/createMember.js](../server/src/services/memberships/createMember.js)
 (`createOrgMember`, `resolveCoordinatorId` — now accepts admin **or** lead coordinators —,
-`resolveManagedCampaigns`), reused by both `memberships` and `leadCrew`.
+`resolveManagedCampaigns`), reused by both `memberships` and `leadCrew`. `createOrgMember` takes an
+optional `campaignId`, which the lead's crew path supplies and the plain org-Users add does not: joining
+an **org** carries no crew, so with no campaign the create-time re-stamp is skipped entirely — there is
+no race whose history the call has authority over.
 
 ## Granting (admins only)
 
@@ -268,8 +296,19 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) hides create/edit/archive/delete for leads;
   [CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) hides the build/edit affordances;
   [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) reads the picker from the `crew`
-  endpoint and gives leads an inline create-canvasser modal. Login/select-org land a lead on `/campaigns`
-  (they have no `/admin` Overview).
+  endpoint, gives leads an inline create-canvasser modal, and is the **one** place a crew is set (the
+  org Users page shows crews read-only). Login/select-org land a lead on `/campaigns` (they have no
+  `/admin` Overview).
+- **The `/admin/memberships` fork** — that route is admin-only, so any *campaign* page that reads it for
+  a name list breaks for a lead. Three pages now branch on `isOrgAdmin`, calling
+  `/admin/campaigns/:id/crew` instead (same shape, open to the lead who manages the campaign) and keying
+  the query `['admin','campaign-crew',campaignId]` so the two never share a cache entry:
+  `CampaignTeamPage`, [CampaignAssignmentsModal.jsx](../client/src/components/CampaignAssignmentsModal.jsx)
+  (opened from the Campaigns page's **ungated** action list, so a lead reaches it) and
+  [EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) (the "assigned by" labels). **The failure mode is
+  what makes this worth a bullet:** the 403 arrived as an empty array, so the picker rendered *empty* and
+  the labels rendered *blank* — the UI asserting there is nobody, rather than that you may not look. Both
+  web cases were found only by grepping for the pattern after the mobile one was reported.
 - **The two org lists** — [SelectOrgPage.jsx](../client/src/pages/SelectOrgPage.jsx) makes only
   `consoleMemberships` selectable, renders `nonConsoleMemberships` as a muted, non-interactive **"No
   console access"** section pointing at the mobile app, and auto-enters when there is exactly one console
@@ -286,7 +325,15 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   [index.jsx](../mobile/app/index.jsx) both use `isConsoleRole`; the canvasser drawer's **Admin
   dashboard** row is gated on `isConsoleUser` (it was `isOrgAdmin`, which stranded a lead who switched to
   canvass mode). The org Users row is hidden for leads in
-  [more.jsx](../mobile/app/(app)/admin/more.jsx). The **canvasser** flow is untouched — a lead who walks
+  [more.jsx](../mobile/app/(app)/admin/more.jsx), and the campaign screen's **Team** tile
+  ([campaign/\[campaignId\].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) points at
+  `campaign-assignments/:campaignId` — the campaign's own crew + book assignments — not at the org Users
+  screen it used to open. That was the reported bug: a lead tapped it, `/admin/memberships` 403'd, and
+  [users.jsx](../mobile/app/(app)/admin/users.jsx) rendered the failure as **"No users yet"** — the app
+  stating as fact that the organization is empty to somebody simply not allowed to look. It now branches
+  on `error.code === 'FORBIDDEN_ROLE'` and says which of the two it is, pointing at the campaign Team
+  screen. Setting a *crew* remains web-only ([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx));
+  mobile reads crews but has no coordinator picker. The **canvasser** flow is untouched — a lead who walks
   is scoped as a canvasser via `CampaignAssignment` exactly like anyone else.
 
 ## Machine-readable 403s
@@ -329,6 +376,13 @@ test:int`):
   create/archive/delete, on the org survey/tag mutations and the org Users admin — while 200 on
   `.../crew` — and that `GET /admin/campaigns` returns only A. Also asserts role 403s carry
   `code: 'FORBIDDEN_ROLE'` at both the org and campaign gate.
+- [perCampaignCrews.int.test.js](../server/test/perCampaignCrews.int.test.js) — the scope guarantee
+  above, as a fixture no other suite could build: **two campaigns in ONE org** (Asa leads HD54, Frank
+  leads HD64, Maria canvasses both). Asserts that two leads setting Maria's crew in their own campaigns
+  don't clobber each other, and that Frank's change in HD64 moves **zero** doors in HD54 — the campaign
+  he does not manage. `teamAttribution.int.test.js` puts its second campaign in a *different* org, so
+  all 22 of its tests stayed green through both bugs: a suite that cannot construct the failure cannot
+  report it.
 - [multiOrgRoles.int.test.js](../server/test/multiOrgRoles.int.test.js) — the mixed-role contract: ONE
   user who is `admin` in Org A and `canvasser` in Org B. Asserts login returns **both** memberships with
   their true roles (the client's picker filter depends on the canvasser row being present), that

@@ -536,7 +536,7 @@ never looks like a two-person collision.
 | `GET /admin/reports/overview` | one campaign or org-wide | `totals{ households, voters, activeUsers, surveysSubmitted, surveyedVoters, homesKnocked, knocks, surveyedKnocks, litKnocks, refusedKnocks, connectionRate, contactRate }`, `canvass{}` (incl. `refused`, `restricted`), `events{}` (incl. `refused`, `restricted`) | **all-time** (no `from/to`) |
 | `GET /admin/reports/campaign-rollup` | `scope=active\|archived\|all` or `campaignId` | `cumulative{…}` + `campaigns[ row{ households, homesKnocked, knockedPct, knocks, surveyedKnocks, litKnocks, refusedKnocks, surveysSubmitted, surveyedVoters, litDropped, connectionRate, contactRate, activeCanvassers, coverage{} } ]` | activity on `timestamp`, surveys on `submittedAt`; households/coverage all-time |
 | `GET /admin/reports/canvassers` | leaderboard | rows `{ surveysSubmitted, surveyKnocks, notHome, wrongAddress, refused, restricted, litDropped, knocks, homesKnocked(=knocks), connectionRate, contactRate, status, hoursOnDoors, daysActive, doorsPerHour, coordinatorId, coordinatorName ('Multiple' when the window spans two teams — resolved from the LEDGER via the shared ledgerCoordinatorLabels, same as the timeline, so the Home leaderboard and the Timeline cannot disagree about a person's team), … }` (per-canvasser refused is the bare `refused` field, not `refusedKnocks`, and feeds `contactRate`; `restricted` is a standalone tally that feeds **no** rate. **`hoursOnDoors`/`doorsPerHour` are computed here as the SUM OF PER-DAY spans** — clients must not re-derive them from `firstActivityAt`/`lastActivityAt`, which is a *calendar* span and under-reports pace ~3×) | activity `timestamp`, surveys `submittedAt` |
-| `GET /admin/reports/team-breakdown` | every TEAM at once, with the reconciliation | `{ ready, teams[{ coordinatorId, coordinatorName, people, doors, surveyDoors, surveysTaken, connectionRate, contactRate }], campaign{ doors, surveyDoors, connectionRate, … }, teamSum, crossTeamDoors }`. `coordinatorName: null` = the **No team** bucket. `doors` is distinct `(household, pass)` **within** a team, so a same-team double-knock is absorbed. **`ready: false`** when `Organization.teamAttributionReadyAt` is unset (the backfill hasn't run) — the endpoint returns empty rather than report every team as ~0 and No-team as enormous, which would look like data instead of an error. | `timestamp` |
+| `GET /admin/reports/team-breakdown` | every TEAM at once, with the reconciliation | `{ ready, teams[{ coordinatorId, coordinatorName, people, doors, surveyDoors, surveysTaken, connectionRate, contactRate }], campaign{ doors, surveyDoors, connectionRate, … }, teamSum, crossTeamDoors }`. `coordinatorName: null` = the **No team** bucket. `doors` is distinct `(household, pass)` **within** a team, so a same-team double-knock is absorbed. **`ready: false`** when `Organization.teamAttributionReadyAt` is unset (the backfill hasn't run) — the endpoint returns empty rather than report every team as ~0 and No-team as enormous, which would look like data instead of an error. **Scope:** a crew is **per-campaign**, so with a `campaignId` the lead set (whose own unstamped doors fold onto their own team row) is derived **for that campaign, from the LEDGER** — `leadIdsForScope`; an unscoped org-wide call reproduces the set it returned before crews became per-campaign. 🚨 **`teamSum − crossTeamDoors == campaign.doors` is a TAUTOLOGY and cannot fail** — it is not a check (§F). | `timestamp` |
 | `GET /admin/reports/canvassers.csv` | leaderboard export | columns incl. `Knocks`, `Connection rate %`, **`Refused`**, **`Restricted`** | same |
 | `GET /admin/reports/team-averages` | org averages | `avg{ homesKnocked, surveysSubmitted, connectionRatePct, doorsPerHour, … }` (rate = Σ completion knocks / Σ knocks) | same |
 | `GET /admin/reports/canvassers/:id/summary` | one canvasser | `kpi{ homesKnocked(=knocks, **refused included** — it once wasn't, so this panel read fewer doors than the Timeline for the same person and over-stated the rate), surveyDoors (door-unit, the rate numerator), surveysSubmitted (voter-unit), refused, connectionRatePct + contactRatePct (the **shared** `connectionRate()`/`contactRate()` helpers, integer %), doorsPerHour, … }` | same |
@@ -587,20 +587,61 @@ averaged). `activeCanvassers` is **not** summable — it uses a separate org-wid
 
 ### Teams (coordinators) — the counting contract
 
-**THE CURRENT COORDINATOR OWNS ALL OF THAT CANVASSER'S HISTORY.** `CanvassActivity.coordinatorId`
-and `SurveyResponse.coordinatorId` carry the team, stamped at knock time by
-[canvass.js](../server/src/routes/mobile/canvass.js) from `req.activeMembership` (already loaded by
-`orgContext`, so it costs zero extra queries) — and **re-stamped whenever that person's coordinator
-changes**, by
-[`setMemberCoordinator`](../server/src/services/memberships/setCoordinator.js). Assigning a
-coordinator to someone who already knocked pulls those earlier doors onto the new team; moving
-someone from crew A to crew B takes their whole history with them, across every campaign and all
-time.
+**THE CURRENT COORDINATOR OWNS ALL OF THAT CANVASSER'S HISTORY IN THIS CAMPAIGN.**
+`CanvassActivity.coordinatorId` and `SurveyResponse.coordinatorId` carry the team, stamped at knock
+time by [canvass.js](../server/src/routes/mobile/canvass.js) from
+**`CampaignAssignment.coordinatorId` for the campaign that door belongs to** (`coordinatorForWrite`
+— one lookup, memoized per request, since a survey submit resolves the team twice) — and
+**re-stamped whenever that person's crew changes**, by
+[`setMemberCoordinator`](../server/src/services/memberships/setCoordinator.js). Assigning a crew to
+someone who already knocked pulls those earlier doors onto the new team; moving someone from crew A
+to crew B takes their history with them — **all time, but ONE campaign.** Changing a crew in
+campaign A moves **zero** doors in campaign B.
+
+**A crew is per-CAMPAIGN, not per-org.** It lives on
+[`CampaignAssignment.coordinatorId`](../server/src/models/CampaignAssignment.js), unique on
+`{campaignId, userId}`. It used to live on `Membership.coordinatorId`, unique on
+`{userId, organizationId}` — **one slot per person per org** — and two team leads running two
+campaigns with a shared canvasser overwrote each other: the second write clobbered the first, and
+the re-stamp then dragged the **first** campaign's whole history onto the **second** lead's team.
+(`Membership.coordinatorId` still exists on disk but is no longer read; dropping it is a separate,
+later step, so the value a moved row moved *from* stays comparable.) Hence
+[`restampFilter`](../server/src/services/memberships/restampCoordinator.js) **requires a
+`campaignId` and throws without one** — an omitted scope silently meaning "everything" *was* the
+bug. Reproduced end to end, then fixed, in
+[test/perCampaignCrews.int.test.js](../server/test/perCampaignCrews.int.test.js) (two campaigns in
+one org — the shape no other suite builds).
+
+**Setting a crew happens in exactly ONE place:** a campaign's **Team tab**
+([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) → `PATCH
+/admin/campaigns/:campaignId/crew/:userId/coordinator`), where the confirmation quotes *that
+campaign's* door count from `previewRestamp` — the same filter the write uses, so the number
+promised is the number that moves. Mobile's campaign **Team** screen reads the crew and adds people
+to the campaign, but does not change a coordinator. The org **Users** page cannot set one — a single
+dropdown cannot be true for somebody on two campaigns — and instead shows a **read-only list, one
+row per campaign**, each linking to that campaign's Team tab
+(`GET /admin/memberships/:userId/crews`). It also lost its Coordinator column, its coordinator
+filter, and the coordinator field on the add-member form. (`PATCH /admin/memberships/:userId` still
+*accepts* a `coordinatorId` and drops it on the floor, so an older client gets a clean no-op rather
+than writing a field that no longer means anything.)
 
 **The one exception, and it is load-bearing: DEPARTURE never re-stamps.** When a coordinator leaves
-the org, [`releaseAssignedWork`](../server/src/services/users/deleteAccount.js) clears their crew's
-`Membership.coordinatorId` — nobody keeps supervising from outside — but deliberately leaves the
-ledger alone. That stamp is the only remaining record of who supervised those doors.
+the org, [`releaseAssignedWork`](../server/src/services/users/deleteAccount.js) hard-deletes their
+own roster rows and clears `Membership.coordinatorId` on their crew — but deliberately leaves the
+ledger alone. That stamp is the only remaining record of who supervised those doors. (⚠️ The
+`Membership` clear is now vestigial: the field it writes is no longer read, so a departed
+coordinator's crew keeps `CampaignAssignment.coordinatorId` pointing at them and *future* knocks
+still stamp that team until a lead re-picks. Nothing already counted moves either way; it is the
+forward-looking half of "nobody keeps supervising from outside" that the field move left behind.)
+
+**Departure vs. removal are now two distinct rules, and the difference is a real capability:**
+
+- **Deactivated but still on the campaign roster** — the roster row survives, so the crew is **still
+  settable**. (This is what un-strands the ~1,700 doors that would otherwise sit in "No team".)
+- **Removed from the campaign** — the roster row is **hard-deleted**, so there is no crew there to
+  set: the crew routes 404 (*"That member is not on this campaign"*), and `setMemberCoordinator`
+  returns `null` on a missing roster row rather than creating one. Their doors keep the team frozen
+  on them — the 104-door fix below. To reassign them, **re-add them to the campaign first.**
 
 The distinction exists because the team used to be joined at read time from the **campaign roster**,
 which caused two failures:
@@ -614,9 +655,11 @@ which caused two failures:
 The second is now the *chosen* behavior, deliberately, and the first is still fixed — because the
 two are different events. A roster change an admin makes on purpose moves the numbers; a person
 leaving does not. **The trade you are accepting:** a by-team figure quoted to a client last month
-can change if someone is reassigned since. It is reversible — the rule is idempotent with respect to
-current state, so setting the coordinator back restores the numbers exactly — and every change is
-recorded in `CoordinatorChange` (who moved whom, from which team to which, how many rows).
+can change if someone is reassigned since — **in that campaign only**. It is reversible — the rule
+is idempotent with respect to current state, so setting the crew back restores the numbers exactly —
+and every change is recorded in `CoordinatorChange` (who moved whom, **in which campaign**, from
+which team to which, how many rows; `campaignId` is nullable because rows written under the old
+org-wide model have no campaign to name, and absent means exactly that).
 **Campaign totals, coverage, rates and the invoice never move: billing is team-blind.**
 
 **`null` is a real answer, not "unknown"** — a candidate knocking their own district belongs in the
@@ -652,6 +695,34 @@ A door-pass worked by *k* teams contributes *k* to the team sum and 1 to the cam
 difference **is** the over-claim. It costs nothing to compute — the same arithmetic as
 `overlapDoors = grandKnocks − billableKnocks`.
 
+> ### 🚨 That identity is a TAUTOLOGY. It cannot fail, and it is NOT the verification.
+>
+> `crossTeamDoors = Math.max(0, teamSum − knocks)`, so `teamSum − crossTeamDoors == knocks` is true
+> **by construction** for any `teamSum >= knocks` — and `teamFoldStage` puts every row on **exactly
+> one** team, so `teamSum >= knocks` always holds. It therefore prints **✓ over completely wrong
+> per-team rows**: doors in the wrong bucket still sum to the same total. This is not hypothetical —
+> a lead-set derivation that broke the fold passed this identity while splitting a lead off their
+> own team, which is why
+> [test/perCampaignCrews.int.test.js](../server/test/perCampaignCrews.int.test.js) asserts the
+> **rows**, never the identity.
+>
+> **The real check is `npm run audit:team-counts`**
+> ([auditTeamCounts.js](../server/src/migrations/auditTeamCounts.js)) — read-only, one campaign
+> (`-- --campaign=<id>`), one org (`-- --org=<slug>`) or all of them. Two things there have teeth
+> the doors column does not:
+>
+> - **The `survey doors` and `surveys taken` columns have NO cross-team subtraction.** They compare
+>   `Σ teams` against the campaign figure raw, so a misfolded row makes them **disagree** — they are
+>   the columns that can actually go ✗.
+> - **A per-team ROW diff.** Run it *before* and *after* any change that touches the fold, the lead
+>   set, or a crew, and compare the per-team rows — not the totals. The campaign total is team-blind
+>   and cannot move, so it agrees either way and **proves nothing**.
+>
+> It also prints a ledger cross-check naming every canvasser who ever knocked, with their state
+> (`active` / `deactivated` / `REMOVED FROM ORG` / `account deleted`) and their crew here
+> (`own team` / `no team` / `off roster` — `off roster` being the removed-from-campaign case, kept
+> visibly distinct from a genuine No-team canvasser).
+
 > ⚠️ **The subtraction is CROSS-team double-knocks only — NOT the overlap count on screen.**
 > `computeOverlaps` flags a door-pass touched by **2+ distinct `userId`s, not 2+ distinct teams**. A
 > house double-knocked by two people on the *same* team is one of those overlaps, yet that team
@@ -664,6 +735,22 @@ difference **is** the over-claim. It costs nothing to compute — the same arith
 > missing from their own team. Every team clause folds them back in:
 > `{ $or: [ {coordinatorId: X}, {userId: X, coordinatorId: null} ] }`, and the No-team bucket
 > excludes all leads so nobody is counted twice.
+>
+> 🚨 **That lead set comes from the LEDGER, scoped to the campaign** — `leadIdsForScope` takes the
+> distinct non-null `coordinatorId` on `CanvassActivity` **and** `SurveyResponse` in the same scope
+> the aggregates run on (both, or the two halves of `/team-breakdown` fold differently and no sum
+> check can see it). Both obvious alternatives are **wrong** now that a crew is per-campaign:
+> **`Membership`** has no campaign, so it answers org-wide and would fold a lead's doors onto their
+> own team in a campaign where they run no crew at all; **`CampaignAssignment`** is a roster gate
+> that is **hard-deleted** on removal, so a lead would lose their own folded doors the moment their
+> last crew member came off the roster — the 104-door bug, back through the front door. The stamp
+> already on the ledger cannot be un-said, so it survives departure, org removal and roster churn.
+>
+> **The consequence, and it is intended:** somebody who runs a crew in campaign A but knocks in
+> campaign B **without** a crew there no longer folds onto their own team in B — they land in
+> **"No team"** there, which is the per-campaign answer. This is the one thing that can move a
+> per-TEAM row when the per-campaign crews migration is deployed. Campaign totals are team-blind and
+> cannot move.
 
 > 🚨 **The team filter must NOT live in `baseFilter()`.** That result is spread into **Household**
 > queries (`/overview`: `{ isActive: true, ...cFilter }`), and a household has no team — a door
@@ -699,6 +786,20 @@ difference **is** the over-claim. It costs nothing to compute — the same arith
 > lives on the schema, not in the create route, because there are two creation paths
 > (`routes/superAdmin/organizations.js` and `utils/seedDemoOrg.js`) and a third would have inherited
 > the bug. `repair:team-stamps` sets it for orgs that predate the fix.
+
+**Seeding the per-campaign crews:** `npm run migrate:campaign-coordinators` — `-- --preflight`
+(read-only; run first — it also names anyone with knocks in a campaign they hold no roster row for),
+no flags (dry run), `-- --apply` (commit), `-- --org=<slug>` to scope any of them. It copies
+`Membership.coordinatorId` onto every `CampaignAssignment` row that does not already carry one, so
+the day after the migration every campaign answers what the org used to, and from then on the
+answers can diverge. Keying on `null` (not `$exists:false`) is right **here**, the inverse of the
+ledger backfill above: an unset roster row means "no crew chosen", not "deliberately no crew" —
+nothing had ever been able to choose one — and it also means a crew a lead has already set
+per-campaign is never overwritten by the stale org value. **It writes ZERO ledger rows**, which is
+what makes it re-runnable and reversible-by-doing-nothing: every frozen stamp stays exactly where it
+is, so no door changes hands as a result of running it. `CampaignAssignment` also gained
+`{campaignId, coordinatorId}` and `CoordinatorChange` `{campaignId, createdAt}`, so
+**`migrate:build-indexes -- --apply` is required** (production runs with `autoIndex` off).
 
 **Coverage is never team-scopable.** It's a property of `Household.status`, and a household has no
 team.

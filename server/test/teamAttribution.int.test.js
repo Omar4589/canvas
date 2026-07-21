@@ -21,11 +21,13 @@ import mongoose from 'mongoose';
 //   2. The campaign's billable total does not move by a single door.
 //   3. A same-team double-knock is absorbed INSIDE the team (contributes 0 to crossTeamDoors) — the
 //      case a naive "subtract every overlap" formula gets wrong.
-//   4. The CURRENT coordinator owns ALL of a canvasser's history: reassigning someone moves every
-//      door they ever knocked onto the new team, org-wide, and setting it back moves them back.
+//   4. The CURRENT coordinator owns ALL of a canvasser's history IN THIS CAMPAIGN: reassigning
+//      someone moves every door they ever knocked here onto the new crew, and setting it back moves
+//      them back. A crew is per-campaign (CampaignAssignment), so a change here moves nothing in
+//      another campaign — see perCampaignCrews.int.test.js, which is where that is proven.
 //   5. DEPARTURE is the exception and never re-stamps — when a coordinator leaves the org their
-//      crew's Membership.coordinatorId is cleared, but the LEDGER keeps their team, so the doors
-//      they supervised stay counted. That asymmetry is the 104-door fix; #4 must not eat it.
+//      crew's roster link is cleared, but the LEDGER keeps their team, so the doors they supervised
+//      stay counted. That asymmetry is the 104-door fix; #4 must not eat it.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-team-attribution';
 
 const { createApp } = await import('../src/app.js');
@@ -538,9 +540,11 @@ test('DEPARTURE does not re-stamp — a departed coordinator keeps the doors the
   const noTeamBefore = (await teamDoors(null)).doors;
   await releaseAssignedWork(quitter._id, { organizationId: org._id });
 
-  // The membership side IS cleared — nobody keeps supervising from outside the org.
-  const rookieMembership = await Membership.findOne({ userId: rookie._id, organizationId: org._id }).lean();
-  assert.equal(rookieMembership.coordinatorId, null, 'a departed coordinator supervises nobody');
+  // The ROSTER side IS cleared — nobody keeps supervising from outside the org, so the next knock
+  // stamps no team. (The crew lives on the campaign roster now; Membership.coordinatorId is a
+  // legacy field nothing reads.)
+  const rookieCrew = await CampaignAssignment.findOne({ campaignId: campaign._id, userId: rookie._id }).lean();
+  assert.equal(rookieCrew?.coordinatorId ?? null, null, 'a departed coordinator supervises nobody');
 
   // But the ledger did NOT move.
   assert.equal((await teamDoors('Quitter X')).doors, 12, "the doors Quitter's crew worked stay his");

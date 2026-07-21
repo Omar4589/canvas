@@ -341,10 +341,12 @@ have no team on them yet** — this is the one-time job that fills them in.
 > **This section is history — the one-time backfill, already run.** It is kept because the traps in it
 > still bite. What it does *not* describe is the current rule: since 2026-07-20 a door's team follows
 > the canvasser's **current** coordinator, and changing someone's coordinator re-stamps their whole
-> history. See **[Re-attribution (`repairTeamStamps.js`)](#re-attribution-repairteamstampsjs)** below
-> and [METRICS.md §F](METRICS.md#teams-coordinators--the-counting-contract). ⚠️ Note the two scripts
-> key on **opposite** conditions on purpose (`$exists:false` here, `$ne: next` there) — don't
-> reconcile them.
+> history **in that campaign** — since 2026-07-21 a crew is a per-campaign fact, so a re-stamp stops
+> at the campaign boundary and changing a crew in one race moves no door in another. See
+> **[Move every crew onto its campaign](#move-every-crew-onto-its-campaign-one-time--after-the-per-campaign-crews-release)**
+> below and [METRICS.md §F](METRICS.md#teams-coordinators--the-counting-contract). ⚠️ Note this
+> script and the re-stamp key on **opposite** conditions on purpose (`$exists:false` here,
+> `$ne: next` there) — don't reconcile them.
 
 Until you run it, the Timeline simply **won't show the team filter or the by-team table**. That's on
 purpose: half-filled-in data would show every team at nearly zero and "No team" as enormous, which looks
@@ -358,11 +360,15 @@ npm run audit:team-counts                               # 4. Prove the numbers a
 ```
 
 > **When to run the audit.** After a bulk write (`migrate:activity-coordinator --apply`,
-> `repair:team-stamps --apply`), after a change to the fold/aggregation code, or if a
+> `migrate:campaign-coordinators --apply`), after a change to the fold/aggregation code, or if a
 > `CoordinatorChange` row ever carries a `restampError` (a torn write). **NOT** after every ordinary
 > coordinator change in the console: the reconciliation identity holds *by construction* —
 > `teamFoldStage` gives every row exactly one `team` and `$group` partitions on it, so a re-stamp
 > changes which team a row lands in, never how many. A routine reassignment cannot break the sum.
+>
+> ⚠️ That last sentence is also the audit's **weakness**, and it is worth knowing before you trust a
+> tick: the `doors` line is arithmetically incapable of failing. What to read instead is in
+> **[The tick that cannot fail](#the-tick-that-cannot-fail-auditteam-counts)**.
 
 **Step 1 is the one not to skip.** It lists every canvasser who has ever knocked and whether their team can
 still be worked out. Deactivating someone, or taking them off a campaign, keeps their team. **Removing
@@ -371,7 +377,8 @@ to say who they belonged to, and it tells you before anything is written.
 
 **Step 4 is the gate.** It checks that every team's doors, survey doors and surveyed voters add up to the
 campaign's totals, on your real data, and **fails loudly if they don't**. Run it before you give any team's
-number to a client. It changes nothing.
+number to a client. It changes nothing. Read its output knowing that the **doors** line is the one check
+in it that cannot fail — [the tick that cannot fail](#the-tick-that-cannot-fail-auditteam-counts).
 
 Safe to re-run at any time — it only ever fills in doors that have no team yet, and it never touches a knock.
 
@@ -379,6 +386,60 @@ Safe to re-run at any time — it only ever fills in doors that have no team yet
 > That's exactly right for anyone who has never switched teams. If someone *has* moved between teams, their
 > older doors will be credited to their current team. The dry run lists every person and the team it will
 > give them, so you can check before committing.
+
+### Move every crew onto its campaign (ONE TIME — after the per-campaign crews release)
+
+A **crew** used to be one fact per person per organisation: Dana was on Marcus's crew, everywhere, in
+every race at once. It is now one fact per person **per campaign** — Dana can be on Marcus's crew in
+the mayoral race and on Priya's in the council race, at the same time, and neither lead can disturb
+the other.
+
+That had to change because two team leads with a shared canvasser were **overwriting each other**.
+There was only one slot, so the second lead to set a crew won it — and the re-stamp that follows any
+crew change then dragged the *first* campaign's entire history onto the *second* lead's team. Nobody
+did anything wrong; both leads were organising their own race.
+
+This job copies each person's existing crew onto every campaign they are on, so the morning after the
+deploy every campaign answers exactly what the organisation used to answer. From then on the answers
+are free to diverge, which is the point.
+
+**It writes nothing to the knock ledger — not one row.** No door changes hands because you ran this.
+
+Run it in this order, and don't compress the steps:
+
+```
+npm run audit:team-counts                             # 1. BEFORE THE DEPLOY. Save the output.
+                                                      #    ... then deploy ...
+npm run migrate:build-indexes -- --apply              # 2. the campaign roster gained an index
+npm run migrate:campaign-coordinators -- --preflight  # 3. LOOK ONLY. Changes nothing.
+npm run migrate:campaign-coordinators                 # 4. Dry run — what it would seed.
+npm run migrate:campaign-coordinators -- --apply      # 5. Do it.
+npm run audit:team-counts                             # 6. Compare against step 1.
+```
+
+**Step 1 is before the deploy on purpose.** The audit script *itself* changes in this release — it
+now works out who runs a crew per campaign instead of org-wide. Take the "before" picture while the
+old code is still running, or your baseline has already been influenced by the thing you're checking.
+Save the text somewhere you can diff it; the script has no memory between runs.
+
+**Step 2 is not optional.** Production deliberately never builds indexes on its own (see
+[Build database indexes](#build-database-indexes-after-a-deploy-that-added-one)), and the roster now
+carries a `{campaign, coordinator}` index that "who is on this crew?" reads on every team screen.
+
+**Step 3 tells you two things.** How many people have a crew to copy, and — the one worth reading —
+anyone who has **knocked a campaign they hold no roster row for**. There is nothing to seed for those
+people and nothing is lost (their doors keep the team already frozen on them), but no future crew
+change can reach them either, so it is better to know now than to wonder later.
+
+**Step 6 compares PER-TEAM ROWS, not the totals.** The campaign totals are team-blind: they cannot
+move, so they will agree before and after and prove precisely nothing. What you are checking is each
+team's own line — its doors, its survey doors, its surveys.
+
+> **Some team rows are *expected* to move, and it is not the copy above that moves them.** Who counts
+> as running a crew is now worked out **per campaign, from the ledger**. So somebody who runs a crew
+> in one race but knocks in another **without** a crew there no longer folds onto their own team in
+> the second race — they land in that campaign's **No team** row, which is the correct per-campaign
+> answer and was not the org-wide one. If a row moved, that is the first explanation to check.
 
 ---
 
@@ -412,10 +473,10 @@ fraud audit).
 | `npm run purge:deleted-identities` | Dry run of the scheduled job, to see what it *would* do |
 | `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
 | `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |
-| `npm run audit:team-counts` | **Read-only.** Proves Σ teams + no-team − cross-team == the campaign billable, column by column, for **every campaign**. Exits **1** if any column of any campaign fails. Narrow with `--org=<slug>` or `--campaign=<id>` |
-| `npm run repair:team-stamps -- --preflight` | **Read-only.** Per org, per person: how many doors would change team under the current-coordinator rule |
-| `npm run repair:team-stamps -- --apply` | Conforms history to each member's current coordinator, and turns team surfaces on for any org stuck with `teamAttributionReadyAt` unset |
-| `npm run repair:team-stamps -- --apply --ready-only` | Only sets the gate flag; examines no ledger rows |
+| `npm run migrate:campaign-coordinators -- --preflight` | **Read-only.** Before the per-campaign crew seed — how many members hold a crew, and who has knocked a campaign they have no roster row for |
+| `npm run migrate:campaign-coordinators -- --apply` | Once, after the release that moves the crew from `Membership.coordinatorId` to `CampaignAssignment.coordinatorId`. Touches **no** ledger row |
+| `npm run audit:team-counts` | **Read-only.** Prints each team's row and checks Σ teams + no-team − cross-team == the campaign billable, column by column, for **every campaign**. Exits **1** if any column of any campaign fails. Narrow with `--org=<slug>` or `--campaign=<id>`. ⚠️ The `doors` column **cannot** fail — [see below](#the-tick-that-cannot-fail-auditteam-counts) |
+| `npm run repair:team-stamps -- --apply --ready-only` | Only sets the `teamAttributionReadyAt` gate flag; examines no ledger rows. **The only mode of this script that still runs** — see [Re-attribution](#re-attribution-repairteamstampsjs) |
 | `npm run repair:orphaned-assignments` | Dry run — finds anyone still holding books on a campaign they're off the roster of |
 
 ### Team attribution (`migrateActivityCoordinator.js`)
@@ -439,19 +500,118 @@ Three things that are load-bearing:
   > nothing to backfill, so the migration always skipped it. Those orgs silently showed no team
   > surfaces at all, forever. Fixed two ways: `Organization.teamAttributionReadyAt` now defaults to
   > now on the **schema** (there are two org-creation paths, so a route-level fix would have missed
-  > `seedDemoOrg.js`), and `repair:team-stamps` sets it **unconditionally, above any `continue`**,
-  > for orgs that already exist.
+  > `seedDemoOrg.js`), and `repair:team-stamps -- --apply --ready-only` sets it **unconditionally,
+  > above any `continue`**, for orgs that already exist.
 - **No new index.** `CanvassActivity` already carries nine on the hottest write path; the team clause rides
   as a residual on `{campaignId, timestamp}`. **`migrate:build-indexes` is not part of this release.**
 
+### Per-campaign crews (`migrateCampaignCoordinators.js`)
+
+[`migrateCampaignCoordinators.js`](../server/src/migrations/migrateCampaignCoordinators.js) seeds
+`CampaignAssignment.coordinatorId` from `Membership.coordinatorId` — a single `bulkWrite` carrying one
+`updateMany` per member who has a crew. `Membership` is unique on `{userId, organizationId}` — one slot
+— and `CampaignAssignment` is unique on `{campaignId, userId}`, which is the whole change: a canvasser
+can now hold a different crew in every race they work.
+
+- **It writes `CampaignAssignment` and nothing else.** Not one `CanvassActivity`, not one
+  `SurveyResponse`. That is what makes it re-runnable and reversible-by-doing-nothing: every frozen
+  team stamp stays exactly where it is, so no door changes hands as a result of running it.
+- **The idempotency key is `{ coordinatorId: null }`, and here that is right** — the inverse of
+  `migrateActivityCoordinator`'s `$exists: false` rule above, deliberately. On the ledger a `null`
+  is a *deliberate* "no team" that a re-run must not clobber. On a roster row it is only ever "no crew
+  chosen", because until this release nothing could choose one. Keying on `null` is also what stops a
+  crew a lead has already set **after** the deploy from being overwritten by the stale org-level value.
+- **New index, so `migrate:build-indexes -- --apply` is a gate.**
+  `CampaignAssignment` gained `{campaignId: 1, coordinatorId: 1}` — "who is on this crew, in this
+  campaign?", which is the roster grouping and the per-campaign lead set.
+- **`Membership.coordinatorId` is deliberately left in place** and is no longer read by anything.
+  Dropping it is a separate, later step: keeping it means that if a per-team row moves unexpectedly,
+  the value it moved *from* is still on disk to compare against.
+
+**Per-team rows can still move across this deploy**, for a reason that has nothing to do with the copy
+above: `leadIdsForScope` ([`routes/admin/reports.js`](../server/src/routes/admin/reports.js)) now
+derives the lead set **per campaign, from the ledger** — `distinct('coordinatorId')` over
+`CanvassActivity` + `SurveyResponse` in scope. Neither of the alternatives works: `Membership` is
+org-wide (so a lead folds onto their own team in campaigns where they run no crew at all), and
+`CampaignAssignment` is a roster gate that is **hard-deleted** on removal (so a lead would lose their
+own folded doors the moment their last crew member came off the roster — the 104-door bug, back
+through the front door). The consequence to expect: somebody who runs a crew in campaign A and knocks
+in campaign B *without* one no longer folds onto their own team in B, and correctly lands in B's
+**No team** row. The campaign's own billable total is team-blind and cannot move either way.
+
+### The tick that cannot fail (`audit:team-counts`)
+
+`/team-breakdown` publishes a reconciliation identity — *Σ teams + no-team − `crossTeamDoors` == the
+campaign billable* — and [`auditTeamCounts.js`](../server/src/migrations/auditTeamCounts.js) prints a
+✓ against it. **On the `doors` column that ✓ is a tautology and proves nothing.**
+
+The arithmetic, because this is the kind of thing that only looks obvious once someone writes it down:
+
+- `crossTeamDoors` is not measured. It is `Math.max(0, teamSum − knocks)` — a subtraction, computed
+  from the two numbers being compared.
+- So the check evaluates `teamSum − max(0, teamSum − knocks) == knocks`, which holds for **any**
+  `teamSum >= knocks`.
+- And `teamSum >= knocks` always: `teamFoldStage` puts every row in exactly one `team`, and the
+  per-team `$group` keys on `(householdId, passId, team)` while the campaign's `knocksPipeline` keys
+  on `(householdId, passId)`. A refinement of a partition can only produce more groups, never fewer.
+
+So the `doors` line prints ✓ over completely wrong per-team rows. What it actually detects is
+`teamSum < knocks`, which cannot occur.
+
+**What to read instead:**
+
+1. **The `survey doors` and `surveys taken` columns.** Neither has a cross-team subtraction, so both
+   are real equalities that can genuinely fail. Know what each fails *on*, though:
+   - `survey doors` runs over by exactly the number of surveyed door-passes worked by two
+     **different** teams — so check it against the `less cross-team doors` line before concluding
+     there is a bug. A campaign with real cross-team overlap fails this column while being perfectly
+     correct.
+   - `surveys taken` runs *under*, and only in one way: the per-team survey counts are looked up
+     against the teams found in the **door** aggregate, so a team holding survey responses but no
+     knock rows is dropped from the sum entirely. That is the door and survey ledgers disagreeing
+     about who is on a team, which is worth stopping for.
+2. **A per-team ROW diff across the change.** Run the audit before and after, and compare each team's
+   line. The script keeps no history and diffs nothing itself, so this means saving both outputs.
+   Campaign totals are team-blind: they will agree either way, which is what makes them useless here.
+3. **The ledger cross-check** it prints underneath — every canvasser who ever knocked in the campaign,
+   with their state (`active` / `deactivated` / `REMOVED FROM ORG` / `account deleted`) and their crew
+   read off **this campaign's** roster. Somebody who knocked here but is no longer rostered reads
+   `off roster` rather than being silently relabelled `no team`, which would look identical to a
+   genuine No-team canvasser.
+
+The audit derives its lead set the same way `leadIdsForScope` does — per campaign, from the ledger —
+and imports the real `teamFoldStage` rather than re-implementing it. That sharing is the point: an
+audit that can be wrong in the same way as the thing it audits is worth nothing. It was org-wide off
+`Membership` until crews became per-campaign, which would now have reported campaign-correct totals
+under campaign-wrong labels.
+
 ### Re-attribution (`repairTeamStamps.js`)
+
+> 🛑 **Out of service since crews became per-campaign — every mode except `--apply --ready-only`
+> now throws.** It scans `Membership`, which is org-wide, and calls `previewRestamp` /
+> `restampFilter` **without a `campaignId`**; `restampFilter` now *requires* one and raises
+> `restampCoordinator: campaignId is required` on the first member who has a coordinator. That
+> refusal is the fix working, not a regression to route around: an omitted scope silently meaning
+> "every campaign, all time" is precisely the bug the per-campaign change exists to close.
+>
+> It fails **before writing a single ledger row**. The one write that can land first is the
+> `teamAttributionReadyAt` gate flag, which is set above the scan, per org — harmless and idempotent.
+>
+> **What replaces each of its three jobs:** day-one conformance is not needed (the copy in
+> `migrateCampaignCoordinators` seeds the roster and moves nothing); drift repair is re-running the
+> same assignment from the campaign's **Team** tab, which is idempotent and campaign-scoped; the
+> gate fix survives as `--apply --ready-only`, the mode that returns before the scan. Rewriting it
+> for the new model means a per-campaign scan of `CampaignAssignment` — the section below is kept
+> because the traps in it are the ones that rewrite would hit.
+
+The description that follows is **history**, from when a crew was an org-wide fact.
 
 Since teams follow the **current** coordinator, [`repairTeamStamps.js`](../server/src/migrations/repairTeamStamps.js)
 brings the ledger into line with every member's `Membership.coordinatorId`. Three jobs in one script:
 
 1. **Day-one conformance.** The rule only applies itself to people whose coordinator is edited after
    deploy; run this once so the documented invariant is true for everyone immediately.
-2. **Drift repair.** `setMemberCoordinator` writes the membership first and the ledger second (that
+2. **Drift repair.** `setMemberCoordinator` writes the roster row first and the ledger second (that
    order is deliberate — the reverse would let every subsequent knock add more drift). If a ledger
    write ever fails, this closes the gap. Compensation is a **re-run, not a rollback**.
 3. **The gate fix** above.

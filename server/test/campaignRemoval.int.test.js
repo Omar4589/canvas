@@ -285,8 +285,10 @@ test('remove-from-ORG still cascades everything (regression on the shared helper
   assert.equal(await CampaignAssignment.countDocuments({ userId: quitter._id }), 0);
   assert.equal(await CampaignManager.countDocuments({ userId: quitter._id }), 0, 'org removal DOES revoke grants');
 
-  const rookie = await Membership.findOne({ userId: ctx.rookie._id }).lean();
-  assert.equal(rookie.coordinatorId, null, 'org removal DOES clear the coordinator link');
+  // The crew link lives on the campaign roster now, so that is what a departure clears — the
+  // LEDGER keeps the departed coordinator's stamp (asserted just below), which is the 104-door fix.
+  const rookieCrew = await CampaignAssignment.findOne({ userId: ctx.rookie._id }).lean();
+  assert.equal(rookieCrew?.coordinatorId ?? null, null, 'org removal DOES clear the crew link');
 
   assert.equal(
     await CanvassActivity.countDocuments({ userId: quitter._id }), 2,

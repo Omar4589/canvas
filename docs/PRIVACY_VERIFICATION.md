@@ -146,6 +146,33 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   data-inventory is ever published, list it alongside `EmailLog` and `AccessLog` as an internal
   operational log. The claim to keep true if a policy sentence ever names staff audit trails:
   *deleted with the organization, no TTL, staff-only.*
+  *[v4 2026-07-21: **CORRECTED — a crew is now PER-CAMPAIGN, and this collection IS campaign-scoped.**
+  Two statements above are now false and stand as history. (a) *"re-stamps … across that org"* — the
+  re-stamp is campaign-scoped. `restampFilter` (`services/memberships/restampCoordinator.js`) now
+  **requires** a `campaignId` and throws without one (exercised: it raises `restampCoordinator:
+  campaignId is required`), because an omitted scope silently meaning "everything" was the bug it was
+  written to fix. The rule reads *the current coordinator owns all of that canvasser's history **in this
+  campaign*** — changing a crew in one campaign moves zero ledger rows in another. (b) *"it has no
+  `campaignId`; coordinator is a per-org relationship"* — it has one, and a coordinator is now a
+  per-campaign relationship. `CoordinatorChange.campaignId` is nullable (`default: null`) and indexed
+  `{campaignId, createdAt}`; **a null means "written under the old org-wide model"**, never "all
+  campaigns". Add `campaignId` to the field list above — nothing else in that list changed. The crew
+  itself moved off `Membership.coordinatorId` (unique `{userId, organizationId}` — one slot, so two
+  leads reorganizing two campaigns overwrote each other) onto `CampaignAssignment.coordinatorId`
+  (unique `{campaignId, userId}`), seeded by `migrate:campaign-coordinators`, which writes **zero**
+  ledger rows.
+  **This is a record-accuracy correction, not a privacy-affecting change.** No new personal data is
+  collected — a `campaignId` is an internal reference to the tenant's own campaign, not data about a
+  person. No new recipient, no subprocessor, no export, no new access path: re-grepped, still nothing
+  reads `CoordinatorChange` over the API (the model, the two writing services, the migration/repair
+  scripts and tests are its only references). No retention change either — it is still in `ORG_SCOPED`
+  (`deleteOrganization.js`), still has no TTL, and `test/orgDelete.int.test.js` still proves the sweep
+  exhaustive over that list. **The Assessment above stands unchanged.**
+  **One wrinkle the new field introduces, stated rather than left to be found:** `CoordinatorChange` is
+  *not* in `deleteCampaign.js`'s `CAMPAIGN_SCOPED` list, so deleting a campaign leaves its rows behind
+  naming a campaign that no longer exists. No promise breaks — they stay org-scoped and staff-only, die
+  with the org, and that cascade only ever runs on a never-walked campaign — but this is the row class
+  to name if a customer-facing *"deleting a campaign removes…"* sentence is ever written.]*
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -348,7 +375,7 @@ The web console has **no** in-product deletion. `client/src/pages/DeleteAccountP
 | Step | What it does | Line |
 |---|---|---|
 | 1 | Writes a **new record containing the user's identity** — `DeletedUserRecord` with firstName, lastName, email, phone, userId, organizationIds[], deletedAt, retentionUntil | `:190-204` |
-| 2 | `releaseAssignedWork()` — hard-deletes, across **all orgs and all campaigns**, every `TurfAssignment`, `EffortMember`, `CampaignAssignment`, `CampaignManager` row **where the deleted user is the assignee**; nulls `Membership.coordinatorId` on anyone they supervised | `:212`, `:268`, `:274-286` |
+| 2 | `releaseAssignedWork()` — hard-deletes, across **all orgs and all campaigns**, every `TurfAssignment`, `EffortMember`, `CampaignAssignment`, `CampaignManager` row **where the deleted user is the assignee**; nulls `Membership.coordinatorId` on anyone they supervised | `:212`, `:268`, `:274-286` *[v4 2026-07-21: line drift only — now `:285-290`]* |
 | 3 | `Membership.updateMany({userId}, {$set:{isActive:false}})` — memberships are **retained**, only deactivated | `:217` |
 | 4 | One `User.updateOne $set` overwriting exactly 11 fields | `:219-236` |
 
@@ -374,6 +401,8 @@ The operator CLI has **no override** ("Deliberately no `--force`", `deleteAccoun
 > **Write:** *"Assignments you held — walk-list books, effort rosters, campaign rosters and campaign-management grants — are permanently deleted across every organization and campaign. Records showing that you assigned work to someone else, and records of field work performed by people you supervised, are retained as part of the organization's operational records and remain linked to your de-identified account identifier."*
 >
 > Reason: the `deleteMany` filters key **only** on `userId` (the assignee). The **assigner-side foreign keys are never touched**: `TurfAssignment.assignedBy` (`models/TurfAssignment.js:28`), `EffortMember.addedBy` (`:27`), `CampaignAssignment.assignedBy` (`:23`), `CampaignManager.grantedBy` (`:28`), `Membership.addedBy` (`:25`). For an admin or lead — the roles that do the assigning — those rows are the bulk of their footprint. And the supervision link is **frozen** onto every knock and survey taken by their reports: `CanvassActivity.coordinatorId` (`models/CanvassActivity.js:69`), `SurveyResponse.coordinatorId` (`models/SurveyResponse.js:68`). The schema comment at `CanvassActivity.js:63` states the freeze is designed to survive "deletion."
+>
+> *[v4 2026-07-21: **the supervision half is now WIDER than this describes, because the coordinator reset went inert.** A crew moved off `Membership.coordinatorId` onto `CampaignAssignment.coordinatorId` (per campaign), and knock time reads **only** the latter (`routes/mobile/canvass.js` `coordinatorForWrite`, which applies no active/not-deleted check). `releaseAssignedWork` still nulls only the `Membership` field — nothing anywhere clears `CampaignAssignment.coordinatorId` when a coordinator departs (grepped every `coordinatorId: null` write in `server/src`: the departure reset at `deleteAccount.js:287` targets `Membership` only). So after deletion the departed coordinator is **still the crew of record** on every campaign roster row naming them, and each NEW knock their former reports record freezes the deleted user's id onto a fresh ledger row — the retained supervision link keeps GROWING rather than stopping at deletion. The `Write:` text above survives this ("records of field work performed by people you supervised are retained"), so **no published sentence becomes false** and no new data is collected — but `deleteAccount.js:284`'s stated intent, *"a coordinator who leaves the ORG must not keep supervising anybody"*, is no longer enforced by the code beneath it. **Escalate to engineering** as a correctness bug, not a disclosure one.]*
 
 ## A2. How long do you keep a deleted user's name, email and phone — and what erases them?
 

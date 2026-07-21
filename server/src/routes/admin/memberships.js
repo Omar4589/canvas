@@ -15,7 +15,6 @@ import {
   createOrgMember,
   MemberError,
   memberIdentityShape,
-  resolveCoordinatorId,
   resolveManagedCampaigns,
 } from '../../services/memberships/createMember.js';
 import { restampSummary } from '../../services/memberships/setCoordinator.js';
@@ -52,8 +51,10 @@ const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted'
 const addSchema = z.object({
   ...memberIdentityShape,
   role: z.enum(['admin', 'lead', 'canvasser']).default('canvasser'),
-  // Optional supervising admin/lead (in this org). Empty string / null = none.
-  coordinatorId: z.string().nullable().optional(),
+  // NO coordinatorId. A crew is per-campaign (models/CampaignAssignment.js), and this adds somebody
+  // to the ORGANIZATION — there is no campaign here to be on a crew of. It is set on a campaign's
+  // Team tab, where the confirmation can quote that campaign's door count. Absent from the schema
+  // rather than accepted-and-ignored: a caller still sending it is working from a stale contract.
   // For role: 'lead' — the campaigns this lead may manage (CampaignManager grants).
   managedCampaignIds: z.array(z.string()).optional(),
 });
@@ -203,7 +204,6 @@ router.get('/', async (req, res, next) => {
         role: m.role,
         isActive: m.isActive,
         addedAt: m.createdAt,
-        coordinatorId: m.coordinatorId ? String(m.coordinatorId) : null,
         billingAccess: !!m.billingAccess,
         managedCampaignIds: managedByUser.get(String(m.userId._id)) || [],
         user: {
@@ -231,9 +231,6 @@ router.post('/', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const data = addSchema.parse(req.body);
 
-    const coordRes = await resolveCoordinatorId({ orgId, raw: data.coordinatorId, memberUserId: null });
-    if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
-
     // Validate the grant set up front (fail before creating anything) for leads.
     let managed = [];
     if (data.role === 'lead') {
@@ -251,7 +248,6 @@ router.post('/', async (req, res, next) => {
         addedBy: req.user._id,
         data,
         role: data.role,
-        coordinatorId: coordRes.value || null,
         // Every newly created account gets a temp password + forced change on first login.
         // Harmless when linking an existing account: createOrgMember only applies the flag on
         // the create-new branch, so a linked account keeps its own password untouched.
@@ -290,7 +286,6 @@ router.post('/', async (req, res, next) => {
         role: membership.role,
         isActive: membership.isActive,
         addedAt: membership.createdAt,
-        coordinatorId: membership.coordinatorId ? String(membership.coordinatorId) : null,
         managedCampaignIds: managed.map((id) => String(id)),
         user: user.toSafeJSON(),
       },
@@ -405,16 +400,6 @@ router.patch('/:userId', async (req, res, next) => {
     const billingBefore = wasBillingAdmin
       ? { billingAccess: membership.billingAccess, role: membership.role, isActive: membership.isActive }
       : null;
-
-    if ('coordinatorId' in data) {
-      const coordRes = await resolveCoordinatorId({
-        orgId,
-        raw: data.coordinatorId,
-        memberUserId: req.params.userId,
-      });
-      if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
-      data.coordinatorId = coordRes.value ?? null;
-    }
 
     const nextRole = data.role || membership.role;
     // Validate the grant set before writing anything (only when the result is a lead).

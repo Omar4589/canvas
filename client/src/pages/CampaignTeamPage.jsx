@@ -214,8 +214,8 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
     queryFn: () => api(`/admin/reports/canvassers/${member.userId}/summary?campaignId=${campaignId}`),
   });
   const [coordinatorId, setCoordinatorId] = useState(member.coordinatorId || '');
-  // A crew change re-stamps this person's whole knock history onto the new team — org-wide, since
-  // the coordinator field has never been per-campaign. So it stages, previews, then commits.
+  // A crew change re-stamps this person’s knock history onto the new team — for THIS campaign, since
+  // the crew lives on the campaign roster. So it stages, previews, then commits.
   const [pendingCoordinatorId, setPendingCoordinatorId] = useState(null);
   const isPendingChange =
     pendingCoordinatorId !== null && pendingCoordinatorId !== (member.coordinatorId || '');

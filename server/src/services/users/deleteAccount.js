@@ -281,13 +281,22 @@ export async function releaseAssignedWork(
     CampaignAssignment.deleteMany({ userId, ...scope }),
     campaignId ? Promise.resolve({ deletedCount: 0 }) : CampaignManager.deleteMany({ userId, ...scope }),
   ]);
-  // A coordinator who leaves the ORG must not keep supervising anybody. Org/global scope only.
-  if (!campaignId) {
-    await Membership.updateMany(
-      { coordinatorId: userId, ...scope },
-      { $set: { coordinatorId: null } }
-    );
-  }
+  // A coordinator who leaves must not keep supervising anybody — their crew's roster rows are
+  // cleared so the NEXT knock stamps no team rather than a departed one.
+  //
+  // The LEDGER is deliberately untouched: the doors that crew already knocked keep the departed
+  // coordinator's stamp, which is what keeps their team whole. Re-stamping here would dump the
+  // whole history into the "No team" bucket admins exclude — the original 104-door under-report.
+  // That asymmetry is the entire reason this write does not go through setMemberCoordinator.
+  //
+  // Runs in EVERY scope now, campaign included, because the crew lives on the campaign roster:
+  // clearing it for one campaign severs supervision in that campaign only, which is exactly right.
+  // (It was org/global-only when a crew was one org-wide field and clearing it in campaign scope
+  // would have broken a link that had nothing to do with this campaign.)
+  await CampaignAssignment.updateMany(
+    { coordinatorId: userId, ...scope },
+    { $set: { coordinatorId: null } }
+  );
 
   return {
     turfAssignments: turf.deletedCount || 0,

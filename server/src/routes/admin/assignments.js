@@ -43,11 +43,17 @@ router.get('/', async (req, res, next) => {
     // show the admin badge, search, and group/assign by crew.
     const userIds = assignments.filter((a) => a.userId).map((a) => a.userId._id);
     const memberships = await Membership.find({ organizationId: campaign.organizationId, userId: { $in: userIds } })
-      .select('userId role coordinatorId isActive')
+      .select('userId role isActive')
       .lean();
     const roleByUser = new Map(memberships.map((m) => [String(m.userId), m.role]));
     const membershipByUser = new Map(memberships.map((m) => [String(m.userId), m]));
-    const coordByUser = new Map(memberships.map((m) => [String(m.userId), m.coordinatorId ? String(m.coordinatorId) : null]));
+    // The crew comes off THIS campaign's roster rows, not the org membership. Membership still
+    // carries a legacy coordinatorId that nothing reads any more; joining it here made the Team
+    // page DISPLAY a different field than it WRITES, so a crew change appeared to revert on the
+    // next refetch. `assignments` are already this campaign's rows, so no extra query.
+    const coordByUser = new Map(
+      assignments.map((a) => [String(a.userId?._id || a.userId), a.coordinatorId ? String(a.coordinatorId) : null])
+    );
     // Resolve the distinct coordinator (lead) ids to display names for the crew label.
     const coordIds = [...new Set([...coordByUser.values()].filter(Boolean))];
     const coordNameById = new Map(

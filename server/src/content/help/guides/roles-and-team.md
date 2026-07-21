@@ -31,9 +31,11 @@ Switching organizations in the console always lands on the new org's home page �
 
 ## What a team lead can do
 
-Inside a campaign you grant them, a team lead is as powerful as an admin: import the voter file, attach a survey, build [walk lists](walk-lists), cut [turf and books](turf-and-books), run [passes](passes), [assign canvassers](assigning-canvassers), build the crew (including creating new canvasser accounts), and see all the reporting.
+Inside a campaign you grant them, a team lead is as powerful as an admin: import the voter file, attach a survey, build [walk lists](walk-lists), cut [turf and books](turf-and-books), run [passes](passes), [assign canvassers](assigning-canvassers) — including putting *themselves* on a book, so a lead who also walks doesn't have to ask you for one — build the crew (including creating new canvasser accounts), and see all the reporting.
 
 What they *can't* do: create, archive, or delete a campaign; edit the org-wide survey or tag libraries (they can read them); or touch org users, org settings, or the voter directory. They also can't grant the lead role or see any campaign you didn't hand them. A lead with no grants sees an empty console.
+
+They build their crew from their campaign's own **Team** tab instead — and that isn't a lesser version of the org Users page. A crew belongs to a campaign, so the Team tab is where *everyone* sets one, admins included.
 
 ## Granting a team lead
 
@@ -45,8 +47,17 @@ You can change the checked campaigns anytime — unchecking one revokes it right
 
 > Tip: A lead who also walks doors is added to a campaign's roster like any [canvasser](add-a-canvasser-account) — managing and walking are separate.
 
+## Where a team lead works
+
+- **In the console**, they sign in the same way you do and land on **Campaigns**, showing only the campaigns they manage. Inside a campaign, every tab you see is there. The org-only areas — Overview, Surveys, Tags, Voters, Users — simply aren't in their nav.
+- **In the mobile app**, they get the same admin view, scoped to their campaigns. A campaign's **Team** tile is where they manage that campaign's crew and book assignments. The org-wide **Users** screen is an admin-only place and isn't offered to them.
+
 ## Coordinators and crews
 
 Within a campaign, you (or a lead) build the **crew** — the canvassers on that campaign. You can mark trusted members as **coordinators** to help lead a crew. See [assigning canvassers](assigning-canvassers) and, for leads, [getting started as a team lead](lead-getting-started).
 
-A canvasser's doors count toward whoever their coordinator is **right now**, so changing someone's crew moves the doors they already knocked onto the new one — which is how you fix a crew you forgot to set at the start. A crew is set for the **whole organization**, not per campaign. See [I moved someone to another team](move-a-canvasser-to-another-team).
+**Crews belong to a campaign, not to your organization.** The same canvasser can be on one coordinator's crew in one campaign and a different coordinator's crew in another, so there's exactly one place to set a crew: that campaign's **Team** tab in the console, or the campaign's **Team** screen in the mobile app. The org **Users** page doesn't set crews any more — open a member there and you'll see their crews listed, one row per campaign they're on, each row linking straight to that campaign's Team tab.
+
+A canvasser's doors count toward whoever their coordinator is **right now on that campaign**, so changing someone's crew moves the doors they already knocked *in that campaign* onto the new one — which is how you fix a crew you forgot to set at the start. Their work on your other campaigns isn't touched. See [I moved someone to another team](move-a-canvasser-to-another-team).
+
+One thing that follows: running a crew is per campaign too. Someone who coordinates a crew on one campaign but knocks doors on another *without* a crew there lands in that second campaign's "No team" bucket — they show up as their own team only where they actually run one.

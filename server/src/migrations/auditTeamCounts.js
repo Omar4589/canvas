@@ -232,6 +232,17 @@ async function auditCampaign(campaign) {
     'userId coordinatorId'
   ).lean();
   const crewById = new Map(roster.map((r) => [String(r.userId), r]));
+  // Names for coordinators who hold a crew on the roster but have NO doors of their own in this
+  // campaign — a brand-new crew, or one whose knocks are not stamped yet. nameById above is built
+  // only from teams that appear in the door aggregate, so without this they render as '?'.
+  const rosterCoordIds = [...new Set(
+    roster.map((r) => r.coordinatorId).filter(Boolean).map(String)
+  )].filter((id) => !nameById.has(id));
+  if (rosterCoordIds.length) {
+    for (const u of await User.find({ _id: { $in: rosterCoordIds } }, 'firstName lastName').lean()) {
+      nameById.set(String(u._id), `${u.firstName} ${u.lastName}`.trim());
+    }
+  }
 
   for (const uid of userIds.map(String)) {
     const u = users.find((x) => String(x._id) === uid);
@@ -240,12 +251,15 @@ async function auditCampaign(campaign) {
     const surveys = await SurveyResponse.countDocuments({ campaignId: campaign._id, userId: uid });
     const state = !m ? 'REMOVED FROM ORG' : u?.deletedAt ? 'account deleted' : m.isActive ? 'active' : 'deactivated';
     const crew = crewById.get(uid);
+    // Order matters: running a crew here beats not being rostered. A lead or admin can knock a
+    // campaign they were never added to as a walker, and reading 'off roster' next to their own
+    // team's name is true but absurd.
     const team = crew?.coordinatorId
       ? nameById.get(String(crew.coordinatorId)) || '?'
-      : !crew
-        ? 'off roster'
-        : leadSet.has(uid)
-          ? 'own team'
+      : leadSet.has(uid)
+        ? 'own team'
+        : !crew
+          ? 'off roster'
           : 'no team';
     console.log(
       `  ${pad(u ? `${u.firstName} ${u.lastName}` : uid, 20)}${padL(n(k?.knocks), 8)} doors ${padL(n(surveys), 6)} surveys  ·  ${pad(team, 14)} ${state}`

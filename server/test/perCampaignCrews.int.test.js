@@ -289,6 +289,38 @@ test('a lead walking WITH their crew on one door folds to ONE team (crossTeamDoo
   assert.equal(noTeam, 0, 'the lead\'s own door did not fall into "No team"');
 });
 
+test('the roster endpoint REPORTS the crew it was told to write', { skip }, async () => {
+  const { hd54, maria, asa, asaToken, bossToken } = ctx;
+  // Regression: /assignments joined the crew from Membership.coordinatorId — the legacy field
+  // nothing writes any more — so the Team page DISPLAYED one value while WRITING another, and a
+  // crew change appeared to revert on the next refetch. Read what the write path wrote.
+  await setCrew(hd54, maria._id, asa._id, asaToken);
+  const res = await call(`/admin/campaigns/${hd54._id}/assignments`, bossToken);
+  const row = (res.json.assignments || []).find((a) => String(a.userId) === String(maria._id));
+  assert.ok(row, 'Maria is on the roster');
+  assert.equal(String(row.coordinatorId), String(asa._id), 'the roster reports the crew that was set');
+  assert.equal(row.coordinatorName, 'Asa X', 'and names it');
+});
+
+test('a departing coordinator stops supervising — future knocks, not past ones', { skip }, async () => {
+  const { org, hd54, chad, asa, asaToken } = ctx;
+  await setCrew(hd54, chad._id, asa._id, asaToken);
+  await knock(hd54, chad, asa._id);
+  const doorsBefore = teamDoors(await teamRows(hd54), 'Asa X');
+
+  // Asa leaves the org. His crew's roster link must be cleared so the NEXT knock stamps no team...
+  await releaseAssignedWork(asa._id, { organizationId: org._id });
+  const chadRow = await CampaignAssignment.findOne({ campaignId: hd54._id, userId: chad._id }).lean();
+  assert.equal(chadRow?.coordinatorId ?? null, null, 'the crew link is cleared');
+
+  // ...but the doors he already supervised keep his stamp. Clearing those instead is the original
+  // 104-door under-report, which is why this write never goes through setMemberCoordinator.
+  assert.equal(
+    teamDoors(await teamRows(hd54), 'Asa X'), doorsBefore,
+    'the departed coordinator keeps every door his crew already knocked'
+  );
+});
+
 test('removing a crew member from the campaign does not split the lead\'s row', { skip }, async () => {
   const { org, hd54, asa, chad, asaToken } = ctx;
   await setCrew(hd54, chad._id, asa._id, asaToken);
