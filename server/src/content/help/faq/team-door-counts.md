@@ -21,9 +21,24 @@ This is why the "Doors" number is a little lower than the raw count of everythin
 
 ## People who left the team
 
-**Their doors still count, and they still count toward their team.** Somebody who knocked for you and then quit — whose account you deactivated, or who you removed from the campaign — keeps their doors on the team they were on. You don't have to do anything.
+**Their doors still count, and they still count toward their team.** Somebody who knocked for you and then quit — whose account you deactivated, who you removed from the campaign or the organization, or who deleted their account — keeps their doors on the team they were on. You don't have to do anything.
 
-The team is recorded on each door **at the moment it's knocked**, so nothing you do to someone's account afterwards can move their work to a different team, or lose it.
+**Losing a person never moves a number.** The one thing that does is changing somebody's coordinator, and that's on purpose — see below.
+
+## Moving someone to another team
+
+**All of their doors move with them,** including the ones they knocked before the change.
+
+That's what makes a forgotten setup step fixable: if you add a canvasser, forget to put them on a crew, and they knock all day, you can set their coordinator afterwards and every one of those doors moves onto that team. You're not stuck with a pile in "No coordinator".
+
+The flip side is worth knowing: **a team number you quoted last month can change if you reassign somebody afterwards.** Before it saves, the app tells you exactly how many doors will move and which two teams are affected. Changed your mind? Set the coordinator back and the numbers return exactly as they were.
+
+Two things a team change never touches:
+
+- **The campaign's own totals**, coverage, and your connection rates. Only the split *between* teams changes.
+- **Your bill.** Billing counts doors, not teams.
+
+One case that surprises people: if you give a coordinator to someone who **runs a crew themselves**, their *own* doors move onto their new coordinator's team. Their crew's doors stay with them. The confirmation says so before you commit.
 
 ## "Knocked by two different teams"
 

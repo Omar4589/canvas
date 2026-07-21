@@ -21,6 +21,8 @@ While you're looking at **today**, the page refreshes about every 20 seconds —
 
 Above the canvasser table there's a **by-team** breakdown: every team's people, doors, survey doors, surveys taken and connection rate — with a **Campaign** row underneath. The teams **add up to the campaign total**, so a number you read off one team's row is consistent with the campaign figure. Click a team to drill into just their canvassers — and **← All teams** brings you back. See [How many doors has one team knocked?](team-door-counts).
 
+Each canvasser's doors count toward whoever their coordinator is **right now** — so if a team's row looks different from last time you read it, check whether somebody's crew changed. See [I moved someone to another team](move-a-canvasser-to-another-team).
+
 ## What "Doors" counts
 
 **One door = one house, in one round.** If two canvassers knock the same house in the same round, that's **one** door — the second knock was almost certainly a mistake and isn't counted twice. Go back in a **new round** and it counts again, because that's a deliberate revisit.

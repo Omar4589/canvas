@@ -177,8 +177,16 @@ a lead sees the map + ping/household detail only for campaigns they manage.
 add-picker), `POST /` (create a **canvasser** — or **link an existing account by email** (`linkExisting`)
 — role hard-coded, and put them on this campaign; a lead owns onboarding, so linking a returning
 cross-org canvasser is allowed here too, with the same privacy guards as the admin path), `PATCH
-/:userId/coordinator` (scoped to this campaign's roster). This is how a lead builds a crew without the
-org Users admin. Adding/removing *existing* members and reading the roster still go through `.../assignments`.
+/:userId/coordinator` + `GET /:userId/coordinator-preview` (both scoped to this campaign's roster).
+This is how a lead builds a crew without the org Users admin. Adding/removing *existing* members and
+reading the roster still go through `.../assignments`.
+
+> ⚠️ **A lead's coordinator change is ORG-WIDE, despite the campaign-scoped URL.** The write filter is
+> `{userId, organizationId}` — `Membership` has no `campaignId`, so a coordinator has never been
+> per-campaign. Since the change now also **re-stamps that person's knock history** onto the new crew
+> (see [USERS.md](USERS.md) and [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract)),
+> a lead reorganizing their crew inside one campaign moves that person's doors in **every** campaign
+> in the org. The preview endpoint exists so they see the door count before committing.
 
 Member creation + validation is shared in
 [services/memberships/createMember.js](../server/src/services/memberships/createMember.js)

@@ -104,6 +104,9 @@ export default function UsersPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [emailLookup, setEmailLookup] = useState(false);
   const [formError, setFormError] = useState('');
+  // Set only when adding a member actually moved existing ledger rows onto a team (a returning
+  // canvasser whose knocks outlived their old membership).
+  const [restampNotice, setRestampNotice] = useState('');
   const [selectedUserId, setSelectedUserId] = useState(null);
 
   const [search, setSearch] = useState('');
@@ -114,8 +117,19 @@ export default function UsersPage() {
 
   const addMember = useMutation({
     mutationFn: (body) => api('/admin/memberships', { method: 'POST', body }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['memberships'] });
+      // Linking a RETURNING canvasser can bring ledger history back with them: removing someone
+      // from the org deletes their Membership but keeps their knocks, so re-adding them re-stamps
+      // those rows onto their new coordinator. This flash is the only signal the admin gets that
+      // the person they just added arrived with work attached.
+      const moved = res?.restamp?.activities || 0;
+      if (moved) {
+        qc.invalidateQueries({ queryKey: ['team-breakdown'] });
+        setRestampNotice(
+          `Moved ${moved.toLocaleString()} existing door record${moved === 1 ? '' : 's'} onto their team.`
+        );
+      }
       setShowForm(false);
       setForm(EMPTY_FORM);
       setEmailLookup(false);
@@ -433,6 +447,25 @@ export default function UsersPage() {
           {visibleMembers.length} of {members.length}
         </span>
       </Card>
+
+      {/* Adding a RETURNING canvasser can pull ledger history back onto a team — say so, because
+          a team total will have changed for a reason the admin never explicitly asked for. */}
+      {restampNotice && (
+        <div
+          role="status"
+          className="mb-4 flex items-start gap-3 rounded-md border border-brand-600 bg-brand-tint px-3 py-2 text-sm text-fg"
+        >
+          <span className="flex-1">{restampNotice}</span>
+          <button
+            type="button"
+            onClick={() => setRestampNotice('')}
+            className="shrink-0 font-semibold hover:opacity-70"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* A refused billing-access change (notably LAST_BILLING_ADMIN — the org can't be left with
           no billing admin) surfaces here. The toggle itself is server-data-driven, so it snaps

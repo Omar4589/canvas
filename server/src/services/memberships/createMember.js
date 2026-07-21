@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { Campaign } from '../../models/Campaign.js';
+import { CoordinatorChange } from '../../models/CoordinatorChange.js';
+import { restampLedgerCoordinator } from './restampCoordinator.js';
 import { phoneSchema, nameSchema, emailSchema, passwordSchema } from '../../utils/validators.js';
 
 // Shared member-creation + validation used by the org Users admin (memberships.js)
@@ -41,7 +43,8 @@ export const memberIdentityShape = {
 // Throws MemberError on the same conditions the memberships route enforces.
 // `mustChangePassword` forces a temp-password reset on first login (client provisioning);
 // `billingAccess` seats a bill-payer admin. Both default off, so existing callers are
-// unaffected. Returns { user, membership }.
+// unaffected. Returns { user, membership, restamp } — see the re-stamp note below for why a
+// CREATE can move ledger rows.
 export async function createOrgMember({
   orgId,
   addedBy,
@@ -102,7 +105,39 @@ export async function createOrgMember({
     coordinatorId: coordinatorId || null,
     billingAccess: !!billingAccess,
   });
-  return { user, membership };
+
+  // NOT a no-op for a brand-new member, and this is the easy thing to miss. Removal from the ORG
+  // hard-deletes the Membership while the CanvassActivity/SurveyResponse rows survive, so
+  // linkExisting can attach an account that already has ledger history in this org — stamped with
+  // whatever team they were on when they left. Under the current-coordinator-owns-history rule
+  // that history belongs to their new coordinator (or to No team, if they have none).
+  // A genuinely new account simply matches zero rows.
+  let restamp = { activities: 0, surveys: 0, restampError: null };
+  try {
+    const moved = await restampLedgerCoordinator({
+      organizationId: orgId,
+      userId: user._id,
+      coordinatorId: coordinatorId || null,
+    });
+    restamp = { ...moved, restampError: null };
+  } catch (err) {
+    restamp.restampError = err?.message || String(err);
+  }
+  if (restamp.activities || restamp.surveys || restamp.restampError) {
+    await CoordinatorChange.create({
+      organizationId: orgId,
+      userId: user._id,
+      fromCoordinatorId: null,
+      toCoordinatorId: coordinatorId || null,
+      byUserId: addedBy || null,
+      source: 'member_create',
+      activitiesMoved: restamp.activities,
+      surveysMoved: restamp.surveys,
+      restampError: restamp.restampError,
+    });
+  }
+
+  return { user, membership, restamp };
 }
 
 // Validate a coordinatorId for a membership in this org. A coordinator oversees a

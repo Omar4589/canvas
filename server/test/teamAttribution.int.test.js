@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert';
 import mongoose from 'mongoose';
 
-// Team attribution — the coordinator frozen onto each knock, over the REAL Express app.
+// Team attribution — the coordinator stamped on each knock, over the REAL Express app.
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/team node --test test/teamAttribution.int.test.js
 //
 // This mirrors a REAL campaign (Florida HD54), because the bug was found there and the numbers are
@@ -21,7 +21,11 @@ import mongoose from 'mongoose';
 //   2. The campaign's billable total does not move by a single door.
 //   3. A same-team double-knock is absorbed INSIDE the team (contributes 0 to crossTeamDoors) — the
 //      case a naive "subtract every overlap" formula gets wrong.
-//   4. Frozen history: moving a canvasser to another team does NOT move the doors they already knocked.
+//   4. The CURRENT coordinator owns ALL of a canvasser's history: reassigning someone moves every
+//      door they ever knocked onto the new team, org-wide, and setting it back moves them back.
+//   5. DEPARTURE is the exception and never re-stamps — when a coordinator leaves the org their
+//      crew's Membership.coordinatorId is cleared, but the LEDGER keeps their team, so the doors
+//      they supervised stay counted. That asymmetry is the 104-door fix; #4 must not eat it.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-team-attribution';
 
 const { createApp } = await import('../src/app.js');
@@ -37,7 +41,11 @@ const { Voter } = await import('../src/models/Voter.js');
 const { Household } = await import('../src/models/Household.js');
 const { Effort } = await import('../src/models/Effort.js');
 const { Pass } = await import('../src/models/Pass.js');
+const { CoordinatorChange } = await import('../src/models/CoordinatorChange.js');
+const { CampaignManager } = await import('../src/models/CampaignManager.js');
+const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
 const { knocksPipeline } = await import('../src/services/reports/aggregations.js');
+const { releaseAssignedWork } = await import('../src/services/users/deleteAccount.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -62,6 +70,31 @@ async function call(path, token, orgId) {
   return { status: res.status, json: await res.json() };
 }
 
+// Mutating variant. Reassignment MUST be driven through the real route: the ledger re-stamp lives
+// in the service layer, so a test that pokes Membership directly exercises none of it.
+async function write(path, token, orgId, body, method = 'PATCH') {
+  const res = await fetch(`${base}/api${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Org-Id': String(orgId),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, json: await res.json() };
+}
+
+// A team's door count off /team-breakdown, by coordinator name (null → the "No team" bucket).
+async function teamDoors(name) {
+  const { org, campaign, token } = ctx;
+  const res = await call(`/admin/reports/team-breakdown?campaignId=${campaign._id}`, token, org._id);
+  const row = name === null
+    ? res.json.teams.find((t) => !t.coordinatorId)
+    : res.json.teams.find((t) => t.coordinatorName === name);
+  return { doors: row?.doors || 0, body: res.json };
+}
+
 // One knock on a fresh house, stamped with the team frozen at knock time.
 async function knock(user, coordinatorId, actionType = 'not_home', household = null) {
   const { org, campaign, effort, pass } = ctx;
@@ -83,7 +116,7 @@ async function knock(user, coordinatorId, actionType = 'not_home', household = n
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity, SurveyResponse, Voter, Household, Effort, Pass])
+  for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity, SurveyResponse, Voter, Household, Effort, Pass, CoordinatorChange])
     await M.deleteMany({});
 
   // teamAttributionReadyAt = the backfill has run. Without it the endpoint refuses to report.
@@ -240,37 +273,335 @@ test('a CROSS-team double-knock is claimed by both teams and reported, not hidde
   assert.equal(res.json.teamSum - res.json.crossTeamDoors, res.json.campaign.doors);
 });
 
-test('FROZEN: moving a canvasser to another team does NOT move the doors they already knocked', { skip }, async () => {
+test('REASSIGNMENT: moving a canvasser moves ALL the doors they already knocked', { skip }, async () => {
   const { org, campaign, token, colin, asa, frank } = ctx;
-  const before = await call(
-    `/admin/reports/canvasser-timeline?campaignId=${campaign._id}&totals=1&coordinatorId=${asa._id}`,
+  // THE contract: the current coordinator owns all of that canvasser's history. Driven through the
+  // real PATCH, because the re-stamp lives in setMemberCoordinator — poking Membership directly
+  // would leave this test GREEN while asserting nothing, which is worse than a failure.
+  const asaBefore = (await teamDoors('Asa X')).doors;
+  const frankBefore = (await teamDoors('Frank X')).doors;
+  const campaignBefore = (await teamDoors(null)).body.campaign.doors;
+
+  // The preview must promise exactly what the write delivers — they share restampFilter.
+  const preview = await call(
+    `/admin/memberships/${colin._id}/coordinator-preview?coordinatorId=${frank._id}`,
     token, org._id
   );
+  assert.equal(preview.status, 200);
+  assert.equal(preview.json.doors, 100, 'preview counts DOORS (deduped), not raw activity rows');
+  assert.equal(preview.json.from.name, 'Asa X');
+  assert.equal(preview.json.to.name, 'Frank X');
 
   // Colin transfers from Asa's paid crew to Frank's volunteers.
-  await Membership.updateOne(
-    { userId: colin._id, organizationId: org._id },
-    { $set: { coordinatorId: frank._id } }
-  );
+  const res = await write(`/admin/memberships/${colin._id}`, token, org._id, {
+    coordinatorId: String(frank._id),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.restamp.changed, true);
+  assert.equal(res.json.restamp.error, null);
+  assert.equal(res.json.restamp.activities, 100, 'the write moved the rows the preview promised');
 
-  const after = await call(
-    `/admin/reports/canvasser-timeline?campaignId=${campaign._id}&totals=1&coordinatorId=${asa._id}`,
-    token, org._id
-  );
+  assert.equal((await teamDoors('Asa X')).doors, asaBefore - 100, "Colin's history leaves Asa");
+  assert.equal((await teamDoors('Frank X')).doors, frankBefore + 100, 'and lands whole on Frank');
+
+  const after = await teamDoors(null);
+  assert.equal(after.body.campaign.doors, campaignBefore, 'the campaign billable does not move');
   assert.equal(
-    after.json.billableKnocks,
-    before.json.billableKnocks,
-    "Colin's 100 doors were knocked for Asa and stay Asa's — a number quoted last month still reconciles"
+    after.body.teamSum - after.body.crossTeamDoors,
+    after.body.campaign.doors,
+    'and the identity still holds exactly'
   );
 
-  const frankRes = await call(
+  // REVERSIBILITY — the reason no undo record is needed: the rule is idempotent w.r.t. current
+  // state, so setting the coordinator back restores the numbers byte-for-byte. Doubles as cleanup,
+  // since later tests in this file read live team totals.
+  const back = await write(`/admin/memberships/${colin._id}`, token, org._id, {
+    coordinatorId: String(asa._id),
+  });
+  assert.equal(back.json.restamp.activities, 100);
+  assert.equal((await teamDoors('Asa X')).doors, asaBefore, 'Asa is exactly whole again');
+  assert.equal((await teamDoors('Frank X')).doors, frankBefore, 'and so is Frank');
+});
+
+test('a NO-OP re-pick writes nothing and logs nothing', { skip }, async () => {
+  const { org, token, colin, asa } = ctx;
+  const before = await CoordinatorChange.countDocuments({ organizationId: org._id });
+  const res = await write(`/admin/memberships/${colin._id}`, token, org._id, {
+    coordinatorId: String(asa._id), // already his coordinator
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.restamp.changed, false);
+  assert.equal(
+    await CoordinatorChange.countDocuments({ organizationId: org._id }),
+    before,
+    'an audit log full of no-ops cannot answer "why did this team move?"'
+  );
+});
+
+test('the change is AUDITED — who moved whom, from which team to which, and how much', { skip }, async () => {
+  const { org, token, ian, asa, frank, boss } = ctx;
+  await write(`/admin/memberships/${ian._id}`, token, org._id, { coordinatorId: String(frank._id) });
+
+  const row = await CoordinatorChange.findOne({ organizationId: org._id, userId: ian._id }).lean();
+  assert.ok(row, 'a reassignment leaves a record');
+  assert.equal(String(row.fromCoordinatorId), String(asa._id));
+  assert.equal(String(row.toCoordinatorId), String(frank._id));
+  assert.equal(String(row.byUserId), String(boss._id), 'the actor, not the subject');
+  assert.equal(row.source, 'admin_users');
+  assert.equal(row.activitiesMoved, 292);
+  assert.equal(row.restampError, null);
+
+  await write(`/admin/memberships/${ian._id}`, token, org._id, { coordinatorId: String(asa._id) });
+});
+
+test('BULK-restrict rows are never re-stamped onto a team', { skip }, async () => {
+  const { org, campaign, token, effort, pass, asa } = ctx;
+  // An admin who bulk-restricts a gated community is doing DESK work: those rows stamp
+  // coordinatorId:null with via:'bulk' and sit outside every per-team total. If that admin is
+  // later given a coordinator, their office marks must NOT be swept onto a team.
+  const clerk = await mkUser('Clerk');
+  await Membership.create({ userId: clerk._id, organizationId: org._id, role: 'admin', isActive: true, coordinatorId: null });
+  const hh = await Household.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: '9200 Gate Way', city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: '9200 GATE WAY|TOWN|FL|34741',
+    location: { type: 'Point', coordinates: [-81.4, 28.3] },
+  });
+  await CanvassActivity.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: hh._id, userId: clerk._id, actionType: 'restricted', via: 'bulk',
+    coordinatorId: null, timestamp: new Date('2026-07-08T14:00:00Z'),
+    location: { lat: 28.3, lng: -81.4 },
+  });
+
+  await write(`/admin/memberships/${clerk._id}`, token, org._id, { coordinatorId: String(asa._id) });
+
+  const bulkRow = await CanvassActivity.findOne({ userId: clerk._id, via: 'bulk' }).lean();
+  assert.equal(bulkRow.coordinatorId, null, 'desk work stays off every team');
+});
+
+test('the SURVEY ledger moves in lockstep with the door ledger', { skip }, async () => {
+  const { org, campaign, token, effort, pass, asa, frank } = ctx;
+  // The two ledgers drifting apart is the exact failure teamFoldStage's header warns about: one
+  // row showing a team's DOORS on one team and their SURVEYS on another.
+  const sammy = await mkUser('Sammy');
+  await Membership.create({ userId: sammy._id, organizationId: org._id, role: 'canvasser', isActive: true, coordinatorId: asa._id });
+  const hh = await Household.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: '9300 Survey St', city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: '9300 SURVEY ST|TOWN|FL|34741',
+    location: { type: 'Point', coordinates: [-81.4, 28.3] },
+  });
+  const voter = await Voter.create({
+    organizationId: org._id, householdId: hh._id, stateVoterId: 'LOCK-1',
+    firstName: 'Lock', lastName: 'Step', fullName: 'Lock Step',
+  });
+  await CanvassActivity.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: hh._id, userId: sammy._id, actionType: 'survey_submitted',
+    coordinatorId: asa._id, timestamp: new Date('2026-07-08T14:00:00Z'),
+    location: { lat: 28.3, lng: -81.4 },
+  });
+  await SurveyResponse.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: hh._id, voterId: voter._id, userId: sammy._id,
+    surveyTemplateId: new mongoose.Types.ObjectId(), surveyTemplateVersion: 1,
+    answers: [], coordinatorId: asa._id, submittedAt: new Date('2026-07-08T14:00:00Z'),
+    location: { lat: 28.3, lng: -81.4 },
+  });
+
+  const res = await write(`/admin/memberships/${sammy._id}`, token, org._id, {
+    coordinatorId: String(frank._id),
+  });
+  assert.equal(res.json.restamp.activities, 1);
+  assert.equal(res.json.restamp.surveys, 1, 'the survey ledger must not be left behind');
+
+  const sr = await SurveyResponse.findOne({ userId: sammy._id }).lean();
+  assert.equal(String(sr.coordinatorId), String(frank._id));
+
+  const breakdown = await teamDoors('Frank X');
+  const frankRow = breakdown.body.teams.find((t) => t.coordinatorName === 'Frank X');
+  assert.equal(frankRow.surveyDoors, 1, 'door-unit follows');
+  assert.equal(frankRow.surveysTaken, 1, 'and voter-unit follows identically');
+});
+
+test('LEGACY rows with coordinatorId ABSENT are swept by a reassignment', { skip }, async () => {
+  const { org, campaign, token, effort, pass, asa } = ctx;
+  // Pre-backfill history has NO coordinatorId key at all. In QUERY context {$ne: <id>} matches an
+  // absent field, so the re-stamp sweeps these for free — the inverse of the {$exists:false} rule
+  // migrateActivityCoordinator.js keys on. Seeded through the RAW driver: Mongoose's default:null
+  // would write an explicit null and mask the case entirely.
+  const ghost = await mkUser('Ghost');
+  await Membership.create({ userId: ghost._id, organizationId: org._id, role: 'canvasser', isActive: true, coordinatorId: null });
+  const hh = await Household.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: '9400 Ghost Rd', city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: '9400 GHOST RD|TOWN|FL|34741',
+    location: { type: 'Point', coordinates: [-81.4, 28.3] },
+  });
+  await CanvassActivity.collection.insertOne({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
+    householdId: hh._id, userId: ghost._id, actionType: 'not_home',
+    // NO coordinatorId key — a genuine legacy row.
+    timestamp: new Date('2026-07-08T14:00:00Z'),
+  });
+
+  const res = await write(`/admin/memberships/${ghost._id}`, token, org._id, {
+    coordinatorId: String(asa._id),
+  });
+  assert.equal(res.json.restamp.activities, 1, 'an absent field is stale, not sacred');
+  const row = await CanvassActivity.findOne({ userId: ghost._id }).lean();
+  assert.equal(String(row.coordinatorId), String(asa._id));
+});
+
+test('CROSS-ORG: a reassignment in one org never touches the same person\'s work in another', { skip }, async () => {
+  const { org, colin, asa } = ctx;
+  // Membership is unique on {userId, organizationId} precisely because a person can canvass for
+  // two customers. restampFilter requires organizationId for this reason.
+  const other = await Organization.create({
+    name: 'Other Org', slug: 'other-org', isActive: true, teamAttributionReadyAt: new Date(),
+  });
+  const otherBoss = await mkUser('Otherboss');
+  const otherLead = await mkUser('Otherlead');
+  await Membership.create({ userId: otherBoss._id, organizationId: other._id, role: 'admin', isActive: true });
+  await Membership.create({ userId: otherLead._id, organizationId: other._id, role: 'lead', isActive: true });
+  await Membership.create({ userId: colin._id, organizationId: other._id, role: 'canvasser', isActive: true, coordinatorId: otherLead._id });
+
+  const otherCampaign = await Campaign.create({
+    organizationId: other._id, name: 'Other Race', type: 'survey', state: 'FL',
+    isActive: true, timeZone: 'America/New_York',
+  });
+  const otherHh = await Household.create({
+    organizationId: other._id, campaignId: otherCampaign._id,
+    addressLine1: '1 Other St', city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: '1 OTHER ST|TOWN|FL|34741',
+    location: { type: 'Point', coordinates: [-81.4, 28.3] },
+  });
+  await CanvassActivity.create({
+    organizationId: other._id, campaignId: otherCampaign._id, householdId: otherHh._id,
+    userId: colin._id, actionType: 'not_home', coordinatorId: otherLead._id,
+    timestamp: new Date('2026-07-08T14:00:00Z'), location: { lat: 28.3, lng: -81.4 },
+  });
+
+  // Move Colin in the FIRST org.
+  await write(`/admin/memberships/${colin._id}`, ctx.token, org._id, { coordinatorId: null });
+
+  const otherRow = await CanvassActivity.findOne({ organizationId: other._id, userId: colin._id }).lean();
+  assert.equal(String(otherRow.coordinatorId), String(otherLead._id), "the other org's ledger is untouched");
+
+  await write(`/admin/memberships/${colin._id}`, ctx.token, org._id, { coordinatorId: String(asa._id) });
+});
+
+test('DEPARTURE does not re-stamp — a departed coordinator keeps the doors they supervised', { skip }, async () => {
+  const { org, campaign, token, effort, pass } = ctx;
+  // THE most important assertion in this file. deleteAccount clears the crew's
+  // Membership.coordinatorId when a coordinator leaves the org; the LEDGER must keep their team,
+  // or their crew's history falls into the "No team" bucket admins exclude. That is the original
+  // 104-door bug, and the current-coordinator-owns-history rule must not resurrect it.
+  const quitter = await mkUser('Quitter');   // a coordinator who will leave
+  const rookie = await mkUser('Rookie');     // their crew member, who stays
+  await Membership.create({ userId: quitter._id, organizationId: org._id, role: 'lead', isActive: true, coordinatorId: null });
+  await Membership.create({ userId: rookie._id, organizationId: org._id, role: 'canvasser', isActive: true, coordinatorId: quitter._id });
+  for (let i = 0; i < 12; i++) await knock(rookie, quitter._id);
+
+  assert.equal((await teamDoors('Quitter X')).doors, 12, 'Quitter\'s team is on the board');
+
+  const noTeamBefore = (await teamDoors(null)).doors;
+  await releaseAssignedWork(quitter._id, { organizationId: org._id });
+
+  // The membership side IS cleared — nobody keeps supervising from outside the org.
+  const rookieMembership = await Membership.findOne({ userId: rookie._id, organizationId: org._id }).lean();
+  assert.equal(rookieMembership.coordinatorId, null, 'a departed coordinator supervises nobody');
+
+  // But the ledger did NOT move.
+  assert.equal((await teamDoors('Quitter X')).doors, 12, "the doors Quitter's crew worked stay his");
+  assert.equal((await teamDoors(null)).doors, noTeamBefore, 'and "No team" is NOT inflated by them');
+});
+
+test('a TEAM LEAD can move history too, from their own campaign crew panel', { skip }, async () => {
+  const { org, campaign, colin, asa, frank } = ctx;
+  // Permission tier 2. The lead's endpoint lives on a campaign-scoped URL but its write filter is
+  // {userId, organizationId} — as it always was, since Membership has no campaignId. So the move
+  // is ORG-WIDE, and the re-stamp makes that pre-existing scope visible rather than adding it.
+  await CampaignManager.create({ userId: frank._id, organizationId: org._id, campaignId: campaign._id, grantedBy: ctx.boss._id });
+  await CampaignAssignment.create({ campaignId: campaign._id, userId: colin._id, organizationId: org._id, assignedBy: ctx.boss._id });
+  const frankToken = signUserToken(frank);
+
+  const asaBefore = (await teamDoors('Asa X')).doors;
+  const frankBefore = (await teamDoors('Frank X')).doors;
+
+  const preview = await call(
+    `/admin/campaigns/${campaign._id}/crew/${colin._id}/coordinator-preview?coordinatorId=${frank._id}`,
+    frankToken, org._id
+  );
+  assert.equal(preview.status, 200, 'a lead may preview their own crew move');
+  assert.equal(preview.json.doors, 100);
+
+  const res = await write(
+    `/admin/campaigns/${campaign._id}/crew/${colin._id}/coordinator`,
+    frankToken, org._id, { coordinatorId: String(frank._id) }
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.json.restamp.activities, 100);
+  assert.equal((await teamDoors('Frank X')).doors, frankBefore + 100);
+  assert.equal((await teamDoors('Asa X')).doors, asaBefore - 100);
+
+  const row = await CoordinatorChange.findOne({ userId: colin._id }).sort({ createdAt: -1 }).lean();
+  assert.equal(row.source, 'lead_crew', 'the audit distinguishes the lead panel from the Users page');
+
+  // Put Colin back so the later fixtures read their baseline.
+  await write(`/admin/memberships/${colin._id}`, ctx.token, org._id, { coordinatorId: String(asa._id) });
+  assert.equal((await teamDoors('Asa X')).doors, asaBefore);
+});
+
+test('LEAD-FOLD: giving a lead their own coordinator moves their OWN doors, and both surfaces agree', { skip }, async () => {
+  const { org, campaign, token, frank, boss } = ctx;
+  // A lead's own knocks stamp coordinatorId:null and teamFoldStage rescues them onto the lead's own
+  // team. Once the lead is themselves assigned a coordinator, those rows stamp a real id, so the
+  // fold's `$in ['$userId', leadIds]` fallback is never reached — one team, no double-count.
+  //
+  // The subtle part: the aggregation fold (/team-breakdown) and the query filter (teamMatch, used
+  // by /canvasser-timeline) are SEPARATE implementations of the same idea. If they ever disagree,
+  // the same person reads one number on one page and another elsewhere. Assert they agree.
+  await knock(frank, null); // Frank knocks for himself — nobody coordinates him
+  const frankOwn = (await teamDoors('Frank X')).doors;
+  const bossBefore = (await teamDoors('Boss X')).doors;
+
+  const res = await write(`/admin/memberships/${frank._id}`, token, org._id, {
+    coordinatorId: String(boss._id),
+  });
+  assert.equal(res.json.restamp.changed, true);
+
+  const after = await teamDoors('Frank X');
+  assert.equal(after.doors, frankOwn - res.json.restamp.activities, "the lead's own doors leave his row");
+  assert.equal((await teamDoors('Boss X')).doors, bossBefore + res.json.restamp.activities,
+    'and land on the team he now reports to');
+
+  // The two implementations must agree on Frank's row.
+  const viaFilter = await call(
     `/admin/reports/canvasser-timeline?campaignId=${campaign._id}&totals=1&coordinatorId=${frank._id}`,
     token, org._id
   );
-  assert.ok(
-    frankRes.json.billableKnocks < 100,
-    "Frank does NOT inherit 100 doors he never worked"
-  );
+  const viaFold = after.body.teams.find((t) => t.coordinatorName === 'Frank X');
+  assert.equal(viaFilter.json.billableKnocks, viaFold.doors,
+    'teamMatch (query) and teamFoldStage (aggregation) must not drift');
+
+  assert.equal(after.body.teamSum - after.body.crossTeamDoors, after.body.campaign.doors, 'identity holds');
+
+  // Reversible: clearing it folds his own doors back onto his own team.
+  await write(`/admin/memberships/${frank._id}`, token, org._id, { coordinatorId: null });
+  assert.equal((await teamDoors('Frank X')).doors, frankOwn, 'exactly back where it started');
+});
+
+test('a NEW org can show team surfaces immediately — the gate is not stuck off', { skip }, async () => {
+  // Regression for a latent bug: teamAttributionReadyAt was written ONLY by
+  // migrate:activity-coordinator, at a point below two `continue` guards, and no creation path set
+  // it. A new org has nothing to backfill, so the migration always skipped it — leaving every org
+  // created after that release permanently gated OFF, with team surfaces silently absent. The
+  // default now lives on the schema, because there are two creation paths (the super-admin route
+  // and seedDemoOrg) and a third would have inherited the bug.
+  const fresh = await Organization.create({ name: 'Brand New', slug: 'brand-new', isActive: true });
+  assert.ok(fresh.teamAttributionReadyAt instanceof Date, 'a new org is ready by default — it has no history to backfill');
 });
 
 test('a LEAD who knocks: their doors AND their surveyed voters both land on their own team', { skip }, async () => {

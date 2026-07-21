@@ -6,6 +6,7 @@ import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { Card, Button, Modal, PhoneInput } from '../components/ui';
 import PasswordInput from '../components/PasswordInput.jsx';
+import CoordinatorConfirm from '../components/CoordinatorConfirm.jsx';
 import { tempPasswordProblem } from '../lib/validators.js';
 
 // In-campaign roster (/campaigns/:campaignId/team). Surfaces CampaignAssignment — the
@@ -213,19 +214,49 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
     queryFn: () => api(`/admin/reports/canvassers/${member.userId}/summary?campaignId=${campaignId}`),
   });
   const [coordinatorId, setCoordinatorId] = useState(member.coordinatorId || '');
+  // A crew change re-stamps this person's whole knock history onto the new team — org-wide, since
+  // the coordinator field has never been per-campaign. So it stages, previews, then commits.
+  const [pendingCoordinatorId, setPendingCoordinatorId] = useState(null);
+  const isPendingChange =
+    pendingCoordinatorId !== null && pendingCoordinatorId !== (member.coordinatorId || '');
+
+  const previewQ = useQuery({
+    queryKey: ['admin', 'coordinator-preview', campaignId, member.userId, pendingCoordinatorId],
+    queryFn: () =>
+      api(
+        `/admin/campaigns/${campaignId}/crew/${member.userId}/coordinator-preview?coordinatorId=${pendingCoordinatorId || 'none'}`
+      ),
+    enabled: isPendingChange,
+  });
+
   const setCoordMut = useMutation({
-    mutationFn: (cid) =>
+    mutationFn: ({ cid }) =>
       api(`/admin/campaigns/${campaignId}/crew/${member.userId}/coordinator`, {
         method: 'PATCH',
         body: { coordinatorId: cid || null },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] }),
-    onError: () => setCoordinatorId(member.coordinatorId || ''), // revert on failure
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
+      // The by-team numbers just moved everywhere, not only on this roster.
+      qc.invalidateQueries({ queryKey: ['team-breakdown'] });
+      qc.invalidateQueries({ queryKey: ['canvasser-timeline'] });
+      setPendingCoordinatorId(null);
+    },
+    onError: () => {
+      setCoordinatorId(member.coordinatorId || ''); // revert on failure
+      setPendingCoordinatorId(null);
+    },
   });
+
   function onChangeCoordinator(e) {
     const val = e.target.value;
     setCoordinatorId(val);
-    setCoordMut.mutate(val);
+    setPendingCoordinatorId(val); // staged — the confirm block below commits it
+  }
+
+  function cancelCoordinatorChange() {
+    setCoordinatorId(member.coordinatorId || '');
+    setPendingCoordinatorId(null);
   }
 
   const kpi = summaryQ.data?.kpi;
@@ -331,7 +362,21 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
           </select>
-          <p className="mt-1 text-xs text-fg-muted">The admin or team lead who oversees this member. Saved immediately.</p>
+          {isPendingChange ? (
+            <CoordinatorConfirm
+              preview={previewQ.data}
+              isLoading={previewQ.isLoading}
+              error={previewQ.error}
+              subjectName={member.name || 'This member'}
+              busy={setCoordMut.isPending}
+              onCancel={cancelCoordinatorChange}
+              onConfirm={() => setCoordMut.mutate({ cid: pendingCoordinatorId })}
+            />
+          ) : (
+            <p className="mt-1 text-xs text-fg-muted">
+              The admin or team lead who oversees this member. Their doors count toward this team.
+            </p>
+          )}
         </div>
 
         {isOrgAdmin && (

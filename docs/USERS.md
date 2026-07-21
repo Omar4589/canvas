@@ -113,24 +113,38 @@ You set it two ways, both on the Users page:
 The Users list shows a **Coordinator** column, and a **Coordinator filter** lets you narrow the list to
 everyone a given admin oversees (or "No coordinator").
 
-### The team is recorded on each door, as it's knocked
+### A team's numbers follow the coordinator you have set today
 
 This is the part that matters when you report a team's numbers to a client.
 
-**A door remembers the team of whoever knocked it, at the moment they knocked it.** It is *not* looked
-up afterwards from who's currently on the campaign. That has three consequences, all of them the ones
+**Whoever someone's coordinator is right now, all of that person's doors count for that team** —
+including doors they knocked before you set the coordinator. Three consequences, all of them the ones
 you want:
 
+- **Forgetting to set a coordinator is fixable.** Add a canvasser, forget to put them on a crew, let
+  them knock all day — then set their coordinator, and *every* door they knocked moves onto that team.
+  You are not stuck with a permanent pile in "No coordinator" because of a setup step you missed.
+- **Moving someone between teams takes their history with them.** Their old doors go to the new team
+  too, across every campaign and all time. **This means a by-team figure you gave a client last month
+  can change if you reassign someone afterwards** — that is the deliberate trade for the point above.
+  It is reversible: set the coordinator back and the numbers return exactly. Every change is recorded
+  (who moved whom, from which team to which, and how many doors), and the console shows you the
+  count before it commits.
 - **Someone who leaves keeps their doors on their team.** Deactivate them, take them off the campaign,
-  remove them from the org — their doors stay where they belong. (This used to be broken: the team was
+  remove them from the org, delete their account — their doors stay where they belong. **Losing a
+  person never moves a number; only a coordinator change does.** (This used to be broken: the team was
   read from the campaign roster, so removing someone deleted the row the lookup depended on and their
   doors fell silently into "No coordinator" — the bucket admins deliberately *exclude*. On a live
   campaign that under-reported one team by **104 doors**.)
-- **Moving someone between teams doesn't rewrite history.** Their old doors stay with the team they
-  knocked them for; only their *new* doors go to the new team. A figure you gave a client last month
-  still reconciles today.
 - **"No coordinator" stays meaningful.** A candidate knocking their own district genuinely has no team,
   and that bucket is theirs — not a dumping ground for anyone the system lost track of.
+
+**What a coordinator change never touches:** the campaign's own totals, coverage, any rate, or your
+bill. Billing counts doors, not teams. It only changes which *team row* the doors are counted under.
+
+**One thing that surprises people:** if you give a coordinator to someone who *runs a crew*
+themselves, their **own** doors move onto their new coordinator's team. Their crew's doors stay with
+them. The confirmation says so before you commit.
 
 The **Timeline** shows a **by-team breakdown**: every team's doors, survey doors, surveys taken and
 connection rate, with a Campaign row that the teams add up to. See
@@ -250,13 +264,18 @@ from the org, not even deleting the account outright. They keep appearing on rep
 numbers. (On the **Timeline**, pick the **All time** range to see everyone who has ever worked the
 campaign — the default view is *today*, so people who left naturally have no rows in it.)
 
-**Their team stays too.** The team a door belongs to is **stamped on the door when it's knocked**, not
-looked up later — so a canvasser's doors stay on their team even after they're deactivated, taken off
-the campaign, or removed from the org. This matters when you report a team's number to a client:
-before, removing someone from a campaign silently moved their doors into "No coordinator", the bucket
-you exclude, and a real campaign under-reported one team by **104 doors**. It also means moving
-someone between teams no longer *retroactively* rewrites history — a figure you gave a client last
-month still reconciles today. See [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
+**Their team stays too.** The team a door belongs to is **stamped on the door**, not looked up later —
+so a canvasser's doors stay on their team even after they're deactivated, taken off the campaign,
+removed from the org, or their account is deleted. This matters when you report a team's number to a
+client: before, removing someone from a campaign silently moved their doors into "No coordinator", the
+bucket you exclude, and a real campaign under-reported one team by **104 doors**.
+
+**Losing a person never moves a number. Reassigning one does** — deliberately. Changing someone's
+coordinator moves *all* of their doors onto the new team (see
+[A team's numbers follow the coordinator you have set today](#a-teams-numbers-follow-the-coordinator-you-have-set-today)),
+which is what lets you fix a crew you forgot to set. The two are different events on purpose: a
+roster change you make moves the numbers; somebody leaving does not. See
+[METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
 
 **Their name stays, within limits.** Deactivation, campaign-removal and org-removal all keep the
 person's name on reports. **Self-deletion is the exception**: the account is scrubbed (the App Store
@@ -480,9 +499,19 @@ carries it to the book-assignment picker ([BookAssignmentPanel.jsx](../client/sr
 
 **Reports ARE team-scoped — but NOT through `baseFilter`.** `?coordinatorId=<id|none>` on
 `/canvasser-timeline`, plus `GET /admin/reports/team-breakdown` (every team at once, with the
-reconciliation). The team lives on the **ledger** (`CanvassActivity.coordinatorId`, frozen at knock
-time), not on the roster — a roster join is what used to lose a canvasser's doors the moment they were
-taken off a campaign.
+reconciliation). The team lives on the **ledger** (`CanvassActivity.coordinatorId`), not on the
+roster — a roster join is what used to lose a canvasser's doors the moment they were taken off a
+campaign.
+
+**Every write of `Membership.coordinatorId` goes through
+[`setMemberCoordinator`](../server/src/services/memberships/setCoordinator.js)**, which updates the
+membership, re-stamps that person's ledger history onto the new team, and files a `CoordinatorChange`
+audit row. It writes the membership *first* on purpose: if the ledger write fails, the drift is a
+finite, shrinking set that a retry or `repair:team-stamps` closes, whereas the reverse order would
+have every subsequent knock add more drift. `test/coordinatorChokePoint.test.js` asserts structurally
+that only three files write the field — the two above and
+[`deleteAccount.js`](../server/src/services/users/deleteAccount.js), **the sanctioned exception**:
+departure clears the crew's membership but must never touch the ledger, or the 104-door bug returns.
 
 > 🚨 **Do NOT "mirror the effort scoping" by adding the key to `baseFilter()`.** An earlier version of
 > this doc recommended exactly that, and it is a trap: `baseFilter`'s result is spread into **Household**

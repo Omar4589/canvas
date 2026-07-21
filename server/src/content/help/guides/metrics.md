@@ -75,4 +75,6 @@ This is **off** unless you turn it on, and it has no effect on what Doorline cha
 
 Each team's doors are counted the same way — one house per round — so two people on the *same* team who both knocked a house count it once for that team. Teams add up to the campaign total. See [How many doors has one team knocked?](team-door-counts).
 
+A canvasser's doors count for whoever their coordinator is **right now**, so setting a crew you forgot to set moves that person's earlier doors onto it. Someone *leaving* moves nothing. See [I moved someone to another team](move-a-canvasser-to-another-team).
+
 > Tip: Dashboard totals add up across *all* rounds. Only the per-round progress view is scoped to one round.

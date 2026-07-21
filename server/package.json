@@ -44,6 +44,7 @@
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
     "migrate:activity-coordinator": "node src/migrations/migrateActivityCoordinator.js",
     "audit:team-counts": "node src/migrations/auditTeamCounts.js",
+    "repair:team-stamps": "node src/migrations/repairTeamStamps.js",
     "demo:refresh": "node src/utils/refreshDemoDay.js",
     "purge:deleted-identities": "node src/migrations/purgeDeletedIdentities.js",
     "lock:account": "node src/utils/lockAccountDeletion.js",

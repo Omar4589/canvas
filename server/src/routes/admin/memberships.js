@@ -17,6 +17,8 @@ import {
   resolveCoordinatorId,
   resolveManagedCampaigns,
 } from '../../services/memberships/createMember.js';
+import { setMemberCoordinator, restampSummary } from '../../services/memberships/setCoordinator.js';
+import { coordinatorPreviewBody } from '../../services/memberships/restampCoordinator.js';
 import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
 import { sendMail } from '../../services/mail/mailer.js';
 import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js';
@@ -242,8 +244,9 @@ router.post('/', async (req, res, next) => {
 
     let user;
     let membership;
+    let restamp;
     try {
-      ({ user, membership } = await createOrgMember({
+      ({ user, membership, restamp } = await createOrgMember({
         orgId,
         addedBy: req.user._id,
         data,
@@ -291,10 +294,49 @@ router.post('/', async (req, res, next) => {
         managedCampaignIds: managed.map((id) => String(id)),
         user: user.toSafeJSON(),
       },
+      // Non-zero only when linkExisting attached an account that already had ledger history in
+      // this org (org removal deletes the Membership but keeps the knocks). It is the only signal
+      // the admin gets that the person they just re-added brought work with them.
+      restamp: restampSummary({ changed: true, ...restamp }),
     });
   } catch (err) {
     if (err.code === 11000) return res.status(409).json({ error: 'Conflict' });
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// What a coordinator change WOULD move, so the console can confirm before it commits. Changing a
+// coordinator re-stamps that person's whole knock history onto the new team, which shifts numbers
+// an admin may have already quoted — so this is a read-only dry run of the exact same filter the
+// write uses (previewRestamp and restampLedgerCoordinator share restampFilter).
+router.get('/:userId/coordinator-preview', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid userId' });
+    }
+    const orgId = activeOrgId(req);
+    const membership = await Membership.findOne({ userId: req.params.userId, organizationId: orgId }).lean();
+    if (!membership) return res.status(404).json({ error: 'Member not in this org' });
+
+    const coordRes = await resolveCoordinatorId({
+      orgId,
+      raw: req.query.coordinatorId === 'none' ? null : req.query.coordinatorId,
+      memberUserId: req.params.userId,
+    });
+    if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
+    if (coordRes.skip) return res.status(400).json({ error: 'coordinatorId is required' });
+
+    res.json(
+      await coordinatorPreviewBody({
+        orgId,
+        userId: req.params.userId,
+        from: membership.coordinatorId ?? null,
+        to: coordRes.value ?? null,
+      })
+    );
+  } catch (err) {
     next(err);
   }
 });
@@ -368,8 +410,10 @@ router.patch('/:userId', async (req, res, next) => {
       managedResult = mres.value;
     }
 
-    // managedCampaignIds lives in CampaignManager, not on the membership doc.
-    const { managedCampaignIds: _omitGrants, ...membershipUpdate } = data;
+    // managedCampaignIds lives in CampaignManager, not on the membership doc. coordinatorId is
+    // held back for the same shape of reason: changing it RE-STAMPS the knock ledger, so it must
+    // go through setMemberCoordinator rather than ride along on this save.
+    const { managedCampaignIds: _omitGrants, coordinatorId: _omitCoord, ...membershipUpdate } = data;
     Object.assign(membership, membershipUpdate);
     await membership.save();
 
@@ -379,6 +423,19 @@ router.patch('/:userId', async (req, res, next) => {
       membership.set(billingBefore);
       await membership.save();
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
+
+    // AFTER the billing backstop on purpose: that block can revert and 409, and a coordinator
+    // change (which moves door counts between teams) must not have happened when it does.
+    let restamp = null;
+    if ('coordinatorId' in data) {
+      restamp = await setMemberCoordinator({
+        organizationId: orgId,
+        userId: membership.userId,
+        coordinatorId: data.coordinatorId,
+        actorUserId: req.user._id,
+        source: 'admin_users',
+      });
     }
 
     // Reconcile grants: leaving the lead role clears every grant; staying/becoming
@@ -400,8 +457,13 @@ router.patch('/:userId', async (req, res, next) => {
     res.json({
       membership: {
         ...membership.toObject(),
+        // setMemberCoordinator writes with updateOne, so the in-memory doc still holds the old
+        // value. Report what is actually in the database.
+        ...(restamp ? { coordinatorId: restamp.next } : {}),
         managedCampaignIds: finalGrants.map((g) => String(g.campaignId)),
       },
+      // Additive — old clients ignore it, so no client-version gate is needed.
+      ...(restamp ? { restamp: restampSummary(restamp) } : {}),
     });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });

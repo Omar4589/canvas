@@ -19,7 +19,7 @@ export const metricHelp = {
   doorsPerHour:
     "Doors knocked per hour actively on doors — each day's first knock to its last knock, added up. Time between days is not counted.",
   coordinator:
-    'The team this canvasser was on when they knocked. It is recorded on each door as it happens, so someone who has since left the team keeps their doors on it.',
+    'The team this canvasser\'s doors count toward — whoever their coordinator is now. Change someone\'s coordinator and their earlier doors move with them; someone leaving moves nothing.',
   start: 'The first door this canvasser knocked in the range.',
   lastDoor: 'The most recent door this canvasser knocked in the range.',
   households: 'Distinct homes reached at least once (a home counts once no matter how many passes).',

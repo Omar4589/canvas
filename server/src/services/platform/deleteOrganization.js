@@ -5,6 +5,7 @@ import { CampaignManager } from '../../models/CampaignManager.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
+import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { Effort } from '../../models/Effort.js';
 import { EffortMember } from '../../models/EffortMember.js';
 import { FlagReview } from '../../models/FlagReview.js';
@@ -45,7 +46,7 @@ import { captureOrgBeforeDelete } from './platformStats.js';
 // test can seed a stub row in every one and prove the sweep is exhaustive.
 export const ORG_SCOPED = [
   Campaign, CampaignAssignment, CampaignManager, CanvassActivity, ClientReport,
-  ClientReportMapPoint, Effort, EffortMember, FlagReview, Household,
+  ClientReportMapPoint, CoordinatorChange, Effort, EffortMember, FlagReview, Household,
   HouseholdLocationChange, ImportJob, ImportProfile, Membership, Pass,
   ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyResponse,
   SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,

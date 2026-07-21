@@ -338,6 +338,14 @@ Doors now remember **which team knocked them**, so a canvasser who later leaves 
 on it. New doors record this by themselves from the moment you deploy. **Doors knocked *before* that deploy
 have no team on them yet** — this is the one-time job that fills them in.
 
+> **This section is history — the one-time backfill, already run.** It is kept because the traps in it
+> still bite. What it does *not* describe is the current rule: since 2026-07-20 a door's team follows
+> the canvasser's **current** coordinator, and changing someone's coordinator re-stamps their whole
+> history. See **[Re-attribution (`repairTeamStamps.js`)](#re-attribution-repairteamstampsjs)** below
+> and [METRICS.md §F](METRICS.md#teams-coordinators--the-counting-contract). ⚠️ Note the two scripts
+> key on **opposite** conditions on purpose (`$exists:false` here, `$ne: next` there) — don't
+> reconcile them.
+
 Until you run it, the Timeline simply **won't show the team filter or the by-team table**. That's on
 purpose: half-filled-in data would show every team at nearly zero and "No team" as enormous, which looks
 like a real answer instead of an error. So it hides rather than lies. Run these in order:
@@ -398,6 +406,9 @@ fraud audit).
 | `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
 | `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |
 | `npm run audit:team-counts -- --campaign=<id>` | **Read-only.** Proves Σ teams + no-team − cross-team == the campaign billable, column by column. Exits **1** on failure |
+| `npm run repair:team-stamps -- --preflight` | **Read-only.** Per org, per person: how many doors would change team under the current-coordinator rule |
+| `npm run repair:team-stamps -- --apply` | Conforms history to each member's current coordinator, and turns team surfaces on for any org stuck with `teamAttributionReadyAt` unset |
+| `npm run repair:team-stamps -- --apply --ready-only` | Only sets the gate flag; examines no ledger rows |
 | `npm run repair:orphaned-assignments` | Dry run — finds anyone still holding books on a campaign they're off the roster of |
 
 ### Team attribution (`migrateActivityCoordinator.js`)
@@ -415,8 +426,35 @@ Three things that are load-bearing:
 - **`teamAttributionReadyAt` is a gate, not a marker.** `GET /admin/reports/team-breakdown` returns
   `ready: false` until it's set, and the client renders no team filter at all. Deploy order is not a
   safeguard — a half-run backfill is *plausible-looking*, not obviously broken.
+
+  > 🐛 **This gate was stuck OFF for every org created after the team-attribution release.** The flag's
+  > only writer was this migration, at a point *below* two `continue` guards — and a new org has
+  > nothing to backfill, so the migration always skipped it. Those orgs silently showed no team
+  > surfaces at all, forever. Fixed two ways: `Organization.teamAttributionReadyAt` now defaults to
+  > now on the **schema** (there are two org-creation paths, so a route-level fix would have missed
+  > `seedDemoOrg.js`), and `repair:team-stamps` sets it **unconditionally, above any `continue`**,
+  > for orgs that already exist.
 - **No new index.** `CanvassActivity` already carries nine on the hottest write path; the team clause rides
   as a residual on `{campaignId, timestamp}`. **`migrate:build-indexes` is not part of this release.**
+
+### Re-attribution (`repairTeamStamps.js`)
+
+Since teams follow the **current** coordinator, [`repairTeamStamps.js`](../server/src/migrations/repairTeamStamps.js)
+brings the ledger into line with every member's `Membership.coordinatorId`. Three jobs in one script:
+
+1. **Day-one conformance.** The rule only applies itself to people whose coordinator is edited after
+   deploy; run this once so the documented invariant is true for everyone immediately.
+2. **Drift repair.** `setMemberCoordinator` writes the membership first and the ledger second (that
+   order is deliberate — the reverse would let every subsequent knock add more drift). If a ledger
+   write ever fails, this closes the gap. Compensation is a **re-run, not a rollback**.
+3. **The gate fix** above.
+
+It calls the same `restampLedgerCoordinator` the routes call — an audit that can be wrong in the same
+way as the thing it audits is worth nothing. Idempotent: a second run reports 0 everywhere.
+
+**Review the `--preflight` output before applying.** It names every person and every door count, and
+those team numbers *will* move. Nothing else moves: campaign totals, coverage, rates and invoices are
+untouched, because billing is team-blind.
 
 [`lockAccountDeletion.js`](../server/src/utils/lockAccountDeletion.js) takes the email as a bare positional
 argument (not just `--email=`) because the Heroku web console is a single text box and `npm run x -- --flag

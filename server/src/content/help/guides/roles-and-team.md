@@ -48,3 +48,5 @@ You can change the checked campaigns anytime — unchecking one revokes it right
 ## Coordinators and crews
 
 Within a campaign, you (or a lead) build the **crew** — the canvassers on that campaign. You can mark trusted members as **coordinators** to help lead a crew. See [assigning canvassers](assigning-canvassers) and, for leads, [getting started as a team lead](lead-getting-started).
+
+A canvasser's doors count toward whoever their coordinator is **right now**, so changing someone's crew moves the doors they already knocked onto the new one — which is how you fix a crew you forgot to set at the start. A crew is set for the **whole organization**, not per campaign. See [I moved someone to another team](move-a-canvasser-to-another-team).

@@ -11,6 +11,8 @@ tags: team, crew, canvassers, page, remove, quit, left the team
 
 The **Team** tab is where you add canvassers to a campaign and see who's on the crew. Add existing org members, or use **+ New canvasser** to create someone new right onto the team. People also join automatically when you assign them a book or pre-add them to a walk list, so the crew fills in as you cut turf. Click any team member to see their activity here, set their crew, or remove them from the campaign.
 
+Setting someone's **crew** moves the doors they've already knocked onto it — the app shows you how many before it saves. A crew applies across the whole organization, not just this campaign. See [I moved someone to another team](move-a-canvasser-to-another-team).
+
 ## When someone quits
 
 Click them, then **Remove from campaign**. Two things happen, and it's worth being clear about both.

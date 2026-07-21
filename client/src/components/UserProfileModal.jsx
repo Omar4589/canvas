@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import PasswordInput from './PasswordInput.jsx';
+import CoordinatorConfirm from './CoordinatorConfirm.jsx';
 import PhoneInput from './ui/PhoneInput.jsx';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -176,18 +177,51 @@ export default function UserProfileModal({ membership, onClose }) {
     setManagedCampaignIds((ids) => (checked ? [...new Set([...ids, id])] : ids.filter((x) => x !== id)));
   }
 
+  // Changing a coordinator RE-STAMPS this person's whole knock history onto the new team, so it no
+  // longer saves straight from onChange — the admin sees how many doors move and confirms first.
+  const [pendingCoordinatorId, setPendingCoordinatorId] = useState(null);
+  const isPendingChange =
+    pendingCoordinatorId !== null && pendingCoordinatorId !== (membership.coordinatorId || '');
+
+  const previewQ = useQuery({
+    queryKey: ['admin', 'coordinator-preview', user.id, pendingCoordinatorId],
+    queryFn: () =>
+      api(
+        `/admin/memberships/${user.id}/coordinator-preview?coordinatorId=${pendingCoordinatorId || 'none'}`
+      ),
+    enabled: isPendingChange,
+  });
+
   const saveCoordinator = useMutation({
-    mutationFn: (cid) =>
+    // `doors` rides along purely so the success flash can report the same DOOR count the
+    // confirmation promised — the API returns raw ledger row counts, which are a different number.
+    mutationFn: ({ cid }) =>
       api(`/admin/memberships/${user.id}`, {
         method: 'PATCH',
         body: { coordinatorId: cid || null },
       }),
-    onSuccess: () => {
+    onSuccess: (res, { doors }) => {
       qc.invalidateQueries({ queryKey: ['memberships'] });
-      flash('success', 'Coordinator updated.');
+      // Team totals just moved on every by-team surface — drop their caches too, or the console
+      // shows the old split until a manual refresh.
+      qc.invalidateQueries({ queryKey: ['team-breakdown'] });
+      qc.invalidateQueries({ queryKey: ['canvasser-timeline'] });
+      setPendingCoordinatorId(null);
+      const moved = doors || 0;
+      if (res?.restamp?.error) {
+        flash(
+          'error',
+          'Coordinator updated, but their past doors could not be moved. Set the coordinator again to retry.'
+        );
+      } else if (moved) {
+        flash('success', `Coordinator updated. Moved ${moved.toLocaleString()} door records.`);
+      } else {
+        flash('success', 'Coordinator updated.');
+      }
     },
     onError: (err) => {
       setCoordinatorId(membership.coordinatorId || ''); // revert on failure
+      setPendingCoordinatorId(null);
       flash('error', err.message);
     },
   });
@@ -195,7 +229,13 @@ export default function UserProfileModal({ membership, onClose }) {
   function onChangeCoordinator(e) {
     const val = e.target.value;
     setCoordinatorId(val);
-    saveCoordinator.mutate(val);
+    // Staged, not saved. The confirm block below commits it.
+    setPendingCoordinatorId(val);
+  }
+
+  function cancelCoordinatorChange() {
+    setCoordinatorId(membership.coordinatorId || '');
+    setPendingCoordinatorId(null);
   }
 
   const resetPw = useMutation({
@@ -532,9 +572,23 @@ export default function UserProfileModal({ membership, onClose }) {
               </option>
             ))}
           </select>
-          <p className="mt-2 text-xs text-fg-muted">
-            The admin or team lead who oversees this member. Saved immediately.
-          </p>
+          {isPendingChange ? (
+            <CoordinatorConfirm
+              preview={previewQ.data}
+              isLoading={previewQ.isLoading}
+              error={previewQ.error}
+              subjectName={`${user.firstName} ${user.lastName}`}
+              busy={saveCoordinator.isPending}
+              onCancel={cancelCoordinatorChange}
+              onConfirm={() =>
+                saveCoordinator.mutate({ cid: pendingCoordinatorId, doors: previewQ.data?.doors || 0 })
+              }
+            />
+          ) : (
+            <p className="mt-2 text-xs text-fg-muted">
+              The admin or team lead who oversees this member. Their doors count toward this team.
+            </p>
+          )}
         </div>
 
         <div className="border-b border-border px-6 py-5">

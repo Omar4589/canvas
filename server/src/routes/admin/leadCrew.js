@@ -12,6 +12,8 @@ import {
   memberIdentityShape,
   resolveCoordinatorId,
 } from '../../services/memberships/createMember.js';
+import { setMemberCoordinator, restampSummary } from '../../services/memberships/setCoordinator.js';
+import { coordinatorPreviewBody } from '../../services/memberships/restampCoordinator.js';
 import { sendMail } from '../../services/mail/mailer.js';
 import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js';
 import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
@@ -90,8 +92,9 @@ router.post('/', denyVendorPrivilegeWrite, async (req, res, next) => {
     if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
 
     let user;
+    let restamp;
     try {
-      ({ user } = await createOrgMember({
+      ({ user, restamp } = await createOrgMember({
         orgId,
         addedBy: req.user._id,
         data, // linkExisting:true links an existing account; false → create-new (existing email → EMAIL_EXISTS_USE_LINK)
@@ -130,10 +133,48 @@ router.post('/', denyVendorPrivilegeWrite, async (req, res, next) => {
       sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name, setPasswordUrl: url, role: 'canvasser' }), kind: 'inviteSetPassword', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
     }
 
-    res.status(201).json({ user: user.toSafeJSON() });
+    // Non-zero only when linkExisting brought back a returning canvasser who still has ledger
+    // history in this org — see createOrgMember.
+    res.status(201).json({ user: user.toSafeJSON(), restamp: restampSummary({ changed: true, ...restamp }) });
   } catch (err) {
     if (err.code === 11000) return res.status(409).json({ error: 'Conflict' });
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Dry run of the coordinator change, so the lead sees what moves before it commits. Same builder
+// and same filter as the write — see services/memberships/restampCoordinator.js.
+router.get('/:userId/coordinator-preview', async (req, res, next) => {
+  try {
+    const campaign = await loadOwnedCampaign(req);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (!mongoose.isValidObjectId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+    const orgId = activeOrgId(req);
+
+    const onCampaign = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.params.userId });
+    if (!onCampaign) return res.status(404).json({ error: 'That member is not on this campaign' });
+
+    const membership = await Membership.findOne({ userId: req.params.userId, organizationId: orgId }).lean();
+    if (!membership) return res.status(404).json({ error: 'Member not in this org' });
+
+    const coordRes = await resolveCoordinatorId({
+      orgId,
+      raw: req.query.coordinatorId === 'none' ? null : req.query.coordinatorId,
+      memberUserId: req.params.userId,
+    });
+    if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
+    if (coordRes.skip) return res.status(400).json({ error: 'coordinatorId is required' });
+
+    res.json(
+      await coordinatorPreviewBody({
+        orgId,
+        userId: req.params.userId,
+        from: membership.coordinatorId ?? null,
+        to: coordRes.value ?? null,
+      })
+    );
+  } catch (err) {
     next(err);
   }
 });
@@ -154,13 +195,24 @@ router.patch('/:userId/coordinator', denyVendorPrivilegeWrite, async (req, res, 
     if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
     if (coordRes.skip) return res.status(400).json({ error: 'coordinatorId is required' });
 
-    const membership = await Membership.findOneAndUpdate(
-      { userId: req.params.userId, organizationId: orgId },
-      { coordinatorId: coordRes.value ?? null },
-      { new: true }
-    );
-    if (!membership) return res.status(404).json({ error: 'Member not in this org' });
-    res.json({ ok: true, coordinatorId: membership.coordinatorId ? String(membership.coordinatorId) : null });
+    // setMemberCoordinator also RE-STAMPS this person's knock history onto the new team. Note the
+    // scope that implies: the write is keyed {userId, organizationId} — as it already was — so a
+    // lead reorganizing their crew inside this campaign moves that person's doors in EVERY
+    // campaign in the org. The coordinator field itself has always been org-wide (Membership has
+    // no campaignId); the re-stamp makes that pre-existing scope visible rather than adding it.
+    const restamp = await setMemberCoordinator({
+      organizationId: orgId,
+      userId: req.params.userId,
+      coordinatorId: coordRes.value ?? null,
+      actorUserId: req.user._id,
+      source: 'lead_crew',
+    });
+    if (!restamp) return res.status(404).json({ error: 'Member not in this org' });
+    res.json({
+      ok: true,
+      coordinatorId: restamp.next ? String(restamp.next) : null,
+      restamp: restampSummary(restamp),
+    });
   } catch (err) {
     next(err);
   }

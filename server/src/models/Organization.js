@@ -17,12 +17,21 @@ const organizationSchema = new mongoose.Schema(
     // 'internal' while this is set, and 'internal' status is unreachable without it
     // (routes/superAdmin/billing.js).
     isInternal: { type: Boolean, default: false, immutable: true },
-    // Set by migrate:activity-coordinator on a clean completion. Until then, history has no team
-    // tag — and an unstamped row is invisible to `coordinatorId: <team>` while being swallowed by
-    // the No-team bucket, so a half-backfilled org shows every team at ~zero and "No team"
-    // enormous. Both look like data, not like an error. The team filter and the by-team breakdown
-    // refuse to render until this is set: deploy order is not a safeguard, a gate is.
-    teamAttributionReadyAt: { type: Date, default: null },
+    // "Team attribution is complete for this org." Until it is, history has no team tag — and an
+    // unstamped row is invisible to `coordinatorId: <team>` while being swallowed by the No-team
+    // bucket, so a half-backfilled org shows every team at ~zero and "No team" enormous. Both look
+    // like data, not like an error. The team filter and the by-team breakdown refuse to render
+    // until this is set: deploy order is not a safeguard, a gate is.
+    //
+    // Defaults to NOW because a brand-new org has zero ledger rows, so the claim is vacuously
+    // true. That default is load-bearing, not a convenience: this was previously `null` and the
+    // ONLY writer was migrate:activity-coordinator, which sits below two `continue` guards and so
+    // never ran for an org with nothing to backfill. Every org created after that release was
+    // therefore permanently gated OFF — team surfaces silently absent, forever. The default lives
+    // on the schema rather than in the create route because there are two creation paths
+    // (routes/superAdmin/organizations.js and utils/seedDemoOrg.js) and a third would inherit the
+    // bug. repair:team-stamps backfills the orgs that predate this.
+    teamAttributionReadyAt: { type: Date, default: () => new Date() },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     // Set once, atomically, when this org's lifetime contribution has been banked into the platform
     // marketing counters (services/platform/platformStats.js), so a RETRIED deletion — the retention

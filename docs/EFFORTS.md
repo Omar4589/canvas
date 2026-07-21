@@ -143,8 +143,10 @@ each crew's doors, survey doors, surveys taken and connection rate side by side,
 that the crews add up to. You no longer need two walk lists just to keep two crews' numbers apart —
 split the territory only if you actually want them working separate doors.
 
-The team is recorded on each door **as it's knocked**, so a canvasser who later leaves the team keeps
-their doors on it. See [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
+A team's numbers follow the **coordinator you have set today**: change someone's coordinator and *all*
+of their doors move onto the new crew, so a crew you forgot to set at the start is fixable after the
+fact. Someone *leaving* moves nothing — their doors stay on the crew they worked for. See
+[METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
 
 ### Assign new voters (Intake)
 1. After a voter upload, the **Walk Lists** page shows an **Intake** count (new addresses). The import

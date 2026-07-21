@@ -125,6 +125,28 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   published pages and the capability together; the env vars were pre-set in Heroku and are inert
   until that deploy. Customer §6 notice = owner, before deploying.)*
 
+- *(v4 2026-07-20)* **New internal collection: `CoordinatorChange`.** Team attribution changed so
+  that the **current** coordinator owns all of a canvasser's history — assigning or changing someone's
+  coordinator now re-stamps `CanvassActivity.coordinatorId` / `SurveyResponse.coordinatorId` across
+  that org. Because a by-team number can therefore move without a door being knocked, each change is
+  recorded in `server/src/models/CoordinatorChange.js`.
+  **What it holds:** `organizationId`, the subject's `userId`, `fromCoordinatorId` / `toCoordinatorId`,
+  the acting `byUserId`, a `source` enum, the two row counts, and a `restampError` string. That is a
+  **staff-to-staff org-chart association plus an actor id** — no voter data, no free text about any
+  person, no contact details. It is a new **audit log**, which is a named trigger, hence this entry.
+  **Who can read it:** nothing exposes it over the API today — it is written by the service layer and
+  read from the console/DB. If a surface is ever added, it belongs behind org-admin auth and must be
+  listed here.
+  **Retention/deletion:** no TTL; deleted with the org — `CoordinatorChange` is in `ORG_SCOPED`
+  (`services/platform/deleteOrganization.js`), which `test/orgDelete.int.test.js` proves exhaustive by
+  seeding a stub row in every listed model. It is **not** campaign-scoped (it has no `campaignId`;
+  coordinator is a per-org relationship).
+  **Assessment: NO published-policy change.** Nothing leaves the tenant, no subprocessor receives it,
+  no new category of personal data is collected about a *voter*, and it dies with the org. If a
+  data-inventory is ever published, list it alongside `EmailLog` and `AccessLog` as an internal
+  operational log. The claim to keep true if a policy sentence ever names staff audit trails:
+  *deleted with the organization, no TTL, staff-only.*
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact

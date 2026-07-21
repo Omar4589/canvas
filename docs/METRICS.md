@@ -587,24 +587,48 @@ averaged). `activeCanvassers` is **not** summable — it uses a separate org-wid
 
 ### Teams (coordinators) — the counting contract
 
-**The team is FROZEN ON THE KNOCK.** `CanvassActivity.coordinatorId` and
-`SurveyResponse.coordinatorId` record the canvasser's coordinator **at the moment they knocked**,
-stamped by [canvass.js](../server/src/routes/mobile/canvass.js) from `req.activeMembership` (already
-loaded by `orgContext`, so it costs zero extra queries).
+**THE CURRENT COORDINATOR OWNS ALL OF THAT CANVASSER'S HISTORY.** `CanvassActivity.coordinatorId`
+and `SurveyResponse.coordinatorId` carry the team, stamped at knock time by
+[canvass.js](../server/src/routes/mobile/canvass.js) from `req.activeMembership` (already loaded by
+`orgContext`, so it costs zero extra queries) — and **re-stamped whenever that person's coordinator
+changes**, by
+[`setMemberCoordinator`](../server/src/services/memberships/setCoordinator.js). Assigning a
+coordinator to someone who already knocked pulls those earlier doors onto the new team; moving
+someone from crew A to crew B takes their whole history with them, across every campaign and all
+time.
 
-It used to be joined at read time from the **campaign roster**, which caused two failures:
+**The one exception, and it is load-bearing: DEPARTURE never re-stamps.** When a coordinator leaves
+the org, [`releaseAssignedWork`](../server/src/services/users/deleteAccount.js) clears their crew's
+`Membership.coordinatorId` — nobody keeps supervising from outside — but deliberately leaves the
+ledger alone. That stamp is the only remaining record of who supervised those doors.
+
+The distinction exists because the team used to be joined at read time from the **campaign roster**,
+which caused two failures:
 - Taking a canvasser off a campaign deleted their `CampaignAssignment`, so the join missed and their
   doors silently fell into **"No coordinator"** — the bucket admins deliberately *exclude* when
   reporting a team's number to a client. On the live HD54 campaign this under-reported one team by
-  **104 doors**.
-- Moving anyone between teams **retroactively rewrote history**, so a figure quoted to a client last
-  month stopped reconciling.
+  **104 doors**. A canvasser removed from the **org** has no `Membership` at all, so no read-time
+  fix could ever recover them. The ledger stamp is what does.
+- Moving anyone between teams **retroactively rewrote history**.
 
-Freezing also fixes the twin: a canvasser removed from the **org** has no `Membership` at all, so any
-read-time fix would still lose them. On the ledger, their history is immune to everything.
+The second is now the *chosen* behavior, deliberately, and the first is still fixed — because the
+two are different events. A roster change an admin makes on purpose moves the numbers; a person
+leaving does not. **The trade you are accepting:** a by-team figure quoted to a client last month
+can change if someone is reassigned since. It is reversible — the rule is idempotent with respect to
+current state, so setting the coordinator back restores the numbers exactly — and every change is
+recorded in `CoordinatorChange` (who moved whom, from which team to which, how many rows).
+**Campaign totals, coverage, rates and the invoice never move: billing is team-blind.**
 
 **`null` is a real answer, not "unknown"** — a candidate knocking their own district belongs in the
-No-team bucket. Never backfill over an explicit null (see the migration note below).
+No-team bucket. The one-time *backfill* must never write over an explicit null (see the migration
+note below); the *re-stamp* deliberately does, because under the current-coordinator rule a stale
+null is just another stale value.
+
+**Assigning a coordinator to someone who is themselves a coordinator** moves that person's **own**
+doors off their own team row and onto their new coordinator's. Their crew's doors are untouched.
+That is the rule applied consistently — `teamFoldStage` only rescues a lead's own null-stamped rows
+onto their own team, and once a real id is stamped there is nothing to rescue — but it surprises an
+admin who thinks they are recording an org chart, so the confirmation dialog says so out loud.
 
 #### How a team's numbers are computed
 
@@ -657,6 +681,24 @@ difference **is** the over-claim. It costs nothing to compute — the same arith
 > backfill shows every team at ~zero and No-team enormous** — which looks like data, not an error.
 > Hence `Organization.teamAttributionReadyAt`: the team surfaces refuse to render until it's set.
 > Deploy order is not a safeguard; a gate is.
+>
+> ⚠️ **That key governs the one-time BACKFILL only. The re-stamp is the exact inverse and this is
+> intentional.** [`restampFilter`](../server/src/services/memberships/restampCoordinator.js) keys on
+> `{ coordinatorId: { $ne: next } }`, which *does* overwrite explicit nulls — correct, because under
+> the current-coordinator rule a stale null is a stale value, not a deliberate one. It also earns two
+> things for free from the same asymmetry: when `next` is a real id, `$ne` matches absent fields too,
+> so legacy rows are swept without a second pass; when `next` is `null`, it matches neither absent
+> nor explicit-null rows, so clearing a coordinator writes nothing it doesn't need to. **Do not
+> "correct" the re-stamp to `$exists:false`** — that would quietly restore the old frozen behavior,
+> and every team number would still add up, so no sum-check would catch it.
+>
+> `teamAttributionReadyAt` now **defaults to now on the Organization schema**. It previously
+> defaulted to `null` with the migration as its only writer — and that write sits below two
+> `continue` guards, so an org with nothing to backfill never reached it. Every org created after
+> that release was therefore gated OFF permanently, with team surfaces silently absent. The default
+> lives on the schema, not in the create route, because there are two creation paths
+> (`routes/superAdmin/organizations.js` and `utils/seedDemoOrg.js`) and a third would have inherited
+> the bug. `repair:team-stamps` sets it for orgs that predate the fix.
 
 **Coverage is never team-scopable.** It's a property of `Household.status`, and a household has no
 team.
@@ -764,11 +806,17 @@ own hours that way and divided a week's doors by a week of wall-clock, under-rep
 (4.9 doors/hr where the truth was 13.7). `/canvassers` now returns `hoursOnDoors` and `doorsPerHour`
 computed the same way the timeline and the CSV do; **clients must not re-derive them.**
 
-- **A knock is a historical fact. Staffing changes never move a number.** Deactivating a canvasser,
+- **A knock is a historical fact. Losing a person never moves a number.** Deactivating a canvasser,
   removing them from a campaign, removing them from the org, or deleting their account **does not
   change a single count** — not the campaign totals, not the leaderboard, not the invoice. Whether
   someone can still log in is an *authorization* question; what they already did is a *ledger*
   question, and the two are deliberately unrelated.
+
+  **The one staffing action that DOES move a number is changing someone's coordinator**, and it moves
+  exactly one thing: which **team row** their doors are counted under (see §F — the current
+  coordinator owns all of that canvasser's history). Campaign totals, coverage, every rate, and the
+  invoice are untouched, because billing is team-blind. It is reversible by setting the coordinator
+  back, and it is recorded in `CoordinatorChange`.
 
   This holds because **every per-canvasser metric is ledger-first**: it aggregates
   `CanvassActivity`, takes its row set from *the activity's* `userId`s, and only then joins out to
