@@ -1246,16 +1246,17 @@ export default function AdminMap() {
             </View>
           )}
 
-          {/* Row 2: the layer toggle switches, stretched to fill the width like row 1 —
-              each an equal share, so the two rows read as one uniform grid. */}
+          {/* Row 2: the layer toggle switches. Each pill is sized to its own label and then
+              takes an equal share of what's left over — NOT an equal third, which cut
+              "Overlaps" (and "Flags" once its count badge appears) off mid-word. */}
           <View style={styles.subBar}>
             <View style={[styles.toggleChip, styles.chipFill]}>
               <Switch style={styles.miniSwitch} value={showPings} onValueChange={setShowPings} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
-              <Text style={styles.toggleLabel}>Pings</Text>
+              <Text style={styles.toggleLabel} numberOfLines={1}>Pings</Text>
             </View>
             <View style={[styles.toggleChip, styles.chipFill]}>
               <Switch style={styles.miniSwitch} value={showFlags} onValueChange={setShowFlags} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
-              <Text style={styles.toggleLabel}>Flags</Text>
+              <Text style={styles.toggleLabel} numberOfLines={1}>Flags</Text>
               {showFlags && openFlagCount > 0 ? (
                 <View style={styles.flagBadge}>
                   <Text style={styles.flagBadgeText}>{openFlagCount}</Text>
@@ -1264,7 +1265,7 @@ export default function AdminMap() {
             </View>
             <View style={[styles.toggleChip, styles.chipFill]}>
               <Switch style={styles.miniSwitch} value={showOverlaps} onValueChange={setShowOverlaps} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
-              <Text style={styles.toggleLabel}>Overlaps</Text>
+              <Text style={styles.toggleLabel} numberOfLines={1}>Overlaps</Text>
               {showOverlaps && overlapDoorCount > 0 ? (
                 <View style={styles.overlapBadge}>
                   <Text style={styles.overlapBadgeText}>{overlapDoorCount}</Text>
@@ -1921,8 +1922,7 @@ function makeStyles(t) {
 
   subBar: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
     gap: spacing.sm,
     alignItems: 'center',
   },
@@ -1943,15 +1943,21 @@ function makeStyles(t) {
     gap: spacing.xs,
   },
   // Shrink the native switch so it fits the filter-chip-height pill on both platforms.
-  miniSwitch: { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] },
+  // The scale is paint-only — the switch still RESERVES its full ~51pt box, so it leaves ~5pt
+  // of dead space at each end. The negative margin takes 4 of those 5 back; it only removes
+  // whitespace the scale already vacated, so nothing gets clipped. That reclaimed 24pt across
+  // the row is what lets both count badges show without the labels having to ellipsize.
+  miniSwitch: {
+    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
+    marginHorizontal: -spacing.xs,
+  },
   toggleLabel: { fontSize: 13, fontWeight: '600', color: colors.textPrimary },
   // Row 3: live pill on the left, house count on the right.
   statusBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
   },
   flagBadge: {
     minWidth: 18,
@@ -1994,10 +2000,13 @@ function makeStyles(t) {
   countText: { fontSize: 12, color: colors.textSecondary },
   countStrong: { color: colors.textPrimary, fontWeight: '700' },
 
-  chromeCard: { paddingTop: spacing.xs },
-  chipScroll: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm, gap: spacing.sm },
-  // Row 2's toggle chips stretch to fill the width (equal thirds).
-  chipFill: { flex: 1, minWidth: 0 },
+  // The chrome owns ALL the vertical rhythm — one `gap` between every row, so no row can
+  // pay for the same space twice (row 1's paddingBottom + row 2's paddingTop used to make
+  // that one gap double-height).
+  chromeCard: { paddingVertical: spacing.sm, gap: spacing.sm },
+  chipScroll: { paddingHorizontal: spacing.sm, gap: spacing.sm },
+  // Row 2's toggle chips size to their label, then share the leftover width equally.
+  chipFill: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', minWidth: 0 },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2019,8 +2028,7 @@ function makeStyles(t) {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    marginHorizontal: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     backgroundColor: colors.brandTint,
@@ -2303,8 +2311,7 @@ function makeStyles(t) {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.xs,
+    paddingHorizontal: spacing.sm,
     gap: spacing.sm,
   },
   overlapReviewLink: { fontSize: 12, fontWeight: '700', color: colors.warnFg },
