@@ -593,6 +593,32 @@ test('LEAD-FOLD: giving a lead their own coordinator moves their OWN doors, and 
   assert.equal((await teamDoors('Frank X')).doors, frankOwn, 'exactly back where it started');
 });
 
+test('a DEACTIVATED canvasser can still be given a coordinator, and their doors move', { skip }, async () => {
+  const { org, token, julian, asa, frank } = ctx;
+  // Julian quit: deactivated AND off the campaign roster. His 60 doors are already on Asa's team.
+  // An admin tidying up historical crews must still be able to move him — the whole point of
+  // ledger-first accounting is that account state never gates what the numbers can say. Verified
+  // because it is load-bearing advice: a real org had ~1,700 doors sitting in "No team" belonging
+  // to deactivated canvassers, and the fix is exactly this.
+  const membership = await Membership.findOne({ userId: julian._id, organizationId: org._id }).lean();
+  assert.equal(membership.isActive, false, 'precondition: Julian really is deactivated');
+
+  const asaBefore = (await teamDoors('Asa X')).doors;
+  const frankBefore = (await teamDoors('Frank X')).doors;
+
+  const res = await write(`/admin/memberships/${julian._id}`, token, org._id, {
+    coordinatorId: String(frank._id),
+  });
+  assert.equal(res.status, 200, 'a deactivated member is not blocked from a coordinator change');
+  assert.equal(res.json.restamp.activities, 60);
+
+  assert.equal((await teamDoors('Frank X')).doors, frankBefore + 60);
+  assert.equal((await teamDoors('Asa X')).doors, asaBefore - 60);
+
+  await write(`/admin/memberships/${julian._id}`, token, org._id, { coordinatorId: String(asa._id) });
+  assert.equal((await teamDoors('Asa X')).doors, asaBefore, 'restored');
+});
+
 test('a NEW org can show team surfaces immediately — the gate is not stuck off', { skip }, async () => {
   // Regression for a latent bug: teamAttributionReadyAt was written ONLY by
   // migrate:activity-coordinator, at a point below two `continue` guards, and no creation path set
