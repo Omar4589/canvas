@@ -49,7 +49,7 @@ Passes belong to a walk list, so you manage them **from the walk list** — ther
 
 Each pass row in that table shows its own numbers — **Books**, **Knocks**, **Survey doors**
 (**Lit drops** on a lit-drop campaign), and **Conn %** — counted exactly the way the dashboard's
-**By round** breakdown counts them (one knock = one distinct house × round, see
+**By pass** breakdown counts them (one knock = one distinct house × pass, see
 [METRICS.md](METRICS.md)). The panel is **all-time**; the dashboard table honors its date filter,
 so the two match exactly on an "All time" range and can legitimately differ on any narrower one.
 

@@ -164,15 +164,16 @@ export default function CampaignDetail() {
 
   const questions = surveyResultsQ.data?.questions || [];
   const rounds = roundsQ.data?.rounds || [];
-  // Round chips: "All rounds" + every real Pass, plus the pre-turf bucket when one exists.
-  // knocks-by-pass emits that bucket as a passId:null row ("Legacy / no round") — without an option
-  // for it those responses would sit in All rounds and in no selectable round, so the rounds would
-  // not add up to the headline. 'legacy' is the server-side sentinel for passId:null.
+  // Pass chips: "All passes" + every real Pass, plus the pre-turf bucket when one exists.
+  // knocks-by-pass emits that bucket as a passId:null row ("Legacy / no pass") — without an option
+  // for it those responses would sit in All passes and in no selectable pass, so the passes would
+  // not add up to the headline. 'legacy' is the server-side sentinel for passId:null — an API value,
+  // not a label, so it stays 'legacy' even though the display text now says "pass".
   const roundChipOptions = useMemo(() => {
     const real = rounds.filter((r) => r.passId);
-    const opts = [{ passId: '', roundLabel: 'All rounds' }, ...real];
+    const opts = [{ passId: '', roundLabel: 'All passes' }, ...real];
     if (real.length && rounds.some((r) => !r.passId)) {
-      opts.push({ passId: 'legacy', roundLabel: 'Legacy / no round' });
+      opts.push({ passId: 'legacy', roundLabel: 'Legacy / no pass' });
     }
     return opts;
   }, [rounds]);
@@ -348,19 +349,19 @@ export default function CampaignDetail() {
             )}
           </View>
 
-          {/* By round (range) — one row per walk list × round from the billing pipeline */}
-          <SectionHeader title="By round" subtitle="Knocks per walk-list round in range" />
+          {/* By pass (range) — one row per walk list × pass from the billing pipeline */}
+          <SectionHeader title="By pass" subtitle="Knocks per walk-list pass in range" />
           {roundsQ.isLoading ? (
             <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md, marginBottom: spacing.md }} />
           ) : roundsQ.error ? (
             // A failed fetch (weak signal, or an old server during the OTA window) must
             // never render as an authoritative zero on a billing surface.
             <View style={styles.card}>
-              <Text style={styles.muted}>Couldn't load rounds — {roundsQ.error.message}</Text>
+              <Text style={styles.muted}>Couldn't load passes — {roundsQ.error.message}</Text>
             </View>
           ) : rounds.length === 0 ? (
             <View style={styles.card}>
-              <Text style={styles.muted}>No rounds yet.</Text>
+              <Text style={styles.muted}>No passes yet.</Text>
             </View>
           ) : (
             <View style={styles.card}>

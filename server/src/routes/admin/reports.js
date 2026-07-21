@@ -159,9 +159,12 @@ function baseFilter(req) {
 // round as a real-looking zero. Only surfaces that show one scope at a time may spread this in.
 function passFilterOf(req) {
   // `?passId=legacy` selects the pre-turf bucket — rows whose passId is null. Without it, those
-  // responses belong to "All rounds" and to no selectable round, so Σ(rounds) would silently fall
-  // short of the all-rounds total on any org with pre-turf history. /knocks-by-pass has always
-  // surfaced this bucket as a "Legacy / no round" row for exactly the same reason.
+  // responses belong to "All passes" and to no selectable pass, so Σ(passes) would silently fall
+  // short of the all-passes total on any org with pre-turf history. /knocks-by-pass has always
+  // surfaced this bucket as a "Legacy / no pass" row for exactly the same reason.
+  //
+  // NOTE the sentinel below is the literal string 'legacy' — an API value the clients send, not a
+  // label. The DISPLAY text changed from "round" to "pass"; this must not.
   if (req.query.passId === 'legacy') return { passId: null };
   if (req.query.passId && mongoose.isValidObjectId(req.query.passId)) {
     return { passId: new mongoose.Types.ObjectId(req.query.passId) };
@@ -1511,7 +1514,7 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
     const headers = [
       'Submitted (ISO)', 'Date', `Time (${tzAbbrev(tz) || tz})`,
       'Voter', 'Party', 'Do not contact', 'Address', 'City', 'State', 'Zip',
-      'Canvasser first name', 'Canvasser last name', 'Walk list', 'Round',
+      'Canvasser first name', 'Canvasser last name', 'Walk list', 'Pass',
       'Question', 'Answer', 'Note', 'Offline submission', 'Response id',
     ];
     const rows = responses.map((r) => {
@@ -1533,7 +1536,7 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
         r.userId?.firstName || '',
         r.userId?.lastName || '',
         effortNameById.get(String(r.passId?.effortId)) || '',
-        r.passId ? `Pass ${r.passId.roundNumber}` : 'Legacy / no round',
+        r.passId ? `Pass ${r.passId.roundNumber}` : 'Legacy / no pass',
         matched.map((a) => a.questionLabel).join(' | '),
         matched.map(answerText).join(' | '),
         r.note || '',
@@ -2367,7 +2370,7 @@ router.get('/duplicate-surveys', async (req, res, next) => {
               email: u?.email || '',
             },
             passId: r.passId ? String(r.passId) : null,
-            roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no round',
+            roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
           };
         })
         .sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt));
@@ -2753,7 +2756,7 @@ async function buildKnocksByPass(req) {
       effortName: p ? effortName.get(String(p.effortId)) || null : null,
       roundNumber: p ? p.roundNumber : null,
       roundName: p ? p.name : null,
-      roundLabel: p ? `Pass ${p.roundNumber} · ${p.name}` : 'Legacy / no round',
+      roundLabel: p ? `Pass ${p.roundNumber} · ${p.name}` : 'Legacy / no pass',
       status: p ? p.status : null,
       activatedAt: p?.activatedAt || null,
       archivedAt: p?.archivedAt || null,
@@ -2848,7 +2851,7 @@ async function buildKnocksByPass(req) {
           passId: p ? key : null,
           roundNumber: p ? p.roundNumber : null,
           roundName: p ? p.name : null,
-          roundLabel: p ? `Pass ${p.roundNumber} · ${p.name}` : 'Legacy / no round',
+          roundLabel: p ? `Pass ${p.roundNumber} · ${p.name}` : 'Legacy / no pass',
           effortName: p ? effortName.get(String(p.effortId)) || null : null,
           userId: String(r._id.userId),
           firstName: info.firstName || '',
@@ -2934,7 +2937,7 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
     let rows;
     if (built.byCanvasser) {
       headers = [
-        'Walk list', 'Round', 'Round name', 'Canvasser first name', 'Canvasser last name',
+        'Walk list', 'Pass', 'Pass name', 'Canvasser first name', 'Canvasser last name',
         'Email', 'Status', 'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
         ...doorCols, 'Connection rate %', 'Contact rate %',
       ];
@@ -2946,7 +2949,7 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
       ]);
     } else {
       headers = [
-        'Walk list', 'Round', 'Round name', 'Round status', 'Activated (ISO)', 'Archived (ISO)',
+        'Walk list', 'Pass', 'Pass name', 'Pass status', 'Activated (ISO)', 'Archived (ISO)',
         'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
         ...doorCols, 'Connection rate %', 'Contact rate %', 'New homes reached',
       ];

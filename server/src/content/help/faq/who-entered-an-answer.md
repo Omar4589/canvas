@@ -13,7 +13,7 @@ Click the answer. Two ways in:
 
 - **The quick look:** on the campaign **Home**, expand any answer in the survey results. Every entry shows the voter, the address, **who recorded it and at what time**, any note typed with it, and an **Offline** badge if it synced later.
 - **The full view:** open the campaign's **Survey Explorer** tab (or click **Open full view** from that expanded answer) for the same drill with filters, a map, and export.
-  Once a campaign has more than one round, the Explorer also has a **round filter** — pick a round to see just that pass's answers, or leave it on **All rounds**. Rounds are listed per walk list ("North · Pass 2"), because round numbering restarts in each walk list. Each round's counts add up to the all-rounds total.
+  Once a campaign has more than one pass, the Explorer also has a **pass filter** — pick a pass to see just that pass's answers, or leave it on **All passes**. Passes are listed per walk list ("North · Pass 2"), because pass numbering restarts in each walk list. Each pass's counts add up to the all-passes total.
 
 ## Who's entering this answer the most?
 

@@ -1,22 +1,23 @@
 // Short "(i)" tooltip copy for the canvasser metrics, shared by the campaign home
 // StatCards and the CanvasserSummaryTable column headers so every count reads the
-// same everywhere. Wording mirrors reportDerive.js's KPI_HELP.
+// same everywhere. Wording mirrors reportDerive.js's KPI_HELP — by HAND, not by import, so a
+// reworded sentence has to be carried across both files (and mobile/lib/metricHelp.js) deliberately.
 export const metricHelp = {
   doors:
-    'Doors knocked in the selected range — one per house, per round. If two canvassers knock the same house in the same round it counts ONCE for the campaign (though it shows on both their rows). Going back in a later round counts again.',
+    'Doors knocked in the selected range — one per house, per pass. If two canvassers knock the same house in the same pass it counts ONCE for the campaign (though it shows on both their rows). Going back in a later pass counts again.',
   surveyDoors:
-    'Doors where at least one survey was taken — one per house, per round. This is what the connection rate divides by. It is usually lower than "Voters surveyed", because one house can have several voters.',
+    'Doors where at least one survey was taken — one per house, per pass. This is what the connection rate divides by. It is usually lower than "Voters surveyed", because one house can have several voters.',
   // ONE key for one metric. There were briefly two (`surveyedVoters` + `votersSurveyed`) with
   // different wording, consumed by different components — which is precisely the drift this module
   // exists to prevent.
   surveyedVoters:
-    'Distinct people surveyed — counted once each, however many rounds you surveyed them in. Not how many forms were filled out. One house can have several voters, so this is usually higher than "Survey doors".',
+    'Distinct people surveyed — counted once each, however many passes you surveyed them in. Not how many forms were filled out. One house can have several voters, so this is usually higher than "Survey doors".',
   // The THIRD unit. Door-unit and voter-unit alone couldn't describe a row count, so row counts got
-  // labelled "Voters surveyed" all over the app — correct only while a campaign has one round,
-  // because one response per voter per round makes rows and people the same number. Go back for a
-  // second round and they part company.
+  // labelled "Voters surveyed" all over the app — correct only while a campaign has one pass,
+  // because one response per voter per pass makes rows and people the same number. Go back for a
+  // second pass and they part company.
   surveysTaken:
-    'How many surveys were filled out. Survey the same person again in a later round and that is another survey — so this can be higher than "Voters surveyed", which counts each person once.',
+    'How many surveys were filled out. Survey the same person again in a later pass and that is another survey — so this can be higher than "Voters surveyed", which counts each person once.',
   litDrops: 'Doors where literature was dropped, counted once per door per pass.',
   connectionRate:
     'Of the doors knocked, the share that completed the goal — a survey submitted OR a lit drop. (A lit drop counts even if no one answered.)',

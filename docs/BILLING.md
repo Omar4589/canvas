@@ -115,12 +115,12 @@ see a **"this month" usage meter** (billable campaigns × rate), and read the **
 exportable as CSV for invoicing. Payment itself happens outside the app (send an invoice — Stripe
 Invoicing works well); the app tracks *entitlement*, not money.
 
-When an invoice needs the knock detail *behind* a campaign's line — which walk list and which round
-(pass) the work landed in — the campaign dashboard's **By round** section exports exactly that
-(`knocks-by-pass.csv`: one row per walk list × round plus a TOTAL row, counted by the same rule as
-the statement's knocks; optionally per canvasser per round). It's supporting detail, not a price
+When an invoice needs the knock detail *behind* a campaign's line — which walk list and which pass
+the work landed in — the campaign dashboard's **By pass** section exports exactly that
+(`knocks-by-pass.csv`: one row per walk list × pass plus a TOTAL row, counted by the same rule as
+the statement's knocks; optionally per canvasser per pass). It's supporting detail, not a price
 input — **pricing is unchanged** ($300 per campaign per month); the statement stays the billing
-document. See [METRICS.md](METRICS.md) (Part 1 "By round").
+document. See [METRICS.md](METRICS.md) (Part 1 "By pass").
 
 **Onboarding a new client is one step:** creating the org also seats its **first admin** (name +
 email — they get a **set-password invite by email**, valid 72 hours, and choose their own password;

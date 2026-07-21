@@ -19,11 +19,11 @@ While you're still setting up, Home shows the **Setup progress** card: an ordere
 
 After the first pass is activated and knocks start coming in, Home becomes a **monitoring dashboard**: households, houses knocked, knocks, active canvassers, and a coverage bar — filterable by date range and by walk list. On a **survey** campaign you'll also see surveys and a connection rate; on a **lit-drop** campaign, lit drops and a lit rate instead.
 
-## The By round breakdown
+## The By pass breakdown
 
-Below the activity cards, the **By round** section lists one row per walk list and pass (Round 1, Round 2, …) for the selected date range — knocks, survey doors (or lit drops), the connection rate, and **New homes reached** — with a TOTAL row that always matches the Knocks number above it.
+Below the activity cards, the **By pass** section lists one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range — knocks, survey doors (or lit drops), the connection rate, and **New homes reached** — with a TOTAL row that always matches the Knocks number above it.
 
-**New homes reached** counts a home only in the round of its **first-ever** knock: going back to a Round-1 door in Round 2 adds a knock, not a new home. So the column shows what each round added to your coverage. Knocks recorded before the campaign had rounds appear as one "Legacy / no round" row.
+**New homes reached** counts a home only in the pass of its **first-ever** knock: going back to a Pass-1 door in Pass 2 adds a knock, not a new home. So the column shows what each pass added to your coverage. Knocks recorded before the campaign had passes appear as one "Legacy / no pass" row.
 
 **Export CSV** downloads the same table, TOTAL row included — pick the date range first, since the export uses it. See [Understanding the numbers](metrics) for how each column is counted.
 

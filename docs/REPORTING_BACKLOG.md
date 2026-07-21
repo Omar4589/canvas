@@ -25,11 +25,11 @@ breakdown.
 > `GET /admin/reports/knocks-by-pass` (+ `?groupBy=canvasser` for by-canvasser-by-round, with the
 > `crossCanvasserDoors` over-claim reconciliation) and the invoice-ready
 > `GET /admin/reports/knocks-by-pass.csv` (walk list × round rows + a TOTAL row; Export CSV button
-> on the Dashboard's new **By round** section). Surfaces: Dashboard **By round** table (web),
+> on the Dashboard's new **By pass** section). Surfaces: Dashboard **By pass** table (web),
 > per-pass **Survey doors / Lit drops / Conn %** columns on the Passes panel (the enriched
-> `GET /admin/campaigns/:id/passes`), and a **By round** card on the mobile admin campaign screen.
+> `GET /admin/campaigns/:id/passes`), and a **By pass** card on the mobile admin campaign screen.
 > "Coverage gained" landed as **New homes reached** — first-ever-knock attribution per round.
-> Spec + counting contract in [METRICS.md](METRICS.md) (Part 1 "By round", §E).
+> Spec + counting contract in [METRICS.md](METRICS.md) (Part 1 "By pass", §E).
 > **Client Reports intentionally remain round-blind** — a weekly client snapshot summarizes the
 > window, it doesn't itemize rounds; revisit only if a client asks.
 
@@ -77,7 +77,7 @@ walked Turf Cutting ("what do we see / what should we see / what can/can't we do
 > Still **round-blind** per item 1 — per-round breakdown was intentionally left out of this pass. See
 > [CLIENT_PORTAL.md](CLIENT_PORTAL.md).
 
-Surfaces inventory: Overview (org rollup), DashboardPage (single-campaign: activity + **By round** +
+Surfaces inventory: Overview (org rollup), DashboardPage (single-campaign: activity + **By pass** +
 coverage funnel + survey results + canvasser leaderboard), PassesPage (per-round knocks + rates),
 Client Reports (public weekly snapshots — still round-blind by design). Endpoints:
 [reports.js](../server/src/routes/admin/reports.js).

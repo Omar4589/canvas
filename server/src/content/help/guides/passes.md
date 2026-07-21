@@ -23,7 +23,7 @@ Passes live *inside* a walk list, not on their own page. Open the **Walk Lists**
 
 ## Each pass shows its numbers
 
-The passes table shows each pass's own count of **books**, **knocks**, **survey doors** (lit drops on a lit-drop campaign), and its **connection rate**. They're counted exactly like the campaign Home's **By round** section — one knock per door per pass. One difference to know: the passes table always shows **all-time** numbers, while the Home's By round table follows the **date range** you've picked there — set the Home range to "All time" and the two match exactly. For what each number means, see [Understanding the numbers](metrics).
+The passes table shows each pass's own count of **books**, **knocks**, **survey doors** (lit drops on a lit-drop campaign), and its **connection rate**. They're counted exactly like the campaign Home's **By pass** section — one knock per door per pass. One difference to know: the passes table always shows **all-time** numbers, while the Home's By pass table follows the **date range** you've picked there — set the Home range to "All time" and the two match exactly. For what each number means, see [Understanding the numbers](metrics).
 
 ## Pass 1 is made for you
 

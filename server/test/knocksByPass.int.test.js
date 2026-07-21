@@ -8,9 +8,9 @@ import mongoose from 'mongoose';
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/knocks_by_pass_test node --test test/knocksByPass.int.test.js
 // The point of this file is the ROUND-LEVEL COUNTING CONTRACT: Σ(rounds[].knocks) must
 // equal totals.knocks must equal an independent knocksPipeline aggregate run right here
-// in the test — a door re-knocked across rounds counts once PER round, a same-round
+// in the test — a door re-knocked across passes counts once PER pass, a same-pass
 // double-knock counts once, legacy passId:null rows collapse into one 'Legacy / no
-// round' bucket that sorts last. coverageGained is FIRST-EVER attribution (a re-knocked
+// pass' bucket that sorts last. coverageGained is FIRST-EVER attribution (a re-knocked
 // door never re-gains coverage, and a date window keys off when that first knock
 // happened). Also covers ?groupBy=canvasser (raw per-user rounds + the
 // crossCanvasserDoors over-claim, bulk rows invisible), both CSV layouts, the lead
@@ -120,7 +120,7 @@ before(async () => {
   //   d1  cross-ROUND re-knock: R1 by A, then R2 by A       → +1 knock in EACH round
   //   d2  R2 surveyed door (A)                              → R2 surveyedKnocks
   //   d3  the ONE cross-canvasser same-round door (A + B)   → round counts 1, canvassers 1 each
-  //   d4  legacy passId:null activity PAIR on one household → one 'Legacy / no round' knock
+  //   d4  legacy passId:null activity PAIR on one household → one 'Legacy / no pass' knock
   //   d5  genuinely-new R2 door (B, surveyed)               → R2 coverage even in the DAY2 window
   //   d6  admin bulk row (via:'bulk') in R2                 → round totals yes, canvasser rows no
   //   d7  same-canvasser same-round double-knock (A twice)  → counts once
@@ -235,7 +235,7 @@ test('legacy passId:null rows collapse to ONE bucket, labelled, sorted last', { 
   assert.strictEqual(r.json.rounds.length, 3, 'R1 + R2 + legacy');
   const legacy = r.json.rounds[r.json.rounds.length - 1];
   assert.strictEqual(legacy.passId, null);
-  assert.strictEqual(legacy.roundLabel, 'Legacy / no round');
+  assert.strictEqual(legacy.roundLabel, 'Legacy / no pass');
   assert.strictEqual(legacy.knocks, 1, 'the d4 activity PAIR is one knock');
   assert.strictEqual(legacy.refusedKnocks, 1);
   // Sorted: effort asc, round asc, legacy last.
@@ -339,7 +339,7 @@ test('groupBy=canvasser: raw per-user rounds, bulk rows invisible, crossCanvasse
   assert.strictEqual(row(null, canvA._id).knocks, 1, 'legacy pair is one knock for A');
   assert.strictEqual(a2.firstName, 'Al');
   assert.strictEqual(a2.status, 'active');
-  assert.strictEqual(rows[rows.length - 1].roundLabel, 'Legacy / no round', 'legacy rows sort last here too');
+  assert.strictEqual(rows[rows.length - 1].roundLabel, 'Legacy / no pass', 'legacy rows sort last here too');
 
   // The over-claim identity: per round, Σ(canvasser knocks) − NON-BULK round knocks —
   // recomputed here from the ledger — must equal crossCanvasserDoors. Exactly one
@@ -371,7 +371,7 @@ test('CSV default view: exact headers, one row per round, TOTAL row, attachment'
   // Seeded cells contain no commas/quotes, so plain splits are safe here.
   const lines = csv.text.split('\n');
   assert.deepStrictEqual(lines[0].split(','), [
-    'Walk list', 'Round', 'Round name', 'Round status', 'Activated (ISO)', 'Archived (ISO)',
+    'Walk list', 'Pass', 'Pass name', 'Pass status', 'Activated (ISO)', 'Archived (ISO)',
     'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
     'Connection rate %', 'Contact rate %', 'New homes reached',
   ]);
@@ -396,7 +396,7 @@ test('CSV groupBy=canvasser: per-user headers, no TOTAL row (no honest per-user 
   assert.strictEqual(csv.status, 200);
   const lines = csv.text.split('\n');
   assert.deepStrictEqual(lines[0].split(','), [
-    'Walk list', 'Round', 'Round name', 'Canvasser first name', 'Canvasser last name',
+    'Walk list', 'Pass', 'Pass name', 'Canvasser first name', 'Canvasser last name',
     'Email', 'Status', 'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
     'Connection rate %', 'Contact rate %',
   ]);

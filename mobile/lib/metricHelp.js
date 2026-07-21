@@ -3,9 +3,9 @@
 // so web and mobile read the same explanations.
 export const metricHelp = {
   doors:
-    'Doors knocked in the selected range — one per house, per round. If two canvassers knock the same house in the same round it counts ONCE for the campaign (though it shows on both their rows). Going back in a later round counts again.',
+    'Doors knocked in the selected range — one per house, per pass. If two canvassers knock the same house in the same pass it counts ONCE for the campaign (though it shows on both their rows). Going back in a later pass counts again.',
   surveyDoors:
-    'Doors where at least one survey was taken — one per house, per round. This is what the connection rate divides by. It is usually lower than "Surveyed voters", because one house can have several voters.',
+    'Doors where at least one survey was taken — one per house, per pass. This is what the connection rate divides by. It is usually lower than "Surveyed voters", because one house can have several voters.',
   surveyedVoters:
     'Distinct people surveyed — not how many forms were filled out. One house can have several voters, so this is usually higher than "Survey doors".',
   litDrops: 'Doors where literature was dropped, counted once per door per pass.',

@@ -160,10 +160,12 @@ export default function SurveyExplorerPage() {
           (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity)
       );
     // Pre-turf responses carry passId:null and belong to no Pass document. Without this option
-    // they'd sit in "All rounds" and in no selectable round, so the rounds would not add up to the
-    // headline. Sorted last, mirroring the "Legacy / no round" row on the knocks-by-pass report.
+    // they'd sit in "All passes" and in no selectable pass, so the passes would not add up to the
+    // headline. Sorted last, mirroring the "Legacy / no pass" row on the knocks-by-pass report.
+    // This label is synthesized HERE, not supplied by the server, so it has to be kept in step with
+    // routes/admin/reports.js by hand. The 'legacy' id is the server sentinel and never changes.
     if ((passesQ.data?.legacyResponseCount || 0) > 0) {
-      rows.push({ id: 'legacy', effortName: '￿', roundNumber: Infinity, label: 'Legacy / no round' });
+      rows.push({ id: 'legacy', effortName: '￿', roundNumber: Infinity, label: 'Legacy / no pass' });
     }
     return rows;
   }, [passesQ.data, efforts]);

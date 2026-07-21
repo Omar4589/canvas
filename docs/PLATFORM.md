@@ -100,7 +100,7 @@ so "signed out then in" and "session expired then in" landed in different places
   (evenings on days −8…−12, its pass properly archived), and the active **Round 2** on the four
   prior evenings plus a "today" whose knocks run from mid-morning up to the minute you pressed it.
   A believable share of Round-2 doors are **re-knocks** of Round-1 not-homes — so the dashboard's
-  **By round** table, the per-pass numbers, and the knock-vs-coverage distinction all demo
+  **By pass** table, the per-pass numbers, and the knock-vs-coverage distinction all demo
   truthfully (two knocks, one home). Press it right before a pitch so the dashboard, map, and
   timeline look live. The staged days read like a real field operation — the work is spread across
   the demo's several canvassers, each knocking a believable ~15-20 doors an hour (never hundreds), a

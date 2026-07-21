@@ -540,12 +540,12 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {/* By round — walk list × pass over the same billing pipeline and window as Activity.
+      {/* By pass — walk list × pass over the same billing pipeline and window as Activity.
           Hidden until the campaign has at least one round (or legacy knocks) to show. */}
       {(byRoundQ.data?.rounds || []).length > 0 && (
         <section className="mb-6">
           <SectionHeading
-            title="By round"
+            title="By pass"
             right={
               <span className="flex items-center gap-2">
                 {roundsExportError && <span className="text-xs text-danger">{roundsExportError}</span>}
@@ -566,7 +566,7 @@ export default function DashboardPage() {
               <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
                 <tr>
                   <th className="px-4 py-2 text-left">Walk list</th>
-                  <th className="px-4 py-2 text-left">Round</th>
+                  <th className="px-4 py-2 text-left">Pass</th>
                   <th className="px-4 py-2 text-right">Knocks</th>
                   <th className="px-4 py-2 text-right">{isLitDrop ? 'Lit drops' : 'Survey doors'}</th>
                   <th className="px-4 py-2 text-right">Conn %</th>

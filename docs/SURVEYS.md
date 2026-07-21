@@ -790,12 +790,13 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 >   **twice**: two forms, and (for a yard sign) two signs handed out. That is intended — contrast
 >   `surveyedVoters`, which is a `distinct('voterId')` and counts that person **once**. A one-round
 >   campaign cannot tell the two apart; see the three-units callout in [METRICS.md](METRICS.md).
-> - **`?passId=legacy` selects the PRE-TURF bucket** (rows with `passId: null`). Round pickers are
->   built from Pass documents, so without this sentinel those responses would belong to "All rounds"
->   and to no selectable round, and Σ(rounds) would quietly fall short of the headline on any org
+> - **`?passId=legacy` selects the PRE-TURF bucket** (rows with `passId: null`). Pass pickers are
+>   built from Pass documents, so without this sentinel those responses would belong to "All passes"
+>   and to no selectable pass, and Σ(passes) would quietly fall short of the headline on any org
 >   with pre-turf history. `GET /admin/campaigns/:id/passes` returns **`legacyResponseCount`** so a
->   client can offer the option only when the bucket is non-empty. Mirrors the "Legacy / no round"
->   row `/knocks-by-pass` has always emitted.
+>   client can offer the option only when the bucket is non-empty. Mirrors the "Legacy / no pass"
+>   row `/knocks-by-pass` has always emitted. (The `legacy` sentinel is an API value, not a label —
+>   it does not change with the wording.)
 > - **`?passId=` scopes any of these to one round** (`survey-results`, `voters-by-answer`(+`.csv`),
 >   `answer-canvassers`), via `passFilterOf` in [reports.js](../server/src/routes/admin/reports.js).
 >   Σ(rounds) === the all-rounds total. It is deliberately **not** part of `baseFilter`:
