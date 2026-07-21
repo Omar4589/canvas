@@ -464,6 +464,16 @@ in practice**: the usual undo is "set the coordinator back", and you cannot set 
 is no longer a member. Use `--org=<slug>` to apply the clean orgs first and decide on the rest
 separately.
 
+**Rows that move but aren't doors get their own line.** `restricted` and `note_added` are the only
+actionTypes outside `KNOCK_ACTIONS`; they are re-stamped like everything else (a restricted mark
+belongs to the same team as the walk that produced it) but the door headline can't count them. The
+first production preflight printed *"40 door(s) (42 activity row(s))"* for a canvasser with two
+restricted marks — so the preflight now says `also moving (not counted as doors): 2 restricted`, and
+calls out that **restricted doors are billable for an org that opted in**. The campaign's own billable
+total still cannot move: `knocksPipeline` dedupes to `(household, pass)` campaign-wide and never reads
+`coordinatorId`, so a re-stamp shifts which *team segment* a restricted door sits in, never the
+invoice.
+
 Nothing else moves: campaign totals, coverage, rates and invoices are untouched, because billing is
 team-blind.
 

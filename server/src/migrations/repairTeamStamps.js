@@ -6,6 +6,7 @@ import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
 import { CoordinatorChange } from '../models/CoordinatorChange.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
+import { KNOCK_ACTIONS } from '../services/reports/aggregations.js';
 import {
   previewRestamp,
   restampFilter,
@@ -70,14 +71,35 @@ const nameOf = (u) => (u ? `${u.firstName} ${u.lastName}`.trim() : 'No team');
 // each row currently carries, deduped to doors the same way /team-breakdown counts them.
 const sourceBreakdown = async (filter) => {
   const agg = await CanvassActivity.aggregate([
-    { $match: filter },
-    // Dedupe to (household, pass) WITHIN each source team first, so these sub-counts are doors and
-    // sum to the same unit as the headline rather than raw rows.
+    // KNOCK_ACTIONS is load-bearing, not tidiness. The headline door count comes from
+    // knocksPipeline, which counts only doors with a real knock on them; without the same filter
+    // here a note_added or restricted row inflates a sub-count above the total it sits under. It
+    // did exactly that on the first production preflight — 'taken from No team: 42' printed
+    // beneath a 40-door headline — which is the doors-vs-rows confusion this codebase has shipped
+    // before. The unit has to match or the breakdown is not a breakdown.
+    { $match: { ...filter, actionType: { $in: KNOCK_ACTIONS } } },
+    // Dedupe to (household, pass) WITHIN each source team, so these are doors, same as the headline.
     { $group: { _id: { from: { $ifNull: ['$coordinatorId', null] }, householdId: '$householdId', passId: '$passId' } } },
     { $group: { _id: '$_id.from', doors: { $sum: 1 } } },
     { $sort: { doors: -1 } },
   ]);
   return agg.map((r) => ({ from: r._id, doors: r.doors }));
+};
+
+// Rows that move but are NOT doors: `restricted` and `note_added` are the only actionTypes outside
+// KNOCK_ACTIONS. They are re-stamped along with everything else (restampFilter is deliberately
+// actionType-blind — a restricted mark belongs to the same team as the walk that produced it), but
+// the door headline can't count them, so without this they move invisibly.
+//
+// `restricted` is the one worth naming out loud: for an org that has opted into billing restricted
+// doors, it is a BILLABLE door changing teams. Silent is the wrong behavior for that.
+const nonKnockBreakdown = async (filter) => {
+  const agg = await CanvassActivity.aggregate([
+    { $match: { ...filter, actionType: { $nin: KNOCK_ACTIONS } } },
+    { $group: { _id: '$actionType', rows: { $sum: 1 } } },
+    { $sort: { rows: -1 } },
+  ]);
+  return agg.map((r) => ({ actionType: r._id, rows: r.rows }));
 };
 
 // Every member of the org and what their ledger would look like under the current rule. Shared by
@@ -111,14 +133,14 @@ const scanOrg = async (org) => {
     });
     if (!counts.activities && !counts.surveys) continue;
 
-    const sources = await sourceBreakdown(
-      restampFilter({
-        organizationId: org._id,
-        userId: m.userId,
-        coordinatorId: m.coordinatorId,
-        bulkAware: true,
-      })
-    );
+    const moveFilter = restampFilter({
+      organizationId: org._id,
+      userId: m.userId,
+      coordinatorId: m.coordinatorId,
+      bulkAware: true,
+    });
+    const sources = await sourceBreakdown(moveFilter);
+    const nonKnock = await nonKnockBreakdown(moveFilter);
     // A source coordinator with no surviving Membership in this org has LEFT. Moving doors off
     // their team is legal under the current-coordinator rule, but it is the one outcome nobody
     // would predict from the target side alone, so it gets called out by name.
@@ -139,6 +161,7 @@ const scanOrg = async (org) => {
         label: s.from ? nameOf(fromById.get(String(s.from))) : 'No team',
         departed: !!s.from && !memberIds.has(String(s.from)),
       })),
+      nonKnock,
       ...counts,
     });
   }
@@ -169,6 +192,24 @@ const main = async () => {
           const flag = s.departed ? '   ⚠️  LEFT THE ORG — this empties their team' : '';
           console.log(`      taken from ${s.label}: ${s.doors} door(s)${flag}`);
           if (s.departed) departedSources = true;
+        }
+        // The sub-counts normally sum to the headline. They can legitimately exceed it if one
+        // (household, pass) carries rows stamped with two DIFFERENT former teams — each source
+        // rightly claims that door, while the headline counts it once. Say so rather than leaving
+        // the reader to notice the arithmetic doesn't close.
+        if (r.nonKnock.length) {
+          const parts = r.nonKnock.map((n) => `${n.rows} ${n.actionType}`).join(', ');
+          const billable = r.nonKnock.some((n) => n.actionType === 'restricted')
+            ? '  ← restricted doors are BILLABLE for an org that opted in'
+            : '';
+          console.log(`      also moving (not counted as doors): ${parts}${billable}`);
+        }
+        const sourceSum = r.sources.reduce((n, s) => n + s.doors, 0);
+        if (sourceSum !== r.doors) {
+          console.log(
+            `      (sub-counts total ${sourceSum} vs ${r.doors} moving: ${sourceSum - r.doors} ` +
+              `door(s) carry rows from more than one former team, counted once in the total)`
+          );
         }
         totalDoors += r.doors;
       }
