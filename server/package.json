@@ -40,6 +40,7 @@
     "migrate:candidate-orgs": "node src/migrations/backfillCandidateOrgs.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
     "audit:stale-overwrites": "node src/migrations/auditStaleOverwrites.js",
+    "audit:orphaned-reviews": "node src/migrations/auditOrphanedReviews.js",
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
     "migrate:activity-coordinator": "node src/migrations/migrateActivityCoordinator.js",
     "audit:team-counts": "node src/migrations/auditTeamCounts.js",

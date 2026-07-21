@@ -22,6 +22,7 @@
     "reconcile:counts": "npm --prefix server run reconcile:counts --",
     "audit:voted-doors": "npm --prefix server run audit:voted-doors --",
     "audit:stale-overwrites": "npm --prefix server run audit:stale-overwrites --",
+    "audit:orphaned-reviews": "npm --prefix server run audit:orphaned-reviews --",
     "cleanup:test-campaigns": "npm --prefix server run cleanup:test-campaigns --",
     "migrate:build-indexes": "npm --prefix server run migrate:build-indexes --",
     "migrate:multitenant": "npm --prefix server run migrate:multitenant",
