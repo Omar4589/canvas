@@ -302,6 +302,42 @@ offline, the flush's pre-existing 4xx policy drops it (offlineQueue.js doFlush) 
 
 It's a brand-new empty collection — **no migration**.
 
+### A correction re-opens the flag, and that is the policy
+
+A decision is keyed to one `CanvassActivity._id`, and a correction is a **delete-then-create** — the
+replacement row gets a **new `_id`**, so the old decision no longer points at anything and the flag
+reads as Open again. That is deliberate, and it is what the owner asked for. Verified against the
+live app:
+
+| The canvasser… | The flag | |
+|---|---|---|
+| records from 300 m | flags `far`/high | |
+| …you dismiss it | dismissed | |
+| …then **re-records at 10 m** | **no flag** | the correction genuinely fixed it |
+| …then **re-records at 300 m again** | **flags again, Open, high** | a repeat offence must not inherit the dismissal |
+
+> ⚠️ **Do not "fix" this by carrying decisions forward onto the replacement row.** It looks like
+> orphaning and it is tempting to treat as a bug. Carrying a decision forward breaks the last row of
+> that table: a canvasser who does the same thing again — or something worse — at a door you already
+> cleared would arrive **pre-dismissed and never appear in your queue**. In a fraud tool, being asked
+> twice beats being told never.
+
+**The one genuine gap** is the decision *history*, and only `confirmed` matters. When a confirmed
+fraud finding's door is later corrected, the flag correctly clears — but the finding itself becomes
+unreachable, so a canvasser can retire their own finding by re-recording that door properly, and an
+end-of-campaign "how many confirmed findings on this canvasser" cannot see it. Worse, a `FlagReview`
+stores **no canvasser and no household** (they lived on the deleted action), so an orphaned finding
+is *unattributable* as well as invisible.
+
+`npm run audit:orphaned-reviews`
+([auditOrphanedReviews.js](../server/src/migrations/auditOrphanedReviews.js)) counts them — read-only,
+reports the population checked so a clean run is evidence rather than an empty query, and separates
+`confirmed` from `dismissed` (a lost dismissal just means the flag came back for another look).
+
+> **Measured 2026-07-20: 113 decisions checked, 0 orphaned.** Real usage, no losses — so this stayed
+> documented rather than fixed. If a future run reports confirmed findings, the fix is a durable home
+> for them against the canvasser; it is **not** a change to the flag behaviour above.
+
 ## D. Endpoints
 
 Both live on the `/admin/reports` router, inheriting its auth, the **team-lead → managed-campaign**
