@@ -54,17 +54,26 @@ router.get('/', async (req, res, next) => {
   try {
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-    const memberships = await Membership.find({ organizationId: campaign.organizationId, isActive: true })
-      .populate({ path: 'userId', select: 'firstName lastName email isActive isSuperAdmin' })
-      .sort({ createdAt: -1 })
-      .lean();
+    const [memberships, roster] = await Promise.all([
+      Membership.find({ organizationId: campaign.organizationId, isActive: true })
+        .populate({ path: 'userId', select: 'firstName lastName email isActive isSuperAdmin' })
+        .sort({ createdAt: -1 })
+        .lean(),
+      // The crew is a per-campaign fact, so it comes off THIS campaign's roster rows — not off the
+      // org membership, which has no campaign and used to hand every campaign the same answer.
+      // Someone in the org but not on this campaign simply has no crew here, which is correct.
+      CampaignAssignment.find({ campaignId: campaign._id }, 'userId coordinatorId').lean(),
+    ]);
+    const crewByUser = new Map(
+      roster.map((r) => [String(r.userId), r.coordinatorId ? String(r.coordinatorId) : null])
+    );
     res.json({
       members: memberships
         .filter((m) => m.userId && m.userId.isActive)
         .map((m) => ({
           role: m.role,
           isActive: m.isActive,
-          coordinatorId: m.coordinatorId ? String(m.coordinatorId) : null,
+          coordinatorId: crewByUser.get(String(m.userId._id)) ?? null,
           user: {
             id: String(m.userId._id),
             firstName: m.userId.firstName,
@@ -99,6 +108,9 @@ router.post('/', denyVendorPrivilegeWrite, async (req, res, next) => {
         addedBy: req.user._id,
         data, // linkExisting:true links an existing account; false → create-new (existing email → EMAIL_EXISTS_USE_LINK)
         role: 'canvasser', // a lead can only create/link canvassers for their crew
+        // The crew is set on the campaign roster row below, not on the org membership — joining an
+        // ORG carries no crew, because a crew only means something inside a campaign.
+        campaignId: campaign._id,
         coordinatorId: coordRes.value || null,
         // New accounts get a temp password + forced change on first login. A linked existing
         // account keeps its own password (the flag only applies on the create-new branch).
@@ -119,6 +131,9 @@ router.post('/', denyVendorPrivilegeWrite, async (req, res, next) => {
           assignedBy: req.user._id,
           assignedAt: new Date(),
         },
+        // $set, not $setOnInsert: linking a RETURNING canvasser who is already on this campaign
+        // should honour the crew the lead just picked rather than silently keep the old one.
+        $set: { coordinatorId: coordRes.value || null },
       },
       { upsert: true }
     );
@@ -152,11 +167,11 @@ router.get('/:userId/coordinator-preview', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
     const orgId = activeOrgId(req);
 
-    const onCampaign = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.params.userId });
+    const onCampaign = await CampaignAssignment.findOne(
+      { campaignId: campaign._id, userId: req.params.userId },
+      'coordinatorId'
+    ).lean();
     if (!onCampaign) return res.status(404).json({ error: 'That member is not on this campaign' });
-
-    const membership = await Membership.findOne({ userId: req.params.userId, organizationId: orgId }).lean();
-    if (!membership) return res.status(404).json({ error: 'Member not in this org' });
 
     const coordRes = await resolveCoordinatorId({
       orgId,
@@ -170,7 +185,8 @@ router.get('/:userId/coordinator-preview', async (req, res, next) => {
       await coordinatorPreviewBody({
         orgId,
         userId: req.params.userId,
-        from: membership.coordinatorId ?? null,
+        campaignId: campaign._id,
+        from: onCampaign.coordinatorId ?? null,
         to: coordRes.value ?? null,
       })
     );
@@ -195,19 +211,20 @@ router.patch('/:userId/coordinator', denyVendorPrivilegeWrite, async (req, res, 
     if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
     if (coordRes.skip) return res.status(400).json({ error: 'coordinatorId is required' });
 
-    // setMemberCoordinator also RE-STAMPS this person's knock history onto the new team. Note the
-    // scope that implies: the write is keyed {userId, organizationId} — as it already was — so a
-    // lead reorganizing their crew inside this campaign moves that person's doors in EVERY
-    // campaign in the org. The coordinator field itself has always been org-wide (Membership has
-    // no campaignId); the re-stamp makes that pre-existing scope visible rather than adding it.
+    // setMemberCoordinator also RE-STAMPS this person's knock history onto the new team — scoped to
+    // THIS campaign, keyed on req.params.campaignId. That the campaign id comes from the URL is
+    // load-bearing, not incidental: requireCampaignManager gates on the same param, so a lead
+    // physically cannot address a campaign they were not granted. Taking it from the body would
+    // reopen exactly that hole.
     const restamp = await setMemberCoordinator({
       organizationId: orgId,
       userId: req.params.userId,
+      campaignId: campaign._id,
       coordinatorId: coordRes.value ?? null,
       actorUserId: req.user._id,
       source: 'lead_crew',
     });
-    if (!restamp) return res.status(404).json({ error: 'Member not in this org' });
+    if (!restamp) return res.status(404).json({ error: 'That member is not on this campaign' });
     res.json({
       ok: true,
       coordinatorId: restamp.next ? String(restamp.next) : null,

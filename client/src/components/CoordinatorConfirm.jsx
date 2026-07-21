@@ -74,9 +74,9 @@ export default function CoordinatorConfirm({
 
           {doors > 0 ? (
             <p className="mt-1.5 text-xs text-fg-muted">
-              This changes both teams’ totals, for every campaign and all time. It does not change
-              campaign totals, coverage, or your bill. You can move them back by setting the
-              coordinator back.
+              This changes both crews’ totals <strong>in this campaign</strong>, all time. Their
+              work on your other campaigns is not affected. It does not change campaign totals,
+              coverage, or your bill. You can move them back by setting the crew back.
             </p>
           ) : null}
 

@@ -1,4 +1,5 @@
 import { CampaignAssignment } from '../models/CampaignAssignment.js';
+import { CampaignManager } from '../models/CampaignManager.js';
 import { Membership } from '../models/Membership.js';
 import { User } from '../models/User.js';
 
@@ -40,25 +41,36 @@ async function activeMemberIdSet(organizationId, ids) {
 
 // Who may be assigned work (a book) in a campaign: users on the campaign roster, OR org
 // admins — who can be assigned on the fly (incl. self) and get added to the roster when
-// they are — but in BOTH cases only if they are currently ACTIVATED (active org membership
-// + active user account), so a since-deactivated person can no longer be given new work.
-// Superadmins are always allowed (cross-org oversight + self-assign). Everyone else must be
-// added on the Team page first. Returns { allowed, notOnTeam } as arrays of string ids (deduped).
+// they are — OR a team lead holding a management grant on THIS campaign, for the same
+// reason (a lead runs the campaign; they must be able to put themselves on a book without
+// asking an admin to roster them first). In all three cases only if they are currently
+// ACTIVATED (active org membership + active user account), so a since-deactivated person can
+// no longer be given new work. Superadmins are always allowed (cross-org oversight +
+// self-assign). Everyone else must be added on the Team page first.
+// Returns { allowed, notOnTeam } as arrays of string ids (deduped).
 export async function partitionAssignable({ campaignId, organizationId, userIds }) {
   const ids = [...new Set((userIds || []).map((u) => String(u)))].filter(Boolean);
   if (!ids.length) return { allowed: [], notOnTeam: [] };
-  const [onRoster, admins, supers, activeSet] = await Promise.all([
+  const [onRoster, admins, managers, supers, activeSet] = await Promise.all([
     CampaignAssignment.find({ campaignId, userId: { $in: ids } }).distinct('userId'),
     Membership.find({ organizationId, userId: { $in: ids }, role: 'admin', isActive: true }).distinct('userId'),
+    // Scoped to THIS campaign's grants, never "is a lead somewhere" — a lead's authority is the
+    // set of campaigns granted to them, so a grant on another campaign must not open this one.
+    CampaignManager.find({ organizationId, campaignId, userId: { $in: ids } }).distinct('userId'),
     User.find({ _id: { $in: ids }, isSuperAdmin: true }).distinct('_id'),
     activeMemberIdSet(organizationId, ids),
   ]);
   const roster = new Set(onRoster.map(String));
   const admin = new Set(admins.map(String));
+  const manager = new Set(managers.map(String));
   const superSet = new Set(supers.map(String));
-  // Roster/admin candidates must ALSO be activated; superadmins bypass (oversight).
+  // Roster/admin/lead candidates must ALSO be activated; superadmins bypass (oversight).
   const ok = new Set(
-    ids.filter((id) => superSet.has(id) || ((roster.has(id) || admin.has(id)) && activeSet.has(id)))
+    ids.filter(
+      (id) =>
+        superSet.has(id) ||
+        ((roster.has(id) || admin.has(id) || manager.has(id)) && activeSet.has(id))
+    )
   );
   return {
     allowed: ids.filter((id) => ok.has(id)),

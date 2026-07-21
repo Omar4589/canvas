@@ -5,6 +5,7 @@ import { Campaign } from '../models/Campaign.js';
 import { Organization } from '../models/Organization.js';
 import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
+import { CampaignAssignment } from '../models/CampaignAssignment.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
 import { SurveyResponse } from '../models/SurveyResponse.js';
 // teamFoldStage is the EXACT fold /team-breakdown uses. Sharing it is the point: an audit that can
@@ -109,12 +110,20 @@ async function auditCampaign(campaign) {
   console.log(`\nAUDIT · ${campaign.name}  (read-only — nothing will be written)\n`);
 
   // ── Whose team is whose ────────────────────────────────────────────────────────────────────────
-  const leadIds = (
-    await Membership.distinct('coordinatorId', {
+  // From the LEDGER, in this campaign's scope — the same derivation routes/admin/reports.js uses
+  // (leadIdsForScope). It must match: this script's whole value is being able to fail when the
+  // endpoint is wrong, and a lead set derived differently here would make the audit wrong in a
+  // DIFFERENT way, which is worse than not auditing. It was org-wide off Membership until crews
+  // became per-campaign, which would now report campaign-correct totals with campaign-wrong labels.
+  const [leadDoors, leadSurveys] = await Promise.all([
+    CanvassActivity.distinct('coordinatorId', { ...scope, coordinatorId: { $ne: null } }),
+    SurveyResponse.distinct('coordinatorId', {
       organizationId: campaign.organizationId,
+      campaignId: campaign._id,
       coordinatorId: { $ne: null },
-    })
-  ).map(String);
+    }),
+  ]);
+  const leadIds = [...new Set([...leadDoors, ...leadSurveys].map(String))];
   const leadSet = new Set(leadIds);
 
   // The SAME fold the endpoint uses (imported, not re-implemented — a second copy is exactly how the
@@ -212,9 +221,17 @@ async function auditCampaign(campaign) {
   const users = await User.find({ _id: { $in: userIds } }, 'firstName lastName deletedAt').lean();
   const mems = await Membership.find(
     { organizationId: campaign.organizationId, userId: { $in: userIds } },
-    'userId isActive coordinatorId'
+    'userId isActive'
   ).lean();
   const mById = new Map(mems.map((m) => [String(m.userId), m]));
+  // The crew is per-campaign, so it comes off THIS campaign's roster. Somebody who knocked here but
+  // is no longer rostered has no row — and reads as "off roster" rather than being silently
+  // relabelled "no team", which would look identical to a genuine No-team canvasser.
+  const roster = await CampaignAssignment.find(
+    { campaignId: campaign._id, userId: { $in: userIds } },
+    'userId coordinatorId'
+  ).lean();
+  const crewById = new Map(roster.map((r) => [String(r.userId), r]));
 
   for (const uid of userIds.map(String)) {
     const u = users.find((x) => String(x._id) === uid);
@@ -222,7 +239,14 @@ async function auditCampaign(campaign) {
     const [k] = await CanvassActivity.aggregate(knocksPipeline({ ...scope, userId: new mongoose.Types.ObjectId(uid) }));
     const surveys = await SurveyResponse.countDocuments({ campaignId: campaign._id, userId: uid });
     const state = !m ? 'REMOVED FROM ORG' : u?.deletedAt ? 'account deleted' : m.isActive ? 'active' : 'deactivated';
-    const team = m?.coordinatorId ? nameById.get(String(m.coordinatorId)) || '?' : leadSet.has(uid) ? 'own team' : 'no team';
+    const crew = crewById.get(uid);
+    const team = crew?.coordinatorId
+      ? nameById.get(String(crew.coordinatorId)) || '?'
+      : !crew
+        ? 'off roster'
+        : leadSet.has(uid)
+          ? 'own team'
+          : 'no team';
     console.log(
       `  ${pad(u ? `${u.firstName} ${u.lastName}` : uid, 20)}${padL(n(k?.knocks), 8)} doors ${padL(n(surveys), 6)} surveys  ·  ${pad(team, 14)} ${state}`
     );

@@ -29,7 +29,6 @@ const EMPTY_FORM = {
   phone: '',
   password: '',
   role: 'canvasser',
-  coordinatorId: '',
   managedCampaignIds: [],
 };
 
@@ -112,7 +111,6 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [coordinatorFilter, setCoordinatorFilter] = useState('all');
   const [sortMode, setSortMode] = useState('name-asc');
 
   const addMember = useMutation({
@@ -154,17 +152,6 @@ export default function UsersPage() {
     ? members.find((m) => m.user.id === selectedUserId) || null
     : null;
 
-  // Active admins + team leads in this org — the eligible coordinators.
-  const coordinators = useMemo(
-    () => members.filter((m) => (m.role === 'admin' || m.role === 'lead') && m.user.isActive && m.isActive),
-    [members]
-  );
-  // userId → "First Last", for rendering a coordinatorId as a name.
-  const nameByUserId = useMemo(
-    () => new Map(members.map((m) => [m.user.id, `${m.user.firstName} ${m.user.lastName}`])),
-    [members]
-  );
-  const coordinatorName = (id) => (id && nameByUserId.get(id)) || null;
 
   const visibleMembers = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -173,13 +160,6 @@ export default function UsersPage() {
       const active = m.isActive && m.user.isActive;
       if (statusFilter === 'active' && !active) return false;
       if (statusFilter === 'inactive' && active) return false;
-      if (coordinatorFilter === 'none' && m.coordinatorId) return false;
-      if (
-        coordinatorFilter !== 'all' &&
-        coordinatorFilter !== 'none' &&
-        m.coordinatorId !== coordinatorFilter
-      )
-        return false;
       if (term) {
         const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
         if (!hay.includes(term)) return false;
@@ -199,7 +179,7 @@ export default function UsersPage() {
         )
       );
     return list;
-  }, [members, search, roleFilter, statusFilter, coordinatorFilter, sortMode]);
+  }, [members, search, roleFilter, statusFilter, sortMode]);
 
   function onSubmit(e) {
     e.preventDefault();
@@ -207,7 +187,6 @@ export default function UsersPage() {
       email: form.email.trim(),
       role: form.role,
       linkExisting: emailLookup,
-      coordinatorId: form.coordinatorId || null,
     };
     if (form.role === 'lead') body.managedCampaignIds = form.managedCampaignIds;
     if (!emailLookup) {
@@ -241,7 +220,7 @@ export default function UsersPage() {
 
   const labelCls = 'block text-xs font-medium text-fg';
   // Table column count — the optional Billing-access column shifts the empty-state colSpans.
-  const colCount = canViewBilling ? 6 : 5;
+  const colCount = canViewBilling ? 5 : 4;
 
   return (
     <div>
@@ -330,23 +309,9 @@ export default function UsersPage() {
               </div>
             </div>
           )}
-          <div className="md:col-span-3">
-            <label className={labelCls}>
-              Coordinator <span className="text-fg-subtle">(optional)</span>
-            </label>
-            <Select
-              value={form.coordinatorId}
-              onChange={(e) => setForm((s) => ({ ...s, coordinatorId: e.target.value }))}
-              className="mt-1 w-full"
-            >
-              <option value="">— None —</option>
-              {coordinators.map((m) => (
-                <option key={m.user.id} value={m.user.id}>
-                  {m.user.firstName} {m.user.lastName}
-                </option>
-              ))}
-            </Select>
-          </div>
+          {/* No crew picker here on purpose. This form adds somebody to the ORGANIZATION, and a
+              crew only means something inside a campaign — you set it on that campaign's Team tab,
+              where the confirmation can tell you how many doors it moves. */}
 
           {!emailLookup && (
             <>
@@ -427,15 +392,6 @@ export default function UsersPage() {
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </Select>
-        <Select value={coordinatorFilter} onChange={(e) => setCoordinatorFilter(e.target.value)}>
-          <option value="all">All coordinators</option>
-          <option value="none">No coordinator</option>
-          {coordinators.map((m) => (
-            <option key={m.user.id} value={m.user.id}>
-              {m.user.firstName} {m.user.lastName}
-            </option>
-          ))}
-        </Select>
         <Select value={sortMode} onChange={(e) => setSortMode(e.target.value)}>
           {SORT_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -497,7 +453,6 @@ export default function UsersPage() {
             <>
               <th className="px-4 py-2.5">Member</th>
               <th className="px-4 py-2.5">Role</th>
-              <th className="px-4 py-2.5">Coordinator</th>
               <th className="px-4 py-2.5">Status</th>
               {canViewBilling && <th className="px-4 py-2.5">Billing access</th>}
               <th className="w-8 px-4 py-2.5"></th>
@@ -507,7 +462,6 @@ export default function UsersPage() {
           {visibleMembers.map((m) => {
             const u = m.user;
             const active = m.isActive && u.isActive;
-            const coord = coordinatorName(m.coordinatorId);
             return (
               <tr
                 key={m.membershipId}
@@ -532,19 +486,6 @@ export default function UsersPage() {
                   <Badge variant={m.role === 'admin' ? 'brand' : m.role === 'lead' ? 'info' : 'neutral'}>
                     {ROLE_LABEL[m.role] || 'Canvasser'}
                   </Badge>
-                </td>
-                <td className="px-4 py-3 text-fg-muted">
-                  {coord ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <Avatar
-                        user={{ firstName: coord.split(' ')[0], lastName: coord.split(' ').slice(1).join(' ') }}
-                        size="sm"
-                      />
-                      <span className="truncate">{coord}</span>
-                    </span>
-                  ) : (
-                    <span className="text-fg-subtle">—</span>
-                  )}
                 </td>
                 <td className="px-4 py-3">
                   <Badge variant={active ? 'success' : 'neutral'} dot>

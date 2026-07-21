@@ -1,15 +1,21 @@
 import mongoose from 'mongoose';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
-import { Membership } from '../../models/Membership.js';
+import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { User } from '../../models/User.js';
 import { NOT_BULK, knocksPipeline } from '../reports/aggregations.js';
 
-// Re-stamp the frozen TEAM tag on a canvasser's ledger history when their coordinator changes.
+// Re-stamp the frozen TEAM tag on a canvasser's ledger history when their crew changes.
 //
-// THE RULE: the CURRENT coordinator owns ALL of that canvasser's history — every campaign, all
-// time, org-wide. So assigning a coordinator to someone who already knocked pulls those earlier
-// doors onto the new team, and moving someone from crew A to crew B takes their history with them.
+// THE RULE: the current coordinator owns all of that canvasser's history IN THIS CAMPAIGN — all
+// time, but one campaign. So assigning a crew to someone who already knocked here pulls those
+// earlier doors onto the new team, and moving someone from crew A to crew B takes their history
+// with them — within this race, and no further.
+//
+// It was org-wide until crews became per-campaign (models/CampaignAssignment.js). That was coherent
+// while a coordinator was an org-chart fact, and stopped being coherent the moment two campaigns
+// wanted different crews: two leads reorganizing their own crews overwrote each other, and this
+// re-stamp then moved the loser's doors in a race the winner did not manage.
 //
 // The counterpart rule, which is just as load-bearing: DEPARTURE never re-stamps. When a
 // coordinator leaves the org, services/users/deleteAccount.js clears their crew's
@@ -39,14 +45,21 @@ import { NOT_BULK, knocksPipeline } from '../reports/aggregations.js';
 // one-time backfill and had to preserve nulls. This service is *supposed* to overwrite them: under
 // the current-coordinator-owns-history rule a stale null is just another stale value. Do not
 // "correct" this to $exists:false — that would quietly restore the frozen behavior.
-export const restampFilter = ({ organizationId, userId, coordinatorId, bulkAware = false }) => {
+export const restampFilter = ({ organizationId, userId, campaignId, coordinatorId, bulkAware = false }) => {
   // Without an org this is a cross-tenant write: the same person can hold memberships in two orgs,
   // which is exactly why Membership is unique on {userId, organizationId}.
   if (!organizationId) throw new Error('restampCoordinator: organizationId is required');
   if (!userId) throw new Error('restampCoordinator: userId is required');
+  // And without a CAMPAIGN it is a cross-campaign write. A crew is per-campaign, so a re-stamp
+  // must be too: two leads reorganizing their own crews used to clobber each other, and the
+  // org-wide filter then dragged the first campaign's whole history onto the second lead's team.
+  // Required rather than optional-with-a-default — an omitted scope silently means "everything",
+  // and that is precisely the bug.
+  if (!campaignId) throw new Error('restampCoordinator: campaignId is required');
   const next = coordinatorId ? new mongoose.Types.ObjectId(String(coordinatorId)) : null;
   return {
     organizationId: new mongoose.Types.ObjectId(String(organizationId)),
+    campaignId: new mongoose.Types.ObjectId(String(campaignId)),
     userId: new mongoose.Types.ObjectId(String(userId)),
     // Bulk-restrict rows are stamped with the ADMIN's userId (routes/admin/turfs.js) and a
     // deliberate coordinatorId:null — desk work, not field work, so they sit outside every
@@ -66,9 +79,9 @@ export const restampFilter = ({ organizationId, userId, coordinatorId, bulkAware
 // word "doors" would have the team row move by less than the confirmation promised, and an admin
 // would reasonably conclude the feature is broken. Hence the shared knocksPipeline — an audit that
 // can be wrong in the same way as the thing it audits is worth nothing.
-export const previewRestamp = async ({ organizationId, userId, coordinatorId }) => {
-  const activityFilter = restampFilter({ organizationId, userId, coordinatorId, bulkAware: true });
-  const surveyFilter = restampFilter({ organizationId, userId, coordinatorId });
+export const previewRestamp = async ({ organizationId, userId, campaignId, coordinatorId }) => {
+  const activityFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId, bulkAware: true });
+  const surveyFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId });
 
   const [activities, surveys, doorAgg] = await Promise.all([
     CanvassActivity.countDocuments(activityFilter),
@@ -86,12 +99,14 @@ export const previewRestamp = async ({ organizationId, userId, coordinatorId }) 
 // who is THEMSELVES a coordinator moves that person's OWN doors off their own team row and onto
 // their new coordinator's. Their crew's doors are untouched. That follows the rule consistently,
 // but it is not what an admin expects from "recording an org chart", so the UI says it out loud.
-export const coordinatorPreviewBody = async ({ orgId, userId, from, to }) => {
+export const coordinatorPreviewBody = async ({ orgId, userId, campaignId, from, to }) => {
   const ids = [from, to].filter(Boolean).map((id) => String(id));
   const [counts, people, runsCrew] = await Promise.all([
-    previewRestamp({ organizationId: orgId, userId, coordinatorId: to }),
+    previewRestamp({ organizationId: orgId, userId, campaignId, coordinatorId: to }),
     ids.length ? User.find({ _id: { $in: ids } }, 'firstName lastName').lean() : [],
-    Membership.exists({ organizationId: orgId, coordinatorId: userId }),
+    // "Do they run a crew HERE?" — scoped to this campaign like everything else, so the warning
+    // fires on the crew the admin is actually looking at rather than one in another race.
+    CampaignAssignment.exists({ campaignId, coordinatorId: userId }),
   ]);
   const named = (id) => {
     if (!id) return null;
@@ -109,10 +124,10 @@ const RESTAMP_WARN_ROWS = 50_000;
 // With no transactions available (the test harness is a standalone mongod), splitting the write
 // into _id ranges would multiply the partial-failure states rather than reduce them; one
 // server-side op per collection is the most atomic shape actually on offer.
-export const restampLedgerCoordinator = async ({ organizationId, userId, coordinatorId }) => {
+export const restampLedgerCoordinator = async ({ organizationId, userId, campaignId, coordinatorId }) => {
   const next = coordinatorId ? new mongoose.Types.ObjectId(String(coordinatorId)) : null;
-  const activityFilter = restampFilter({ organizationId, userId, coordinatorId, bulkAware: true });
-  const surveyFilter = restampFilter({ organizationId, userId, coordinatorId });
+  const activityFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId, bulkAware: true });
+  const surveyFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId });
 
   const act = await CanvassActivity.updateMany(activityFilter, { $set: { coordinatorId: next } });
   const srv = await SurveyResponse.updateMany(surveyFilter, { $set: { coordinatorId: next } });

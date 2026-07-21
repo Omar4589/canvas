@@ -16,6 +16,11 @@ import mongoose from 'mongoose';
 const coordinatorChangeSchema = new mongoose.Schema(
   {
     organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', required: true, index: true },
+    // WHICH campaign's crew moved. A crew is per-campaign, so "why did this team's number move?"
+    // is only answerable per campaign. Not `required`, because rows written before crews became
+    // per-campaign have no campaign to name and must stay readable — absent means "org-wide, under
+    // the old model", which is the honest reading of them.
+    campaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', default: null },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // whose coordinator changed
     // null is a REAL value on both sides ("No coordinator"), the same way it is on the ledger —
     // hence nullable ObjectIds rather than a sentinel string.
@@ -38,6 +43,7 @@ const coordinatorChangeSchema = new mongoose.Schema(
 );
 
 coordinatorChangeSchema.index({ organizationId: 1, createdAt: -1 }); // "what happened in my org?"
+coordinatorChangeSchema.index({ campaignId: 1, createdAt: -1 }); // "why did THIS campaign's team move?"
 coordinatorChangeSchema.index({ userId: 1, createdAt: -1 }); // "why did this person's doors move?"
 
 export const CoordinatorChange = mongoose.model('CoordinatorChange', coordinatorChangeSchema);

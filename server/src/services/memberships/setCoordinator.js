@@ -1,30 +1,36 @@
-import { Membership } from '../../models/Membership.js';
+import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { restampLedgerCoordinator } from './restampCoordinator.js';
 
-// THE choke point for changing an existing member's coordinator.
+// THE choke point for changing an existing member's crew, within ONE campaign.
 //
-// Every surface that reassigns a canvasser goes through here — the org Users admin, the team-lead
-// crew panel, and (via createOrgMember) both add-member paths — so the ledger re-stamp cannot be
-// forgotten by a new caller. test/coordinatorChokePoint.int.test.js asserts structurally that only
-// this file, createMember.js, and deleteAccount.js write Membership.coordinatorId.
+// Every surface that reassigns a canvasser goes through here — the campaign Team tab on web, the
+// mobile crew screen, and (via createOrgMember) the lead's create-a-canvasser path — so the ledger
+// re-stamp cannot be forgotten by a new caller. test/coordinatorChokePoint.test.js asserts
+// structurally that only this file and its two sanctioned siblings write
+// CampaignAssignment.coordinatorId.
 //
 // resolveCoordinatorId() is deliberately NOT this seam: it is a pure validator that performs no
-// write and runs on the create paths BEFORE the membership exists.
+// write and runs on the create paths BEFORE the roster row exists.
 //
 // Returns { changed, previous, next, activities, surveys, restampError }, or null when the member
-// isn't in this org.
+// is not on this campaign.
 export const setMemberCoordinator = async ({
   organizationId,
   userId,
+  campaignId,
   coordinatorId,
   actorUserId = null,
   source,
 }) => {
-  const membership = await Membership.findOne({ userId, organizationId });
-  if (!membership) return null;
+  if (!campaignId) throw new Error('setMemberCoordinator: campaignId is required');
+  // The crew lives on the campaign ROSTER row, so no roster row means there is nothing to set:
+  // this person is not on this campaign. Callers surface that as a 404 rather than creating a
+  // membership-shaped side effect.
+  const assignment = await CampaignAssignment.findOne({ userId, campaignId });
+  if (!assignment) return null;
 
-  const previous = membership.coordinatorId ?? null;
+  const previous = assignment.coordinatorId ?? null;
   const next = coordinatorId ?? null;
 
   // A re-picked select that lands on the same value must be completely silent — no membership
@@ -34,28 +40,29 @@ export const setMemberCoordinator = async ({
     return { changed: false, previous, next, activities: 0, surveys: 0, restampError: null };
   }
 
-  // ORDER MATTERS: Membership first, ledger second. Both orderings can tear (no transactions are
+  // ORDER MATTERS: roster first, ledger second. Both orderings can tear (no transactions are
   // available — the test harness runs a standalone mongod), but they are not equally bad:
-  //   · Membership first — if the ledger write fails, new knocks already stamp `next` and the
+  //   · Roster first — if the ledger write fails, new knocks already stamp `next` and the
   //     drift is a FINITE, SHRINKING set of old rows that a retry or repair:team-stamps fixes.
   //     The two sources converge.
-  //   · Ledger first — if the membership write fails, the ledger says `next` while Membership
+  //   · Ledger first — if the roster write fails, the ledger says `next` while the roster
   //     still says `previous`, so EVERY SUBSEQUENT KNOCK writes more drift. They diverge without
   //     bound.
   // Compensation is therefore a re-run, not a rollback — the same idempotence that makes reversal
   // "just set it back".
-  await Membership.updateOne({ userId, organizationId }, { $set: { coordinatorId: next } });
+  await CampaignAssignment.updateOne({ userId, campaignId }, { $set: { coordinatorId: next } });
 
   let moved = { activities: 0, surveys: 0 };
   let restampError = null;
   try {
-    moved = await restampLedgerCoordinator({ organizationId, userId, coordinatorId: next });
+    moved = await restampLedgerCoordinator({ organizationId, userId, campaignId, coordinatorId: next });
   } catch (err) {
     restampError = err?.message || String(err);
   }
 
   await CoordinatorChange.create({
     organizationId,
+    campaignId,
     userId,
     fromCoordinatorId: previous,
     toCoordinatorId: next,

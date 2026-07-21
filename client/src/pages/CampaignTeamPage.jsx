@@ -237,9 +237,12 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
-      // The by-team numbers just moved everywhere, not only on this roster.
-      qc.invalidateQueries({ queryKey: ['team-breakdown'] });
-      qc.invalidateQueries({ queryKey: ['canvasser-timeline'] });
+      // The crew list itself is served by the campaign crew endpoint now, so it is stale too.
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', campaignId] });
+      // THIS campaign's by-team numbers just moved. `['reports','team-breakdown',…]` is the real
+      // key (TimelinePage) — a bare ['team-breakdown'] matched nothing and silently did nothing.
+      qc.invalidateQueries({ queryKey: ['reports', 'team-breakdown'] });
+      qc.invalidateQueries({ queryKey: ['reports', 'canvasser-timeline'] });
       setPendingCoordinatorId(null);
     },
     onError: () => {

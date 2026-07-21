@@ -214,9 +214,15 @@ export default function AdminUsers() {
           <Text style={styles.back}>‹ Admin</Text>
         </Pressable>
         <Text style={styles.headerTitle}>Users</Text>
-        <Pressable onPress={() => setShowCreate(true)} hitSlop={8}>
-          <Text style={styles.headerAction}>+ New</Text>
-        </Pressable>
+        {/* Offering "+ New" to somebody the server just refused only produces a second 403 inside
+            the create sheet. If listing is forbidden, so is adding. */}
+        {usersQ.error?.code === 'FORBIDDEN_ROLE' ? (
+          <View style={{ width: 44 }} />
+        ) : (
+          <Pressable onPress={() => setShowCreate(true)} hitSlop={8}>
+            <Text style={styles.headerAction}>+ New</Text>
+          </Pressable>
+        )}
       </View>
 
       <View style={styles.controls}>
@@ -274,9 +280,11 @@ export default function AdminUsers() {
             <Text style={styles.sortButtonText}>Sort: {sortLabel}</Text>
             <Text style={styles.sortChevron}>▾</Text>
           </Pressable>
-          <Text style={styles.countText}>
-            {visibleUsers.length} of {users.length}
-          </Text>
+          {!usersQ.isError && (
+            <Text style={styles.countText}>
+              {visibleUsers.length} of {users.length}
+            </Text>
+          )}
         </View>
       </View>
 
@@ -285,6 +293,18 @@ export default function AdminUsers() {
       >
         {usersQ.isLoading ? (
           <ActivityIndicator color={colors.brand} />
+        ) : usersQ.isError ? (
+          // NEVER fall through to the empty state on an error. A team lead reaching this screen
+          // gets a 403 from /admin/memberships, which used to render as "No users yet" — the app
+          // stating as fact that the organization is empty to somebody who is simply not allowed
+          // to look. Say which of the two it is.
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>
+              {usersQ.error?.code === 'FORBIDDEN_ROLE'
+                ? 'Managing users is an admin task. You can manage your own campaigns’ crews from a campaign’s Team screen.'
+                : 'Could not load users. Pull to retry, or check your connection.'}
+            </Text>
+          </View>
         ) : visibleUsers.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>

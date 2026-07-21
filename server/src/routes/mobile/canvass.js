@@ -40,22 +40,38 @@ function activeOrgId(req) {
 
 // The TEAM a knock belongs to, resolved ONCE at knock time and frozen onto the row.
 //
-// `orgContext` already loaded this request's Membership, so the normal canvasser path costs ZERO
-// extra queries. The one exception is a SUPER-ADMIN: orgContext returns early for them without
-// loading a membership (orgContext.js:35-38), so fall back to a lookup rather than silently
-// stamping null — a super-admin who is also a coordinated member of the org should still have
-// their doors land on their team.
+// Keyed on the CAMPAIGN, not the org. A crew is a per-campaign fact — the same canvasser can work
+// two races under two different coordinators — so the source is CampaignAssignment.coordinatorId
+// for the campaign this door belongs to. Reading it off req.activeMembership (which is per-org and
+// already in memory) is what made two leads overwrite each other.
 //
-// null is a real answer, not a failure: a candidate knocking their own district, or anyone with no
-// coordinator, belongs in the "No coordinator" bucket. Never invent a team here.
-async function coordinatorForWrite(req, organizationId) {
-  if (req.activeMembership) return req.activeMembership.coordinatorId ?? null;
-  if (!organizationId) return null;
-  const m = await Membership.findOne(
-    { userId: req.user._id, organizationId },
+// `organizationId` is retained for call-site symmetry with the row being written; the lookup does
+// not need it, because CampaignAssignment is unique on {campaignId, userId} and a campaign belongs
+// to exactly one org.
+//
+// null is a real answer, not a failure: a candidate knocking their own district, an admin handed a
+// book on the fly, or anyone not yet on a crew here belongs in the "No coordinator" bucket. Never
+// invent a team.
+async function coordinatorForWrite(req, organizationId, campaignId) {
+  if (!campaignId) return null;
+  // Per-REQUEST memo. A survey submit resolves the team twice (the SurveyResponse and its paired
+  // activity row, which must not drift), and a canvasser posts against one campaign at a time, so
+  // one lookup covers the request. This replaced a zero-query read off req.activeMembership — the
+  // cost of the crew becoming a per-campaign fact rather than an org-chart one.
+  if (!req._crewCache) req._crewCache = new Map();
+  const key = String(campaignId);
+  if (req._crewCache.has(key)) return req._crewCache.get(key);
+
+  const assignment = await CampaignAssignment.findOne(
+    { campaignId, userId: req.user._id },
     'coordinatorId'
   ).lean();
-  return m?.coordinatorId ?? null;
+  // No roster row is a REAL answer of "no crew", not a failure: an org admin or super-admin can be
+  // handed a book on the fly (services/campaignRoster.js), and they belong in the No-team bucket
+  // until somebody puts them on a crew for this campaign. Never invent a team here.
+  const value = assignment?.coordinatorId ?? null;
+  req._crewCache.set(key, value);
+  return value;
 }
 
 function isOrgAdminOrSuper(req) {
@@ -267,7 +283,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
 
   // Freeze the team on the door. Resolved now, never re-derived — so this door stays on this
   // team even after the canvasser is deactivated, taken off the campaign, or leaves the org.
-  const coordinatorId = await coordinatorForWrite(req, household.organizationId);
+  const coordinatorId = await coordinatorForWrite(req, household.organizationId, household.campaignId);
 
   const activity = await CanvassActivity.create({
     organizationId: household.organizationId,
@@ -578,7 +594,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // exactly like their door numbers do. (A re-submit restamps it — correct: it records the team
     // of whoever last did the fieldwork. An ADMIN editing the answers later must not touch it;
     // that path sets only editedBy/editedAt.)
-    const coordinatorId = await coordinatorForWrite(req, household.organizationId);
+    const coordinatorId = await coordinatorForWrite(req, household.organizationId, campaign._id);
 
     const surveyFields = {
       organizationId: household.organizationId,

@@ -9,7 +9,7 @@ import PassManager from '../components/PassManager.jsx';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
 import WalkListSurveySelect from '../components/WalkListSurveySelect.jsx';
-import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
 const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
@@ -274,7 +274,16 @@ export default function EffortsPage() {
   // duplicate/delete there refresh this picker too.
   const surveysQ = useQuery({ queryKey: ['surveys'], queryFn: () => api('/admin/surveys'), enabled: isSurveyType });
 
-  const orgQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
+  // Names for the "assigned by" labels below. This page is inside the campaign console, which team
+  // leads reach — and /admin/memberships is admin-only, so a lead 403'd and every name rendered
+  // blank. The campaign crew endpoint carries the same names and is open to the lead who manages
+  // this campaign.
+  const { isOrgAdmin } = useAuth();
+  const orgQ = useQuery({
+    queryKey: isOrgAdmin ? ['memberships'] : ['admin', 'campaign-crew', campaignId],
+    queryFn: () => api(isOrgAdmin ? '/admin/memberships' : `/admin/campaigns/${campaignId}/crew`),
+    enabled: isOrgAdmin || !!campaignId,
+  });
   const orgTz = useOrgTimeZone();
   const tz = selected?.timeZone || orgTz;
 

@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import PasswordInput from './PasswordInput.jsx';
-import CoordinatorConfirm from './CoordinatorConfirm.jsx';
 import PhoneInput from './ui/PhoneInput.jsx';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -101,13 +100,8 @@ export default function UserProfileModal({ membership, onClose }) {
   const [showResetPw, setShowResetPw] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [feedback, setFeedback] = useState(null);
-  const [coordinatorId, setCoordinatorId] = useState(membership.coordinatorId || '');
   // The campaigns this member manages when their role is 'lead' (edited alongside the role).
   const [managedCampaignIds, setManagedCampaignIds] = useState(membership.managedCampaignIds || []);
-
-  useEffect(() => {
-    setCoordinatorId(membership.coordinatorId || '');
-  }, [membership.coordinatorId]);
 
   useEffect(() => {
     setManagedCampaignIds(membership.managedCampaignIds || []);
@@ -143,12 +137,6 @@ export default function UserProfileModal({ membership, onClose }) {
     enabled: !!user.id,
   });
 
-  // Org roster (cached, shared with the Users page) → the eligible coordinators are the
-  // active admins AND team leads in this org, excluding this member themselves.
-  const orgQ = useQuery({ queryKey: ['memberships'], queryFn: () => api('/admin/memberships') });
-  const coordinators = (orgQ.data?.members || []).filter(
-    (m) => (m.role === 'admin' || m.role === 'lead') && m.user.isActive && m.isActive && m.user.id !== user.id
-  );
   // Campaigns available to grant when this member is a team lead.
   const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
   const campaigns = campaignsQ.data?.campaigns || [];
@@ -177,66 +165,12 @@ export default function UserProfileModal({ membership, onClose }) {
     setManagedCampaignIds((ids) => (checked ? [...new Set([...ids, id])] : ids.filter((x) => x !== id)));
   }
 
-  // Changing a coordinator RE-STAMPS this person's whole knock history onto the new team, so it no
-  // longer saves straight from onChange — the admin sees how many doors move and confirms first.
-  const [pendingCoordinatorId, setPendingCoordinatorId] = useState(null);
-  const isPendingChange =
-    pendingCoordinatorId !== null && pendingCoordinatorId !== (membership.coordinatorId || '');
-
-  const previewQ = useQuery({
-    queryKey: ['admin', 'coordinator-preview', user.id, pendingCoordinatorId],
-    queryFn: () =>
-      api(
-        `/admin/memberships/${user.id}/coordinator-preview?coordinatorId=${pendingCoordinatorId || 'none'}`
-      ),
-    enabled: isPendingChange,
+  // Which crew this person is on, per campaign. Read-only here — see the Crews block below.
+  const crewsQ = useQuery({
+    queryKey: ['admin', 'member-crews', user.id],
+    queryFn: () => api(`/admin/memberships/${user.id}/crews`),
   });
-
-  const saveCoordinator = useMutation({
-    // `doors` rides along purely so the success flash can report the same DOOR count the
-    // confirmation promised — the API returns raw ledger row counts, which are a different number.
-    mutationFn: ({ cid }) =>
-      api(`/admin/memberships/${user.id}`, {
-        method: 'PATCH',
-        body: { coordinatorId: cid || null },
-      }),
-    onSuccess: (res, { doors }) => {
-      qc.invalidateQueries({ queryKey: ['memberships'] });
-      // Team totals just moved on every by-team surface — drop their caches too, or the console
-      // shows the old split until a manual refresh.
-      qc.invalidateQueries({ queryKey: ['team-breakdown'] });
-      qc.invalidateQueries({ queryKey: ['canvasser-timeline'] });
-      setPendingCoordinatorId(null);
-      const moved = doors || 0;
-      if (res?.restamp?.error) {
-        flash(
-          'error',
-          'Coordinator updated, but their past doors could not be moved. Set the coordinator again to retry.'
-        );
-      } else if (moved) {
-        flash('success', `Coordinator updated. Moved ${moved.toLocaleString()} door records.`);
-      } else {
-        flash('success', 'Coordinator updated.');
-      }
-    },
-    onError: (err) => {
-      setCoordinatorId(membership.coordinatorId || ''); // revert on failure
-      setPendingCoordinatorId(null);
-      flash('error', err.message);
-    },
-  });
-
-  function onChangeCoordinator(e) {
-    const val = e.target.value;
-    setCoordinatorId(val);
-    // Staged, not saved. The confirm block below commits it.
-    setPendingCoordinatorId(val);
-  }
-
-  function cancelCoordinatorChange() {
-    setCoordinatorId(membership.coordinatorId || '');
-    setPendingCoordinatorId(null);
-  }
+  const crews = crewsQ.data?.crews || [];
 
   const resetPw = useMutation({
     mutationFn: (password) =>
@@ -555,40 +489,45 @@ export default function UserProfileModal({ membership, onClose }) {
           )}
         </div>
 
+        {/* Read-only, one row per campaign. A crew is a per-campaign fact, so a single dropdown
+            here could not be truthful: somebody on two campaigns has two crews, and showing one
+            would misreport the other. This shows all of them — strictly more than the old control
+            could — and sends the change to the campaign's Team tab, where the confirmation can
+            quote that campaign's door count instead of an org-wide one. */}
         <div className="border-b border-border px-6 py-5">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
-            Coordinator
+            Crews
           </h3>
-          <select
-            value={coordinatorId}
-            onChange={onChangeCoordinator}
-            disabled={saveCoordinator.isPending}
-            className={`${inputCls} disabled:opacity-60`}
-          >
-            <option value="">— No coordinator —</option>
-            {coordinators.map((m) => (
-              <option key={m.user.id} value={m.user.id}>
-                {m.user.firstName} {m.user.lastName}
-              </option>
-            ))}
-          </select>
-          {isPendingChange ? (
-            <CoordinatorConfirm
-              preview={previewQ.data}
-              isLoading={previewQ.isLoading}
-              error={previewQ.error}
-              subjectName={`${user.firstName} ${user.lastName}`}
-              busy={saveCoordinator.isPending}
-              onCancel={cancelCoordinatorChange}
-              onConfirm={() =>
-                saveCoordinator.mutate({ cid: pendingCoordinatorId, doors: previewQ.data?.doors || 0 })
-              }
-            />
-          ) : (
-            <p className="mt-2 text-xs text-fg-muted">
-              The admin or team lead who oversees this member. Their doors count toward this team.
+          {crewsQ.isLoading ? (
+            <p className="text-xs text-fg-muted">Loading…</p>
+          ) : crewsQ.isError ? (
+            <p className="text-xs text-danger">Could not load this person’s crews.</p>
+          ) : crews.length === 0 ? (
+            <p className="text-xs text-fg-muted">
+              Not on any campaign yet. Add them to one from that campaign’s Team tab.
             </p>
+          ) : (
+            <ul className="space-y-2">
+              {crews.map((c) => (
+                <li key={c.campaignId} className="flex items-center justify-between gap-3 text-sm">
+                  <Link
+                    to={`/campaigns/${c.campaignId}/team`}
+                    className="truncate text-brand hover:underline"
+                    title={`Change this crew on ${c.campaignName}`}
+                  >
+                    {c.campaignName}
+                  </Link>
+                  <span className="shrink-0 text-fg">
+                    {c.coordinatorName || <span className="text-fg-muted">No crew</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
+          <p className="mt-3 text-xs text-fg-muted">
+            A crew is set per campaign. Open a campaign’s Team tab to change it — that’s also where
+            you see how many doors the change would move.
+          </p>
         </div>
 
         <div className="border-b border-border px-6 py-5">

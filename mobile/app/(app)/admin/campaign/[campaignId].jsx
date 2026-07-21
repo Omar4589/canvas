@@ -518,8 +518,11 @@ export default function CampaignDetail() {
                 { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
                 { label: 'GPS audit', subtitle: 'Review flagged entries', badge: campaign?.openMockFlags || 0, onPress: goAudit },
                 { label: 'Notes', subtitle: 'Door, survey & admin notes', onPress: goNotes },
-                { label: 'Users', subtitle: 'Manage people', onPress: () => router.push('/(app)/admin/users') },
-                { label: 'Assignments', subtitle: 'Books & canvassers', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },
+                // "Team", not "Users" — the campaign's own crew, which is what belongs on a campaign
+                // screen and is the one people surface a team lead can actually reach. The org Users
+                // admin is a separate, admin-only place (see more.jsx); routing here used to send a
+                // lead into it, where /admin/memberships 403s and the screen read "No users yet".
+                { label: 'Team', subtitle: 'Crew & assignments', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },
               ]}
             />
           </View>

@@ -196,14 +196,32 @@ export function teamMatch(coordinatorId, allLeadIds = []) {
   return { $or: [{ coordinatorId: id }, { userId: id, coordinatorId: null }] };
 }
 
-// The users who are somebody's coordinator in this org — i.e. the set of team leads. Needed so the
-// "No team" bucket can exclude them (their own doors belong to their own team, above).
-async function leadIdsForOrg(orgId) {
-  const ids = await Membership.distinct('coordinatorId', {
-    organizationId: orgId,
-    coordinatorId: { $ne: null },
-  });
-  return ids;
+// The users who run a crew in this scope — i.e. whose OWN unstamped doors should fold onto their
+// own team row, and who the "No team" bucket must therefore exclude (or their doors count twice).
+//
+// DERIVED FROM THE LEDGER, deliberately, and this is load-bearing. The obvious sources are both
+// wrong now that a crew is per-campaign:
+//   · Membership — has no campaign, so it answers org-wide and would fold a lead's doors onto
+//     their own team in campaigns where they run no crew at all.
+//   · CampaignAssignment — is a roster GATE that is hard-DELETED when somebody is removed from a
+//     campaign (services/users/deleteAccount.js). Sourcing the lead set from it means a lead loses
+//     their own folded doors the moment their last crew member comes off the roster: exactly the
+//     bug the frozen stamp was introduced to fix, reintroduced through the back door.
+// The stamp already on the ledger says who supervised each door and cannot be un-said, so it
+// survives departure, org removal and roster churn — the three cases that broke the alternatives.
+//
+// Scope carries campaignId when the caller sent one, and omits it for the unscoped admin calls
+// (which reproduce the org-wide set, so those keep working unchanged).
+async function leadIdsForScope(scope) {
+  const filter = { ...scope, ...NOT_BULK, coordinatorId: { $ne: null } };
+  const [fromDoors, fromSurveys] = await Promise.all([
+    CanvassActivity.distinct('coordinatorId', filter),
+    // The survey ledger can name a team the door ledger does not — a re-stamp that half-landed, or
+    // legacy rows. teamFoldStage is applied to BOTH aggregates, so the lead set has to cover both
+    // or the two halves of /team-breakdown fold differently, which no sum check can see.
+    SurveyResponse.distinct('coordinatorId', { ...scope, coordinatorId: { $ne: null } }),
+  ]);
+  return [...new Set([...fromDoors, ...fromSurveys].map(String))];
 }
 
 // teamFoldStage lives in services/reports/aggregations.js (imported below) — the audit script needs
@@ -242,7 +260,10 @@ async function crewFilter(req) {
   const raw = req.query.coordinatorId;
   if (!raw) return {};
   if (raw !== 'none' && !mongoose.isValidObjectId(raw)) return {};
-  const leads = raw === 'none' ? await leadIdsForOrg(activeOrgId(req)) : [];
+  // The `none` bucket has to exclude whoever runs a crew HERE, in the same scope the caller is
+  // asking about — a lead's own doors already belong to their own team row, and counting them in
+  // "No team" too would double them. baseFilter carries campaignId when one was sent.
+  const leads = raw === 'none' ? await leadIdsForScope(baseFilter(req)) : [];
   return teamMatch(raw, leads);
 }
 
@@ -1798,7 +1819,10 @@ router.get('/team-breakdown', async (req, res, next) => {
       return res.json({ ready: false, teams: [], campaign: null, crossTeamDoors: 0 });
     }
 
-    const leadIds = (await leadIdsForOrg(orgId)).map(String);
+    // Same scope the aggregates below run on, so the fold and the rows it folds agree. A campaign-
+    // scoped call gets that campaign's crews; an unscoped admin call gets the org-wide set, which
+    // is what it got before crews became per-campaign.
+    const leadIds = await leadIdsForScope(scope);
     const leadSet = new Set(leadIds);
 
     const [rows, campaignAgg] = await Promise.all([

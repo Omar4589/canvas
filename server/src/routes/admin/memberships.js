@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { Organization } from '../../models/Organization.js';
+import { Campaign } from '../../models/Campaign.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CampaignManager } from '../../models/CampaignManager.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
@@ -17,8 +18,7 @@ import {
   resolveCoordinatorId,
   resolveManagedCampaigns,
 } from '../../services/memberships/createMember.js';
-import { setMemberCoordinator, restampSummary } from '../../services/memberships/setCoordinator.js';
-import { coordinatorPreviewBody } from '../../services/memberships/restampCoordinator.js';
+import { restampSummary } from '../../services/memberships/setCoordinator.js';
 import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
 import { sendMail } from '../../services/mail/mailer.js';
 import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js';
@@ -306,36 +306,51 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-// What a coordinator change WOULD move, so the console can confirm before it commits. Changing a
-// coordinator re-stamps that person's whole knock history onto the new team, which shifts numbers
-// an admin may have already quoted — so this is a read-only dry run of the exact same filter the
-// write uses (previewRestamp and restampLedgerCoordinator share restampFilter).
-router.get('/:userId/coordinator-preview', async (req, res, next) => {
+// Which crew this person is on, IN EACH CAMPAIGN they are rostered to. Read-only.
+//
+// The org Users page used to set one coordinator here, because a coordinator was one org-level
+// fact. Crews are per-campaign now (models/CampaignAssignment.js), so a single value on a person's
+// org profile cannot be true — somebody on two campaigns has two crews, and picking one to display
+// would misreport the other. The page therefore shows the list and links out; the write lives on
+// the campaign's Team tab, where its blast radius is one campaign and the confirmation can quote
+// that campaign's door count.
+router.get('/:userId/crews', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
     const orgId = activeOrgId(req);
-    const membership = await Membership.findOne({ userId: req.params.userId, organizationId: orgId }).lean();
-    if (!membership) return res.status(404).json({ error: 'Member not in this org' });
+    const rows = await CampaignAssignment.find(
+      { userId: req.params.userId, organizationId: orgId },
+      'campaignId coordinatorId'
+    ).lean();
 
-    const coordRes = await resolveCoordinatorId({
-      orgId,
-      raw: req.query.coordinatorId === 'none' ? null : req.query.coordinatorId,
-      memberUserId: req.params.userId,
-    });
-    if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
-    if (coordRes.skip) return res.status(400).json({ error: 'coordinatorId is required' });
-
-    res.json(
-      await coordinatorPreviewBody({
-        orgId,
-        userId: req.params.userId,
-        from: membership.coordinatorId ?? null,
-        to: coordRes.value ?? null,
-      })
+    const campaignIds = [...new Set(rows.map((r) => String(r.campaignId)))];
+    const coordIds = [...new Set(rows.map((r) => r.coordinatorId).filter(Boolean).map(String))];
+    const [campaigns, coords] = await Promise.all([
+      campaignIds.length ? Campaign.find({ _id: { $in: campaignIds } }, 'name isActive').lean() : [],
+      coordIds.length ? User.find({ _id: { $in: coordIds } }, 'firstName lastName').lean() : [],
+    ]);
+    const campaignById = new Map(campaigns.map((c) => [String(c._id), c]));
+    const nameById = new Map(
+      coords.map((u) => [String(u._id), `${u.firstName || ''} ${u.lastName || ''}`.trim()])
     );
+
+    res.json({
+      crews: rows.map((r) => {
+        const c = campaignById.get(String(r.campaignId));
+        const coordinatorId = r.coordinatorId ? String(r.coordinatorId) : null;
+        return {
+          campaignId: String(r.campaignId),
+          campaignName: c?.name || 'Unknown campaign',
+          campaignIsActive: c?.isActive !== false,
+          coordinatorId,
+          // null = the "No crew" bucket for that campaign, which is a real answer.
+          coordinatorName: coordinatorId ? nameById.get(coordinatorId) || 'Unknown' : null,
+        };
+      }),
+    });
   } catch (err) {
     next(err);
   }
@@ -411,8 +426,9 @@ router.patch('/:userId', async (req, res, next) => {
     }
 
     // managedCampaignIds lives in CampaignManager, not on the membership doc. coordinatorId is
-    // held back for the same shape of reason: changing it RE-STAMPS the knock ledger, so it must
-    // go through setMemberCoordinator rather than ride along on this save.
+    // dropped outright: a crew is a per-campaign fact now, so there is nothing here to set. The
+    // key is still destructured away so an older client that keeps sending it gets a clean no-op
+    // rather than writing a field that no longer means anything.
     const { managedCampaignIds: _omitGrants, coordinatorId: _omitCoord, ...membershipUpdate } = data;
     Object.assign(membership, membershipUpdate);
     await membership.save();
@@ -423,19 +439,6 @@ router.patch('/:userId', async (req, res, next) => {
       membership.set(billingBefore);
       await membership.save();
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
-    }
-
-    // AFTER the billing backstop on purpose: that block can revert and 409, and a coordinator
-    // change (which moves door counts between teams) must not have happened when it does.
-    let restamp = null;
-    if ('coordinatorId' in data) {
-      restamp = await setMemberCoordinator({
-        organizationId: orgId,
-        userId: membership.userId,
-        coordinatorId: data.coordinatorId,
-        actorUserId: req.user._id,
-        source: 'admin_users',
-      });
     }
 
     // Reconcile grants: leaving the lead role clears every grant; staying/becoming
@@ -457,13 +460,8 @@ router.patch('/:userId', async (req, res, next) => {
     res.json({
       membership: {
         ...membership.toObject(),
-        // setMemberCoordinator writes with updateOne, so the in-memory doc still holds the old
-        // value. Report what is actually in the database.
-        ...(restamp ? { coordinatorId: restamp.next } : {}),
         managedCampaignIds: finalGrants.map((g) => String(g.campaignId)),
       },
-      // Additive — old clients ignore it, so no client-version gate is needed.
-      ...(restamp ? { restamp: restampSummary(restamp) } : {}),
     });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });

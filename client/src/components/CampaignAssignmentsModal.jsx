@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 export default function CampaignAssignmentsModal({ campaign, onClose }) {
   const qc = useQueryClient();
+  const { isOrgAdmin } = useAuth();
   const [search, setSearch] = useState('');
 
+  // Admins list the whole org from the Users admin; team leads can't reach that route at all, so
+  // they read the same picker list from the campaign-scoped crew endpoint instead. This modal opens
+  // from the Campaigns page's UNGATED action list, so a lead gets here — and without the fork the
+  // 403 rendered as an empty picker. Same shape from both. (CampaignTeamPage does this too.)
   const membersQ = useQuery({
-    queryKey: ['memberships'],
-    queryFn: () => api('/admin/memberships'),
+    queryKey: isOrgAdmin ? ['memberships'] : ['admin', 'campaign-crew', campaign._id],
+    queryFn: () =>
+      api(isOrgAdmin ? '/admin/memberships' : `/admin/campaigns/${campaign._id}/crew`),
   });
 
   const assignmentsQ = useQuery({

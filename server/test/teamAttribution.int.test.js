@@ -85,6 +85,19 @@ async function write(path, token, orgId, body, method = 'PATCH') {
   return { status: res.status, json: await res.json() };
 }
 
+// Set a crew member's coordinator. A crew is per-campaign, so this drives the campaign crew route —
+// the ONE write path now that the org Users page can no longer claim a single org-wide answer.
+// Still through the real route: the ledger re-stamp lives in the service layer, so a test that
+// poked the roster directly would exercise none of it.
+async function setCrew(userId, coordinatorId, token = ctx.token) {
+  return write(
+    `/admin/campaigns/${ctx.campaign._id}/crew/${userId}/coordinator`,
+    token,
+    ctx.org._id,
+    { coordinatorId: coordinatorId ? String(coordinatorId) : null }
+  );
+}
+
 // A team's door count off /team-breakdown, by coordinator name (null → the "No team" bucket).
 async function teamDoors(name) {
   const { org, campaign, token } = ctx;
@@ -116,7 +129,7 @@ async function knock(user, coordinatorId, actionType = 'not_home', household = n
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity, SurveyResponse, Voter, Household, Effort, Pass, CoordinatorChange])
+  for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity, SurveyResponse, Voter, Household, Effort, Pass, CoordinatorChange, CampaignAssignment, CampaignManager])
     await M.deleteMany({});
 
   // teamAttributionReadyAt = the backfill has run. Without it the endpoint refuses to report.
@@ -136,21 +149,22 @@ before(async () => {
   const randy = await mkUser('Randy');    // the candidate — no team, deliberately
   const vince = await mkUser('Vince');    // a volunteer, on Frank's team
 
-  const M = (u, role, coordinatorId = null, isActive = true) =>
-    Membership.create({ userId: u._id, organizationId: org._id, role, isActive, coordinatorId });
+  // A membership no longer carries a crew — a crew is a per-campaign fact, seeded on the roster
+  // below. Membership is now only role + active state.
+  const M = (u, role, isActive = true) =>
+    Membership.create({ userId: u._id, organizationId: org._id, role, isActive });
 
-  await M(boss, 'admin', null);
-  await M(asa, 'lead', null);
-  await M(frank, 'lead', null);
-  await M(chadwick, 'canvasser', asa._id);
-  await M(ian, 'canvasser', asa._id);
-  await M(colin, 'canvasser', asa._id);
-  // The two who left: DEACTIVATED, and removed from the campaign roster. Their Membership (and so
-  // their coordinator) survives — which is exactly why their doors are recoverable.
-  await M(julian, 'canvasser', asa._id, false);
-  await M(nathan, 'canvasser', asa._id, false);
-  await M(randy, 'canvasser', null);
-  await M(vince, 'canvasser', frank._id);
+  await M(boss, 'admin');
+  await M(asa, 'lead');
+  await M(frank, 'lead');
+  await M(chadwick, 'canvasser');
+  await M(ian, 'canvasser');
+  await M(colin, 'canvasser');
+  // The two who left: DEACTIVATED, and removed from the campaign roster.
+  await M(julian, 'canvasser', false);
+  await M(nathan, 'canvasser', false);
+  await M(randy, 'canvasser');
+  await M(vince, 'canvasser');
 
   const campaign = await Campaign.create({
     organizationId: org._id, name: 'Florida HD54', type: 'survey', state: 'FL',
@@ -161,6 +175,28 @@ before(async () => {
     organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
     roundNumber: 1, name: 'Round 1', status: 'active',
   });
+
+  // The crew, on the campaign roster. Julian and Nathan are deliberately absent: they were taken
+  // OFF this campaign, and the whole point of the frozen stamp is that their doors stay on Asa's
+  // team anyway. Randy (the candidate) is rostered with no crew — a real answer, not an omission.
+  const roster = (u, coordinatorId = null) =>
+    CampaignAssignment.create({
+      campaignId: campaign._id, userId: u._id, organizationId: org._id,
+      assignedBy: boss._id, coordinatorId,
+    });
+  await roster(asa);
+  await roster(frank);
+  await roster(chadwick, asa._id);
+  await roster(ian, asa._id);
+  await roster(colin, asa._id);
+  await roster(randy, null);
+  await roster(vince, frank._id);
+  // Julian is DEACTIVATED but still on the campaign; Nathan is deactivated AND off the roster.
+  // Keeping them distinct matters: a deactivated member's crew must still be settable (that is the
+  // ~1,700-doors-in-No-team fix), while somebody taken off the campaign has no crew here to set —
+  // and their doors stay on the team frozen onto them regardless. Two different rules, two people.
+  await roster(julian, asa._id);
+
   Object.assign(ctx, { org, boss, asa, frank, chadwick, ian, colin, julian, nathan, randy, vince, campaign, effort, pass });
 
   // ── Asa's team: 737 + 292 + 100 + 60 + 47 = 1,236 raw knock events ──
@@ -284,7 +320,7 @@ test('REASSIGNMENT: moving a canvasser moves ALL the doors they already knocked'
 
   // The preview must promise exactly what the write delivers — they share restampFilter.
   const preview = await call(
-    `/admin/memberships/${colin._id}/coordinator-preview?coordinatorId=${frank._id}`,
+    `/admin/campaigns/${ctx.campaign._id}/crew/${colin._id}/coordinator-preview?coordinatorId=${frank._id}`,
     token, org._id
   );
   assert.equal(preview.status, 200);
@@ -293,9 +329,7 @@ test('REASSIGNMENT: moving a canvasser moves ALL the doors they already knocked'
   assert.equal(preview.json.to.name, 'Frank X');
 
   // Colin transfers from Asa's paid crew to Frank's volunteers.
-  const res = await write(`/admin/memberships/${colin._id}`, token, org._id, {
-    coordinatorId: String(frank._id),
-  });
+  const res = await setCrew(colin._id, frank._id, token);
   assert.equal(res.status, 200);
   assert.equal(res.json.restamp.changed, true);
   assert.equal(res.json.restamp.error, null);
@@ -315,9 +349,7 @@ test('REASSIGNMENT: moving a canvasser moves ALL the doors they already knocked'
   // REVERSIBILITY — the reason no undo record is needed: the rule is idempotent w.r.t. current
   // state, so setting the coordinator back restores the numbers byte-for-byte. Doubles as cleanup,
   // since later tests in this file read live team totals.
-  const back = await write(`/admin/memberships/${colin._id}`, token, org._id, {
-    coordinatorId: String(asa._id),
-  });
+  const back = await setCrew(colin._id, asa._id, token);
   assert.equal(back.json.restamp.activities, 100);
   assert.equal((await teamDoors('Asa X')).doors, asaBefore, 'Asa is exactly whole again');
   assert.equal((await teamDoors('Frank X')).doors, frankBefore, 'and so is Frank');
@@ -326,9 +358,7 @@ test('REASSIGNMENT: moving a canvasser moves ALL the doors they already knocked'
 test('a NO-OP re-pick writes nothing and logs nothing', { skip }, async () => {
   const { org, token, colin, asa } = ctx;
   const before = await CoordinatorChange.countDocuments({ organizationId: org._id });
-  const res = await write(`/admin/memberships/${colin._id}`, token, org._id, {
-    coordinatorId: String(asa._id), // already his coordinator
-  });
+  const res = await setCrew(colin._id, asa._id, token);
   assert.equal(res.status, 200);
   assert.equal(res.json.restamp.changed, false);
   assert.equal(
@@ -340,18 +370,18 @@ test('a NO-OP re-pick writes nothing and logs nothing', { skip }, async () => {
 
 test('the change is AUDITED — who moved whom, from which team to which, and how much', { skip }, async () => {
   const { org, token, ian, asa, frank, boss } = ctx;
-  await write(`/admin/memberships/${ian._id}`, token, org._id, { coordinatorId: String(frank._id) });
+  await setCrew(ian._id, frank._id, token);
 
   const row = await CoordinatorChange.findOne({ organizationId: org._id, userId: ian._id }).lean();
   assert.ok(row, 'a reassignment leaves a record');
   assert.equal(String(row.fromCoordinatorId), String(asa._id));
   assert.equal(String(row.toCoordinatorId), String(frank._id));
   assert.equal(String(row.byUserId), String(boss._id), 'the actor, not the subject');
-  assert.equal(row.source, 'admin_users');
+  assert.equal(row.source, 'lead_crew');
   assert.equal(row.activitiesMoved, 292);
   assert.equal(row.restampError, null);
 
-  await write(`/admin/memberships/${ian._id}`, token, org._id, { coordinatorId: String(asa._id) });
+  await setCrew(ian._id, asa._id, token);
 });
 
 test('BULK-restrict rows are never re-stamped onto a team', { skip }, async () => {
@@ -374,7 +404,7 @@ test('BULK-restrict rows are never re-stamped onto a team', { skip }, async () =
     location: { lat: 28.3, lng: -81.4 },
   });
 
-  await write(`/admin/memberships/${clerk._id}`, token, org._id, { coordinatorId: String(asa._id) });
+  await setCrew(clerk._id, asa._id, token);
 
   const bulkRow = await CanvassActivity.findOne({ userId: clerk._id, via: 'bulk' }).lean();
   assert.equal(bulkRow.coordinatorId, null, 'desk work stays off every team');
@@ -385,7 +415,9 @@ test('the SURVEY ledger moves in lockstep with the door ledger', { skip }, async
   // The two ledgers drifting apart is the exact failure teamFoldStage's header warns about: one
   // row showing a team's DOORS on one team and their SURVEYS on another.
   const sammy = await mkUser('Sammy');
-  await Membership.create({ userId: sammy._id, organizationId: org._id, role: 'canvasser', isActive: true, coordinatorId: asa._id });
+  await Membership.create({ userId: sammy._id, organizationId: org._id, role: 'canvasser', isActive: true });
+  // On the campaign roster with a crew — that is where a crew lives now.
+  await CampaignAssignment.create({ campaignId: campaign._id, userId: sammy._id, organizationId: org._id, coordinatorId: asa._id });
   const hh = await Household.create({
     organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
     addressLine1: '9300 Survey St', city: 'Town', state: 'FL', zipCode: '34741',
@@ -410,9 +442,7 @@ test('the SURVEY ledger moves in lockstep with the door ledger', { skip }, async
     location: { lat: 28.3, lng: -81.4 },
   });
 
-  const res = await write(`/admin/memberships/${sammy._id}`, token, org._id, {
-    coordinatorId: String(frank._id),
-  });
+  const res = await setCrew(sammy._id, frank._id, token);
   assert.equal(res.json.restamp.activities, 1);
   assert.equal(res.json.restamp.surveys, 1, 'the survey ledger must not be left behind');
 
@@ -432,7 +462,8 @@ test('LEGACY rows with coordinatorId ABSENT are swept by a reassignment', { skip
   // migrateActivityCoordinator.js keys on. Seeded through the RAW driver: Mongoose's default:null
   // would write an explicit null and mask the case entirely.
   const ghost = await mkUser('Ghost');
-  await Membership.create({ userId: ghost._id, organizationId: org._id, role: 'canvasser', isActive: true, coordinatorId: null });
+  await Membership.create({ userId: ghost._id, organizationId: org._id, role: 'canvasser', isActive: true });
+  await CampaignAssignment.create({ campaignId: campaign._id, userId: ghost._id, organizationId: org._id, coordinatorId: null });
   const hh = await Household.create({
     organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
     addressLine1: '9400 Ghost Rd', city: 'Town', state: 'FL', zipCode: '34741',
@@ -446,9 +477,7 @@ test('LEGACY rows with coordinatorId ABSENT are swept by a reassignment', { skip
     timestamp: new Date('2026-07-08T14:00:00Z'),
   });
 
-  const res = await write(`/admin/memberships/${ghost._id}`, token, org._id, {
-    coordinatorId: String(asa._id),
-  });
+  const res = await setCrew(ghost._id, asa._id, token);
   assert.equal(res.json.restamp.activities, 1, 'an absent field is stale, not sacred');
   const row = await CanvassActivity.findOne({ userId: ghost._id }).lean();
   assert.equal(String(row.coordinatorId), String(asa._id));
@@ -484,12 +513,12 @@ test('CROSS-ORG: a reassignment in one org never touches the same person\'s work
   });
 
   // Move Colin in the FIRST org.
-  await write(`/admin/memberships/${colin._id}`, ctx.token, org._id, { coordinatorId: null });
+  await setCrew(colin._id, null, ctx.token);
 
   const otherRow = await CanvassActivity.findOne({ organizationId: other._id, userId: colin._id }).lean();
   assert.equal(String(otherRow.coordinatorId), String(otherLead._id), "the other org's ledger is untouched");
 
-  await write(`/admin/memberships/${colin._id}`, ctx.token, org._id, { coordinatorId: String(asa._id) });
+  await setCrew(colin._id, asa._id, ctx.token);
 });
 
 test('DEPARTURE does not re-stamp — a departed coordinator keeps the doors they supervised', { skip }, async () => {
@@ -524,7 +553,6 @@ test('a TEAM LEAD can move history too, from their own campaign crew panel', { s
   // {userId, organizationId} — as it always was, since Membership has no campaignId. So the move
   // is ORG-WIDE, and the re-stamp makes that pre-existing scope visible rather than adding it.
   await CampaignManager.create({ userId: frank._id, organizationId: org._id, campaignId: campaign._id, grantedBy: ctx.boss._id });
-  await CampaignAssignment.create({ campaignId: campaign._id, userId: colin._id, organizationId: org._id, assignedBy: ctx.boss._id });
   const frankToken = signUserToken(frank);
 
   const asaBefore = (await teamDoors('Asa X')).doors;
@@ -550,7 +578,7 @@ test('a TEAM LEAD can move history too, from their own campaign crew panel', { s
   assert.equal(row.source, 'lead_crew', 'the audit distinguishes the lead panel from the Users page');
 
   // Put Colin back so the later fixtures read their baseline.
-  await write(`/admin/memberships/${colin._id}`, ctx.token, org._id, { coordinatorId: String(asa._id) });
+  await setCrew(colin._id, asa._id, ctx.token);
   assert.equal((await teamDoors('Asa X')).doors, asaBefore);
 });
 
@@ -567,9 +595,7 @@ test('LEAD-FOLD: giving a lead their own coordinator moves their OWN doors, and 
   const frankOwn = (await teamDoors('Frank X')).doors;
   const bossBefore = (await teamDoors('Boss X')).doors;
 
-  const res = await write(`/admin/memberships/${frank._id}`, token, org._id, {
-    coordinatorId: String(boss._id),
-  });
+  const res = await setCrew(frank._id, boss._id, token);
   assert.equal(res.json.restamp.changed, true);
 
   const after = await teamDoors('Frank X');
@@ -589,7 +615,7 @@ test('LEAD-FOLD: giving a lead their own coordinator moves their OWN doors, and 
   assert.equal(after.body.teamSum - after.body.crossTeamDoors, after.body.campaign.doors, 'identity holds');
 
   // Reversible: clearing it folds his own doors back onto his own team.
-  await write(`/admin/memberships/${frank._id}`, token, org._id, { coordinatorId: null });
+  await setCrew(frank._id, null, token);
   assert.equal((await teamDoors('Frank X')).doors, frankOwn, 'exactly back where it started');
 });
 
@@ -606,16 +632,14 @@ test('a DEACTIVATED canvasser can still be given a coordinator, and their doors 
   const asaBefore = (await teamDoors('Asa X')).doors;
   const frankBefore = (await teamDoors('Frank X')).doors;
 
-  const res = await write(`/admin/memberships/${julian._id}`, token, org._id, {
-    coordinatorId: String(frank._id),
-  });
+  const res = await setCrew(julian._id, frank._id, token);
   assert.equal(res.status, 200, 'a deactivated member is not blocked from a coordinator change');
   assert.equal(res.json.restamp.activities, 60);
 
   assert.equal((await teamDoors('Frank X')).doors, frankBefore + 60);
   assert.equal((await teamDoors('Asa X')).doors, asaBefore - 60);
 
-  await write(`/admin/memberships/${julian._id}`, token, org._id, { coordinatorId: String(asa._id) });
+  await setCrew(julian._id, asa._id, token);
   assert.equal((await teamDoors('Asa X')).doors, asaBefore, 'restored');
 });
 

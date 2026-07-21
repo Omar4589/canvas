@@ -50,6 +50,11 @@ export async function createOrgMember({
   addedBy,
   data,
   role,
+  // The campaign this person is being added to, when there is one. Only the lead's
+  // create-a-canvasser path has one; adding somebody to the ORG alone does not, and carries no
+  // crew — a crew only means something inside a campaign. Without it the ledger re-stamp below is
+  // skipped entirely, because there is no campaign whose history this call has authority over.
+  campaignId = null,
   coordinatorId = null,
   mustChangePassword = false,
   billingAccess = false,
@@ -102,7 +107,6 @@ export async function createOrgMember({
     role,
     isActive: true,
     addedBy,
-    coordinatorId: coordinatorId || null,
     billingAccess: !!billingAccess,
   });
 
@@ -110,22 +114,31 @@ export async function createOrgMember({
   // hard-deletes the Membership while the CanvassActivity/SurveyResponse rows survive, so
   // linkExisting can attach an account that already has ledger history in this org — stamped with
   // whatever team they were on when they left. Under the current-coordinator-owns-history rule
-  // that history belongs to their new coordinator (or to No team, if they have none).
+  // that history belongs to their new crew (or to No team, if they have none).
   // A genuinely new account simply matches zero rows.
+  //
+  // Scoped to the campaign they are being added to, because that is the only campaign whose crew
+  // this call sets. History they have in OTHER campaigns keeps the team it was earned under — the
+  // caller has no authority over those races, and silently moving them is the bug this whole
+  // change exists to remove.
   let restamp = { activities: 0, surveys: 0, restampError: null };
-  try {
-    const moved = await restampLedgerCoordinator({
-      organizationId: orgId,
-      userId: user._id,
-      coordinatorId: coordinatorId || null,
-    });
-    restamp = { ...moved, restampError: null };
-  } catch (err) {
-    restamp.restampError = err?.message || String(err);
+  if (campaignId) {
+    try {
+      const moved = await restampLedgerCoordinator({
+        organizationId: orgId,
+        userId: user._id,
+        campaignId,
+        coordinatorId: coordinatorId || null,
+      });
+      restamp = { ...moved, restampError: null };
+    } catch (err) {
+      restamp.restampError = err?.message || String(err);
+    }
   }
   if (restamp.activities || restamp.surveys || restamp.restampError) {
     await CoordinatorChange.create({
       organizationId: orgId,
+      campaignId,
       userId: user._id,
       fromCoordinatorId: null,
       toCoordinatorId: coordinatorId || null,
