@@ -5,7 +5,12 @@ import { Organization } from '../models/Organization.js';
 import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
 import { CoordinatorChange } from '../models/CoordinatorChange.js';
-import { previewRestamp, restampLedgerCoordinator } from '../services/memberships/restampCoordinator.js';
+import { CanvassActivity } from '../models/CanvassActivity.js';
+import {
+  previewRestamp,
+  restampFilter,
+  restampLedgerCoordinator,
+} from '../services/memberships/restampCoordinator.js';
 
 // Bring the knock ledger's TEAM tag into line with every member's CURRENT coordinator.
 //
@@ -58,6 +63,23 @@ const orgScope = async () => {
 
 const nameOf = (u) => (u ? `${u.firstName} ${u.lastName}`.trim() : 'No team');
 
+// WHICH TEAM LOSES THE DOORS. The target side alone ("→ Dana Whitfield: 443 doors") is not a
+// reviewable number: a run that pulls doors off a still-active coordinator and a run that empties a
+// DEPARTED coordinator's team look identical from it, and only one of those is something you'd want
+// to discover before running it rather than after. So the preflight breaks the move down by the team
+// each row currently carries, deduped to doors the same way /team-breakdown counts them.
+const sourceBreakdown = async (filter) => {
+  const agg = await CanvassActivity.aggregate([
+    { $match: filter },
+    // Dedupe to (household, pass) WITHIN each source team first, so these sub-counts are doors and
+    // sum to the same unit as the headline rather than raw rows.
+    { $group: { _id: { from: { $ifNull: ['$coordinatorId', null] }, householdId: '$householdId', passId: '$passId' } } },
+    { $group: { _id: '$_id.from', doors: { $sum: 1 } } },
+    { $sort: { doors: -1 } },
+  ]);
+  return agg.map((r) => ({ from: r._id, doors: r.doors }));
+};
+
 // Every member of the org and what their ledger would look like under the current rule. Shared by
 // the preflight, the dry run and the apply, so the three can never disagree about the numbers.
 const scanOrg = async (org) => {
@@ -88,11 +110,35 @@ const scanOrg = async (org) => {
       coordinatorId: m.coordinatorId,
     });
     if (!counts.activities && !counts.surveys) continue;
+
+    const sources = await sourceBreakdown(
+      restampFilter({
+        organizationId: org._id,
+        userId: m.userId,
+        coordinatorId: m.coordinatorId,
+        bulkAware: true,
+      })
+    );
+    // A source coordinator with no surviving Membership in this org has LEFT. Moving doors off
+    // their team is legal under the current-coordinator rule, but it is the one outcome nobody
+    // would predict from the target side alone, so it gets called out by name.
+    const memberIds = new Set(members.map((m2) => String(m2.userId)));
+    const fromNames = await User.find(
+      { _id: { $in: sources.map((s) => s.from).filter(Boolean) } },
+      'firstName lastName'
+    ).lean();
+    const fromById = new Map(fromNames.map((u) => [String(u._id), u]));
+
     rows.push({
       userId: m.userId,
       coordinatorId: m.coordinatorId,
       who: nameOf(byId.get(String(m.userId))),
       toTeam: nameOf(m.coordinatorId ? byId.get(String(m.coordinatorId)) : null),
+      sources: sources.map((s) => ({
+        doors: s.doors,
+        label: s.from ? nameOf(fromById.get(String(s.from))) : 'No team',
+        departed: !!s.from && !memberIds.has(String(s.from)),
+      })),
       ...counts,
     });
   }
@@ -106,6 +152,7 @@ const main = async () => {
   if (PREFLIGHT) {
     console.log('PREFLIGHT — read-only. Nothing will be written.\n');
     let totalDoors = 0;
+    let departedSources = false;
     for (const org of orgs) {
       const rows = await scanOrg(org);
       const gate = org.teamAttributionReadyAt ? 'ready' : '⚠️  NOT READY (team surfaces hidden)';
@@ -118,11 +165,24 @@ const main = async () => {
           `  ${r.who} → ${r.toTeam}: ${r.doors} door(s) ` +
             `(${r.activities} activity row(s), ${r.surveys} survey row(s))`
         );
+        for (const s of r.sources) {
+          const flag = s.departed ? '   ⚠️  LEFT THE ORG — this empties their team' : '';
+          console.log(`      taken from ${s.label}: ${s.doors} door(s)${flag}`);
+          if (s.departed) departedSources = true;
+        }
         totalDoors += r.doors;
       }
       console.log('');
     }
     console.log(`Total doors that would change team: ${totalDoors}`);
+    if (departedSources) {
+      console.log(
+        '\n⚠️  Some doors would be taken from a coordinator who has LEFT the organization.\n' +
+          '   That is legal under the current-coordinator rule, but it is irreversible in practice:\n' +
+          '   you cannot set their coordinator "back" to someone who is no longer a member.\n' +
+          '   Scope the run with --org=<slug> if you want to apply the safe orgs first.'
+      );
+    }
     console.log('\nReview this list before running --apply. Team numbers WILL move for these people.');
     await mongoose.disconnect();
     return;

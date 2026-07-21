@@ -452,9 +452,20 @@ brings the ledger into line with every member's `Membership.coordinatorId`. Thre
 It calls the same `restampLedgerCoordinator` the routes call — an audit that can be wrong in the same
 way as the thing it audits is worth nothing. Idempotent: a second run reports 0 everywhere.
 
-**Review the `--preflight` output before applying.** It names every person and every door count, and
-those team numbers *will* move. Nothing else moves: campaign totals, coverage, rates and invoices are
-untouched, because billing is team-blind.
+**Review the `--preflight` output before applying.** It names every person, the team they'd move to,
+and — indented under each — **which team currently holds those doors**, deduped to doors the same way
+`/team-breakdown` counts them, so the sub-counts sum to the headline.
+
+That source breakdown is the whole point of the preflight. The target side alone (*"→ Dana Whitfield:
+443 doors"*) cannot distinguish a routine correction from a run that **empties a departed
+coordinator's team**, and those want different decisions. A source whose `Membership` no longer exists
+is flagged `⚠️ LEFT THE ORG`, with a summary warning at the end, because that move is **irreversible
+in practice**: the usual undo is "set the coordinator back", and you cannot set it back to someone who
+is no longer a member. Use `--org=<slug>` to apply the clean orgs first and decide on the rest
+separately.
+
+Nothing else moves: campaign totals, coverage, rates and invoices are untouched, because billing is
+team-blind.
 
 [`lockAccountDeletion.js`](../server/src/utils/lockAccountDeletion.js) takes the email as a bare positional
 argument (not just `--email=`) because the Heroku web console is a single text box and `npm run x -- --flag
