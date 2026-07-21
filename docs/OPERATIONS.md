@@ -354,8 +354,15 @@ like a real answer instead of an error. So it hides rather than lies. Run these 
 npm run migrate:activity-coordinator -- --preflight     # 1. LOOK ONLY. Changes nothing.
 npm run migrate:activity-coordinator                    # 2. Dry run — shows what it would do.
 npm run migrate:activity-coordinator -- --apply         # 3. Do it.
-npm run audit:team-counts -- --campaign=<campaignId>    # 4. Prove the numbers add up.
+npm run audit:team-counts                               # 4. Prove the numbers add up.
 ```
+
+> **When to run the audit.** After a bulk write (`migrate:activity-coordinator --apply`,
+> `repair:team-stamps --apply`), after a change to the fold/aggregation code, or if a
+> `CoordinatorChange` row ever carries a `restampError` (a torn write). **NOT** after every ordinary
+> coordinator change in the console: the reconciliation identity holds *by construction* —
+> `teamFoldStage` gives every row exactly one `team` and `$group` partitions on it, so a re-stamp
+> changes which team a row lands in, never how many. A routine reassignment cannot break the sum.
 
 **Step 1 is the one not to skip.** It lists every canvasser who has ever knocked and whether their team can
 still be worked out. Deactivating someone, or taking them off a campaign, keeps their team. **Removing
@@ -405,7 +412,7 @@ fraud audit).
 | `npm run purge:deleted-identities` | Dry run of the scheduled job, to see what it *would* do |
 | `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
 | `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |
-| `npm run audit:team-counts -- --campaign=<id>` | **Read-only.** Proves Σ teams + no-team − cross-team == the campaign billable, column by column. Exits **1** on failure |
+| `npm run audit:team-counts` | **Read-only.** Proves Σ teams + no-team − cross-team == the campaign billable, column by column, for **every campaign**. Exits **1** if any column of any campaign fails. Narrow with `--org=<slug>` or `--campaign=<id>` |
 | `npm run repair:team-stamps -- --preflight` | **Read-only.** Per org, per person: how many doors would change team under the current-coordinator rule |
 | `npm run repair:team-stamps -- --apply` | Conforms history to each member's current coordinator, and turns team surfaces on for any org stuck with `teamAttributionReadyAt` unset |
 | `npm run repair:team-stamps -- --apply --ready-only` | Only sets the gate flag; examines no ledger rows |

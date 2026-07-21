@@ -2,6 +2,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import { connectDb } from '../config/db.js';
 import { Campaign } from '../models/Campaign.js';
+import { Organization } from '../models/Organization.js';
 import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
@@ -34,24 +35,75 @@ import {
 //  2. NOBODY IS DROPPED.  Every canvasser who ever knocked appears, with their numbers, including
 //     anyone deactivated, taken off the campaign, removed from the org, or self-deleted. The ledger
 //     is the source of truth; account state must not move a single count.
+// Campaign ids are not something anyone has to hand — they live in the console URL. Since this is
+// the HARD GATE before quoting a team number, it has to be runnable without hunting for them, or it
+// quietly stops getting run. So --campaign is optional: with no args it audits EVERY campaign and
+// exits non-zero if ANY column of ANY campaign fails to reconcile.
+//
+//   npm run audit:team-counts                      # every campaign, every org
+//   npm run audit:team-counts -- --org=<slug>       # every campaign in one org
+//   npm run audit:team-counts -- --campaign=<id>    # one campaign
 const CAMPAIGN_ID = (process.argv.find((a) => a.startsWith('--campaign=')) || '').split('=')[1];
+const ORG_SLUG = (process.argv.find((a) => a.startsWith('--org=')) || '').split('=')[1] || null;
 
 const n = (v) => (v || 0).toLocaleString();
 const pad = (s, w) => String(s).padEnd(w);
 const padL = (s, w) => String(s).padStart(w);
 
-async function main() {
-  if (!CAMPAIGN_ID || !mongoose.isValidObjectId(CAMPAIGN_ID)) {
-    console.error('Usage: npm run audit:team-counts -- --campaign=<campaignId>');
-    process.exit(1);
+// Which campaigns this run covers. One explicit id, one org's worth, or everything.
+async function resolveCampaigns() {
+  if (CAMPAIGN_ID) {
+    if (!mongoose.isValidObjectId(CAMPAIGN_ID)) {
+      console.error('Usage: npm run audit:team-counts -- --campaign=<campaignId>');
+      process.exit(1);
+    }
+    const one = await Campaign.findById(CAMPAIGN_ID).lean();
+    if (!one) {
+      console.error('No such campaign.');
+      process.exit(1);
+    }
+    return [one];
   }
+  if (ORG_SLUG) {
+    const org = await Organization.findOne({ slug: ORG_SLUG }, '_id name').lean();
+    if (!org) {
+      console.error(`No organization with slug "${ORG_SLUG}".`);
+      process.exit(1);
+    }
+    return Campaign.find({ organizationId: org._id }).lean();
+  }
+  return Campaign.find({}).lean();
+}
+
+async function main() {
   await connectDb(process.env.MONGODB_URI);
 
-  const campaign = await Campaign.findById(CAMPAIGN_ID).lean();
-  if (!campaign) {
-    console.error('No such campaign.');
-    process.exit(1);
+  const campaigns = await resolveCampaigns();
+  if (!campaigns.length) {
+    console.log('No campaigns to audit.');
+    await mongoose.disconnect();
+    process.exit(0);
   }
+
+  let totalFailed = 0;
+  for (const campaign of campaigns) {
+    totalFailed += await auditCampaign(campaign);
+  }
+
+  if (campaigns.length > 1) {
+    console.log(
+      totalFailed
+        ? `\n════ ✗ ${totalFailed} column(s) across ${campaigns.length} campaign(s) DO NOT RECONCILE. Do not quote these numbers. ════\n`
+        : `\n════ ✓ All ${campaigns.length} campaign(s) reconcile on every column. ════\n`
+    );
+  }
+
+  await mongoose.disconnect();
+  process.exit(totalFailed ? 1 : 0);
+}
+
+// Audit ONE campaign. Returns the number of columns that failed to reconcile.
+async function auditCampaign(campaign) {
   const scope = { organizationId: campaign.organizationId, campaignId: campaign._id, ...NOT_BULK };
 
   console.log(`\nAUDIT · ${campaign.name}  (read-only — nothing will be written)\n`);
@@ -182,8 +234,7 @@ async function main() {
       : '\n✓ Every column reconciles. Teams + no-team − cross-team = the campaign, exactly.\n'
   );
 
-  await mongoose.disconnect();
-  process.exit(failed ? 1 : 0);
+  return failed;
 }
 
 main().catch((err) => {
