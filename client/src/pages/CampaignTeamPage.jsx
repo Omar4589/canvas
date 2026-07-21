@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { Card, Button, Modal, PhoneInput } from '../components/ui';
+import { Card, Button, Badge, Modal, PhoneInput } from '../components/ui';
 import PasswordInput from '../components/PasswordInput.jsx';
 import CoordinatorConfirm from '../components/CoordinatorConfirm.jsx';
 import { tempPasswordProblem } from '../lib/validators.js';
@@ -38,6 +38,9 @@ function TeamMemberRow({ a, isSelf, onOpen }) {
           <div className="flex items-center gap-2">
             <span className="truncate font-medium text-fg">{a.firstName} {a.lastName}</span>
             <RoleBadge role={a.role} />
+            {/* The server has always sent `status` (canvasserStanding) and this row has always
+                ignored it, so a switched-off member looked identical to a working one. */}
+            {a.status === 'deactivated' && <Badge variant="warning">Deactivated</Badge>}
             {isSelf && <YouBadge />}
           </div>
           <div className="truncate text-xs text-fg-muted">{a.email}</div>
@@ -370,7 +373,7 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
               preview={previewQ.data}
               isLoading={previewQ.isLoading}
               error={previewQ.error}
-              subjectName={member.name || 'This member'}
+              subjectName={`${member.firstName} ${member.lastName}`.trim() || 'This member'}
               busy={setCoordMut.isPending}
               onCancel={cancelCoordinatorChange}
               onConfirm={() => setCoordMut.mutate({ cid: pendingCoordinatorId })}

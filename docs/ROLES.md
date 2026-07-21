@@ -49,6 +49,12 @@ timeline, insights, early voting, and client reports.
   from their campaign's own **Team** tab instead (see below). That's not a consolation prize: a crew
   belongs to a campaign, so the Team tab is where *everyone* — admins included — sets one. The org
   Users page only *shows* a person's crews, one row per campaign, read-only.
+
+  **One exception, and it is a real one:** a lead can switch a **canvasser's** account off and back on
+  from their campaign's Team tab. That is *not* campaign-scoped — an account is either on or off for
+  the whole organization, so deactivating someone a lead shares with another campaign takes them out
+  of that campaign too. The app says which campaigns it reaches before you confirm, and the lead can
+  reverse it. A lead can never do this to an admin, another lead, or Doorline staff.
 - **Grant the team-lead role** or change anyone's grants — only admins do that.
 - **See or touch any campaign they weren't granted** — everything is default-deny; a lead with no
   grants sees an empty console.
@@ -178,6 +184,27 @@ library (to attach a survey / filter by tag), but every mutation carries a per-r
 
 **Org-only, leads blocked** — `memberships` (org Users admin), `voters` (org voter directory), `queues`
 stay `requireOrgRole('admin')`.
+
+> ⚠️ **One write on `leadCrew` is NOT campaign-shaped, and it is the only one.**
+> `PATCH .../crew/:userId/deactivate` and `.../reactivate` write `Membership.isActive`, and
+> [`Membership`](../server/src/models/Membership.js) has **no `campaignId`** — one row per person per
+> org. So the usual guarantee on this router ("the campaign in the URL bounds the blast radius") does
+> **not** hold for these two, and they are guarded on the **target** instead:
+>
+> - the role lives **inside the update filter**, not in a read before it — a read-then-write races a
+>   concurrent promotion to `{role:'admin', billingAccess:true}` and would defeat *both* billing
+>   layers, which were computed against the stale snapshot;
+> - `User.isSuperAdmin` is refused outright — a super-admin can hold an ordinary canvasser membership,
+>   and switching it off would force Doorline staff onto the support-grant path where every request
+>   logs as vendor intrusion, poisoning the audit trail `orgContext` exists to keep clean;
+> - the router carries a blanket **`VENDOR_READ_ONLY`** block, because the identical write is already
+>   403 for a support-grant holder on `/admin/memberships` and must not be 200 through a campaign door;
+> - the response carries **`alsoAffects`** — the other campaigns this reaches — so the UI can disclose
+>   the org-wide scope before committing rather than after.
+>
+> They ship as a **pair**. A deactivate without its inverse would be a one-way door for a lead, and
+> their books stay assigned precisely because reactivation is one tap away — the same reason the org
+> route doesn't release work either.
 
 **Campaign-map data — allows leads, authorized per campaign.** The campaign Map tab is lead-visible, so
 its data endpoints allow `('admin','lead')` and gate leads on the campaign: `households`

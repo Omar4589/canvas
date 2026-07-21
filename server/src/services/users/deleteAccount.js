@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
+import { wouldStrandBilling } from '../memberships/billingGuards.js';
 import { Organization } from '../../models/Organization.js'; // registered for populate
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CampaignManager } from '../../models/CampaignManager.js';
@@ -125,14 +126,14 @@ export async function checkDeletionBlockers(userId) {
     // subscription, and the entitlement gate drives the whole org read-only when it lapses.
     // Self-deletion must not be able to financially suspend a customer.
     if (m.billingAccess) {
-      const otherBillers = await Membership.countDocuments({
+      // The SAME count the console doors use (services/memberships/billingGuards.js) — this asks
+      // the question in blocker form rather than 409 form, but a second copy of "who is last" is
+      // how the two answers drift into disagreeing about the same org.
+      const stranded = await wouldStrandBilling({
         organizationId: m.organizationId?._id ?? m.organizationId,
-        userId: { $ne: user._id },
-        role: 'admin',
-        isActive: true,
-        billingAccess: true,
+        userId: user._id,
       });
-      if (otherBillers === 0) {
+      if (stranded) {
         blockers.push({
           code: 'LAST_BILLING_ADMIN',
           message: `You are the only admin who can manage billing for ${orgName}. Give billing access to another admin first.`,

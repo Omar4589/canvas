@@ -1,5 +1,6 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { radius, spacing } from '../lib/theme';
+import { FAR_WARN_M } from '../lib/flags';
 import { formatDistance } from '../lib/geo';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
@@ -41,9 +42,13 @@ function timeOnly(ts) {
 export default function ActivityRow({ activity, onPress, showDate = false }) {
   const styles = useThemedStyles(makeStyles);
   const a = activity;
+  // FAR_WARN_M (75), not a local 50. The server raised it so a rooftop-pin-vs-sidewalk gap stopped
+  // reading as suspicious, and lib/flags.js mirrors that — but this component kept its own copy, so
+  // every 50-75m knock rendered a red 'flagged' badge that the GPS audit screen and the server's own
+  // flaggedOnly filter both consider clean.
   const flagged =
     a.wasOfflineSubmission ||
-    (a.distanceFromHouseMeters != null && a.distanceFromHouseMeters > 50);
+    (a.distanceFromHouseMeters != null && a.distanceFromHouseMeters > FAR_WARN_M);
   const Wrapper = onPress ? Pressable : View;
   return (
     <Wrapper
@@ -85,7 +90,7 @@ export default function ActivityRow({ activity, onPress, showDate = false }) {
             <Text
               style={[
                 styles.meta,
-                a.distanceFromHouseMeters > 50 && styles.metaWarn,
+                a.distanceFromHouseMeters > FAR_WARN_M && styles.metaWarn,
               ]}
             >
               📍 {formatDistance(a.distanceFromHouseMeters)}

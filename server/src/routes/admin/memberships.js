@@ -18,6 +18,11 @@ import {
   resolveManagedCampaigns,
 } from '../../services/memberships/createMember.js';
 import { restampSummary } from '../../services/memberships/setCoordinator.js';
+import {
+  isLastBillingAdmin,
+  strandsBilling,
+  LAST_BILLING_ADMIN_ERROR,
+} from '../../services/memberships/billingGuards.js';
 import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
 import { sendMail } from '../../services/mail/mailer.js';
 import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js';
@@ -90,53 +95,6 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
-// An org must never lose its LAST billing admin through a console action: the billing-grade
-// notices — support-access grants and the wind-down/dormancy DELETION WARNINGS — go only to
-// billingAccess admins (services/mail/recipients.js), so an org with none has nobody to warn
-// before its data is deleted. Account deletion already blocks on this (deleteAccount's
-// LAST_BILLING_ADMIN); these guard the three console doors that used to slip past it:
-// toggling billing access off, demoting the role, and deactivating/removing the membership.
-// No super-admin bypass on purpose — hand billing access to another admin first, then proceed.
-//
-// Two layers, because the check-and-write isn't atomic (no Mongo transaction — the deploy runs a
-// standalone-friendly setup and the codebase uses none): isLastBillingAdmin is the cheap PRE-write
-// gate that catches the ordinary single-admin case without touching anything; strandsBilling is the
-// POST-write backstop for the concurrency race the pre-write count can't see. With exactly two
-// billing admins, two simultaneous strips each observe the OTHER as sufficient and both pass the
-// pre-write gate — so after each write we re-count and undo the one that raced the org to zero.
-// The undo can over-fire (both revert, both 409) but can never STRAND: the org keeps a billing
-// admin no matter the interleaving, and a retry succeeds once the dust settles.
-async function isLastBillingAdmin(membership) {
-  if (!membership?.billingAccess || membership.role !== 'admin' || !membership.isActive) return false;
-  const others = await Membership.countDocuments({
-    organizationId: membership.organizationId,
-    userId: { $ne: membership.userId },
-    role: 'admin',
-    isActive: true,
-    billingAccess: true,
-  });
-  return others === 0;
-}
-
-// Post-write backstop: true when the org now has ZERO active billing admins. Counts ALL of them
-// (not "others") because the just-written doc already reflects the strip. Only worth calling after
-// a write that actually stripped a billing admin — an ordinary member edit can't reach zero.
-async function strandsBilling(organizationId) {
-  const remaining = await Membership.countDocuments({
-    organizationId,
-    role: 'admin',
-    isActive: true,
-    billingAccess: true,
-  });
-  return remaining === 0;
-}
-
-const LAST_BILLING_ADMIN_ERROR = {
-  error:
-    'This is the only admin with billing access — the one who receives billing and account notices. ' +
-    'Give billing access to another admin first.',
-  code: 'LAST_BILLING_ADMIN',
-};
 
 // Replace a lead's CampaignManager grants in this org with exactly `campaignIds`
 // (an array of ObjectId already validated by resolveManagedCampaigns). Additive

@@ -49,6 +49,9 @@ const { CoordinatorChange } = await import('../src/models/CoordinatorChange.js')
 const { CampaignManager } = await import('../src/models/CampaignManager.js');
 const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
 const { releaseAssignedWork } = await import('../src/services/users/deleteAccount.js');
+const { SupportAccessGrant } = await import('../src/models/SupportAccessGrant.js');
+const { TurfAssignment } = await import('../src/models/TurfAssignment.js');
+const { Turf } = await import('../src/models/Turf.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -87,6 +90,9 @@ const write = async (path, token, body, method = 'PATCH') => {
 
 // Set a crew member's coordinator THROUGH THE REAL ROUTE — the re-stamp lives in the service layer,
 // so poking Membership directly would exercise none of the behaviour under test.
+const status = (camp, userId, action, token) =>
+  write(`/admin/campaigns/${camp._id}/crew/${userId}/${action}`, token, {});
+
 const setCrew = (camp, userId, coordinatorId, token) =>
   write(`/admin/campaigns/${camp._id}/crew/${userId}/coordinator`, token, {
     coordinatorId: coordinatorId ? String(coordinatorId) : null,
@@ -138,7 +144,8 @@ before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
   for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity,
-    SurveyResponse, Household, Effort, Pass, CoordinatorChange, CampaignManager, CampaignAssignment])
+    SurveyResponse, Household, Effort, Pass, CoordinatorChange, CampaignManager, CampaignAssignment,
+    SupportAccessGrant, TurfAssignment, Turf])
     await M.deleteMany({});
 
   // teamAttributionReadyAt = the backfill has run; without it team-breakdown refuses to report.
@@ -340,4 +347,144 @@ test('removing a crew member from the campaign does not split the lead\'s row', 
   const after = teamDoors(await teamRows(hd54), 'Asa X');
   assert.equal(after, before, 'Asa\'s team keeps every door it had');
   assert.equal(teamDoors(await teamRows(hd54), null), 0, 'nothing leaked into "No team"');
+});
+
+// ── deactivate / reactivate ─────────────────────────────────────────────────────────────────────
+//
+// These two write Membership.isActive, which has NO campaignId — one row per person per ORG. So the
+// write reaches campaigns the actor does not manage, and every guard has to be about the TARGET
+// rather than about the campaign in the URL. That inversion is what these tests pin.
+
+test('a lead switches a canvasser off and back on, and is told which other campaigns it hits', { skip }, async () => {
+  const { hd54, hd64, maria, asa, asaToken, org, boss } = ctx;
+  // The departure test above ran releaseAssignedWork in ORG scope, which deletes CampaignManager
+  // grants too — so Asa stopped being a lead and every call below would 403 at
+  // requireCampaignManager. Restore the grant rather than reorder: the departure behaviour is worth
+  // testing exactly as written, and a suite that silently depends on test order is worse.
+  await CampaignManager.updateOne(
+    { userId: asa._id, organizationId: org._id, campaignId: hd54._id },
+    { $setOnInsert: { userId: asa._id, organizationId: org._id, campaignId: hd54._id, grantedBy: boss._id } },
+    { upsert: true }
+  );
+
+  const off = await status(hd54, maria._id, 'deactivate', asaToken);
+  assert.equal(off.status, 200, 'a lead may deactivate a canvasser on their campaign');
+  assert.equal(off.json.isActive, false);
+  // Maria also walks HD64, which Asa does not manage. The write reaches it, so the response has to
+  // SAY so — disclosure is the mitigation, since there is no campaign-scoped version of this write.
+  assert.deepEqual(
+    off.json.alsoAffects.map((c) => c.name), ['HD64'],
+    'the response names the other campaign this reaches'
+  );
+  assert.equal(
+    (await Membership.findOne({ userId: maria._id, organizationId: org._id }).lean()).isActive, false
+  );
+
+  const on = await status(hd54, maria._id, 'reactivate', asaToken);
+  assert.equal(on.status, 200, 'and can put them back — without the inverse this is a one-way door');
+  assert.equal(
+    (await Membership.findOne({ userId: maria._id, organizationId: org._id }).lean()).isActive, true
+  );
+});
+
+test('a lead cannot switch off an admin, another lead, or a super-admin', { skip }, async () => {
+  const { org, hd54, boss, frank, asaToken } = ctx;
+
+  // Put them on the campaign first — proving the roster precondition is NOT the thing protecting us.
+  for (const u of [boss, frank]) {
+    await CampaignAssignment.updateOne(
+      { campaignId: hd54._id, userId: u._id },
+      { $setOnInsert: { campaignId: hd54._id, userId: u._id, organizationId: org._id } },
+      { upsert: true }
+    );
+  }
+  assert.equal((await status(hd54, boss._id, 'deactivate', asaToken)).status, 403, 'not an admin');
+  assert.equal((await status(hd54, frank._id, 'deactivate', asaToken)).status, 403, 'not another lead');
+
+  // A super-admin can hold an ordinary canvasser membership in a customer org. Switching it off
+  // would force Doorline staff onto the support-grant path and log their work as vendor intrusion —
+  // poisoning the audit trail. Refused before the role check even runs.
+  const staff = await User.create({
+    firstName: 'Sam', lastName: 'Staff', email: 'sam@doorline.app',
+    passwordHash: await User.hashPassword(PW), isActive: true, isSuperAdmin: true,
+  });
+  await Membership.create({ userId: staff._id, organizationId: org._id, role: 'canvasser', isActive: true });
+  await CampaignAssignment.create({ campaignId: hd54._id, userId: staff._id, organizationId: org._id });
+  const res = await status(hd54, staff._id, 'deactivate', asaToken);
+  assert.equal(res.status, 403, 'a super-admin is never deactivatable from a customer console');
+  assert.equal(
+    (await Membership.findOne({ userId: staff._id, organizationId: org._id }).lean()).isActive, true
+  );
+});
+
+test('a role change racing the deactivate cannot slip past — the filter carries the role', { skip }, async () => {
+  const { org, hd54, maria, asaToken } = ctx;
+  // The guard reads the membership, sees 'canvasser', then writes. If the write did not RE-ASSERT
+  // the role, a concurrent promotion would land in between and both billing layers would have been
+  // computed against a stale snapshot. Simulate the interleaving by promoting after the read window
+  // and before the write can match: the update filter must simply miss.
+  await Membership.updateOne(
+    { userId: maria._id, organizationId: org._id },
+    { $set: { role: 'admin', billingAccess: true } }
+  );
+  const res = await status(hd54, maria._id, 'deactivate', asaToken);
+  assert.ok(res.status === 403 || res.status === 409, `refused, got ${res.status}`);
+  assert.equal(
+    (await Membership.findOne({ userId: maria._id, organizationId: org._id }).lean()).isActive, true,
+    'the promoted member is still active'
+  );
+  await Membership.updateOne(
+    { userId: maria._id, organizationId: org._id },
+    { $set: { role: 'canvasser', billingAccess: false } }
+  );
+});
+
+test('a support-grant holder is refused — same write, same answer as the org route', { skip }, async () => {
+  const { org, hd54, maria } = ctx;
+  const staff = await User.create({
+    firstName: 'Vera', lastName: 'Vendor', email: 'vera@doorline.app',
+    passwordHash: await User.hashPassword(PW), isActive: true, isSuperAdmin: true,
+  });
+  // A live grant and NO membership — orgContext seats them as a vendor, requireCampaignManager
+  // passes them (super-admins always do), so the router's own block is the only thing left.
+  await SupportAccessGrant.create({
+    actorUserId: staff._id, organizationId: org._id, reason: 'investigating login issue',
+    expiresAt: new Date(Date.now() + 3600_000),
+  });
+  const res = await status(hd54, maria._id, 'deactivate', signUserToken(staff));
+  assert.equal(res.status, 403, 'support access is read-only for team management');
+  assert.equal(res.json.code, 'VENDOR_READ_ONLY');
+});
+
+test('deactivating keeps their books — reactivating finds them intact', { skip }, async () => {
+  const { org, hd54, maria, asaToken } = ctx;
+  const turf = await Turf.create({
+    organizationId: org._id, campaignId: hd54._id, passId: ctx.byCampaign[String(hd54._id)].pass._id,
+    name: 'Book 1', mode: 'geometric', status: 'published',
+  });
+  await TurfAssignment.create({
+    organizationId: org._id, campaignId: hd54._id, passId: ctx.byCampaign[String(hd54._id)].pass._id,
+    turfId: turf._id, userId: maria._id,
+  });
+
+  await status(hd54, maria._id, 'deactivate', asaToken);
+  // Deliberately NOT released. Deactivate is reversible and its inverse is one tap away, so someone
+  // switched off mid-shift keeps their books — that is exactly why releaseAssignedWork is not called
+  // here, and why shipping deactivate without reactivate would have frozen them for a lead.
+  assert.equal(
+    await TurfAssignment.countDocuments({ userId: maria._id, campaignId: hd54._id }), 1,
+    'their book is still theirs'
+  );
+  await status(hd54, maria._id, 'reactivate', asaToken);
+  assert.equal(await TurfAssignment.countDocuments({ userId: maria._id, campaignId: hd54._id }), 1);
+});
+
+test('someone not on this campaign cannot be touched through it', { skip }, async () => {
+  const { org, hd54, asaToken } = ctx;
+  const stranger = await User.create({
+    firstName: 'Stan', lastName: 'Stranger', email: 'stan@percamp.co',
+    passwordHash: await User.hashPassword(PW), isActive: true,
+  });
+  await Membership.create({ userId: stranger._id, organizationId: org._id, role: 'canvasser', isActive: true });
+  assert.equal((await status(hd54, stranger._id, 'deactivate', asaToken)).status, 404);
 });

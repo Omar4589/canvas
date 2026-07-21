@@ -5,6 +5,7 @@ import { requireAuth, requireCampaignManager, denyVendorPrivilegeWrite } from '.
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Membership } from '../../models/Membership.js';
+import { User } from '../../models/User.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import {
   createOrgMember,
@@ -14,18 +15,51 @@ import {
 } from '../../services/memberships/createMember.js';
 import { setMemberCoordinator, restampSummary } from '../../services/memberships/setCoordinator.js';
 import { coordinatorPreviewBody } from '../../services/memberships/restampCoordinator.js';
+import {
+  isLastBillingAdmin,
+  strandsBilling,
+  LAST_BILLING_ADMIN_ERROR,
+} from '../../services/memberships/billingGuards.js';
 import { sendMail } from '../../services/mail/mailer.js';
 import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js';
 import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
 
 // A team lead's crew surface, scoped to ONE campaign they manage (requireCampaignManager
-// gates the mount). It gives a lead the crew-building an org admin does on the Users
-// page — WITHOUT the org-wide Users administration: list org members to add, create a
-// brand-new canvasser (or link a returning one by email) onto this campaign, and set a
-// crew member's coordinator. Adding/removing existing members and reading the roster
+// gates the mount): list org members to add, create a brand-new canvasser (or link a
+// returning one by email) onto this campaign, set a crew member's coordinator, and switch a
+// canvasser's access off and back on. Adding/removing existing members and reading the roster
 // still go through .../assignments.
+//
+// It used to say this router gave a lead crew-building "WITHOUT the org-wide Users administration."
+// That stopped being true when deactivate/reactivate landed — see the warning below and
+// docs/ROLES.md. Everything ELSE here is still campaign-shaped.
+//
+// ⚠️ ONE ROUTE HERE IS NOT CAMPAIGN-SHAPED. deactivate/reactivate write Membership.isActive, and
+// Membership has NO campaignId (models/Membership.js) — one row per person per ORG. So that write
+// reaches every campaign in the org, including ones this lead does not manage. It is deliberate and
+// disclosed rather than prevented (the response carries `alsoAffects` so the UI can name the other
+// campaigns before committing), but it means the usual "the URL param bounds the blast radius"
+// reasoning does NOT hold for those two routes. Guard them on the target, not on the campaign.
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
+
+// A support-grant holder is a VENDOR here, not a member. They may READ a customer's crew to do
+// support; they must not reshape it. Blanket rather than per-route because this router now carries
+// a membership write: PATCH /admin/memberships/:id/deactivate is already 403 for a grant holder
+// (routes/admin/memberships.js), and the identical write must not be 200 just because it arrived
+// through a campaign-scoped door. denyVendorPrivilegeWrite is deliberately narrower than this —
+// it covers account/role CREATION only (middleware/auth.js) — so it cannot stand in.
+router.use((req, res, next) => {
+  if (req.supportGrant && req.method !== 'GET') {
+    return res.status(403).json({
+      error:
+        'Support access is read-only for team management. Creating or changing accounts, roles, or ' +
+        'crew must be done by an administrator who is a member of this organization.',
+      code: 'VENDOR_READ_ONLY',
+    });
+  }
+  next();
+});
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -229,6 +263,160 @@ router.patch('/:userId/coordinator', denyVendorPrivilegeWrite, async (req, res, 
       ok: true,
       coordinatorId: restamp.next ? String(restamp.next) : null,
       restamp: restampSummary(restamp),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The OTHER campaigns a status change reaches. Membership.isActive is org-wide, so switching
+// someone off here switches them off everywhere — including campaigns this lead does not manage.
+// Returned on both routes so the UI can say so BEFORE committing, the same way the crew change
+// quotes its door count. Disclosure is the mitigation; there is no campaign-scoped version of this
+// write to fall back on.
+async function otherCampaignsFor({ userId, organizationId, exceptCampaignId }) {
+  const rows = await CampaignAssignment.find(
+    { userId, organizationId, campaignId: { $ne: exceptCampaignId } },
+    'campaignId'
+  ).lean();
+  if (!rows.length) return [];
+  const campaigns = await Campaign.find(
+    { _id: { $in: rows.map((r) => r.campaignId) } },
+    'name'
+  ).lean();
+  return campaigns.map((c) => ({ campaignId: String(c._id), name: c.name }));
+}
+
+// Shared by deactivate and reactivate: everything that must be true of the TARGET before either
+// write. Returns { error, status } to send, or { membership } to proceed with.
+async function loadStatusTarget(req, campaign) {
+  if (!mongoose.isValidObjectId(req.params.userId)) {
+    return { status: 400, error: 'Invalid userId' };
+  }
+  const onCampaign = await CampaignAssignment.exists({
+    campaignId: campaign._id,
+    userId: req.params.userId,
+  });
+  // Necessary but NOT a real barrier: POST .../assignments has no role filter, so a lead can put
+  // any active org member on their campaign first. Kept so the route is coherent, never relied on.
+  if (!onCampaign) return { status: 404, error: 'That member is not on this campaign' };
+
+  const user = await User.findById(req.params.userId, 'isSuperAdmin deletedAt').lean();
+  if (!user) return { status: 404, error: 'Member not in this org' };
+  if (user.deletedAt) {
+    return { status: 409, error: 'This account was deleted.', code: 'ACCOUNT_DELETED' };
+  }
+  // A super-admin can hold an ordinary canvasser membership in a customer org (orgContext seats
+  // them as a MEMBER when one exists, precisely so their own admin work is not logged as vendor
+  // intrusion). Switching that membership off would force Doorline staff onto the support-grant
+  // path and poison the very audit trail that ordering exists to keep clean. Never reachable from
+  // a customer's console.
+  if (user.isSuperAdmin) {
+    return { status: 403, error: 'That account can only be managed by Doorline staff.' };
+  }
+  return { user };
+}
+
+// Switch a canvasser's access OFF. Org-wide — see the router note and `alsoAffects`.
+router.patch('/:userId/deactivate', async (req, res, next) => {
+  try {
+    const campaign = await loadOwnedCampaign(req);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    const orgId = activeOrgId(req);
+
+    const target = await loadStatusTarget(req, campaign);
+    if (target.error) {
+      return res.status(target.status).json({ error: target.error, ...(target.code ? { code: target.code } : {}) });
+    }
+
+    const existing = await Membership.findOne({ userId: req.params.userId, organizationId: orgId });
+    if (!existing) return res.status(404).json({ error: 'Member not in this org' });
+    // A lead may switch off a CANVASSER only. Admins, other leads and their own account stay out of
+    // reach — deactivating a membership is unscoped org authority, and requireCampaignManager admits
+    // leads, so without this the campaign door would be an escalation path.
+    if (existing.role !== 'canvasser') {
+      return res.status(403).json({ error: 'Only a canvasser can be deactivated from a campaign.' });
+    }
+    if (await isLastBillingAdmin(existing)) {
+      return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
+    const wasBillingAdmin = existing.billingAccess && existing.role === 'admin' && existing.isActive;
+
+    // The role condition lives INSIDE the filter, not in the read above. Read-then-write is a race:
+    // a concurrent PATCH promoting this person to {role:'admin', billingAccess:true} would land
+    // between the two, and BOTH billing layers were computed against the stale canvasser snapshot.
+    // Matching on role here means the write simply misses a doc that stopped qualifying.
+    const membership = await Membership.findOneAndUpdate(
+      { userId: req.params.userId, organizationId: orgId, role: 'canvasser' },
+      { isActive: false },
+      { new: true }
+    );
+    if (!membership) {
+      return res.status(409).json({ error: 'That member changed while you were working. Try again.' });
+    }
+
+    // Post-write backstop, guarded on whether this write could STRIP a billing admin at all.
+    // Without that guard it fires in any org that simply has no billing admin — a legitimate state
+    // — and reverts every deactivate with a baffling 409. (It did. A test caught it.)
+    //
+    // With the canvasser-only filter above, wasBillingAdmin is structurally always false, so this
+    // is unreachable today: the race it exists for is already handled by the role living IN the
+    // filter, which makes the write miss rather than land. It stays because the guard belongs with
+    // the write, so that relaxing the role restriction later cannot silently drop the protection.
+    if (wasBillingAdmin && (await strandsBilling(orgId))) {
+      await Membership.updateOne({ _id: membership._id }, { isActive: true });
+      return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
+
+    // Deliberately NOT releaseAssignedWork. Deactivate is a REVERSIBLE toggle whose inverse sits
+    // right below, so their books stay put — someone switched off mid-shift and back on tomorrow
+    // expects to still hold them. Only removal from the campaign (.../assignments DELETE) and
+    // account deletion release work.
+    res.json({
+      ok: true,
+      isActive: false,
+      alsoAffects: await otherCampaignsFor({
+        userId: req.params.userId,
+        organizationId: orgId,
+        exceptCampaignId: campaign._id,
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Switch it back ON. The inverse is what makes the pair defensible: without it a lead could end
+// someone's access and be unable to restore it, and their books would be frozen in a state only an
+// org admin could unfreeze.
+router.patch('/:userId/reactivate', async (req, res, next) => {
+  try {
+    const campaign = await loadOwnedCampaign(req);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    const orgId = activeOrgId(req);
+
+    const target = await loadStatusTarget(req, campaign);
+    if (target.error) {
+      return res.status(target.status).json({ error: target.error, ...(target.code ? { code: target.code } : {}) });
+    }
+
+    const membership = await Membership.findOneAndUpdate(
+      { userId: req.params.userId, organizationId: orgId, role: 'canvasser' },
+      { isActive: true },
+      { new: true }
+    );
+    if (!membership) {
+      return res.status(403).json({ error: 'Only a canvasser can be reactivated from a campaign.' });
+    }
+
+    res.json({
+      ok: true,
+      isActive: true,
+      alsoAffects: await otherCampaignsFor({
+        userId: req.params.userId,
+        organizationId: orgId,
+        exceptCampaignId: campaign._id,
+      }),
     });
   } catch (err) {
     next(err);

@@ -160,7 +160,7 @@ export default function QualityScreen() {
               <BarChart data={data.syncLagHistogram.map((b) => ({ label: b.bucket, value: b.count }))} />
             </View>
 
-            <SectionHeader title="Flagged activities" subtitle="Offline OR > 165 ft from house" />
+            <SectionHeader title="Flagged activities" subtitle="Offline OR > 250 ft from house" />
             {data.flaggedActivities.length === 0 ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyText}>No flagged activity in this range.</Text>
