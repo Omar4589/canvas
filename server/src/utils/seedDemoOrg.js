@@ -95,6 +95,7 @@ import { recomputeCutAttributesForCampaign } from '../services/turf/computeCutAt
 import { createNextPass } from '../services/passes/createPass.js';
 import { generateTurf } from '../services/turf/generateTurf.js';
 import { ensureCampaignAssignments } from '../services/campaignRoster.js';
+import { CampaignAssignment } from '../models/CampaignAssignment.js';
 import { recomputeFullyVoted } from '../services/voted/recomputeFullyVoted.js';
 import { computeWindowStats, buildFrozenMapPoints } from '../services/reports/computeReport.js';
 import { zonedDayRange } from '../utils/timezone.js';
@@ -405,6 +406,16 @@ function surveyQuestions() {
 // door knocked in both rounds needs a single resolveStatus over all its actions
 // (and one call keeps the writes batched / H12-safe).
 async function stageCanvassHistory({ rng, campaign, template, rounds, votersByHousehold }) {
+  // Who is on whose crew, in THIS campaign — read from the roster the crew block above just wrote,
+  // rather than threaded through, so this cannot drift from what the console will show. Same shape
+  // and same source as services/platform/refreshDemoDay, which is the other caller.
+  const crewRows = await CampaignAssignment.find(
+    { campaignId: campaign._id },
+    'userId coordinatorId'
+  ).lean();
+  const crewByUser = new Map(
+    crewRows.map((r) => [String(r.userId), r.coordinatorId ? String(r.coordinatorId) : null])
+  );
   const allActivities = [];
   const allSurveys = [];
   const perRound = [];
@@ -417,6 +428,7 @@ async function stageCanvassHistory({ rng, campaign, template, rounds, votersByHo
       rng, campaign, template, tz: CAMPAIGN_TZ, stagedBooks,
       assignmentsByTurf: round.assignmentsByTurf,
       hhById: votersByHousehold.docs, votersByHousehold: votersByHousehold.byId,
+      crewByUser,
       ...(round.dayOffsets ? { dayOffsets: round.dayOffsets } : {}), // default = recent window
     });
     allActivities.push(...staged.activities);
@@ -908,6 +920,36 @@ async function main() {
   // book belongs to.
   const crewIds = [...bookedReviewers.map((u) => u._id), ...background.map((u) => u._id)];
   await ensureCampaignAssignments(campaign._id, crewIds, org._id, admin._id); // positional args
+
+  // CREWS. A demo that shows every door under one nameless heap sells nothing — the by-team table
+  // is a feature, so the demo has to have teams. Split the field canvassers across two
+  // coordinators, both real accounts in this org and both admins (which is what a coordinator must
+  // be). Written straight onto the roster because a crew is per-campaign now
+  // (models/CampaignAssignment.js); the knocks below are stamped from the same split, so the
+  // ledger and the roster agree from the first door.
+  //
+  // Omar leads by default; Dana (the seeded demo admin) takes the second crew. SEED_DEMO_CREW_LEADS
+  // overrides with a comma-separated list of emails. Anyone not found is skipped rather than
+  // failing the seed — a fresh database has no Omar, and a demo with one crew still beats none.
+  const leadEmails = (process.env.SEED_DEMO_CREW_LEADS || 'omar@doorline.app,demo-admin@doorline.app')
+    .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const leadUsers = (await User.find({ email: { $in: leadEmails } }, '_id email').lean())
+    .sort((a, b) => leadEmails.indexOf(a.email) - leadEmails.indexOf(b.email));
+  const crewByUser = new Map();
+  if (leadUsers.length) {
+    // Round-robin so each coordinator gets a real crew rather than one taking everybody.
+    const walkers = [...background, ...bookedReviewers.filter((u) => !leadEmails.includes(u.email))];
+    for (const [i, u] of walkers.entries()) {
+      const lead = leadUsers[i % leadUsers.length];
+      if (String(lead._id) === String(u._id)) continue; // nobody coordinates themselves
+      crewByUser.set(String(u._id), String(lead._id));
+      await CampaignAssignment.updateOne(
+        { campaignId: campaign._id, userId: u._id },
+        { $set: { coordinatorId: lead._id } }
+      );
+    }
+    console.log(`   crews: ${leadUsers.map((l) => l.email).join(' + ')} over ${crewByUser.size} canvasser(s)`);
+  }
   for (const userId of crewIds) {
     await EffortMember.findOneAndUpdate(
       { effortId: effort._id, userId },

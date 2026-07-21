@@ -44,6 +44,14 @@ const ALLOWED = new Set([
   // roster, never the ledger — that is what makes it re-runnable and what keeps every existing
   // frozen stamp exactly where it was.
   'migrations/migrateCampaignCoordinators.js',
+  // The demo seeder, which builds a whole org from nothing. It is exempt for a reason that does not
+  // apply to any of the above: it writes the roster and the ledger IN THE SAME RUN, stamping every
+  // staged knock from the same crew map it just wrote (services/platform/demoActivity.js). There is
+  // no pre-existing history to re-stamp, so there is no re-stamp to forget — the two are consistent
+  // by construction rather than by remembering. If that ever stops being true (a path that assigns
+  // a crew to a demo org that already has knocks), it belongs behind setCoordinator.js like
+  // everything else.
+  'utils/seedDemoOrg.js',
 ]);
 
 const WRITE_CALL = /CampaignAssignment\.(updateOne|updateMany|findOneAndUpdate|create|bulkWrite)\b/;

@@ -109,7 +109,7 @@ function jitterLocation(rng, hh) {
   return { lat: lat + dLat, lng: lng + dLng, accuracy: rng.int(5, 20) };
 }
 
-function activityDoc({ rng, hh, userId, actionType, ts, passId, turfId, voterId = null, wasOffline = false }) {
+function activityDoc({ rng, hh, userId, actionType, ts, passId, turfId, voterId = null, wasOffline = false, coordinatorId = null }) {
   const loc = jitterLocation(rng, hh);
   const [hLng, hLat] = hh.location.coordinates;
   return {
@@ -118,6 +118,10 @@ function activityDoc({ rng, hh, userId, actionType, ts, passId, turfId, voterId 
     householdId: hh._id,
     voterId,
     userId,
+    // The crew this door counts toward, frozen on the row exactly as the real write path does it
+    // (routes/mobile/canvass.js). Without it every demo knock landed in the "No team" bucket and a
+    // client shown the by-team table saw one undifferentiated blob.
+    coordinatorId,
     actionType,
     passId,
     turfId,
@@ -150,6 +154,9 @@ function activityDoc({ rng, hh, userId, actionType, ts, passId, turfId, voterId 
 export function stageDemoActivity({
   rng, campaign, template, tz, stagedBooks, assignmentsByTurf, hhById, votersByHousehold,
   dayOffsets = DAY_OFFSETS, now = Date.now(),
+  // userId -> coordinatorId for THIS campaign's roster. A crew is per-campaign, so it is read from
+  // CampaignAssignment by the caller and frozen onto each row here, the same way a real knock does.
+  crewByUser = new Map(),
 }) {
   const activities = [];
   const surveys = [];
@@ -160,6 +167,7 @@ export function stageDemoActivity({
 
   function knockDoor({ hh, canvasserId, ts, passId, turfId, isToday }) {
     const wasOffline = rng.chance(0.1);
+    const coordinatorId = crewByUser.get(String(canvasserId)) || null;
     const outcome = rng.weighted(OUTCOME_WEIGHTS);
     const voters = votersByHousehold.get(String(hh._id)) || [];
     if (outcome === 'survey' && template && voters.length) {
@@ -190,6 +198,9 @@ export function stageDemoActivity({
           voterId: voter._id,
           householdId: hh._id,
           userId: canvasserId,
+          // Same crew as the paired activity below — the two ledgers must not drift, or a team's
+          // survey number and door number disagree and no sum check can see it.
+          coordinatorId,
           surveyTemplateId: template._id,
           surveyTemplateVersion: template.version || 1,
           answers,
@@ -205,10 +216,10 @@ export function stageDemoActivity({
           editedAt: null,
         },
       });
-      activities.push(activityDoc({ rng, hh, userId: canvasserId, actionType: 'survey_submitted', ts, passId, turfId, voterId: voter._id, wasOffline }));
+      activities.push(activityDoc({ rng, hh, userId: canvasserId, actionType: 'survey_submitted', ts, passId, turfId, voterId: voter._id, wasOffline, coordinatorId }));
     } else {
       const actionType = outcome === 'survey' ? 'not_home' : outcome;
-      activities.push(activityDoc({ rng, hh, userId: canvasserId, actionType, ts, passId, turfId, wasOffline }));
+      activities.push(activityDoc({ rng, hh, userId: canvasserId, actionType, ts, passId, turfId, wasOffline, coordinatorId }));
       if (actionType === 'not_home' && overlapCandidates.length < 3) {
         overlapCandidates.push({ hh, ts, canvasserId, passId, turfId });
       }
@@ -272,8 +283,10 @@ export function stageDemoActivity({
   for (const o of overlapCandidates.slice(0, 3)) {
     const others = fieldCanvassers.filter((id) => id !== String(o.canvasserId));
     if (!others.length) break;
+    const overlapUser = rng.pick(others);
     activities.push(activityDoc({
-      rng, hh: o.hh, userId: rng.pick(others), actionType: 'not_home',
+      rng, hh: o.hh, userId: overlapUser, actionType: 'not_home',
+      coordinatorId: crewByUser.get(String(overlapUser)) || null,
       ts: new Date(Math.min(o.ts.getTime() + rng.int(30, 90) * 60000, now - 60000)),
       passId: o.passId, turfId: o.turfId,
     }));

@@ -4,6 +4,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
+import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
@@ -165,9 +166,22 @@ export async function refreshDemoDay() {
   const stagedRounds = [];
   const doorSets = [];
   let todayKnocks = 0;
+
+  // Who is on whose crew, IN THIS CAMPAIGN. Read from the roster rather than invented here, so a
+  // refresh reflects whatever crews the demo org actually has — including any an admin reshuffled
+  // by hand — and the staged knocks carry the same team a real knock would.
+  const crewRows = await CampaignAssignment.find(
+    { campaignId: campaign._id },
+    'userId coordinatorId'
+  ).lean();
+  const crewByUser = new Map(
+    crewRows.map((r) => [String(r.userId), r.coordinatorId ? String(r.coordinatorId) : null])
+  );
+
   for (const { pass, books } of rounds) {
     const staged = stageDemoActivity({
       rng, campaign, template, tz, stagedBooks: books, assignmentsByTurf, hhById, votersByHousehold,
+      crewByUser,
       // Archived rounds re-land on the old window; the active round keeps the
       // default (today + four prior evenings).
       ...(pass.status === 'archived' ? { dayOffsets: ARCHIVED_DAY_OFFSETS } : {}),
