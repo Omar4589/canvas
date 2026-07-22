@@ -399,6 +399,19 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
     alongside `mustChangePassword` on created accounts too, so a brand-new hire's temp password also
     expires after 72h.
   - `isSuperAdmin: Boolean` — platform-wide; bypasses org-role checks.
+  - `lastLoginAt: Date` — written in **exactly one place**, `POST /auth/login`. It is "when they last
+    typed a password", **not** a last-activity clock: tokens live 30 days and the mobile app skips
+    the login screen whenever it holds one, so a canvasser who works daily legitimately reads
+    `27d ago`. Exposed in `toSafeJSON()`.
+  - `lastSeenAt: Date` — the true last-activity clock, stamped by `requireAuth` on any authenticated
+    request and throttled to ~15 min per user per process (`middleware/lastSeen.js`), so it is
+    approximate by design. **Super-admin-only**: emitted by `GET /super-admin/users` and
+    `services/platform/userOversight.js` and nowhere else — deliberately absent from `toSafeJSON()`
+    and from `GET /admin/memberships`, so an org admin can never read when a member (who may also
+    belong to another org) was last online. **Not indexed**: it is projected into one response and is
+    never a predicate or sort key, so an index would buy write amplification on the hottest write
+    path for no read at all. Both clocks are **scrubbed on account deletion**
+    ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) v4).
 - **`Membership`** ([server/src/models/Membership.js](../server/src/models/Membership.js)) — join table
   `{ userId, organizationId, role: 'admin'|'lead'|'canvasser', isActive, addedBy }`, unique on
   `(userId, organizationId)`. The `'lead'` (team lead) role is a **campaign-scoped admin** — its
@@ -428,6 +441,24 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   a choke point in [server/src/routes/index.js](../server/src/routes/index.js):
   `router.use(['/super-admin','/admin','/mobile'], requireAuth, blockIfMustChangePassword)`. `/auth` is
   deliberately excluded so `change-password`, `me`, `logout` stay reachable.
+- **The `lastSeenAt` stamp** — [server/src/middleware/auth.js](../server/src/middleware/auth.js) writes
+  `User.lastSeenAt` at the very end of `requireAuth`, gated by `shouldStampLastSeen()`
+  ([middleware/lastSeen.js](../server/src/middleware/lastSeen.js)). Three details are load-bearing:
+  - **It sits after every 401 guard**, immediately before `req.user = user`. A deleted or
+    session-revoked account has already been refused above, so a tombstone can never be re-stamped by
+    the deleted holder's still-valid 30-day token — which is what keeps the deletion scrub true.
+  - **It is fire-and-forget** (`.catch(() => {})`, unawaited) and passes `{ timestamps: false }`.
+    `requireAuth` wraps its whole body in a catch returning a blanket `401`, so an awaited write that
+    rejected on a transient DB blip would eject a live session; and without `timestamps: false` the
+    stamp would drag `User.updatedAt` forward every 15 minutes for every active account.
+  - **The throttle is an in-process LRU Map, not a "is the stored value stale?" check.** `requireAuth`
+    runs **twice** on every `/admin`, `/mobile` and `/super-admin` request (the `routes/index.js`
+    gate plus each sub-router's own mount) and **three times** on nested campaign routes, since
+    `/admin/campaigns` is mounted ahead of `/admin/campaigns/:campaignId/*` and Express `use()`
+    prefix-matches. Every one of those passes reads the same stale document, so a DB comparison would
+    fire the write on all of them. Recording the decision before the write is issued is what makes
+    passes 2 and 3 no-ops. Per-process like the login limiter's store: N dynos each write once per
+    window per user and a redeploy clears the table, both fine — a miss costs one redundant `$set`.
 - **Login throttle & lockout** — [server/src/middleware/loginRateLimit.js](../server/src/middleware/loginRateLimit.js)
   exports two `express-rate-limit` limiters (per-IP `max:50`, per-email `max:10`, 15-min window,
   `skipSuccessfulRequests`) mounted on `/api/auth/login`. Both `skip` emails in

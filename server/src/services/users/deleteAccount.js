@@ -236,6 +236,13 @@ export async function deleteAccount(userId, { reason = 'self' } = {}) {
         tempPasswordSetAt: null,
         passwordResetToken: null,
         passwordResetExpiresAt: null,
+        // Both activity clocks go too. The tombstone exists so the org's field records stay
+        // attributable to a stable id — "when was this person last online" contributes nothing to
+        // that and everything to a re-identification hint about someone who asked to be forgotten.
+        // lastLoginAt USED to survive here; scrubbing it changes previously documented behavior —
+        // see the v4 stamps in docs/PRIVACY_VERIFICATION.md.
+        lastLoginAt: null,
+        lastSeenAt: null,
       },
     }
   );

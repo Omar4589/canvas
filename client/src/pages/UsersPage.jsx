@@ -38,7 +38,7 @@ const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name A–Z' },
   { value: 'name-desc', label: 'Name Z–A' },
   { value: 'recent-joined', label: 'Recently joined' },
-  { value: 'recent-active', label: 'Recently active' },
+  { value: 'recent-signin', label: 'Recently signed in' },
 ];
 
 function compareName(a, b, dir) {
@@ -170,7 +170,10 @@ export default function UsersPage() {
     if (sortMode === 'name-asc') list.sort((a, b) => compareName(a, b, 'asc'));
     else if (sortMode === 'name-desc') list.sort((a, b) => compareName(a, b, 'desc'));
     else if (sortMode === 'recent-joined') list.sort((a, b) => compareDate(a, b, 'addedAt'));
-    else if (sortMode === 'recent-active')
+    // Sorts lastLoginAt, and says so — it used to be labeled "Recently active", which it never was.
+    // It can't be repointed at real activity either: lastSeenAt is super-admin-only by design and
+    // deliberately absent from /admin/memberships, which is what feeds this page.
+    else if (sortMode === 'recent-signin')
       list.sort((a, b) =>
         compareDate(
           { lastLoginAt: a.user.lastLoginAt },

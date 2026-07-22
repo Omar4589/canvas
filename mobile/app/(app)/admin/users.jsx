@@ -25,7 +25,7 @@ const SORT_OPTIONS = [
   { key: 'name-asc', label: 'Name A–Z' },
   { key: 'name-desc', label: 'Name Z–A' },
   { key: 'recent-joined', label: 'Recently joined' },
-  { key: 'recent-active', label: 'Recently active' },
+  { key: 'recent-signin', label: 'Recently signed in' },
 ];
 
 function compareName(a, b, dir) {
@@ -200,7 +200,9 @@ export default function AdminUsers() {
       list.sort((a, b) => compareName(a, b, 'desc'));
     else if (sortMode === 'recent-joined')
       list.sort((a, b) => compareDate(a, b, 'addedAt'));
-    else if (sortMode === 'recent-active')
+    // Sorts lastLoginAt, and says so — it used to be labeled "Recently active", which it never was.
+    // Can't be repointed either: lastSeenAt is super-admin-only and absent from /admin/memberships.
+    else if (sortMode === 'recent-signin')
       list.sort((a, b) => compareDate(a, b, 'lastLoginAt'));
     return list;
   }, [users, search, roleFilter, statusFilter, sortMode]);

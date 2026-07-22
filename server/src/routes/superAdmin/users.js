@@ -88,6 +88,9 @@ router.get('/', async (req, res, next) => {
         deletionLocked: !!u.deletionLocked,
         mustChangePassword: !!u.mustChangePassword,
         lastLoginAt: u.lastLoginAt,
+        // Unlike lastActivityAt below, this is NOT gated on `paged` — it's already on the lean doc,
+        // so the legacy full-list path carries it for free.
+        lastSeenAt: u.lastSeenAt || null,
         lastActivityAt: paged ? lastActive[i]?.timestamp || null : undefined,
         createdAt: u.createdAt,
         memberships: byUser.get(String(u._id)) || [],

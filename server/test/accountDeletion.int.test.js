@@ -207,6 +207,11 @@ test('a canvasser deletes their account: identity is scrubbed, the ledger is unt
   assert.strictEqual(u.phone, null);
   assert.ok(!u.email.includes('cara@t.co'), 'real email is gone from the User row');
   assert.ok(u.email.includes(String(ctx.cara.userId)), 'tombstone email embeds the id, so a 2nd deletion cannot collide');
+  // Neither activity clock survives. lastLoginAt USED to — see the v4 stamps in
+  // docs/PRIVACY_VERIFICATION.md. A tombstone keeps the id so field records stay attributable;
+  // "when were they last online" only ever added a re-identification hint.
+  assert.strictEqual(u.lastLoginAt, null, 'a tombstone keeps no login clock');
+  assert.strictEqual(u.lastSeenAt, null, 'a tombstone keeps no last-seen clock');
 
   // --- the money did not move ---
   const knocksAfter = await billableKnocks(ctx.campaign._id);

@@ -163,11 +163,41 @@ test('server search + the operator filters (deleted / temp password / orphan / s
   assert.deepStrictEqual(roles, ['break_glass', 'support'], 'the least-privilege split is finally visible');
 });
 
-test('last login and last field activity are different clocks — both returned when paged', { skip }, async () => {
+test('three different clocks — login, last seen, and last canvassed', { skip }, async () => {
+  // Seeded directly rather than driven through a request: the lastSeenAt stamp in requireAuth is
+  // deliberately fire-and-forget, so asserting that a call produced it would race the response.
+  // What matters to the console is the PROJECTION, which is what this asserts.
+  const seenAt = new Date(Date.now() - 5 * 60 * 1000);
+  await User.updateOne({ email: 'c0@acme.com' }, { $set: { lastSeenAt: seenAt } });
+
   const res = await call('GET', '/super-admin/users?q=zelda&limit=5&skip=0', { token: ctx.owner.token });
   const zelda = res.json.users[0];
-  assert.ok(zelda.lastActivityAt, 'her knock an hour ago is her last activity');
+  assert.ok(zelda.lastActivityAt, 'her knock an hour ago is her last canvassing activity');
   assert.strictEqual(zelda.lastLoginAt ?? null, null, 'while she has never logged into THIS test session');
+  assert.strictEqual(zelda.lastSeenAt, null, 'and has never made a request either — null, not absent');
+
+  const c0 = await call('GET', '/super-admin/users?q=c0@acme.com&limit=5&skip=0', { token: ctx.owner.token });
+  assert.strictEqual(
+    new Date(c0.json.users[0].lastSeenAt).getTime(),
+    seenAt.getTime(),
+    'lastSeenAt is returned as stored'
+  );
+  assert.strictEqual(
+    c0.json.users[0].lastActivityAt ?? null,
+    null,
+    'an account that never canvassed has no canvass clock — the case that used to render "Never"'
+  );
+});
+
+test('lastSeenAt rides the LEGACY parameterless path too (unlike lastActivityAt)', { skip }, async () => {
+  // lastActivityAt costs a per-account query, so it is deliberately withheld from the un-paged
+  // path. lastSeenAt is already on the user document, so withholding it would be an accident.
+  await User.updateOne({ email: 'c1@acme.com' }, { $set: { lastSeenAt: new Date() } });
+  const res = await call('GET', '/super-admin/users', { token: ctx.owner.token });
+  const c1 = res.json.users.find((x) => x.email === 'c1@acme.com');
+  assert.ok('lastSeenAt' in c1, 'lastSeenAt is present on the legacy shape');
+  assert.ok(c1.lastSeenAt, 'and carries the seeded value');
+  assert.strictEqual(c1.lastActivityAt, undefined, 'while lastActivityAt stays withheld there');
 });
 
 test('platform-role control: break-glass only, and the LAST break-glass account cannot be demoted', { skip }, async () => {

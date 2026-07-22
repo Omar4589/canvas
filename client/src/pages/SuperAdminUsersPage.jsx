@@ -134,7 +134,9 @@ export default function SuperAdminUsersPage() {
               <th className="px-4 py-3 text-left">Email</th>
               <th className="px-4 py-3 text-left">Status</th>
               <th className="px-4 py-3 text-left">Memberships</th>
-              {/* Two different clocks, labeled apart: signing in vs actually canvassing. */}
+              {/* Three clocks, labeled apart: typing a password, using the app at all, and
+                  knocking doors. The third lives in the expanded row — most accounts never canvass,
+                  so it earns its space there rather than in the table. */}
               <th className="px-4 py-3 text-left">Last login</th>
               <th className="px-4 py-3 text-left">Last active</th>
               <th className="px-4 py-3 text-right"></th>
@@ -213,9 +215,13 @@ export default function SuperAdminUsersPage() {
                       <span className="text-xs text-fg-subtle">none</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-xs text-fg-muted">{formatRelative(u.lastLoginAt)}</td>
-                  <td className="px-4 py-3 text-xs text-fg-muted" title="Most recent canvassing activity recorded by this account">
-                    {formatRelative(u.lastActivityAt)}
+                  <td className="px-4 py-3 text-xs text-fg-muted" title="Last time this account signed in with a password. Sessions last 30 days, so a daily user can still read weeks old.">
+                    {formatRelative(u.lastLoginAt)}
+                  </td>
+                  {/* Em-dash, not "Never": before this account's first request after the feature
+                      shipped, lastSeenAt is simply not recorded yet — "Never" would be false. */}
+                  <td className="px-4 py-3 text-xs text-fg-muted" title="Last authenticated request from this account, on any surface. Recorded at most every 15 minutes.">
+                    {formatRelative(u.lastSeenAt, { never: '—' })}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button
@@ -232,6 +238,9 @@ export default function SuperAdminUsersPage() {
                       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-fg-muted">
                         <span>Phone: {u.phone || '—'}</span>
                         <span>Joined: {formatDate(u.createdAt)}</span>
+                        <span title="Most recent door knocked by this account. Only canvassers ever have one.">
+                          Last canvassed: {formatRelative(u.lastActivityAt, { never: '—' })}
+                        </span>
                         {u.deletedAt && <span>Deleted: {formatDate(u.deletedAt)}</span>}
                         {u.deletionLocked && <span className="font-medium">Deletion-locked (reviewer demo account)</span>}
                       </div>

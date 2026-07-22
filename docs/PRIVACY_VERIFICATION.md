@@ -173,6 +173,44 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   naming a campaign that no longer exists. No promise breaks — they stay org-scoped and staff-only, die
   with the org, and that cascade only ever runs on a never-walked campaign — but this is the row class
   to name if a customer-facing *"deleting a campaign removes…"* sentence is ever written.]*
+- *(v4 2026-07-22)* **New field: `User.lastSeenAt`.** The All Users console's "Last active" column was
+  derived from `CanvassActivity` — the last *door knocked* — so every admin, lead and staff account who
+  never canvasses rendered the literal word "Never" beside "Last login: Just now". `requireAuth` now
+  stamps a real last-activity timestamp. It is a **new behavioral signal about an identified staff or
+  canvasser user**, which is a named trigger, hence this entry.
+  **What it holds:** one `Date` per `User` — the approximate instant of that account's most recent
+  authenticated API request, throttled to one write per ~15 minutes per user per process
+  (`server/src/middleware/lastSeen.js`). No route, no IP, no user-agent, no device id, no location:
+  the *when* only, never the *what* or the *where*. It is strictly coarser than data already held —
+  every `CanvassActivity` row carries a precise timestamp *and* GPS.
+  **Who can read it:** SUPER ADMINS ONLY, enforced by **omission at every layer**, deliberately. It is
+  emitted by `GET /super-admin/users` (`routes/superAdmin/users.js`) and
+  `services/platform/userOversight.js` and **nowhere else**. It is explicitly not in
+  `User.toSafeJSON()` (which feeds `/auth/me`, login and mobile bootstrap) and not on
+  `GET /admin/memberships`. That second omission is load-bearing: it is why the E-section finding
+  that a customer admin who links an existing global account can see that person's `lastLoginAt`
+  **does not widen** — a linked org still cannot see when that person was last online. The cost of
+  the decision, recorded so it is not re-litigated: the org Users page's mislabeled "Recently active"
+  sort could not be repointed at real activity and was renamed **"Recently signed in"** on both
+  clients instead. Had this field reached org admins it **would** have needed new published-policy
+  text — the Privacy Policy's admin-visibility sentence is scoped to *"activity at a door"*, and
+  nothing tells a canvasser their employer can see when they last opened the app (see the open
+  finding in *THINGS YOU DID NOT ASK ABOUT* (c)).
+  **Retention/deletion:** no TTL. **Scrubbed on account deletion** — `services/users/deleteAccount.js`
+  now nulls **both** `lastSeenAt` and `lastLoginAt` in the tombstone `$set`. That is a **change to
+  previously documented behavior**: `lastLoginAt` used to survive, so see the v4 stamps in section A
+  (the scrub-count table row, the scrubbed-field list, the not-touched list, and the A3 pseudonymity
+  paragraph) and in *THE HONEST GAPS*. Asserted by `test/accountDeletion.int.test.js`. It survives an
+  *org* deletion like the rest of the `User` row. `requireAuth` refuses a `deletedAt` user **before**
+  the stamp runs, so a tombstone cannot be re-stamped by the deleted holder's still-valid 30-day token.
+  **Assessment: NO published-policy change.** No new category of data about a *voter*; nothing leaves
+  the tenant; no subprocessor receives it; no export, report or share link carries it. The Privacy
+  Policy's *"information collected automatically"* paragraph already describes "the date and time of
+  your request" as operational data, and the super-admin-only scope is what keeps this inside that
+  purpose. On deletion this change **strictly reduces** what the tombstone retains. If a data
+  inventory is ever published, list it alongside `EmailLog` and `AccessLog` as an internal operational
+  signal. The claim to keep true: *a staff-visible last-activity timestamp, never exposed to the
+  account's own organization, removed on account deletion.*
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -377,11 +415,11 @@ The web console has **no** in-product deletion. `client/src/pages/DeleteAccountP
 | 1 | Writes a **new record containing the user's identity** — `DeletedUserRecord` with firstName, lastName, email, phone, userId, organizationIds[], deletedAt, retentionUntil | `:190-204` |
 | 2 | `releaseAssignedWork()` — hard-deletes, across **all orgs and all campaigns**, every `TurfAssignment`, `EffortMember`, `CampaignAssignment`, `CampaignManager` row **where the deleted user is the assignee**; nulls `Membership.coordinatorId` on anyone they supervised | `:212`, `:268`, `:274-286` *[v4 2026-07-21: line drift only — now `:285-290`]* |
 | 3 | `Membership.updateMany({userId}, {$set:{isActive:false}})` — memberships are **retained**, only deactivated | `:217` |
-| 4 | One `User.updateOne $set` overwriting exactly 11 fields | `:219-236` |
+| 4 | One `User.updateOne $set` overwriting exactly 11 fields *[v4 2026-07-22: now **13** — `lastLoginAt` and `lastSeenAt` joined the scrub]* | `:219-236` *[v4 2026-07-22: line drift — the block is `:224-248`]* |
 
-**The 11 scrubbed fields:** `firstName → 'Deleted'`, `lastName → 'user'`, `email → deleted+<userId>@deleted.doorline.invalid`, `phone → null`, `passwordHash → a fresh random unusable bcrypt hash` (not null — the field is `required`), `isActive → false`, `deletedAt → now`, `mustChangePassword → false`, `tempPasswordSetAt → null`, `passwordResetToken → null`, `passwordResetExpiresAt → null`.
+**The 11 scrubbed fields:** `firstName → 'Deleted'`, `lastName → 'user'`, `email → deleted+<userId>@deleted.doorline.invalid`, `phone → null`, `passwordHash → a fresh random unusable bcrypt hash` (not null — the field is `required`), `isActive → false`, `deletedAt → now`, `mustChangePassword → false`, `tempPasswordSetAt → null`, `passwordResetToken → null`, `passwordResetExpiresAt → null`. *[v4 2026-07-22: **13 fields.** Add `lastLoginAt → null` and `lastSeenAt → null` — a tombstone no longer carries either activity clock.]*
 
-**The User row is never deleted.** It is tombstoned in place. Fields explicitly NOT touched and therefore persisting indefinitely: `_id`, `createdAt`, `updatedAt`, **`lastLoginAt`**, `isSuperAdmin`, `platformRole`, `deletionLocked`.
+**The User row is never deleted.** It is tombstoned in place. Fields explicitly NOT touched and therefore persisting indefinitely: `_id`, `createdAt`, `updatedAt`, **`lastLoginAt`**, `isSuperAdmin`, `platformRole`, `deletionLocked`. *[v4 2026-07-22: **CORRECTED — `lastLoginAt` is now SCRUBBED.** The sentence above stands as history. The not-touched set is now `_id`, `createdAt`, `updatedAt`, `isSuperAdmin`, `platformRole`, `deletionLocked`. The new `User.lastSeenAt` is scrubbed alongside it and never joins that list. Rationale: the tombstone exists so the org's field records stay attributable to a stable id — a rolling "when were they last online" adds nothing to that and only a re-identification hint about someone who asked to be forgotten. Asserted by `test/accountDeletion.int.test.js`.]*
 
 **Deletion is NOT unconditionally available.** Four blockers refuse it (`deleteAccount.js:62-145`), computed across every org where the user holds an **active** membership (`:104` — inactive memberships are not scanned), and re-checked inside the write path (`:176-183`, throws `BLOCKED`; API returns 409 at `auth.js:245`):
 
@@ -431,7 +469,7 @@ After the purge, **all field records persist in full and remain linked to the de
 - `CanvassActivity.timestamp` — **`required`** (`:42`); `actionType`, free-text `note` (`:37`), `distanceFromHouseMeters` (`:40`), `coordinatorId` (`:69`)
 - `SurveyResponse.userId` (required), with its own required `location` and `submittedAt` and the answer payload (`models/SurveyResponse.js:44`, `:52`, `:55`, `:49`)
 - `FlagReview.reviewedBy` (required); `HouseholdLocationChange.userId` (required); `VoterNote.authorId`
-- The tombstoned `User` document itself still exists, carrying `_id`, `createdAt`, `lastLoginAt`, `deletedAt` — and an email that **embeds the user id**: `deleted+<userId>@deleted.doorline.invalid`
+- The tombstoned `User` document itself still exists, carrying `_id`, `createdAt`, `lastLoginAt`, `deletedAt` — and an email that **embeds the user id**: `deleted+<userId>@deleted.doorline.invalid` *[v4 2026-07-22: `lastLoginAt` is no longer among them, nor is the new `lastSeenAt` — both are scrubbed. **The pseudonymity finding is unchanged and never depended on that field**: the tombstone still carries `_id`, `createdAt` and `deletedAt` plus an id-embedding email, and every field record still points at that id. Removing an activity clock removes a re-identification hint, not the identifier.]*
 
 Nothing in the deletion path or the purge path ever nulls, removes, or re-keys `CanvassActivity.userId`. `deleteAccount.js:170-173` states the omission is deliberate. `purgeDeletedIdentities.js:34-37` writes to `DeletedUserRecord` and nothing else.
 
@@ -533,7 +571,7 @@ What the cache does **not** contain: any name, voter ID, party, or canvass resul
 
 | Survives | Contains | Why it survives |
 |---|---|---|
-| **`User` accounts** | name, email, phone, bcrypt hash, `lastLoginAt` | Deliberate: *"global identities are kept even when this was their only org"* (`deleteOrganization.js:59-62`). Only `Membership` rows are removed. |
+| **`User` accounts** | name, email, phone, bcrypt hash, `lastLoginAt` *[v4 2026-07-22: add `lastSeenAt` — a `User` surviving an **org** deletion now also carries a rolling last-activity clock. **Account** deletion scrubs both clocks; org deletion scrubs neither, by design.]* | Deliberate: *"global identities are kept even when this was their only org"* (`deleteOrganization.js:59-62`). Only `Membership` rows are removed. |
 | **`AccessLog`** | staff actor id, org id, route template | Not in `ORG_SCOPED`. No voter PII. |
 | **`SupportAccessGrant`** | staff actor id, org id, **required free-text `reason` (500 chars)** | Not in `ORG_SCOPED`. The free text can name the customer or its people. |
 | **`GeocodeCache`** | street addresses + coordinates | See Exception 1. |
@@ -1343,6 +1381,6 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 17. **There is no TTL index anywhere in the entire codebase.** No collection expires on its own. Every retention promise depends on a **cron job running on a worker dyno** — and repo history records a prior incident where the worker was scaled to 0 by a bad deploy. The code's own health text contemplates the purge having **"NEVER run"** and says *"we are promising a retention limit we are not enforcing."* **Write "we aim to purge within ~180 days," not "is deleted after 180 days."** (A2)
 18. **A failed customer deletion request produces a green success receipt and is never retried.** (B6)
 19. **Doorline cannot answer "was MY record accessed?"** — `AccessLog` stores a route template and a resource class, never a record id. **Do not offer record-level access transparency.** (E12) *[v4 2026-07-19: NARROWED — single-record opens and exports now carry subject ids, and org admins can read a per-voter staff-access panel. The advisory flips to: you MAY offer record-level transparency for staff access, scoped exactly as the v3-gap-3 stamp states (browse stays request-level; pre-2026-07-19 rows are request-level history).]*
-20. **After the 180-day purge, the field data is PSEUDONYMOUS, not anonymous.** The GPS trail, timestamps, notes and survey submissions remain permanently linked to a stable identifier, and the tombstoned `User` row still exists carrying that identifier and `lastLoginAt`. **Two code comments call this "permanently anonymous." They are wrong, and one of them is already user-facing copy.** (A3)
-21. **`User` accounts have no retention limit at all.** A volunteer who canvassed for one weekend in 2024 still has a live row — name, email, phone, bcrypt hash, `lastLoginAt` — indefinitely, unless they personally delete their account **from the mobile app** (there is no web deletion, and the operator CLI cannot delete a sole admin, sole billing admin, sole super-admin, or a `deletionLocked` account). (A1, B5)
+20. **After the 180-day purge, the field data is PSEUDONYMOUS, not anonymous.** The GPS trail, timestamps, notes and survey submissions remain permanently linked to a stable identifier, and the tombstoned `User` row still exists carrying that identifier and `lastLoginAt`. **Two code comments call this "permanently anonymous." They are wrong, and one of them is already user-facing copy.** (A3) *[v4 2026-07-22: **NARROWED, not closed** — the tombstone no longer carries `lastLoginAt` (scrubbed, as is the new `lastSeenAt`). The finding rests on `_id`/`createdAt`/`deletedAt` and the id-embedding tombstone email, all of which remain.]*
+21. **`User` accounts have no retention limit at all.** A volunteer who canvassed for one weekend in 2024 still has a live row — name, email, phone, bcrypt hash, `lastLoginAt` *[v4 2026-07-22: and now `lastSeenAt`. The gap is otherwise unchanged — a **live** row keeps both clocks; only account deletion scrubs them.]* — indefinitely, unless they personally delete their account **from the mobile app** (there is no web deletion, and the operator CLI cannot delete a sole admin, sole billing admin, sole super-admin, or a `deletionLocked` account). (A1, B5)
 22. **Voters — the actual data subjects, who never consented to anything — have no account, no access, no correction, no deletion, no opt-out, and no do-not-contact mechanism.** Every request from a voter is a manual process with no tooling behind it. **This is the largest structural gap in the product from a privacy-law standpoint, and no sentence you write can paper over it.** (H16(d)) *[v3 2026-07-17: narrowed — do-not-contact is now admin-tooled (see v3 gap 1); the voter-initiated half of this finding is unchanged.]*

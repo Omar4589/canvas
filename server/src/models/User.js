@@ -62,7 +62,20 @@ const userSchema = new mongoose.Schema(
     // moment the user completes the forced change. null = never changed → all tokens honored
     // (grandfathers every session issued before this field shipped).
     passwordChangedAt: { type: Date, default: null },
+    // Written in exactly ONE place: POST /auth/login (routes/auth.js). It is "when they last typed
+    // a password", NOT "when they were last here" — tokens live 30d (services/auth/tokens.js) and
+    // the mobile app skips the login screen whenever a stored one is present, so a canvasser who
+    // knocks doors every day legitimately reads "27d ago". Use lastSeenAt for the second question.
     lastLoginAt: { type: Date, default: null },
+    // The real last-activity clock: stamped by requireAuth on ANY authenticated request, throttled
+    // to ~15 min per user per process (middleware/lastSeen.js), so it is approximate by design.
+    // Deliberately absent from toSafeJSON() below and from GET /admin/memberships: this is a
+    // super-admin-only operational signal, never something an org admin can read about a member who
+    // may also belong to another org. Deliberately NOT indexed — it is projected into a response
+    // and is never a predicate or a sort key, so an index would buy write amplification on the
+    // hottest write path in the app for no read at all. Means "this session called the API", which
+    // is not proof a human tapped anything: a phone with the app open in a pocket still polls.
+    lastSeenAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

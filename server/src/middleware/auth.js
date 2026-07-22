@@ -1,6 +1,7 @@
 import { verifyToken } from '../services/auth/tokens.js';
 import { User } from '../models/User.js';
 import { canManageCampaign } from '../services/authz/campaignManagement.js';
+import { shouldStampLastSeen } from './lastSeen.js';
 
 export async function requireAuth(req, res, next) {
   try {
@@ -32,6 +33,20 @@ export async function requireAuth(req, res, next) {
           code: 'SESSION_REVOKED',
         });
       }
+    }
+    // Best-effort last-activity stamp. Placed HERE, after every 401 guard above, on purpose: a
+    // deleted or deactivated account has already been refused, so a tombstone can never be
+    // re-stamped by the deleted holder's still-valid 30d token — which is what keeps the deletion
+    // scrub in services/users/deleteAccount.js true. Fire-and-forget is mandatory, not stylistic:
+    // this whole function is wrapped in a catch that returns a blanket 401, so an awaited write
+    // that rejected on a transient DB blip would eject a live session. timestamps:false because
+    // the schema sets them — without it every active user's updatedAt would read "~now" forever.
+    if (shouldStampLastSeen(String(user._id))) {
+      User.updateOne(
+        { _id: user._id },
+        { $set: { lastSeenAt: new Date() } },
+        { timestamps: false }
+      ).catch(() => {});
     }
     req.user = user;
     next();

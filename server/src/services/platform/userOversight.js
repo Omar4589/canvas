@@ -146,6 +146,7 @@ export async function buildUserOversight(userId) {
       mustChangePassword: !!user.mustChangePassword,
       tempPasswordSetAt: user.tempPasswordSetAt || null,
       lastLoginAt: user.lastLoginAt || null,
+      lastSeenAt: user.lastSeenAt || null,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     },

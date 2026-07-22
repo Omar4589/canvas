@@ -95,9 +95,14 @@ export default function SuperAdminUserDetailPage() {
             <dd className="text-fg">{formatDate(u.createdAt)}</dd>
           </div>
           <div>
-            {/* Two different clocks on purpose: signing in vs actually canvassing (below, per org). */}
+            {/* Three clocks on purpose: typing a password, using the app at all, and canvassing
+                (the last one below, per org). */}
             <dt className="text-xs uppercase tracking-wide text-fg-subtle">Last login</dt>
             <dd className="text-fg">{formatRelative(u.lastLoginAt)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-fg-subtle">Last active</dt>
+            <dd className="text-fg">{formatRelative(u.lastSeenAt, { never: '—' })}</dd>
           </div>
           {u.mustChangePassword && (
             <div>
@@ -169,7 +174,9 @@ export default function SuperAdminUserDetailPage() {
                       deliberately NOT billable knocks (distinct household×pass). */}
                   <th className="px-3 py-2 text-right" title="Raw field records (one per door action) — not billable knocks">Field records</th>
                   <th className="px-3 py-2 text-right">Surveys</th>
-                  <th className="px-3 py-2 text-left">Last active</th>
+                  {/* "Last canvassed", not "Last active": this is the canvass clock, and the
+                      account-level "Last active" above is a different one. */}
+                  <th className="px-3 py-2 text-left">Last canvassed</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
