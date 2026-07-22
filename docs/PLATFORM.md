@@ -95,7 +95,7 @@ so "signed out then in" and "session expired then in" landed in different places
   guarded by typing the org's slug back. User accounts always survive (someone in another org keeps
   that access); the org's identity records (People) are deleted with it — People are per-org, so
   nothing is shared with anyone else (see [PERSONS.md](PERSONS.md)).
-- **Refresh demo day** (Control Room) — one click re-stages the demo org's recent canvassing
+- **Rebuild demo day** (Control Room) — one click rebuilds the demo org's canvassing
   relative to *now*, as a **two-round story**: an archived **Round 1** worked the week before
   (evenings on days −8…−12, its pass properly archived), and the active **Round 2** on the four
   prior evenings plus a "today" whose knocks run from mid-morning up to the minute you pressed it.
@@ -106,16 +106,25 @@ so "signed out then in" and "session expired then in" landed in different places
   the demo's several canvassers, each knocking a believable ~15-20 doors an hour (never hundreds), a
   realistic connection rate of about 1 in 5 doors, and survey answers that mirror a real canvass. It
   only ever touches the demo org; each app-review account's book (you can have one per platform —
-  Apple, Google) stays unwalked **in both rounds** so those doors stay fresh for reviewers, and the
-  voted layer + published client report survive. Also runnable from the Heroku Run console:
-  `npm --prefix server run demo:refresh`.
+  Apple, Google) stays unwalked **in both rounds** so those doors stay fresh for reviewers.
 
-  One-time setup / repair: the button leans on the demo org being set up correctly — a roster of
-  field canvassers with the books shared out among them, and each app-review account's book marked as
-  off-limits. If the demo org has drifted (e.g. every book ended up on one account), or if the button
-  ever refuses to run because it can't find a marked reviewer book, re-run the demo **seed** once to
-  rebuild that structure (see Part 2). The seed reshapes the survey, rebuilds the roster, shares the
-  books out, and marks each reviewer's book; after that, the button just works.
+  **The button now runs the demo seed itself** — the same thing as
+  `npm run seed:demo -- --reset --apply` from the Heroku Run console — so it also *repairs* the demo
+  org rather than assuming it is healthy. It shares the books back out among the field canvassers,
+  re-marks each app-review account's off-limits book, and **recreates a review account a store
+  reviewer deleted**. Because it is the seed, it does more than the old refresh did: it also wipes
+  and **republishes the client report** and resets the early-vote layer. Doors, voters, the books
+  themselves, and the `/r/` share link and its password all survive.
+
+  Two things it deliberately will **not** do. It never changes an existing app-review account's
+  **password** — Apple and Google keep the credentials already sitting in their review notes, so a
+  stray click can't lock a reviewer out mid-review. And it refuses to run at all if the demo org
+  hasn't been built yet (or is missing its voters), because that first build is far too slow to
+  finish inside a web request and would leave the demo half-made; build it once from the console
+  with `npm run seed:demo -- --apply`, and the button maintains it from then on.
+
+  It is **break-glass only** — a support-tier staff account can't press it — and it asks for
+  confirmation first, since it now regenerates more than a day's knocks.
 - **All Users** — every account on the platform (with the orgs each belongs to and their role in each),
   now **searched and filtered server-side and paged** — the browser never downloads the whole user
   base. Each name opens a full **user detail page** (`/super-admin/users/:userId`): identity
@@ -250,7 +259,7 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 | Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` (`?since=` forward cursor, `?before=` backward "Load older") ([platform.js](../server/src/routes/superAdmin/platform.js)); `GET /super-admin/access/platform-stats`, `GET /super-admin/access/platform-trends?days=30\|90\|365` (the sparkline series — zero-filled UTC days ending at **yesterday**; returns `live`/`deleted`/`undated` so the ⓘ can print the exact gaps), `POST /super-admin/access/platform-stats/reconcile` (the "Reconcile now" button — `recomputeLive` **+ `recomputeDaily`**, same as the nightly job), `GET /super-admin/access/idle-orgs`, `GET /super-admin/access/health/retention`, `GET /super-admin/access/grants?all=1`, `GET /super-admin/access/deletion-requests` (the ops-health chips) ([access.js](../server/src/routes/superAdmin/access.js)); `GET /super-admin/organizations/at-risk` (billing strip) |
 | Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) + [OrgDetailPage.jsx](../client/src/pages/OrgDetailPage.jsx) | `GET /super-admin/organizations` (opt-in `skip`/`limit`/`q`/`sort` + `total`), `GET /super-admin/organizations/billing-rollup` (this-month revenue across all customer orgs), `GET /super-admin/organizations/at-risk` (the needs-attention definition), `GET /super-admin/organizations/:orgId` (the slim detail composite — roster incl. deactivated memberships, campaigns + last activity, billing header w/ the `internal` exemption flag; **registered after the literal routes** so `/:orgId` can't swallow them; metadata only — no grant, no AccessLog row), `POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId` (isActive + the Rename control's name/slug), `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js), tested by [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
 | Emails | [SuperAdminEmailsPage.jsx](../client/src/pages/SuperAdminEmailsPage.jsx) (web) + `super-admin/emails.jsx` (mobile More ▸ Platform) | `GET /super-admin/emails` (opt-in `skip`/`limit` + `kind`/`outcome`/`organizationId` filters; returns `total`, distinct `kinds`, `last24h` sent/failed; rows carry `deliveryStatus`/`deliveryDetail` from the Resend webhook and `keptForever` on the never-expiring deletion-warning evidence), `GET /super-admin/emails/orgs` (filter dropdown) ([emails.js](../server/src/routes/superAdmin/emails.js)). Metadata only — see [EMAIL.md](EMAIL.md) for the send log, TTL, and webhook. |
-| Refresh demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)) | `POST /super-admin/demo/refresh-day` → [services/platform/refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js) (slug-locked to the demo org; wipes + restages the activity layer only — doors/books/accounts/voted layer/report survive; regenerates **both rounds** of the 2-round story and re-stamps pass lifecycle dates; returns per-round staged counts + `reknockDoors`; console runner `npm run demo:refresh`). Generation + batched persistence are shared with the seed via [services/platform/demoActivity.js](../server/src/services/platform/demoActivity.js) so both look identical. |
+| Rebuild demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)), typed-confirm modal, `{confirm:'rebuild'}` body | `POST /super-admin/demo/refresh-day` (`requireBreakGlass`; module-scoped single-flight → `409 DEMO_REBUILD_RUNNING`) → [services/platform/seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js) `seedDemoOrg({apply:true, reset:true, rebuild:false, allowImport:false, syncPasswords:false, requireExisting:true, requireSharePassword:true, historySeed:Date.now(), log:()=>{}})`. Slug-locked to the demo org inside the engine. Refuses the cold-build path (`409 DEMO_NOT_BUILT` / `DEMO_IMPORT_REQUIRED`) **before the first write**, since `resetActivityLayer` commits its wipe long before the import branch. Books ARE re-cut/reassigned (the `deleteMany`+`insertMany` in `buildRoundBooks` is the only thing that heals drift), review accounts ARE recreated, the voted layer and client report ARE wiped and rebuilt; share link + its password survive. **No password ever crosses the API boundary** — the summary carries `credentialSource` (the config-var name) instead. Console equivalent: `npm run seed:demo -- --reset --apply`. |
 | All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) + [SuperAdminUserDetailPage.jsx](../client/src/pages/SuperAdminUserDetailPage.jsx) | `GET /super-admin/users` (opt-in `skip`/`limit`/`q` + filters `super`/`deleted`/`tempPassword`/`orphan`/`active`; returns `total` + `deletedCount`, per-page `lastActivityAt`, and `lastSeenAt` — the last one is **not** page-gated, since unlike `lastActivityAt` it is already on the user document and costs no extra read), `GET /super-admin/users/:userId` (the drill-in composite → [services/platform/userOversight.js](../server/src/services/platform/userOversight.js): full identity incl. `tempPasswordSetAt`/`deletionLocked`/`lastSeenAt`, ALL memberships incl. deactivated, per-org structural activity counts, staff grant/access history, `DeletedUserRecord` **status only** — metadata, no grant, no AccessLog row), `GET /super-admin/users/:userId/lockout` (reads the per-email throttle state — per-process, labeled), `PATCH /super-admin/users/:userId/platform-role` (break-glass only; refuses to demote the last break-glass account), `POST /super-admin/users/:userId/promote`, `POST /super-admin/users/:userId/clear-lockout` (clears the per-email login throttle via `clearLoginLockout`, see [loginRateLimit.js](../server/src/middleware/loginRateLimit.js)) ([users.js](../server/src/routes/superAdmin/users.js)) |
 | Imports | [SuperAdminImportsPage.jsx](../client/src/pages/SuperAdminImportsPage.jsx) | `GET /super-admin/imports` — cross-org import + geocoding-cost aggregation (real persisted lookup counts; cost derived from `GEOCODE_COST_PER_1000_CENTS`, never sent to clients); opt-in `skip`/`limit`, `q` (file/uploader/org), `orgId`, `sort=cost\|new`, `excludeUndone=1`, `groupBy=month\|org` rollups ([imports.js](../server/src/routes/superAdmin/imports.js)) |
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
@@ -271,14 +280,24 @@ because the flag can never reach a customer org:
 
 - **Born-immutable.** The field is `immutable: true` and is absent from every update schema, so no
   PATCH body and no ordinary Mongoose write can set it on an existing org. It is settable **only at
-  creation**, plus **three** sanctioned raw-collection writes — all CLI-only, none reachable from an
-  HTTP route: [utils/seedDemoOrg.js](../server/src/utils/seedDemoOrg.js) (hard-locked to the demo
-  slug), [migrations/migrateInternalOrgs.js](../server/src/migrations/migrateInternalOrgs.js)
+  creation**, plus **three** sanctioned raw-collection writes:
+  [services/platform/seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js) (hard-locked to
+  the demo slug), [migrations/migrateInternalOrgs.js](../server/src/migrations/migrateInternalOrgs.js)
   (`npm run migrate:internal-orgs`, dry-run by default, `--apply`; `--slugs` accepts arbitrary orgs),
   and [migrations/migrateBilling.js](../server/src/migrations/migrateBilling.js) (its pre-existing
   `--internal` slugs). All three are idempotent and print what they touch; their write filters guard
   *re-running*, not *targeting* — the two migrations can flag any org an operator names, which is the
   operator's prerogative (server shell access sits outside the app's security boundary).
+
+  **One of the three is now reachable from an HTTP route** — this used to read "all CLI-only, none
+  reachable from an HTTP route", and that stopped being true when the demo seeder became the engine
+  behind `POST /super-admin/demo/refresh-day`. The boundary still holds, but it now rests on the
+  write's *filter* rather than on unreachability: the `_id` comes from a
+  `findOne({slug: DEMO_ORG_SLUG})` performed earlier in the same function, the update is
+  `{$set:{isInternal:true}}` guarded by `{isInternal:{$ne:true}}`, and there is no request-supplied
+  input anywhere on the path (the route passes a fixed options object and no org identifier). So it
+  can only ever mark the demo org internal, and only if it somehow wasn't. It is also a no-op on the
+  route path in practice, because that path refuses to run at all unless the demo org already exists.
 - **Create-time only, break-glass only.** `POST /super-admin/organizations {internal:true}`
   ([organizations.js](../server/src/routes/superAdmin/organizations.js)) requires
   `platformRole === 'break_glass'` (else **403 `BREAK_GLASS_REQUIRED`**); passing `trialDays` with
@@ -382,10 +401,10 @@ customer owns.
   against self-lockout / accidental self-demotion).
 - **Organizations** `PATCH` flips `isActive` (deactivate hides the org from its members) and edits
   name/slug (slug validated kebab-case — see [validators.js](../server/src/utils/validators.js)).
-- **Refresh demo day internals** ([demoActivity.js](../server/src/services/platform/demoActivity.js),
-  [refreshDemoDay.js](../server/src/services/platform/refreshDemoDay.js)):
-  - **The demo is a permanent two-round story, regenerated identically by seed and refresh.** The
-    seed ([seedDemoOrg.js](../server/src/utils/seedDemoOrg.js)) finds-or-creates Round 1 and Round 2
+- **Rebuild demo day internals** ([demoActivity.js](../server/src/services/platform/demoActivity.js),
+  [seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js)):
+  - **The demo is a permanent two-round story, and ONE engine regenerates it.** The
+    seed ([seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js)) finds-or-creates Round 1 and Round 2
     idempotently (`Pass.findOne({effortId, roundNumber})` else `createNextPass`, with a fail-loud
     guard against a stray pass minting the wrong number) and cuts+assigns each round's books via a
     shared `buildRoundBooks(pass)` — reviewer books are `isReviewerBook`-marked in **every** round.
@@ -399,13 +418,40 @@ customer owns.
     `resolveStatus` over all rounds (latest-across-passes) and writes stay batched. ~375-450 Round-2
     doors are deliberate **re-knocks** of Round-1 doors (two knocks, one home — the By-round table
     and knock-vs-coverage distinction demo truthfully).
-  - **The refresh regenerates BOTH rounds.** `refreshDemoDay` pulls **all archived + active passes
-    with published turfs** (an active-only pull would erase Round-1 history on first press), guards
-    reviewer books over the union of their assignments, wipes, restages archived rounds on the old
-    offsets + the active round on the defaults (concat + single persist, same as the seed), and
-    touches up pass lifecycle dates at the staged-window boundary. Returns per-round staged counts +
-    `reknockDoors` alongside the original staged/wiped shape (the CLI prints one per-round summary
-    line; the Control Room toast shows the overall staged/wiped totals).
+  - **There is no second engine, deliberately — and the reason is a real outage.** A separate
+    `services/platform/refreshDemoDay.js` used to back the button, restaging the activity layer
+    without re-cutting assignments. It resolved each book to one owner with
+    `new Map(assignments.map((a) => [String(a.turfId), a.userId]))` — but
+    [TurfAssignment](../server/src/models/TurfAssignment.js) is **many-to-many** (its only unique
+    index is the *pair* `{turfId, userId}`), so that Map silently kept whichever row the unsorted
+    `find()` returned **last**, i.e. the most recently inserted. One extra assignment row on an
+    app-review account — exactly what a bulk assign in `everyone` mode creates, since it upserts
+    additively and never sets `isReviewerBook` — therefore re-attributed **every** field
+    canvasser's knocks to the review account, and dropped the four canvassers to zero. The
+    `isReviewerBook` guard did not catch it: it only asks "does each round contain at least one
+    marked book?", never "is a marked *user* also the resolved owner of an unmarked book?".
+    Reproduced end-to-end (1,010 activities across 4 canvassers → 342, all on the review account,
+    with the ~3× volume drop the per-canvasser `dailyCap` predicts). The service is deleted rather
+    than patched: two demo engines that had to stay behaviourally identical is the root cause, not
+    an incidental detail, and only the seed's per-round `deleteMany` + `insertMany` actually heals
+    the stored duplicate rows. Regression test: `demoRebuild.int.test.js` injects the drift and
+    asserts the rebuild both clears it and leaves reviewer books unwalked.
+  - **CLI/engine split.** The engine ([services/platform/seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js))
+    never connects, disconnects, reads `process.argv`, or calls `process.exit` — every failure
+    throws an `Error` carrying `status`/`code`. All of that lives in the ~35-line CLI wrapper
+    ([utils/seedDemoOrg.js](../server/src/utils/seedDemoOrg.js)), so `npm run seed:demo` is
+    unchanged. Two traps this closed: `main()` used to **self-execute on import** (importing it
+    from a route would run the seed at boot and then `mongoose.disconnect()` the live app), and
+    `passwordList()` was invoked at **module scope**, so a mismatched `SEED_DEMO_*_PASSWORD`
+    pair would have crashed the dyno before Express listened. Account/password resolution is now
+    `resolveSeedAccounts()`, called per run and positioned **below** `emailList`/`passwordList` —
+    a const arrow referencing either from above hits the TDZ and fails only when the button is
+    pressed, passing every import-time check on the way through.
+  - **Determinism.** Household/voter generation stays pinned to `RNG_SEED` forever — it must
+    reproduce the dataset already imported. The staged-knock rng is the `historySeed` option: the
+    CLI pins it (`RNG_SEED + 1`, so a re-run reproduces the same day), the button passes
+    `Date.now()`, which preserves what the old unseeded refresh gave you — a slightly different
+    day per press.
   - **Realism is per-canvasser, not per-book.** `stageDemoActivity` groups each canvasser's books,
     spreads them ~one-per-day across the round's day offsets, and walks each day on a single running
     clock (2-5 min/door, capped). So the single-day `doorsPerHour = knocks / (last-first span)` (see
@@ -427,14 +473,14 @@ customer owns.
     list** — e.g. `apple@review.com,android@review.com`. The seed creates one canvasser account per
     email (all sharing `SEED_DEMO_CANVASSER_PASSWORD`) and reserves one clean, marked book for each; the
     refresh keeps every one of them unwalked. No button changes are needed to add a platform.
-  - **One-time repair = re-run the seed.** `node src/utils/seedDemoOrg.js --reset --apply` reshapes the
-    survey template, ensures the field-canvasser roster, **cleanly redistributes** book assignments
-    (wipe + reassign: reviewer keeps one marked book per round, the rest round-robin across field
-    canvassers), and restages the full two-round story — without touching
-    doors/voters/report/share-link. (On an org that predates the second round, the seed *creates*
-    Round 2 via `createNextPass`, cuts+publishes its books, and archives Round 1; run it with
-    `--reset --apply` — or press Refresh demo day once — so the staged history matches the new pass
-    dates.) Set
+  - **Repair = the button, or the same thing from the console.** `npm run seed:demo -- --reset --apply`
+    reshapes the survey template, ensures the field-canvasser roster, **cleanly redistributes** book
+    assignments (wipe + reassign: reviewer keeps one marked book per round, the rest round-robin
+    across field canvassers), and restages the full two-round story — without touching
+    doors/voters/share-link (it does republish the client report). Pressing **Rebuild demo day** runs
+    this exact path, minus the password sync and the cold-build branch. (On an org that predates the
+    second round, the seed *creates* Round 2 via `createNextPass`, cuts+publishes its books, and
+    archives Round 1, so the staged history matches the new pass dates.) Set
     `SEED_DEMO_CANVASSER_EMAIL` to the demo org's actual review-account email(s) first — comma-separate
     for multiple platforms (`apple@review.com,android@review.com`) — so the seed resolves and marks the
     right reviewer book(s).

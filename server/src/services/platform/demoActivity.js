@@ -8,10 +8,11 @@ import { normalizeAndFilterAnswers } from '../surveys/normalizeAnswers.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 
-// Shared demo-activity generator + persister. Both the one-time seed
-// (seedDemoOrg.stageCanvassHistory) and the super-admin "Refresh demo day" button
-// (services/platform/refreshDemoDay) build and persist a day's fake canvassing
-// through here, so the two paths can never drift in realism or write pattern.
+// Demo-activity generator + persister, called by seedDemoOrg.stageCanvassHistory —
+// which is now the ONLY caller, for both the CLI and the super-admin "Rebuild demo
+// day" button. It used to be shared with services/platform/refreshDemoDay so the two
+// could not drift in realism; that second engine is deleted, because they drifted
+// anyway in the part that was NOT shared (how each resolved a book's owner).
 //
 // The realism model is PER-CANVASSER, not per-book: each canvasser walks roughly
 // one book per day spread across a window of days (default: today + the four
@@ -20,7 +21,7 @@ import { zonedDayRange } from '../../utils/timezone.js';
 // total. That keeps `doorsPerHour = knocks / (last-first span)` in a realistic
 // ~15-20 band instead of collapsing a canvasser's whole inventory into one window.
 //
-// Both callers stage the demo campaign's PERMANENT 2-round story: Round 1
+// The caller stages the demo campaign's PERMANENT 2-round story: Round 1
 // archived (knocks on ARCHIVED_DAY_OFFSETS), Round 2 active (knocks on
 // DAY_OFFSETS) — one stageDemoActivity call per round, then everything is
 // concatenated into a SINGLE persistDemoActivity call, because Household.status

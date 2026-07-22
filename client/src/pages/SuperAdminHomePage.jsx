@@ -38,18 +38,34 @@ export default function SuperAdminHomePage() {
   const { switchOrg, user } = useAuth();
   const [live, setLive] = useState(true);
   const [refreshMsg, setRefreshMsg] = useState(null);
+  const [confirmRebuild, setConfirmRebuild] = useState(false);
 
-  // Re-stage the demo org's recent canvassing (4 evenings + a morning-to-now
-  // "today") right before a pitch. Server-side it's locked to the demo org.
+  // Rebuild the demo org from the seed right before a pitch. This is the same engine as
+  // `npm run seed:demo -- --reset --apply`, so it does more than the old refresh did: it
+  // re-cuts book assignments (the only thing that heals drift), recreates review accounts a
+  // store reviewer deleted, and republishes the client report. Server-side it is slug-locked
+  // to the demo org, break-glass only, and refuses to touch review-account passwords.
   const refreshDemoMut = useMutation({
-    mutationFn: () => api('/super-admin/demo/refresh-day', { method: 'POST' }),
+    mutationFn: () => api('/super-admin/demo/refresh-day', {
+      method: 'POST',
+      body: { confirm: 'rebuild' },
+    }),
     onSuccess: (r) => {
+      const staged = r.staged;
       setRefreshMsg(
-        `Demo refreshed: ${r.staged.todayKnocks} knocks today · ${r.staged.activities} total · ${r.staged.surveys} surveys.`
+        staged
+          ? `Demo rebuilt: ${staged.todayKnocks} knocks today · ${staged.activities} total · ${staged.surveys} surveys`
+            + ` across ${r.books?.total ?? 0} books.`
+          : 'Demo rebuilt.'
       );
+      setConfirmRebuild(false);
       qc.invalidateQueries({ queryKey: ['super-admin', 'platform-overview'] });
+      qc.invalidateQueries({ queryKey: ['super-admin', 'platform-stats'] });
     },
-    onError: (err) => setRefreshMsg(err.message),
+    onError: (err) => {
+      setRefreshMsg(err.message);
+      setConfirmRebuild(false);
+    },
   });
 
   const overviewQ = useQuery({
@@ -320,12 +336,12 @@ export default function SuperAdminHomePage() {
             </h2>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => refreshDemoMut.mutate()}
+                onClick={() => setConfirmRebuild(true)}
                 disabled={refreshDemoMut.isPending}
-                title="Wipe & re-stage the demo org's recent canvassing so Today looks live"
+                title="Rebuild the demo org from the seed: re-cuts book assignments, recreates deleted review accounts, restages both rounds, and republishes the client report"
                 className="text-xs font-semibold text-brand-accent hover:underline disabled:opacity-60"
               >
-                {refreshDemoMut.isPending ? 'Refreshing demo…' : 'Refresh demo day'}
+                {refreshDemoMut.isPending ? 'Rebuilding demo…' : 'Rebuild demo day'}
               </button>
               <button
                 onClick={() => navigate('/organizations')}
@@ -338,6 +354,58 @@ export default function SuperAdminHomePage() {
           {refreshMsg && (
             <div className="mb-2 rounded-md border border-info/30 bg-info-tint px-3 py-1.5 text-xs text-info-fg">
               {refreshMsg}
+            </div>
+          )}
+
+          {/* One click used to be enough, when this only restaged the activity layer. It now
+              re-cuts assignments and republishes the client report, so it gets a confirm —
+              enumerating what is destroyed and what survives, the way the org-delete flow does. */}
+          {confirmRebuild && (
+            <div
+              className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-overlay/40 px-4 py-8"
+              onClick={() => setConfirmRebuild(false)}
+            >
+              <div className="w-full max-w-lg rounded-xl bg-card shadow-lg" onClick={(e) => e.stopPropagation()}>
+                <div className="border-b border-border px-6 py-4">
+                  <h2 className="text-lg font-semibold text-fg">Rebuild demo day?</h2>
+                  <p className="mt-1 text-xs text-fg-muted">
+                    Runs the demo seed against <span className="font-semibold">Meridian Field Strategies</span> only.
+                    No other organization can be touched.
+                  </p>
+                </div>
+                <div className="px-6 py-4 text-sm text-fg">
+                  <p className="font-semibold">Wiped and regenerated</p>
+                  <ul className="mt-1 list-disc pl-5 text-xs text-fg-muted">
+                    <li>All canvass activity, surveys, and flag reviews</li>
+                    <li>Book assignments for both rounds (this is what repairs drift)</li>
+                    <li>The early-vote layer and the published client report</li>
+                  </ul>
+                  <p className="mt-3 font-semibold">Left alone</p>
+                  <ul className="mt-1 list-disc pl-5 text-xs text-fg-muted">
+                    <li>Doors, voters, and the books themselves</li>
+                    <li>The <code>/r/</code> share link and its password</li>
+                    <li>
+                      Review-account passwords — Apple and Google keep the credentials they
+                      already have
+                    </li>
+                  </ul>
+                </div>
+                <div className="flex justify-end gap-2 border-t border-border px-6 py-3">
+                  <button
+                    onClick={() => setConfirmRebuild(false)}
+                    className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-fg hover:bg-sunken"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => refreshDemoMut.mutate()}
+                    disabled={refreshDemoMut.isPending}
+                    className="rounded-md bg-brand-accent px-3 py-1.5 text-xs font-semibold text-on-accent hover:opacity-90 disabled:opacity-60"
+                  >
+                    {refreshDemoMut.isPending ? 'Rebuilding…' : 'Rebuild demo day'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

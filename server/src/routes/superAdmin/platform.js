@@ -6,8 +6,8 @@ import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Subscription } from '../../models/Subscription.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
-import { refreshDemoDay } from '../../services/platform/refreshDemoDay.js';
-import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
+import { seedDemoOrg } from '../../services/platform/seedDemoOrg.js';
+import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
 
 const router = Router();
 router.use(requireAuth, requireSuperAdmin);
@@ -169,16 +169,68 @@ router.get('/platform-overview', async (req, res, next) => {
   }
 });
 
-// Re-stage the demo org's recent canvassing relative to now (4 evenings + a
-// morning-to-now "today") so the dashboard looks live before a pitch. Locked to
-// the demo org by slug inside the service — it can never touch a real org.
-router.post('/demo/refresh-day', async (req, res, next) => {
+// Rebuild the demo org from the SEED — the same engine as `npm run seed:demo -- --reset
+// --apply`, which is the only path that actually heals drifted book assignments (it does a
+// clean deleteMany + insertMany per round) and the only one that recreates a review account a
+// store reviewer deleted. The old activity-only refresh service is gone; it resolved each book
+// to a single owner through a lossy Map over a MANY-TO-MANY table, so one extra assignment row
+// on the review account silently re-attributed every field canvasser's knocks to it.
+//
+// Locked to the demo org by slug inside the engine — it can never touch a real org — and the
+// three destructive doors are nailed shut here rather than in the engine, so the CLI keeps them.
+let demoRebuildRunning = false;
+
+router.post('/demo/refresh-day', requireBreakGlass, async (req, res, next) => {
+  // A bodyless POST is a browser tab left open across this deploy: the old bundle fired this
+  // URL with no body for the far gentler activity-only refresh. Refuse it rather than hand a
+  // stale client the more destructive operation it never asked for.
+  if (req.body?.confirm !== 'rebuild') {
+    return res.status(400).json({
+      error: 'Reload the Control Room — this action now rebuilds the demo org and needs confirmation.',
+      code: 'confirm-required',
+    });
+  }
+  // Two overlapping runs corrupt each other: buildRoundBooks deletes then re-inserts the round's
+  // assignments against a unique {turfId,userId} index, and `willStage` is computed from a live
+  // activity count both would read as 0 after the other's wipe — double-staging the day, or
+  // leaving it empty right before a pitch. No Mongo transactions here (standalone-mongod test
+  // harness), so a single in-process flag is the guard. Per-DYNO: advisory only if web ever
+  // scales past 1, which it does not today.
+  if (demoRebuildRunning) {
+    return res.status(409).json({
+      error: 'A demo rebuild is already running — wait for it to finish.',
+      code: 'DEMO_REBUILD_RUNNING',
+    });
+  }
+  demoRebuildRunning = true;
+  const started = Date.now();
   try {
-    const summary = await refreshDemoDay();
-    res.json(summary);
+    const summary = await seedDemoOrg({
+      apply: true,
+      reset: true,
+      rebuild: false,            // the campaign-wipe cascade is CLI-only, permanently
+      allowImport: false,        // a ~2,600-voter import cannot finish inside a 30s request
+      syncPasswords: false,      // never rewrite credentials Apple/Google are mid-review with
+      requireExisting: true,     // refuse the cold-build path instead of half-building it
+      requireSharePassword: true,
+      // The CLI pins the staged-knock rng so a re-run reproduces the same day. The button
+      // varies it, keeping what the old refresh button gave you: a slightly different day
+      // each press. The household/voter rng stays fixed — see RNG_SEED.
+      historySeed: Date.now(),
+      log: () => {},             // three of the engine's log lines print credentials
+    });
+    // The demo org is isInternal, so staff enter without a grant and deliberately leave no
+    // AccessLog row. This line is the only record of who pressed it.
+    console.warn(
+      `[demo-rebuild] ${req.user.email || req.user._id} rebuilt the demo org in ${Date.now() - started}ms`,
+      summary.staged
+    );
+    res.json({ ...summary, durationMs: Date.now() - started });
   } catch (err) {
-    if (err?.status) return res.status(err.status).json({ error: err.message });
+    if (err?.status) return res.status(err.status).json({ error: err.message, code: err.code });
     next(err);
+  } finally {
+    demoRebuildRunning = false;
   }
 });
 

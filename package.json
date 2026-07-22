@@ -15,7 +15,6 @@
     "heroku-postbuild": "npm run install:all && npm run build",
     "seed:admin": "npm --prefix server run seed:admin",
     "seed:demo": "npm --prefix server run seed:demo --",
-    "demo:refresh": "npm --prefix server run demo:refresh --",
     "lock:account": "npm --prefix server run lock:account --",
     "mail:preview": "npm --prefix server run mail:preview --",
     "purge:deleted-identities": "npm --prefix server run purge:deleted-identities --",
