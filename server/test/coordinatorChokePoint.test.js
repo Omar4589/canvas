@@ -45,13 +45,19 @@ const ALLOWED = new Set([
   // frozen stamp exactly where it was.
   'migrations/migrateCampaignCoordinators.js',
   // The demo seeder, which builds a whole org from nothing. It is exempt for a reason that does not
-  // apply to any of the above: it writes the roster and the ledger IN THE SAME RUN, stamping every
-  // staged knock from the same crew map it just wrote (services/platform/demoActivity.js). There is
-  // no pre-existing history to re-stamp, so there is no re-stamp to forget — the two are consistent
-  // by construction rather than by remembering. If that ever stops being true (a path that assigns
-  // a crew to a demo org that already has knocks), it belongs behind setCoordinator.js like
-  // everything else.
-  'utils/seedDemoOrg.js',
+  // apply to any of the above: it writes the roster and the ledger IN THE SAME RUN, and the staging
+  // pass RE-READS the roster it just wrote (stageCanvassHistory's CampaignAssignment lookup) rather
+  // than being handed a map, so every staged knock is stamped from the crew that is actually on
+  // record. There is no pre-existing history to re-stamp, so there is no re-stamp to forget — the
+  // two are consistent by construction rather than by remembering. If that ever stops being true (a
+  // path that assigns a crew to a demo org that already has knocks), it belongs behind
+  // setCoordinator.js like everything else.
+  //
+  // This names the ENGINE, not the CLI runner. utils/seedDemoOrg.js is now a ~35-line wrapper that
+  // owns the connection and the flags and touches no roster; the writes live here, and this is also
+  // the module the Control Room's "Rebuild demo day" button calls (always with reset:true, so the
+  // wipe lands before the crew write and the no-surviving-history premise still holds).
+  'services/platform/seedDemoOrg.js',
 ]);
 
 const WRITE_CALL = /CampaignAssignment\.(updateOne|updateMany|findOneAndUpdate|create|bulkWrite)\b/;
