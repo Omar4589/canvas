@@ -1,6 +1,7 @@
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { FAR_WARN_M, formatDistanceImperial } from '../lib/flags.js';
+import { actionLabel } from '../lib/statusColors.js';
 
 function formatDateTime(d, tz) {
   if (!d) return '—';
@@ -14,26 +15,6 @@ function formatDateTime(d, tz) {
   );
 }
 
-function actionLabel(t) {
-  switch (t) {
-    case 'not_home':
-      return 'Not home';
-    case 'wrong_address':
-      return 'Wrong address';
-    case 'refused':
-      return 'Refused';
-    case 'restricted':
-      return 'Restricted';
-    case 'survey_submitted':
-      return 'Survey submitted';
-    case 'lit_dropped':
-      return 'Lit dropped';
-    case 'note_added':
-      return 'Note added';
-    default:
-      return t || '—';
-  }
-}
 
 const ACTION_COLORS = {
   survey_submitted: '#22c55e',

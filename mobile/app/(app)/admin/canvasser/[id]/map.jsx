@@ -17,7 +17,7 @@ import { initMapbox } from '../../../../../lib/mapbox';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { formatExact } from '../../../../../lib/datetime';
 import { formatDistance } from '../../../../../lib/geo';
-import { radius, spacing } from '../../../../../lib/theme';
+import { radius, spacing, ACTION_LABELS } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../../lib/mapStyles';
@@ -45,15 +45,6 @@ const ACTION_PIN = {
   restricted: 'restricted',
   lit_dropped: 'lit_dropped',
   note_added: 'unknocked',
-};
-const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-  note_added: 'Note',
 };
 
 export default function MapScreen() {
@@ -223,7 +214,7 @@ export default function MapScreen() {
               />
               <View style={{ flex: 1 }}>
                 <Text style={styles.detailAction}>
-                  {ACTION_LABEL[selected.actionType] || selected.actionType}
+                  {ACTION_LABELS[selected.actionType] || selected.actionType}
                 </Text>
                 {selected.household ? (
                   <Text style={styles.detailAddress}>

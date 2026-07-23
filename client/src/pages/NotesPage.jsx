@@ -8,6 +8,7 @@ import { defaultRange, labelForRange } from '../lib/datePresets.js';
 import { formatInTz } from '../lib/datetime.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { Card, Badge } from '../components/ui/index.js';
+import { ACTION_LABELS } from '../lib/statusColors.js';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -26,15 +27,6 @@ const SOURCES = [
   { key: 'voter', label: 'Admin', countKey: 'voter', color: '#8b5cf6' },
 ];
 
-const ACTION_LABEL = {
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-  survey_submitted: 'Survey',
-  note_added: 'Note',
-};
 
 const LIMIT = 50;
 
@@ -325,7 +317,7 @@ function NoteCard({ note, campaignId, tz }) {
             {src.label}
           </Badge>
           {note.actionType && note.source === 'door' && (
-            <span className="text-xs text-fg-subtle">{ACTION_LABEL[note.actionType] || note.actionType}</span>
+            <span className="text-xs text-fg-subtle">{ACTION_LABELS[note.actionType] || note.actionType}</span>
           )}
           {note.edited && <span className="text-xs italic text-fg-subtle">edited</span>}
         </div>

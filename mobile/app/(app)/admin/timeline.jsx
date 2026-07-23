@@ -20,7 +20,7 @@ import { loadActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, shiftDays, deviceTimezone } from '../../../lib/dateRanges';
 import { rateFromPct } from '../../../lib/rates';
 import { downloadCsv } from '../../../lib/csv';
-import { radius, spacing } from '../../../lib/theme';
+import { radius, spacing, actionLabel } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import DateRangeBar from '../../../components/DateRangeBar';
@@ -79,15 +79,6 @@ function fmtHour(h) {
 function fmtDayCol(ymd) {
   const [, m, d] = ymd.split('-');
   return `${Number(m)}/${Number(d)}`;
-}
-function actionLabel(t) {
-  if (t === 'survey_submitted') return 'Surveyed';
-  if (t === 'lit_dropped') return 'Lit dropped';
-  if (t === 'not_home') return 'Not home';
-  if (t === 'wrong_address') return 'Wrong addr';
-  if (t === 'refused') return 'Refused';
-  if (t === 'restricted') return 'Restricted';
-  return t;
 }
 function actionColor(colors, t) {
   return colors.status[t === 'survey_submitted' ? 'surveyed' : t] || colors.textMuted;

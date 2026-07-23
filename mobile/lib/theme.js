@@ -52,6 +52,31 @@ const statusLabels = {
   dnc: 'Do not contact',
 };
 
+// ACTION type → label. Distinct from statusLabels above: an action is what a canvasser
+// RECORDED at a door ('survey_submitted'), a status is what the door IS as a result
+// ('surveyed'). Kept beside statusLabels so the two vocabularies stay visible together.
+//
+// This had drifted into seven private copies across web and mobile, with `survey_submitted`
+// reading "Survey submitted" on audit surfaces, "Surveyed" in activity feeds and "Survey" in
+// notes lists. Canonical wording is now "Surveyed" — it matches statusLabels.surveyed, so an
+// action and the status it produces finally read the same. Mirrored in
+// client/src/lib/statusColors.js; keep the two in sync.
+//
+// NOT the same thing as the ACTION_PIN / ACTION_TO_PIN maps in the screens, which translate
+// an action enum into a STATUS key to pick a pin icon ('survey_submitted' → 'surveyed').
+// Those are semantic, not display text — never fold them into this.
+export const ACTION_LABELS = {
+  not_home: 'Not home',
+  wrong_address: 'Wrong address',
+  refused: 'Refused',
+  survey_submitted: 'Surveyed',
+  lit_dropped: 'Lit dropped',
+  restricted: 'Restricted',
+  note_added: 'Note added',
+};
+
+export const actionLabel = (t) => ACTION_LABELS[t] || t || '—';
+
 // Shadows. Black drop shadows read poorly on dark surfaces, so dark UIs lean on
 // the `border` token (cards already carry a 1px border) to separate surfaces;
 // the shadow values are shared and effectively a no-op against a dark bg.

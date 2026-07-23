@@ -2,15 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { ACTION_LABELS } from '../lib/statusColors.js';
 
-const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-};
 
 const DOT_CLS = {
   survey_submitted: 'bg-green-500',
@@ -103,7 +96,7 @@ export default function CrossOrgActivityFeed({ limit = 50, refetchMs = 30_000 })
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-fg">
-                  {ACTION_LABEL[e.actionType] || e.actionType}
+                  {ACTION_LABELS[e.actionType] || e.actionType}
                 </span>
                 {e.organization && (
                   <button

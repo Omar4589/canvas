@@ -4,6 +4,7 @@
 // (theme-independent, like the door-status palette); review-status/severity carry a `tone` that
 // components resolve against the theme (colors.warnBg/danger/etc.).
 import { formatDistance } from './geo';
+import { ACTION_LABELS } from './theme';
 
 export const FLAG_THRESHOLDS = {
   FAR_WARN_M: 75,
@@ -139,15 +140,6 @@ export function reasonDetailText(reason) {
   }
 }
 
-const ACTION_LABELS = {
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  survey_submitted: 'Survey submitted',
-  lit_dropped: 'Lit dropped',
-  restricted: 'Restricted',
-  note_added: 'Note added',
-};
 
 // "Replaced “Restricted” recorded 4 min earlier from 20 ft away" — context line under a
 // far flag whose row replaced the canvasser's own earlier entry at this door ("latest wins"

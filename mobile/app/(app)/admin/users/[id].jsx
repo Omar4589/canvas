@@ -19,18 +19,10 @@ import { loadCurrentUser } from '../../../../lib/cache';
 import { formatDate, formatRelative as sharedFormatRelative } from '../../../../lib/dates';
 import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../../lib/validators';
 import PasswordInput from '../../../../components/PasswordInput';
-import { radius, spacing } from '../../../../lib/theme';
+import { radius, spacing, ACTION_LABELS } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
-const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-};
 
 function initials(first, last) {
   return ((first?.[0] || '') + (last?.[0] || '')).toUpperCase() || '?';
@@ -739,7 +731,7 @@ export default function AdminUserDetail() {
                     />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.activityAction}>
-                        {ACTION_LABEL[a.actionType] || a.actionType}
+                        {ACTION_LABELS[a.actionType] || a.actionType}
                       </Text>
                       <Text style={styles.activitySub} numberOfLines={1}>
                         {a.household

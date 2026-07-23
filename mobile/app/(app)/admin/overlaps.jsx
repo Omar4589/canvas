@@ -16,7 +16,7 @@ import { useRefresh } from '../../../lib/useRefresh';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { rangeFor } from '../../../lib/dateRanges';
 import { timeAgo, formatExact } from '../../../lib/datetime';
-import { radius, spacing } from '../../../lib/theme';
+import { radius, spacing, actionLabel } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
@@ -28,15 +28,6 @@ const PRESETS = [
   { key: 'all', label: 'All time' },
 ];
 
-function actionLabel(t) {
-  if (t === 'survey_submitted') return 'Surveyed';
-  if (t === 'lit_dropped') return 'Lit dropped';
-  if (t === 'not_home') return 'Not home';
-  if (t === 'wrong_address') return 'Wrong addr';
-  if (t === 'refused') return 'Refused';
-  if (t === 'restricted') return 'Restricted';
-  return t;
-}
 
 function actionColor(colors, t) {
   return colors.status[t === 'survey_submitted' ? 'surveyed' : t] || colors.textMuted;

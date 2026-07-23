@@ -15,22 +15,13 @@ import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { timeAgo } from '../../../../../lib/datetime';
-import { radius, spacing } from '../../../../../lib/theme';
+import { radius, spacing, ACTION_LABELS } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import { useDebouncedValue } from '../../../../../lib/useDebouncedValue';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import PinIcon from '../../../../../components/PinIcon';
 
-const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong addr',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-  note_added: 'Note added',
-};
 const ACTION_PIN = {
   survey_submitted: 'surveyed',
   not_home: 'not_home',
@@ -152,14 +143,14 @@ export default function HouseholdsScreen() {
                   </Text>
                   <Text style={styles.meta}>
                     {h.visits} visit{h.visits === 1 ? '' : 's'} · last:{' '}
-                    {ACTION_LABEL[h.finalAction] || h.finalAction} ·{' '}
+                    {ACTION_LABELS[h.finalAction] || h.finalAction} ·{' '}
                     {timeAgo(h.lastAt)}
                   </Text>
                   {h.actionTypes.length > 1 ? (
                     <Text style={styles.meta}>
                       Actions:{' '}
                       {h.actionTypes
-                        .map((a) => ACTION_LABEL[a] || a)
+                        .map((a) => ACTION_LABELS[a] || a)
                         .join(', ')}
                     </Text>
                   ) : null}

@@ -1,5 +1,5 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { radius, spacing } from '../lib/theme';
+import { radius, spacing, ACTION_LABELS } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { formatInTz } from '../lib/datetime';
 
@@ -10,15 +10,6 @@ const SOURCE_META = {
   voter: { label: 'Admin', color: '#8B5CF6' },
 };
 
-const ACTION_LABEL = {
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-  survey_submitted: 'Survey',
-  note_added: 'Note',
-};
 
 // One note row for the Notes hub. Mirrors the web NoteCard: source badge + colored
 // dot, door action label, "edited" tag, quoted body, and a meta line
@@ -52,7 +43,7 @@ export default function NoteCard({ note, tz, onOpenVoter, onOpenHousehold }) {
             <Text style={styles.badgeText}>{meta.label}</Text>
           </View>
           {note.actionType && note.source === 'door' ? (
-            <Text style={styles.action}>{ACTION_LABEL[note.actionType] || note.actionType}</Text>
+            <Text style={styles.action}>{ACTION_LABELS[note.actionType] || note.actionType}</Text>
           ) : null}
           {note.edited ? <Text style={styles.edited}>edited</Text> : null}
         </View>

@@ -35,13 +35,22 @@ export function statusColorsForTheme(dark) {
 
 // ACTION type → label. Distinct from STATUS_LABELS above: an action is what a canvasser
 // RECORDED at a door ('survey_submitted'), a status is what the door IS as a result
-// ('surveyed'). Lives here so the two label maps stay side by side — this one had drifted
-// into private copies in HouseholdDetailPanel and lib/flags.js before it was pulled out.
+// ('surveyed'). Lives here so the two label maps stay side by side.
+//
+// This had drifted into seven private copies across web and mobile, with `survey_submitted`
+// reading "Survey submitted" on audit surfaces, "Surveyed" in activity feeds and "Survey" in
+// notes lists. Canonical wording is now "Surveyed" — it matches STATUS_LABELS.surveyed, so an
+// action and the status it produces finally read the same. Mirrored in mobile/lib/theme.js;
+// keep the two in sync.
+//
+// NOT the same thing as the ACTION_PIN / ACTION_TO_PIN maps on mobile, which translate an
+// action enum into a STATUS key to pick a pin icon ('survey_submitted' → 'surveyed'). Those
+// are semantic, not display text — never fold them into this.
 export const ACTION_LABELS = {
   not_home: 'Not home',
   wrong_address: 'Wrong address',
   refused: 'Refused',
-  survey_submitted: 'Survey submitted',
+  survey_submitted: 'Surveyed',
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
   note_added: 'Note added',

@@ -2,14 +2,9 @@
 // Extracted so every surface that renders /super-admin/activity-feed rows (today the Activity
 // tab; the Control Room preview used to duplicate both) draws from one definition.
 
-export const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-};
+// Canonical wording lives in lib/theme.js (ACTION_LABELS), beside the status labels.
+// Re-exported here under the name this feed's screens already import.
+export { ACTION_LABELS as ACTION_LABEL } from './theme';
 
 // Dot colors depend on the active theme palette, so this is a function of `colors`, not a
 // constant — call it inside the component with the palette from useTheme().

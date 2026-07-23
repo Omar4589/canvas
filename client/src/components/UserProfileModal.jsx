@@ -8,15 +8,8 @@ import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { formatDate, formatRelative as sharedFormatRelative } from '../lib/dates.js';
 import { tempPasswordProblem, isValidTempPassword } from '../lib/validators.js';
+import { ACTION_LABELS } from '../lib/statusColors.js';
 
-const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-};
 
 const ACTION_DOT_CLS = {
   survey_submitted: 'bg-green-500',
@@ -612,7 +605,7 @@ export default function UserProfileModal({ membership, onClose }) {
                   />
                   <div className="min-w-0 flex-1">
                     <div className="font-medium text-fg">
-                      {ACTION_LABEL[a.actionType] || a.actionType}
+                      {ACTION_LABELS[a.actionType] || a.actionType}
                     </div>
                     <div className="truncate text-xs text-fg-muted">
                       {a.household

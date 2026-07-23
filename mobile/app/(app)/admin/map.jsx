@@ -30,7 +30,7 @@ import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/d
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { initMapbox } from '../../../lib/mapbox';
 import { timeAgo, formatExact, formatInTz } from '../../../lib/datetime';
-import { radius, spacing } from '../../../lib/theme';
+import { radius, spacing, actionLabel } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
@@ -167,16 +167,6 @@ function linesToFeatures(activities, householdsById) {
   return { type: 'FeatureCollection', features };
 }
 
-function actionLabel(t) {
-  if (t === 'survey_submitted') return 'Survey submitted';
-  if (t === 'lit_dropped') return 'Lit dropped';
-  if (t === 'not_home') return 'Not home';
-  if (t === 'wrong_address') return 'Wrong address';
-  if (t === 'refused') return 'Refused';
-  if (t === 'restricted') return 'Restricted';
-  if (t === 'note_added') return 'Note added';
-  return t;
-}
 
 function actionColor(colors, t) {
   if (t === 'survey_submitted') return colors.status.surveyed;

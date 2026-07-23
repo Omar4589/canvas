@@ -1,5 +1,5 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { radius, spacing } from '../lib/theme';
+import { radius, spacing, ACTION_LABELS } from '../lib/theme';
 import { FAR_WARN_M } from '../lib/flags';
 import { formatDistance } from '../lib/geo';
 import { useTheme } from '../lib/ThemeContext';
@@ -18,15 +18,6 @@ const ACTION_TO_PIN = {
   note_added: 'unknocked',
 };
 
-const ACTION_LABEL = {
-  survey_submitted: 'Surveyed',
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  lit_dropped: 'Lit dropped',
-  restricted: 'Restricted',
-  note_added: 'Note added',
-};
 
 function timeOnly(ts) {
   if (!ts) return '';
@@ -61,7 +52,7 @@ export default function ActivityRow({ activity, onPress, showDate = false }) {
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.action}>
-          {ACTION_LABEL[a.actionType] || a.actionType}
+          {ACTION_LABELS[a.actionType] || a.actionType}
           {a.voter?.fullName ? ` · ${a.voter.fullName}` : ''}
           {a.voter?.party ? <Text style={styles.party}> ({a.voter.party})</Text> : null}
         </Text>

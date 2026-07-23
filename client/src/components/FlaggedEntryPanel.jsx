@@ -11,27 +11,8 @@ import {
 import FlagReasonBadges from './FlagReasonBadges.jsx';
 import FlagReviewControl from './FlagReviewControl.jsx';
 import FlagLegend from './FlagLegend.jsx';
+import { actionLabel } from '../lib/statusColors.js';
 
-function actionLabel(t) {
-  switch (t) {
-    case 'not_home':
-      return 'Not home';
-    case 'wrong_address':
-      return 'Wrong address';
-    case 'refused':
-      return 'Refused';
-    case 'restricted':
-      return 'Restricted';
-    case 'survey_submitted':
-      return 'Survey submitted';
-    case 'lit_dropped':
-      return 'Lit dropped';
-    case 'note_added':
-      return 'Note added';
-    default:
-      return t || '—';
-  }
-}
 
 // The Map's flagged-entry review panel. Mirrors CanvasserPingPanel's layout (action +
 // canvasser + time, house, distance, GPS accuracy) and adds the reason badges + the shared

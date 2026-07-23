@@ -14,21 +14,12 @@ import { api } from '../../../../../lib/api';
 import { loadActiveCampaign } from '../../../../../lib/cache';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { formatExact, timeAgo } from '../../../../../lib/datetime';
-import { radius, spacing } from '../../../../../lib/theme';
+import { radius, spacing, ACTION_LABELS } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import PinIcon from '../../../../../components/PinIcon';
 
-const ACTION_LABEL = {
-  survey_submitted: 'Survey',
-  not_home: 'Not home',
-  wrong_address: 'Wrong addr',
-  refused: 'Refused',
-  restricted: 'Restricted',
-  lit_dropped: 'Lit dropped',
-  note_added: 'Note',
-};
 const ACTION_PIN = {
   survey_submitted: 'surveyed',
   not_home: 'not_home',
@@ -117,7 +108,7 @@ export default function NotesScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.note}>“{n.note}”</Text>
                 <Text style={styles.meta}>
-                  {ACTION_LABEL[n.actionType] || n.actionType}
+                  {ACTION_LABELS[n.actionType] || n.actionType}
                   {n.voter?.fullName ? ` · ${n.voter.fullName}` : ''}
                 </Text>
                 {n.household ? (
