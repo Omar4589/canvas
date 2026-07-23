@@ -378,12 +378,16 @@ export default function SuperAdminHomePage() {
                   <ul className="mt-1 list-disc pl-5 text-xs text-fg-muted">
                     <li>All canvass activity, surveys, and flag reviews</li>
                     <li>Book assignments for both rounds (this is what repairs drift)</li>
-                    <li>The early-vote layer and the published client report</li>
+                    <li>The early-vote layer</li>
+                    <li>The client report&rsquo;s contents (a fresh weekly snapshot is published)</li>
                   </ul>
                   <p className="mt-3 font-semibold">Left alone</p>
                   <ul className="mt-1 list-disc pl-5 text-xs text-fg-muted">
                     <li>Doors, voters, and the books themselves</li>
-                    <li>The <code>/r/</code> share link and its password</li>
+                    <li>
+                      The share link &mdash; same URL and password; it always points to the
+                      campaign&rsquo;s latest report
+                    </li>
                     <li>
                       Review-account passwords — Apple and Google keep the credentials they
                       already have
