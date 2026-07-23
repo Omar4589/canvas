@@ -30,9 +30,19 @@ On any campaign you've been granted, you're as powerful as an admin:
 
 - Creating, archiving, or deleting a campaign
 - Billing and org settings
-- The org Users list and the org voter directory
+- The org voter directory
+- Changing anyone's **role**, name, or email — and managing admins or fellow leads
 - The survey template and tag libraries (you can *use* them, not edit them)
 - Granting the team-lead role
+
+## Your Users page (mobile)
+
+**More → Users** shows the people on *your* campaigns — never the whole organization. From there you
+can create canvassers onto a campaign (they're assigned automatically, with an optional coordinator),
+set a **temporary password** when someone's locked out, and switch a canvasser's account off and back
+on. Heads-up on the off-switch: an account is on or off for the **whole organization**, so if you
+share a canvasser with another campaign, switching them off reaches that campaign too — the app names
+what it affects before you confirm.
 
 ## Your day to day
 

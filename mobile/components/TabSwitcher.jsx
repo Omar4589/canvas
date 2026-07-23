@@ -8,9 +8,14 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 export default function TabSwitcher({ tabs, activeKey, onChange }) {
   const styles = useThemedStyles(makeStyles);
   return (
+    // flexGrow:0 — this component's root is a horizontal ScrollView dropped straight into
+    // screen flex columns; without it the pills stretched to fill leftover height (tall
+    // pills on empty screens) or got compressed below content height (clipped descenders,
+    // the Help-center screenshot bug).
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={{ flexGrow: 0 }}
       contentContainerStyle={styles.row}
     >
       {tabs.map((t) => {

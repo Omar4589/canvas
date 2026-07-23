@@ -90,7 +90,10 @@ in the app display in **feet**, switching to **miles** once a distance reaches a
   severity. Click a row to drill into just that person's flagged entries.
 - **The entries list** — one card per flagged door: who, the address, the time, the reason(s) with the
   actual number (e.g. *205 ft from house*, *8 s after the previous door*), and the review buttons. Each
-  card has a **"View on map"** link that jumps to the map focused on that exact entry.
+  card has a **"View on map"** link that jumps to the map focused on that exact entry — **on mobile
+  too**: the mobile audit card's link opens the admin map with the flag layer on, selects the entry
+  and flies to its GPS point (already-reviewed entries still focus — the map widens to all review
+  statuses while arriving). The mobile audit also **defaults to Today** (it opened on 30 days).
 
 Filter the list by flag type, by review status (Open / Reviewed / Dismissed / Confirmed), by walk
 list, or by date.

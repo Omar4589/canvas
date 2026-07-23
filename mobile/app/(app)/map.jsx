@@ -124,9 +124,10 @@ const LIT_DROP_FILTER_OPTIONS = [
 const SORT_OPTIONS = [
   { key: 'nearest', label: 'Nearest to me' },
   { key: 'walk', label: 'Walk order' },
+  { key: 'address', label: 'Address A–Z' },
   { key: 'status', label: 'Status' },
 ];
-const SORT_LABELS = { nearest: 'Nearest', walk: 'Walk order', status: 'Status' };
+const SORT_LABELS = { nearest: 'Nearest', walk: 'Walk order', address: 'Address A\u2013Z', status: 'Status' };
 
 function buildFeatureCollection(households) {
   return {
@@ -656,6 +657,7 @@ export default function MapScreen() {
         household: h,
         distanceM: distanceToCoords(userCoords, h.location?.coordinates),
         _walk: h.walkOrder ?? Infinity,
+        _addr: h.addressLine1 || '',
         _status: STATUS_ORDER[h.status || 'unknocked'] ?? 9,
       });
     }
@@ -667,6 +669,7 @@ export default function MapScreen() {
         building: b,
         distanceM: distanceToCoords(userCoords, b.coordinates),
         _walk: Math.min(...b.units.map((u) => u.walkOrder ?? Infinity)),
+        _addr: b.addressLine1 || '',
         _status: 0, // buildings sort to the top of a status sort (mixed)
       });
     }
@@ -676,6 +679,10 @@ export default function MapScreen() {
         return (a.distanceM ?? Infinity) - (b.distanceM ?? Infinity);
       }
       if (sortMode === 'status') return a._status - b._status || a._walk - b._walk;
+      // Address A→Z (item D16) — numeric-aware so "12 Oak St" sorts before "104 Oak St".
+      if (sortMode === 'address') {
+        return a._addr.localeCompare(b._addr, undefined, { numeric: true, sensitivity: 'base' }) || a._walk - b._walk;
+      }
       return a._walk - b._walk; // 'walk' (and 'nearest' fallback when no GPS fix)
     });
     return entries;

@@ -21,6 +21,7 @@ import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '..
 import PasswordInput from '../../../../components/PasswordInput';
 import { radius, spacing, ACTION_LABELS } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
+import { useConsoleRole } from '../../../../lib/useConsoleRole';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
 
@@ -60,6 +61,12 @@ export default function AdminUserDetail() {
   const qc = useQueryClient();
   const { id } = useLocalSearchParams();
   const userId = Array.isArray(id) ? id[0] : id;
+  // Lead capabilities on this page: read + temp password + deactivate for CANVASSER
+  // targets on their campaigns (server-enforced). Identity/role editing and campaign
+  // assignment stay admin-only, so those sections don't render for a lead at all.
+  const viewerRole = useConsoleRole();
+  const isAdminViewer = viewerRole !== 'lead';
+
 
   const [currentUser, setCurrentUser] = useState(null);
   useEffect(() => {
@@ -401,7 +408,8 @@ export default function AdminUserDetail() {
             </Text>
           </View>
 
-          {/* Profile form */}
+          {/* Profile form — identity + role editing is admin-only. */}
+          {isAdminViewer && (
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Profile</Text>
 
@@ -567,8 +575,11 @@ export default function AdminUserDetail() {
               )}
             </Pressable>
           </View>
+          )}
 
-          {/* Password — right under the profile/role section for quick access */}
+          {/* Password — right under the profile/role section for quick access.
+              A lead may set one only for canvasser accounts (their crew). */}
+          {(isAdminViewer || user.role === 'canvasser') && (
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Password</Text>
             <Pressable
@@ -620,8 +631,11 @@ export default function AdminUserDetail() {
               </View>
             )}
           </View>
+          )}
 
-          {/* Campaigns — assign this person to campaigns straight from their profile */}
+          {/* Campaigns — assign from the profile. Admin-only: a lead's creations are
+              auto-assigned, and leads never (un)assign (owner decision, item A5-C). */}
+          {isAdminViewer && (
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Campaigns</Text>
             {campaignsQ.isLoading || userCampaignsQ.isLoading ? (
@@ -666,6 +680,7 @@ export default function AdminUserDetail() {
               })()
             )}
           </View>
+          )}
 
           {/* Lifetime stats */}
           <View style={styles.card}>
@@ -751,8 +766,10 @@ export default function AdminUserDetail() {
             )}
           </View>
 
-          {/* Account actions — deactivate/reactivate lives at the bottom (danger zone). */}
-          {!isSelf && (
+          {/* Account actions — deactivate/reactivate lives at the bottom (danger zone).
+              A lead may switch only canvasser accounts (their crew); the server enforces
+              the same boundary. */}
+          {!isSelf && (isAdminViewer || user.role === 'canvasser') && (
             <View style={styles.card}>
               <Text style={styles.sectionLabel}>Account</Text>
               <Pressable

@@ -13,7 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
@@ -52,6 +52,8 @@ function billingTag(b) {
 export default function OrganizationsScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // Android's system nav bar overlaps bottom sheets without this inset (item D8).
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
@@ -285,7 +287,7 @@ export default function OrganizationsScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <Pressable style={styles.modalBackdrop} onPress={() => setShowCreate(false)}>
-            <Pressable style={styles.formSheet} onPress={(e) => e.stopPropagation()}>
+            <Pressable style={[styles.formSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]} onPress={(e) => e.stopPropagation()}>
               <CreateOrgForm
                 onSubmit={(body) => createMut.mutate(body)}
                 onCancel={() => setShowCreate(false)}

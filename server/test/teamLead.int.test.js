@@ -186,7 +186,10 @@ test('libraries: lead reads surveys/tags but cannot mutate them, and cannot reac
   assert.strictEqual((await call('POST', `/api/admin/surveys/${sid}/archive`, opt)).status, 403, 'archive survey');
   assert.strictEqual((await call('POST', `/api/admin/surveys/${sid}/unarchive`, opt)).status, 403, 'unarchive survey');
   assert.strictEqual((await call('DELETE', `/api/admin/surveys/${sid}`, opt)).status, 403, 'delete survey');
-  assert.strictEqual((await call('GET', '/api/admin/memberships', opt)).status, 403, 'org Users admin');
+  // Users is lead-VISIBLE since 2026-07-23 — scoped server-side to their campaigns'
+  // rosters. The full boundary matrix (list scoping, canvasser-only writes, ADMIN_ONLY
+  // routes) lives in leadUserManagement.int.test.js; here we just pin reachability.
+  assert.strictEqual((await call('GET', '/api/admin/memberships', opt)).status, 200, 'org Users (lead-scoped)');
   assert.strictEqual((await call('GET', '/api/admin/voters', opt)).status, 403, 'org voters');
 });
 
@@ -197,7 +200,8 @@ test('a role 403 carries code FORBIDDEN_ROLE', { skip }, async () => {
   // your org" (ORG_CONTEXT). Mobile uses it to notice a mid-session demotion; without it the
   // body is a bare {error:'Forbidden'} and no client can act on it. Covers both role gates:
   // requireOrgRole (org-level) and requireCampaignManager (campaign-level).
-  const orgLevel = await call('GET', '/api/admin/memberships', opt);
+  // (/admin/voters, not /admin/memberships — memberships is lead-visible since 2026-07-23.)
+  const orgLevel = await call('GET', '/api/admin/voters', opt);
   assert.strictEqual(orgLevel.status, 403);
   assert.strictEqual(orgLevel.json.code, 'FORBIDDEN_ROLE');
 

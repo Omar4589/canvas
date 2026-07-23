@@ -66,8 +66,9 @@ export default function AdminMore() {
   const styles = useThemedStyles(makeStyles);
   const [user, setUser] = useState(null);
   const [webNote, setWebNote] = useState(null);
-  // Team leads don't get the org Users admin (it's admin-only, and would 403). They
-  // manage their crew's book assignments from the campaign-scoped Books tab instead.
+  // Leads see the Users hub too — /admin/memberships is lead-scoped server-side to their
+  // campaigns' rosters, and their write set (temp password / deactivate, canvassers only)
+  // is enforced there. isLead still gates a few admin-only rows below.
   const [isLead, setIsLead] = useState(false);
 
   // Mock-GPS nudge on the GPS-audit row: SUM of open mock flags across every campaign
@@ -141,7 +142,7 @@ export default function AdminMore() {
 
         <Text style={styles.sectionLabel}>Manage</Text>
         <View style={styles.group}>
-          {!isLead && <Row icon="👥" label="Users" onPress={() => router.push('/(app)/admin/users')} />}
+          <Row icon="👥" label="Users" onPress={() => router.push('/(app)/admin/users')} />
           <Row icon="🚩" label="GPS audit" sub="Review flagged entries" badge={openMockTotal} onPress={() => router.push('/(app)/admin/audit')} />
           <Row icon="📝" label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
           <Row icon="🔁" label="Overlaps" sub="Doors two canvassers both knocked" onPress={() => router.push('/(app)/admin/overlaps')} />

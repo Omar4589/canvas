@@ -10,6 +10,7 @@ import { PRESETS, rangeFor, labelForRange, todayInTz, deviceTimezone } from '../
 import { spacing, radius } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
 import KpiGrid from '../../../components/KpiGrid';
@@ -38,6 +39,7 @@ function ymdSpanDays(from, to) {
 export default function AdminAudit() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const roleLabel = useConsoleRoleLabel();
   const router = useRouter();
   const qc = useQueryClient();
 
@@ -59,8 +61,9 @@ export default function AdminAudit() {
   const [userId, setUserId] = useState(''); // '' = all canvassers
   const [live, setLive] = useState(true);
   const [range, setRange] = useState(() => {
-    const r = rangeFor('30d', null, deviceTimezone());
-    return { preset: '30d', from: r.from, to: r.to };
+    const r = rangeFor('today', null, deviceTimezone());
+    // Default to TODAY (item D3) — the audit is a daily review; wider windows are one tap away.
+    return { preset: 'today', from: r.from, to: r.to };
   });
   const rangeTouchedRef = useRef(false);
 
@@ -71,15 +74,15 @@ export default function AdminAudit() {
     setReviewStatus('open');
     setUserId('');
     setLive(true);
-    const r = rangeFor('30d', null, tz);
-    setRange({ preset: '30d', from: r.from, to: r.to });
+    const r = rangeFor('today', null, tz);
+    setRange({ preset: 'today', from: r.from, to: r.to });
     rangeTouchedRef.current = false;
   }
 
   useEffect(() => {
     if (rangeTouchedRef.current) return;
-    const r = rangeFor('30d', null, tz);
-    setRange({ preset: '30d', from: r.from, to: r.to });
+    const r = rangeFor('today', null, tz);
+    setRange({ preset: 'today', from: r.from, to: r.to });
   }, [tz]);
   function onRangeChange(v) {
     rangeTouchedRef.current = true;
@@ -157,7 +160,7 @@ export default function AdminAudit() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Admin</Text>
+          <Text style={styles.back}>‹ {roleLabel}</Text>
         </Pressable>
         <Text style={styles.headerTitle}>GPS audit</Text>
         {/* Same width as the back button so the title stays centered; the (i) opens the
@@ -224,7 +227,19 @@ export default function AdminAudit() {
               </View>
             ) : (
               entries.map((e) => (
-                <FlaggedEntryCard key={e.actionId} entry={e} tz={tz} onReviewed={onReviewed} />
+                <FlaggedEntryCard
+                  key={e.actionId}
+                  entry={e}
+                  tz={tz}
+                  onReviewed={onReviewed}
+                  // "View on map" (item D4) — the web audit has this per entry; the map turns
+                  // its flag layer on, selects this entry, and flies to its GPS point.
+                  onViewOnMap={(entry) =>
+                    router.push(
+                      `/(app)/admin/map?flag=1&focusActivityId=${entry.actionId}&focusAt=${Date.now()}`
+                    )
+                  }
+                />
               ))
             )}
             {data.total > entries.length ? (

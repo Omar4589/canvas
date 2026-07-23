@@ -12,7 +12,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../../../lib/api';
-import { loadActiveCampaign } from '../../../../../lib/cache';
+import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
@@ -41,10 +41,10 @@ export default function ActivityFeed() {
   const params = useLocalSearchParams();
   const userId = params.id;
 
-  const [campaign, setCampaign] = useState(undefined);
-  useEffect(() => {
-    loadActiveCampaign().then((c) => setCampaign(c || null));
-  }, []);
+  // Threaded campaignId wins; the validated cache is the fallback — never the raw
+  // cache, which can hold a campaign a team lead doesn't manage (or be empty, which
+  // left every query disabled and the screen blank).
+  const campaign = useAdminCampaign(params.campaignId);
   const tz = campaign?.timeZone || deviceTimezone();
 
   const [range, setRange] = useState(() => {

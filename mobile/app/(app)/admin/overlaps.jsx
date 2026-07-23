@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,17 +8,18 @@ import {
   RefreshControl,
   StyleSheet,
 } from 'react-native';
-import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
-import { loadActiveCampaign } from '../../../lib/cache';
+import { useAdminCampaign } from '../../../lib/useAdminCampaign';
 import { rangeFor } from '../../../lib/dateRanges';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing, actionLabel } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 
 const PRESETS = [
   { key: 'today', label: 'Today' },
@@ -36,23 +37,17 @@ function actionColor(colors, t) {
 export default function AdminOverlaps() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const roleLabel = useConsoleRoleLabel();
   const router = useRouter();
   const params = useLocalSearchParams();
-  const [campaign, setCampaign] = useState(undefined);
   const [preset, setPreset] = useState(
     typeof params.preset === 'string' ? params.preset : 'today'
   );
 
-  // Re-sync on FOCUS, not once on mount: this is a hidden Tabs.Screen, so it stays mounted across
-  // navigations — a mount-once load showed the previous campaign's overlaps after switching orgs or
-  // campaigns and coming back. Same pattern as notes.jsx / audit.jsx.
-  useFocusEffect(
-    useCallback(() => {
-      loadActiveCampaign().then((c) =>
-        setCampaign((prev) => (String(c?.id) !== String(prev?.id) ? c || null : prev))
-      );
-    }, [])
-  );
+  // VALIDATED campaign context (focus-resynced): the raw cache can hold a campaign a team
+  // lead doesn't manage — the hook checks it against the lead-filtered /admin/campaigns
+  // list and returns null instead of leaking an unmanaged campaign's context here.
+  const campaign = useAdminCampaign();
 
   const cId = campaign?.id;
   // Anchor presets to the campaign's tz; the query is already gated on cId (campaign loaded),
@@ -84,7 +79,7 @@ export default function AdminOverlaps() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Admin</Text>
+          <Text style={styles.back}>‹ {roleLabel}</Text>
         </Pressable>
         <Text style={styles.headerTitle}>Overlaps</Text>
         <View style={{ width: 80 }} />
@@ -94,9 +89,13 @@ export default function AdminOverlaps() {
         Houses knocked by 2+ canvassers within the same pass.
       </Text>
 
+      {/* flexGrow:0 — without it this horizontal ScrollView flexes in the screen column:
+          it stretched the pills tall when the list was empty and clipped their descenders
+          when it was full (the screenshot bug). */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
         contentContainerStyle={styles.presetRow}
       >
         {PRESETS.map((p) => {
@@ -118,12 +117,20 @@ export default function AdminOverlaps() {
       </ScrollView>
 
       <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />
         }
       >
-        {overlapsQ.error ? (
+        {campaign === null ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>No campaign selected</Text>
+            <Text style={styles.emptyText}>
+              Pick a campaign you manage from the Overview, then come back here.
+            </Text>
+          </View>
+        ) : overlapsQ.error ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>Couldn't load overlaps: {overlapsQ.error.message}</Text>
             <Pressable onPress={() => overlapsQ.refetch()} hitSlop={6}>
@@ -155,7 +162,21 @@ export default function AdminOverlaps() {
             ) : null}
 
             {overlaps.map((o) => (
-              <View key={o.householdId} style={styles.card}>
+              <Pressable
+                key={o.householdId}
+                // Item D14 — each entry opens a detail screen with a map of the house.
+                // The whole entry threads through params so the detail renders instantly.
+                onPress={() =>
+                  router.push({
+                    pathname: `/(app)/admin/overlap/${o.householdId}`,
+                    params: {
+                      data: JSON.stringify(o),
+                      campaignId: cId,
+                      tz: campaign?.timeZone || '',
+                    },
+                  })
+                }
+                style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}>
                 <View style={styles.cardHead}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.address}>
@@ -208,7 +229,7 @@ export default function AdminOverlaps() {
                     </View>
                   </View>
                 ))}
-              </View>
+              </Pressable>
             ))}
           </>
         )}

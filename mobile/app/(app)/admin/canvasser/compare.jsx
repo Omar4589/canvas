@@ -11,7 +11,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueries } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
-import { loadActiveCampaign } from '../../../../lib/cache';
+import { useAdminCampaign } from '../../../../lib/useAdminCampaign';
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../lib/dateRanges';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
@@ -116,10 +116,9 @@ export default function Compare() {
     [params.ids]
   );
 
-  const [campaign, setCampaign] = useState(undefined);
-  useEffect(() => {
-    loadActiveCampaign().then((c) => setCampaign(c || null));
-  }, []);
+  // Threaded campaignId wins; the validated cache is the fallback — never the raw cache,
+  // which can hold a campaign a team lead doesn't manage.
+  const campaign = useAdminCampaign(params.campaignId);
 
   const tz = campaign?.timeZone || deviceTimezone();
 
@@ -291,6 +290,9 @@ export default function Compare() {
                   router.push({
                     pathname: `/(app)/admin/canvasser/${s.user.id}`,
                     params: {
+                      // The profile screen must not depend on the cached active campaign —
+                      // with an empty cache it white-screened (queries never enabled).
+                      ...(cId ? { campaignId: cId } : {}),
                       from: range.from || '',
                       to: range.to || '',
                       preset: range.preset,

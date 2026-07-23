@@ -45,16 +45,18 @@ timeline, insights, early voting, and client reports.
 - **Touch org-wide libraries** — the **survey template library** and the **tag library**. A lead can
   *read* both (to attach a survey to their campaign and to filter by tag) but not create/edit/delete
   templates or tags.
-- **The org Users administration, org settings, or the org voter directory.** A lead builds their crew
-  from their campaign's own **Team** tab instead (see below). That's not a consolation prize: a crew
-  belongs to a campaign, so the Team tab is where *everyone* — admins included — sets one. The org
-  Users page only *shows* a person's crews, one row per campaign, read-only.
+- **Org settings or the org voter directory.** Those stay admin-only.
+- **The org-WIDE Users view.** Since 2026-07-23 a lead **does** get the Users page — but scoped:
+  their list is exactly the people rostered on campaigns they manage, deduped, never the whole
+  organization. On that scoped list a lead can **set temporary passwords** and **switch accounts off
+  and back on**, for **canvasser accounts only** — never an admin, another lead, or Doorline staff
+  (the server refuses, not just the UI). Changing roles, creating org-level accounts, deleting, and
+  editing someone's identity (name/email/phone) remain admin-only.
 
-  **One exception, and it is a real one:** a lead can switch a **canvasser's** account off and back on
-  from their campaign's Team tab. That is *not* campaign-scoped — an account is either on or off for
-  the whole organization, so deactivating someone a lead shares with another campaign takes them out
-  of that campaign too. The app says which campaigns it reaches before you confirm, and the lead can
-  reverse it. A lead can never do this to an admin, another lead, or Doorline staff.
+  **The off-switch caveat is a real one:** deactivation is *not* campaign-scoped — an account is
+  either on or off for the whole organization, so switching off someone a lead shares with another
+  campaign takes them out of that campaign too. The app says which campaigns it reaches before you
+  confirm, and the lead can reverse it.
 - **Grant the team-lead role** or change anyone's grants — only admins do that.
 - **See or touch any campaign they weren't granted** — everything is default-deny; a lead with no
   grants sees an empty console.
@@ -72,10 +74,11 @@ until an admin grants one.
   campaigns they manage. Inside a campaign, every tab an admin sees is there. The org-only areas
   (Overview, Surveys, Tags, Voters, Users) simply aren't in their nav.
 - **Mobile admin app** — they get the same admin tab (Overview / Insights / Map / Books), scoped to
-  their campaigns. A campaign's **Team** tile opens that campaign's own crew + book assignments, which
-  a lead can use; the org-wide **Users** screen is a separate, admin-only place, and it isn't offered to
-  a lead at all. (If one reaches it anyway, it now says managing users is an admin task and points back
-  at the campaign Team screen — it used to read "No users yet".) If a lead also walks
+  their campaigns. **People management is one surface: More → Users** (the old standalone campaign
+  Team screen merged into it). A campaign's **Team** tile opens Users pre-filtered to that campaign.
+  There a lead sees their campaigns' people, creates canvassers (born assigned, with an optional
+  coordinator), sets temporary passwords, and switches canvasser accounts off/on — and never sees
+  assignment controls (their creations auto-assign; rostering is admin work). If a lead also walks
   doors, that's a separate thing: they're added to a campaign's walker roster like any canvasser and
   use the canvassing flow for their own books. When a lead switches into canvass mode, the drawer's
   **Admin dashboard** row brings them straight back.
@@ -193,8 +196,25 @@ Without it a lead could cut turf and hand out every book except their own: the c
 library (to attach a survey / filter by tag), but every mutation carries a per-route
 `requireOrgRole('admin')`.
 
-**Org-only, leads blocked** — `memberships` (org Users admin), `voters` (org voter directory), `queues`
-stay `requireOrgRole('admin')`.
+**Org-wide, lead-SCOPED** — `memberships` (the Users surface) is `('admin','lead')` since
+2026-07-23, with per-route boundaries inside
+([memberships.js](../server/src/routes/admin/memberships.js)):
+
+- `GET /` — a lead's list is filtered to `leadVisibleUserIds` (everyone holding a
+  `CampaignAssignment` on a campaign in their `managedCampaignIds` grant set; empty grants → empty
+  list, default-deny).
+- `PATCH /:userId/password`, `/deactivate`, `/reactivate` — allowed for a lead only when
+  `leadMayManageTarget` passes: the target's membership role is **`canvasser`** AND they share a
+  managed campaign. Fellow leads and admins are never manageable (privilege-escalation guard).
+- `GET /:userId/{crews,campaigns,stats,recent-activity}` — read drills allowed for any *visible*
+  target (`leadMaySeeTarget`), 403 outside the scope.
+- `POST /`, `PATCH /:userId` (role/grants/billing), `DELETE /:userId`, `PATCH /:userId/user`
+  (identity) — walled by `requireAdminRole` → `403 { code: 'ADMIN_ONLY' }`.
+- The whole matrix is pinned by
+  [`test/leadUserManagement.int.test.js`](../server/test/leadUserManagement.int.test.js).
+
+**Org-only, leads blocked** — `voters` (org voter directory) and `queues` stay
+`requireOrgRole('admin')`.
 
 > ⚠️ **One write on `leadCrew` is NOT campaign-shaped, and it is the only one.**
 > `PATCH .../crew/:userId/deactivate` and `.../reactivate` write `Membership.isActive`, and

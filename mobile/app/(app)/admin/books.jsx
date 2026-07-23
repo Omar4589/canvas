@@ -178,10 +178,13 @@ export default function AdminBooks() {
     () => new Set((rosterQ.data?.assignments || []).map((a) => String(a.userId))),
     [rosterQ.data]
   );
+  // ANY active, rostered member — not just canvassers. Admins and team leads on the
+  // campaign roster take books too (the web assign panel always offered them; the old
+  // role filter silently hid them from leads on mobile — item D12).
   const roster = useMemo(
     () =>
       (membersQ.data?.members || [])
-        .filter((m) => m.role === 'canvasser' && m.user?.isActive && m.isActive && rosterUserIds.has(String(m.user.id)))
+        .filter((m) => m.user?.isActive && m.isActive && rosterUserIds.has(String(m.user.id)))
         .map((m) => ({ id: String(m.user.id), firstName: m.user.firstName, lastName: m.user.lastName, email: m.user.email })),
     [membersQ.data, rosterUserIds]
   );
@@ -1035,7 +1038,7 @@ export default function AdminBooks() {
         ) : rosterWithSelf.length === 0 ? (
           <Empty styles={styles}>
             No canvassers are assigned to this campaign yet.{'\n'}
-            <Text style={styles.link} onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}>
+            <Text style={styles.link} onPress={() => router.push(`/(app)/admin/users?campaignId=${cId}`)}>
               Assign canvassers →
             </Text>
           </Empty>

@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -45,6 +46,8 @@ export default function SupportAccessGate() {
   const pending = useSupportAccessPrompt();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // Android's system nav bar overlaps bottom sheets without this inset (item D8).
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const qc = useQueryClient();
 
@@ -98,7 +101,7 @@ export default function SupportAccessGate() {
         {/* Backdrop press declines rather than dismissing — a sheet you can dismiss without
             leaving the org is the re-fire loop described above. */}
         <Pressable style={styles.modalBackdrop} onPress={decline}>
-          <Pressable style={styles.formSheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={[styles.formSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]} onPress={(e) => e.stopPropagation()}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={styles.formTitle}>
                 Start a support session in {pending.organizationName || 'this organization'}

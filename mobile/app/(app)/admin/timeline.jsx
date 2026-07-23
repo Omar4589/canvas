@@ -434,6 +434,9 @@ export default function AdminTimeline() {
     router.push({
       pathname: `/(app)/admin/canvasser/${r.userId}`,
       params: {
+        // The profile screen must not depend on the cached active campaign —
+        // with an empty cache it white-screened (queries never enabled).
+        ...(cId ? { campaignId: cId } : {}),
         ...(fromDay ? { from: fromDay } : {}),
         ...(range?.to ? { to: range.to } : {}),
         ...(range?.preset ? { preset: range.preset } : {}),
@@ -459,6 +462,7 @@ export default function AdminTimeline() {
     router.push({
       pathname: '/(app)/admin/canvasser/compare',
       params: {
+        ...(cId ? { campaignId: cId } : {}),
         ids: Array.from(selectedIds).join(','),
         from: fromDay || '',
         to: range?.to || '',

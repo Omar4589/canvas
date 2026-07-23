@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../lib/api';
 import { flushQueue, getPendingCount } from '../lib/offlineQueue';
 import { signOut } from '../lib/authState';
@@ -37,6 +38,8 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 export default function DeleteAccountSheet({ visible, onClose }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // Android's system nav bar overlaps bottom sheets without this inset (item D8).
+  const insets = useSafeAreaInsets();
 
   const [checking, setChecking] = useState(true);
   const [check, setCheck] = useState(null);
@@ -98,7 +101,7 @@ export default function DeleteAccountSheet({ visible, onClose }) {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.sheetWrap}
         >
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
             <View style={styles.grabber} />
             <Text style={styles.title}>Delete your account</Text>
 

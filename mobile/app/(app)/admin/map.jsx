@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tansta
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { useMapStyle } from '../../../lib/mapStyles';
@@ -212,6 +213,28 @@ function MenuItem({ label, active, dotColor, onPress }) {
   );
 }
 
+// The move-pin teardrop — mirrors the web's marker, kept red. 48px tall; the wrapper lifts
+// it by half its height so the pin TIP (not its center) marks the exact map center that
+// Save reads. Pure SVG (react-native-svg), no map annotation involved.
+function MovePinGlyph() {
+  return (
+    <View style={{ position: 'absolute', transform: [{ translateY: -24 }] }}>
+      <Svg width={36} height={48} viewBox="0 0 36 48">
+        {/* soft ground shadow under the tip */}
+        <Path d="M18 46c4 0 7-1 7-2.2S22 41.6 18 41.6 11 42.6 11 43.8 14 46 18 46Z" fill="rgba(0,0,0,0.25)" />
+        {/* teardrop body */}
+        <Path
+          d="M18 1C9.7 1 3 7.7 3 16c0 10.5 12.4 24.2 14.1 26.1a1.2 1.2 0 0 0 1.8 0C20.6 40.2 33 26.5 33 16 33 7.7 26.3 1 18 1Z"
+          fill="#dc2626"
+          stroke="#ffffff"
+          strokeWidth={2}
+        />
+        <Circle cx={18} cy={16} r={5.5} fill="#ffffff" />
+      </Svg>
+    </View>
+  );
+}
+
 export default function AdminMap() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -260,6 +283,10 @@ export default function AdminMap() {
   // The door's own campaign (from the deep link) — lets the focus effect safely give up
   // when THIS campaign has loaded without the door, without racing a campaign switch.
   const focusCid = one(params.hcid);
+  // Audit "View on map" deep-link: focus one flagged entry (?flag=1&focusActivityId=…).
+  // Read live (this screen stays mounted); consumed once focused, like the household link.
+  const flagFocusId = one(params.focusActivityId);
+  const flagFocusNonce = one(params.focusAt);
 
   // Audit filters — mirror the web admin map. Default to TODAY (like the web):
   // the map opens on today's activity; "All time" is one tap away in the preset
@@ -432,10 +459,13 @@ export default function AdminMap() {
 
   // GPS-audit flags overlay — OPEN (unresolved) flags for the current scope. Reviewing one
   // removes it from the layer (it's no longer open), matching the web map + the open-count model.
+  // EXCEPT while arriving on an audit "View on map" deep-link: the focused entry may already be
+  // reviewed, so the query widens to ALL statuses until the focus is consumed (web does the same).
   const flagsQ = useQuery({
-    queryKey: ['admin', 'flags-map', cId, range?.from, range?.to, canvasserId],
+    queryKey: ['admin', 'flags-map', cId, range?.from, range?.to, canvasserId, flagFocusId ? 'all' : 'open'],
     queryFn: () => {
-      const p = new URLSearchParams({ campaignId: String(cId), reviewStatus: 'open', limit: '500' });
+      const p = new URLSearchParams({ campaignId: String(cId), limit: '500' });
+      if (!flagFocusId) p.set('reviewStatus', 'open');
       if (range?.from) p.set('from', range.from);
       if (range?.to) p.set('to', range.to);
       if (canvasserId) p.set('userId', canvasserId);
@@ -663,6 +693,34 @@ export default function AdminMap() {
     return m;
   }, [flagEntries]);
   const selectedFlag = selectedFlagId ? flagsById.get(String(selectedFlagId)) : null;
+
+  // Consume the audit deep-link: switch the flag layer on, and once the entry is in the
+  // loaded set, select it + fly to its GPS point, then strip the params (this screen stays
+  // mounted, so a tab press would otherwise re-apply them forever). Mirrors the household
+  // focus effect above.
+  const focusedFlagRef = useRef(null);
+  useEffect(() => {
+    if (!flagFocusId) return;
+    const token = `${flagFocusId}:${flagFocusNonce}`;
+    if (focusedFlagRef.current === token) return;
+    if (!showFlags) {
+      setShowFlags(true);
+      return; // the flags query enables; this re-runs when entries arrive
+    }
+    const e = flagsById.get(String(flagFocusId));
+    if (e?.location?.lng != null && e?.location?.lat != null) {
+      setSelected(null);
+      setSelectedPing(null);
+      setSelectedFlagId(String(flagFocusId));
+      cameraRef.current?.setCamera({
+        centerCoordinate: [e.location.lng, e.location.lat],
+        zoomLevel: 17,
+        animationDuration: 600,
+      });
+      focusedFlagRef.current = token;
+      router.setParams({ flag: '', focusActivityId: '', focusAt: '' });
+    }
+  }, [flagFocusId, flagFocusNonce, showFlags, flagsById]);
 
   // Overlap doors → an amber ring on whichever loaded households are in the overlap set.
   // The endpoint returns ids only, so we intersect with the currently loaded (date/
@@ -1451,8 +1509,11 @@ export default function AdminMap() {
       {moveTarget && (
         <>
           <View pointerEvents="none" style={styles.crosshairWrap}>
-            <View style={styles.crosshairRing} />
-            <View style={styles.crosshairDot} />
+            {/* A web-style red teardrop pin (item D15) — the old small circle didn't read as
+                "a pin you're placing". Its TIP marks the exact map center, so the SVG is
+                shifted up by half its height; the mechanic (drag the map, not a marker)
+                stays — draggable annotations break pinch-zoom on Fabric. */}
+            <MovePinGlyph />
           </View>
           <SafeAreaView edges={['bottom']} style={styles.moveBar}>
             <Text style={styles.moveTitle}>Move pin</Text>
@@ -2091,22 +2152,6 @@ function makeStyles(t) {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  crosshairRing: {
-    position: 'absolute',
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 3,
-    borderColor: colors.brand,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  crosshairDot: {
-    position: 'absolute',
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.brand,
   },
   moveBar: {
     position: 'absolute',

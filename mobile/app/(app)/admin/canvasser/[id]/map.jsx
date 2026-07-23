@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../../../lib/api';
-import { loadActiveCampaign } from '../../../../../lib/cache';
+import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../../lib/config';
 import { initMapbox } from '../../../../../lib/mapbox';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
@@ -55,10 +55,10 @@ export default function MapScreen() {
   const params = useLocalSearchParams();
   const userId = params.id;
 
-  const [campaign, setCampaign] = useState(undefined);
-  useEffect(() => {
-    loadActiveCampaign().then((c) => setCampaign(c || null));
-  }, []);
+  // Threaded campaignId wins; the validated cache is the fallback — never the raw
+  // cache, which can hold a campaign a team lead doesn't manage (or be empty, which
+  // left every query disabled and the screen blank).
+  const campaign = useAdminCampaign(params.campaignId);
 
   const tz = campaign?.timeZone || deviceTimezone();
 

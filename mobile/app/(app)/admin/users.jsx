@@ -11,11 +11,14 @@ import {
   Platform,
   Modal,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import PasswordInput from '../../../components/PasswordInput';
+import MemberSheet from '../../../components/MemberSheet';
+import CreateCanvasserSheet from '../../../components/CreateCanvasserSheet';
+import { useConsoleRole, useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../lib/validators';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -55,7 +58,7 @@ function initials(name) {
     .toUpperCase();
 }
 
-function UserCard({ user, onPress }) {
+function UserCard({ user, onPress, assigned, coordinatorName }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const name = `${user.firstName} ${user.lastName}`.trim();
@@ -99,9 +102,24 @@ function UserCard({ user, onPress }) {
                   : { color: colors.textSecondary },
               ]}
             >
-              {user.role === 'admin' ? 'admin' : 'canvasser'}
+              {user.role === 'admin' ? 'admin' : user.role === 'lead' ? 'team lead' : 'canvasser'}
             </Text>
           </View>
+          {/* Campaign-scoped extras: assigned state + coordinator (the merged Team view). */}
+          {assigned !== undefined && (
+            <View style={[styles.pill, assigned ? styles.pillSuccess : styles.pillNeutral]}>
+              <Text style={[styles.pillText, { color: assigned ? colors.success : colors.textMuted }]}>
+                {assigned ? 'assigned' : 'not assigned'}
+              </Text>
+            </View>
+          )}
+          {coordinatorName ? (
+            <View style={[styles.pill, styles.pillNeutral]}>
+              <Text style={[styles.pillText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {coordinatorName}
+              </Text>
+            </View>
+          ) : null}
           <View
             style={[
               styles.pill,
@@ -148,8 +166,14 @@ function FilterPill({ active, label, onPress }) {
 export default function AdminUsers() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // Android's system nav bar overlaps bottom sheets without this inset (item D8).
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const qc = useQueryClient();
+  const params = useLocalSearchParams();
+  const viewerRole = useConsoleRole(); // 'super' | 'admin' | 'lead'
+  const roleLabel = useConsoleRoleLabel();
+  const isLead = viewerRole === 'lead';
   const [showCreate, setShowCreate] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -158,10 +182,63 @@ export default function AdminUsers() {
   const [sortMode, setSortMode] = useState('name-asc');
   const [sortPickerOpen, setSortPickerOpen] = useState(false);
 
+  // ── The people hub's campaign filter (the old campaign Team page merged in here). ──
+  // '' = all campaigns (org view). Seeded from ?campaignId= (a campaign's "Team" quick
+  // action lands pre-filtered). Leads land on their first managed campaign by default so
+  // create/coordinator actions are always available to them.
+  const [campaignFilter, setCampaignFilter] = useState(() =>
+    typeof params.campaignId === 'string' ? params.campaignId : ''
+  );
+  const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
+  const activeCampaigns = useMemo(
+    () => (campaignsQ.data?.campaigns || []).filter((c) => c.isActive),
+    [campaignsQ.data]
+  );
+  useEffect(() => {
+    if (isLead && !campaignFilter && activeCampaigns.length) {
+      setCampaignFilter(String(activeCampaigns[0]._id));
+    }
+  }, [isLead, campaignFilter, activeCampaigns]);
+  const cId = campaignFilter || null;
+  const selectedCampaign = cId
+    ? (() => {
+        const c = activeCampaigns.find((x) => String(x._id) === String(cId));
+        return c ? { id: String(c._id), name: c.name, type: c.type } : null;
+      })()
+    : null;
+
+  // /admin/memberships is now lead-scoped server-side (their campaigns' rosters, deduped).
   const usersQ = useQuery({
     queryKey: ['admin', 'memberships'],
     queryFn: () => api('/admin/memberships'),
   });
+
+  // Campaign context: the roster (assigned state + coordinator) + who can BE a coordinator.
+  const assignmentsQ = useQuery({
+    queryKey: ['admin', 'campaign-assignments', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/assignments`),
+    enabled: !!cId,
+  });
+  const rosterByUser = useMemo(() => {
+    const m = new Map();
+    for (const a of assignmentsQ.data?.assignments || []) {
+      m.set(String(a.userId), {
+        coordinatorId: a.coordinatorId ? String(a.coordinatorId) : null,
+        coordinatorName: a.coordinatorName || null,
+        status: a.status,
+      });
+    }
+    return m;
+  }, [assignmentsQ.data]);
+  const coordinators = useMemo(
+    () =>
+      (usersQ.data?.members || [])
+        .filter((m) => (m.role === 'admin' || m.role === 'lead') && m.user.isActive && m.isActive)
+        .map((m) => ({ id: String(m.user.id), name: `${m.user.firstName} ${m.user.lastName}`.trim() })),
+    [usersQ.data]
+  );
+
+  const [sheetUserId, setSheetUserId] = useState(null);
 
   const createUser = useMutation({
     mutationFn: (body) => api('/admin/memberships', { method: 'POST', body }),
@@ -170,6 +247,21 @@ export default function AdminUsers() {
       setShowCreate(false);
     },
   });
+  // Campaign-scoped create (auto-assigns; accepts coordinatorId) — admins pass
+  // requireCampaignManager too, so BOTH roles create through here when a campaign is picked.
+  const createOnCampaign = useMutation({
+    mutationFn: (body) => api(`/admin/campaigns/${cId}/crew`, { method: 'POST', body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cId] });
+      setShowCreate(false);
+    },
+  });
+  const assignAll = useMutation({
+    mutationFn: (userIds) => api(`/admin/campaigns/${cId}/assignments`, { method: 'POST', body: { userIds } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] }),
+  });
 
   const users = useMemo(
     () =>
@@ -177,6 +269,7 @@ export default function AdminUsers() {
         ...m.user,
         role: m.role,
         isActive: m.isActive && m.user.isActive,
+        membershipActive: m.isActive,
         addedAt: m.addedAt,
       })),
     [usersQ.data]
@@ -204,8 +297,15 @@ export default function AdminUsers() {
     // Can't be repointed either: lastSeenAt is super-admin-only and absent from /admin/memberships.
     else if (sortMode === 'recent-signin')
       list.sort((a, b) => compareDate(a, b, 'lastLoginAt'));
+    // Campaign scoped: tag assigned state, then partition the campaign's people first (a
+    // stable partition, so the chosen sort still orders each half); the rest of the org
+    // follows so an admin can assign them from the sheet.
+    if (cId) {
+      list = list.map((u) => ({ ...u, assigned: rosterByUser.has(String(u.id)) }));
+      list = [...list.filter((u) => u.assigned), ...list.filter((u) => !u.assigned)];
+    }
     return list;
-  }, [users, search, roleFilter, statusFilter, sortMode]);
+  }, [users, search, roleFilter, statusFilter, sortMode, cId, rosterByUser]);
 
   const sortLabel = SORT_OPTIONS.find((s) => s.key === sortMode)?.label;
 
@@ -213,12 +313,13 @@ export default function AdminUsers() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Admin</Text>
+          <Text style={styles.back} numberOfLines={1}>‹ {roleLabel}</Text>
         </Pressable>
         <Text style={styles.headerTitle}>Users</Text>
         {/* Offering "+ New" to somebody the server just refused only produces a second 403 inside
-            the create sheet. If listing is forbidden, so is adding. */}
-        {usersQ.error?.code === 'FORBIDDEN_ROLE' ? (
+            the create sheet. A LEAD creates through a campaign (auto-assigned), so their button
+            needs a campaign selected — which the default-select effect guarantees. */}
+        {usersQ.error?.code === 'FORBIDDEN_ROLE' || (isLead && !cId) ? (
           <View style={{ width: 44 }} />
         ) : (
           <Pressable onPress={() => setShowCreate(true)} hitSlop={8}>
@@ -237,9 +338,29 @@ export default function AdminUsers() {
           autoCapitalize="none"
           autoCorrect={false}
         />
+        {/* Campaign filter — the merged Team page's scope. Admins get an org-wide "All". */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0 }}
+          contentContainerStyle={styles.filterRow}
+        >
+          {!isLead && (
+            <FilterPill active={!campaignFilter} label="All campaigns" onPress={() => setCampaignFilter('')} />
+          )}
+          {activeCampaigns.map((c) => (
+            <FilterPill
+              key={String(c._id)}
+              active={campaignFilter === String(c._id)}
+              label={c.name}
+              onPress={() => setCampaignFilter(String(c._id))}
+            />
+          ))}
+        </ScrollView>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0 }}
           contentContainerStyle={styles.filterRow}
         >
           <FilterPill
@@ -251,6 +372,11 @@ export default function AdminUsers() {
             active={roleFilter === 'admin'}
             label="Admins"
             onPress={() => setRoleFilter('admin')}
+          />
+          <FilterPill
+            active={roleFilter === 'lead'}
+            label="Team leads"
+            onPress={() => setRoleFilter('lead')}
           />
           <FilterPill
             active={roleFilter === 'canvasser'}
@@ -303,7 +429,7 @@ export default function AdminUsers() {
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
               {usersQ.error?.code === 'FORBIDDEN_ROLE'
-                ? 'Managing users is an admin task. You can manage your own campaigns’ crews from a campaign’s Team screen.'
+                ? 'Your account can’t view users in this organization.'
                 : 'Could not load users. Pull to retry, or check your connection.'}
             </Text>
           </View>
@@ -316,15 +442,77 @@ export default function AdminUsers() {
             </Text>
           </View>
         ) : (
-          visibleUsers.map((u) => (
-            <UserCard
-              key={u.id}
-              user={u}
-              onPress={() => router.push(`/(app)/admin/users/${u.id}`)}
-            />
-          ))
+          <>
+            {/* Bulk assign — admin, campaign scoped (ported from the Team page). */}
+            {cId && !isLead && visibleUsers.some((u) => !u.assigned) ? (
+              <Pressable
+                onPress={() => assignAll.mutate(visibleUsers.filter((u) => !u.assigned).map((u) => u.id))}
+                style={styles.bulkBtn}
+                disabled={assignAll.isPending}
+              >
+                <Text style={styles.bulkBtnText}>
+                  {assignAll.isPending
+                    ? 'Assigning…'
+                    : `Assign all shown (${visibleUsers.filter((u) => !u.assigned).length})`}
+                </Text>
+              </Pressable>
+            ) : null}
+            {visibleUsers.map((u) => (
+              <UserCard
+                key={u.id}
+                user={u}
+                assigned={cId ? u.assigned : undefined}
+                coordinatorName={cId ? rosterByUser.get(String(u.id))?.coordinatorName : undefined}
+                // Campaign scoped → the member sheet (campaign actions); org view → full page.
+                onPress={() => (cId ? setSheetUserId(u.id) : router.push(`/(app)/admin/users/${u.id}`))}
+              />
+            ))}
+          </>
         )}
       </ScrollView>
+
+      {/* Member sheet — campaign-scoped actions for the tapped person. */}
+      {sheetUserId && selectedCampaign
+        ? (() => {
+            const u = users.find((x) => String(x.id) === String(sheetUserId));
+            if (!u) return null;
+            const roster = rosterByUser.get(String(u.id));
+            return (
+              <MemberSheet
+                member={{
+                  role: u.role,
+                  isActive: u.isActive,
+                  status: roster?.status || (u.membershipActive ? 'active' : 'deactivated'),
+                  coordinatorId: roster?.coordinatorId || null,
+                  coordinatorName: roster?.coordinatorName || null,
+                  assigned: !!roster,
+                  user: { id: String(u.id), firstName: u.firstName, lastName: u.lastName, email: u.email },
+                }}
+                campaign={selectedCampaign}
+                coordinators={coordinators}
+                viewerRole={viewerRole}
+                onClose={() => setSheetUserId(null)}
+                onChanged={() => {
+                  qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
+                  qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
+                  qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cId] });
+                }}
+              />
+            );
+          })()
+        : null}
+
+      {/* Campaign-scoped create (both roles; coordinator picker included). */}
+      {showCreate && cId ? (
+        <CreateCanvasserSheet
+          campaignName={selectedCampaign?.name}
+          coordinators={coordinators}
+          onClose={() => setShowCreate(false)}
+          onCreate={(body) => createOnCampaign.mutate(body)}
+          submitting={createOnCampaign.isPending}
+          error={createOnCampaign.error}
+        />
+      ) : null}
 
       {/* Sort picker */}
       <Modal
@@ -338,7 +526,7 @@ export default function AdminUsers() {
           onPress={() => setSortPickerOpen(false)}
         >
           <Pressable
-            style={styles.actionSheet}
+            style={[styles.actionSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}
             onPress={(e) => e.stopPropagation()}
           >
             <Text style={styles.actionSheetTitle}>Sort users</Text>
@@ -379,10 +567,11 @@ export default function AdminUsers() {
         </Pressable>
       </Modal>
 
-      {/* Create user modal */}
+      {/* Org-level create (no campaign selected — admins only; role picker, no coordinator:
+          a crew is a per-campaign fact, there is no campaign here to be on a crew of). */}
       <Modal
         transparent
-        visible={showCreate}
+        visible={showCreate && !cId}
         animationType="slide"
         onRequestClose={() => setShowCreate(false)}
       >
@@ -395,7 +584,7 @@ export default function AdminUsers() {
             onPress={() => setShowCreate(false)}
           >
             <Pressable
-              style={styles.formSheet}
+              style={[styles.formSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}
               onPress={(e) => e.stopPropagation()}
             >
               <CreateUserForm
@@ -659,7 +848,18 @@ function makeStyles(t) {
     alignItems: 'center',
     gap: spacing.xs,
     paddingRight: spacing.lg,
+    marginBottom: spacing.xs,
   },
+  bulkBtn: {
+    backgroundColor: colors.brandTint,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.brand,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  bulkBtnText: { color: colors.brand, fontWeight: '700' },
   filterDivider: {
     width: 1,
     alignSelf: 'stretch',

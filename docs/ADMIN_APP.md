@@ -89,9 +89,16 @@ own disposition** (green only where *they* surveyed, etc.), exactly like the web
 [MAPS.md](MAPS.md).
 
 ### The More hub
-- **Manage:** Users; **GPS audit** ([AUDIT.md](AUDIT.md)); **Notes** — the campaign Notes hub, door/
-  survey/admin notes in one feed ([NOTES.md](NOTES.md)); Voter search; Switch to canvass mode. (More
-  management screens — Campaigns, Efforts, Walk lists, Surveys — are coming.)
+- **Manage:** **Users — the one people surface** (all roles incl. team leads, who see it scoped to
+  their campaigns): a campaign filter chip scopes the list; the old standalone campaign Team screen
+  merged in here, so a campaign's "Team" tile lands pre-filtered. Rows open a member sheet —
+  campaign KPIs, a **Coordinator dropdown**, recent doors (each taps through to the live map, "See
+  all" opens the paged activity screen), temp password, assign/unassign (admins), deactivate/
+  reactivate. The Add sheet creates a canvasser straight onto the selected campaign with an optional
+  **coordinator** picked at birth. **GPS audit** ([AUDIT.md](AUDIT.md)) — defaults to Today, each
+  entry has "View on map"; **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)); **Overlaps** —
+  entries open a detail screen with a map of the house and "Open on live map"; Voter search; Switch
+  to canvass mode.
 - **On the web:** CSV import, Early voting, Turf cutting — these open a short note (managed on the web
   dashboard; file uploads / turf drawing aren't mobile-friendly).
 - **Appearance**, and **Account** (Platform view for super admins, Switch organization, Sign out).

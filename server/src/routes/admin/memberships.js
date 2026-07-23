@@ -11,6 +11,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { isOrgAdmin, managedCampaignIds } from '../../services/authz/campaignManagement.js';
 import {
   createOrgMember,
   MemberError,
@@ -29,8 +30,12 @@ import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js'
 import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
 import { phoneSchema, nameSchema, emailSchema, passwordSchema as passwordField } from '../../utils/validators.js';
 
+// Team leads reach this router too — READ scoped to their campaigns' rosters, and a narrow
+// write set (temp password / deactivate / reactivate, CANVASSER targets only). Every other
+// write stays admin-only via requireAdminRole below. Default-deny throughout: a lead with
+// zero grants sees nobody and can touch nobody.
 const router = Router();
-router.use(requireAuth, orgContext, requireOrgRole('admin'));
+router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 // A support-grant holder is a VENDOR in this organization, not a member — orgContext set req.supportGrant
 // precisely because they have no membership here. They may READ team data to do support, but they must
@@ -50,6 +55,53 @@ router.use((req, res, next) => {
   }
   next();
 });
+
+// The routes a lead may never touch (create, role/grants, delete, identity edits).
+function requireAdminRole(req, res, next) {
+  if (isOrgAdmin(req)) return next();
+  return res.status(403).json({ error: 'Only an org admin can do this.', code: 'ADMIN_ONLY' });
+}
+
+// The users a LEAD may see: everyone rostered on a campaign they hold a CampaignManager
+// grant for. Empty grant set → empty visibility (default-deny).
+async function leadVisibleUserIds(req) {
+  const campaignIds = await managedCampaignIds(req);
+  if (!campaignIds.length) return new Set();
+  const rows = await CampaignAssignment.find(
+    { organizationId: req.activeOrg._id, campaignId: { $in: campaignIds } },
+    'userId'
+  ).lean();
+  return new Set(rows.map((r) => String(r.userId)));
+}
+
+// May this LEAD manage (temp-password / deactivate / reactivate) the target account?
+// Only CANVASSER accounts rostered on a campaign the lead manages — never a fellow lead,
+// never an admin (that would be privilege escalation: a lead deactivating the admin who
+// granted them access). Owner decision 2026-07-23.
+async function leadMayManageTarget(req, userId) {
+  if (!mongoose.isValidObjectId(userId)) return false;
+  const target = await Membership.findOne(
+    { userId, organizationId: req.activeOrg._id },
+    'role'
+  ).lean();
+  if (!target || target.role !== 'canvasser') return false;
+  const campaignIds = await managedCampaignIds(req);
+  if (!campaignIds.length) return false;
+  const shared = await CampaignAssignment.exists({
+    organizationId: req.activeOrg._id,
+    userId,
+    campaignId: { $in: campaignIds },
+  });
+  return Boolean(shared);
+}
+
+// Read guard for the per-user drill routes (/crews, /campaigns, /stats, /recent-activity):
+// a lead may look at anyone VISIBLE to them (any role, read-only); writes stay narrower.
+async function leadMaySeeTarget(req, userId) {
+  if (!mongoose.isValidObjectId(userId)) return false;
+  const visible = await leadVisibleUserIds(req);
+  return visible.has(String(userId));
+}
 
 const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 
@@ -132,7 +184,12 @@ router.get('/', async (req, res, next) => {
       .populate({ path: 'userId' })
       .sort({ createdAt: -1 })
       .lean();
-    const members = memberships.filter((m) => m.userId);
+    let members = memberships.filter((m) => m.userId);
+    // A lead's list is their campaigns' rosters, deduped — not the whole org.
+    if (!isOrgAdmin(req)) {
+      const visible = await leadVisibleUserIds(req);
+      members = members.filter((m) => visible.has(String(m.userId._id)));
+    }
 
     // How many active orgs each member belongs to GLOBALLY — so the UI can lock
     // the login-email field for multi-org users. We expose only a boolean, never
@@ -183,7 +240,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', async (req, res, next) => {
+router.post('/', requireAdminRole, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
@@ -273,6 +330,9 @@ router.get('/:userId/crews', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    if (!isOrgAdmin(req) && !(await leadMaySeeTarget(req, req.params.userId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     const orgId = activeOrgId(req);
     const rows = await CampaignAssignment.find(
       { userId: req.params.userId, organizationId: orgId },
@@ -309,7 +369,7 @@ router.get('/:userId/crews', async (req, res, next) => {
   }
 });
 
-router.patch('/:userId', async (req, res, next) => {
+router.patch('/:userId', requireAdminRole, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.userId)) {
@@ -412,7 +472,7 @@ router.patch('/:userId', async (req, res, next) => {
   }
 });
 
-router.delete('/:userId', async (req, res, next) => {
+router.delete('/:userId', requireAdminRole, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.userId)) {
@@ -451,7 +511,7 @@ router.delete('/:userId', async (req, res, next) => {
   }
 });
 
-router.patch('/:userId/user', async (req, res, next) => {
+router.patch('/:userId/user', requireAdminRole, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.userId)) {
@@ -511,6 +571,11 @@ router.patch('/:userId/password', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    // A lead may reset only a CANVASSER on a campaign they manage — never a fellow
+    // lead or an admin.
+    if (!isOrgAdmin(req) && !(await leadMayManageTarget(req, req.params.userId))) {
+      return res.status(403).json({ error: 'You can only reset passwords for canvassers on your campaigns.' });
+    }
     const membership = await Membership.findOne({
       userId: req.params.userId,
       organizationId: activeOrgId(req),
@@ -556,6 +621,11 @@ router.patch('/:userId/password', async (req, res, next) => {
 router.patch('/:userId/deactivate', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    // Same lead boundary as /password. The write is still org-wide by design (Membership
+    // has no campaignId) — the disclosure lives in the leadCrew variant's alsoAffects.
+    if (!isOrgAdmin(req) && !(await leadMayManageTarget(req, req.params.userId))) {
+      return res.status(403).json({ error: 'You can only deactivate canvassers on your campaigns.' });
+    }
     const existing = await Membership.findOne({ userId: req.params.userId, organizationId: activeOrgId(req) });
     if (!existing) return res.status(404).json({ error: 'Membership not found' });
     if (await isLastBillingAdmin(existing)) {
@@ -582,6 +652,9 @@ router.patch('/:userId/deactivate', async (req, res, next) => {
 router.patch('/:userId/reactivate', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    if (!isOrgAdmin(req) && !(await leadMayManageTarget(req, req.params.userId))) {
+      return res.status(403).json({ error: 'You can only reactivate canvassers on your campaigns.' });
+    }
     // Reactivating a deleted user's membership would put a tombstone back on the roster and
     // back into the team headcount. The login stays shut either way (auth gates on
     // deletedAt), but the org should never see them offered as assignable again.
@@ -609,6 +682,9 @@ router.get('/:userId/campaigns', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid user id' });
     }
+    if (!isOrgAdmin(req) && !(await leadMaySeeTarget(req, req.params.userId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     const rows = await CampaignAssignment.find(
       { userId: req.params.userId, organizationId: activeOrgId(req) },
       { campaignId: 1 }
@@ -624,6 +700,9 @@ router.get('/:userId/stats', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid user id' });
+    }
+    if (!isOrgAdmin(req) && !(await leadMaySeeTarget(req, req.params.userId))) {
+      return res.status(403).json({ error: 'Forbidden' });
     }
     const orgId = activeOrgId(req);
     const userId = new mongoose.Types.ObjectId(req.params.userId);
@@ -714,6 +793,9 @@ router.get('/:userId/recent-activity', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid user id' });
+    }
+    if (!isOrgAdmin(req) && !(await leadMaySeeTarget(req, req.params.userId))) {
+      return res.status(403).json({ error: 'Forbidden' });
     }
     const orgId = activeOrgId(req);
     const userId = new mongoose.Types.ObjectId(req.params.userId);

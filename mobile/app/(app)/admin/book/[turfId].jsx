@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../../lib/api';
@@ -42,6 +42,8 @@ const STATUS_LABEL = {
 export default function AdminBookDetail() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // Android's system nav bar overlaps bottom sheets without this inset (item D8).
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const qc = useQueryClient();
   const { styleURL } = useMapStyle();
@@ -118,10 +120,13 @@ export default function AdminBookDetail() {
     () => new Set((rosterQ.data?.assignments || []).map((a) => String(a.userId))),
     [rosterQ.data]
   );
+  // ANY active, rostered member — not just canvassers. Admins and team leads on the
+  // campaign roster take books too (the web assign panel always offered them; the old
+  // role filter silently hid them from leads on mobile — item D12).
   const roster = useMemo(
     () =>
       (membersQ.data?.members || [])
-        .filter((m) => m.role === 'canvasser' && m.user?.isActive && m.isActive && rosterUserIds.has(String(m.user.id)))
+        .filter((m) => m.user?.isActive && m.isActive && rosterUserIds.has(String(m.user.id)))
         .map((m) => ({ id: String(m.user.id), firstName: m.user.firstName, lastName: m.user.lastName, email: m.user.email })),
     [membersQ.data, rosterUserIds]
   );
@@ -449,7 +454,7 @@ export default function AdminBookDetail() {
       {/* House tap detail */}
       <Modal visible={!!selectedId} transparent animationType="slide" onRequestClose={() => setSelectedId(null)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setSelectedId(null)}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]} onPress={() => {}}>
             <Text style={styles.sheetTitle}>
               {selectedHome?.addressLine1 || houseQ.data?.household?.addressLine1 || 'Address'}
             </Text>
@@ -489,7 +494,7 @@ export default function AdminBookDetail() {
             {rosterWithSelf.length === 0 ? (
               <Text style={styles.sheetSub}>
                 No canvassers assigned to this campaign yet.{'\n'}
-                <Text style={styles.link} onPress={() => router.push(`/(app)/admin/campaign-assignments/${cId}`)}>
+                <Text style={styles.link} onPress={() => router.push(`/(app)/admin/users?campaignId=${cId}`)}>
                   Assign canvassers →
                 </Text>
               </Text>

@@ -11,7 +11,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../../../lib/api';
-import { loadActiveCampaign } from '../../../../../lib/cache';
+import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../../lib/dateRanges';
 import { formatRange, timeAgo } from '../../../../../lib/datetime';
 import { rateFromPct } from '../../../../../lib/rates';
@@ -56,10 +56,10 @@ export default function CanvasserOverview() {
   const params = useLocalSearchParams();
   const userId = params.id;
 
-  const [campaign, setCampaign] = useState(undefined);
-  useEffect(() => {
-    loadActiveCampaign().then((c) => setCampaign(c || null));
-  }, []);
+  // Threaded campaignId wins; the validated cache is the fallback — never the raw
+  // cache, which can hold a campaign a team lead doesn't manage (or be empty, which
+  // left every query disabled and the screen blank).
+  const campaign = useAdminCampaign(params.campaignId);
 
   const tz = campaign?.timeZone || deviceTimezone();
 
@@ -212,7 +212,22 @@ export default function CanvasserOverview() {
     );
   }
 
-  if (!range || summaryQ.isLoading) {
+  // No campaign to scope by (nothing threaded AND nothing valid in the cache): say so
+  // instead of rendering nothing — this exact state used to be a blank white screen.
+  if (campaign === null) {
+    return (
+      <SafeAreaView style={styles.screen} edges={['top']}>
+        <Header onBack={() => router.back()} />
+        <View style={styles.loading}>
+          <Text style={{ color: colors.textSecondary, textAlign: 'center', paddingHorizontal: spacing.xl }}>
+            No campaign selected. Open a campaign from the Overview, then view this canvasser from there.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (campaign === undefined || !range || summaryQ.isLoading) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
         <Header onBack={() => router.back()} />
@@ -236,7 +251,18 @@ export default function CanvasserOverview() {
     );
   }
 
-  if (!s) return null;
+  // A settled query with no payload (deleted user, empty response) — an explicit empty
+  // state, never a bare null (that rendered as a white screen).
+  if (!s) {
+    return (
+      <SafeAreaView style={styles.screen} edges={['top']}>
+        <Header onBack={() => router.back()} />
+        <View style={styles.loading}>
+          <Text style={{ color: colors.textSecondary }}>No data for this canvasser.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const fullName =
     `${s.user.firstName || ''} ${s.user.lastName || ''}`.trim() || s.user.email;
@@ -330,7 +356,8 @@ export default function CanvasserOverview() {
           onSeeAll={() =>
             router.push({
               pathname: `/(app)/admin/canvasser/${userId}/days`,
-              params: { from: range.from || '', to: range.to || '', preset: range.preset },
+              params: {
+                ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
             })
           }
         />
@@ -343,7 +370,8 @@ export default function CanvasserOverview() {
               onPress={() =>
                 router.push({
                   pathname: `/(app)/admin/canvasser/${userId}/day/${d.date}`,
-                  params: { preset: range.preset },
+                  params: {
+                    ...(campaign?.id ? { campaignId: campaign.id } : {}), preset: range.preset },
                 })
               }
               style={({ pressed }) => [styles.dayRow, pressed && { opacity: 0.7 }]}
@@ -386,7 +414,8 @@ export default function CanvasserOverview() {
               onSeeAll={() =>
                 router.push({
                   pathname: `/(app)/admin/canvasser/${userId}/answers`,
-                  params: { from: range.from || '', to: range.to || '', preset: range.preset },
+                  params: {
+                    ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
                 })
               }
             />
@@ -416,7 +445,8 @@ export default function CanvasserOverview() {
           onSeeAll={() =>
             router.push({
               pathname: `/(app)/admin/canvasser/${userId}/quality`,
-              params: { from: range.from || '', to: range.to || '', preset: range.preset },
+              params: {
+                ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
             })
           }
         />
@@ -451,7 +481,8 @@ export default function CanvasserOverview() {
             onPress={() =>
               router.push({
                 pathname: `/(app)/admin/canvasser/${userId}/activity`,
-                params: { from: range.from || '', to: range.to || '', preset: range.preset },
+                params: {
+                  ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
               })
             }
           />
@@ -461,7 +492,8 @@ export default function CanvasserOverview() {
             onPress={() =>
               router.push({
                 pathname: `/(app)/admin/canvasser/${userId}/households`,
-                params: { from: range.from || '', to: range.to || '', preset: range.preset },
+                params: {
+                  ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
               })
             }
           />
@@ -472,7 +504,8 @@ export default function CanvasserOverview() {
               onPress={() =>
                 router.push({
                   pathname: `/(app)/admin/canvasser/${userId}/voters`,
-                  params: { from: range.from || '', to: range.to || '', preset: range.preset },
+                  params: {
+                    ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
                 })
               }
             />
@@ -483,7 +516,8 @@ export default function CanvasserOverview() {
             onPress={() =>
               router.push({
                 pathname: `/(app)/admin/canvasser/${userId}/notes`,
-                params: { from: range.from || '', to: range.to || '', preset: range.preset },
+                params: {
+                  ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
               })
             }
           />
@@ -493,7 +527,8 @@ export default function CanvasserOverview() {
             onPress={() =>
               router.push({
                 pathname: `/(app)/admin/canvasser/${userId}/map`,
-                params: { from: range.from || '', to: range.to || '', preset: range.preset },
+                params: {
+                  ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
               })
             }
           />

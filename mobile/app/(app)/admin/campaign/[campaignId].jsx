@@ -274,7 +274,7 @@ export default function CampaignDetail() {
       <SafeAreaView style={styles.screen} edges={['top']}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} hitSlop={8}>
-            <Text style={styles.back}>‹ Overview</Text>
+            <Text style={styles.back} numberOfLines={1}>‹ Overview</Text>
           </Pressable>
         </View>
         <View style={styles.centered}>
@@ -288,7 +288,7 @@ export default function CampaignDetail() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Overview</Text>
+          <Text style={styles.back} numberOfLines={1}>‹ Overview</Text>
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{campaign?.name || 'Campaign'}</Text>
         <View style={{ width: 64 }} />
@@ -436,6 +436,9 @@ export default function CampaignDetail() {
                   router.push({
                     pathname: `/(app)/admin/canvasser/${c.userId}`,
                     params: {
+                      // The profile screen must not depend on the cached active campaign —
+                      // with an empty cache it white-screened (queries never enabled).
+                      campaignId: cId,
                       ...(range?.from ? { from: range.from } : {}),
                       ...(range?.to ? { to: range.to } : {}),
                       ...(range?.preset ? { preset: range.preset } : {}),
@@ -519,11 +522,10 @@ export default function CampaignDetail() {
                 { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
                 { label: 'GPS audit', subtitle: 'Review flagged entries', badge: campaign?.openMockFlags || 0, onPress: goAudit },
                 { label: 'Notes', subtitle: 'Door, survey & admin notes', onPress: goNotes },
-                // "Team", not "Users" — the campaign's own crew, which is what belongs on a campaign
-                // screen and is the one people surface a team lead can actually reach. The org Users
-                // admin is a separate, admin-only place (see more.jsx); routing here used to send a
-                // lead into it, where /admin/memberships 403s and the screen read "No users yet".
-                { label: 'Team', subtitle: 'Crew & assignments', onPress: () => router.push(`/(app)/admin/campaign-assignments/${cId}`) },
+                // "Team" opens the Users hub pre-filtered to this campaign — the old
+                // standalone Team page merged into Users (one people surface, lead-scoped
+                // server-side, so it is safe for every console role).
+                { label: 'Team', subtitle: 'Crew & assignments', onPress: () => router.push(`/(app)/admin/users?campaignId=${cId}`) },
               ]}
             />
           </View>
@@ -551,7 +553,8 @@ function makeStyles(t) {
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  back: { color: colors.brand, fontWeight: '600', fontSize: 14, width: 64 },
+  // No fixed 64px width — "‹ Overview" wrapped to "‹ Overvie / w" inside it (screenshot bug).
+  back: { color: colors.brand, fontWeight: '600', fontSize: 14, flexShrink: 0 },
   headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
@@ -603,8 +606,17 @@ function makeStyles(t) {
     alignItems: 'center',
   },
   statTileValue: { ...type.h2, fontSize: 20, fontVariant: ['tabular-nums'], color: colors.textPrimary },
-  statTileLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
-  statTileLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textAlign: 'center' },
+  // paddingHorizontal + a shrinkable label keep the (i) dot clear of the tile border —
+  // it used to sit flush against the edge on two-line labels (screenshot bug, item D1).
+  statTileLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: 2,
+    paddingHorizontal: spacing.sm,
+  },
+  statTileLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textAlign: 'center', flexShrink: 1 },
 
   coverageSummary: { ...type.caption, marginBottom: spacing.sm, color: colors.textPrimary, fontWeight: '600' },
 

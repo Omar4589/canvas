@@ -247,6 +247,9 @@ export async function computeOverlaps(match, { organizationId, limit = 200 } = {
           city: h.city,
           state: h.state,
           zipCode: h.zipCode,
+          // Kept in the same shape as /overlap-doors above ("one card component renders
+          // both surfaces") — the mobile overlap detail draws its map from this.
+          location: h.location || null,
         },
         passes: [],
         canvasserSet: new Set(),

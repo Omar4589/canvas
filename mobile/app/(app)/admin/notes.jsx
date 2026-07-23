@@ -19,6 +19,7 @@ import { PRESETS, rangeFor, labelForRange, todayInTz, deviceTimezone } from '../
 import { spacing, radius } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
 import SourceChips from '../../../components/SourceChips';
@@ -39,6 +40,7 @@ const SOURCES = [
 export default function AdminNotes() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const roleLabel = useConsoleRoleLabel();
   const router = useRouter();
 
   // Campaign scoping via CampaignChip (like Timeline/Map/Audit). This hidden Tabs
@@ -206,7 +208,7 @@ export default function AdminNotes() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>‹ Admin</Text>
+          <Text style={styles.back}>‹ {roleLabel}</Text>
         </Pressable>
         <Text style={styles.headerTitle}>Notes</Text>
         <View style={{ width: 80 }} />
