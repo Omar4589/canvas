@@ -37,5 +37,6 @@ Don't like the layout, or the voter list changed? If the books are still drafts,
 
 - Added a few new addresses? Use **Add as new book** to cut only the doors not yet in any book — no recut, no downtime.
 - Reshape a book or two with **move**, **merge**, or **split**.
+- A book gated off? **Mark restricted** — and if only *part* of it is out of reach, mark **just the untouched doors**, leaving the ones your crew already reached alone. See [The Turf Cutting page](page-turf-cutting).
 
 > Tip: Knocks follow the *door*, not the book — so moving, merging, or splitting never changes your [coverage or knock counts](coverage-vs-knocks).

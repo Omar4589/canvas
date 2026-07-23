@@ -322,17 +322,18 @@ export default function AdminBooks() {
     if (mapSheetBookId) qc.invalidateQueries({ queryKey: ['admin', 'book-households', cId, mapSheetBookId] });
   };
   const restrictMut = useMutation({
-    mutationFn: (turfIds) =>
-      api(`/admin/campaigns/${cId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds } }),
+    mutationFn: ({ turfIds, scope }) =>
+      api(`/admin/campaigns/${cId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds, scope } }),
     onSuccess: (res) => {
       invalidateRestrict();
       setSelectMode(false);
       setSelectedBooks(new Set());
       const skips = res.skipped || {};
-      const skipNote =
-        (skips.completed || 0) + (skips.alreadyRestricted || 0) > 0
-          ? `\nSkipped ${skips.completed || 0} completed · ${skips.alreadyRestricted || 0} already restricted.`
-          : '';
+      const parts = [];
+      if (skips.completed) parts.push(`${skips.completed} completed`);
+      if (skips.alreadyRestricted) parts.push(`${skips.alreadyRestricted} already restricted`);
+      if (skips.reached) parts.push(`${skips.reached} reached left as-is`);
+      const skipNote = parts.length ? `\nSkipped ${parts.join(' · ')}.` : '';
       Alert.alert('Marked restricted', `${res.marked} door${res.marked === 1 ? '' : 's'} marked.${skipNote}`);
     },
     onError: onAssignError,
@@ -350,14 +351,49 @@ export default function AdminBooks() {
 
   function confirmRestrictBooks(bookList) {
     const ids = bookList.map((b) => b.id);
-    const totalDoors = bookList.reduce((s, b) => s + (b.doors || 0), 0);
     const label = bookList.length === 1 ? `“${bookList[0].name}”` : `${bookList.length} books`;
+    // Per-round status counts (from /turfs/progress) → how many doors the crew already reached
+    // (not-home / refused / wrong-address) vs. never touched.
+    let unknocked = 0;
+    let reached = 0;
+    for (const b of bookList) {
+      const sc = progressByTurf.get(b.id)?.statusCounts;
+      if (!sc) continue;
+      unknocked += sc.unknocked || 0;
+      reached += (sc.not_home || 0) + (sc.wrong_address || 0) + (sc.refused || 0);
+    }
+    const incomplete = unknocked + reached;
+
+    // Only offer the scope choice when the crew has actually reached some doors — otherwise the
+    // two scopes are identical and it's just the old single confirm.
+    if (reached > 0) {
+      Alert.alert(
+        `Mark ${label} restricted?`,
+        `Your crew already reached ${reached} door${reached === 1 ? '' : 's'} here. Restrict which doors? ` +
+          `Restricted doors go slate and stay out of every rate and knock count. Reversible.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: `Every unfinished (${incomplete})`,
+            style: 'destructive',
+            onPress: () => restrictMut.mutate({ turfIds: ids, scope: 'incomplete' }),
+          },
+          {
+            text: `Only unknocked (${unknocked})`,
+            onPress: () => restrictMut.mutate({ turfIds: ids, scope: 'unknocked' }),
+          },
+        ]
+      );
+      return;
+    }
+
+    const totalDoors = bookList.reduce((s, b) => s + (b.doors || 0), 0);
     Alert.alert(
       `Mark ${label} restricted?`,
       `~${totalDoors} doors get a Restricted Access mark — canvassers see them slate and they stay out of every rate and knock count. Doors completed this round keep their result; already-restricted doors are skipped. Reversible.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Mark restricted', style: 'destructive', onPress: () => restrictMut.mutate(ids) },
+        { text: 'Mark restricted', style: 'destructive', onPress: () => restrictMut.mutate({ turfIds: ids, scope: 'incomplete' }) },
       ]
     );
   }

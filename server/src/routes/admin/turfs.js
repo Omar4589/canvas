@@ -713,6 +713,14 @@ router.post('/restrict-bulk', async (req, res, next) => {
   try {
     const tids = (req.body?.turfIds || []).filter((id) => mongoose.isValidObjectId(id));
     if (!tids.length) return res.status(400).json({ error: 'turfIds required' });
+    // scope decides which unfinished doors get marked:
+    //   'incomplete' (default, backward-compatible) — every door not surveyed/lit-dropped/restricted,
+    //     i.e. INCLUDING the ones the crew reached (not-home / refused / wrong-address). Use when the
+    //     whole book is inaccessible (a gated community).
+    //   'unknocked' — ONLY doors nobody has touched this round; every reached door keeps its status
+    //     and its knock. Use when the crew worked part of the book and only the untouched remainder
+    //     is inaccessible.
+    const scope = req.body?.scope === 'unknocked' ? 'unknocked' : 'incomplete';
     const turfs = await Turf.find(
       { _id: { $in: tids }, campaignId: req.campaign._id },
       { passId: 1, householdIds: 1, status: 1, name: 1 }
@@ -727,7 +735,9 @@ router.post('/restrict-bulk', async (req, res, next) => {
 
     const now = new Date();
     let marked = 0;
-    const skipped = { completed: 0, alreadyRestricted: 0, ineligible: 0 };
+    // `reached` = doors left alone under scope 'unknocked' because the crew already reached them
+    // (not-home / refused / wrong-address). Always 0 under 'incomplete'.
+    const skipped = { completed: 0, alreadyRestricted: 0, ineligible: 0, reached: 0 };
     const perTurf = [];
     const touched = [];
     const rows = [];
@@ -752,6 +762,13 @@ router.post('/restrict-bulk', async (req, res, next) => {
       let turfMarked = 0;
       for (const hh of eligibleDoors) {
         const s = statusMap.get(String(hh._id))?.status || 'unknocked';
+        // scope 'unknocked': leave every door the crew reached exactly as it is (this also
+        // subsumes the completed/restricted skips below, but count them there for a truthful
+        // breakdown rather than lumping them into `reached`).
+        if (scope === 'unknocked' && s !== 'unknocked' && s !== 'surveyed' && s !== 'lit_dropped' && s !== 'restricted') {
+          skipped.reached += 1;
+          continue;
+        }
         if (s === 'surveyed' || s === 'lit_dropped') {
           skipped.completed += 1; // a done door keeps its result
           continue;

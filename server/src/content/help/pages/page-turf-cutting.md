@@ -26,6 +26,16 @@ Status colors appear on their own once the round has knocks. While you're still 
 
 Switch rounds with the **Pass** dropdown at the top right — the colors, the counts, and the bar all follow the round you pick. The page doesn't refresh on its own; reload it to see the latest.
 
+## Marking a book restricted
+
+If a whole book is behind a gate you can't get into, select it and choose **Mark restricted…** — every
+unfinished door goes slate, stays out of your rates and knock counts, and the next cut can leave it out.
+
+If the crew has already worked *part* of the book, you'll be asked which doors to mark: **only the
+untouched ones** (the default when there's reached work — it leaves every door your crew already got to,
+like not-homes and refusals, exactly as it is) or **every door not yet done**. Doors already surveyed
+keep their result either way, and you can **Unmark restricted** to undo.
+
 ## Every house sits inside its book's shape
 
 Each book's shaded shape **contains all of that book's houses**, and shapes never overlap. So the shape a house sits in, the ring around its dot, and its popup all name the same book.

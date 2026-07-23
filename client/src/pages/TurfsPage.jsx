@@ -394,12 +394,36 @@ function PassPicker({ campaignId, passId, onChange }) {
 // Typed-confirm for the bulk restricted mark/unmark — a whole gated community in
 // one action. Mirrors DiscardModal's contract; the skip rules are stated so the
 // admin knows completed and already-restricted doors keep their result.
-function RestrictModal({ mode, books, pending, error, onCancel, onConfirm }) {
+// Sum a status key across the selected books' per-round statusCounts (from /turfs/progress).
+function sumStatus(books, progressByTurf, keys) {
+  let n = 0;
+  for (const b of books) {
+    const sc = progressByTurf?.get(String(b._id))?.statusCounts;
+    if (!sc) continue;
+    for (const k of keys) n += sc[k] || 0;
+  }
+  return n;
+}
+
+function RestrictModal({ mode, books, progressByTurf, pending, error, onCancel, onConfirm }) {
   const [confirmText, setConfirmText] = useState('');
   const marking = mode === 'mark';
   const totalDoors = books.reduce((s, b) => s + (b.eligibleDoorCount ?? b.doorCount ?? 0), 0);
   const bulkMarks = books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
+
+  // Live per-scope counts from the progress the page already loaded. "Reached" = doors the crew
+  // touched but didn't complete (not-home / refused / wrong-address). When there are any, offer a
+  // choice and default to leaving them alone.
+  const unknockedCount = sumStatus(books, progressByTurf, ['unknocked']);
+  const incompleteCount = sumStatus(books, progressByTurf, ['unknocked', 'not_home', 'wrong_address', 'refused']);
+  const reachedCount = Math.max(0, incompleteCount - unknockedCount);
+  const hasProgress = progressByTurf && progressByTurf.size > 0;
+  const showScope = marking && hasProgress && reachedCount > 0;
+  const [scope, setScope] = useState(reachedCount > 0 ? 'unknocked' : 'incomplete');
+
+  const chosenCount = scope === 'unknocked' ? unknockedCount : incompleteCount;
   const typedOk = !marking || confirmText.trim().toLowerCase() === 'restrict';
+
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={onCancel}>
       <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -409,13 +433,62 @@ function RestrictModal({ mode, books, pending, error, onCancel, onConfirm }) {
             : 'Remove bulk restricted marks?'}
         </h3>
         {marking ? (
-          <p className="mt-2 text-sm text-fg-muted">
-            Every eligible door in {books.length === 1 ? 'this book' : 'these books'} (~
-            {totalDoors.toLocaleString()}) gets a <strong>Restricted Access</strong> mark — canvassers see them
-            slate, they stay out of every rate and knock count, and the next cut can exclude them. Doors already{' '}
-            <strong>completed this round</strong> keep their result; doors already restricted are skipped. Reversible
-            via <strong>Unmark restricted</strong>, and a canvasser can re-disposition any door in the field.
-          </p>
+          showScope ? (
+            <>
+              <p className="mt-2 text-sm text-fg-muted">
+                Your crew already reached {reachedCount.toLocaleString()} door{reachedCount === 1 ? '' : 's'} in{' '}
+                {books.length === 1 ? 'this book' : 'these books'}. Choose which doors to mark{' '}
+                <strong>Restricted Access</strong> — canvassers see them slate, they stay out of every rate and knock
+                count, and the next cut can exclude them.
+              </p>
+              <div className="mt-3 space-y-2">
+                <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border-strong p-2.5 hover:bg-sunken">
+                  <input
+                    type="radio"
+                    name="restrict-scope"
+                    checked={scope === 'unknocked'}
+                    onChange={() => setScope('unknocked')}
+                    className="mt-0.5"
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium text-fg">Only unknocked doors ({unknockedCount.toLocaleString()})</span>
+                    <span className="mt-0.5 block text-xs text-fg-muted">
+                      Leaves the {reachedCount.toLocaleString()} door{reachedCount === 1 ? '' : 's'} your crew reached
+                      (not-home, refused) exactly as they are.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border-strong p-2.5 hover:bg-sunken">
+                  <input
+                    type="radio"
+                    name="restrict-scope"
+                    checked={scope === 'incomplete'}
+                    onChange={() => setScope('incomplete')}
+                    className="mt-0.5"
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium text-fg">Every door not yet done ({incompleteCount.toLocaleString()})</span>
+                    <span className="mt-0.5 block text-xs text-fg-muted">
+                      Also marks the {reachedCount.toLocaleString()} reached-but-unfinished door
+                      {reachedCount === 1 ? '' : 's'} — for a whole inaccessible book.
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <p className="mt-2 text-xs text-fg-subtle">
+                Completed doors keep their result; already-restricted doors are skipped. Reversible via{' '}
+                <strong>Unmark restricted</strong>.
+              </p>
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-fg-muted">
+              Every eligible door in {books.length === 1 ? 'this book' : 'these books'} (~
+              {totalDoors.toLocaleString()}) gets a <strong>Restricted Access</strong> mark — canvassers see them
+              slate, they stay out of every rate and knock count, and the next cut can exclude them. Doors already{' '}
+              <strong>completed this round</strong> keep their result; doors already restricted are skipped. Reversible
+              via <strong>Unmark restricted</strong>, and a canvasser can re-disposition any door in the field.
+            </p>
+          )
         ) : (
           <p className="mt-2 text-sm text-fg-muted">
             Removes the {bulkMarks.toLocaleString()} bulk mark{bulkMarks === 1 ? '' : 's'} this action created in the
@@ -443,11 +516,17 @@ function RestrictModal({ mode, books, pending, error, onCancel, onConfirm }) {
             Cancel
           </button>
           <button
-            onClick={onConfirm}
+            onClick={() => onConfirm(scope)}
             disabled={pending || !typedOk}
             className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
           >
-            {pending ? 'Working…' : marking ? 'Mark restricted' : 'Remove marks'}
+            {pending
+              ? 'Working…'
+              : marking
+              ? showScope
+                ? `Restrict ${chosenCount.toLocaleString()} door${chosenCount === 1 ? '' : 's'}`
+                : 'Mark restricted'
+              : 'Remove marks'}
           </button>
         </div>
       </div>
@@ -1106,15 +1185,17 @@ export default function TurfsPage() {
   });
   // Bulk restricted — whole gated communities in one action (docs/PASSES_AND_TURF.md).
   const restrictBulk = useMutation({
-    mutationFn: (turfIds) =>
-      api(`/admin/campaigns/${campaignId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds } }),
+    mutationFn: ({ turfIds, scope }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds, scope } }),
     onSuccess: (res) => {
       setShowRestrict(null);
       const skips = res.skipped || {};
-      const skipNote =
-        (skips.completed || 0) + (skips.alreadyRestricted || 0) > 0
-          ? ` · skipped ${skips.completed || 0} completed, ${skips.alreadyRestricted || 0} already restricted`
-          : '';
+      const parts = [];
+      if (skips.completed) parts.push(`${skips.completed} completed`);
+      if (skips.alreadyRestricted) parts.push(`${skips.alreadyRestricted} already restricted`);
+      // Doors the crew reached, left untouched under the "only unknocked" scope.
+      if (skips.reached) parts.push(`${skips.reached} reached left as-is`);
+      const skipNote = parts.length ? ` · ${parts.join(', ')}` : '';
       setRestrictResult(`Marked ${res.marked} door${res.marked === 1 ? '' : 's'} restricted${skipNote}.`);
       invalidateCut();
       qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
@@ -2088,12 +2169,15 @@ export default function TurfsPage() {
         <RestrictModal
           mode={showRestrict}
           books={selectedTurfs}
+          progressByTurf={progressByTurf}
           pending={restrictBulk.isPending || unrestrictBulk.isPending}
           error={showRestrict === 'mark' ? restrictBulk.error : unrestrictBulk.error}
           onCancel={() => setShowRestrict(null)}
-          onConfirm={() =>
-            (showRestrict === 'mark' ? restrictBulk : unrestrictBulk).mutate(selectedTurfs.map((t) => String(t._id)))
-          }
+          onConfirm={(scope) => {
+            const turfIds = selectedTurfs.map((t) => String(t._id));
+            if (showRestrict === 'mark') restrictBulk.mutate({ turfIds, scope });
+            else unrestrictBulk.mutate(turfIds);
+          }}
         />
       )}
 

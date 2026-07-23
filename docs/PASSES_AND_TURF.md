@@ -99,18 +99,32 @@ never automatic: turn it off to include them (e.g. if access has since opened up
 counterpart to the field marker — the field records "can't get in," the admin decides per round whether
 to keep trying.
 
-**Marking a whole book restricted (bulk).** When an entire book is inaccessible (a gated community),
+**Marking a book restricted (bulk).** When part or all of a book is inaccessible (a gated community),
 select it on the Turf Cutting page, or on mobile open its **⋯** menu (the Books map's promoted-book
 sheet, or the book detail screen reached from List view) — **Mark restricted…** —
-`POST .../turfs/restrict-bulk { turfIds[] }` creates a real restricted activity row per eligible door
-(`via: 'bulk'`, the acting admin's user, the house's own coordinates, the book's round), so canvassers
-see the slate doors **immediately** in their round view and the excludeRestricted toggle above catches
-the whole community on the next cut. Doors **completed this round** are skipped (they keep their
-result), already-restricted doors are skipped (idempotent), and field rows are never deleted — a
-canvasser can still re-disposition any door, which supersedes the bulk mark. **Unmark restricted (N)**
-(`POST .../turfs/unrestrict-bulk`) deletes only the bulk-created rows and recomputes statuses; field
-marks survive. Bulk rows are excluded from per-canvasser stats and the GPS audit — see
-[METRICS.md](METRICS.md).
+`POST .../turfs/restrict-bulk { turfIds[], scope? }` creates a real restricted activity row per
+targeted door (`via: 'bulk'`, the acting admin's user, the house's own coordinates, the book's round),
+so canvassers see the slate doors **immediately** in their round view and the excludeRestricted toggle
+above catches them on the next cut.
+
+**Two scopes, because a book is often only *partly* inaccessible.** If the crew already worked some of
+the book, you usually don't want to relabel the doors they reached:
+
+- **`unknocked`** — mark **only the doors nobody has touched this round**. Every door the crew reached
+  (not-home / refused / wrong-address) keeps its status and its knock. This is the default in the UI
+  **whenever there are any reached doors**, and it's the case where only the untouched remainder of a
+  book is gated.
+- **`incomplete`** (the request default when `scope` is omitted) — mark **every door not yet done**,
+  including the reached-but-unfinished ones. Use when the whole book is inaccessible. On a fully
+  untouched book the two scopes are identical.
+
+Both scopes always **skip doors completed this round** (they keep their result) and **already-restricted
+doors** (idempotent); field rows are never deleted — a canvasser can still re-disposition any door,
+which supersedes the bulk mark. The response's `skipped` breakdown carries `{ completed,
+alreadyRestricted, ineligible, reached }` — `reached` counts the doors left alone under `unknocked`.
+**Unmark restricted (N)** (`POST .../turfs/unrestrict-bulk`) deletes only the bulk-created rows and
+recomputes statuses; field marks survive. Bulk rows are excluded from per-canvasser stats and the GPS
+audit — see [METRICS.md](METRICS.md).
 
 Books are first created as **drafts** — nothing reaches canvassers until you **accept** them (drafts →
 published). Re-cut freely until then; a **Discard** snapshots the layout so it's always recoverable.
