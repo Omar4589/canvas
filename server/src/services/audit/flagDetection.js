@@ -46,16 +46,31 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
   }
 
   // House pins + address (one query) — for the one-spot house-spread guard and to attach
-  // address/geometry to every entry without a second fetch.
+  // address/geometry to every entry without a second fetch. The correction provenance
+  // (coordSource/correctedAt/correctedBy) rides along for the far pin-downgrade — see §B.7;
+  // drop those three from this projection and the downgrade silently stops firing while every
+  // unit test that passes an empty pinFixMap keeps passing.
   const householdIds = [...new Set(rows.map((r) => String(r.householdId)))];
   const households = await Household.find(
     { _id: { $in: householdIds }, organizationId },
-    'addressLine1 addressLine2 city state zipCode location'
+    'addressLine1 addressLine2 city state zipCode location coordSource correctedAt correctedBy'
   ).lean();
   const hInfoMap = new Map(households.map((h) => [String(h._id), h]));
   const pinMap = new Map(households.map((h) => [String(h._id), pinLngLat(h)]));
+  // Corrected pins only. `coordSource === 'corrected'` is load-bearing, not belt-and-braces: a
+  // re-import with overwriteHandEdits puts the file's coordinate back and resets coordSource but
+  // never clears correctedAt/correctedBy (services/import/csvImporter.js), so correctedAt alone
+  // would claim "the pin was moved here" about a pin that is now the file's again.
+  const pinFixMap = new Map(
+    households
+      .filter((h) => h.coordSource === 'corrected' && h.correctedAt && pinLngLat(h))
+      .map((h) => [
+        String(h._id),
+        { ...pinLngLat(h), correctedAt: h.correctedAt, correctedBy: h.correctedBy ? String(h.correctedBy) : null },
+      ])
+  );
 
-  const { acc, byUser } = computeReasons(rows, pinMap, thresholds);
+  const { acc, byUser } = computeReasons(rows, pinMap, thresholds, pinFixMap);
 
   // Join persisted review decisions (absent = open).
   const flaggedIds = [...acc.keys()];
@@ -127,9 +142,14 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
 
 // PURE detection core (no DB) — exported for unit testing. `rows` are lean CanvassActivity
 // docs (time-sorted per user is fine but not required — grouped + sorted here); `pinMap` maps
-// householdId string → {lng,lat}|null. Returns { acc, byUser } where acc is
-// Map<actionIdStr, { row, reasons: Map<type, reason> }>.
-export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS) {
+// householdId string → {lng,lat}|null. `pinFixMap` carries correction provenance for the far
+// pin-downgrade — householdId string → {lng, lat, correctedAt, correctedBy}, corrected pins
+// only. It is a SEPARATE map rather than richer pinMap values on purpose: pinMap values are
+// shipped verbatim to the client as entry.household.location, so folding correctedBy in would
+// start leaking a raw User id the API has never carried. Defaults empty, so the three-arg
+// callers (every unit test but the two one-spot ones) behave exactly as before.
+// Returns { acc, byUser } where acc is Map<actionIdStr, { row, reasons: Map<type, reason> }>.
+export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS, pinFixMap = new Map()) {
   const T = thresholds;
   const acc = new Map();
   const addReason = (row, reason) => {
@@ -234,6 +254,36 @@ export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS) {
                 detail.downgraded = true;
                 detail.nearestMeters = near.distanceFromHouseMeters;
                 detail.minutesSinceNearest = Math.round(sinceNearMin);
+              }
+            }
+          }
+          // Pin-correction downgrade. `distanceFromHouseMeters` is frozen against the pin as it
+          // stood at knock time, so an approximate pin (street centroid, interpolated address)
+          // flags an honest canvasser who really did walk to the door — permanently, because
+          // moving the pin later touches no ledger row. If the pin was corrected AFTER this
+          // knock and the GPS turns out to sit beside the corrected pin, that is the exoneration.
+          //
+          // ONLY EVER DOWNGRADES. The block lives inside `if (farSev)` and assigns nothing but
+          // 'low', so a pin dragged AWAY can never manufacture or worsen a flag — nobody should
+          // be graded on an edit they didn't make and (since pins are lead/admin-only) couldn't.
+          const fix = pinFixMap.get(String(r.householdId));
+          if (fix && !missing && new Date(fix.correctedAt) > new Date(r.timestamp)) {
+            // haversineMeters is LAT-FIRST per point; `fix` carries named lat/lng (never a
+            // positional GeoJSON pair) so this call can't be silently transposed. Rounded to
+            // match how the write path stamps distanceFromHouseMeters.
+            const liveM = Math.round(haversineMeters(r.location.lat, r.location.lng, fix.lat, fix.lng));
+            detail.pinCorrectedMeters = liveM;
+            detail.pinCorrectedAt = fix.correctedAt;
+            if (Math.max(0, liveM - (acc_m ?? 0)) <= T.FAR_WARN_M) {
+              if (fix.correctedBy && fix.correctedBy === String(r.userId)) {
+                // The flagged canvasser moved the pin themselves. Withhold the downgrade — nobody
+                // grades their own work — but say so rather than staying silent. WITHHOLD, NOT
+                // REVERT: if `replaced` already earned 'low' on independent at-the-door evidence,
+                // that stands. Reverting it here would be an upgrade, which this rule never does.
+                detail.pinMovedBySelf = true;
+              } else {
+                farSev = 'low';
+                detail.pinDowngraded = true;
               }
             }
           }

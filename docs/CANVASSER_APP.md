@@ -178,17 +178,18 @@ your restricted marks still count toward your shift's start/end times. Tapped a 
 record the real disposition on it and the new one takes over. See [METRICS.md](METRICS.md) for exactly
 how restricted homes are (and aren't) counted.
 
-### Fix a wrong pin
+### A pin in the wrong place
 
-Sometimes a door's pin sits in the wrong place (an "Approximate location" badge on the door detail
-flags the ones most likely to be off). Since you're standing right there, you can fix it: tap **Fix
-pin location →**, then either **Use my current location** (drops the pin where you are — it warns if
-your GPS is weak) or **drag the blue pin** on the mini-map to the right spot, and **Save**. If the
-address shares a pin with other units (an apartment), it asks whether to move **just this unit** or the
-**whole building**. The correction saves optimistically and syncs in the background like a knock —
-including **offline**: the fix holds and uploads when you're back on signal (writing the spot you
-picked, not wherever you are at sync time). It never changes anyone's book or walk order — just the
-pin. See [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
+Sometimes a door's pin sits in the wrong place — an **"Approximate location"** badge on the door detail
+flags the ones most likely to be off, and you'll still see that badge.
+
+**Moving a pin is a team lead / admin job**, so there's no "Fix pin location" button on the canvasser
+screen any more. Tell your lead which door is wrong and they'll move it; everyone picks up the corrected
+spot on their next sync. Knock the door you actually stood at — if the pin was wrong and it made your
+entry look suspicious, correcting the pin clears that up afterwards ([AUDIT.md](AUDIT.md) § B.7).
+
+Leads and admins: the affordance is the same screen, reached through **Switch to canvass mode**, plus
+the web map's "Move pin". See [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
 
 ### Taking a survey
 

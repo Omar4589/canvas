@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { recordHouseholdAction } from '../../../lib/recordAction';
 import { guardedPush } from '../../../lib/navGuard';
 import { buildingKey } from '../../../lib/buildings';
+import { loadRoleContext } from '../../../lib/role';
 import FixPinModal from '../../../components/FixPinModal';
 import VoterMeta from '../../../components/VoterMeta';
 import { timeAgo, formatExact } from '../../../lib/datetime';
@@ -183,6 +184,18 @@ export default function HouseholdDetail() {
 
   const [note, setNote] = useState('');
   const [showFixPin, setShowFixPin] = useState(false);
+  // Moving a pin is a data change with an audit trail, so it's leads/admins only — the server
+  // refuses anyone else (routes/mobile/canvass.js), and this just keeps a canvasser from tapping
+  // a button that can only fail. Defaults FALSE because loadRoleContext is async: defaulting true
+  // would flash the affordance for every canvasser on every mount.
+  const [canFixPin, setCanFixPin] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    loadRoleContext()
+      .then((ctx) => { if (mounted) setCanFixPin(!!ctx.isConsoleUser); })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
   // Once any action fires, lock the screen (firedRef blocks a second tap synchronously;
   // isSubmitting disables the buttons) — then we navigate back.
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -292,18 +305,28 @@ export default function HouseholdDetail() {
           ) : (
             <View />
           )}
-          <Pressable onPress={() => setShowFixPin(true)} hitSlop={6}>
-            <Text style={{ color: colors.brand, fontSize: 13, fontWeight: '700' }}>Fix pin location →</Text>
-          </Pressable>
+          {/* The badge above stays visible to everyone — a canvasser still needs to know the pin
+              is approximate — but only a lead/admin gets the affordance to move it. */}
+          {canFixPin ? (
+            <Pressable onPress={() => setShowFixPin(true)} hitSlop={6}>
+              <Text style={{ color: colors.brand, fontSize: 13, fontWeight: '700' }}>Fix pin location →</Text>
+            </Pressable>
+          ) : (
+            <View />
+          )}
         </View>
 
-        <FixPinModal
-          visible={showFixPin}
-          household={household}
-          qc={qc}
-          siblingCount={siblingCount}
-          onClose={() => setShowFixPin(false)}
-        />
+        {/* Gated at the mount, not just the button: a stale showFixPin must not be able to
+            present a modal whose save can only 403. */}
+        {canFixPin && (
+          <FixPinModal
+            visible={showFixPin}
+            household={household}
+            qc={qc}
+            siblingCount={siblingCount}
+            onClose={() => setShowFixPin(false)}
+          />
+        )}
 
         {campaignType === 'survey' && (
           <>

@@ -8,6 +8,8 @@ import {
   reasonDetailText,
   correctionContextText,
   isDowngradedCorrection,
+  isPinDowngraded,
+  pinCorrectionText,
 } from '../lib/flags';
 import FlagReviewControl from './FlagReviewControl';
 import { spacing, radius } from '../lib/theme';
@@ -74,6 +76,13 @@ export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, d
         <Text style={styles.correction}>
           {correction}
           {isDowngradedCorrection(entry) ? ' · counted as low severity' : ''}
+        </Text>
+      ) : null}
+
+      {pinCorrectionText(entry) ? (
+        <Text style={styles.correction}>
+          {pinCorrectionText(entry)}
+          {isPinDowngraded(entry) ? ' · counted as low severity' : ''}
         </Text>
       ) : null}
 

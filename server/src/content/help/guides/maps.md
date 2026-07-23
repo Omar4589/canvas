@@ -39,7 +39,7 @@ You don't always have to set the map's filters by hand. Drill into a survey answ
 
 ## Fixing an off-spot pin
 
-Some pins are looked up from the address, not read from your file, so they can land a house or two off. The web map draws a faint **amber ring** around these and the door reads *"Approximate location."* To fix one, drag the pin to the right spot and Save — the ring disappears and it reads *"Pin corrected."* Canvassers pick up the fix on their next sync, and moving a pin never re-cuts your books.
+Some pins are looked up from the address, not read from your file, so they can land a house or two off. The web map draws a faint **amber ring** around these and the door reads *"Approximate location."* To fix one, drag the pin to the right spot and Save — the ring disappears and it reads *"Pin corrected."* Canvassers pick up the fix on their next sync, and moving a pin never re-cuts your books. **Canvassers can't move pins themselves** — if one flags a bad pin to you, this is where you fix it. Full details in [Fixing a house pin](fix-pin-location).
 
 ## What's live vs. what needs a refresh
 

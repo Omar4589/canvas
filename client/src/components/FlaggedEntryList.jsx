@@ -1,6 +1,12 @@
 import { Link } from 'react-router-dom';
 import { formatInTz } from '../lib/datetime.js';
-import { REVIEW_STATUS_META, correctionContextText, isDowngradedCorrection } from '../lib/flags.js';
+import {
+  REVIEW_STATUS_META,
+  correctionContextText,
+  isDowngradedCorrection,
+  isPinDowngraded,
+  pinCorrectionText,
+} from '../lib/flags.js';
 import FlagReasonBadges from './FlagReasonBadges.jsx';
 import FlagReviewControl from './FlagReviewControl.jsx';
 
@@ -64,6 +70,12 @@ export default function FlaggedEntryList({ entries = [], tz, campaignId, dateFro
               <div className="mt-1 text-xs text-fg-muted">
                 {correction}
                 {isDowngradedCorrection(e) ? ' · counted as low severity' : ''}
+              </div>
+            )}
+            {pinCorrectionText(e) && (
+              <div className="mt-1 text-xs text-fg-muted">
+                {pinCorrectionText(e)}
+                {isPinDowngraded(e) ? ' · counted as low severity' : ''}
               </div>
             )}
             <div className="mt-3 border-t border-border pt-3">

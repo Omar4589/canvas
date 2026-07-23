@@ -338,6 +338,154 @@ test('far correction: no nearest evidence / no snapshot / reversed clock never d
   assert.equal(farDetail(acc, 'SKEW').downgraded, undefined);
 });
 
+// far PIN-CORRECTION downgrade: a far entry whose house pin was corrected AFTER the knock, and
+// whose GPS sits beside the corrected pin, drops to low (detail.pinDowngraded) — unless the
+// flagged canvasser moved the pin themselves. Never upgrades. Same one-door-per-row discipline
+// as the correction block above so rapid/one_spot can't contaminate the assertions.
+//
+// GEOMETRY: 0.0003° of latitude ≈ 33 m; 0.02° ≈ 2.2 km. Latitude is used (not longitude) so that
+// transposing haversineMeters' lat/lng arguments feeds lat=-95 and blows the numbers up — these
+// fixtures fail loudly on a swap rather than quietly passing.
+const PIN = { lat: 30, lng: -95 };
+function pinFix({ lat = PIN.lat, lng = PIN.lng, atSec, by = 'someone-else' } = {}) {
+  return { lat, lng, correctedAt: at(atSec), correctedBy: by };
+}
+// A far row at `sec` whose own GPS is `latOffset` north of PIN.
+function pinRow({ _id, sec, dist, latOffset = 0.0003, accuracy = 5, userId }) {
+  return mkRow({
+    _id,
+    userId: userId || `pin-${_id}`,
+    householdId: `h-${_id}`,
+    timestamp: at(sec),
+    location: { lat: PIN.lat + latOffset, lng: PIN.lng, accuracy },
+    distanceFromHouseMeters: dist,
+  });
+}
+const fixMap = (id, fix) => new Map([[`h-${id}`, fix]]);
+
+test('pin correction: a pin moved onto the door after the knock downgrades to low', () => {
+  const rows = [pinRow({ _id: 'PD', sec: 0, dist: 400 })];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS, fixMap('PD', pinFix({ atSec: 3600 })));
+  assert.equal(sevOf(acc, 'PD', 'far'), 'low', 'GPS ~33 m from the corrected pin → exonerated');
+  const d = farDetail(acc, 'PD');
+  assert.equal(d.pinDowngraded, true);
+  assert.ok(d.pinCorrectedMeters >= 30 && d.pinCorrectedMeters <= 36, `~33 m, got ${d.pinCorrectedMeters}`);
+  assert.ok(d.pinCorrectedAt, 'the correction time rides along for the UI');
+  assert.equal(d.meters, 400, 'the frozen distance is preserved as evidence');
+  assert.equal(d.downgraded, undefined, 'this is not a replaced-chain downgrade');
+});
+
+test('pin correction: NEVER upgrades — a clean knock whose pin moved away stays unflagged', () => {
+  // 20 m frozen → not far at all. The corrected pin is 2.2 km from the GPS.
+  const rows = [pinRow({ _id: 'NOUP', sec: 0, dist: 20, latOffset: 0.02 })];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS, fixMap('NOUP', pinFix({ atSec: 3600 })));
+  assert.equal(has(acc, 'NOUP', 'far'), false, 'live geometry can never CREATE a far flag');
+});
+
+test('pin correction: NEVER upgrades — a med row whose pin moved further stays med', () => {
+  const rows = [pinRow({ _id: 'NOUP2', sec: 0, dist: 100, latOffset: 0.02 })];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS, fixMap('NOUP2', pinFix({ atSec: 3600 })));
+  assert.equal(sevOf(acc, 'NOUP2', 'far'), 'med', 'severity is unchanged, never raised');
+  const d = farDetail(acc, 'NOUP2');
+  assert.equal(d.pinDowngraded, undefined);
+  assert.ok(d.pinCorrectedMeters > 2000, 'but the reviewer still sees the live distance as context');
+});
+
+test('pin correction: the flagged canvasser moving their own pin does NOT downgrade', () => {
+  const rows = [pinRow({ _id: 'SELF', sec: 0, dist: 400, userId: 'u-self' })];
+  const { acc } = computeReasons(
+    rows, new Map(), FLAG_THRESHOLDS, fixMap('SELF', pinFix({ atSec: 3600, by: 'u-self' }))
+  );
+  assert.equal(sevOf(acc, 'SELF', 'far'), 'high', 'nobody grades their own work');
+  const d = farDetail(acc, 'SELF');
+  assert.equal(d.pinMovedBySelf, true, 'and the reviewer is told exactly why it stayed');
+  assert.equal(d.pinDowngraded, undefined);
+  assert.ok(d.pinCorrectedMeters != null, 'context still attached');
+});
+
+test('pin correction: a correction that PREDATES the knock attaches nothing', () => {
+  // The frozen distance was already measured against this pin — there is nothing to forgive.
+  const rows = [pinRow({ _id: 'BEFORE', sec: 3600, dist: 400 })];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS, fixMap('BEFORE', pinFix({ atSec: 0 })));
+  assert.equal(sevOf(acc, 'BEFORE', 'far'), 'high');
+  assert.equal(farDetail(acc, 'BEFORE').pinCorrectedMeters, undefined);
+});
+
+test('pin correction: omitting the 4th argument is byte-identical to passing an empty map', () => {
+  // TEST-COMPAT LOCK. Every other suite in this file calls computeReasons with three args.
+  const mk = () => [pinRow({ _id: 'COMPAT', sec: 0, dist: 400 })];
+  const three = computeReasons(mk(), new Map(), FLAG_THRESHOLDS);
+  const four = computeReasons(mk(), new Map(), FLAG_THRESHOLDS, new Map());
+  assert.equal(sevOf(three.acc, 'COMPAT', 'far'), 'high');
+  assert.equal(sevOf(four.acc, 'COMPAT', 'far'), 'high');
+  assert.deepEqual(farDetail(three.acc, 'COMPAT'), farDetail(four.acc, 'COMPAT'));
+});
+
+test('pin correction: legacy rows with no location, and null distance, are safe no-ops', () => {
+  const noLoc = mkRow({
+    _id: 'NOLOC', userId: 'u-nl', householdId: 'h-NOLOC',
+    timestamp: at(0), location: null, distanceFromHouseMeters: 400,
+  });
+  const noDist = pinRow({ _id: 'NODIST', sec: 7200, dist: null });
+  const fixes = new Map([
+    ['h-NOLOC', pinFix({ atSec: 3600 })],
+    ['h-NODIST', pinFix({ atSec: 10800 })],
+  ]);
+  const { acc } = computeReasons([noLoc, noDist], new Map(), FLAG_THRESHOLDS, fixes);
+  assert.equal(sevOf(acc, 'NOLOC', 'far'), 'high', 'no GPS → nothing to compare, severity untouched');
+  assert.equal(farDetail(acc, 'NOLOC').pinCorrectedMeters, undefined);
+  assert.equal(has(acc, 'NODIST', 'far'), false, 'null distance is still never far');
+});
+
+test('pin correction: accuracy is subtracted from the live distance too', () => {
+  // ~110 m from the corrected pin at ±60 → effective 50 ≤ FAR_WARN_M → forgiven.
+  const rows = [pinRow({ _id: 'ACC', sec: 0, dist: 400, latOffset: 0.001, accuracy: 60 })];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS, fixMap('ACC', pinFix({ atSec: 3600 })));
+  assert.equal(sevOf(acc, 'ACC', 'far'), 'low', 'a poor fix beside the corrected pin still exonerates');
+  assert.equal(farDetail(acc, 'ACC').pinDowngraded, true);
+});
+
+test('pin correction: composes with the replaced-chain downgrade', () => {
+  const replacedNear = {
+    actionType: 'restricted',
+    timestamp: at(0),
+    location: { lat: PIN.lat, lng: PIN.lng, accuracy: 5 },
+    distanceFromHouseMeters: 5,
+    nearest: nearest(600, 10, 5),
+  };
+  // (a) both paths exonerate → low, both markers present.
+  const both = pinRow({ _id: 'BOTH', sec: 600, dist: 400 });
+  both.replaced = replacedNear;
+  // (b) replaced is outside the window (would stay high) but the pin move forgives it.
+  const pinOnly = pinRow({ _id: 'PINONLY', sec: 14 * 3600, dist: 400 });
+  pinOnly.replaced = { ...replacedNear, nearest: nearest(14 * 3600, 13 * 60, 5) };
+  // (c) replaced already earned low; a SELF pin-move must not revert it upward.
+  const selfKeep = pinRow({ _id: 'KEEP', sec: 600, dist: 400, userId: 'u-keep' });
+  selfKeep.replaced = replacedNear;
+
+  const fixes = new Map([
+    ['h-BOTH', pinFix({ atSec: 20000 })],
+    ['h-PINONLY', pinFix({ atSec: 15 * 3600 })],
+    ['h-KEEP', pinFix({ atSec: 20000, by: 'u-keep' })],
+  ]);
+  const { acc } = computeReasons([both, pinOnly, selfKeep], new Map(), FLAG_THRESHOLDS, fixes);
+
+  assert.equal(sevOf(acc, 'BOTH', 'far'), 'low');
+  assert.equal(farDetail(acc, 'BOTH').downgraded, true, 'both markers ride together');
+  assert.equal(farDetail(acc, 'BOTH').pinDowngraded, true);
+
+  assert.equal(sevOf(acc, 'PINONLY', 'far'), 'low', 'the pin path forgives what the chain could not');
+  assert.equal(farDetail(acc, 'PINONLY').downgraded, undefined);
+  assert.equal(farDetail(acc, 'PINONLY').pinDowngraded, true);
+
+  // WITHHOLD, NOT REVERT — the self-move guard declines to help, it never takes back a low the
+  // replaced chain already earned on independent at-the-door evidence.
+  assert.equal(sevOf(acc, 'KEEP', 'far'), 'low', 'a self pin-move never upgrades an earned low');
+  assert.equal(farDetail(acc, 'KEEP').downgraded, true);
+  assert.equal(farDetail(acc, 'KEEP').pinMovedBySelf, true);
+  assert.equal(farDetail(acc, 'KEEP').pinDowngraded, undefined);
+});
+
 // summarize() count semantics: the prominent "flagged" number is OPEN-based, each status is
 // counted exactly once (regression guard for the old reviewed double-count), per-reason totals
 // reflect OPEN flags only, and flaggedActions stays the full-range total.

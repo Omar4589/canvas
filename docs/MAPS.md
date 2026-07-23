@@ -164,14 +164,25 @@ campaigns they manage (see [ROLES.md](ROLES.md)).
 A **looked-up (geocoded)** pin is a best guess — it can land a house or two off, especially in rural
 areas or on long roads. The web admin map flags these with a faint **amber ring** around the pin, and
 the door's detail panel shows **"Approximate location."** To fix one, an admin **drags the pin** to the
-right spot ("Move pin" → Save); a canvasser can also nudge it from the field. Once it's moved the amber
-ring disappears and the door reads **"Pin corrected."** Three things worth knowing:
+right spot ("Move pin" → Save); a team lead can also fix it from the field in the mobile app. Once it's
+moved the amber ring disappears and the door reads **"Pin corrected."** Four things worth knowing:
 
+- **Only leads and admins can move a pin.** Canvassers still see the "Approximate location" badge, but
+  the fix is a data change with an audit trail, so it belongs with the people accountable for the data
+  — and leaving it open to anyone let a faked door be laundered (record it from home, collect a "far
+  from house" flag, then drag the pin onto your own house). If a canvasser spots a bad pin, they tell
+  their lead.
 - **Moving a pin doesn't re-cut books.** A correction only fixes *where the dot sits* — the door keeps
   whatever book (turf) it's already in until you re-cut ([PASSES_AND_TURF.md](PASSES_AND_TURF.md)).
 - **Canvassers see corrections automatically** on their next sync — you don't have to tell them.
 - A report you've already **published** keeps the map it was frozen with; republish it to pick up
   corrections made afterward.
+
+**It can also clear a stale GPS flag.** A canvasser who walked to the real house while the pin was in
+the wrong place gets flagged "far from house" — and the flag used to stick forever, since the distance
+is measured once, when the door is recorded. Correcting the pin now drops such an entry to **low**
+severity. See [AUDIT.md](AUDIT.md) for the exact rule (it can only ever lower a flag, and it won't
+help if the person who moved the pin is the one who recorded the door).
 
 ---
 
@@ -207,7 +218,7 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
   pin ([lib/mapRender.js](../client/src/lib/mapRender.js)), and the door detail panel shows an
   "Approximate location" / "Pin corrected" badge.
 - **Correcting a pin.** An admin drags the pin (MapPage "Move pin" → `PATCH
-  /admin/campaigns/:id/households/:householdId/location`); a canvasser fixes it in the field (drop it at
+  /admin/campaigns/:id/households/:householdId/location`); a lead can fix it in the field (drop it at
   their GPS spot or drag it → `POST /mobile/households/:householdId/location`). Both go through the shared
   `updateHouseholdLocation` service ([services/households/updateHouseholdLocation.js](../server/src/services/households/updateHouseholdLocation.js)),
   which validates a **state-bounding-box** guardrail, sets `coordSource='corrected'` + provenance
@@ -215,6 +226,17 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
   `scope:'building'` move repositions every unit sharing the pin. **A correction never re-cuts turf** —
   book membership is `turfId` (set at cut), not derived from coordinates — and `walkOrder`/`status` are
   untouched.
+- **Both paths enforce the SAME policy: `canManageCampaign`** — org admin (or super, who still needs a
+  support grant to enter the org at all), or a team lead for a campaign they manage. The web route gets
+  it from `requireCampaignManager`; the mobile route calls the same function inline with
+  `household.campaignId`, because that route isn't campaign-nested. A canvasser is refused with
+  `403 { code: 'FORBIDDEN_ROLE' }` and a message written to be read in the app's alert. **Order
+  matters on the mobile route:** the gate replaces `assertHouseholdAccess`, whose roster check would
+  otherwise 403 a lead who manages the campaign but was never rostered onto it — a policy the web path
+  doesn't have. Covered by `server/test/mobilePinRole.int.test.js`.
+- **A correction can lower a stale `far` GPS flag** on entries recorded before the move — see
+  [AUDIT.md](AUDIT.md) §B.7. It reads `coordSource`/`correctedAt`/`correctedBy`; nothing here writes to
+  `CanvassActivity`, and the frozen `distanceFromHouseMeters` is never rewritten.
 - **Caveat:** a published `ClientReportMapPoint` snapshot is frozen at publish time and won't reflect a
   later correction until the report is republished.
 
@@ -465,8 +487,8 @@ constants). A small legend labels the two rings when they're shown.
 ## I. Invariants / gotchas
 
 - **Coordinates are imported or geocoded (Geocodio), and can be corrected** (see §B); rows with no
-  usable point never reach a map. A pin correction is deterministic (`updateHouseholdLocation`) and
-  never re-cuts turf.
+  usable point never reach a map. A pin correction is deterministic (`updateHouseholdLocation`),
+  never re-cuts turf, and is **lead/admin-only on both write paths** (`canManageCampaign`).
 - **Set the Mapbox access token BEFORE `setTelemetryEnabled()` — never the other way round.** On
   Android `setTelemetryEnabled` has no cheap native path: `RNMBXModule.kt` builds a throwaway Mapbox
   `MapView` on the UI thread just to reach the flag. Mapbox v11 throws `MapboxConfigurationException`

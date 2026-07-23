@@ -17,7 +17,7 @@ import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { knockStateOf, knockStateDelta, bumpCampaignStats } from '../../services/reports/campaignCounters.js';
-import { canvasserHouseholdScope } from '../../services/canvass/canvasserScope.js';
+import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
@@ -79,12 +79,21 @@ function isOrgAdminOrSuper(req) {
   return req.activeMembership?.role === 'admin';
 }
 
-async function assertHouseholdAccess(req, household) {
+// Org scoping only — split out because the pin-correction route needs the 404-not-403 org
+// check (never leak that another org's household exists) but must NOT run the roster check
+// below: a lead who MANAGES a campaign was often never rostered onto it as a walker.
+function assertHouseholdOrg(req, household) {
   const orgId = activeOrgId(req);
   if (!orgId) return { error: { status: 400, message: 'Active organization required' } };
   if (String(household.organizationId) !== String(orgId)) {
     return { error: { status: 404, message: 'Household not found' } };
   }
+  return {};
+}
+
+async function assertHouseholdAccess(req, household) {
+  const org = assertHouseholdOrg(req, household);
+  if (org.error) return org;
   if (isOrgAdminOrSuper(req)) return {};
   const assigned = await CampaignAssignment.exists({
     campaignId: household.campaignId,
@@ -337,6 +346,14 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   return { household, activity };
 }
 
+// Shown VERBATIM to the user by the mobile alert (lib/recordAction.js renders `data.error`),
+// so it has to read like something a canvasser can act on, not like an API refusal.
+//
+// FORBIDDEN_ROLE is inert on this path: pin fixes go through submitOrQueue, not react-query,
+// so _layout.jsx's onGlobalError/recoverRole never sees it. If pin fixes ever move to
+// useMutation, re-check that — a demoted-mid-session user would then get a cache clear.
+const PIN_ROLE_MESSAGE = 'Only team leads and admins can move a house pin. Ask your lead to fix this one.';
+
 // Fix a door's pin. The move coords are top-level lat/lng (chosen in the UI at fix
 // time, frozen in any offline-queued body). `location` (the merged GPS stamp from the
 // client's optimistic layer) is ignored for the move; only the audit accuracy is used.
@@ -353,18 +370,21 @@ router.post('/households/:householdId/location', async (req, res, next) => {
     const household = await Household.findById(req.params.householdId);
     if (!household) return res.status(404).json({ error: 'Household not found' });
 
-    const access = await assertHouseholdAccess(req, household);
-    if (access.error) return res.status(access.error.status).json({ error: access.error.message });
+    // Org scoping only — deliberately NOT assertHouseholdAccess: its roster check would 403 a
+    // lead who manages this campaign but never walked it, which is exactly who should be fixing
+    // pins. The role gate below is the real boundary.
+    const org = assertHouseholdOrg(req, household);
+    if (org.error) return res.status(org.error.status).json({ error: org.error.message });
 
-    const campaign = await Campaign.findById(household.campaignId).lean();
-    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-
-    // Non-admins can only fix pins for doors in the books they're actively working.
-    if (!isOrgAdminOrSuper(req)) {
-      const scope = await canvasserHouseholdScope(req, campaign);
-      if (!scope.some((id) => String(id) === String(household._id))) {
-        return res.status(403).json({ error: 'You can only fix pins for doors in your assigned books.' });
-      }
+    // Moving a pin is a DATA change with an audit trail, so it belongs to the people accountable
+    // for the data — not to whoever is standing there. It used to be open to any canvasser working
+    // the book, which let a faked knock be laundered: record from home, collect a "far from house"
+    // flag, then drag the pin onto your own house to soften it. Same policy as the web endpoint
+    // (requireCampaignManager) — literally the same function, called inline because this route
+    // isn't campaign-nested. No book-scope check survives: the only role that both reached it and
+    // passes here is a managing lead, and the web path never imposed a roster on one.
+    if (!(await canManageCampaign(req, household.campaignId))) {
+      return res.status(403).json({ error: PIN_ROLE_MESSAGE, code: 'FORBIDDEN_ROLE' });
     }
 
     const data = locationCorrectionSchema.parse(req.body);

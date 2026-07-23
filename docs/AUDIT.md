@@ -46,7 +46,7 @@ is blocked at the tap with a clear message — so "no GPS trail" is not an optio
 | Flag | Plain meaning |
 |---|---|
 | **Mock location** | The phone reported that the fix came from a **mock-location (fake GPS) app** — the strongest fraud signal there is. The canvasser is never told this was detected; the flag simply appears for you. Always high severity. |
-| **Far from house** | The canvasser's GPS was well away from the house pin when they recorded — a door they may not have walked to. (Accounts for GPS wobble — a big distance caused by a *weak* fix is treated as Weak GPS, not Far.) |
+| **Far from house** | The canvasser's GPS was well away from the house pin when they recorded — a door they may not have walked to. (Accounts for GPS wobble — a big distance caused by a *weak* fix is treated as Weak GPS, not Far. And if the pin itself was wrong and someone later corrected it, an entry that turns out to sit beside the corrected pin drops to low — see below.) |
 | **Rapid succession** | Two different doors logged only seconds apart — too fast to have walked between them (a sign of arm-chairing a block). |
 | **One spot** | A run of *different* doors all logged from nearly the **same** GPS point, while those houses are actually spread down the street — i.e. entered from one place (a parked car), not walked. |
 | **Weak / missing GPS** | The location fix was poor (or absent, or synced from offline), or the fix was computed **long before the door was recorded** (a stale, reheated location) — either way the entry's location can't be trusted. |
@@ -65,6 +65,18 @@ The reviewer still sees it (corrections are downgraded, never hidden) — but it
 fix, not a phantom knock. A door rewritten from far away **without** a real earlier visit, or long
 after it, keeps its full flag. Don't be surprised that these low flags still count in the Far KPI —
 that's deliberate; dismiss them as you review.
+
+**A wrong pin doesn't punish honesty either.** Some pins are looked up from the address rather than
+read from your file, and land a house or two off. A canvasser who walks to the *real* door gets
+flagged, because the distance is measured against the pin as it stood at that moment — and it stays
+measured that way forever, since correcting a pin doesn't rewrite history. So the audit checks the
+other direction too: if the pin was **corrected after** the door was recorded and the entry turns out
+to sit right beside the corrected pin, the flag drops to **low** and shows both distances ("820 ft
+from the pin at the time · 30 ft from the pin's current spot"). Two deliberate limits. It can only
+ever *lower* a flag — dragging a pin away from a door can never create or worsen one, because nobody
+should be graded on an edit they didn't make. And if the person who moved the pin is the same person
+who recorded the door, the entry **keeps its full severity** and says so: nobody grades their own
+work. (Moving a pin is a lead/admin action — see [MAPS.md](MAPS.md) — so this is a narrow case.)
 
 Each flag has a **severity** (low / medium / high) so the worst ones stand out. Distances everywhere
 in the app display in **feet**, switching to **miles** once a distance reaches a mile.
@@ -192,7 +204,7 @@ the numbers below are the defaults — tune them in that one file.
 
 | Flag | Rule | Guard |
 |---|---|---|
-| **far** | `distanceFromHouseMeters` (already stamped at record time) tiered on **`distance − accuracy`**: `> 250 m` (~820 ft) → high, `> 75 m` (~250 ft) → medium. | **Null distance is never far** (unknown ≠ far). Subtracting accuracy means a big distance from a *poor* fix reads as **weak_gps**, not far — so bad GPS can't masquerade as bad canvassing. **Correction downgrade:** a far entry whose `replaced.nearest` proves a near visit (effective ≤ `FAR_WARN_M`) within `FAR_CORRECTION_WINDOW_MIN` (720 min) drops to **low** with `detail.downgraded` — see §B.5. |
+| **far** | `distanceFromHouseMeters` (already stamped at record time) tiered on **`distance − accuracy`**: `> 250 m` (~820 ft) → high, `> 75 m` (~250 ft) → medium. | **Null distance is never far** (unknown ≠ far). Subtracting accuracy means a big distance from a *poor* fix reads as **weak_gps**, not far — so bad GPS can't masquerade as bad canvassing. **Correction downgrade:** a far entry whose `replaced.nearest` proves a near visit (effective ≤ `FAR_WARN_M`) within `FAR_CORRECTION_WINDOW_MIN` (720 min) drops to **low** with `detail.downgraded` — see §B.5. **Pin-correction downgrade:** a far entry whose household pin was corrected AFTER the knock, and whose GPS is within `FAR_WARN_M` effective of the **corrected** pin, drops to **low** with `detail.pinDowngraded` — unless `correctedBy` is the flagged user, in which case severity is kept and `detail.pinMovedBySelf` says why. **Never upgrades:** the check lives inside `if (farSev)` and only ever assigns `'low'`, so a pin dragged away can't create or worsen a flag — see §B.7. |
 | **weak_gps** | Missing location → high; accuracy `> 250 m` → high, `> 100 m` → medium; else an offline submission → low. **Stale-fix escalation:** when `location.fixTimestamp` is present and the fix predates the tap by `> STALE_FIX_HIGH_SEC` (30 min) → high, `> STALE_FIX_MED_SEC` (5 min) → med (`detail.stale` + `fixAgeSec`); the client caps reused fixes at 2 min, so an honest new client can never trip this — it catches bypassed/old clients and forged payloads. | A **null** accuracy alone is *not* flagged (unknown ≠ bad — it would flood on legacy rows). Absent `fixTimestamp` (legacy rows, old clients) and negative gaps (clock skew) never flag. |
 | **mock_gps** | `location.mocked === true` (Android's `isFromMockProvider`, captured on every fix by the app) → **high**, always. | `false`/`null`/absent (iOS, legacy rows, old clients) never flags. Detection is **silent by design**: the canvasser app never blocks or hints on a mocked fix, so the evidence accumulates instead of tipping the cheater off to switch methods. |
 | **rapid** | Per canvasser, walk consecutive **distinct-door** actions on the travel timeline; a gap `< 20 s` flags the later action (`< 8 s` → high). | Same-household consecutive actions (a correction) are skipped; notes are excluded; an **identical-timestamp offline pair** is suppressed (that's a sync artifact, not real behavior). |
@@ -252,6 +264,49 @@ replaced: {
   `correctionContextText` in [client/src/lib/flags.js](../client/src/lib/flags.js) and its mobile
   mirror [mobile/lib/flags.js](../mobile/lib/flags.js).
 
+### B.7 Pin-correction downgrade (a corrected pin forgives a stale far flag)
+
+`distanceFromHouseMeters` is measured against the pin **as it stood when the door was recorded**
+([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) `distanceFromHouse`) and is never
+recomputed — `updateHouseholdLocation` doesn't so much as import `CanvassActivity`. So an approximate
+geocode (street centroid, interpolated address) flags a canvasser who really did walk to the door, and
+correcting the pin afterwards left that flag standing **forever**. The detector now checks the live
+geometry as well, in the one direction that can only help.
+
+- **Transport: a 4th parameter,** `computeReasons(rows, pinMap, thresholds, pinFixMap)`. `pinFixMap`
+  maps householdId → `{lng, lat, correctedAt, correctedBy}` for corrected pins only. It is deliberately
+  **not** folded into `pinMap`: those values are shipped verbatim to the client as
+  `entry.household.location`, so enriching them would start leaking `correctedBy` (a raw User id no
+  client has ever received). `correctedBy` is compared inside the detector and only the derived boolean
+  leaves. Defaults to an empty Map, so every three-arg caller (all the unit tests but the two one-spot
+  ones) is byte-identical.
+- **`coordSource === 'corrected'` is part of the filter, not belt-and-braces.** A re-import with
+  `overwriteHandEdits` puts the file's coordinate back and resets `coordSource`, but never clears
+  `correctedAt`/`correctedBy` ([csvImporter.js](../server/src/services/import/csvImporter.js)) — so
+  `correctedAt` alone would claim "the pin was moved here" about a pin that is the file's again.
+- **The rule:** a post-knock correction (`correctedAt > row.timestamp`, strict) attaches
+  `detail.pinCorrectedMeters` + `pinCorrectedAt` as reviewer context regardless. If the live distance
+  minus accuracy is within `FAR_WARN_M`, severity drops to `low` with `detail.pinDowngraded` — unless
+  `correctedBy === row.userId`, which sets `detail.pinMovedBySelf` and keeps the severity.
+- **It never upgrades.** The block sits inside `if (farSev)` and assigns nothing but `'low'`. A pin
+  dragged *away* from a door cannot manufacture or worsen a flag.
+- **The self-move guard is a WITHHOLD, not a revert.** If the `replaced` chain already earned `low` on
+  independent at-the-door evidence, a self-move leaves it there — taking it back would be an upgrade.
+- **Clock skew is self-limiting, which is why there's no guard for it.** An offline knock flushed after
+  a correction has its frozen distance computed at *flush* time, i.e. already against the corrected
+  pin: if that reads far, the live check reads far too and nothing downgrades; if it reads near, there
+  was never a far flag. No false downgrade is reachable.
+- **Residual risk, named:** an *accomplice* — a lead moving a pin to exonerate someone else's phantom
+  knock — is out of the guard's reach. Mitigated by downgrade-never-suppress (the entry stays in the
+  queue and in the Far KPI) and by `HouseholdLocationChange`, which logs who moved what, from where, when.
+- **The household projection is load-bearing, exactly like the `replaced` one above.** It must carry
+  `coordSource correctedAt correctedBy` — drop them and the downgrade silently stops firing while every
+  unit test that passes an empty `pinFixMap` keeps passing. `server/test/mobilePinRole.int.test.js` and
+  the flags-endpoint assertions are what catch it.
+- The UI lines are `pinCorrectionText` / `isPinDowngraded` / `isSelfMovedPin` in the two `flags.js`
+  mirrors; `FlaggedEntryPanel` prints both distances side by side, because the map's leader line is
+  drawn to the **current** pin and used to silently contradict the frozen label.
+
 ### B.6 Location-required enforcement (no location = no knock)
 
 Recording a disposition or survey **requires a live GPS fix**, enforced twice:
@@ -267,7 +322,9 @@ Recording a disposition or survey **requires a live GPS fix**, enforced twice:
   nothing is recorded, recolored, or queued. The map shows a persistent advisory banner
   ([mobile/components/LocationBlockedBanner.jsx](../mobile/components/LocationBlockedBanner.jsx)).
   Pin corrections (`recordLocationCorrection`) are deliberately **not** gated (`requireFix: false`) —
-  the moved coordinate comes from the map drag, and map hygiene must stay possible.
+  the moved coordinate comes from the map drag, and map hygiene must stay possible. (This is about the
+  *location* gate only. Pin correction is separately restricted by **role** — leads/admins/supers, see
+  [MAPS.md](MAPS.md) — so "map hygiene" now names a lead's job, not a canvasser's.)
 - **Server backstop** — [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) rejects a
   missing/degenerate `location` on both write paths with `400 { error, code: 'LOCATION_REQUIRED' }`
   **before** zod (so clients get the typed message, not a zod dump). This replaces the accidental
@@ -299,6 +356,15 @@ offline, the flush's pre-existing 4xx policy drops it (offlineQueue.js doFlush) 
 - **Reopen deletes the record** (back to synthesized-open), preserving the "no open rows stored" invariant.
 - `reasonsAtReview` snapshots the reasons at decision time, so a decision survives a later threshold
   change (if an action stops being flagged, its review just goes dormant).
+- **A pin correction changes severity UNDER an existing decision, and deliberately does not re-open
+  it.** Unlike a disposition correction — a delete-then-create whose new `_id` orphans the old review
+  (below) — moving a pin leaves the `CanvassActivity` row alone, so a decision made at `high` can end
+  up sitting over a `low`. Auto-reopening would be worse: reopen *is* a delete, so it would destroy a
+  `confirmed` fraud finding with no replacement row to carry it. Deciding "moved since the review" also
+  needs state the detector refuses to hold ("flags are derived, not stored"). And the drift is always
+  toward *less* severe (§B.7 never upgrades), so the dangerous direction — a dismissal quietly sitting
+  over something worse — is unreachable. `reasonsAtReview` is the hedge, and the panel says *"The pin
+  was moved after this was reviewed"* when `pinCorrectedAt` post-dates `reviewedAt`.
 
 It's a brand-new empty collection — **no migration**.
 
@@ -394,6 +460,11 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **Corrections are downgraded, never suppressed.** A downgraded-low far still appears (and still
   counts in `summary.totals.far` while open) — full suppression would let a canvasser who once
   legitimately visited a door rewrite its status from anywhere, unflagged.
+- **Live geometry may only DOWNGRADE.** The pin-correction check (§B.7) runs inside `if (farSev)` and
+  assigns nothing but `'low'`. A pin dragged *away* from a door must never manufacture or worsen a flag
+  — a canvasser can't be graded on an edit they didn't make and (pins being lead/admin-only) couldn't
+  have made. And the self-move guard is a **withhold, not a revert**: when the `replaced` chain has
+  already earned `low`, a self-move keeps it, because taking it back would itself be an upgrade.
 - **The replace must never run without stamping the snapshot.** `buildReplacedSnapshot` reads the
   pre-`deleteMany` rows; any new replace path (or a reorder that queries after the delete) silently
   destroys the correction evidence again.
@@ -416,6 +487,15 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **Reviewing a flag must invalidate the nudge sources.** All four review handlers (web
   AuditPage/MapPage, mobile audit/map) invalidate `['admin','campaigns']` + the campaign-rollup
   keys alongside the flags queries — miss one and a cleared flag leaves a stale badge.
+- **The pin-correction change inverts the deploy order: mobile OTA FIRST.** "Server first" exists so a
+  client never calls an endpoint that doesn't exist yet. Restricting pin-moving to leads/admins does the
+  opposite — it *removes* a client capability — so deploying the server first would leave every
+  canvasser tapping a live "Fix pin location" button into a 403 for the whole OTA window. Ship the OTA
+  that hides the affordance, let it propagate, then deploy the server (which also carries the Help
+  Center copy, so the article retarget lands at the same instant the endpoint starts refusing).
+  **No migration and no `buildIndexes` run** — no new field is written and the household query shape is
+  unchanged; only its projection widened. No client-version bump either: the endpoint keeps its shape,
+  and an old bundle gets a typed, readable 403 that rolls the optimistic pin back.
 - **Deploy the server first** (the endpoints must exist before the client calls them). `FlagReview`,
   the `replaced` snapshot, and the `location.mocked`/`fixTimestamp` fields all need **no migration**
   (absence = open / no special treatment / never flags). The nudge's partial index DOES need the

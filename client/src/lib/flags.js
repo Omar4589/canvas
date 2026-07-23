@@ -38,7 +38,7 @@ export const FLAG_LEGEND = [
   },
   {
     key: 'far',
-    text: 'Recorded ~250 ft or more from the house pin after allowing for GPS accuracy; ~820 ft or more is high. An honest same-day correction of an entry made at the door shows as low.',
+    text: "Recorded ~250 ft or more from the house pin after allowing for GPS accuracy; ~820 ft or more is high. An honest same-day correction of an entry made at the door shows as low. So does an entry that turns out to sit beside the house pin after someone corrected it — unless the person who moved the pin is the one who recorded the door.",
   },
   {
     key: 'rapid',
@@ -156,4 +156,41 @@ export function correctionContextText(entry) {
 // canvasser was at the door recently (see server flagThresholds FAR_CORRECTION_WINDOW_MIN).
 export function isDowngradedCorrection(entry) {
   return !!(entry?.reasons || []).find((r) => r.type === 'far')?.detail?.downgraded;
+}
+
+function farDetailOf(entry) {
+  return (entry?.reasons || []).find((r) => r.type === 'far')?.detail || null;
+}
+
+// Context line for a far flag whose HOUSE PIN was corrected after the door was recorded — a
+// separate story from correctionContextText above, which is about the canvasser replacing their
+// own earlier entry. Null unless a post-knock pin move exists. Mirrored in mobile/lib/flags.js.
+export function pinCorrectionText(entry) {
+  const d = farDetailOf(entry);
+  if (d?.pinCorrectedMeters == null) return null;
+  const away = formatDistanceImperial(d.pinCorrectedMeters);
+  if (d.pinMovedBySelf) return `Pin moved after this door was recorded, by the person who recorded it — ${away} from the pin's current spot`;
+  if (d.pinDowngraded) return `Pin moved after this door was recorded — this entry is ${away} from the pin's current spot`;
+  return `Pin moved after this door was recorded — still ${away} from the pin's current spot`;
+}
+
+// True when the far flag dropped to low because the pin was corrected onto this entry's spot.
+// Deliberately NOT folded into isDowngradedCorrection: that one drives copy about "the earlier
+// entry", which a pin-only downgrade doesn't have.
+export function isPinDowngraded(entry) {
+  return !!farDetailOf(entry)?.pinDowngraded;
+}
+
+// True when the pin move WOULD have exonerated the entry, but the person who moved it is the
+// one being flagged — so the downgrade was withheld.
+export function isSelfMovedPin(entry) {
+  return !!farDetailOf(entry)?.pinMovedBySelf;
+}
+
+// True when the pin was corrected AFTER a reviewer already decided on this flag — their
+// decision is sitting on top of a severity that has since changed underneath them.
+export function pinMovedAfterReview(entry) {
+  const at = farDetailOf(entry)?.pinCorrectedAt;
+  const reviewedAt = entry?.review?.reviewedAt;
+  return !!(at && reviewedAt && new Date(at) > new Date(reviewedAt));
 }

@@ -153,6 +153,17 @@ build alongside it.
 `campaignHouseholds`, `walklists`, `voted`, `efforts`, `passes`, `setup-status`, `turfs`,
 `turfs/:turfId/assignments`. A lead does everything an admin does inside a granted campaign.
 
+**Correcting a household pin** — the same `canManageCampaign` policy on **both** write paths, one of
+them not campaign-nested: web `PATCH /admin/campaigns/:id/households/:householdId/location` (via the
+router's `requireCampaignManager`) and mobile `POST /mobile/households/:householdId/location` (which
+calls `canManageCampaign(req, household.campaignId)` **inline**, since its path carries no
+`:campaignId`). **Canvassers cannot move a pin** — moving one is a data change with an audit trail, and
+leaving it open let a faked door be laundered past the GPS audit (see [AUDIT.md](AUDIT.md) § B.7). This
+is the only mobile route with a role gate: everything else under `/mobile` is scoped by data
+(`canvasserHouseholdScope`), not by role. Note the ordering — the gate **replaces** the route's
+`assertHouseholdAccess` call, whose roster check would otherwise refuse a lead who manages the campaign
+but was never rostered onto it as a walker.
+
 That parity extends past the router gate into the **assignability** check those routers share:
 `partitionAssignable` ([services/campaignRoster.js](../server/src/services/campaignRoster.js)) allows
 anyone on the campaign roster, **any active org `admin`**, **a lead holding a `CampaignManager` grant on

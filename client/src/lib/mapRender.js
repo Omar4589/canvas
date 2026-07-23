@@ -203,6 +203,12 @@ export function flagsToGeoJSON(entries) {
 
 // A dashed line from each flag's GPS point to its house pin (so a "far" flag visibly
 // connects the ping to the door it belongs to).
+//
+// The pin end is the house's CURRENT coordinate, which may post-date the entry if someone
+// corrected the pin after the door was recorded — the app stores no historical pin, so there
+// is nothing else to draw to. That's why FlaggedEntryPanel labels both distances ("from the
+// pin at the time" / "from the pin's current spot") whenever they differ: the line and the
+// panel used to silently contradict each other after a correction.
 export function flagsToLinesGeoJSON(entries) {
   const features = [];
   for (const e of entries || []) {

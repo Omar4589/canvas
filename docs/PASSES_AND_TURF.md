@@ -226,8 +226,9 @@ the books editor on the Turf Cutting page and apply to a pass's **published** bo
 ## Fixing a mis-placed pin
 
 A house pin in the wrong spot can be dragged to its correct location — an admin does it on the web map
-(**"Move pin"**), and a **canvasser can do it in the field** (**"Fix pin location,"** including "use my
-current GPS"). Either way it corrects **only the coordinates** (with an audit trail); it does **not**
+(**"Move pin"**), and a **team lead can do it in the field** (**"Fix pin location,"** including "use my
+current GPS"). **Canvassers can't move pins** — a correction is a data change with an audit trail, so it
+is lead/admin-only ([MAPS.md](MAPS.md)); a canvasser who spots a bad pin tells their lead. Either way it corrects **only the coordinates** (with an audit trail); it does **not**
 change the book, the walk order, the door's status, or any count, and it **needs no recut**. Canvassers
 see the corrected spot on their **next sync (within ~30s** — see below). Full mechanics:
 [MAPS.md → Coordinate provenance & pin correction](MAPS.md). (What you _can't_ do in-app is edit the
@@ -613,5 +614,5 @@ next full bootstrap; billing stays correct throughout** because it dedups per `(
 **Wrong Address** is one of the `KNOCK_ACTIONS` ([aggregations.js:8](../server/src/services/reports/aggregations.js#L8)) —
 a real **billable knock that counts as coverage**, non-sticky in `Household.status` (`resolveStatus`
 makes only survey/lit sticky, [statusPrecedence.js](../server/src/utils/statusPrecedence.js)). A canvasser
-can flag it, drop a note, and fix the pin, but **cannot edit the address string** — that's an admin/data
-change on the web side.
+can flag it and drop a note, but **cannot edit the address string or move the pin** — both are
+admin/lead data changes.

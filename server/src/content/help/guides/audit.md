@@ -16,7 +16,7 @@ Every time a canvasser marks a door, the app quietly records **where the phone w
 ## The five flags
 
 - **Mock location** — the phone itself reported that the fix came from a **fake-GPS app**. This is the strongest fraud signal there is, and it's always high severity. The canvasser is never told it was detected — the flag quietly appears for you, so the evidence accumulates instead of tipping them off.
-- **Far from house** — the phone was well away from the house pin. (A big distance from a *weak* signal reads as Weak GPS instead, so bad signal never looks like bad canvassing. And an honest correction — a canvasser fixing an earlier entry after walking away — shows as low severity, not a full flag; see below.)
+- **Far from house** — the phone was well away from the house pin. (A big distance from a *weak* signal reads as Weak GPS instead, so bad signal never looks like bad canvassing. And an honest correction — a canvasser fixing an earlier entry after walking away — shows as low severity, not a full flag; see below. So does an entry beside a pin that was wrong and has since been corrected.)
 - **Rapid succession** — two different doors logged only seconds apart, too fast to have walked between.
 - **One spot** — different houses spread down the street, all logged from nearly the same point (a parked car). Many units logged at one apartment entrance is normal and does **not** trip this.
 - **Weak / missing GPS** — the location fix was poor, absent, synced from offline, or **computed long before the door was recorded** (a stale, reheated location), so it can't be trusted.
@@ -40,6 +40,8 @@ Reviewing records a decision — it never deletes the entry or changes any repor
 > Tip: The little **(i)** next to the flag filters (on the Audit page, the map's GPS-audit section, and the flag panel) opens a plain-language key to all five flag types and their severities — including the four different things "Weak / missing GPS" can mean.
 
 **Corrections look different on purpose.** When a canvasser changes their answer at a door they already visited — say they tapped Restricted by mistake, walked off, then fixed it to Not home — the newer entry is recorded from where they *now* stand, which can look far from the house. The app remembers the entry they replaced, so a same-day correction after a genuine at-the-door visit appears as a **low**-severity Far flag with a line like *Replaced "Restricted" recorded 4 min earlier from 20 ft away*. Review it like any flag — it usually means an honest fix, not a phantom knock. A door rewritten from far away without a real earlier visit keeps its full flag.
+
+**A wrong pin is forgiven the same way.** Some pins are looked up from the address and land a house or two off, so a canvasser who walked to the real door still gets flagged — and the flag used to stick forever, because the distance is measured once, when the door is recorded. Now, if the pin is **corrected after** the fact and the entry turns out to sit right beside the corrected spot, the flag drops to **low** and shows both distances. It can only ever lower a flag, never raise one. And if the person who moved the pin is the same person who recorded the door, it stays at full severity and says so — nobody grades their own work. (Only leads and admins can move pins; see [Fixing a house pin](fix-pin-location).)
 
 > Tip: The **flagged** count means *still open* — as you review, dismiss, or confirm flags, that number drops, so you can work a day's flags down to zero.
 

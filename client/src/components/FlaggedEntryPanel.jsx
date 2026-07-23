@@ -5,6 +5,10 @@ import {
   correctionContextText,
   formatDistanceImperial,
   isDowngradedCorrection,
+  isPinDowngraded,
+  isSelfMovedPin,
+  pinCorrectionText,
+  pinMovedAfterReview,
   primaryReason,
   reasonColor,
 } from '../lib/flags.js';
@@ -26,6 +30,11 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
   const distFar = dist != null && dist > FAR_WARN_M;
   const accentColor = reasonColor(primaryReason(entry)?.type);
   const h = household || entry.household;
+  // The pin may have been corrected since this door was recorded. `dist` is frozen against the
+  // pin as it stood then, while the map's leader line is drawn to the pin as it stands NOW — so
+  // whenever the two differ, both numbers are labelled rather than letting the panel and the map
+  // silently disagree.
+  const pinDist = (entry.reasons || []).find((r) => r.type === 'far')?.detail?.pinCorrectedMeters ?? null;
 
   return (
     <div>
@@ -82,7 +91,13 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
           <div className="mt-1 text-fg-muted">unknown</div>
         ) : (
           <div className={'mt-1 font-medium ' + (distFar ? 'text-danger' : 'text-fg')}>
-            {formatDistanceImperial(dist)} from house{distFar ? ' — far' : ''}
+            {formatDistanceImperial(dist)} from {pinDist == null ? 'house' : 'the pin at the time'}
+            {distFar ? ' — far' : ''}
+          </div>
+        )}
+        {pinDist != null && (
+          <div className="mt-0.5 font-medium text-fg">
+            {formatDistanceImperial(pinDist)} from the pin's current spot
           </div>
         )}
         {entry.location?.accuracy != null && (
@@ -91,10 +106,26 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
         {correctionContextText(entry) && (
           <div className="mt-1 text-xs text-fg-muted">{correctionContextText(entry)}</div>
         )}
+        {pinCorrectionText(entry) && (
+          <div className="mt-1 text-xs text-fg-muted">{pinCorrectionText(entry)}</div>
+        )}
         {isDowngradedCorrection(entry) && (
           <div className="mt-1 text-xs text-fg-subtle">
             The earlier entry was recorded at the door — this correction is flagged low for reference.
           </div>
+        )}
+        {isPinDowngraded(entry) && (
+          <div className="mt-1 text-xs text-fg-subtle">
+            The pin was corrected to a spot this entry sits next to — flagged low for reference.
+          </div>
+        )}
+        {isSelfMovedPin(entry) && (
+          <div className="mt-1 text-xs text-fg-subtle">
+            The person who recorded this door also moved the pin — kept at full severity for review.
+          </div>
+        )}
+        {pinMovedAfterReview(entry) && (
+          <div className="mt-1 text-xs text-fg-subtle">The pin was moved after this was reviewed.</div>
         )}
         {entry.wasOfflineSubmission && (
           <div className="mt-1 text-xs text-fg-subtle">Synced offline — timestamp is the device's record time.</div>
