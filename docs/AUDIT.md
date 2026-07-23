@@ -219,14 +219,28 @@ An entry can carry several reasons; its `maxSeverity` is the worst. `haversineMe
 
 ### One threshold, everywhere
 
-`FAR_WARN_M` (75 m) is now the **single** "far" threshold. The legacy far-knock counters and the
-`flaggedOnly` activity feed in [reports.js](../server/src/routes/admin/reports.js), the
+`FAR_WARN_M` (75 m) is now the **single** "far" threshold. The `flaggedOnly` activity feed and the
+`/quality` flagged list in [reports.js](../server/src/routes/admin/reports.js), the
 `CanvasserPingPanel` "— far" label on web, and its mobile counterparts — `ActivityRow` and the admin
 map's ping-detail sheet ([mobile/app/(app)/admin/map.jsx](../mobile/app/(app)/admin/map.jsx)) — all
 reference it (server) / its client mirror ([client/src/lib/flags.js](../client/src/lib/flags.js)) or
 mobile mirror ([mobile/lib/flags.js](../mobile/lib/flags.js)) — resolving an old 50 m-server /
 100 m-client split so "far" means one thing across the app. (The mobile ping sheet was the last
-straggler on the 100 m value.)
+straggler on 100 m; `/quality`'s far *count* was the last on 50 m, quietly contradicting its own
+75 m flagged list until it moved to the shared rule below.)
+
+**The per-canvasser far KPIs go further than the threshold — they share the full rule.**
+`farFromHouseCount`/`farFromHousePercent` on `/canvassers/:id/summary` and `/quality` are computed by
+`farAssessment` (via [services/audit/farKpi.js](../server/src/services/audit/farKpi.js)) — the same
+function the detector calls — so they are accuracy-aware and **pin-aware**: effective distance
+(minus GPS accuracy) over 75 m, with honest replaced-chain corrections and post-knock pin fixes
+forgiven. They are **living numbers**: correcting a pin retroactively lowers a canvasser's far
+count, and the movement is explained rather than silent — `farForgivenByPinCount` rides both
+responses, and the flagged lists (`/quality.flaggedActivities`, `/activities?flaggedOnly`) keep
+forgiven rows visible with a `pinForgiven` marker. **Lists are annotated, never post-filtered** —
+the DB filters stay raw `FAR_WARN_M` supersets so `/activities` pagination math (`total`,
+skip/limit) stays exact. The `distanceHistogram` deliberately stays raw frozen-distance — it
+describes GPS behavior, not a verdict.
 
 **Units:** storage, thresholds, and all detection math are **meters**; every user-facing string
 converts at display time to **feet, then miles at ≥ 1 mile** — web via `formatDistanceImperial`
@@ -304,7 +318,14 @@ geometry as well, in the one direction that can only help.
   was never a far flag. No false downgrade is reachable.
 - **Residual risk, named:** an *accomplice* — a lead moving a pin to exonerate someone else's phantom
   knock — is out of the guard's reach. Mitigated by downgrade-never-suppress (the entry stays in the
-  queue and in the Far KPI) and by `HouseholdLocationChange`, which logs who moved what, from where, when.
+  audit queue and in every flagged list, visibly marked `forgiven`; a pin-forgiven entry does leave
+  the per-canvasser far *count*, but `farForgivenByPinCount` keeps the forgiveness volume itself
+  observable) and by `HouseholdLocationChange`, which logs who moved what, from where, when.
+- **Two callers, one implementation.** The far rule is the exported `farAssessment(row, fix,
+  thresholds)`; `computeReasons` (this detector) and the per-canvasser KPI helper
+  ([services/audit/farKpi.js](../server/src/services/audit/farKpi.js)) both call it, and the
+  corrected-pin filter is the shared `buildPinFixMap`. Change the rule in one place and every far
+  surface moves together; there is no second implementation to drift.
 - **The household projection is load-bearing, exactly like the `replaced` one above.** It must carry
   `coordSource correctedAt correctedBy` — drop them and the downgrade silently stops firing while every
   unit test that passes an empty `pinFixMap` keeps passing. `server/test/mobilePinRole.int.test.js` and

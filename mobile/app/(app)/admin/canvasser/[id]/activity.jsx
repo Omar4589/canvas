@@ -146,7 +146,7 @@ export default function ActivityFeed() {
           trackColor={{ true: colors.danger, false: colors.border }}
           thumbColor={colors.card}
         />
-        <Text style={styles.toggleLabel}>Only flagged (offline or &gt;50m)</Text>
+        <Text style={styles.toggleLabel}>Only flagged (offline or &gt; 250 ft)</Text>
         <Text style={styles.count}>
           {total > 0 ? `${skip + 1}–${showingTo} of ${total}` : '0'}
         </Text>

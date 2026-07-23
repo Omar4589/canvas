@@ -33,6 +33,7 @@ import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps, computeOverlapDoors } from '../../services/reports/overlaps.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import { detectFlags } from '../../services/audit/flagDetection.js';
+import { computeFarKpi, farKpiForRows } from '../../services/audit/farKpi.js';
 import { FLAG_THRESHOLDS, SEVERITY_RANK, AUDIT_WINDOW_MAX_DAYS } from '../../services/audit/flagThresholds.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { VoterNote } from '../../models/VoterNote.js';
@@ -3097,7 +3098,7 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
 
     const knockMatch = { ...activityMatch, actionType: { $in: KNOCK_ACTIONS } };
 
-    const [user, memberships, actionAgg, hourAgg, dowAgg, dailyAgg, surveysCount, qualityAgg, distanceHist] =
+    const [user, memberships, actionAgg, hourAgg, dowAgg, dailyAgg, surveysCount, qualityAgg, distanceHist, farKpi] =
       await Promise.all([
         User.findById(userId, 'firstName lastName email phone isActive lastLoginAt').lean(),
         Membership.find({ userId, organizationId: orgId }, 'role isActive').lean(),
@@ -3146,11 +3147,6 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
               total: { $sum: 1 },
               offlineCount: { $sum: { $cond: ['$wasOfflineSubmission', 1, 0] } },
               avgDistance: { $avg: '$distanceFromHouseMeters' },
-              farCount: {
-                $sum: {
-                  $cond: [{ $gt: ['$distanceFromHouseMeters', FAR_WARN_M] }, 1, 0],
-                },
-              },
               firstActivityAt: { $min: '$timestamp' },
               lastActivityAt: { $max: '$timestamp' },
             },
@@ -3167,6 +3163,11 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
             },
           },
         ]),
+        // The far count is NOT a raw aggregation anymore: it's the detector's own rule
+        // (farAssessment via services/audit/farKpi.js) — effective distance minus accuracy,
+        // honest corrections and post-knock pin fixes forgiven. Same activityMatch object as
+        // the aggregations above, so the date/campaign window can never drift.
+        computeFarKpi(activityMatch, { organizationId: orgId }),
       ]);
 
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -3238,7 +3239,6 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
       total: 0,
       offlineCount: 0,
       avgDistance: null,
-      farCount: 0,
       firstActivityAt: null,
       lastActivityAt: null,
     };
@@ -3331,9 +3331,13 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
           qual.total > 0 ? Math.round((qual.offlineCount / qual.total) * 1000) / 10 : 0,
         avgDistanceFromHouseMeters:
           qual.avgDistance != null ? Math.round(qual.avgDistance * 10) / 10 : null,
-        farFromHouseCount: qual.farCount,
+        // Detector-rule far (see farKpi.js). Denominator deliberately stays qual.total — the
+        // percent's meaning ("share of all field activity") is unchanged; only the numerator
+        // got honest. farForgivenByPinCount explains the number's movement after a pin fix.
+        farFromHouseCount: farKpi.farCount,
         farFromHousePercent:
-          qual.total > 0 ? Math.round((qual.farCount / qual.total) * 1000) / 10 : 0,
+          qual.total > 0 ? Math.round((farKpi.farCount / qual.total) * 1000) / 10 : 0,
+        farForgivenByPinCount: farKpi.farForgivenByPinCount,
         distanceHistogram,
       },
     });
@@ -3473,6 +3477,14 @@ router.get('/canvassers/:userId/activities', async (req, res, next) => {
         .lean(),
     ]);
 
+    // Per-page pin-forgiveness annotation. The DB filter and pagination stay untouched — the
+    // flaggedOnly $or is deliberately a raw superset (effective-distance/pin logic isn't an
+    // indexable query), and post-FILTERING a page would make `total` lie and pages come up
+    // short. Annotate-not-filter: a forgiven row still appears, marked.
+    const { assessmentsByActionId } = await farKpiForRows(activities, {
+      organizationId: activeOrgId(req),
+    });
+
     res.json({
       total,
       limit,
@@ -3484,6 +3496,7 @@ router.get('/canvassers/:userId/activities', async (req, res, next) => {
         note: a.note || null,
         location: a.location,
         distanceFromHouseMeters: a.distanceFromHouseMeters,
+        pinForgiven: !!assessmentsByActionId.get(String(a._id))?.detail?.pinDowngraded,
         wasOfflineSubmission: !!a.wasOfflineSubmission,
         household: a.householdId
           ? {
@@ -3808,7 +3821,7 @@ router.get('/canvassers/:userId/quality', async (req, res, next) => {
     const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, userId, ...NOT_BULK };
     const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter, userId };
 
-    const [distAgg, offlineAgg, syncAgg, flaggedList, lastSync] = await Promise.all([
+    const [distAgg, offlineAgg, syncAgg, flaggedList, lastSync, farKpi] = await Promise.all([
       CanvassActivity.aggregate([
         { $match: activityMatch },
         {
@@ -3828,11 +3841,6 @@ router.get('/canvassers/:userId/quality', async (req, res, next) => {
             total: { $sum: 1 },
             offlineCount: { $sum: { $cond: ['$wasOfflineSubmission', 1, 0] } },
             avgDistance: { $avg: '$distanceFromHouseMeters' },
-            farCount: {
-              $sum: {
-                $cond: [{ $gt: ['$distanceFromHouseMeters', 50] }, 1, 0],
-              },
-            },
           },
         },
       ]),
@@ -3868,6 +3876,10 @@ router.get('/canvassers/:userId/quality', async (req, res, next) => {
         .limit(100)
         .lean(),
       SurveyResponse.findOne(surveyMatch, 'syncedAt').sort({ syncedAt: -1 }).lean(),
+      // Detector-rule far count — same helper as /summary, same activityMatch object, so the
+      // two screens can't disagree (and the old hardcoded-50 count here, which contradicted
+      // this route's own 75-based flagged list, is gone).
+      computeFarKpi(activityMatch, { organizationId: activeOrgId(req) }),
     ]);
 
     const distanceHistogram = [
@@ -3896,7 +3908,6 @@ router.get('/canvassers/:userId/quality', async (req, res, next) => {
       total: 0,
       offlineCount: 0,
       avgDistance: null,
-      farCount: 0,
     };
 
     res.json({
@@ -3905,12 +3916,16 @@ router.get('/canvassers/:userId/quality', async (req, res, next) => {
       offlinePercent: q.total > 0 ? Math.round((q.offlineCount / q.total) * 1000) / 10 : 0,
       avgDistanceFromHouseMeters:
         q.avgDistance != null ? Math.round(q.avgDistance * 10) / 10 : null,
-      farFromHouseCount: q.farCount,
+      farFromHouseCount: farKpi.farCount,
       farFromHousePercent:
-        q.total > 0 ? Math.round((q.farCount / q.total) * 1000) / 10 : 0,
+        q.total > 0 ? Math.round((farKpi.farCount / q.total) * 1000) / 10 : 0,
+      farForgivenByPinCount: farKpi.farForgivenByPinCount,
       distanceHistogram,
       syncLagHistogram,
       lastSyncAt: lastSync?.syncedAt || null,
+      // The list stays the raw FAR_WARN_M-or-offline SUPERSET (annotate, never post-filter):
+      // pin-forgiven rows remain visible, marked, so forgiveness is reviewable rather than
+      // silent — same downgrade-never-suppress posture as the audit queue.
       flaggedActivities: flaggedList.map((a) => ({
         id: String(a._id),
         actionType: a.actionType,
@@ -3918,6 +3933,7 @@ router.get('/canvassers/:userId/quality', async (req, res, next) => {
         wasOfflineSubmission: !!a.wasOfflineSubmission,
         distanceFromHouseMeters: a.distanceFromHouseMeters,
         location: a.location,
+        pinForgiven: !!farKpi.assessmentsByActionId.get(String(a._id))?.detail?.pinDowngraded,
         household: a.householdId
           ? {
               id: String(a.householdId._id),

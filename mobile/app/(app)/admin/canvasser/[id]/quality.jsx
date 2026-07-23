@@ -14,6 +14,7 @@ import { api } from '../../../../../lib/api';
 import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { formatExact, formatInTz, timeAgo } from '../../../../../lib/datetime';
+import { formatDistance } from '../../../../../lib/geo';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
@@ -102,19 +103,23 @@ export default function QualityScreen() {
                 },
                 {
                   label: 'Avg distance from house',
-                  value:
-                    data.avgDistanceFromHouseMeters != null
-                      ? `${data.avgDistanceFromHouseMeters}m`
-                      : '—',
+                  // ft/mi at display time, metric comparison for the level — thresholds stay meters.
+                  value: formatDistance(data.avgDistanceFromHouseMeters),
                   level:
                     data.avgDistanceFromHouseMeters != null && data.avgDistanceFromHouseMeters > 25
                       ? 'caution'
                       : undefined,
                 },
                 {
-                  label: 'Knocks > 50m',
+                  // The detector's verdict, not a raw meter cutoff: effective distance minus GPS
+                  // accuracy, with honest corrections and post-knock pin fixes forgiven. The
+                  // forgiven count explains why this number can drop after someone fixes a pin.
+                  label: 'Far knocks',
                   value: `${data.farFromHousePercent}%`,
-                  sub: `${data.farFromHouseCount} flagged`,
+                  sub:
+                    data.farForgivenByPinCount != null && data.farForgivenByPinCount > 0
+                      ? `${data.farFromHouseCount} flagged · ${data.farForgivenByPinCount} forgiven`
+                      : `${data.farFromHouseCount} flagged`,
                   level:
                     data.farFromHousePercent > 10
                       ? 'low'
@@ -135,7 +140,7 @@ export default function QualityScreen() {
 
             <SectionHeader
               title="Distance from house"
-              subtitle="GPS accuracy when each knock was logged"
+              subtitle="How far from the house pin each entry was logged"
             />
             <View style={styles.chartCard}>
               <BarChart
@@ -160,7 +165,7 @@ export default function QualityScreen() {
               <BarChart data={data.syncLagHistogram.map((b) => ({ label: b.bucket, value: b.count }))} />
             </View>
 
-            <SectionHeader title="Flagged activities" subtitle="Offline OR > 250 ft from house" />
+            <SectionHeader title="Flagged activities" subtitle="Offline or > 250 ft from house · forgiven = pin corrected later" />
             {data.flaggedActivities.length === 0 ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyText}>No flagged activity in this range.</Text>

@@ -14,6 +14,7 @@ import { api } from '../../../../../lib/api';
 import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../../lib/dateRanges';
 import { formatRange, timeAgo } from '../../../../../lib/datetime';
+import { formatDistance } from '../../../../../lib/geo';
 import { rateFromPct } from '../../../../../lib/rates';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
@@ -458,17 +459,19 @@ export default function CanvasserOverview() {
           />
           <Highlight
             title="Avg distance"
-            value={
-              s.quality.avgDistanceFromHouseMeters != null
-                ? `${s.quality.avgDistanceFromHouseMeters}m`
-                : '—'
-            }
+            value={formatDistance(s.quality.avgDistanceFromHouseMeters)}
             sub="from house"
           />
+          {/* Detector-rule far (accuracy-aware, corrections + pin fixes forgiven) — the
+              forgiven count explains a drop after someone corrects a pin. */}
           <Highlight
-            title=">50m"
+            title="Far knocks"
             value={`${s.quality.farFromHousePercent}%`}
-            sub={`${s.quality.farFromHouseCount} flagged`}
+            sub={
+              s.quality.farForgivenByPinCount != null && s.quality.farForgivenByPinCount > 0
+                ? `${s.quality.farFromHouseCount} flagged · ${s.quality.farForgivenByPinCount} forgiven`
+                : `${s.quality.farFromHouseCount} flagged`
+            }
           />
         </View>
 

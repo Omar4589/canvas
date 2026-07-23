@@ -40,6 +40,11 @@ export default function ActivityRow({ activity, onPress, showDate = false }) {
   const flagged =
     a.wasOfflineSubmission ||
     (a.distanceFromHouseMeters != null && a.distanceFromHouseMeters > FAR_WARN_M);
+  // Server-annotated: the pin was corrected after this knock and the entry sits beside the
+  // corrected spot. Badge SWAP, not hide — the raw distance is still a fact (its red meta text
+  // stays); only the verdict changes. Absent field (older server/payload) → false → identical
+  // to today.
+  const forgiven = !!a.pinForgiven;
   const Wrapper = onPress ? Pressable : View;
   return (
     <Wrapper
@@ -92,7 +97,11 @@ export default function ActivityRow({ activity, onPress, showDate = false }) {
               <Text style={styles.offlineText}>offline</Text>
             </View>
           ) : null}
-          {flagged ? (
+          {forgiven ? (
+            <View style={styles.forgivenBadge}>
+              <Text style={styles.forgivenText}>forgiven</Text>
+            </View>
+          ) : flagged ? (
             <View style={styles.flagBadge}>
               <Text style={styles.flagText}>flagged</Text>
             </View>
@@ -166,6 +175,19 @@ function makeStyles(t) {
     },
     flagText: {
       color: t.colors.danger,
+      fontSize: 10,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    forgivenBadge: {
+      backgroundColor: t.colors.successBg,
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 1,
+      borderRadius: radius.sm,
+    },
+    forgivenText: {
+      color: t.colors.success,
       fontSize: 10,
       fontWeight: '700',
       textTransform: 'uppercase',

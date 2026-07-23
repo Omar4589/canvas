@@ -57,18 +57,7 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
   ).lean();
   const hInfoMap = new Map(households.map((h) => [String(h._id), h]));
   const pinMap = new Map(households.map((h) => [String(h._id), pinLngLat(h)]));
-  // Corrected pins only. `coordSource === 'corrected'` is load-bearing, not belt-and-braces: a
-  // re-import with overwriteHandEdits puts the file's coordinate back and resets coordSource but
-  // never clears correctedAt/correctedBy (services/import/csvImporter.js), so correctedAt alone
-  // would claim "the pin was moved here" about a pin that is now the file's again.
-  const pinFixMap = new Map(
-    households
-      .filter((h) => h.coordSource === 'corrected' && h.correctedAt && pinLngLat(h))
-      .map((h) => [
-        String(h._id),
-        { ...pinLngLat(h), correctedAt: h.correctedAt, correctedBy: h.correctedBy ? String(h.correctedBy) : null },
-      ])
-  );
+  const pinFixMap = buildPinFixMap(households);
 
   const { acc, byUser } = computeReasons(rows, pinMap, thresholds, pinFixMap);
 
@@ -222,74 +211,11 @@ export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS, pinFi
         addReason(r, { type: 'mock_gps', severity: 'high', detail: {} });
       }
 
-      // far — distance MINUS accuracy (a big distance from a poor fix reads as weak_gps, not
-      // far). Null distance = unknown → never "far".
-      const d = r.distanceFromHouseMeters;
-      if (d != null) {
-        const effective = Math.max(0, d - (acc_m ?? 0));
-        let farSev = null;
-        if (effective > T.FAR_CONFIRM_M) farSev = 'high';
-        else if (effective > T.FAR_WARN_M) farSev = 'med';
-        if (farSev) {
-          const detail = { meters: d, effectiveMeters: Math.round(effective), accuracy: acc_m ?? null };
-          if (r.replaced) {
-            // Correction context for the UI, on EVERY far correction (downgraded or not):
-            // the entry this one replaced ("latest wins" deleted its row — the snapshot is
-            // the only surviving record of where the canvasser stood the first time).
-            detail.priorActionType = r.replaced.actionType || null;
-            detail.priorMeters = r.replaced.distanceFromHouseMeters ?? null;
-            detail.priorAccuracy = r.replaced.location?.accuracy ?? null;
-            detail.minutesSincePrior = r.replaced.timestamp
-              ? Math.round((new Date(r.timestamp) - new Date(r.replaced.timestamp)) / 60000)
-              : null;
-            // Downgrade, don't suppress: the chain's best evidence (`nearest`) proves they
-            // were AT this door recently → an honest correction, not a phantom knock. The
-            // >= 0 guard denies the downgrade on reversed clocks (offline flush skew).
-            const near = r.replaced.nearest;
-            if (near && near.distanceFromHouseMeters != null && near.timestamp) {
-              const nearEff = Math.max(0, near.distanceFromHouseMeters - (near.accuracy ?? 0));
-              const sinceNearMin = (new Date(r.timestamp) - new Date(near.timestamp)) / 60000;
-              if (nearEff <= T.FAR_WARN_M && sinceNearMin >= 0 && sinceNearMin <= T.FAR_CORRECTION_WINDOW_MIN) {
-                farSev = 'low';
-                detail.downgraded = true;
-                detail.nearestMeters = near.distanceFromHouseMeters;
-                detail.minutesSinceNearest = Math.round(sinceNearMin);
-              }
-            }
-          }
-          // Pin-correction downgrade. `distanceFromHouseMeters` is frozen against the pin as it
-          // stood at knock time, so an approximate pin (street centroid, interpolated address)
-          // flags an honest canvasser who really did walk to the door — permanently, because
-          // moving the pin later touches no ledger row. If the pin was corrected AFTER this
-          // knock and the GPS turns out to sit beside the corrected pin, that is the exoneration.
-          //
-          // ONLY EVER DOWNGRADES. The block lives inside `if (farSev)` and assigns nothing but
-          // 'low', so a pin dragged AWAY can never manufacture or worsen a flag — nobody should
-          // be graded on an edit they didn't make and (since pins are lead/admin-only) couldn't.
-          const fix = pinFixMap.get(String(r.householdId));
-          if (fix && !missing && new Date(fix.correctedAt) > new Date(r.timestamp)) {
-            // haversineMeters is LAT-FIRST per point; `fix` carries named lat/lng (never a
-            // positional GeoJSON pair) so this call can't be silently transposed. Rounded to
-            // match how the write path stamps distanceFromHouseMeters.
-            const liveM = Math.round(haversineMeters(r.location.lat, r.location.lng, fix.lat, fix.lng));
-            detail.pinCorrectedMeters = liveM;
-            detail.pinCorrectedAt = fix.correctedAt;
-            if (Math.max(0, liveM - (acc_m ?? 0)) <= T.FAR_WARN_M) {
-              if (fix.correctedBy && fix.correctedBy === String(r.userId)) {
-                // The flagged canvasser moved the pin themselves. Withhold the downgrade — nobody
-                // grades their own work — but say so rather than staying silent. WITHHOLD, NOT
-                // REVERT: if `replaced` already earned 'low' on independent at-the-door evidence,
-                // that stands. Reverting it here would be an upgrade, which this rule never does.
-                detail.pinMovedBySelf = true;
-              } else {
-                farSev = 'low';
-                detail.pinDowngraded = true;
-              }
-            }
-          }
-          addReason(r, { type: 'far', severity: farSev, detail });
-        }
-      }
+      // far — the full rule lives in farAssessment (below), shared with the per-canvasser
+      // KPI helper (services/audit/farKpi.js) so the profile tiles can never disagree with
+      // this detector. The `type` wrapper stays here so the primitive is reason-shape-agnostic.
+      const fa = farAssessment(r, pinFixMap.get(String(r.householdId)), T);
+      if (fa) addReason(r, { type: 'far', severity: fa.severity, detail: fa.detail });
     }
 
     // rapid — consecutive DISTINCT-door gaps on the travel timeline (notes excluded).
@@ -319,6 +245,92 @@ export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS, pinFi
 
   return { acc, byUser };
 }
+
+// The ONE far rule — pure, no DB, no side effects. `row` is a lean CanvassActivity-shaped doc
+// (distanceFromHouseMeters, location{lat,lng,accuracy}, replaced{…nearest}, timestamp, userId);
+// `fix` is the household's buildPinFixMap entry ({lat,lng,correctedAt,correctedBy}) or undefined.
+//
+// Returns null (no distance, or not far once accuracy is subtracted — a big distance from a
+// poor fix reads as weak_gps, not far), or { severity, detail }:
+//   'med'/'high' — a genuine far knock (detail.pinMovedBySelf marks a withheld self-move
+//                  downgrade, which therefore still counts);
+//   'low'        — downgraded: detail.downgraded (honest replaced-chain correction) or
+//                  detail.pinDowngraded (pin corrected after the knock, GPS beside it).
+//
+// TWO CALLERS, one implementation — that is the point. computeReasons (the audit page / map
+// flags) and the per-canvasser far KPI (services/audit/farKpi.js — "far" = med/high, "forgiven"
+// = pinDowngraded) both call this, so the profile tiles can never disagree with the detector.
+// acc_m/missing are recomputed here (two null-safe reads) rather than taken as parameters, so
+// no caller can feed a drifted derivation.
+export const farAssessment = (row, fix, thresholds = FLAG_THRESHOLDS) => {
+  const T = thresholds;
+  const d = row.distanceFromHouseMeters;
+  if (d == null) return null; // unknown ≠ far
+  const acc_m = row.location?.accuracy;
+  const missing = !row.location || row.location.lat == null || row.location.lng == null;
+  const effective = Math.max(0, d - (acc_m ?? 0));
+  let farSev = null;
+  if (effective > T.FAR_CONFIRM_M) farSev = 'high';
+  else if (effective > T.FAR_WARN_M) farSev = 'med';
+  if (!farSev) return null;
+
+  const detail = { meters: d, effectiveMeters: Math.round(effective), accuracy: acc_m ?? null };
+  if (row.replaced) {
+    // Correction context for the UI, on EVERY far correction (downgraded or not):
+    // the entry this one replaced ("latest wins" deleted its row — the snapshot is
+    // the only surviving record of where the canvasser stood the first time).
+    detail.priorActionType = row.replaced.actionType || null;
+    detail.priorMeters = row.replaced.distanceFromHouseMeters ?? null;
+    detail.priorAccuracy = row.replaced.location?.accuracy ?? null;
+    detail.minutesSincePrior = row.replaced.timestamp
+      ? Math.round((new Date(row.timestamp) - new Date(row.replaced.timestamp)) / 60000)
+      : null;
+    // Downgrade, don't suppress: the chain's best evidence (`nearest`) proves they
+    // were AT this door recently → an honest correction, not a phantom knock. The
+    // >= 0 guard denies the downgrade on reversed clocks (offline flush skew).
+    const near = row.replaced.nearest;
+    if (near && near.distanceFromHouseMeters != null && near.timestamp) {
+      const nearEff = Math.max(0, near.distanceFromHouseMeters - (near.accuracy ?? 0));
+      const sinceNearMin = (new Date(row.timestamp) - new Date(near.timestamp)) / 60000;
+      if (nearEff <= T.FAR_WARN_M && sinceNearMin >= 0 && sinceNearMin <= T.FAR_CORRECTION_WINDOW_MIN) {
+        farSev = 'low';
+        detail.downgraded = true;
+        detail.nearestMeters = near.distanceFromHouseMeters;
+        detail.minutesSinceNearest = Math.round(sinceNearMin);
+      }
+    }
+  }
+  // Pin-correction downgrade. `distanceFromHouseMeters` is frozen against the pin as it
+  // stood at knock time, so an approximate pin (street centroid, interpolated address)
+  // flags an honest canvasser who really did walk to the door — permanently, because
+  // moving the pin later touches no ledger row. If the pin was corrected AFTER this
+  // knock and the GPS turns out to sit beside the corrected pin, that is the exoneration.
+  //
+  // ONLY EVER DOWNGRADES. The block lives inside the far-severity branch and assigns nothing
+  // but 'low', so a pin dragged AWAY can never manufacture or worsen a flag — nobody should
+  // be graded on an edit they didn't make and (since pins are lead/admin-only) couldn't.
+  if (fix && !missing && new Date(fix.correctedAt) > new Date(row.timestamp)) {
+    // haversineMeters is LAT-FIRST per point; `fix` carries named lat/lng (never a
+    // positional GeoJSON pair) so this call can't be silently transposed. Rounded to
+    // match how the write path stamps distanceFromHouseMeters.
+    const liveM = Math.round(haversineMeters(row.location.lat, row.location.lng, fix.lat, fix.lng));
+    detail.pinCorrectedMeters = liveM;
+    detail.pinCorrectedAt = fix.correctedAt;
+    if (Math.max(0, liveM - (acc_m ?? 0)) <= T.FAR_WARN_M) {
+      if (fix.correctedBy && fix.correctedBy === String(row.userId)) {
+        // The flagged canvasser moved the pin themselves. Withhold the downgrade — nobody
+        // grades their own work — but say so rather than staying silent. WITHHOLD, NOT
+        // REVERT: if `replaced` already earned 'low' on independent at-the-door evidence,
+        // that stands. Reverting it here would be an upgrade, which this rule never does.
+        detail.pinMovedBySelf = true;
+      } else {
+        farSev = 'low';
+        detail.pinDowngraded = true;
+      }
+    }
+  }
+  return { severity: farSev, detail };
+};
 
 // Greedy time-ordered sweep: anchor at the earliest unassigned located row, gather all rows
 // within radius + time window of the anchor, then fire if the cluster covers enough DISTINCT
@@ -382,6 +394,25 @@ function pinLngLat(h) {
   if (!c || c.length < 2) return null;
   return { lng: c[0], lat: c[1] };
 }
+
+// householdId → {lat, lng, correctedAt, correctedBy} for CORRECTED pins only, from lean
+// Household docs projected with 'location coordSource correctedAt correctedBy'. Shared by
+// detectFlags and the far KPI helper (services/audit/farKpi.js) so the corrected-pin filter
+// can't drift between them.
+//
+// `coordSource === 'corrected'` is load-bearing, not belt-and-braces: a re-import with
+// overwriteHandEdits puts the file's coordinate back and resets coordSource but never clears
+// correctedAt/correctedBy (services/import/csvImporter.js), so correctedAt alone would claim
+// "the pin was moved here" about a pin that is now the file's again.
+export const buildPinFixMap = (households) =>
+  new Map(
+    households
+      .filter((h) => h.coordSource === 'corrected' && h.correctedAt && pinLngLat(h))
+      .map((h) => [
+        String(h._id),
+        { ...pinLngLat(h), correctedAt: h.correctedAt, correctedBy: h.correctedBy ? String(h.correctedBy) : null },
+      ])
+  );
 
 function emptySummary() {
   return {

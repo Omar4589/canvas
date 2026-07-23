@@ -89,7 +89,7 @@ const KPIS = [
   },
   {
     key: 'farFromHousePercent',
-    label: 'Knocks > 50m %',
+    label: 'Far knocks %',
     accessor: (s) => s?.quality.farFromHousePercent || 0,
     format: (v) => `${v}%`,
     higherIsBetter: false,
@@ -264,7 +264,7 @@ export default function Compare() {
                     {team ? (
                       <View style={[styles.valueCell, styles.teamCell]}>
                         <Text style={styles.teamValue}>
-                          {kpi.format(team[kpi.key] != null ? team[kpi.key] : 0)}
+                          {team[kpi.key] != null ? kpi.format(team[kpi.key]) : '—'}
                         </Text>
                       </View>
                     ) : null}
