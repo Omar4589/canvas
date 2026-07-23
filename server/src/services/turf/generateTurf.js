@@ -265,11 +265,18 @@ export async function recomputeTurf(turfDoc) {
   return turfDoc;
 }
 
-// Re-tessellate ALL of a pass's books into non-overlapping territories (each
-// book's hull clipped to its Voronoi cell). Call AFTER an edit shifts a book's
-// centroid/members — the shared seams move, so the whole pass re-tessellates.
-// Uses the books' stored centroids, so run it after the per-book recomputeTurf.
-export async function recomputePassTerritories(passId) {
+// Re-tessellate a pass's books into non-overlapping, door-containing territories
+// (each book's hull ∩ the union of its own doors' Voronoi cells — see
+// computeTerritories). Call AFTER an edit changes a book's members, after the
+// per-book recomputeTurf.
+//
+// onlyTurfIds: limit the expensive per-book geometry to just the books an edit
+// touched (~150-250ms at 16k doors instead of ~1.6s for all 128). The Voronoi
+// diagram is still computed over the WHOLE pass — seams depend on every door —
+// but only the listed books' shapes are rebuilt and written; the rest keep their
+// stored shapes, which remain exactly correct (moves don't change the diagram)
+// or conservatively contained (removals only grow the remaining cells).
+export async function recomputePassTerritories(passId, { onlyTurfIds = null } = {}) {
   const turfs = await Turf.find(
     { passId, status: { $in: ['draft', 'published'] } },
     { _id: 1, centroid: 1, householdIds: 1 }
@@ -282,9 +289,15 @@ export async function recomputePassTerritories(passId) {
     centroid: t.centroid,
     households: (t.householdIds || []).map((id) => hhById.get(String(id))).filter(Boolean),
   }));
-  const territories = computeTerritories(books);
-  const bulk = turfs.map((t, i) => ({
-    updateOne: { filter: { _id: t._id }, update: { $set: { boundary: territories[i] || null } } },
-  }));
+  const only = onlyTurfIds ? new Set(onlyTurfIds.map(String)) : null;
+  const onlyIndices = only
+    ? new Set(turfs.map((t, i) => (only.has(String(t._id)) ? i : -1)).filter((i) => i >= 0))
+    : null;
+  const territories = computeTerritories(books, { onlyIndices });
+  const bulk = [];
+  turfs.forEach((t, i) => {
+    if (onlyIndices && !onlyIndices.has(i)) return; // untouched book — keep its stored shape
+    bulk.push({ updateOne: { filter: { _id: t._id }, update: { $set: { boundary: territories[i] || null } } } });
+  });
   if (bulk.length) await Turf.bulkWrite(bulk, { ordered: false });
 }

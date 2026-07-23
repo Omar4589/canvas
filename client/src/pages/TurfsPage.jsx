@@ -327,7 +327,11 @@ function registerBookLayers(map, dark) {
 function bboxOf(turfs) {
   let a = Infinity; let b = Infinity; let c = -Infinity; let d = -Infinity;
   for (const t of turfs) {
-    for (const ring of t.boundary?.coordinates || []) {
+    // A book with pocket islands stores a MultiPolygon (one extra nesting level) — flatten
+    // it to the same rings-of-positions shape a plain Polygon has.
+    const coords = t.boundary?.coordinates || [];
+    const rings = t.boundary?.type === 'MultiPolygon' ? coords.flat() : coords;
+    for (const ring of rings) {
       for (const [x, y] of ring) { if (x < a) a = x; if (y < b) b = y; if (x > c) c = x; if (y > d) d = y; }
     }
   }

@@ -26,10 +26,10 @@ Status colors appear on their own once the round has knocks. While you're still 
 
 Switch rounds with the **Pass** dropdown at the top right — the colors, the counts, and the bar all follow the round you pick. The page doesn't refresh on its own; reload it to see the latest.
 
-## Why a house can sit outside its book's shape
+## Every house sits inside its book's shape
 
-The shaded shape around a book is a drawing aid — the book is really just its list of houses. Shapes are trimmed so neighboring books never overlap, and books are balanced to be similar in *size*, so a book sometimes owns a house that sits closer to the next book over. When that happens the house falls outside the drawn shape even though the book still owns it.
+Each book's shaded shape **contains all of that book's houses**, and shapes never overlap. So the shape a house sits in, the ring around its dot, and its popup all name the same book.
 
-To tell which book a house truly belongs to, look at its **ring color**, or click it — both come from the book itself.
+One thing you may notice: a small **pocket** — a little island of one book's color sitting inside another book's area. That's not a mistake. Books are balanced to be similar in size, so a book sometimes owns a house in the middle of another book's houses; the map draws a pocket of the owning book's color right around that house so you can tell whose it is at a glance.
 
 For the full walkthrough, see [Cutting and recutting books](turf-and-books).

@@ -1089,7 +1089,11 @@ router.post('/move-door', async (req, res, next) => {
     }
     if (!to.householdIds.map(String).includes(String(householdId))) to.householdIds.push(householdId);
     await recomputeTurf(to);
-    await recomputePassTerritories(to.passId);
+    // Only the two touched books re-tessellate — a move flips cell ownership without
+    // changing the pass's Voronoi diagram, so every other book's shape is still exact.
+    const movedTurfIds = [String(to._id)];
+    if (from && String(from._id) !== String(to._id)) movedTurfIds.push(String(from._id));
+    await recomputePassTerritories(to.passId, { onlyTurfIds: movedTurfIds });
     res.json({
       from: from && String(from._id) !== String(to._id) ? { id: String(from._id), doorCount: from.doorCount } : null,
       to: { id: String(to._id), doorCount: to.doorCount },
@@ -1122,16 +1126,20 @@ router.post('/move-doors', async (req, res, next) => {
     }
 
     const idSet = new Set(ids.map(String));
+    const changedTurfIds = [String(to._id)]; // donors that actually lost a door + the target
     const others = await Turf.find({ campaignId: req.campaign._id, passId: to.passId, _id: { $ne: to._id } });
     for (const t of others) {
       const before = t.householdIds.length;
       t.householdIds = t.householdIds.filter((id) => !idSet.has(String(id)));
-      if (t.householdIds.length !== before) await recomputeTurf(t);
+      if (t.householdIds.length !== before) {
+        await recomputeTurf(t);
+        changedTurfIds.push(String(t._id));
+      }
     }
     const have = new Set(to.householdIds.map(String));
     for (const id of ids) if (!have.has(String(id))) to.householdIds.push(id);
     await recomputeTurf(to);
-    await recomputePassTerritories(to.passId);
+    await recomputePassTerritories(to.passId, { onlyTurfIds: changedTurfIds });
     res.json({ to: { id: String(to._id), doorCount: to.doorCount } });
   } catch (err) {
     next(err);
@@ -1172,7 +1180,8 @@ router.post('/merge', async (req, res, next) => {
     // archiving left ghost stubs that lingered in the list and survived discard.
     await Turf.deleteMany({ _id: { $in: absorbedIds } });
     await recomputeTurf(primary);
-    await recomputePassTerritories(primary.passId);
+    // Absorbed doors flip ownership to primary; every other book's shape is still exact.
+    await recomputePassTerritories(primary.passId, { onlyTurfIds: [String(primary._id)] });
     res.json({ turf: { id: String(primary._id), doorCount: primary.doorCount } });
   } catch (err) {
     next(err);
@@ -1207,7 +1216,7 @@ router.post('/:turfId/split', async (req, res, next) => {
     });
     await recomputeTurf(src);
     await recomputeTurf(newTurf);
-    await recomputePassTerritories(src.passId);
+    await recomputePassTerritories(src.passId, { onlyTurfIds: [String(src._id), String(newTurf._id)] });
     res.json({
       source: { id: String(src._id), doorCount: src.doorCount },
       created: { id: String(newTurf._id), doorCount: newTurf.doorCount },

@@ -8,10 +8,14 @@ const pointSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Polygon OR MultiPolygon — a book's territory grows pocket islands when it owns a door
+// surrounded by another book's houses (see services/turf/boundary.js computeTerritories).
+// coordinates is untyped because the two shapes nest differently (Polygon [[[lng,lat]]],
+// MultiPolygon [[[[lng,lat]]]]); boundary is display-only and never geo-queried (below).
 const polygonSchema = new mongoose.Schema(
   {
-    type: { type: String, enum: ['Polygon'], default: 'Polygon' },
-    coordinates: { type: [[[Number]]], default: undefined },
+    type: { type: String, enum: ['Polygon', 'MultiPolygon'], default: 'Polygon' },
+    coordinates: { type: [], default: undefined },
   },
   { _id: false }
 );

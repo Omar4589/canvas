@@ -135,9 +135,9 @@ answering *"how is this round going?"* — without leaving the page.
   restricted, or still unknocked — using the same colors as the Map page. Around each house sits a
   **ring in its book's color**, so you can read "this one is a not-home *and* it's in Book 4" at a
   glance. That's two facts on one dot.
-- **Why a ring and not just the book outline?** Because a book's outline doesn't always contain every
-  one of its houses (see *Book outlines are approximate* below). The ring is keyed to the book itself,
-  so it is always right.
+- **The shape agrees with the ring.** Every house sits inside its book's outline (see *Every house
+  is inside its book's shape* below), so the shape a dot sits in and the ring around it always name
+  the same book.
 - **Book labels count the work**: `Book 4 · 23/65` — 23 of its 65 houses done.
 - **Book shading tracks completion**: an untouched book is pale, a finished one is solid. Spot the
   book nobody has started from across the map without reading a single number.
@@ -154,16 +154,17 @@ it either way.
 
 **It does not auto-refresh.** The page shows the round as of when you opened it; reload to update.
 
-## Book outlines are approximate
+## Every house is inside its book's shape
 
-The shaded outline around a book is a **display aid, not the definition of the book** — a book *is*
-its list of houses. A house can sit slightly outside its own book's outline, for one deliberate
-reason: outlines are trimmed so that neighbouring books never overlap, and books are balanced for even
-*size*, not for perfect geometry. When a book takes on a house that happens to sit closer to the
-neighbouring book's center, the trim removes it from the outline even though the book still owns it.
+The shaded outline around a book **contains every one of the book's houses**, and outlines still
+**never overlap**. The book itself remains its list of houses — the outline is drawn *from* that
+list, and it always agrees with it.
 
-If you want to know which book a house really belongs to, use its **ring color** on the map, or click
-it — both come from the book itself rather than from the drawn shape.
+One shape follows from that guarantee: a **pocket**. When a book owns a house that sits in the middle
+of another book's houses (which the size-balancing cut legitimately produces), the map draws a small
+island of the owning book's color right around that house, and the surrounding book's shape carries a
+matching hole. A pocket isn't an error — it's the map telling you, at a glance, "this door belongs to
+that other book." The house's ring color and its popup say the same thing.
 
 ## Recutting (changing the books)
 
@@ -432,29 +433,51 @@ driving across the area for one door.) Everything runs on Hilbert-projected mete
 - **`hardMax` rescue (the finisher):** a house still stuck far from its cluster joins its **nearest** book
   even slightly over target (up to `hardMax`) instead of driving away — compactness beats the count.
 
-### Book outlines: containment vs. non-overlap
+### Book outlines: containment AND non-overlap — both, via door-level Voronoi
 
 `computeBoundary` ([boundary.js](../server/src/services/turf/boundary.js)) walks a relaxing `maxEdge`
 ladder (0.4 → 0.6 → 1.2 km) and **each rung must contain every one of the book's houses**, falling
 back to `turf.convex` (which contains all input points by construction). It used to return on the
 first rung that produced a `Polygon` — but `turf.concave` triangulates away outlying points and still
 returns a valid Polygon, so hulls were accepted that visibly excluded their own doors and the ladder
-never got its chance (measured: **1 of 13 houses outside at maxEdge 0.4, 0 at 1.2**). Guarded by
-`test/turfBoundary.test.js`.
+never got its chance (measured: **1 of 13 houses outside at maxEdge 0.4, 0 at 1.2**).
 
-**A door can still sit outside its book's outline, by design.** `computeTerritories` clips each hull
-to its **Voronoi cell** so adjacent books never overlap, while `balancedKMeans` trades geometric
-purity for even book sizes (the whole point of `tolerance`). A book can therefore own houses that are
-nearer a *neighbour's* centroid, and the clip removes them from the outline. Measured: a 24-house book
-beside another lost **7 of 24** houses from its own outline. This is not fixable without letting books
-overlap — you cannot have disjoint territories *and* full containment when the assignment isn't
-Voronoi-consistent. Consequence for the UI: **the cut map's book-colored ring, keyed on `turfId`, is
-the authoritative ownership signal — never the polygon.** The same test file pins both sides (no
-overlap, and the clip still bites) so neither can silently flip.
+`computeTerritories` builds each stored outline as
 
-`recomputeTurf` writes the **unclipped** hull and must always be followed by
-`recomputePassTerritories` — every call site does (move-door, move-doors, merge, split, and the
-effort door-claim path in [efforts.js](../server/src/routes/admin/efforts.js)).
+```
+territory_i = hull_i ∩ union(Voronoi cells of book i's OWN doors)
+```
+
+with the Voronoi diagram seeded by **every booked door of the pass** — not one seed per book. Every
+door is inside its own cell by definition and inside its hull (verified above), so it is inside the
+intersection; cells are disjoint across books, so territories never overlap. **Both properties hold
+simultaneously.** An earlier revision of this section claimed that was impossible and pinned the loss
+as by-design — that held only for the previous construction (each hull clipped to a *single* cell
+seeded at the book's centroid), under which a door nearer a neighbour's centroid fell outside its own
+outline (measured then: 7 of 24 doors lost from a street book). The door-level union retires that
+trade-off. Measured at production scale (16.5k doors / 128 books): **~1.5s full recompute, 0 doors
+outside, 0 m² overlap**, ~95 KB total geometry. Deterministic — worker re-runs reproduce identical
+shapes. Duplicate coordinates (apartment stacks) are deduped first-book-wins; a coordinate genuinely
+split across two books can only be strictly inside one of two disjoint shapes, so the minority units
+rely on the ring/popup (the one honest residual). Contract pinned by `test/turfBoundary.test.js`.
+
+Two shape consequences, both intended: a door surrounded by another book's houses gets a **pocket
+island** (the territory becomes a `MultiPolygon`; the surrounding book carries a matching hole), and
+`Turf.boundary` therefore accepts **`Polygon` or `MultiPolygon`** — safe because boundary is
+display-only and never geo-queried (see the model comment; Mapbox on web and mobile renders both
+natively, and the canvasser bootstrap never ships boundary at all).
+
+**Edit-time cost is bounded by `onlyTurfIds`.** `recomputePassTerritories(passId, { onlyTurfIds })`
+still seeds the diagram with the whole pass (seams depend on every door) but re-unions only the books
+an edit touched (~110ms at 16k doors vs ~1.5s for all 128). Correct because a door *move* doesn't
+change the diagram — only cell ownership flips, so untouched books' stored shapes stay exactly right —
+and a door *removal* (the effort claim path) only grows the remaining cells, so untouched shapes stay
+strictly inside their new entitlement: still disjoint, still containing. `recomputeTurf` writes the
+**unclipped** hull and must always be followed by `recomputePassTerritories` — every call site does
+(move-door, move-doors, merge, split, and the effort door-claim path in
+[efforts.js](../server/src/routes/admin/efforts.js)), each passing the books it changed. Outlines cut
+before this change are healed in place by `npm run recompute:territories -- --apply`
+(see [OPERATIONS.md](OPERATIONS.md)) — it rewrites only `Turf.boundary`, so it is safe mid-round.
 
 `tolerance` is surfaced on the Turf Cutting page as a **Tight / Balanced / Compact** toggle
 (`0.15 / 0.25 / 0.4`; default **Compact = 0.4**), sent through `params.tolerance` (the `/generate` route

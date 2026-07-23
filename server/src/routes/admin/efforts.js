@@ -299,19 +299,26 @@ router.post('/:id/claim', loadEffort, async (req, res, next) => {
       );
       const affectedTurfIds = [...new Set(owned.filter((h) => h.turfId).map((h) => String(h.turfId)))];
       const ownedSet = new Set(ownedIds.map(String));
-      const touchedPassIds = new Set();
+      const touchedByPass = new Map(); // passId -> turfIds that lost doors
       for (const tid of affectedTurfIds) {
         const turf = await Turf.findById(tid);
         if (!turf) continue;
         turf.householdIds = turf.householdIds.filter((id) => !ownedSet.has(String(id)));
         await recomputeTurf(turf);
-        if (turf.passId) touchedPassIds.add(String(turf.passId));
+        if (turf.passId) {
+          const pid = String(turf.passId);
+          if (!touchedByPass.has(pid)) touchedByPass.set(pid, []);
+          touchedByPass.get(pid).push(String(turf._id));
+        }
         recutBooks += 1;
       }
       // recomputeTurf leaves an UNCLIPPED hull; every other caller (move-door, move-doors,
-      // merge, split) immediately re-tessellates so books stay non-overlapping. This path
-      // didn't — leaving one book's raw hull sitting over its clipped neighbours.
-      for (const pid of touchedPassIds) await recomputePassTerritories(pid);
+      // merge, split) immediately re-tessellates so books stay non-overlapping. Only the
+      // shrunken books rebuild: removing doors only GROWS the remaining Voronoi cells, so
+      // untouched books' stored shapes stay inside their entitlement — disjoint and containing.
+      for (const [pid, turfIds] of touchedByPass) {
+        await recomputePassTerritories(pid, { onlyTurfIds: turfIds });
+      }
     }
 
     res.json({ claimed: intake.length + (force ? owned.length : 0), reassigned: force ? owned.length : 0, recutBooks });

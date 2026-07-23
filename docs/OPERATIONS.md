@@ -316,6 +316,22 @@ npm run migrate:build-indexes -- --apply
 did, every deploy would try to rebuild indexes across your biggest collections at boot, which can lock up
 the database while people are canvassing. So we build them on purpose, when we mean to.
 
+### Redraw the book shapes on the cut map (ONE TIME — after the containment release)
+
+The Turf Cutting map's book shapes now **contain every one of their houses** (a stray door gets a
+small pocket of its book's color instead of sitting outside the shape). New cuts and any book edit
+draw the new shapes automatically; **books cut before the release keep their old shapes until you run
+this once.** It rewrites only the drawn outlines — doors, canvasser assignments, and knocks are
+untouched, so it is safe to run in the middle of a live round. Dry-runs by default; idempotent, so
+re-running is harmless.
+
+```
+npm run recompute:territories -- --apply
+```
+
+Reload the web console afterwards — the Turf Cutting map picks the new shapes up immediately. Phones
+don't need anything (the field app never receives these shapes).
+
 ### Stamp merge candidates with their organization (ONE TIME — batch-3 release)
 
 Existing `PersonMergeCandidate` rows predate the `organizationId` field (new ones get it at write
