@@ -220,10 +220,13 @@ An entry can carry several reasons; its `maxSeverity` is the worst. `haversineMe
 ### One threshold, everywhere
 
 `FAR_WARN_M` (75 m) is now the **single** "far" threshold. The legacy far-knock counters and the
-`flaggedOnly` activity feed in [reports.js](../server/src/routes/admin/reports.js), and the
-`CanvasserPingPanel` "— far" label, all reference it (server) / its client mirror
-([client/src/lib/flags.js](../client/src/lib/flags.js)) — resolving an old 50 m-server / 100 m-client
-split so "far" means one thing across the app.
+`flaggedOnly` activity feed in [reports.js](../server/src/routes/admin/reports.js), the
+`CanvasserPingPanel` "— far" label on web, and its mobile counterparts — `ActivityRow` and the admin
+map's ping-detail sheet ([mobile/app/(app)/admin/map.jsx](../mobile/app/(app)/admin/map.jsx)) — all
+reference it (server) / its client mirror ([client/src/lib/flags.js](../client/src/lib/flags.js)) or
+mobile mirror ([mobile/lib/flags.js](../mobile/lib/flags.js)) — resolving an old 50 m-server /
+100 m-client split so "far" means one thing across the app. (The mobile ping sheet was the last
+straggler on the 100 m value.)
 
 **Units:** storage, thresholds, and all detection math are **meters**; every user-facing string
 converts at display time to **feet, then miles at ≥ 1 mile** — web via `formatDistanceImperial`

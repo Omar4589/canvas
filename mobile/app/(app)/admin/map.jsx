@@ -26,7 +26,7 @@ import LiveStatus from '../../../components/LiveStatus';
 import DateRangePickerModal from '../../../components/DateRangePickerModal';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import FlagLegendHint from '../../../components/FlagLegendHint';
-import { primaryReason, reasonColor } from '../../../lib/flags';
+import { primaryReason, reasonColor, FAR_WARN_M } from '../../../lib/flags';
 import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { initMapbox } from '../../../lib/mapbox';
@@ -1793,7 +1793,9 @@ export default function AdminMap() {
         const a = selectedPing;
         const household = householdsById.get(String(a.householdId));
         const dist = a.distanceFromHouseMeters;
-        const distFar = dist != null && dist > 100;
+        // FAR_WARN_M (75), not a local 100 — the server detector, the web ping panel, and
+        // ActivityRow all key the "far" label off this one constant; this sheet was the straggler.
+        const distFar = dist != null && dist > FAR_WARN_M;
         const detail = pingDetailQ.data;
         const voter = detail?.voter;
         const surveyResponse = detail?.surveyResponse;
