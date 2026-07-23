@@ -19,13 +19,22 @@ import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
-import { getPassStatusMap } from '../../services/passes/passStatus.js';
+import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
 import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
+
+// Record-level audit tag for the :householdId drill (same pattern as routes/admin/households.js
+// and routes/admin/voters.js) — GET /household/:householdId is a single-record open returning
+// voter names, so a staff read under a grant must log WHICH door was opened.
+router.param('householdId', (req, res, next, householdId) => {
+  if (mongoose.isValidObjectId(householdId)) addAuditSubjects(res, 'household', householdId);
+  next();
+});
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -868,25 +877,40 @@ router.get('/doors', async (req, res, next) => {
     // Address fields ride along (non-slim) so the client can group stacked
     // apartment units (same geocode) into one building marker and render the
     // unit list without a per-unit fetch.
-    const doors = households
-      .filter((h) => h.location?.coordinates?.length === 2)
-      .map((h) => {
-        const d = {
-          id: String(h._id),
-          lng: h.location.coordinates[0],
-          lat: h.location.coordinates[1],
-          turfId: h.turfId ? String(h.turfId) : null,
-          status: h.status || 'unknocked', // so the cut UI can flag/count restricted doors
-        };
-        if (!slim) {
-          d.addressLine1 = h.addressLine1 || '';
-          d.addressLine2 = h.addressLine2 || '';
-          d.city = h.city || '';
-          d.state = h.state || '';
-          d.zipCode = h.zipCode || '';
-        }
-        return d;
-      });
+    const placed = households.filter((h) => h.location?.coordinates?.length === 2);
+
+    // withStatus=1 (the web cut map): each door's status FOR THIS ROUND, so the map can
+    // color houses by what happened this pass instead of only by which book owns them.
+    // Opt-in rather than unconditional — the mobile assign map (slim=1) colors by book and
+    // would pay the aggregate + a string per door across a 16k-door effort for nothing.
+    // Distinct from `status` below, which is Household.status (latest across ALL passes).
+    let passStatusMap = null;
+    if (req.query.withStatus === '1' && placed.length) {
+      passStatusMap = await getPassStatusMap(
+        pass._id,
+        placed.map((h) => String(h._id)),
+        req.campaign.type
+      );
+    }
+
+    const doors = placed.map((h) => {
+      const d = {
+        id: String(h._id),
+        lng: h.location.coordinates[0],
+        lat: h.location.coordinates[1],
+        turfId: h.turfId ? String(h.turfId) : null,
+        status: h.status || 'unknocked', // so the cut UI can flag/count restricted doors
+      };
+      if (passStatusMap) d.passStatus = passStatusMap.get(String(h._id))?.status || 'unknocked';
+      if (!slim) {
+        d.addressLine1 = h.addressLine1 || '';
+        d.addressLine2 = h.addressLine2 || '';
+        d.city = h.city || '';
+        d.state = h.state || '';
+        d.zipCode = h.zipCode || '';
+      }
+      return d;
+    });
     res.json({ doors });
   } catch (err) {
     next(err);
@@ -998,6 +1022,11 @@ router.get('/assignments', async (req, res, next) => {
 // the canvasser's book) and how many are knocked (status !== unknocked). One status
 // map for the whole pass, then sliced per turf — so the Books list can show
 // "12/40 done" per book without fetching every household.
+//
+// `statusCounts` breaks that same slice out by status. THIS ROUTE IS THE SINGLE COUNT
+// ORACLE for the cut page: the book status chips, the map labels, the completion tint and
+// the round coverage bar all read it, so they cannot drift apart. /doors?withStatus=1
+// colors dots from the same getPassStatusMap over the same pass, but never feeds a count.
 router.get('/progress', async (req, res, next) => {
   try {
     const { passId } = req.query;
@@ -1023,7 +1052,7 @@ router.get('/progress', async (req, res, next) => {
     const progress = turfs.map((t) => {
       const ids = (t.householdIds || []).map(String).filter((id) => eligible.has(id));
       const knocked = ids.filter((id) => (statusMap.get(id)?.status || 'unknocked') !== 'unknocked').length;
-      return { turfId: String(t._id), total: ids.length, knocked };
+      return { turfId: String(t._id), total: ids.length, knocked, statusCounts: statusCountsFromMap(statusMap, ids) };
     });
     res.json({ progress });
   } catch (err) {

@@ -13,9 +13,11 @@ import MapStyleControl from '../components/MapStyleControl.jsx';
 import StatCard from '../components/StatCard.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
+import CoverageBar from '../components/CoverageBar.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from '../lib/statusColors.js';
 
 // Geometric book-size flex → tolerance (how much book sizes may vary from the target
 // to stay compact). Default Compact (0.4); consumed by balancedKMeans via params.
@@ -41,7 +43,15 @@ const ATTRIBUTES = [
   { value: 'county', label: 'County' },
 ];
 
-function booksToFillGeoJSON(turfs, colorByTurf, selected) {
+// Share of a book's eligible doors already worked this round (0–1), or null before any
+// progress is known. Drives the completion tint on the book fill.
+function bookProgress(turfId, progressByTurf) {
+  const p = progressByTurf?.get(String(turfId));
+  if (!p || !p.total) return null;
+  return p.knocked / p.total;
+}
+
+function booksToFillGeoJSON(turfs, colorByTurf, selected, progressByTurf) {
   return {
     type: 'FeatureCollection',
     features: turfs
@@ -49,40 +59,59 @@ function booksToFillGeoJSON(turfs, colorByTurf, selected) {
       .map((t) => ({
         type: 'Feature',
         geometry: t.boundary,
-        properties: { id: String(t._id), color: colorByTurf.get(String(t._id)), selected: selected.has(String(t._id)) },
-      })),
-  };
-}
-function booksToLabelGeoJSON(turfs, selected) {
-  return {
-    type: 'FeatureCollection',
-    features: turfs
-      .filter((t) => t.centroid?.coordinates?.length === 2)
-      .map((t) => ({
-        type: 'Feature',
-        geometry: t.centroid,
         properties: {
           id: String(t._id),
-          label: `${t.name} · ${t.eligibleDoorCount ?? t.doorCount}`,
+          color: colorByTurf.get(String(t._id)),
           selected: selected.has(String(t._id)),
+          // Hue stays the book's color; only alpha varies, so an untouched book reads pale
+          // and a finished one solid without ever losing its identity.
+          progress: bookProgress(t._id, progressByTurf) ?? 0,
         },
       })),
   };
 }
-function doorsToGeoJSON(doors, colorByTurf, targetedSet) {
+function booksToLabelGeoJSON(turfs, selected, progressByTurf, statusMode) {
   return {
     type: 'FeatureCollection',
-    features: doors.map((d) => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
-      properties: {
-        id: d.id,
-        turfId: d.turfId ? String(d.turfId) : '',
-        color: colorByTurf.get(String(d.turfId)) || '#9ca3af',
-        // When a target filter is active, dim doors that aren't in the matched set.
-        dim: targetedSet ? !targetedSet.has(String(d.id)) : false,
-      },
-    })),
+    features: turfs
+      .filter((t) => t.centroid?.coordinates?.length === 2)
+      .map((t) => {
+        const p = statusMode ? progressByTurf?.get(String(t._id)) : null;
+        // "Book 4 · 23/65" once the round is underway, else today's plain door count.
+        // Deliberately no percentage in the text — it lengthens the label and worsens the
+        // collision-culling below; the fill tint is what carries the percentage.
+        const label = p && p.total ? `${t.name} · ${p.knocked}/${p.total}` : `${t.name} · ${t.eligibleDoorCount ?? t.doorCount}`;
+        return {
+          type: 'Feature',
+          geometry: t.centroid,
+          properties: { id: String(t._id), label, selected: selected.has(String(t._id)) },
+        };
+      }),
+  };
+}
+// `color` is what the dot is filled with, `ringColor` the halo beneath it. In status mode the
+// fill carries THIS ROUND's door status and the ring keeps book identity, so both read at once —
+// which matters because a book's outline provably need not contain all of its own doors (the
+// Voronoi clip in services/turf/boundary.js), while the ring is keyed on turfId and always right.
+function doorsToGeoJSON(doors, colorByTurf, targetedSet, statusMode, dark) {
+  const statusColors = statusColorsForTheme(dark);
+  return {
+    type: 'FeatureCollection',
+    features: doors.map((d) => {
+      const bookColor = colorByTurf.get(String(d.turfId)) || '#9ca3af';
+      return {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
+        properties: {
+          id: d.id,
+          turfId: d.turfId ? String(d.turfId) : '',
+          color: statusMode ? statusColors[d.passStatus || 'unknocked'] || statusColors.unknocked : bookColor,
+          ringColor: bookColor,
+          // When a target filter is active, dim doors that aren't in the matched set.
+          dim: targetedSet ? !targetedSet.has(String(d.id)) : false,
+        },
+      };
+    }),
   };
 }
 
@@ -128,7 +157,7 @@ function groupDoors(doors) {
 // DOM element for a building marker: an SVG apartment glyph (book-colored) + a
 // "{n} units" badge. A building icon — not a numbered bubble — so it never reads
 // as pin clustering.
-function buildingMarkerEl(total, color, dark) {
+function buildingMarkerEl(total, color, dark, badgeText) {
   const el = document.createElement('div');
   el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;';
   // A small 2x2-window building glyph (was 28px + 12 windows) — far less clutter at 100+ markers.
@@ -147,7 +176,7 @@ function buildingMarkerEl(total, color, dark) {
     `<rect x="6" y="3" width="12" height="18" rx="1.4" fill="${color}" stroke="#fff" stroke-width="1.4"/>` +
     windows.join('') +
     `</svg>` +
-    `<div class="units-badge" style="display:none;margin-top:-3px;background:${badgeBg};color:${badgeFg};font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${total} units</div>`;
+    `<div class="units-badge" style="display:none;margin-top:-3px;background:${badgeBg};color:${badgeFg};font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${badgeText || `${total} units`}</div>`;
   return el;
 }
 
@@ -217,7 +246,22 @@ function registerBookLayers(map, dark) {
 
   const empty = { type: 'FeatureCollection', features: [] };
   map.addSource('books', { type: 'geojson', data: empty });
-  map.addLayer({ id: 'book-fill', type: 'fill', source: 'books', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['get', 'selected'], 0.3, 0.16] } });
+  map.addLayer({
+    id: 'book-fill',
+    type: 'fill',
+    source: 'books',
+    paint: {
+      'fill-color': ['get', 'color'],
+      // Tinted by completion: pale at 0% worked, solid at 100%, with the selected book
+      // lifted above whatever its progress would otherwise give it.
+      'fill-opacity': [
+        'case',
+        ['get', 'selected'],
+        ['interpolate', ['linear'], ['get', 'progress'], 0, 0.3, 1, 0.46],
+        ['interpolate', ['linear'], ['get', 'progress'], 0, 0.1, 1, 0.32],
+      ],
+    },
+  });
   map.addLayer({
     id: 'book-outline',
     type: 'line',
@@ -247,6 +291,23 @@ function registerBookLayers(map, dark) {
     },
   });
   map.addSource('doors', { type: 'geojson', data: empty });
+  // Book-colored halo UNDER each dot. In status mode the dot itself is spent on the door's
+  // round status, so this is what still says "and it belongs to Book 4". Hidden when status
+  // mode is off (the dot is already the book color then — a ring would just be a fatter dot).
+  // Starts hidden and is switched on by the layer-visibility effect, so a fresh cut (the
+  // common cutting case, status mode off) never flashes rings for a frame on load or after
+  // a basemap swap re-registers these layers.
+  map.addLayer({
+    id: 'door-book-ring',
+    type: 'circle',
+    source: 'doors',
+    layout: { visibility: 'none' },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4.7, 15, 7.2],
+      'circle-color': ['get', 'ringColor'],
+      'circle-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
+    },
+  });
   map.addLayer({
     id: 'doors',
     type: 'circle',
@@ -461,7 +522,69 @@ function DiscardModal({ isActive, bookCount, passLabel, knockCount, clearKnocks,
   );
 }
 
-function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose }) {
+// What happened at this door THIS round, plus the answers recorded here. Both come from the
+// endpoints the Map page's HouseholdDetailPanel already uses — same roles (admin + a lead who
+// manages the campaign), same per-campaign gate, and the same router.param audit hook, so this
+// widens no access and stays record-level auditable. Scoped to `passId` exactly like the panel.
+function RoundActivity({ householdId, passId, status, tz }) {
+  const activityQ = useQuery({
+    queryKey: ['household-activity', householdId],
+    queryFn: () => api(`/admin/households/${householdId}/activity`),
+    enabled: !!householdId,
+  });
+  const surveysQ = useQuery({
+    queryKey: ['household-surveys', householdId, passId || ''],
+    queryFn: () => api(`/admin/households/${householdId}/surveys${passId ? `?passId=${passId}` : ''}`),
+    enabled: !!householdId && status === 'surveyed',
+  });
+  const round = (activityQ.data?.rounds || []).find((r) => String(r.passId || '') === String(passId || ''));
+  const latest = round?.entries?.[0] || null; // the server already sorts newest-first
+  const surveys = surveysQ.data?.surveys || [];
+  const when = (at) =>
+    formatInTz(at, tz, { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true);
+
+  return (
+    <div className="mt-2 border-t border-border pt-2">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">This round</div>
+      <div className="flex items-center gap-1.5 text-xs">
+        <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS[status] || STATUS_COLORS.unknocked }} />
+        <span className="font-medium text-fg">{STATUS_LABELS[status] || 'Unknocked'}</span>
+      </div>
+      {activityQ.isLoading ? (
+        <div className="mt-0.5 text-[11px] text-fg-subtle">Loading…</div>
+      ) : latest ? (
+        <div className="mt-0.5 text-[11px] text-fg-muted">
+          {actionLabel(latest.actionType)}
+          {latest.canvasser ? ` · ${latest.canvasser}` : ''}
+          {latest.at ? ` · ${when(latest.at)}` : ''}
+        </div>
+      ) : (
+        <div className="mt-0.5 text-[11px] text-fg-subtle">Not worked this round yet.</div>
+      )}
+
+      {surveys.map((s) => (
+        <div key={s.id} className="mt-1.5 rounded border border-border px-1.5 py-1">
+          <div className="text-[11px] font-medium text-fg">
+            {s.voter?.fullName || 'Survey'}
+            {s.canvasser ? <span className="font-normal text-fg-muted"> · {s.canvasser.firstName} {s.canvasser.lastName}</span> : null}
+          </div>
+          <ul className="mt-0.5 space-y-0.5">
+            {(s.answers || []).map((a, i) => (
+              <li key={i} className="text-[11px] leading-snug">
+                <span className="text-fg-muted">{a.questionText || a.questionKey}: </span>
+                <span className="text-fg">{Array.isArray(a.answer) ? a.answer.join(', ') : String(a.answer ?? '—')}</span>
+              </li>
+            ))}
+            {!(s.answers || []).length && <li className="text-[11px] text-fg-subtle">No answers recorded.</li>}
+          </ul>
+          {s.note && <div className="mt-0.5 text-[11px] italic text-fg-muted">“{s.note}”</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound }) {
   const hh = data?.household;
   const voters = data?.voters || [];
   const currentId = book ? String(book._id) : null;
@@ -502,6 +625,7 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
           </select>
         </div>
       )}
+      {hh && showRound && <RoundActivity householdId={householdId} passId={passId} status={status} tz={tz} />}
       {hh && (
         <div className="mt-2 border-t border-border pt-2">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
@@ -663,9 +787,11 @@ export default function TurfsPage() {
   // Doors load for the whole pass so every household shows on the map as a dot
   // colored by its book the moment a cut completes — not only in edit mode.
   // (Drag-to-move is still gated behind editMode in the map handlers below.)
+  // withStatus=1 rides along so each door carries its status FOR THIS ROUND — what colors
+  // the dots. Counts never come from here; see progressQ (the single count oracle).
   const doorsQ = useQuery({
     queryKey: ['turf-doors', campaignId, passId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/doors?passId=${passId}`),
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/doors?passId=${passId}&withStatus=1`),
     enabled: !!campaignId && !!passId,
   });
   const turfs = turfsQ.data?.turfs || [];
@@ -802,18 +928,40 @@ export default function TurfsPage() {
     assignedByTurf.set(key, arr);
   }
 
-  // Per-book canvassing progress for the status filter (Completed/In-progress/Not-started).
-  // Reuses the existing /progress endpoint; only meaningful once books are published.
+  // Per-book canvassing progress — THE single count oracle for this page. Feeds the status
+  // filter chips (Completed/In-progress/Not-started), the map labels, the fill tint, the
+  // round coverage bar, and the status-mode gate below, so none of them can drift apart.
   const progressQ = useQuery({
     queryKey: ['turf-progress', campaignId, passId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/progress?passId=${passId}`),
-    enabled: !!campaignId && !!passId && publishedCount > 0,
+    enabled: !!campaignId && !!passId && turfs.length > 0,
   });
   const progressByTurf = useMemo(() => {
     const m = new Map();
     for (const p of progressQ.data?.progress || []) m.set(String(p.turfId), p);
     return m;
   }, [progressQ.data]);
+  // Round totals: doors worked so far, and the same broken out by status for the coverage bar.
+  const roundProgress = useMemo(() => {
+    const rows = progressQ.data?.progress || [];
+    const counts = {};
+    let knocked = 0;
+    let total = 0;
+    for (const p of rows) {
+      knocked += p.knocked || 0;
+      total += p.total || 0;
+      for (const [k, n] of Object.entries(p.statusCounts || {})) counts[k] = (counts[k] || 0) + n;
+    }
+    return { knocked, total, counts };
+  }, [progressQ.data]);
+  // Status coloring engages once the round has actually been worked — on a fresh cut it would
+  // paint every dot the same gray and actively hurt the cutting task, so dots stay book-colored
+  // until then. Gated on the oracle's `knocked`, NOT turfsQ's knockCount: the server computes
+  // that one as countDocuments({ passId }) with no actionType filter, so it counts note_added —
+  // which getPassStatusMap excludes. A notes-only pass would otherwise flip the page to an
+  // all-gray map. `statusOverride` is the Layers-box checkbox; null = follow the round.
+  const [statusOverride, setStatusOverride] = useState(null);
+  const statusMode = statusOverride ?? roundProgress.knocked > 0;
 
   // Group-sizes preview for attribute mode (knockable doors per precinct/zip/…).
   const attributePreviewQ = useQuery({
@@ -1121,9 +1269,9 @@ export default function TurfsPage() {
   function paint() {
     const map = mapRef.current;
     if (!map || !map.getSource('books')) return;
-    map.getSource('books').setData(booksToFillGeoJSON(turfs, colorByTurf, selectedBooks));
-    map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs, selectedBooks));
-    map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf, targetedSet));
+    map.getSource('books').setData(booksToFillGeoJSON(turfs, colorByTurf, selectedBooks, progressByTurf));
+    map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs, selectedBooks, progressByTurf, statusMode));
+    map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf, targetedSet, statusMode, darkBase));
 
     // Status filter (Assigned / Unassigned / Completed / In-progress / Not-started): hide
     // non-matching books + their dots via cheap Mapbox filter expressions — full GeoJSON
@@ -1133,7 +1281,10 @@ export default function TurfsPage() {
     map.setFilter('book-fill', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
     map.setFilter('book-outline', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
     map.setFilter('book-labels', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
+    // The ring shares the `doors` source, so it needs the SAME filter or a hidden book's
+    // dots would vanish while their halos stayed behind.
     map.setFilter('doors', ids ? ['in', ['get', 'turfId'], ['literal', ids]] : null);
+    map.setFilter('door-book-ring', ids ? ['in', ['get', 'turfId'], ['literal', ids]] : null);
 
     // Fit to the books (or raw house dots before any cut) ONCE per data set — keyed
     // by the book-id signature so selection toggles and assignment refetches never
@@ -1145,7 +1296,7 @@ export default function TurfsPage() {
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }
-  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds]);
+  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
 
   // Building markers (HTML overlays) for stacked apartment units — synced apart from paint()
   // so book-select toggles don't churn the DOM. Hidden when Houses/Buildings is toggled off
@@ -1160,7 +1311,13 @@ export default function TurfsPage() {
     for (const b of grouped.buildings) {
       if (visibleBookIds && !visibleBookIds.has(String(b.turfId))) continue;
       const color = colorByTurf.get(String(b.turfId)) || '#9ca3af';
-      const el = buildingMarkerEl(b.total, color, darkBase);
+      // The glyph stays BOOK-colored (a building is a book-membership object, and its units
+      // can hold several different statuses). In status mode the badge answers "how many of
+      // these have been hit" instead of just how many units are stacked here.
+      const hit = statusMode
+        ? (b.units || []).filter((u) => (u.passStatus || 'unknocked') !== 'unknocked').length
+        : 0;
+      const el = buildingMarkerEl(b.total, color, darkBase, statusMode ? `${hit}/${b.total} hit` : null);
       // Live target preview: dim a building unless one of its units is targeted.
       if (targetedSet && !(b.units || []).some((u) => targetedSet.has(String(u.id)))) {
         el.style.opacity = '0.2';
@@ -1184,7 +1341,7 @@ export default function TurfsPage() {
     };
     map.on('zoomend', onZoom);
     return () => map.off('zoomend', onZoom);
-  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds]);
+  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds, statusMode]);
 
   // Layer visibility toggles (Houses/Buildings/Fills/Labels). Flip the Mapbox layers here;
   // the HTML building markers are handled in the marker effect above. Re-applies on styleEpoch
@@ -1197,7 +1354,9 @@ export default function TurfsPage() {
     set('book-outline', layerVis.fills);
     set('book-labels', layerVis.labels);
     set('doors', layerVis.houses);
-  }, [layerVis, mapReady, styleEpoch]);
+    // Only meaningful in status mode — off, the dot already IS the book color.
+    set('door-book-ring', layerVis.houses && statusMode);
+  }, [layerVis, mapReady, styleEpoch, statusMode]);
 
   // Clear selection + popups when switching pass/campaign (those books are gone).
   useEffect(() => { setSelectedBooks(new Set()); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
@@ -1274,6 +1433,14 @@ export default function TurfsPage() {
           {passId && publishedCount > 0 && (
             <BookStatusChips value={statusFilter} onChange={setStatusFilter} counts={statusCounts} />
           )}
+        </div>
+      )}
+
+      {/* Round coverage — the whole pass's door mix. Doubles as the legend for the map's
+          status colors, which is why the page needs no separate legend widget. */}
+      {statusMode && roundProgress.total > 0 && (
+        <div className="mb-4">
+          <CoverageBar canvass={roundProgress.counts} compact />
         </div>
       )}
       </div>
@@ -1809,6 +1976,20 @@ export default function TurfsPage() {
                   <span className="text-fg">{label}</span>
                 </label>
               ))}
+              {/* Colors houses by what happened at them THIS round, keeping book identity as
+                  the halo. Auto-on once the round has knocks; this forces it either way. */}
+              <label
+                className="mt-0.5 flex cursor-pointer items-center gap-2 rounded border-t border-border px-1 pt-1 hover:bg-sunken"
+                title="Color houses by this round's door status, with the book color as a ring"
+              >
+                <input
+                  type="checkbox"
+                  checked={statusMode}
+                  onChange={(e) => setStatusOverride(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
+                />
+                <span className="text-fg">Door status</span>
+              </label>
             </div>
           )}
           {tokenQ.data?.isReady && !!turfs.length && (
@@ -1850,6 +2031,11 @@ export default function TurfsPage() {
               moving={moveDoor.isPending}
               onMove={(toTurfId) => moveDoor.mutate({ householdId: popupHouseholdId, toTurfId })}
               onClose={() => setPopupHouseholdId(null)}
+              householdId={popupHouseholdId}
+              passId={passId}
+              status={popupDoor?.passStatus || 'unknocked'}
+              tz={tz}
+              showRound={statusMode}
             />
           )}
           {popupBuilding && (

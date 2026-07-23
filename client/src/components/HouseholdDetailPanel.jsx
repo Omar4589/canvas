@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { formatInTz } from '../lib/datetime.js';
+import { actionLabel } from '../lib/statusColors.js';
 
 // The billable knock set — MUST mirror the server's KNOCK_ACTIONS
 // (services/reports/aggregations.js) so the inline overlap badge counts collisions the same
@@ -25,27 +26,6 @@ function formatAnswer(answer) {
   if (answer == null || answer === '') return '—';
   if (Array.isArray(answer)) return answer.length ? answer.join(', ') : '—';
   return String(answer);
-}
-
-function actionLabel(t) {
-  switch (t) {
-    case 'not_home':
-      return 'Not home';
-    case 'wrong_address':
-      return 'Wrong address';
-    case 'refused':
-      return 'Refused';
-    case 'restricted':
-      return 'Restricted';
-    case 'survey_submitted':
-      return 'Survey submitted';
-    case 'lit_dropped':
-      return 'Lit dropped';
-    case 'note_added':
-      return 'Note added';
-    default:
-      return t || '—';
-  }
 }
 
 export default function HouseholdDetailPanel({

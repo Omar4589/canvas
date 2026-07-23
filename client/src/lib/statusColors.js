@@ -32,3 +32,19 @@ export const STATUS_LABELS = {
 export function statusColorsForTheme(dark) {
   return dark ? { ...STATUS_COLORS, unknocked: '#d1d5db' } : STATUS_COLORS;
 }
+
+// ACTION type → label. Distinct from STATUS_LABELS above: an action is what a canvasser
+// RECORDED at a door ('survey_submitted'), a status is what the door IS as a result
+// ('surveyed'). Lives here so the two label maps stay side by side — this one had drifted
+// into private copies in HouseholdDetailPanel and lib/flags.js before it was pulled out.
+export const ACTION_LABELS = {
+  not_home: 'Not home',
+  wrong_address: 'Wrong address',
+  refused: 'Refused',
+  survey_submitted: 'Survey submitted',
+  lit_dropped: 'Lit dropped',
+  restricted: 'Restricted',
+  note_added: 'Note added',
+};
+
+export const actionLabel = (t) => ACTION_LABELS[t] || t || '—';

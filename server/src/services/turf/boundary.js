@@ -3,6 +3,13 @@ import * as turf from '@turf/turf';
 // Display boundary for a book: concave hull with a relaxing maxEdge ladder,
 // falling back to convex, then a small buffered circle for degenerate books.
 // Overlapping hulls between adjacent books are acceptable (display only).
+//
+// Every rung must CONTAIN all of the book's houses. turf.concave triangulates and
+// discards edges longer than maxEdge, so an outlying house can be triangulated away
+// — and the result is still a valid Polygon. Returning on "is a Polygon" alone
+// therefore accepted hulls that visibly excluded their own doors, and the relaxing
+// ladder never got its chance (measured: 1 of 13 houses outside at 0.4km, 0 at 1.2km).
+// Convex is the floor: it contains every input point by construction.
 export function computeBoundary(households, { maxEdgeKm = 0.4 } = {}) {
   const pts = households
     .filter((h) => h.location?.coordinates?.length === 2)
@@ -14,10 +21,11 @@ export function computeBoundary(households, { maxEdgeKm = 0.4 } = {}) {
     return circle?.geometry?.type === 'Polygon' ? circle.geometry : null;
   }
   const fc = turf.featureCollection(pts);
+  const containsAll = (geometry) => pts.every((p) => safeContains(geometry, p));
   for (const edge of [maxEdgeKm, maxEdgeKm * 1.5, maxEdgeKm * 3]) {
     try {
       const hull = turf.concave(fc, { units: 'kilometers', maxEdge: edge });
-      if (hull?.geometry?.type === 'Polygon') return hull.geometry;
+      if (hull?.geometry?.type === 'Polygon' && containsAll(hull.geometry)) return hull.geometry;
     } catch {
       // try a looser edge
     }

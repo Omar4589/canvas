@@ -25,6 +25,10 @@ Cuts only include knockable doors. Already-voted homes are skipped, and you can 
 
 New books start as **drafts** — canvassers see nothing yet. Re-cut freely; when you're happy, **Accept** to publish them. Only published books can be [assigned to canvassers](assigning-canvassers).
 
+## Check on a round without leaving the page
+
+Once canvassers have started, the same map shows you how the round is going: houses colored by what happened at them **in the round picked in the Pass dropdown**, a book-colored ring on each so you can still tell books apart, `23/65` counts in the book labels, and books that shade in as they fill up. Click a house for who knocked it, when, and any answers taken there. See [The Turf Cutting page](page-turf-cutting) for the details.
+
 ## Recutting is all-or-nothing
 
 Don't like the layout, or the voter list changed? If the books are still drafts, just generate again. If they're published, you must **Discard** first — see [Recut books mid-pass](recut-books-mid-pass) for how that's guarded and how it keeps knocks while clearing assignments.

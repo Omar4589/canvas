@@ -2,6 +2,8 @@
 // severities. The numbers here MUST stay in sync with the server source of truth at
 // server/src/services/audit/flagThresholds.js (the browser can't import server ESM).
 // Only the values the client actually needs are mirrored.
+import { ACTION_LABELS } from './statusColors.js';
+
 export const FLAG_THRESHOLDS = {
   FAR_WARN_M: 75, // "far" label threshold — matches the server (was an inconsistent 50/100 split)
   FAR_CONFIRM_M: 250,
@@ -134,16 +136,6 @@ export function reasonDetailText(reason) {
       return '';
   }
 }
-
-const ACTION_LABELS = {
-  not_home: 'Not home',
-  wrong_address: 'Wrong address',
-  refused: 'Refused',
-  survey_submitted: 'Survey submitted',
-  lit_dropped: 'Lit dropped',
-  restricted: 'Restricted',
-  note_added: 'Note added',
-};
 
 // "Replaced “Restricted” recorded 4 min earlier from 20 ft away" — context line under a
 // far flag whose row replaced the canvasser's own earlier entry at this door ("latest wins"

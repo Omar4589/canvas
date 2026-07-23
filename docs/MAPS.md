@@ -41,6 +41,12 @@ Every house is a pin, colored by its current status:
 | Purple | Lit dropped | Literature was left (no conversation). |
 | Slate | Restricted | The home is physically inaccessible — gated community, locked building, no legal access. Recorded, but not a knock. (All campaign types.) |
 
+**This palette is shared, not per-map.** `lib/statusColors.js` (mirroring `mobile/lib/theme.js`) is the
+one source, so the same status is the same color on the admin map, the canvasser app, the charts, the
+coverage bars — and on the **Turf Cutting** map, where a house's fill is its status *for the selected
+round* and the ring around it is its book's color (see
+[PASSES_AND_TURF.md](PASSES_AND_TURF.md) → *Watching a round on the cut map*).
+
 **Refused vs. the misses.** Amber sits deliberately *between* the wins and the misses. Not home (blue)
 and Wrong address (red) mean nobody was reached; **Refused (amber) means a person answered the door** —
 they just declined to take the survey. It still counts as a knock and as a contact, so it gets its own

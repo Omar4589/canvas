@@ -240,6 +240,19 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
    Honest scope, stated everywhere: LIST/BROWSE stays request-level (a directory page listing
    200 names is one browse, not 200 record accesses), and rows before 2026-07-19 are request-
    level history. Guard tests: `test/accessLogCoverage.int.test.js` (record-level section).]*
+   *[v4 2026-07-22: **GAP CLOSED — the turf-cutting door drill.** The hook list above
+   (voters/households/mobile/reports) missed one: `routes/admin/turfs.js` served
+   `GET /admin/campaigns/:campaignId/turfs/household/:householdId` — a single-record open
+   returning a door's address plus its members' names and party — with **no `router.param`
+   hook**, so a staff read under a grant logged the request but not WHICH door. Surfaced while
+   building the cut-map status redesign; the same hook the households router uses is now
+   registered there. Covered by a new case in `test/accessLogCoverage.int.test.js`
+   ("the turf-cutting door drill carries the household as its subject"). This makes an existing
+   exposure auditable — it is **not** a new exposure and needs no Privacy Policy / ToS / DPA
+   edit. The same page's round detail (status, who knocked it, when, survey answers) is served
+   by the already-hooked `/admin/households/:householdId/{activity,surveys}`, reached by the
+   same roles (org admin + a lead who manages that campaign) that already reach the page — no
+   route widened, no role granted anything new.]*
 4. **The cross-org password-reset path is unprevented by decision** (v1 F14 Exc 3): an admin of any org
    a user belongs to can reset that user's global password. Mitigation: the reset issues a visible
    forced-change temp password. Rationale recorded at `memberships.js:423-432` (admin reset is the only

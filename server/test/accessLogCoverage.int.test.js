@@ -279,6 +279,22 @@ test('HONEST SCOPE: a MEMBER admin reading the same profile and export logs NOTH
   assert.strictEqual(await AccessLog.countDocuments({}), 0, 'member access is never vendor access');
 });
 
+test('RECORD-LEVEL: the turf-cutting door drill carries the household as its subject', { skip }, async () => {
+  // The turfs router (admin + campaign-managing leads) has its own single-record open returning
+  // voter names — GET .../turfs/household/:householdId — and originally had no router.param hook,
+  // so it opened a door without recording WHICH door. Same pattern as /admin/households now.
+  await grantFor(ctx.support.token);
+  const read = await call('GET', `/admin/campaigns/${ctx.camp._id}/turfs/household/${ctx.hh._id}`, ctx.support);
+  assert.ok(read.status < 400, `expected a successful door read, got ${read.status}`);
+
+  const logs = await pollLogs({ organizationId: ctx.org._id, 'subjects.id': ctx.hh._id });
+  assert.strictEqual(logs.length, 1, 'the door-drill row carries the household subject');
+  assert.deepStrictEqual(
+    logs[0].subjects.map((s) => `${s.type}:${s.id}`),
+    [`household:${ctx.hh._id}`]
+  );
+});
+
 test('RECORD-LEVEL: the person console read carries the person subject (direct recordAccess path)', { skip }, async () => {
   await grantFor(ctx.bg.token);
   const read = await call('GET', `/super-admin/persons/${ctx.person._id}`, { token: ctx.bg.token });

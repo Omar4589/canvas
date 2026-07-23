@@ -126,6 +126,45 @@ see the balance, and a **search** box finds a book by name or assigned canvasser
 (published) books can be assigned** — assigning a draft is blocked (a re-cut would wipe it), so Accept
 first.
 
+## Watching a round on the cut map
+
+Once a round has been worked, the Turf Cutting map stops being only a cutting tool and starts
+answering *"how is this round going?"* — without leaving the page.
+
+- **Each house is colored by what happened at it this round** — surveyed, not home, refused,
+  restricted, or still unknocked — using the same colors as the Map page. Around each house sits a
+  **ring in its book's color**, so you can read "this one is a not-home *and* it's in Book 4" at a
+  glance. That's two facts on one dot.
+- **Why a ring and not just the book outline?** Because a book's outline doesn't always contain every
+  one of its houses (see *Book outlines are approximate* below). The ring is keyed to the book itself,
+  so it is always right.
+- **Book labels count the work**: `Book 4 · 23/65` — 23 of its 65 houses done.
+- **Book shading tracks completion**: an untouched book is pale, a finished one is solid. Spot the
+  book nobody has started from across the map without reading a single number.
+- **A coverage bar** across the top gives the whole round's mix — how many surveyed, not home,
+  refused, still unknocked — and doubles as the map's color key.
+- **Click a house** for its status, who knocked it, when, and any survey answers recorded there this
+  round, alongside the usual "move to another book".
+- **Apartment buildings** show `5/12 hit` instead of `12 units` once the round is underway.
+
+This appears **automatically once the round has knocks**. While you're still cutting, houses stay
+colored by book exactly as before — a fresh cut has no status to show, and coloring every dot the same
+gray would only make the cut harder to see. A **Door status** checkbox in the map's Layers box forces
+it either way.
+
+**It does not auto-refresh.** The page shows the round as of when you opened it; reload to update.
+
+## Book outlines are approximate
+
+The shaded outline around a book is a **display aid, not the definition of the book** — a book *is*
+its list of houses. A house can sit slightly outside its own book's outline, for one deliberate
+reason: outlines are trimmed so that neighbouring books never overlap, and books are balanced for even
+*size*, not for perfect geometry. When a book takes on a house that happens to sit closer to the
+neighbouring book's center, the trim removes it from the outline even though the book still owns it.
+
+If you want to know which book a house really belongs to, use its **ring color** on the map, or click
+it — both come from the book itself rather than from the drawn shape.
+
 ## Recutting (changing the books)
 
 If you don't like the books, or the underlying voter list changed, you **recut**. Two situations:
@@ -242,7 +281,9 @@ the old one and needs its own book assignments — a new round is a fresh assign
 `door × round` figure) next to the books + progress. The **audit map** (Passes → *Audit →*) is
 **pass-scoped**: with a round selected it shows *that round's* door status + activity, not the global
 latest — and the door detail has a **History by round** section, so a door worked in Round 1 *and*
-Round 2 shows both.
+Round 2 shows both. The **Turf Cutting page** is pass-scoped the same way (see *Watching a round on
+the cut map* below): pick a round in its dropdown and the house colors, the per-book progress and the
+coverage bar all re-scope to that round.
 
 **Archiving a round is one-way + guarded.** A round goes draft → active → archived and is **never
 reopened** (you make a new round). Archiving a **live or already-worked** round therefore needs a
@@ -391,6 +432,30 @@ driving across the area for one door.) Everything runs on Hilbert-projected mete
 - **`hardMax` rescue (the finisher):** a house still stuck far from its cluster joins its **nearest** book
   even slightly over target (up to `hardMax`) instead of driving away — compactness beats the count.
 
+### Book outlines: containment vs. non-overlap
+
+`computeBoundary` ([boundary.js](../server/src/services/turf/boundary.js)) walks a relaxing `maxEdge`
+ladder (0.4 → 0.6 → 1.2 km) and **each rung must contain every one of the book's houses**, falling
+back to `turf.convex` (which contains all input points by construction). It used to return on the
+first rung that produced a `Polygon` — but `turf.concave` triangulates away outlying points and still
+returns a valid Polygon, so hulls were accepted that visibly excluded their own doors and the ladder
+never got its chance (measured: **1 of 13 houses outside at maxEdge 0.4, 0 at 1.2**). Guarded by
+`test/turfBoundary.test.js`.
+
+**A door can still sit outside its book's outline, by design.** `computeTerritories` clips each hull
+to its **Voronoi cell** so adjacent books never overlap, while `balancedKMeans` trades geometric
+purity for even book sizes (the whole point of `tolerance`). A book can therefore own houses that are
+nearer a *neighbour's* centroid, and the clip removes them from the outline. Measured: a 24-house book
+beside another lost **7 of 24** houses from its own outline. This is not fixable without letting books
+overlap — you cannot have disjoint territories *and* full containment when the assignment isn't
+Voronoi-consistent. Consequence for the UI: **the cut map's book-colored ring, keyed on `turfId`, is
+the authoritative ownership signal — never the polygon.** The same test file pins both sides (no
+overlap, and the clip still bites) so neither can silently flip.
+
+`recomputeTurf` writes the **unclipped** hull and must always be followed by
+`recomputePassTerritories` — every call site does (move-door, move-doors, merge, split, and the
+effort door-claim path in [efforts.js](../server/src/routes/admin/efforts.js)).
+
 `tolerance` is surfaced on the Turf Cutting page as a **Tight / Balanced / Compact** toggle
 (`0.15 / 0.25 / 0.4`; default **Compact = 0.4**), sent through `params.tolerance` (the `/generate` route
 passes `params` straight through). Lower → tighter, more even books; higher → more size flex for
@@ -429,6 +494,9 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/merge` `{ turfIds[] }` ([:930](../server/src/routes/admin/turfs.js#L930)) | Merge ≥2 books of the **same pass** into `turfs[0]` (survivor). Union the doors onto the survivor; **fold assignments** (`findOneAndUpdate` upsert on `{turfId:survivor, userId}` → same-user dedups, different-users **both survive**); **hard-delete** the absorbed `Turf`s + their `TurfAssignment`s; `recomputeTurf`/`recomputePassTerritories`. **No snapshot → irreversible.** Survivor = DB order of the `$in`, not request order. |
 | `POST .../turfs/:turfId/split` `{ householdIds[], name? }` ([:970](../server/src/routes/admin/turfs.js#L970)) | Peel `householdIds` out of the book into a **new** `Turf` (same pass/mode/params, `status` copied). `recomputeTurf` on both. **Creates no `TurfAssignment`** — the split-off book comes out unassigned. |
 | `POST .../turfs/unassign-bulk` `{ turfIds[], userIds[] }` ([:151](../server/src/routes/admin/turfs.js#L151)) | Campaign-scoped `TurfAssignment.deleteMany` for the given (book, user) pairs — the "unassign everywhere" path. Touches no `Household`. |
+| `GET .../turfs/doors?passId=&withStatus=1` | The effort's knockable doors with coordinates, each tagged with its book (`turfId`) or `null`. **`withStatus=1`** (opt-in) adds **`passStatus`** — the door's status *for this round*, from `getPassStatusMap`. Distinct from the always-present `status`, which is `Household.status` (latest across **all** rounds). Opt-in because the mobile assign map (`slim=1`) colors by book and would pay an aggregate + a string per door across a 16k-door effort for nothing. Drives **dot color only, never a count**. |
+| `GET .../turfs/progress?passId=` | **The single count oracle for the cut page.** Per book: `{ turfId, total, knocked, statusCounts }` over eligible doors (`KNOCKABLE_DOOR_FILTER`), from one `getPassStatusMap` sliced per turf. `statusCounts` (via `statusCountsFromMap`) sums to `total` by construction, and Σ over books is the round total — so the book status chips, the map labels, the completion tint and the coverage bar cannot drift apart. `passStatus` above resolves from the same map over the same pass, so a dot's color can't contradict what it contributes. Also read by the mobile books screen, which ignores `statusCounts`. |
+| `GET .../turfs/household/:householdId` | One door's address + members for the map popup. **Record-level audited**: a `router.param('householdId')` hook tags the household as an `AccessLog` subject, matching `/admin/households` and `/admin/voters` (this router previously had none). The popup's *round* detail — status/who/when and survey answers — comes from `/admin/households/:householdId/{activity,surveys}` instead, which are already lead-accessible, campaign-gated and subject-tagged. |
 
 ## D. Why new households are unassigned after import
 

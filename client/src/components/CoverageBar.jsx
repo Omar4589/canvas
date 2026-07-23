@@ -15,11 +15,42 @@ const SEGMENTS = [
   { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-400' },
 ];
 
-export default function CoverageBar({ canvass = {} }) {
+export default function CoverageBar({ canvass = {}, compact = false }) {
   const total = SEGMENTS.reduce((sum, s) => sum + (canvass[s.key] || 0), 0);
 
   if (total === 0) {
-    return <Card className="p-4 text-sm text-fg-muted">No households yet.</Card>;
+    return compact ? null : <Card className="p-4 text-sm text-fg-muted">No households yet.</Card>;
+  }
+
+  // Compact: no Card, one slim strip + an inline legend that hides empty statuses. For headers
+  // that are deliberately short on vertical room (the Turf Cutting page reclaims that height
+  // for the map), where this doubles as the map's status legend.
+  if (compact) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <div className="flex h-2 w-40 shrink-0 overflow-hidden rounded-full bg-sunken">
+          {SEGMENTS.map((s) => {
+            const count = canvass[s.key] || 0;
+            if (!count) return null;
+            return (
+              <div
+                key={s.key}
+                className={s.color}
+                style={{ width: `${(count / total) * 100}%` }}
+                title={`${s.label}: ${count} (${((count / total) * 100).toFixed(1)}%)`}
+              />
+            );
+          })}
+        </div>
+        {SEGMENTS.filter((s) => canvass[s.key]).map((s) => (
+          <span key={s.key} className="flex items-center gap-1.5 text-[11px]">
+            <span className={`inline-block h-2 w-2 rounded-full ${s.color}`} />
+            <span className="text-fg-muted">{s.label}</span>
+            <span className="font-semibold tabular-nums text-fg">{(canvass[s.key] || 0).toLocaleString()}</span>
+          </span>
+        ))}
+      </div>
+    );
   }
 
   return (

@@ -11,7 +11,7 @@ import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Household } from '../../models/Household.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
-import { recomputeTurf } from '../../services/turf/generateTurf.js';
+import { recomputeTurf, recomputePassTerritories } from '../../services/turf/generateTurf.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
 import { createNextPass } from '../../services/passes/createPass.js';
 import { partitionAssignable } from '../../services/campaignRoster.js';
@@ -299,13 +299,19 @@ router.post('/:id/claim', loadEffort, async (req, res, next) => {
       );
       const affectedTurfIds = [...new Set(owned.filter((h) => h.turfId).map((h) => String(h.turfId)))];
       const ownedSet = new Set(ownedIds.map(String));
+      const touchedPassIds = new Set();
       for (const tid of affectedTurfIds) {
         const turf = await Turf.findById(tid);
         if (!turf) continue;
         turf.householdIds = turf.householdIds.filter((id) => !ownedSet.has(String(id)));
         await recomputeTurf(turf);
+        if (turf.passId) touchedPassIds.add(String(turf.passId));
         recutBooks += 1;
       }
+      // recomputeTurf leaves an UNCLIPPED hull; every other caller (move-door, move-doors,
+      // merge, split) immediately re-tessellates so books stay non-overlapping. This path
+      // didn't — leaving one book's raw hull sitting over its clipped neighbours.
+      for (const pid of touchedPassIds) await recomputePassTerritories(pid);
     }
 
     res.json({ claimed: intake.length + (force ? owned.length : 0), reassigned: force ? owned.length : 0, recutBooks });
