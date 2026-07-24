@@ -99,12 +99,19 @@ never automatic: turn it off to include them (e.g. if access has since opened up
 counterpart to the field marker — the field records "can't get in," the admin decides per round whether
 to keep trying.
 
-Excluding them from the cut doesn't remove them from the **cut map**, though — they stay visible as gray
-*loose* dots (they're not in any book), which can read as doors you still need to cut. A **Restricted (N)**
-checkbox in the map's Layers box hides those loose restricted dots; it appears only when the round has
-restricted homes and is **hidden by default** (the count keeps them discoverable). Doors a canvasser marks
-restricted *inside* a book keep their book color and stay on the map either way, so an active-round audit
-never loses worked doors.
+Excluding them from the cut doesn't remove them from the **cut map**, though — like every door a cut leaves
+out of a book (already-worked doors a targeted cut skipped, restricted homes, voters added since the cut),
+they stay visible as gray *loose* dots, which pad the density so a round looks bigger than the walk. Two
+Layers-box checkboxes hide loose dots, and **both are hidden by default** so the map opens showing only the
+cut's booked doors:
+
+- **Not in a book (N)** — hides **every** loose door (all doors not in any book).
+- **Restricted (N)** — hides just the restricted loose dots.
+
+Each appears only when the round has doors in that category, and the count keeps them discoverable. A loose
+door shows only when every checkbox covering it is on (a restricted loose door needs both). Doors a canvasser
+marks restricted *inside* a book keep their book color and stay on the map either way, so an active-round
+audit never loses worked doors.
 
 **Marking a book restricted (bulk).** When part or all of a book is inaccessible (a gated community),
 select it on the Turf Cutting page, or on mobile open its **⋯** menu (the Books map's promoted-book
@@ -171,8 +178,9 @@ answering *"how is this round going?"* — without leaving the page.
 This appears **automatically once the round has knocks**. While you're still cutting, houses stay
 colored by book exactly as before — a fresh cut has no status to show, and coloring every dot the same
 gray would only make the cut harder to see. A **Door status** checkbox in the map's Layers box forces
-it either way, and a **Restricted** checkbox there (shown only when the round has restricted homes) hides
-the loose restricted dots — see *Excluding restricted-access homes from a later round* above.
+it either way, and **Not in a book** / **Restricted** checkboxes there (each shown only when the round has
+such doors, both hidden by default) hide the loose dots — see *Excluding restricted-access homes from a
+later round* above.
 
 **It does not auto-refresh.** The page shows the round as of when you opened it; reload to update.
 

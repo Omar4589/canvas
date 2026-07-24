@@ -846,10 +846,11 @@ export default function TurfsPage() {
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
   const [popupBuildingKey, setPopupBuildingKey] = useState(null);
   // Map layer visibility toggles + book status filter + crew-load bar open state.
-  // `restricted` starts hidden: restricted homes are excluded from cuts by default, so
-  // showing them on the cut map (identical gray to unbooked doors) only reads as clutter.
-  // The Layers-box row only appears when the effort actually has restricted doors.
-  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true, restricted: false });
+  // `notInBook` (all loose doors) and `restricted` (the restricted subset) both start
+  // HIDDEN so the cut map opens showing only this cut's booked doors — a targeted second
+  // cut otherwise leaves every already-worked/excluded door on the map as a gray dot,
+  // padding the density. Their Layers-box rows only appear when such doors exist.
+  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true, notInBook: false, restricted: false });
   const [statusFilter, setStatusFilter] = useState(new Set()); // empty = show all books
   const [crewOpen, setCrewOpen] = useState(false);
 
@@ -886,16 +887,27 @@ export default function TurfsPage() {
   const colorByTurf = useMemo(() => new Map(turfs.map((t, i) => [String(t._id), colorFor(i)])), [turfsQ.data]);
   const selectedTurfs = turfs.filter((t) => selectedBooks.has(String(t._id)));
   // Group stacked apartment units (same geocode) into buildings; lone doors stay
-  // singles. Used for the dot layer, the building markers, and the popup. When the
-  // Layers "Restricted" toggle is off, drop LOOSE restricted doors — the excluded ones
-  // that clutter the map as gray "unbooked" dots. A restricted door that's still IN a
-  // book (a canvasser marked it mid-pass, or the cut deliberately included it) keeps its
-  // book color and stays, so an active-pass audit never loses worked doors.
+  // singles. Used for the dot layer, the building markers, and the popup.
+  //
+  // Two Layers toggles hide LOOSE doors (turfId=null) — the doors a cut left out of every
+  // book, which otherwise pad the map's density: "Not in a book" hides all of them,
+  // "Restricted" hides just the restricted ones. A loose door shows only when EVERY toggle
+  // covering it is on (a restricted loose door needs both). Doors that ARE in a book always
+  // stay — a canvasser can mark one restricted mid-pass and it keeps its book color — so an
+  // active-pass audit never loses worked doors.
   const grouped = useMemo(() => {
     const all = doorsQ.data?.doors || [];
-    const visible = layerVis.restricted ? all : all.filter((d) => !(d.status === 'restricted' && !d.turfId));
+    const visible = all.filter((d) => {
+      if (d.turfId) return true;
+      if (!layerVis.notInBook) return false;
+      if (d.status === 'restricted' && !layerVis.restricted) return false;
+      return true;
+    });
     return groupDoors(visible);
-  }, [doorsQ.data, layerVis.restricted]);
+  }, [doorsQ.data, layerVis.notInBook, layerVis.restricted]);
+  // Loose doors (not in any book): already-worked leftovers a targeted cut skipped,
+  // restricted homes, and voters added since the cut. Drives the "Not in a book" toggle count.
+  const looseDoorCount = (doorsQ.data?.doors || []).filter((d) => !d.turfId).length;
   // Doors not yet in any book — e.g. voters imported after this pass was cut. Restricted
   // homes are loose too (they're kept out of the cut), but when we're excluding them they
   // aren't actionable, so don't let them inflate the "not in any book" nag.
@@ -2070,8 +2082,10 @@ export default function TurfsPage() {
                 ['buildings', 'Buildings'],
                 ['fills', 'Book fills'],
                 ['labels', 'Labels'],
-                // Only offered when the effort actually has restricted homes; hides them
-                // from the cut map so they don't read as unbooked doors.
+                // Offered only when the cut actually left doors loose. "Not in a book" hides
+                // every loose door; "Restricted" hides just the restricted ones — both default
+                // hidden, so the map opens showing only this cut's booked doors.
+                ...(looseDoorCount > 0 ? [['notInBook', `Not in a book (${looseDoorCount.toLocaleString()})`]] : []),
                 ...(restrictedDoorCount > 0 ? [['restricted', `Restricted (${restrictedDoorCount.toLocaleString()})`]] : []),
               ].map(([key, label]) => (
                 <label key={key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-sunken">

@@ -24,7 +24,12 @@ Once a round has been knocked, the map starts showing you how it's going:
 
 Status colors appear on their own once the round has knocks. While you're still cutting, houses stay colored by book — a brand-new cut has no progress to show yet. The **Door status** checkbox in the map's **Layers** box turns it on or off yourself.
 
-**Hiding restricted homes.** When you exclude restricted-access homes from a cut, they still show on the map as gray dots — the same gray as doors not yet in a book — which can look like doors you still need to cut. Flip the **Restricted** checkbox in that same **Layers** box to hide them. It only appears when the round has restricted homes. Homes a canvasser marked restricted *inside* a book keep their book color and stay put, so you never lose worked doors.
+**Hiding doors that aren't in a book.** After a cut — especially a second pass where you only cut the unknocked doors — every door left out of a book (the already-worked ones, restricted homes, voters added since you cut) still shows on the map as a gray dot, so the round can look bigger than the actual walk. Two checkboxes in the **Layers** box clean that up, and both start hidden so the map opens showing just the cut's books:
+
+- **Not in a book** — hides every door that isn't in a book.
+- **Restricted** — hides just the restricted homes.
+
+Each only appears when the round has those doors. Homes a canvasser marked restricted *inside* a book keep their book color and stay put, so you never lose worked doors.
 
 Switch rounds with the **Pass** dropdown at the top right — the colors, the counts, and the bar all follow the round you pick. The page doesn't refresh on its own; reload it to see the latest.
 
