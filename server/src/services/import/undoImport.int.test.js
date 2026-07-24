@@ -36,9 +36,9 @@ test('undo aggregates all of a file\'s upload attempts, deletes the union, keeps
     { _id: h3, campaignId, normalizedAddress: 'a3', effortId: null, turfId: null, status: 'unknocked', fullyVoted: false },
   ]);
   await Voter.collection.insertMany([
-    { _id: v1, organizationId: orgId, stateVoterId: 's1', householdId: h1, personId: p1 },
-    { _id: v2, organizationId: orgId, stateVoterId: 's2', householdId: h2, personId: p2 },
-    { _id: v3, organizationId: orgId, stateVoterId: 's3', householdId: h3, personId: p3 },
+    { _id: v1, organizationId: orgId, campaignId, stateVoterId: 's1', householdId: h1, personId: p1 },
+    { _id: v2, organizationId: orgId, campaignId, stateVoterId: 's2', householdId: h2, personId: p2 },
+    { _id: v3, organizationId: orgId, campaignId, stateVoterId: 's3', householdId: h3, personId: p3 },
   ]);
   await Person.collection.insertMany([{ _id: p1 }, { _id: p2 }, { _id: p3 }]);
   await ImportJob.collection.insertMany([

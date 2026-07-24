@@ -105,7 +105,7 @@ async function seedOrg(name, slug, phone, party) {
   const owned = await Person.findById(person._id).lean();
 
   const voter = await Voter.create({
-    organizationId: org._id, householdId: hh._id,
+    organizationId: org._id, campaignId: camp._id, householdId: hh._id,
     stateVoterId: SVID, registeredState: STATE,
     firstName: 'Vi', lastName: 'Voter', fullName: 'Vi Voter',
     phone, party, gender: 'F',

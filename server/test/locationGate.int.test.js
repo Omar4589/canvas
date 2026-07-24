@@ -91,7 +91,7 @@ before(async () => {
   await TurfAssignment.create({ organizationId: org._id, campaignId: camp._id, passId: pass._id, turfId: turf._id, userId: canv._id });
 
   const voter = await Voter.create({
-    organizationId: org._id, householdId: homes[1]._id, stateVoterId: 'FLG1',
+    organizationId: org._id, campaignId: camp._id, householdId: homes[1]._id, stateVoterId: 'FLG1',
     firstName: 'Vi', lastName: 'Voter', fullName: 'Vi Voter',
   });
 

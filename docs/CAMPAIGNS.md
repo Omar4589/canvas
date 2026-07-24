@@ -167,8 +167,11 @@ in the drawer). The rules protect your data once canvassing has started:
 - **Delete** is permanent and is **only allowed before any canvassing** (no knocks or surveys
   recorded). When allowed, it cascades — it removes the campaign and everything it owns (its
   imported voters and doors, efforts, draft rounds, books, walk lists, early-vote marks, reports).
-  Once a campaign has field activity, **Delete is disabled** ("Archive instead") — you can't destroy
-  real canvassing history.
+  **If your org runs other campaigns, they are untouched** — voter records are per-campaign, so
+  deleting one campaign removes only *its* copies; a person shared with another campaign lives on
+  there, and a **Do not contact** request is preserved even if their last record dies (a later
+  import re-flags them automatically). Once a campaign has field activity, **Delete is disabled**
+  ("Archive instead") — you can't destroy real canvassing history.
 
 ## Add more doors later (a new walk list on a live campaign)
 
@@ -258,12 +261,17 @@ is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archiv
   [billableRestricted.int.test.js](../server/test/billableRestricted.int.test.js).
 - **DELETE `/admin/campaigns/:id`** — **only when `!hasCanvassed`** (else `400 { code: 'has-activity' }`).
   Cascades via [deleteCampaign.js](../server/src/services/campaigns/deleteCampaign.js):
-  `deleteCampaignCascade()` removes the voters housed in the campaign's households, then
-  `deleteMany({ campaignId })` over **every** campaignId-scoped collection (Household, Effort,
-  EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot, SavedSearch, VotedUpload, VotedVoter,
-  VotedPendingId, CampaignAssignment, ClientReport, ClientReportMapPoint, ReportShareLink,
-  CanvassActivity, SurveyResponse, ImportJob), then the campaign. (ImportJob raw files in GridFS are
-  a known minor orphan.)
+  `deleteCampaignCascade()` first parks DNC stickiness (a flagged person whose LAST row lives here
+  → `DncPendingId` with the flag's original attribution, so a future import re-flags) and
+  re-points org-level `VoterNote`s to a surviving sibling row (deleting them only when no sibling
+  survives), then `Voter.deleteMany({ campaignId })` — **exactly this campaign's rows; sibling
+  campaigns' voters are structurally unreachable** — then `deleteMany({ campaignId })` over
+  **every** campaignId-scoped collection (Household, Effort, EffortMember, Pass, Turf,
+  TurfAssignment, TurfSnapshot, SavedSearch, VotedUpload, VotedVoter, VotedPendingId,
+  CampaignAssignment, ClientReport, ClientReportMapPoint, ReportShareLink, CanvassActivity,
+  SurveyResponse, ImportJob — raw GridFS import files deleted first), then the campaign. The
+  platform-stats capture banks only people whose **last** row dies (shared people keep counting
+  in `live`).
 
 ## Setup progress
 

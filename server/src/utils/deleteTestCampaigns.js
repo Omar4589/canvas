@@ -48,15 +48,15 @@ const nonzero = (counts) =>
   Object.entries(counts).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(', ') || '(nothing)';
 
 async function campaignStats(campaignId) {
-  const householdIds = await Household.find({ campaignId }).distinct('_id');
-  const [voters, efforts, passes, knock, survey] = await Promise.all([
-    householdIds.length ? Voter.countDocuments({ householdId: { $in: householdIds } }) : 0,
+  const [households, voters, efforts, passes, knock, survey] = await Promise.all([
+    Household.countDocuments({ campaignId }),
+    Voter.countDocuments({ campaignId }),
     Effort.countDocuments({ campaignId }),
     Pass.countDocuments({ campaignId }),
     CanvassActivity.exists({ campaignId }),
     SurveyResponse.exists({ campaignId }),
   ]);
-  return { households: householdIds.length, voters, efforts, passes, walked: Boolean(knock || survey) };
+  return { households, voters, efforts, passes, walked: Boolean(knock || survey) };
 }
 
 async function inventory() {
@@ -129,10 +129,7 @@ async function main() {
     // Capture the mock campaign's Person links BEFORE the cascade deletes its voters.
     let personIds = [];
     if (isMock) {
-      const hhIds = await Household.find({ campaignId: campaign._id }).distinct('_id');
-      personIds = hhIds.length
-        ? await Voter.find({ householdId: { $in: hhIds }, personId: { $ne: null } }).distinct('personId')
-        : [];
+      personIds = await Voter.find({ campaignId: campaign._id, personId: { $ne: null } }).distinct('personId');
       console.log(`      ${personIds.length} linked Person id(s) captured for the orphan check`);
     }
 

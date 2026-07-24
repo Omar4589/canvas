@@ -190,7 +190,22 @@ export default function VotersPage() {
                     <td className="px-4 py-2 text-fg-muted">
                       {v.household ? `${v.household.addressLine1}, ${v.household.city} ${v.household.state}` : '—'}
                     </td>
-                    <td className="px-4 py-2 text-fg-muted">{v.household?.campaignName || '—'}</td>
+                    <td className="px-4 py-2 text-fg-muted">
+                      {/* Deduped org view of a multi-campaign org: one row per person, a chip
+                          per campaign they're in. Single-campaign (or campaign-filtered) rows
+                          have no `campaigns` and keep the plain name. */}
+                      {v.campaigns?.length ? (
+                        <span className="inline-flex flex-wrap items-center gap-1">
+                          {v.campaigns.map((c) => (
+                            <span key={c.id} className="rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted">
+                              {c.name || '—'}
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        v.household?.campaignName || '—'
+                      )}
+                    </td>
                     <td className="px-4 py-2">
                       <span className="inline-flex items-center gap-1.5">
                         <StatusPill status={v.surveyStatus} />

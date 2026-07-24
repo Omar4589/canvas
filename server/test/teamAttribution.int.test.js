@@ -427,7 +427,7 @@ test('the SURVEY ledger moves in lockstep with the door ledger', { skip }, async
     location: { type: 'Point', coordinates: [-81.4, 28.3] },
   });
   const voter = await Voter.create({
-    organizationId: org._id, householdId: hh._id, stateVoterId: 'LOCK-1',
+    organizationId: org._id, campaignId: campaign._id, householdId: hh._id, stateVoterId: 'LOCK-1',
     firstName: 'Lock', lastName: 'Step', fullName: 'Lock Step',
   });
   await CanvassActivity.create({
@@ -674,7 +674,7 @@ test('a LEAD who knocks: their doors AND their surveyed voters both land on thei
     location: { type: 'Point', coordinates: [-81.4, 28.3] },
   });
   const voter = await Voter.create({
-    organizationId: org._id, householdId: hh._id, stateVoterId: 'LEAD-1',
+    organizationId: org._id, campaignId: campaign._id, householdId: hh._id, stateVoterId: 'LEAD-1',
     firstName: 'Vera', lastName: 'Voter', fullName: 'Vera Voter',
   });
   await CanvassActivity.create({

@@ -329,16 +329,38 @@ export async function buildImportRows(buffer, filename, mapping, { explode = tru
   return { ...validated, detection };
 }
 
+// Distinct people (stateVoterId) in the org. Voter rows are per-campaign, so a raw row
+// count would double-count a person imported into two campaigns — marketing's
+// votersProcessed counts people, not rows.
+async function countOrgPeople(orgId) {
+  const [r] = await Voter.aggregate([
+    { $match: { organizationId: orgId } },
+    { $group: { _id: '$stateVoterId' } },
+    { $count: 'n' },
+  ]);
+  return r?.n || 0;
+}
+
 /**
  * Upsert households + voters into the DB. Batched bulkWrites (safe past ~10k
- * rows). Voters are upserted by {organizationId, stateVoterId} so one org's
- * import never touches another org's voters (decision 13). Counts are computed
- * by countDocuments diff so they're correct even if the job is retried.
+ * rows). Voters are upserted by {campaignId, stateVoterId} — rows are
+ * PER-CAMPAIGN, so an overlapping file imported into a sibling campaign inserts
+ * that campaign's own rows and never re-houses this one's. Org isolation
+ * (decision 13) holds transitively: a campaign belongs to exactly one org.
+ * Counts are computed by countDocuments diff so they're correct even if the
+ * job is retried.
  */
 export async function applyImport({ campaign, orgId, validRows, householdMap, batchSize = 2000, overwriteHandEdits = false, onProgress }) {
   const campaignId = campaign._id;
+  // Migration guard: the per-campaign upsert filter below can't match a legacy row (no
+  // campaignId), so it would insert a duplicate for the old unique index to reject.
+  // Fail with the fix instead of a cryptic E11000 mid-write.
+  if (await Voter.exists({ organizationId: orgId, campaignId: { $exists: false } })) {
+    throw new Error('Voter rows predate the per-campaign migration — run: npm run migrate:voter-campaigns -- --apply');
+  }
   const beforeHouseholds = await Household.countDocuments({ campaignId });
-  const beforeVoters = await Voter.countDocuments({ organizationId: orgId });
+  const beforeVoters = await Voter.countDocuments({ campaignId });
+  const beforeOrgPeople = await countOrgPeople(orgId);
 
   // 1. Households.
   const householdValues = Array.from(householdMap.values());
@@ -430,13 +452,16 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
     for (const h of houses) addressToId.set(h.normalizedAddress, h._id);
   }
 
-  // 2.5. Hand-edit shield: fetch this org's ARMED voters among the incoming ids. An admin's
+  // 2.5. Hand-edit shield: fetch this CAMPAIGN's armed voters among the incoming ids. An admin's
   // hand edit (routes/admin/voters.js PATCH) arms the edited identity fields in
   // locallyEditedFields — and the blind $set below used to be the one writer that ignored it,
-  // silently reverting door-confirmed corrections on every re-import. The 'locallyEditedFields.0'
-  // filter keeps this tiny (only armed voters return, typically a handful even on a 100k file);
-  // it rides the unique {organizationId, stateVoterId} index. Fetched here, not threaded in from
-  // the caller, so the runImport CLI entry gets the same protection as the worker path.
+  // silently reverting door-confirmed corrections on every re-import. Campaign-scoped because
+  // arming is per-row: a sibling campaign's armed row isn't the row this upsert touches (identity
+  // coherence across siblings flows through the personId fan-out, not this shield). The
+  // 'locallyEditedFields.0' filter keeps this tiny (only armed voters return, typically a handful
+  // even on a 100k file); it rides the unique {campaignId, stateVoterId} index. Fetched here, not
+  // threaded in from the caller, so the runImport CLI entry gets the same protection as the
+  // worker path.
   const SHIELD_PROJ = { stateVoterId: 1, locallyEditedFields: 1 };
   for (const f of IDENTITY_FIELDS) SHIELD_PROJ[f] = 1;
   const shieldBySvid = new Map();
@@ -444,13 +469,28 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
   for (let i = 0; i < allSvids.length; i += batchSize) {
     const docs = await Voter.find(
       {
-        organizationId: orgId,
+        campaignId,
         stateVoterId: { $in: allSvids.slice(i, i + batchSize) },
         'locallyEditedFields.0': { $exists: true },
       },
       SHIELD_PROJ
     ).lean();
     for (const d of docs) shieldBySvid.set(d.stateVoterId, d);
+  }
+
+  // 2.6. DNC seeding: "never contact this person" is an ORG-wide promise but rows are
+  // per-campaign — a person flagged in a sibling campaign must arrive here already flagged.
+  // Prefetch flagged rows org-wide by svid and copy the full subdoc onto INSERTS only
+  // ($setOnInsert — existing rows keep import-survival-by-omission, and the preserved
+  // uploadId keeps an upload's undo able to revert seeded copies too). Doors that gain a
+  // seeded flag are returned so the caller folds them into the fullyDnc recompute.
+  const dncBySvid = new Map();
+  for (let i = 0; i < allSvids.length; i += batchSize) {
+    const docs = await Voter.find(
+      { organizationId: orgId, stateVoterId: { $in: allSvids.slice(i, i + batchSize) }, 'doNotContact.flagged': true },
+      { stateVoterId: 1, doNotContact: 1 }
+    ).lean();
+    for (const d of docs) dncBySvid.set(d.stateVoterId, d.doNotContact);
   }
 
   // 3. Voters (org-scoped upsert). For armed rows the admin's decision governs: default keeps the
@@ -463,8 +503,12 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
   let overwrittenHandEdits = 0;
   const voterOps = validRows.map((row) => {
     const householdId = addressToId.get(normalizeAddress(row.household));
-    const set = { ...row.voter, householdId, organizationId: orgId };
+    const set = { ...row.voter, householdId, campaignId, organizationId: orgId };
     const setOnInsert = { surveyStatus: 'not_surveyed' };
+    // Seeded DNC (see 2.6): only ever in $setOnInsert, never $set — a field in both
+    // operators is a Mongo conflict, and $set would break import-survival-by-omission.
+    const seededDnc = dncBySvid.get(row.voter.stateVoterId);
+    if (seededDnc) setOnInsert.doNotContact = seededDnc;
     const update = { $set: set, $setOnInsert: setOnInsert };
     const prior = shieldBySvid.get(row.voter.stateVoterId);
     if (prior) {
@@ -489,16 +533,28 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
     }
     return {
       updateOne: {
-        filter: { organizationId: orgId, stateVoterId: row.voter.stateVoterId },
+        filter: { campaignId, stateVoterId: row.voter.stateVoterId },
         update,
         upsert: true,
       },
     };
   });
   const insertedVoterIds = [];
+  const seededDncHouseholdIds = new Set();
   for (let i = 0; i < voterOps.length; i += batchSize) {
     const res = await Voter.bulkWrite(voterOps.slice(i, i + batchSize), { ordered: false });
-    if (res?.upsertedIds) insertedVoterIds.push(...Object.values(res.upsertedIds));
+    if (res?.upsertedIds) {
+      insertedVoterIds.push(...Object.values(res.upsertedIds));
+      // voterOps was mapped 1:1 from validRows, so slice index i+idx points back at the
+      // source row — that's how a seeded insert finds the door needing a fullyDnc recompute.
+      for (const idx of Object.keys(res.upsertedIds)) {
+        const row = validRows[i + Number(idx)];
+        if (row && dncBySvid.has(row.voter.stateVoterId)) {
+          const hh = addressToId.get(normalizeAddress(row.household));
+          if (hh) seededDncHouseholdIds.add(String(hh));
+        }
+      }
+    }
     if (onProgress) {
       await onProgress({
         phase: 'voters',
@@ -509,19 +565,23 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
   }
 
   const afterHouseholds = await Household.countDocuments({ campaignId });
-  const afterVoters = await Voter.countDocuments({ organizationId: orgId });
+  const afterVoters = await Voter.countDocuments({ campaignId });
   const newHouseholds = Math.max(0, afterHouseholds - beforeHouseholds);
   const newVoters = Math.max(0, afterVoters - beforeVoters);
 
-  // Lifetime marketing counter: voters newly added to the platform this import (net new rows, so a
-  // re-import that only updates existing voters adds nothing). Resolves internal internally; no-op for
-  // demo orgs. Backfill recounts from rows as the source of truth.
-  await bumpLive('votersProcessed', newVoters, { orgId });
+  // Lifetime marketing counter: PEOPLE newly added to the platform this import — the
+  // distinct-svid diff, not the row diff, so importing a person already in a sibling
+  // campaign adds nothing (their row is new; the person isn't). Resolves internal
+  // internally; no-op for demo orgs. Backfill recounts from rows as the source of truth.
+  const afterOrgPeople = await countOrgPeople(orgId);
+  await bumpLive('votersProcessed', Math.max(0, afterOrgPeople - beforeOrgPeople), { orgId });
 
   return {
     uniqueVoters: validRows.length,
     uniqueHouseholds: householdMap.size,
     newHouseholds,
+    // "New to this campaign" — a person imported from a sibling campaign counts as new
+    // here (their row here is new) even though the org already knew them.
     newVoters,
     updatedVoters: Math.max(0, validRows.length - newVoters),
     // Hand-edit outcome: (voter, field) instances where the file disagreed with an armed edit.
@@ -532,6 +592,9 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
     // Exact docs inserted this run (for "undo import"). Empty on an idempotent retry.
     insertedHouseholdIds,
     insertedVoterIds,
+    // Doors that gained an import-seeded DNC flag (see 2.6) — the caller folds these into
+    // its fullyDnc recompute so an all-DNC door drops immediately, not on the next nightly.
+    seededDncHouseholdIds: [...seededDncHouseholdIds],
   };
 }
 

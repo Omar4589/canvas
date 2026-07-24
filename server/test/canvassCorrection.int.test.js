@@ -108,13 +108,13 @@ before(async () => {
   await TurfAssignment.create({ organizationId: org._id, campaignId: camp._id, passId: pass._id, turfId: turf._id, userId: canv._id });
 
   const voter = await Voter.create({
-    organizationId: org._id, householdId: homes[1]._id, stateVoterId: 'FLC1',
+    organizationId: org._id, campaignId: camp._id, householdId: homes[1]._id, stateVoterId: 'FLC1',
     firstName: 'Vi', lastName: 'Voter', fullName: 'Vi Voter',
   });
   // A second voter on its own door, so the survey-replay test never shares a SurveyResponse with
   // the snapshot test above (these assert absolute row counts).
   const voter2 = await Voter.create({
-    organizationId: org._id, householdId: homes[5]._id, stateVoterId: 'FLC2',
+    organizationId: org._id, campaignId: camp._id, householdId: homes[5]._id, stateVoterId: 'FLC2',
     firstName: 'Sam', lastName: 'Second', fullName: 'Sam Second',
   });
 

@@ -46,6 +46,7 @@
     "migrate:candidate-orgs": "npm --prefix server run migrate:candidate-orgs --",
     "request:org-deletion": "npm --prefix server run request:org-deletion --",
     "migrate:voter-scope": "npm --prefix server run migrate:voter-scope --",
+    "migrate:voter-campaigns": "npm --prefix server run migrate:voter-campaigns --",
     "migrate:cut-attributes": "npm --prefix server run migrate:cut-attributes --",
     "migrate:activity-turf-tags": "npm --prefix server run migrate:activity-turf-tags --",
     "migrate:turf-indexes": "npm --prefix server run migrate:turf-indexes --",

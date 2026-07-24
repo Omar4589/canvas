@@ -602,7 +602,7 @@ test('editing your own owner-less Person applies canonically instead of filing a
     normalizedAddress: '9 owns st|springfield|il|62704',
   });
   const voter = await Voter.create({
-    organizationId: ctx.org._id, householdId: hh._id, personId: person._id,
+    organizationId: ctx.org._id, campaignId: hh.campaignId, householdId: hh._id, personId: person._id,
     firstName: 'Old', lastName: 'Name', fullName: 'Old Name', stateVoterId: 'OWNS-1',
   });
 

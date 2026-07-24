@@ -457,6 +457,28 @@ team's own line — its doors, its survey doors, its surveys.
 > the second race — they land in that campaign's **No team** row, which is the correct per-campaign
 > answer and was not the org-wide one. If a row moved, that is the first explanation to check.
 
+### Give every voter record its campaign (ONE TIME — after the per-campaign voters release)
+
+Voter records used to be one row per person per **organisation**, pointed at a single door. Two
+campaigns importing overlapping files therefore fought over the same rows — the second import
+silently pulled each shared person onto *its* doors, and the first campaign's lists went quiet.
+Records are now one row per person **per campaign**, and this job stamps every existing row with
+the campaign its door already belongs to, then swaps the uniqueness rule to match.
+
+**Run it immediately after the deploy — imports refuse to run until you do.** The new import code
+guards on un-migrated rows and fails with a message naming this exact command (a clear error
+instead of a half-written file). Deploy in a quiet moment and go straight to the console:
+
+```
+npm run migrate:voter-campaigns              # 1. Dry run — reports what it would stamp.
+npm run migrate:voter-campaigns -- --apply   # 2. Stamp + swap the unique index.
+npm run migrate:build-indexes -- --apply     # 3. Build the rest of the new indexes.
+```
+
+The apply step **verifies before it swaps** — if any row can't be resolved to a campaign, or a
+duplicate would exist under the new rule, it aborts loudly and leaves the old index in place.
+Every org has one campaign as of this release, so both checks are expected to pass trivially.
+
 ---
 
 # Part 2 — Technical reference

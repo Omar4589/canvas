@@ -43,7 +43,7 @@ async function seedOrg({ slug, status, knocks = 0, bulk = 0, surveys = 0, voters
     zipCode: '40000', normalizedAddress: `${slug}-addr`,
   });
   for (let i = 0; i < voters; i++) {
-    await Voter.create({ organizationId: org._id, householdId: hh._id, firstName: 'V', lastName: String(i), fullName: `V ${i}`, stateVoterId: `${slug}-${i}` });
+    await Voter.create({ organizationId: org._id, campaignId: camp._id, householdId: hh._id, firstName: 'V', lastName: String(i), fullName: `V ${i}`, stateVoterId: `${slug}-${i}` });
   }
   for (let i = 0; i < knocks; i++) {
     await CanvassActivity.create({ organizationId: org._id, campaignId: camp._id, householdId: hh._id, userId: oid(), actionType: 'not_home', location: LOC, timestamp: new Date() });

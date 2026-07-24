@@ -16,15 +16,24 @@ Related: [EARLY_VOTING.md](EARLY_VOTING.md) (voted status), [METRICS.md](METRICS
 
 ## Where voters live (org vs campaign)
 
-Voters are stored at the **organization** level — one record per person (deduped by their state
-Voter ID). Each voter is attached to **one household, which belongs to one campaign**, so a voter is
-associated with a single campaign at a time. Campaign-specific data — **surveys, voted marks,
-knocks** — is per campaign. That's why the directory is **org-wide with a campaign filter**.
+Voter records are stored **per campaign**: each campaign that imports a person gets its **own
+copy** of their record, attached to that campaign's own copy of their door. So when two campaigns
+in your org target the same neighborhood — even the exact same people — each campaign has its own
+voters, doors, statuses, and books, and nothing one campaign does re-shuffles the other.
+
+The **person** is still one person to the org: the copies are tied together by their state Voter
+ID, so org-wide facts follow them everywhere. **Do not contact** set in one campaign applies in
+all of them, admin notes show on every copy's profile, and the org-wide Voters directory shows
+each person **once** (with a chip for every campaign they're in). Campaign-specific facts —
+**surveys, voted marks, knocks, "surveyed" status** — stay with each campaign's own copy.
 
 ## The directory (web: "Voters")
 
 A searchable, paginated list of every voter in the org. Search by **name, Voter ID, or address**;
 filter by **campaign, survey status, voted status, or party**. Each row → the voter's profile.
+In an org running **more than one campaign**, the unfiltered view shows each person **once**
+(their campaigns listed as chips; "surveyed" means surveyed in *any* of them); picking a campaign
+filter shows that campaign's own records.
 
 ## The profile
 
@@ -147,9 +156,9 @@ by different endpoints; it is no longer in the map/door bootstrap payload at all
 
 | Model | File | Notes |
 |---|---|---|
-| `Voter` | [models/Voter.js](../server/src/models/Voter.js) | Org-scoped (unique `{organizationId, stateVoterId}`). New: `lastEditedBy`/`lastEditedAt` (admin edit stamp) + index `{organizationId, lastName, firstName}` for the directory. **`doNotContact`** typed subdoc `{flagged, at, byUserId, reason, source: 'admin'\|'upload', uploadId}` + partial index `{organizationId, 'doNotContact.flagged'}` (flagged rows only — needs `migrate:build-indexes --apply`). Import-safe **by omission**: never in csvImporter's `row.voter`, so the re-import `$set` can't touch it (the `surveyStatus` mechanism). |
+| `Voter` | [models/Voter.js](../server/src/models/Voter.js) | **PER-CAMPAIGN rows** (unique `{campaignId, stateVoterId}`; org isolation holds transitively — a campaign belongs to one org). The same person in 2 campaigns of one org = 2 **sibling rows** (same `{organizationId, stateVoterId}`, non-unique index for sibling lookups). **Sibling invariant:** `doNotContact` must agree across siblings (writers write by the org+svid pair); `surveyStatus`, `householdId`, `locallyEditedFields` are per-row by design. Also: `lastEditedBy`/`lastEditedAt` (admin edit stamp), `{organizationId, lastName, firstName}` directory index. **`doNotContact`** typed subdoc `{flagged, at, byUserId, reason, source: 'admin'\|'upload', uploadId}` + partial index `{organizationId, 'doNotContact.flagged'}` (flagged rows only). Index changes ship via `migrate:voter-campaigns --apply` then `migrate:build-indexes --apply`. Import-safe **by omission**: never in csvImporter's `row.voter` `$set`; a flagged person imported into a NEW campaign gets the subdoc **seeded on insert** (`$setOnInsert`, original attribution kept, so upload-undo still reverts seeded copies). |
 | `Household.fullyDnc` | [models/Household.js](../server/src/models/Household.js) | Derived: true when **every** voter at the door is flagged (≥1-voter guard — a voter-less door is never fullyDnc). Written ONLY by [services/dnc/recomputeFullyDnc.js](../server/src/services/dnc/recomputeFullyDnc.js), whose unconditional bulkWrite `$set` bumps `updatedAt` — the mobile `/changes` delta depends on that bump. Filtered via the shared [`KNOCKABLE_DOOR_FILTER`](../server/src/services/canvass/knockableDoorFilter.js) at every cut/serve/count site. |
-| `DncUpload` / `DncPendingId` | [models/DncUpload.js](../server/src/models/DncUpload.js), [models/DncPendingId.js](../server/src/models/DncPendingId.js) | Org-level (no campaignId) audit + sticky-pending stores for DNC list uploads; pendings graduate on later imports via [services/dnc/reapplyDncLists.js](../server/src/services/dnc/reapplyDncLists.js), hooked in importProcessor beside the voted reapply. |
+| `DncUpload` / `DncPendingId` | [models/DncUpload.js](../server/src/models/DncUpload.js), [models/DncPendingId.js](../server/src/models/DncPendingId.js) | Org-level (no campaignId) audit + sticky-pending stores for DNC list uploads; pendings graduate on later imports via [services/dnc/reapplyDncLists.js](../server/src/services/dnc/reapplyDncLists.js), hooked in importProcessor beside the voted reapply. `DncPendingId.uploadId` is now **nullable**: deleting a campaign that held a flagged person's LAST row parks their request as a pending id (null uploadId = admin-set, `reason` carried) so a later import re-flags them — "never contact me" survives a campaign delete. Both models are in the org-delete `ORG_SCOPED` sweep. |
 | `VoterNote` | [models/VoterNote.js](../server/src/models/VoterNote.js) | **New, org-level** admin/canvasser note that follows the person: `{ organizationId, voterId, authorId, body, editedBy, editedAt, timestamps }`. Index `{voterId, createdAt:-1}`. |
 | `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | New: `editedBy`/`editedAt` audit fields for in-place edits. `answers` = `[{questionKey, questionLabel, answer}]`. |
 | `CanvassActivity` / `SurveyResponse` notes | — | Field notes shown read-only on the profile (no dedicated voter-note before this feature). |
@@ -177,9 +186,9 @@ guarded by `requireAuth, orgContext, requireOrgRole('admin')`:
 
 | Method · path | Purpose |
 |---|---|
-| `GET /admin/voters` | Directory: server-paginated (`limit`/`skip`/`total` — renamed from `offset` to match every other paged route; the web client is the only caller and ships with the server). Search (name/Voter ID/address) + filters (`campaignId`, `party`, `surveyStatus`, `voted`, `precinct`, `dnc`). Rows carry a `dnc` boolean. |
-| `POST /admin/voters/:voterId/dnc` | Flag do-not-contact (body `{reason}`, required, min 3 chars). Idempotent — a re-flag never restamps (upload-undo attribution). Writes the subdoc + a VoterNote, then `recomputeFullyDnc` for the door. Returns the profile. |
-| `DELETE /admin/voters/:voterId/dnc` | Clear the flag (stamps the transition + VoterNote + recompute; door may reopen). |
+| `GET /admin/voters` | Directory: server-paginated (`limit`/`skip`/`total`). Search (name/Voter ID/address) + filters (`campaignId`, `party`, `surveyStatus`, `voted`, `precinct`, `dnc`). Rows carry a `dnc` boolean. `?campaignId` is a direct `filter.campaignId` (rows are per-campaign — always resolves that campaign's own row). The org-wide view of a **multi-campaign** org runs a dedupe-by-svid aggregation: one row per person (`$first` in directory order), additive `campaigns:[{id,name}]` chips, `surveyStatus` = surveyed-in-any; single-campaign orgs keep the plain indexed find. |
+| `POST /admin/voters/:voterId/dnc` | Flag do-not-contact (body `{reason}`, required, min 3 chars). Idempotent — a re-flag never restamps (upload-undo attribution). Writes by `{organizationId, stateVoterId}` so **every sibling row flips together**, writes a VoterNote, then `recomputeFullyDnc` for **every sibling's door**. Returns the profile. |
+| `DELETE /admin/voters/:voterId/dnc` | Clear the flag on **all sibling rows** (stamps the transition + VoterNote + recompute; doors may reopen in every campaign). |
 | `GET /admin/voters/:voterId` | Full profile (`buildVoterProfile`). |
 | `PATCH /admin/voters/:voterId` | Edit allowed fields (Zod). Locks `stateVoterId`/`householdId`/`organizationId`; stamps `lastEditedBy/At`; recomputes `fullName`. |
 | `POST/PATCH/DELETE /admin/voters/:voterId/notes[/:noteId]` | Admin voter-note CRUD. |
@@ -211,6 +220,12 @@ filter so undo attribution stays clean), `POST /undo` (reverts only rows carryin
   (identity/source integrity). Changing a household = a re-import concern, not a profile edit.
 - **Scoping:** admin is org-wide; mobile is the active campaign and (for non-admins) the canvasser's
   assigned books.
+- **Sibling rows (multi-campaign orgs):** the same person imported into 2 campaigns has one Voter
+  row per campaign. Person-level history — surveys, VoterNotes, field notes, staff-access answers —
+  is **unioned across siblings** in `buildVoterProfile` (each survey is labeled with its
+  campaignId, and the profile carries an additive `otherCampaigns` array); door-level facts
+  (household, members, activity, voted) stay the opened row's. `doNotContact` writers keep
+  siblings in lockstep; `surveyStatus` never crosses rows.
 - **Do-not-contact enforcement is layered** — no single gate is trusted alone: walk-list resolution
   excludes flagged voters unconditionally ([resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js) —
   applied after every filter, not a checkbox); the walk-list CSV export re-checks LIVE flag state
@@ -253,9 +268,10 @@ Key invariants:
 - **Survey answers never create a voted mark.** The survey-submit path
   ([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)) writes a `SurveyResponse`
   and sets `surveyStatus`, and touches **no** `VotedVoter` row — even for an "Already Voted" answer.
-- **`surveyStatus` is org-wide; voted is per-campaign.** Survey status lives on the shared `Voter`
-  doc; the voted mark is a campaign-scoped `VotedVoter` row, so a voter can be voted in one
-  campaign and not another (and a `Voter` has **no** `voted` field).
+- **`surveyStatus` and voted are BOTH per-campaign.** Survey status lives on each campaign's own
+  `Voter` row (surveying a shared person in campaign A leaves campaign B's row `not_surveyed`);
+  the voted mark is a campaign-scoped `VotedVoter` row. A `Voter` has **no** `voted` field. The
+  org directory's unfiltered view reads surveyed-in-any across a person's sibling rows.
 - **A door drops only when all of its voters are voted** (`recomputeFullyVoted`: `voterCount > 0 &&
   every voter has a VotedVoter row`) — one un-voted resident keeps it on the books. Auditable via
   `npm run audit:voted-doors` ([server/src/utils/auditVotedDoors.js](../server/src/utils/auditVotedDoors.js)).

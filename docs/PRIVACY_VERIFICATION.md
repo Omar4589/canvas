@@ -211,6 +211,45 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   inventory is ever published, list it alongside `EmailLog` and `AccessLog` as an internal operational
   signal. The claim to keep true: *a staff-visible last-activity timestamp, never exposed to the
   account's own organization, removed on account deletion.*
+- *(v4 2026-07-24)* **Voter rows are now PER-CAMPAIGN** (unique `{campaignId, stateVoterId}`,
+  was `{organizationId, stateVoterId}`) — the release that lets one org run two campaigns with
+  overlapping voter files without the second import silently re-housing the first campaign's
+  voters. Named triggers hit: **retention/deletion** (what a campaign delete removes changed) and,
+  in the honest-audit sense, **what we hold** (the same person's identity fields can now exist as
+  2+ sibling rows inside one org). Code-verified 2026-07-24; guard test
+  `test/overlappingCampaigns.int.test.js` (10 cases) + `test/migrateVoterCampaigns.int.test.js`.
+  **Duplication, not new collection:** a sibling row holds the same fields the org already held
+  for that person, in the same tenant, sourced from that org's own uploads. No new data category,
+  no new audience (org admins already saw the person org-wide), no new recipient or subprocessor,
+  no new export. The org-wide promises stay org-wide by construction: `doNotContact` writers now
+  write by `{organizationId, stateVoterId}` so every sibling flips together, and imports SEED the
+  flag onto a new campaign's copy of an already-flagged person (`$setOnInsert`, original
+  attribution kept, upload-undo still reverts seeded copies). `surveyStatus` became per-campaign —
+  that is a *narrowing* of cross-campaign visibility, not a widening.
+  **Campaign deletion (never-walked campaigns only, as before):** now removes exactly that
+  campaign's voter rows; a person shared with a sibling campaign survives there. Two org-level
+  facts are handled explicitly rather than lost: (1) a flagged person losing their LAST row is
+  parked as a **`DncPendingId`** carrying the flag's original attribution — `uploadId` (nullable
+  now; null = admin-set) **and the admin's free-text `reason`** — so a later import re-flags them.
+  That is personal data (a stateVoterId + a sentence about a person) deliberately outliving the
+  row it described, purpose-limited to honoring the person's own opt-out; it dies on graduation,
+  on its upload's undo, or with the org. (2) org-level `VoterNote`s re-point to a surviving
+  sibling row and are deleted with the person's last row — closing a pre-existing orphan (they
+  used to survive a campaign delete keyed to a dead voterId).
+  **Gap CLOSED, found during this work:** `DncPendingId` and `DncUpload` were **missing from
+  `deleteOrganization.js`'s `ORG_SCOPED` sweep** — org deletion left behind DNC upload records
+  and pending stateVoterIds (personal identifiers) indefinitely. Both models are now in the list,
+  and `test/orgDelete.int.test.js`'s exhaustive-sweep proof covers them.
+  **Ops note:** the release ships with `migrate:voter-campaigns` (backfill + unique-index swap;
+  imports refuse to run until it has), then `migrate:build-indexes --apply` — see OPERATIONS.md.
+  Platform marketing counters (`votersProcessed`) switched from rows to **distinct people** so
+  the duplication cannot inflate published numbers.
+  **Assessment: NO published-policy change.** The Privacy Policy describes voter data as
+  customer-supplied and org-scoped; per-campaign rows change internal structure, not what is
+  collected, who sees it, how long it is kept, or who it is shared with. The B5 org-deletion
+  narrative is *more* true than before (two survivor classes eliminated). Claims to keep true:
+  *deleting a campaign removes only that campaign's copies; "do not contact" survives any
+  campaign delete; org deletion sweeps DNC uploads and pendings with everything else.*
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 

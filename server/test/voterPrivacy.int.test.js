@@ -112,7 +112,7 @@ before(async () => {
   });
 
   await Voter.create({
-    organizationId: org._id, householdId: hh._id, stateVoterId: 'FL-1',
+    organizationId: org._id, campaignId: camp._id, householdId: hh._id, stateVoterId: 'FL-1',
     firstName: 'Vi', lastName: 'Voter', fullName: 'Vi Voter',
     party: 'DEM', gender: 'F', dateOfBirth: new Date(DOB),
   });

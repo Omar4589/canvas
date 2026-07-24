@@ -135,13 +135,21 @@ router.get('/map', async (req, res, next) => {
         : null;
 
     // A team lead may only pull the map for a campaign they manage — and never org-wide
-    // (no campaignId). Admins/super are unrestricted.
+    // (no campaignId). Admins must scope too once the org runs 2+ campaigns (an unscoped
+    // pull would merge both campaigns' doors onto one map; every shipping client always
+    // sends campaignId) — `all=1` is the explicit org-wide escape hatch, and
+    // single-campaign orgs keep the legacy unscoped shape. Mirrors the reports guard.
     if (!isOrgAdmin(req)) {
       if (!campaignId) {
         return res.status(403).json({ error: 'A team lead must scope the map to a campaign they manage.' });
       }
       if (!(await canManageCampaign(req, campaignId))) {
         return res.status(403).json({ error: 'Forbidden' });
+      }
+    } else if (!campaignId && req.query.all !== '1') {
+      const campaignCount = await Campaign.countDocuments({ organizationId: orgId });
+      if (campaignCount > 1) {
+        return res.status(400).json({ error: 'This organization runs multiple campaigns — pass campaignId, or all=1 for the org-wide map.' });
       }
     }
 

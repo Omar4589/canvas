@@ -78,9 +78,9 @@ async function forecastPersons(validRows, uidSource, orgId) {
  * Takes the already-parsed { validRows, householdMap, errors, dupSvids } from
  * parseAndValidate. Returns { totals, rowIssues, samples } (sample arrays capped).
  *
- * Scoped to the campaign being imported: a voter currently in another campaign's
- * household is counted as an updated voter but not as a within-campaign move/orphan
- * (cross-campaign door ownership is out of scope here).
+ * Scoped to the campaign being imported, matching applyImport's per-campaign upsert:
+ * a person who exists only in a SIBLING campaign forecasts as a NEW voter here (their
+ * row here will be an insert), and never as a move/orphan.
  */
 export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, totalRows = 0, uidSource = null }) {
   const campaignId = campaign._id;
@@ -96,10 +96,10 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
   const newDoors = fileAddrSet.size - existingAddrSet.size;
   const existingDoors = existingAddrSet.size;
 
-  // Existing voters (org-scoped) by stateVoterId → forecast new vs updated.
+  // Existing voters (campaign-scoped, like the apply) by stateVoterId → forecast new vs updated.
   const svids = validRows.map((r) => r.voter.stateVoterId);
   const existingVoters = await findInChunks(
-    Voter, 'stateVoterId', svids, { stateVoterId: 1, householdId: 1, fullName: 1 }, { organizationId: orgId }
+    Voter, 'stateVoterId', svids, { stateVoterId: 1, householdId: 1, fullName: 1 }, { campaignId }
   );
   const existingBySvid = new Map(existingVoters.map((v) => [v.stateVoterId, v]));
   const updatedVoters = existingBySvid.size;
@@ -194,7 +194,7 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
   for (const f of IDENTITY_FIELDS) ARMED_PROJ[f] = 1;
   const armedVoters = await findInChunks(
     Voter, 'stateVoterId', svids, ARMED_PROJ,
-    { organizationId: orgId, 'locallyEditedFields.0': { $exists: true } }
+    { campaignId, 'locallyEditedFields.0': { $exists: true } }
   );
   const armedBySvid = new Map(armedVoters.map((v) => [v.stateVoterId, v]));
   const handEditSamples = [];

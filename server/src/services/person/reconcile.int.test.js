@@ -22,7 +22,7 @@ const V = (svid, extra = {}) => ({
   household: { state: 'FL' },
 });
 const seedVoter = (org, svid, name, personId, extra = {}) =>
-  Voter.create({ organizationId: org, stateVoterId: svid, registeredState: 'FL', firstName: name, lastName: name, fullName: name + ' ' + name, party: 'REP', personId, householdId: new mongoose.Types.ObjectId(), ...extra });
+  Voter.create({ organizationId: org, campaignId: new mongoose.Types.ObjectId(), stateVoterId: svid, registeredState: 'FL', firstName: name, lastName: name, fullName: name + ' ' + name, party: 'REP', personId, householdId: new mongoose.Types.ObjectId(), ...extra });
 
 before(async () => { if (URI) { await mongoose.connect(URI); await Person.syncIndexes(); await Voter.syncIndexes(); } });
 after(async () => { if (URI) await mongoose.disconnect(); });

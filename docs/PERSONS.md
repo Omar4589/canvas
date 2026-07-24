@@ -48,13 +48,16 @@ Related: [IMPORTS.md](IMPORTS.md) (where Persons get linked during an upload),
 
 ## What a "Person" is
 
-Every `Voter` row belongs to **one organization** (the same human in two orgs is two Voter
-rows). A **Person** is the canonical record that **links** those rows — one Person per real
-human. When org B imports a voter that org A already has, both orgs' Voter rows point at the
-**same** Person.
+Every `Voter` row belongs to **one campaign of one organization** (the same human in two orgs is
+two-plus Voter rows; the same human in two *campaigns* of one org is also two rows — "siblings",
+tied by their state Voter ID). A **Person** is the canonical record that **links** those rows —
+one Person per real human per org. All of an org's sibling rows for a person carry the **same**
+`personId`, which is exactly why identity propagation reaches every campaign's copy: the fan-out
+writes by `{personId, organizationId}` (§C Propagation), so correcting a phone once corrects it
+in every campaign.
 
-Think of it as: the Voter row is *your org's copy*; the Person is *the shared truth* about who
-that human is.
+Think of it as: the Voter row is *one campaign's copy*; the Person is *the org's shared truth*
+about who that human is.
 
 ## What's shared, and what stays private
 

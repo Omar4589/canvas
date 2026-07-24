@@ -7,9 +7,10 @@ import { suggestMapping } from './canonicalFields.js';
 // stays small; the admin downloads these to fix and re-upload.
 export const NOT_FOUND_CAP = 10000;
 
-// Shared first half: parse the CSV, find the voter-id column, and match the ids ORG-WIDE by
-// stateVoterId. Campaign filtering (or not) is the callers' business.
-async function parseIdsAndFindOrgVoters(organizationId, fileBuffer, idColumn, projection) {
+// Shared first half: parse the CSV, find the voter-id column, and match the ids by
+// stateVoterId within `scopeFilter` ({ campaignId } or { organizationId }) — voter rows are
+// per-campaign, so the scope decides whether a sibling campaign's row counts as a match.
+async function parseIdsAndFindVoters(scopeFilter, fileBuffer, idColumn, projection) {
   const csv = fileBuffer.toString('utf8');
   const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() });
   const columns = parsed.meta?.fields || [];
@@ -30,7 +31,7 @@ async function parseIdsAndFindOrgVoters(organizationId, fileBuffer, idColumn, pr
   const ids = [...csvIds];
   const voters = ids.length
     ? await Voter.find(
-        { organizationId, stateVoterId: { $in: ids } },
+        { ...scopeFilter, stateVoterId: { $in: ids } },
         projection || { _id: 1, stateVoterId: 1, householdId: 1 }
       ).lean()
     : [];
@@ -38,26 +39,21 @@ async function parseIdsAndFindOrgVoters(organizationId, fileBuffer, idColumn, pr
 }
 
 // Parse the CSV, find the voter-id column, and resolve which of this campaign's
-// voters it matches. Voters are matched org-wide by stateVoterId (indexed) then
-// filtered to those living in THIS campaign's households.
+// voters it matches — a direct {campaignId, stateVoterId} match on the unique index
+// (rows are per-campaign; a person housed only in a sibling campaign is notFound here).
 // Shared by early voting (voted.js) and "walk list from CSV" (walklists.js).
 export async function parseAndMatch(campaign, fileBuffer, idColumn) {
-  const base = await parseIdsAndFindOrgVoters(campaign.organizationId, fileBuffer, idColumn);
+  const base = await parseIdsAndFindVoters({ campaignId: campaign._id }, fileBuffer, idColumn);
   if (base.error) return base;
   const { columns, col, totalRows, csvCount, ids, voters } = base;
-  const hhIds = [...new Set(voters.map((v) => String(v.householdId)))];
-  const inCampaignHh = new Set(
-    (await Household.find({ _id: { $in: hhIds }, campaignId: campaign._id }, { _id: 1 }).lean()).map((h) => String(h._id))
-  );
-  const inCampaign = voters.filter((v) => inCampaignHh.has(String(v.householdId)));
-  const matchedSvids = new Set(inCampaign.map((v) => v.stateVoterId));
+  const matchedSvids = new Set(voters.map((v) => v.stateVoterId));
   const notFoundIds = ids.filter((id) => !matchedSvids.has(id));
   return {
     columns,
     col,
     totalRows,
     csvCount,
-    inCampaign,
+    inCampaign: voters,
     notFound: notFoundIds.length,
     notFoundIds,
   };
@@ -66,8 +62,10 @@ export async function parseAndMatch(campaign, fileBuffer, idColumn) {
 // The org-wide variant: no campaign filter at all. Used by do-not-contact list uploads, where the
 // flag is an org-level fact about the voter (routes/admin/dnc.js) — a match anywhere in the org
 // counts, and `notFoundIds` means "no voter row anywhere in the org" (those become DncPendingIds).
+// Rows are per-campaign, so `matched` holds one row per SIBLING for a person in 2+ campaigns —
+// callers flag per-row and count people by deduping stateVoterId.
 export async function parseAndMatchOrg(organizationId, fileBuffer, idColumn) {
-  const base = await parseIdsAndFindOrgVoters(organizationId, fileBuffer, idColumn, {
+  const base = await parseIdsAndFindVoters({ organizationId }, fileBuffer, idColumn, {
     _id: 1,
     stateVoterId: 1,
     householdId: 1,
@@ -111,7 +109,7 @@ export async function resolveHouseholdsFromVoterMatch(campaign, inCampaign) {
   const householdIds = cuttable.map((h) => h._id);
   const voters = householdIds.length
     ? await Voter.find(
-        { organizationId: campaign.organizationId, householdId: { $in: householdIds } },
+        { campaignId: campaign._id, householdId: { $in: householdIds } },
         { _id: 1 }
       ).lean()
     : [];

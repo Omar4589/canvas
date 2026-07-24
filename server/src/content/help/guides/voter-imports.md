@@ -14,7 +14,8 @@ tags: import, voters, intake
 ## How an upload is matched
 
 - A row matches an existing **door by its address** (after light normalization). A different or misspelled address becomes a separate door.
-- A row matches a **voter by their state Voter ID**. Re-uploading the same voter updates them in place — imports are safe to repeat.
+- A row matches a **voter by their state Voter ID, within the campaign you're importing into**. Re-uploading the same voter updates them in place — imports are safe to repeat.
+- **Running more than one campaign?** Each campaign gets its **own copy** of every voter and door it imports. Two campaigns can upload overlapping — even identical — files and neither disturbs the other: separate doors, separate books, separate counts. The person stays one person to your organization (a **Do not contact** set anywhere applies everywhere, and they appear once in the org-wide Voters directory), but each campaign works its own copy.
 
 ## Preview before you commit
 

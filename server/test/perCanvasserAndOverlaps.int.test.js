@@ -136,7 +136,7 @@ before(async () => {
   ]);
 
   const voter = await Voter.create({
-    organizationId: org._id, householdId: H._id, stateVoterId: 'SV-H-1',
+    organizationId: org._id, campaignId: camp._id, householdId: H._id, stateVoterId: 'SV-H-1',
     firstName: 'Vera', lastName: 'Voter', fullName: 'Vera Voter', surveyStatus: 'surveyed',
   });
 

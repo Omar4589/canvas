@@ -98,7 +98,7 @@ after(async () => {
 async function mapCanvasserIds(campaignId) {
   const url = campaignId
     ? `${base}/api/admin/households/map?campaignId=${campaignId}&includeActivities=1`
-    : `${base}/api/admin/households/map`;
+    : `${base}/api/admin/households/map?all=1`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${ctx.adminTok}`, 'X-Org-Id': String(ctx.org._id) },
   });
@@ -130,10 +130,19 @@ test('campaign B dropdown = only its knocker', { skip }, async () => {
   assert.deepStrictEqual([...got], [ids.otherCamp]);
 });
 
-test('org-wide map (no campaignId) falls back to all ACTIVE members (deactivated excluded)', { skip }, async () => {
+test('org-wide map (all=1) falls back to all ACTIVE members (deactivated excluded)', { skip }, async () => {
   const { ids } = ctx;
-  const got = await mapCanvasserIds(null);
+  const got = await mapCanvasserIds(null); // helper sends all=1 — see below
   // Every active canvasser + admin; the deactivated user is gone on this legacy path.
   assert.ok(got.has(ids.knocker) && got.has(ids.surveyor) && got.has(ids.rostered) && got.has(ids.otherCamp) && got.has(ids.idle));
   assert.ok(!got.has(ids.deadKnocker), 'org-wide path keeps its historical isActive filter');
+});
+
+test('a BARE unscoped map call 400s in a multi-campaign org (all=1 is the explicit hatch)', { skip }, async () => {
+  // This org runs campaigns A and B — an admin request with neither campaignId nor all=1
+  // must refuse rather than silently merge both campaigns' doors onto one map.
+  const res = await fetch(`${base}/api/admin/households/map`, {
+    headers: { Authorization: `Bearer ${ctx.adminTok}`, 'X-Org-Id': String(ctx.org._id) },
+  });
+  assert.strictEqual(res.status, 400, `expected 400, got ${res.status}`);
 });

@@ -71,12 +71,9 @@ router.get('/', async (req, res, next) => {
       req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
         ? new mongoose.Types.ObjectId(req.query.campaignId)
         : null;
-    if (campaignId) {
-      const hhIds = (
-        await Household.find({ organizationId: orgId, campaignId }, '_id').lean()
-      ).map((h) => h._id);
-      filter.householdId = { $in: hhIds };
-    }
+    // Voter rows are per-campaign — a direct filter, no household round-trip, and it always
+    // resolves to THIS campaign's row of a shared person (never "whichever imported last").
+    if (campaignId) filter.campaignId = campaignId;
 
     // voted filter — campaign-scoped when a campaign is selected, else org-wide.
     if (req.query.voted === 'true' || req.query.voted === 'false') {
@@ -100,14 +97,61 @@ router.get('/', async (req, res, next) => {
       filter.$or = [{ fullName: rx }, { stateVoterId: search }, { householdId: { $in: addrHh } }];
     }
 
-    const [rows, total] = await Promise.all([
-      Voter.find(filter)
-        .sort({ lastName: 1, firstName: 1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Voter.countDocuments(filter),
-    ]);
+    // Org-wide view of a multi-campaign org: dedupe by person (stateVoterId) so someone
+    // imported into two campaigns is ONE directory row — their first-sorted row is the
+    // primary, `campaignIds` collects everywhere they appear, and surveyStatus reads
+    // surveyed-in-any. Single-campaign orgs (and any campaign-scoped view) keep the plain
+    // indexed find — rows and people are the same thing there.
+    const needsDedupe =
+      !campaignId && (await Campaign.countDocuments({ organizationId: orgId })) > 1;
+
+    let rows;
+    let total;
+    let extrasByVoterId = null; // person-level extras from the dedupe pipeline
+    if (needsDedupe) {
+      const groupStage = {
+        $group: {
+          _id: '$stateVoterId',
+          doc: { $first: '$$ROOT' },
+          campaignIds: { $addToSet: '$campaignId' },
+          surveyedAny: { $max: { $cond: [{ $eq: ['$surveyStatus', 'surveyed'] }, 1, 0] } },
+        },
+      };
+      const [pageRows, totalAgg] = await Promise.all([
+        Voter.aggregate([
+          { $match: filter },
+          // Pre-group sort makes $first deterministic (the person's first row in directory
+          // order); post-group sort orders the PEOPLE the same way for paging.
+          { $sort: { lastName: 1, firstName: 1, _id: 1 } },
+          groupStage,
+          { $sort: { 'doc.lastName': 1, 'doc.firstName': 1, 'doc._id': 1 } },
+          { $skip: skip },
+          { $limit: limit },
+        ]).allowDiskUse(true),
+        Voter.aggregate([
+          { $match: filter },
+          { $group: { _id: '$stateVoterId' } },
+          { $count: 'n' },
+        ]).allowDiskUse(true),
+      ]);
+      rows = pageRows.map((r) => r.doc);
+      total = totalAgg[0]?.n || 0;
+      extrasByVoterId = new Map(
+        pageRows.map((r) => [
+          String(r.doc._id),
+          { campaignIds: r.campaignIds.map(String), surveyedAny: r.surveyedAny === 1 },
+        ])
+      );
+    } else {
+      [rows, total] = await Promise.all([
+        Voter.find(filter)
+          .sort({ lastName: 1, firstName: 1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        Voter.countDocuments(filter),
+      ]);
+    }
 
     // Resolve household/campaign + voted flag for the page.
     const hhIds = [...new Set(rows.map((v) => String(v.householdId)).filter(Boolean))];
@@ -118,7 +162,13 @@ router.get('/', async (req, res, next) => {
         ).lean()
       : [];
     const hMap = new Map(households.map((h) => [String(h._id), h]));
-    const campIds = [...new Set(households.map((h) => String(h.campaignId)).filter(Boolean))];
+    const campIds = [
+      ...new Set([
+        ...households.map((h) => String(h.campaignId)).filter(Boolean),
+        // Deduped people may span campaigns beyond their primary row's household.
+        ...(extrasByVoterId ? [...extrasByVoterId.values()].flatMap((e) => e.campaignIds) : []),
+      ]),
+    ];
     const camps = campIds.length
       ? await Campaign.find({ _id: { $in: campIds } }, 'name').lean()
       : [];
@@ -135,6 +185,7 @@ router.get('/', async (req, res, next) => {
     const voters = rows.map((v) => {
       const h = hMap.get(String(v.householdId));
       const hcamp = h ? String(h.campaignId) : null;
+      const extras = extrasByVoterId?.get(String(v._id)) || null;
       return {
         id: String(v._id),
         fullName: v.fullName,
@@ -142,7 +193,8 @@ router.get('/', async (req, res, next) => {
         lastName: v.lastName,
         stateVoterId: v.stateVoterId,
         party: v.party || null,
-        surveyStatus: v.surveyStatus,
+        // Deduped org view reads surveyed-in-ANY-campaign; row views read the row.
+        surveyStatus: extras ? (extras.surveyedAny ? 'surveyed' : 'not_surveyed') : v.surveyStatus,
         dnc: !!v.doNotContact?.flagged,
         voted: hcamp ? !!votedByVoter.get(String(v._id))?.has(hcamp) : false,
         household: h
@@ -155,6 +207,10 @@ router.get('/', async (req, res, next) => {
               campaignName: hcamp ? cMap.get(hcamp) || null : null,
             }
           : null,
+        // Additive (dedupe path only): every campaign this person appears in.
+        ...(extras
+          ? { campaigns: extras.campaignIds.map((cid) => ({ id: cid, name: cMap.get(cid) || null })) }
+          : {}),
       };
     });
 
@@ -188,11 +244,18 @@ router.get('/:voterId/staff-access', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     const voter = await Voter.findOne(
       { _id: req.params.voterId, organizationId: activeOrgId(req) },
-      'householdId personId'
+      'householdId personId stateVoterId'
     ).lean();
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
 
-    const subjectIds = [voter._id, voter.householdId, voter.personId].filter(Boolean);
+    // Sibling rows too (the same person in other campaigns) — "was this record accessed"
+    // is a question about the PERSON, not one campaign's row of them.
+    const siblingIds = await Voter.find({
+      organizationId: activeOrgId(req),
+      stateVoterId: voter.stateVoterId,
+      _id: { $ne: voter._id },
+    }).distinct('_id');
+    const subjectIds = [voter._id, ...siblingIds, voter.householdId, voter.personId].filter(Boolean);
     // $slice:2 on subjects, NOT the whole array. The export heuristic below only needs to know
     // "one subject or more than one", and an export row can carry up to SUBJECT_CAP (20k) ids —
     // projecting them all meant a routine profile view could pull 50 x 20k subdocs into the dyno
@@ -412,10 +475,12 @@ router.delete('/:voterId/notes/:noteId', async (req, res, next) => {
 });
 
 // ── Do-not-contact (org-wide; see docs/VOTERS.md) ────────────────────────────
-// The flag lives on the org-scoped Voter, so setting it here covers every campaign the voter is
-// ever housed in. Admins only (this router's gate) — leads see the flag but cannot change it.
-// Both transitions stamp who/when on the subdoc and write a VoterNote, so the durable history
-// lives in the notes trail the profile and Notes hub already render.
+// The flag is an ORG-wide promise on per-campaign Voter rows: both transitions write by
+// {organizationId, stateVoterId}, so every sibling row (the same person in other campaigns)
+// flips together and each campaign's door recomputes. Admins only (this router's gate) —
+// leads see the flag but cannot change it. Both transitions stamp who/when on the subdoc and
+// write a VoterNote, so the durable history lives in the notes trail the profile and Notes
+// hub already render (the profile unions notes across siblings).
 
 router.post('/:voterId/dnc', async (req, res, next) => {
   try {
@@ -423,7 +488,7 @@ router.post('/:voterId/dnc', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.voterId)) return res.status(400).json({ error: 'Invalid voterId' });
     const voter = await Voter.findOne(
       { _id: req.params.voterId, organizationId: activeOrgId(req) },
-      '_id householdId doNotContact'
+      '_id householdId stateVoterId doNotContact'
     ).lean();
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
 
@@ -440,8 +505,14 @@ router.post('/:voterId/dnc', async (req, res, next) => {
       return res.json({ ok: true, alreadyFlagged: true });
     }
 
-    await Voter.updateOne(
-      { _id: voter._id },
+    // All sibling rows — this person in every campaign of the org. The flagged-$ne guard
+    // keeps any already-flagged sibling's original attribution (same restamp rule as above).
+    const siblings = await Voter.find(
+      { organizationId: activeOrgId(req), stateVoterId: voter.stateVoterId },
+      '_id householdId'
+    ).lean();
+    await Voter.updateMany(
+      { organizationId: activeOrgId(req), stateVoterId: voter.stateVoterId, 'doNotContact.flagged': { $ne: true } },
       {
         $set: {
           doNotContact: {
@@ -461,9 +532,9 @@ router.post('/:voterId/dnc', async (req, res, next) => {
       authorId: req.user._id,
       body: `Marked do-not-contact: ${reason}`,
     });
-    // Recompute the door (may suppress it) — also bumps Household.updatedAt, which is what
-    // pushes the change to already-bootstrapped phones via the /changes delta.
-    await recomputeFullyDnc([String(voter.householdId)]);
+    // Recompute every sibling's door (each may suppress) — also bumps Household.updatedAt,
+    // which is what pushes the change to already-bootstrapped phones via the /changes delta.
+    await recomputeFullyDnc([...new Set(siblings.map((s) => String(s.householdId)))]);
 
     res.json(await buildVoterProfile(voter._id, { orgId: activeOrgId(req) }));
   } catch (err) {
@@ -478,7 +549,7 @@ router.delete('/:voterId/dnc', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.voterId)) return res.status(400).json({ error: 'Invalid voterId' });
     const voter = await Voter.findOne(
       { _id: req.params.voterId, organizationId: activeOrgId(req) },
-      '_id householdId doNotContact'
+      '_id householdId stateVoterId doNotContact'
     ).lean();
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
 
@@ -486,9 +557,14 @@ router.delete('/:voterId/dnc', async (req, res, next) => {
       return res.json({ ok: true, alreadyClear: true });
     }
 
-    // The subdoc records the last transition in either direction; the notes trail keeps history.
-    await Voter.updateOne(
-      { _id: voter._id },
+    // The subdoc records the last transition in either direction; the notes trail keeps
+    // history. Clears ALL sibling rows — un-flagging is as org-wide as flagging.
+    const siblings = await Voter.find(
+      { organizationId: activeOrgId(req), stateVoterId: voter.stateVoterId },
+      '_id householdId'
+    ).lean();
+    await Voter.updateMany(
+      { organizationId: activeOrgId(req), stateVoterId: voter.stateVoterId },
       {
         $set: {
           doNotContact: {
@@ -508,7 +584,7 @@ router.delete('/:voterId/dnc', async (req, res, next) => {
       authorId: req.user._id,
       body: 'Do-not-contact flag removed.',
     });
-    await recomputeFullyDnc([String(voter.householdId)]); // door may reopen
+    await recomputeFullyDnc([...new Set(siblings.map((s) => String(s.householdId)))]); // doors may reopen
 
     res.json(await buildVoterProfile(voter._id, { orgId: activeOrgId(req) }));
   } catch (err) {

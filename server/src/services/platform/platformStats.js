@@ -3,7 +3,6 @@ import { PlatformDaily } from '../../models/PlatformDaily.js';
 import { Subscription } from '../../models/Subscription.js';
 import { Organization } from '../../models/Organization.js';
 import { Campaign } from '../../models/Campaign.js';
-import { Household } from '../../models/Household.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Voter } from '../../models/Voter.js';
@@ -27,6 +26,19 @@ async function internalOrgIds() {
 
 async function isInternalOrg(orgId) {
   return !!(await Subscription.exists({ organizationId: orgId, status: 'internal' }));
+}
+
+// Distinct PEOPLE — {organizationId, stateVoterId} pairs — under `match`. Voter rows are
+// per-campaign, so a raw row count would double-count a person imported into two campaigns
+// of one org; votersProcessed has always meant people. (The same person in two ORGS still
+// counts twice — orgs are separate universes, decision 13.)
+async function countPeople(match) {
+  const [r] = await Voter.aggregate([
+    { $match: match },
+    { $group: { _id: { org: '$organizationId', svid: '$stateVoterId' } } },
+    { $count: 'n' },
+  ]).allowDiskUse(true);
+  return r?.n || 0;
 }
 
 /**
@@ -83,7 +95,7 @@ export async function captureOrgBeforeDelete(orgId) {
     Campaign.countDocuments({ organizationId: orgId }),
     CanvassActivity.countDocuments({ organizationId: orgId, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }),
     SurveyResponse.countDocuments({ organizationId: orgId }),
-    Voter.countDocuments({ organizationId: orgId }),
+    countPeople({ organizationId: orgId }),
   ]);
   const captured = { organizations: 1, campaigns, doorsKnocked, surveyResponses, votersProcessed };
   await moveLiveToDeleted(captured);
@@ -106,12 +118,25 @@ export async function captureCampaignBeforeDelete(campaign) {
   if (!claimed) return null; // already captured on a prior (failed) attempt
   if (await isInternalOrg(campaign.organizationId)) return null;
   const campaignId = campaign._id;
-  const householdIds = await Household.find({ campaignId }).distinct('_id');
-  const [doorsKnocked, surveyResponses, votersProcessed] = await Promise.all([
+  // People this delete actually removes from the org's universe: distinct ids in this
+  // campaign with NO sibling row in another campaign. A person shared with a sibling
+  // campaign lives on there — banking them into `deleted` while their surviving row still
+  // counts in `live` would double them in the total.
+  const campSvids = await Voter.find({ campaignId }).distinct('stateVoterId');
+  let survivors = 0;
+  for (let i = 0; i < campSvids.length; i += 5000) {
+    const s = await Voter.find({
+      organizationId: campaign.organizationId,
+      stateVoterId: { $in: campSvids.slice(i, i + 5000) },
+      campaignId: { $ne: campaignId },
+    }).distinct('stateVoterId');
+    survivors += s.length;
+  }
+  const [doorsKnocked, surveyResponses] = await Promise.all([
     CanvassActivity.countDocuments({ campaignId, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }),
     SurveyResponse.countDocuments({ campaignId }),
-    Voter.countDocuments({ householdId: { $in: householdIds } }),
   ]);
+  const votersProcessed = Math.max(0, campSvids.length - survivors);
   const captured = { organizations: 0, campaigns: 1, doorsKnocked, surveyResponses, votersProcessed };
   await moveLiveToDeleted(captured);
   return captured;
@@ -134,7 +159,7 @@ export async function computeLiveCounts() {
     Campaign.countDocuments({ organizationId: orgNin }),
     CanvassActivity.countDocuments({ organizationId: orgNin, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }),
     SurveyResponse.countDocuments({ organizationId: orgNin }),
-    Voter.countDocuments({ organizationId: orgNin }),
+    countPeople({ organizationId: orgNin }),
   ]);
   return { organizations, campaigns, doorsKnocked, surveyResponses, votersProcessed };
 }
@@ -185,6 +210,38 @@ export async function computeDailySeries() {
   for (const metric of PLATFORM_METRICS) {
     const [Model, match] = matches[metric];
     const { dateField } = DAILY_SOURCES[metric];
+    // votersProcessed counts PEOPLE (per-campaign rows would double-count a person imported
+    // into two campaigns), so bucket each {org, person} pair once, on its FIRST row's
+    // createdAt — re-importing a known person into a sibling campaign adds a row, not a bar.
+    if (metric === 'votersProcessed') {
+      const [buckets, missing] = await Promise.all([
+        Voter.aggregate([
+          { $match: { ...match, [dateField]: { $type: 'date' } } },
+          { $group: { _id: { org: '$organizationId', svid: '$stateVoterId' }, first: { $min: `$${dateField}` } } },
+          { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$first' } }, n: { $sum: 1 } } },
+        ]).allowDiskUse(true),
+        // Dateless = pairs with NO dated row at all (a real count, not a residual — keeps the
+        // trend invariant an actual cross-check against countPeople, like the row metrics).
+        Voter.aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: { org: '$organizationId', svid: '$stateVoterId' },
+              hasDate: { $max: { $cond: [{ $eq: [{ $type: `$${dateField}` }, 'date'] }, 1, 0] } },
+            },
+          },
+          { $match: { hasDate: 0 } },
+          { $count: 'n' },
+        ]).allowDiskUse(true),
+      ]);
+      undated[metric] = missing[0]?.n || 0;
+      for (const b of buckets) {
+        const row = byDay.get(b._id) || {};
+        row[metric] = b.n;
+        byDay.set(b._id, row);
+      }
+      continue;
+    }
     const [buckets, missing] = await Promise.all([
       // $dateToString throws on a null/missing date, so bucket only real dates …
       Model.aggregate([

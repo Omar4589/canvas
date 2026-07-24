@@ -52,7 +52,7 @@ async function seedData(org, lastKnockAt = null) {
     location: { type: 'Point', coordinates: [-81, 28] },
   });
   await Voter.create({
-    organizationId: org._id, householdId: hh._id, stateVoterId: `SV-${org.slug}`,
+    organizationId: org._id, campaignId: camp._id, householdId: hh._id, stateVoterId: `SV-${org.slug}`,
     firstName: 'Vi', lastName: 'Voter', fullName: 'Vi Voter',
   });
   if (lastKnockAt) {

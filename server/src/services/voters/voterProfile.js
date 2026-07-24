@@ -27,9 +27,19 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   const campaignId = household?.campaignId || null;
   const campaign = campaignId ? await Campaign.findById(campaignId, 'name type').lean() : null;
 
+  // Sibling rows — the same person's row in each OTHER campaign of this org (rows are
+  // per-campaign). The person-level histories below (surveys, notes) union over them; the
+  // door-level pieces (household, members, activity, voted) stay this row's on purpose.
+  const siblings = await Voter.find(
+    { organizationId: voter.organizationId, stateVoterId: voter.stateVoterId, _id: { $ne: voter._id } },
+    'campaignId householdId surveyStatus'
+  ).lean();
+  const personRowIds = [voter._id, ...siblings.map((s) => s._id)];
+
   const [voted, surveys, activity, voterNotesRaw, members, adminNotes] = await Promise.all([
     campaignId ? VotedVoter.findOne({ campaignId, voterId: voter._id }).lean() : null,
-    SurveyResponse.find({ voterId: voter._id }).sort({ submittedAt: -1 }).lean(),
+    // All of the person's surveys, across campaigns — each carries its campaignId for labeling.
+    SurveyResponse.find({ voterId: { $in: personRowIds } }).sort({ submittedAt: -1 }).lean(),
     household
       ? CanvassActivity.find(
           { householdId: voter.householdId, actionType: { $in: KNOCK_ACTIONS } },
@@ -42,8 +52,9 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
     CanvassActivity.find(
       // Exclude survey_submitted: its note is the survey's note, surfaced below from
       // SurveyResponse (dual-ledger). Without this it appears twice. Mirrors the Notes
-      // hub's doorMatch (routes/admin/reports.js).
-      { voterId: voter._id, actionType: { $ne: 'survey_submitted' }, note: { $exists: true, $ne: null, $not: /^\s*$/ } },
+      // hub's doorMatch (routes/admin/reports.js). Sibling rows included — a field note
+      // about the person belongs to the person.
+      { voterId: { $in: personRowIds }, actionType: { $ne: 'survey_submitted' }, note: { $exists: true, $ne: null, $not: /^\s*$/ } },
       '_id note timestamp actionType userId'
     )
       .sort({ timestamp: -1 })
@@ -51,7 +62,8 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
     household
       ? Voter.find({ householdId: voter.householdId }, 'fullName surveyStatus doNotContact.flagged').lean()
       : [],
-    VoterNote.find({ voterId: voter._id }).sort({ createdAt: -1 }).lean(),
+    // Admin notes are org-level and follow the person across campaigns.
+    VoterNote.find({ voterId: { $in: personRowIds } }).sort({ createdAt: -1 }).lean(),
   ]);
 
   // Which household members have voted (for the members list).
@@ -130,8 +142,25 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
     }
   }
 
+  // The person's presence in other campaigns (additive — clients that don't know it ignore it).
+  let otherCampaigns = [];
+  if (siblings.length) {
+    const sibCamps = await Campaign.find(
+      { _id: { $in: [...new Set(siblings.map((s) => String(s.campaignId)))] } },
+      'name'
+    ).lean();
+    const sibCampMap = new Map(sibCamps.map((c) => [String(c._id), c.name]));
+    otherCampaigns = siblings.map((s) => ({
+      campaignId: String(s.campaignId),
+      name: sibCampMap.get(String(s.campaignId)) || null,
+      voterId: String(s._id),
+      surveyStatus: s.surveyStatus,
+    }));
+  }
+
   return {
     person,
+    otherCampaigns,
     voter: {
       id: String(voter._id),
       stateVoterId: voter.stateVoterId,

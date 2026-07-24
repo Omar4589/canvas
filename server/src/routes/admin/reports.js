@@ -56,16 +56,32 @@ const FAR_WARN_M = FLAG_THRESHOLDS.FAR_WARN_M;
 // Reports are campaign-scoped via ?campaignId. Historically baseFilter trusted any
 // campaignId with no ownership check. Team leads may pull reports ONLY for a campaign
 // they manage — and never org-wide (no campaignId), which would span other campaigns.
-// Admins/super stay unscoped. (This also closes the trust-any-campaignId gap.)
+// (This also closes the trust-any-campaignId gap.)
+//
+// Org admins were historically unscoped: no campaignId meant "the whole org", which for a
+// single-campaign org is the same numbers. With 2+ campaigns it silently BLENDS them into
+// figures that read like one campaign's — and every shipping client always sends
+// campaignId, so an omission is a forgotten filter, not a request for a blend. Enforced
+// only for multi-campaign orgs (single-campaign orgs keep the legacy shape, so nothing in
+// the field can break), with `all=1` as the explicit org-wide escape hatch.
 router.use(async (req, res, next) => {
   try {
-    if (isOrgAdmin(req)) return next();
-    // The cross-campaign rollup is the lead's campaign LIST (e.g. the mobile admin
-    // landing). It self-scopes to their managed campaigns below, so it's allowed
+    // The cross-campaign rollup is the per-campaign LIST (web Overview, mobile admin
+    // landing; a lead's self-scopes to their managed campaigns below), so it's allowed
     // without a single campaignId — unlike every other (per-campaign) report.
     if (req.path === '/campaign-rollup') return next();
     const campaignId = req.query.campaignId;
-    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+    const hasCampaign = campaignId && mongoose.isValidObjectId(campaignId);
+    if (isOrgAdmin(req)) {
+      if (hasCampaign || req.query.all === '1') return next();
+      const orgId = req.activeOrg?._id;
+      const campaigns = orgId ? await Campaign.countDocuments({ organizationId: orgId }) : 0;
+      if (campaigns > 1) {
+        return res.status(400).json({ error: 'This organization runs multiple campaigns — pass campaignId, or all=1 for an org-wide total.' });
+      }
+      return next();
+    }
+    if (!hasCampaign) {
       return res.status(403).json({ error: 'A team lead must scope reports to a campaign they manage.' });
     }
     if (!(await canManageCampaign(req, campaignId))) {

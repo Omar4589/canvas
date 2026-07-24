@@ -52,8 +52,8 @@ function hh(orgId, campaignId, extra = {}) {
     ...extra,
   };
 }
-function voter(orgId, householdId, svid, name) {
-  return { organizationId: orgId, householdId, stateVoterId: svid, firstName: name, lastName: 'Uploaded', fullName: `${name} Uploaded` };
+function voter(orgId, campaignId, householdId, svid, name) {
+  return { organizationId: orgId, campaignId, householdId, stateVoterId: svid, firstName: name, lastName: 'Uploaded', fullName: `${name} Uploaded` };
 }
 
 before(async () => {
@@ -78,11 +78,11 @@ before(async () => {
   const [dA1, dA2, dPre] = await Household.insertMany([hh(org._id, campA._id), hh(org._id, campA._id), hh(org._id, campA._id)]);
   const [dB1] = await Household.insertMany([hh(org._id, campB._id)]);
   const [vA1, , , vPre, vB1] = await Voter.insertMany([
-    voter(org._id, dA1._id, 'UP-A1', 'Ann'),
-    voter(org._id, dA2._id, 'UP-A2', 'Abe'),
-    voter(org._id, dA2._id, 'UP-A3', 'Amy'),
-    voter(org._id, dPre._id, 'UP-PRE', 'Pat'),
-    voter(org._id, dB1._id, 'UP-B1', 'Bob'),
+    voter(org._id, campA._id, dA1._id, 'UP-A1', 'Ann'),
+    voter(org._id, campA._id, dA2._id, 'UP-A2', 'Abe'),
+    voter(org._id, campA._id, dA2._id, 'UP-A3', 'Amy'),
+    voter(org._id, campA._id, dPre._id, 'UP-PRE', 'Pat'),
+    voter(org._id, campB._id, dB1._id, 'UP-B1', 'Bob'),
   ]);
 
   // The pre-existing ADMIN flag (uploadId null) the upload must count as alreadyFlagged and
@@ -243,7 +243,7 @@ test('12. graduation: a pending id flags the voter when they later enter the uni
 
   // The voter later arrives (as a universe import would insert them) — single-voter door.
   const [dG] = await Household.insertMany([hh(ctx.org._id, ctx.campB._id)]);
-  const [vG] = await Voter.insertMany([voter(ctx.org._id, dG._id, 'UP-GRAD', 'Grace')]);
+  const [vG] = await Voter.insertMany([voter(ctx.org._id, ctx.campB._id, dG._id, 'UP-GRAD', 'Grace')]);
 
   const result = await reapplyDncLists(ctx.org._id);
   assert.strictEqual(result.flagged, 1);
@@ -269,9 +269,9 @@ test('13. undoImport keep-guards: DNC voters and fully-DNC doors survive an impo
   // door itself is fully DNC; dV — two voters, one flagged, one clean.
   const [dU, dV] = await Household.insertMany([hh(ctx.org._id, ctx.campA._id), hh(ctx.org._id, ctx.campA._id)]);
   const [vU, vV1, vV2] = await Voter.insertMany([
-    voter(ctx.org._id, dU._id, 'UP-U1', 'Uri'),
-    voter(ctx.org._id, dV._id, 'UP-V1', 'Vin'),
-    voter(ctx.org._id, dV._id, 'UP-V2', 'Wes'),
+    voter(ctx.org._id, ctx.campA._id, dU._id, 'UP-U1', 'Uri'),
+    voter(ctx.org._id, ctx.campA._id, dV._id, 'UP-V1', 'Vin'),
+    voter(ctx.org._id, ctx.campA._id, dV._id, 'UP-V2', 'Wes'),
   ]);
   const stamp = { flagged: true, at: new Date(), byUserId: ctx.admin._id, reason: 'Do not contact', source: 'admin', uploadId: null };
   await Voter.updateMany({ _id: { $in: [vU._id, vV1._id] } }, { $set: { doNotContact: stamp } });

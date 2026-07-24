@@ -5,8 +5,11 @@ import mongoose from 'mongoose';
 // It lives HERE and not on Person because Person is identity-only (see the allowlist in
 // services/person/propagateIdentity.js — canvassing state is banned there), and not in a
 // campaign-scoped side collection because the flag must follow the person into every future
-// campaign. Import-survival is by omission: this field is never in csvImporter's row.voter, so
-// the re-import $set spread can never touch it (the surveyStatus mechanism).
+// campaign. Voter rows are per-campaign, so "org-wide" is an invariant across sibling rows
+// (same {organizationId, stateVoterId}): flag writers write by that pair, and csvImporter
+// seeds a flagged sibling's subdoc onto newly inserted rows ($setOnInsert only).
+// Import-survival for existing rows is by omission: this field is never in csvImporter's
+// row.voter, so the re-import $set spread can never touch it (the surveyStatus mechanism).
 const doNotContactSchema = new mongoose.Schema(
   {
     flagged: { type: Boolean, default: false },
@@ -29,6 +32,19 @@ const voterSchema = new mongoose.Schema(
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Organization',
+      required: true,
+      index: true,
+    },
+    // Which campaign this row belongs to. Voter rows are PER-CAMPAIGN: the same person
+    // imported into two campaigns of one org gets two rows ("siblings" — same
+    // {organizationId, stateVoterId}), each housed in its own campaign's Household. That is
+    // what lets overlapping voter files coexist: an import only ever touches its own
+    // campaign's rows. Sibling invariant: doNotContact must agree across siblings (writers
+    // write by {organizationId, stateVoterId}); surveyStatus, householdId and
+    // locallyEditedFields are per-row (per-campaign) by design.
+    campaignId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Campaign',
       required: true,
       index: true,
     },
@@ -96,9 +112,14 @@ const voterSchema = new mongoose.Schema(
 voterSchema.index({ householdId: 1, surveyStatus: 1 });
 // Paginated, name-sorted org-wide directory listing.
 voterSchema.index({ organizationId: 1, lastName: 1, firstName: 1 });
-// Voter identity is scoped per-org (decision 13): one org's import never
-// clobbers another's. Replaces the old global-unique index on stateVoterId.
-voterSchema.index({ organizationId: 1, stateVoterId: 1 }, { unique: true });
+// Voter rows are unique per CAMPAIGN (campaignId is globally unique, so org isolation —
+// decision 13 — holds transitively). Replaces the old per-org unique
+// {organizationId, stateVoterId} index; migrate:voter-campaigns drops that one.
+voterSchema.index({ campaignId: 1, stateVoterId: 1 }, { unique: true });
+// Sibling lookups: DNC writes fan out to every campaign's row of one person, the org
+// directory dedupes by person, and id-list matching resolves org-wide. Non-unique — the
+// same person may legitimately appear once per campaign.
+voterSchema.index({ organizationId: 1, stateVoterId: 1 });
 // Directory "Do not contact" filter + upload/undo scans. Partial: only flagged rows are indexed
 // (tiny index, like CanvassActivity's location.mocked one). Prod autoIndex is OFF — this exists
 // only after `migrate:build-indexes --apply`; its key shape is distinct so buildIndexes sees it.

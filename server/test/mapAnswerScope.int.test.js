@@ -81,11 +81,11 @@ before(async () => {
 
   const [hA, hB] = await Household.insertMany([hh(org._id, camp._id, 1), hh(org._id, camp._id, 2)]);
   const vA = await Voter.create({
-    organizationId: org._id, householdId: hA._id, stateVoterId: 'TXS1',
+    organizationId: org._id, campaignId: camp._id, householdId: hA._id, stateVoterId: 'TXS1',
     firstName: 'Ann', lastName: 'Answers', fullName: 'Ann Answers',
   });
   const vB = await Voter.create({
-    organizationId: org._id, householdId: hB._id, stateVoterId: 'TXS2',
+    organizationId: org._id, campaignId: camp._id, householdId: hB._id, stateVoterId: 'TXS2',
     firstName: 'Ben', lastName: 'Bothtem', fullName: 'Ben Bothtem',
   });
 

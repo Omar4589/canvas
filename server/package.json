@@ -16,6 +16,7 @@
     "migrate:multitenant": "node src/utils/migrateToMultiTenant.js",
     "worker": "node --max-old-space-size=${WORKER_MAX_OLD_SPACE:-384} src/worker.js",
     "migrate:voter-scope": "node src/migrations/migrateVoterScope.js",
+    "migrate:voter-campaigns": "node src/migrations/migrateVoterCampaigns.js",
     "migrate:passes": "node src/migrations/migratePasses.js",
     "migrate:cut-attributes": "node src/migrations/migrateCutAttributes.js",
     "migrate:activity-turf-tags": "node src/migrations/migrateActivityTurfTags.js",

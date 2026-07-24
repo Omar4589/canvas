@@ -138,7 +138,11 @@ export async function buildPersonOversight(personId) {
     orgs.push({
       organizationId: String(orgId),
       organizationName: orgNameById.get(String(orgId)) || null,
-      voterCount: voters.length,
+      // People, not rows — voter rows are per-campaign, so a person in 2 campaigns has 2
+      // linked rows; voterCount stays "how many distinct voters", rowCount says how many
+      // campaign rows carry them (equal unless the org runs them in multiple campaigns).
+      voterCount: new Set(voters.map((v) => v.stateVoterId)).size,
+      voterRowCount: voters.length,
       // City/state ONLY — data-minimized July 2026. This payload used to ship the full street
       // addresses, zip, county, and the linked stateVoterId list to the browser while the UI
       // rendered only "City, ST". PII that crosses the wire with no rendering purpose is exposure

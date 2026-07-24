@@ -94,19 +94,19 @@ before(async () => {
     organizationId: org._id, firstName: 'Pat', lastName: 'Shared', fullName: 'Pat Shared', party: 'I',
   });
   const vPlain = await Voter.create({
-    organizationId: org._id, householdId: h1._id, stateVoterId: 'FLD1',
+    organizationId: org._id, campaignId: camp._id, householdId: h1._id, stateVoterId: 'FLD1',
     firstName: 'Vera', lastName: 'Voter', fullName: 'Vera Voter', party: 'D',
   });
   const vSib1 = await Voter.create({
-    organizationId: org._id, householdId: h2._id, stateVoterId: 'FLD2', personId: person._id,
+    organizationId: org._id, campaignId: camp._id, householdId: h2._id, stateVoterId: 'FLD2', personId: person._id,
     firstName: 'Pat', lastName: 'Shared', fullName: 'Pat Shared', party: 'I',
   });
   const vSib2 = await Voter.create({
-    organizationId: org._id, householdId: h3._id, stateVoterId: 'FLD3', personId: person._id,
+    organizationId: org._id, campaignId: camp._id, householdId: h3._id, stateVoterId: 'FLD3', personId: person._id,
     firstName: 'Pat', lastName: 'Shared', fullName: 'Pat Shared', party: 'I',
   });
   const vOut = await Voter.create({
-    organizationId: org._id, householdId: hOut._id, stateVoterId: 'FLD4',
+    organizationId: org._id, campaignId: camp._id, householdId: hOut._id, stateVoterId: 'FLD4',
     firstName: 'Oscar', lastName: 'Outside', fullName: 'Oscar Outside', party: 'R',
   });
 

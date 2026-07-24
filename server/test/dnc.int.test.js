@@ -104,9 +104,9 @@ before(async () => {
 
   // HH-A houses two voters (V1, V2); HH-B one (V3). Distinct svids, none a substring of another.
   const [v1, v2, v3] = await Voter.insertMany([
-    { organizationId: org._id, householdId: hhA._id, stateVoterId: 'DNCV1X', firstName: 'Vera', lastName: 'One', fullName: 'Vera One' },
-    { organizationId: org._id, householdId: hhA._id, stateVoterId: 'DNCV2X', firstName: 'Vic', lastName: 'Two', fullName: 'Vic Two' },
-    { organizationId: org._id, householdId: hhB._id, stateVoterId: 'DNCV3X', firstName: 'Val', lastName: 'Three', fullName: 'Val Three' },
+    { organizationId: org._id, campaignId: camp._id, householdId: hhA._id, stateVoterId: 'DNCV1X', firstName: 'Vera', lastName: 'One', fullName: 'Vera One' },
+    { organizationId: org._id, campaignId: camp._id, householdId: hhA._id, stateVoterId: 'DNCV2X', firstName: 'Vic', lastName: 'Two', fullName: 'Vic Two' },
+    { organizationId: org._id, campaignId: camp._id, householdId: hhB._id, stateVoterId: 'DNCV3X', firstName: 'Val', lastName: 'Three', fullName: 'Val Three' },
   ]);
 
   const app = createApp();

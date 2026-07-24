@@ -230,13 +230,13 @@ router.post('/unmark', async (req, res, next) => {
     const stateVoterId = String(req.body?.stateVoterId || '').trim();
     if (!stateVoterId) return res.status(400).json({ error: 'stateVoterId required' });
 
+    // Direct per-campaign row — an org-wide findOne could land on a SIBLING campaign's row
+    // of the same person and falsely 404 the in-campaign check below.
     const voter = await Voter.findOne(
-      { organizationId: req.campaign.organizationId, stateVoterId },
+      { campaignId: req.campaign._id, stateVoterId },
       { _id: 1, householdId: 1 }
     ).lean();
-    if (!voter) return res.status(404).json({ error: 'No voter with that ID in this organization' });
-    const inCampaign = await Household.exists({ _id: voter.householdId, campaignId: req.campaign._id });
-    if (!inCampaign) return res.status(404).json({ error: 'That voter is not in this campaign' });
+    if (!voter) return res.status(404).json({ error: 'That voter is not in this campaign' });
 
     const del = await VotedVoter.deleteMany({ campaignId: req.campaign._id, voterId: voter._id });
     if (!del.deletedCount) return res.status(404).json({ error: 'That voter was not marked voted' });

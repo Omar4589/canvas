@@ -470,6 +470,19 @@ export default function VoterDetailPage() {
               {h.fullyVoted && <span className="ml-2 text-teal-600">· fully voted</span>}
               {h.fullyDnc && <span className="ml-2 text-danger">· fully do-not-contact</span>}
             </p>
+            {/* The same person's record in each other campaign of this org (sibling rows). */}
+            {p.otherCampaigns?.length > 0 && (
+              <p className="mt-1 text-fg-muted">
+                Also in:{' '}
+                {p.otherCampaigns.map((oc, i) => (
+                  <span key={oc.voterId}>
+                    {i > 0 && ', '}
+                    <Link to={`/voters/${oc.voterId}`} className="text-brand-accent hover:underline">{oc.name || 'campaign'}</Link>
+                    <span className="text-fg-subtle"> ({oc.surveyStatus === 'surveyed' ? 'surveyed' : 'not surveyed'})</span>
+                  </span>
+                ))}
+              </p>
+            )}
             {h.members.length > 0 && (
               <div className="mt-3">
                 <div className="text-xs uppercase tracking-wide text-fg-subtle">Household members</div>

@@ -32,8 +32,8 @@ async function seed({ homeStatus, homeIsNew = false }) {
     _id: home, campaignId: campaign._id, organizationId: orgId, normalizedAddress: 'a1', status: homeStatus, isActive: true,
   });
   await Voter.collection.insertMany([
-    { _id: existingVoter, organizationId: orgId, stateVoterId: 's-old', householdId: home },
-    { _id: newVoter, organizationId: orgId, stateVoterId: 's-new', householdId: home },
+    { _id: existingVoter, organizationId: orgId, campaignId: campaign._id, stateVoterId: 's-old', householdId: home },
+    { _id: newVoter, organizationId: orgId, campaignId: campaign._id, stateVoterId: 's-new', householdId: home },
   ]);
   return { home, newVoter, homeIsNew };
 }

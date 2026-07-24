@@ -29,8 +29,13 @@ history below only lists that campaign's imports.
 
 - A row is matched to a **household by its address** (after light normalization: trim + uppercase,
   5-digit zip). A different/misspelled address makes a **separate** household; it does **not** merge.
-- A row is matched to a **voter by their state Voter ID** (org-wide). Re-uploading the same voter
-  updates their info in place.
+- A row is matched to a **voter by their state Voter ID, within the campaign you're importing
+  into**. Re-uploading the same voter into the same campaign updates their info in place.
+- **Another campaign in your org already has this person?** Doesn't matter — this import creates
+  **this campaign's own copy** of them (and of their door), and never touches the other
+  campaign's. Two campaigns can import overlapping — even identical — files and each keeps its
+  own voters, doors, and statuses. A person already marked **Do not contact** anywhere in the org
+  arrives here already flagged.
 
 ## Any vendor file — CSV or Excel
 
@@ -135,7 +140,7 @@ Import pipeline: [services/import/csvImporter.js](../server/src/services/import/
 | Entity | Key | Behavior |
 |---|---|---|
 | `Household` | unique `{campaignId, normalizedAddress}` | Upsert: address/location fields `$set`; `status`/`isActive` only `$setOnInsert`. **Never sets `effortId`** → new doors stay `null` (Intake); existing doors keep their owner. **Never touches `turfId`/`status`** → a new voter at an owned door rides the existing book. |
-| `Voter` | unique `{organizationId, stateVoterId}` | Upsert `$set: {...row, householdId}` → re-import with a new address **moves** the voter's household. The move is **surfaced in the preview** and **audited** on the `ImportJob` (`movedVoters`); a source door emptied by moves is **deactivated** (`isActive:false`, counted as `deactivatedDoors`). |
+| `Voter` | unique `{campaignId, stateVoterId}` | **Per-campaign upsert** `$set: {...row, householdId, campaignId}` → within a campaign, a re-import with a new address **moves** the voter's household (surfaced in the preview, audited as `movedVoters`; a source door emptied by moves is deactivated, `deactivatedDoors`). An overlapping import into a **sibling campaign inserts that campaign's own row** — it can never re-house this one's (the old org-wide upsert used to silently steal the voter to whichever campaign imported last). The re-housing audit + preview are campaign-scoped to match. A person flagged do-not-contact anywhere in the org gets the flag **seeded on insert** (`$setOnInsert`, original attribution kept — upload-undo still reverts seeded copies), and seeded doors join the post-import `fullyDnc` recompute. `newVoters`/`updatedVoters` mean **new/updated to this campaign**; the platform's lifetime `votersProcessed` counts **people** (distinct-svid delta), so an overlap import doesn't inflate it. |
 
 `normalizeAddress` = `[addr1, addr2, city, state, zip5]` upper-trimmed and joined with `|` — exact
 match only (no fuzzy / "St" vs "Street"). `looseAddressKey` (same file) is a fuzzier key — expands

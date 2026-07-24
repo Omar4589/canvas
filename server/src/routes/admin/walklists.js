@@ -197,8 +197,9 @@ router.post('/from-csv', upload.single('file'), async (req, res, next) => {
 });
 
 // Distinct filter values for the campaign, to populate the walk-list value
-// pickers. Voter has no campaignId, so voter fields are scoped via the campaign's
-// households; geo fields read straight off the denormalized Household columns.
+// pickers. Voter fields are scoped via the campaign's ACTIVE households (a direct
+// campaignId filter would sweep in voters at deactivated doors); geo fields read
+// straight off the denormalized Household columns.
 router.get('/distinct', async (req, res, next) => {
   try {
     const campaignId = req.campaign._id;

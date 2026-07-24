@@ -31,12 +31,19 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
-// Split matched voters into newly-flagged vs already-flagged.
+// Split matched voter ROWS into newly-flagged vs already-flagged, counting PEOPLE for the UI:
+// rows are per-campaign, so a person in 2+ campaigns matches once per campaign — `newly` (rows)
+// feeds the flag ops and `affected` (their doors, across every campaign) the recompute, while
+// the people counts keep "matched/will flag" meaning humans, not rows. A half-flagged person
+// (sibling rows disagreeing — shouldn't happen, the writers keep them in step) counts as newly,
+// and the ops converge their rows.
 function classify(matched) {
   const newly = matched.filter((v) => v.doNotContact?.flagged !== true);
-  const alreadyCount = matched.length - newly.length;
   const affected = [...new Set(matched.map((v) => String(v.householdId)))];
-  return { newly, alreadyCount, affected };
+  const people = new Set(matched.map((v) => v.stateVoterId));
+  const newlyPeople = new Set(newly.map((v) => v.stateVoterId));
+  const alreadyCount = people.size - newlyPeople.size;
+  return { newly, alreadyCount, affected, matchedPeople: people.size, willFlagPeople: newlyPeople.size };
 }
 
 // Dry-run: which doors would become fully-DNC (across every campaign housing these voters), with
@@ -88,15 +95,15 @@ router.post('/preview', upload.single('file'), async (req, res, next) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
     const m = await parseAndMatchOrg(activeOrgId(req), req.file.buffer, req.body?.idColumn);
     if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
-    const { newly, alreadyCount, affected } = classify(m.matched);
+    const { newly, alreadyCount, affected, matchedPeople, willFlagPeople } = classify(m.matched);
     const { doorsWillDrop, dropsByCampaign } = await previewDrops(activeOrgId(req), affected, newly.map((v) => v._id));
     res.json({
       idColumn: m.col,
       columns: m.columns,
       totalRows: m.totalRows,
       idsInFile: m.csvCount,
-      matched: m.matched.length,
-      willFlag: newly.length,
+      matched: matchedPeople,
+      willFlag: willFlagPeople,
       alreadyFlagged: alreadyCount,
       notFound: m.notFound,
       notFoundIds: m.notFoundIds.slice(0, NOT_FOUND_CAP),
@@ -115,7 +122,7 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
     const m = await parseAndMatchOrg(activeOrgId(req), req.file.buffer, req.body?.idColumn);
     if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
-    const { newly, alreadyCount, affected } = classify(m.matched);
+    const { newly, alreadyCount, affected, matchedPeople, willFlagPeople } = classify(m.matched);
 
     const uploadDoc = await DncUpload.create({
       organizationId: activeOrgId(req),
@@ -157,7 +164,8 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
     const afterFully = await Household.countDocuments({ _id: { $in: affected }, fullyDnc: true });
     const doorsDropped = Math.max(0, afterFully - beforeFully);
 
-    await DncUpload.updateOne({ _id: uploadDoc._id }, { $set: { matched: newly.length, doorsDropped } });
+    // People, not rows — a person with sibling rows in two campaigns is one match.
+    await DncUpload.updateOne({ _id: uploadDoc._id }, { $set: { matched: willFlagPeople, doorsDropped } });
 
     // Sticky DNC: remember ids with no voter anywhere in the org yet, so a later universe import
     // graduates them (reapplyDncLists); clear stale pendings for ids that DID match.
@@ -178,8 +186,8 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
 
     res.json({
       uploadId: String(uploadDoc._id),
-      matched: m.matched.length,
-      flagged: newly.length,
+      matched: matchedPeople,
+      flagged: willFlagPeople,
       alreadyFlagged: alreadyCount,
       notFound: m.notFound,
       notFoundIds: m.notFoundIds.slice(0, NOT_FOUND_CAP),
@@ -204,7 +212,7 @@ router.post('/undo', async (req, res, next) => {
 
     const ownRows = await Voter.find(
       { organizationId: activeOrgId(req), 'doNotContact.uploadId': uploadDoc._id, 'doNotContact.flagged': true },
-      { _id: 1, householdId: 1 }
+      { _id: 1, householdId: 1, stateVoterId: 1 }
     ).lean();
     if (ownRows.length) {
       // Keep the stamp (at/byUserId/uploadId) for history; only the flag flips.
@@ -221,7 +229,8 @@ router.post('/undo', async (req, res, next) => {
     uploadDoc.undoneAt = new Date();
     await uploadDoc.save();
 
-    res.json({ ok: true, unflagged: ownRows.length, doorsReopened: affected.length });
+    // People, not rows (a person's sibling rows unflag together).
+    res.json({ ok: true, unflagged: new Set(ownRows.map((v) => v.stateVoterId)).size, doorsReopened: affected.length });
   } catch (err) {
     next(err);
   }
@@ -231,15 +240,22 @@ router.post('/undo', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const [uploads, totalFlagged, fullyDncDoors] = await Promise.all([
+    const [uploads, flaggedAgg, fullyDncDoors] = await Promise.all([
       DncUpload.find({ organizationId: activeOrgId(req) })
         .sort({ createdAt: -1 })
         .limit(50)
         .populate('uploadedBy', 'firstName lastName')
         .lean(),
-      Voter.countDocuments({ organizationId: activeOrgId(req), 'doNotContact.flagged': true }),
+      // People, not rows — sibling rows in 2+ campaigns are one flagged person. Rides the
+      // partial doNotContact.flagged index.
+      Voter.aggregate([
+        { $match: { organizationId: activeOrgId(req), 'doNotContact.flagged': true } },
+        { $group: { _id: '$stateVoterId' } },
+        { $count: 'n' },
+      ]),
       Household.countDocuments({ organizationId: activeOrgId(req), fullyDnc: true }),
     ]);
+    const totalFlagged = flaggedAgg[0]?.n || 0;
     res.json({
       totalFlagged,
       fullyDncDoors,

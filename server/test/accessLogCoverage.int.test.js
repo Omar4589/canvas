@@ -89,11 +89,11 @@ before(async () => {
     location: { type: 'Point', coordinates: [-81, 28] },
   });
   const voter = await Voter.create({
-    organizationId: org._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-1',
+    organizationId: org._id, campaignId: camp._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-1',
     firstName: 'Vera', lastName: 'Subject', fullName: 'Vera Subject',
   });
   const voter2 = await Voter.create({
-    organizationId: org._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-2',
+    organizationId: org._id, campaignId: camp._id, householdId: hh._id, stateVoterId: 'SV-AUDIT-2',
     firstName: 'Vic', lastName: 'Second', fullName: 'Vic Second',
   });
   const person = await Person.create({
