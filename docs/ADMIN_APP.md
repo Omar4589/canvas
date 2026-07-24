@@ -179,10 +179,14 @@ tapped-book sheet has a **⋯** button beside its ✕ close — opening it shows
 (or **Unmark restricted (N)** once bulk-marked), kept off the roster's scroll path so it can't be
 tapped by accident; List view reaches the same action via the **⋯** in the book detail screen's
 header. Either **⋯** menu closes by tapping anywhere off it (or re-tapping the **⋯**), and it never
-carries over to the next book you open. Select mode's action bar has **Restrict…** for several books at once, and the web Turf Cutting
-page has the same action on the selected-books panel. Every eligible door gets a restricted mark in
-one go — canvassers see the slate doors immediately, doors already completed this round keep their
-result, and **Unmark restricted (N)** reverses it (field-recorded
+carries over to the next book you open. Select mode's action bar has **Restrict…** for several books at
+once — plus **Unmark (N)** when the selection holds bulk marks, clearing them all in one action — and the
+web Turf Cutting page has the same actions on the selected-books panel. All three mobile entry points
+share one scope-aware flow (`mobile/lib/restrictBooks.js`): when the crew has already reached doors
+(not-home / refused / wrong-address) you choose **Only unknocked** (the safe default, listed first) or
+**Every unfinished**, which takes a second confirm before it also marks the reached doors — matching the
+web modal's default and its type-"restrict" gate. Canvassers see the slate doors immediately, doors
+already completed this round keep their result, and **Unmark restricted (N)** reverses it (field-recorded
 marks are never touched). Bulk marks never appear in per-canvasser stats or the GPS audit — see
 [METRICS.md](METRICS.md).
 

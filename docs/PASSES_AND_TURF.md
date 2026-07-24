@@ -123,8 +123,11 @@ the book, you usually don't want to relabel the doors they reached:
 
 - **`unknocked`** — mark **only the doors nobody has touched this round**. Every door the crew reached
   (not-home / refused / wrong-address) keeps its status and its knock. This is the default in the UI
-  **whenever there are any reached doors**, and it's the case where only the untouched remainder of a
-  book is gated.
+  **whenever there are any reached doors — on web and on every mobile entry point** (the three mobile
+  surfaces share one prompt flow in `mobile/lib/restrictBooks.js`; the reached-inclusive scope always
+  takes a second explicit confirm there, mobile's analogue of web's type-"restrict" gate, and every
+  mobile request sends its scope explicitly rather than relying on the server default). It's the case
+  where only the untouched remainder of a book is gated.
 - **`incomplete`** (the request default when `scope` is omitted) — mark **every door not yet done**,
   including the reached-but-unfinished ones. Use when the whole book is inaccessible. On a fully
   untouched book the two scopes are identical.
@@ -134,7 +137,9 @@ doors** (idempotent); field rows are never deleted — a canvasser can still re-
 which supersedes the bulk mark. The response's `skipped` breakdown carries `{ completed,
 alreadyRestricted, ineligible, reached }` — `reached` counts the doors left alone under `unknocked`.
 **Unmark restricted (N)** (`POST .../turfs/unrestrict-bulk`) deletes only the bulk-created rows and
-recomputes statuses; field marks survive. Bulk rows are excluded from per-canvasser stats and the GPS
+recomputes statuses; field marks survive. Available on web for the whole selection, and on mobile from
+the same menus as Mark plus an **Unmark (N)** button on the multi-select bar (so several books' bulk
+marks clear in one action there too). Bulk rows are excluded from per-canvasser stats and the GPS
 audit — see [METRICS.md](METRICS.md).
 
 Books are first created as **drafts** — nothing reaches canvassers until you **accept** them (drafts →

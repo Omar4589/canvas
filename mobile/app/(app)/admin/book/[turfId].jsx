@@ -23,6 +23,8 @@ import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../lib/mapStyles';
 import { outlineRing } from '../../../../lib/bookDensity';
+import { restrictCounts } from '../../../../lib/restrictBooks';
+import { confirmMarkRestricted, confirmUnmarkRestricted } from '../../../../lib/restrictBooksConfirm';
 
 initMapbox();
 
@@ -258,14 +260,17 @@ export default function AdminBookDetail() {
     qc.invalidateQueries({ queryKey: ['admin', 'book-detail', cId, turfId] });
   };
   const restrictMut = useMutation({
-    mutationFn: () =>
-      api(`/admin/campaigns/${cId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds: [turfId] } }),
+    // scope is always explicit — an omitted scope falls back to the server's 'incomplete'
+    // default, which marks the crew's reached doors (the parity gap this closed).
+    mutationFn: ({ scope }) =>
+      api(`/admin/campaigns/${cId}/turfs/restrict-bulk`, { method: 'POST', body: { turfIds: [turfId], scope } }),
     onSuccess: (res) => {
       const skips = res.skipped || {};
-      const skipNote =
-        (skips.completed || 0) + (skips.alreadyRestricted || 0) > 0
-          ? `\nSkipped ${skips.completed || 0} completed · ${skips.alreadyRestricted || 0} already restricted.`
-          : '';
+      const parts = [];
+      if (skips.completed) parts.push(`${skips.completed} completed`);
+      if (skips.alreadyRestricted) parts.push(`${skips.alreadyRestricted} already restricted`);
+      if (skips.reached) parts.push(`${skips.reached} reached left as-is`);
+      const skipNote = parts.length ? `\nSkipped ${parts.join(' · ')}.` : '';
       Alert.alert('Marked restricted', `${res.marked} door${res.marked === 1 ? '' : 's'} marked.${skipNote}`);
     },
     onError: (e) => Alert.alert('Could not mark restricted', e?.message || 'Please try again.'),
@@ -281,24 +286,22 @@ export default function AdminBookDetail() {
   });
   function onRestrictAction() {
     setMenuOpen(false);
+    const label = `“${turf?.name || 'this book'}”`;
     if ((turf?.bulkRestrictedCount || 0) > 0) {
-      Alert.alert(
-        'Remove bulk restricted marks?',
-        `${turf.bulkRestrictedCount} bulk mark${turf.bulkRestrictedCount === 1 ? '' : 's'} will be removed. Restricted marks canvassers recorded at the door are kept.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', onPress: () => unrestrictMut.mutate() },
-        ]
-      );
+      confirmUnmarkRestricted({
+        label,
+        bulkMarks: turf.bulkRestrictedCount,
+        onConfirm: () => unrestrictMut.mutate(),
+      });
     } else {
-      Alert.alert(
-        `Mark “${turf?.name || 'this book'}” restricted?`,
-        `~${total} doors get a Restricted Access mark — canvassers see them slate and they stay out of every rate and knock count. Doors completed this round keep their result; already-restricted doors are skipped. Reversible.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Mark restricted', style: 'destructive', onPress: () => restrictMut.mutate() },
-        ]
-      );
+      // Per-round statuses are already loaded (bookQ households come from getPassStatusMap —
+      // the same source restrict-bulk marks against), so the counts here are exact.
+      confirmMarkRestricted({
+        label,
+        counts: restrictCounts(households.map((h) => h.status || 'unknocked')),
+        totalDoors: total,
+        onScope: (scope) => restrictMut.mutate({ scope }),
+      });
     }
   }
 

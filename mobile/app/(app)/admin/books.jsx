@@ -28,6 +28,8 @@ import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { outlineRing, doorsPerAcre } from '../../../lib/bookDensity';
+import { restrictCountsFromStatusCounts } from '../../../lib/restrictBooks';
+import { confirmMarkRestricted, confirmUnmarkRestricted } from '../../../lib/restrictBooksConfirm';
 
 initMapbox();
 
@@ -350,69 +352,36 @@ export default function AdminBooks() {
       api(`/admin/campaigns/${cId}/turfs/unrestrict-bulk`, { method: 'POST', body: { turfIds } }),
     onSuccess: (res) => {
       invalidateRestrict();
+      // Mirror restrictMut: a bulk unmark from select mode is done with the selection.
+      setSelectMode(false);
+      setSelectedBooks(new Set());
       Alert.alert('Marks removed', `${res.unmarked} bulk restricted mark${res.unmarked === 1 ? '' : 's'} removed.`);
     },
     onError: onAssignError,
   });
   const restrictPending = restrictMut.isPending || unrestrictMut.isPending;
 
+  // Shared restrict flow (lib/restrictBooks*) — same prompts as the book-detail screen:
+  // safe 'unknocked' default when the crew has reached doors, second confirm before the
+  // reached-inclusive scope, and an always-explicit scope on the wire.
   function confirmRestrictBooks(bookList) {
     const ids = bookList.map((b) => b.id);
     const label = bookList.length === 1 ? `“${bookList[0].name}”` : `${bookList.length} books`;
-    // Per-round status counts (from /turfs/progress) → how many doors the crew already reached
-    // (not-home / refused / wrong-address) vs. never touched.
-    let unknocked = 0;
-    let reached = 0;
-    for (const b of bookList) {
-      const sc = progressByTurf.get(b.id)?.statusCounts;
-      if (!sc) continue;
-      unknocked += sc.unknocked || 0;
-      reached += (sc.not_home || 0) + (sc.wrong_address || 0) + (sc.refused || 0);
-    }
-    const incomplete = unknocked + reached;
-
-    // Only offer the scope choice when the crew has actually reached some doors — otherwise the
-    // two scopes are identical and it's just the old single confirm.
-    if (reached > 0) {
-      Alert.alert(
-        `Mark ${label} restricted?`,
-        `Your crew already reached ${reached} door${reached === 1 ? '' : 's'} here. Restrict which doors? ` +
-          `Restricted doors go slate and stay out of every rate and knock count. Reversible.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: `Every unfinished (${incomplete})`,
-            style: 'destructive',
-            onPress: () => restrictMut.mutate({ turfIds: ids, scope: 'incomplete' }),
-          },
-          {
-            text: `Only unknocked (${unknocked})`,
-            onPress: () => restrictMut.mutate({ turfIds: ids, scope: 'unknocked' }),
-          },
-        ]
-      );
-      return;
-    }
-
-    const totalDoors = bookList.reduce((s, b) => s + (b.doors || 0), 0);
-    Alert.alert(
-      `Mark ${label} restricted?`,
-      `~${totalDoors} doors get a Restricted Access mark — canvassers see them slate and they stay out of every rate and knock count. Doors completed this round keep their result; already-restricted doors are skipped. Reversible.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Mark restricted', style: 'destructive', onPress: () => restrictMut.mutate({ turfIds: ids, scope: 'incomplete' }) },
-      ]
-    );
+    confirmMarkRestricted({
+      label,
+      counts: restrictCountsFromStatusCounts(bookList.map((b) => progressByTurf.get(b.id)?.statusCounts)),
+      totalDoors: bookList.reduce((s, b) => s + (b.doors || 0), 0),
+      onScope: (scope) => restrictMut.mutate({ turfIds: ids, scope }),
+    });
   }
-  function confirmUnrestrictBook(book) {
-    Alert.alert(
-      'Remove bulk restricted marks?',
-      `${book.bulkRestrictedCount} bulk mark${book.bulkRestrictedCount === 1 ? '' : 's'} will be removed. Restricted marks canvassers recorded at the door are kept.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', onPress: () => unrestrictMut.mutate([book.id]) },
-      ]
-    );
+  // One book (map sheet / detail) or the whole multi-selection — bulk marks only either way.
+  function confirmUnrestrictBooks(bookList) {
+    const bulkMarks = bookList.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
+    confirmUnmarkRestricted({
+      label: bookList.length === 1 ? `“${bookList[0].name}”` : `${bookList.length} books`,
+      bulkMarks,
+      onConfirm: () => unrestrictMut.mutate(bookList.map((b) => b.id)),
+    });
   }
 
   const mutating = assignMut.isPending || unassignMut.isPending || bulkMut.isPending || selfAssignMut.isPending;
@@ -963,7 +932,7 @@ export default function AdminBooks() {
                     disabled={restrictPending}
                     onPress={() => {
                       setSheetMenuOpen(false);
-                      if (mapSheetBook.bulkRestrictedCount > 0) confirmUnrestrictBook(mapSheetBook);
+                      if (mapSheetBook.bulkRestrictedCount > 0) confirmUnrestrictBooks([mapSheetBook]);
                       else confirmRestrictBooks([mapSheetBook]);
                     }}
                     style={({ pressed }) => [styles.sheetMenuItem, (pressed || restrictPending) && { opacity: 0.7 }]}
@@ -1142,31 +1111,46 @@ export default function AdminBooks() {
       {/* (The single-book assign sheet now renders INSIDE the map container as a
           half-height panel — the old scrim Modal occluded the map it revealed.) */}
 
-      {selectMode && selectedBooks.size > 0 && (
-        <View style={styles.actionBar}>
-          <Text style={styles.actionBarText}>
-            {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'} selected
-          </Text>
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <Pressable
-              onPress={() => confirmRestrictBooks(books.filter((b) => selectedBooks.has(b.id)))}
-              disabled={restrictPending}
-              style={[styles.actionBarBtn, styles.actionBarBtnRestrict, restrictPending && { opacity: 0.6 }]}
-            >
-              <Text style={styles.actionBarBtnText}>Restrict…</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                setAssignError(null);
-                setBulkOpen(true);
-              }}
-              style={styles.actionBarBtn}
-            >
-              <Text style={styles.actionBarBtnText}>Assign to…</Text>
-            </Pressable>
+      {selectMode && selectedBooks.size > 0 && (() => {
+        const selected = books.filter((b) => selectedBooks.has(b.id));
+        // Web can unmark its whole selection in one go — parity: offer it whenever the
+        // selection holds any bulk marks. Bulk marks only; field marks always survive.
+        const selectedBulkMarks = selected.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
+        return (
+          <View style={styles.actionBar}>
+            <Text style={styles.actionBarText}>
+              {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'} selected
+            </Text>
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Pressable
+                onPress={() => confirmRestrictBooks(selected)}
+                disabled={restrictPending}
+                style={[styles.actionBarBtn, styles.actionBarBtnRestrict, restrictPending && { opacity: 0.6 }]}
+              >
+                <Text style={styles.actionBarBtnText}>Restrict…</Text>
+              </Pressable>
+              {selectedBulkMarks > 0 && (
+                <Pressable
+                  onPress={() => confirmUnrestrictBooks(selected)}
+                  disabled={restrictPending}
+                  style={[styles.actionBarBtn, restrictPending && { opacity: 0.6 }]}
+                >
+                  <Text style={styles.actionBarBtnText}>Unmark ({selectedBulkMarks.toLocaleString()})</Text>
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => {
+                  setAssignError(null);
+                  setBulkOpen(true);
+                }}
+                style={styles.actionBarBtn}
+              >
+                <Text style={styles.actionBarBtnText}>Assign to…</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
-      )}
+        );
+      })()}
 
       <BulkModal
         visible={bulkOpen}
