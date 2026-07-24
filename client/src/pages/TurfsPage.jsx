@@ -846,7 +846,10 @@ export default function TurfsPage() {
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
   const [popupBuildingKey, setPopupBuildingKey] = useState(null);
   // Map layer visibility toggles + book status filter + crew-load bar open state.
-  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true });
+  // `restricted` starts hidden: restricted homes are excluded from cuts by default, so
+  // showing them on the cut map (identical gray to unbooked doors) only reads as clutter.
+  // The Layers-box row only appears when the effort actually has restricted doors.
+  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true, restricted: false });
   const [statusFilter, setStatusFilter] = useState(new Set()); // empty = show all books
   const [crewOpen, setCrewOpen] = useState(false);
 
@@ -883,10 +886,22 @@ export default function TurfsPage() {
   const colorByTurf = useMemo(() => new Map(turfs.map((t, i) => [String(t._id), colorFor(i)])), [turfsQ.data]);
   const selectedTurfs = turfs.filter((t) => selectedBooks.has(String(t._id)));
   // Group stacked apartment units (same geocode) into buildings; lone doors stay
-  // singles. Used for the dot layer, the building markers, and the popup.
-  const grouped = useMemo(() => groupDoors(doorsQ.data?.doors || []), [doorsQ.data]);
-  // Doors not yet in any book — e.g. voters imported after this pass was cut.
-  const unassignedCount = (doorsQ.data?.doors || []).filter((d) => !d.turfId).length;
+  // singles. Used for the dot layer, the building markers, and the popup. When the
+  // Layers "Restricted" toggle is off, drop LOOSE restricted doors — the excluded ones
+  // that clutter the map as gray "unbooked" dots. A restricted door that's still IN a
+  // book (a canvasser marked it mid-pass, or the cut deliberately included it) keeps its
+  // book color and stays, so an active-pass audit never loses worked doors.
+  const grouped = useMemo(() => {
+    const all = doorsQ.data?.doors || [];
+    const visible = layerVis.restricted ? all : all.filter((d) => !(d.status === 'restricted' && !d.turfId));
+    return groupDoors(visible);
+  }, [doorsQ.data, layerVis.restricted]);
+  // Doors not yet in any book — e.g. voters imported after this pass was cut. Restricted
+  // homes are loose too (they're kept out of the cut), but when we're excluding them they
+  // aren't actionable, so don't let them inflate the "not in any book" nag.
+  const unassignedCount = (doorsQ.data?.doors || []).filter(
+    (d) => !d.turfId && !(excludeRestricted && d.status === 'restricted')
+  ).length;
   // Inaccessible homes a canvasser flagged (Household.status === 'restricted'). The admin
   // can drop them from this cut so nobody is routed back to an unreachable door.
   const restrictedDoorCount = (doorsQ.data?.doors || []).filter((d) => d.status === 'restricted').length;
@@ -2050,7 +2065,15 @@ export default function TurfsPage() {
           {tokenQ.data?.isReady && !!turfs.length && (
             <div className="absolute right-3 top-28 z-10 rounded-lg border border-border bg-card/95 p-2 text-xs shadow-lg backdrop-blur">
               <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Layers</div>
-              {[['houses', 'Houses'], ['buildings', 'Buildings'], ['fills', 'Book fills'], ['labels', 'Labels']].map(([key, label]) => (
+              {[
+                ['houses', 'Houses'],
+                ['buildings', 'Buildings'],
+                ['fills', 'Book fills'],
+                ['labels', 'Labels'],
+                // Only offered when the effort actually has restricted homes; hides them
+                // from the cut map so they don't read as unbooked doors.
+                ...(restrictedDoorCount > 0 ? [['restricted', `Restricted (${restrictedDoorCount.toLocaleString()})`]] : []),
+              ].map(([key, label]) => (
                 <label key={key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-sunken">
                   <input
                     type="checkbox"
