@@ -104,7 +104,10 @@ out of a book (already-worked doors a targeted cut skipped, restricted homes, vo
 they stay visible as gray *loose* dots, which pad the density so a round looks bigger than the walk. A single
 **Not in a book (N)** checkbox in the map's Layers box hides them all — every loose door, restricted ones
 included. It is **hidden by default** (so the map opens showing only the cut's booked doors) and appears only
-when the cut left doors loose. Doors that are *inside* a book — including one a canvasser marked restricted
+when the cut left doors loose. "In a book" is judged against **this round's own books**, not `Household.turfId`
+being set — `turfId` is a single global pointer that only the doors a cut *selects* get re-pointed to, so a
+door a targeted round skipped still carries an earlier round's book id yet is loose here. (Before any cut
+there are no books, so nothing hides — the pre-cut map still shows the full universe gray.) Doors that are *inside* a book — including one a canvasser marked restricted
 mid-round — keep their book color and stay on the map, so an active-round audit never loses worked doors.
 
 **Marking a book restricted (bulk).** When part or all of a book is inaccessible (a gated community),
