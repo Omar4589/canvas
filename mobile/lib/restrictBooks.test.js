@@ -15,8 +15,12 @@ import {
 // leaves them alone. These tests pin that the safe scope is always the plain default path
 // and the reached-inclusive scope always costs a second, explicit confirm.
 
-// Run with: node --test --experimental-default-type=module lib/*.test.js  (mobile is
-// CommonJS-default for Metro; the flag scopes ESM to this run only.)
+// Run from the REPO ROOT: `npm run test:mobile`. The script deliberately lives in the root
+// package.json, NOT mobile/package.json — Expo's OTA fingerprint hashes mobile/package.json
+// (scripts included), so adding even a test script there re-stamps the runtime fingerprint
+// and strands OTA updates (ota-check blocks the publish). The root file is outside the
+// fingerprint. (--experimental-default-type=module because mobile is CommonJS-default for
+// Metro; the flag scopes ESM to the test run only.)
 
 test('restrictCounts: reached = not_home + wrong_address + refused; completed/restricted excluded', () => {
   const counts = restrictCounts([
