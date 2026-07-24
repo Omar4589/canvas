@@ -124,6 +124,13 @@ export default function AdminBooks() {
       : effortList.find((e) => e.activeRound)?.id || effortList[0]?.id || null;
   const currentEffort = effortList.find((e) => e.id === currentEffortId) || null;
   const passId = currentEffort?.activeRound?._id ? String(currentEffort.activeRound._id) : null;
+  // Which round these books belong to — this screen silently swaps to the new round the
+  // moment one is activated, so say so. Auto-named rounds ("Pass 2") skip the name echo.
+  const activeRound = currentEffort?.activeRound || null;
+  const passLabel = activeRound?.roundNumber
+    ? `Pass ${activeRound.roundNumber}` +
+      (activeRound.name && activeRound.name !== `Pass ${activeRound.roundNumber}` ? ` · ${activeRound.name}` : '')
+    : null;
 
   // Campaign-scoped crew endpoint (not the org-wide /admin/memberships) so the assign
   // picker works for team leads too, not just org admins.
@@ -668,6 +675,14 @@ export default function AdminBooks() {
               value={currentEffortId}
               onChange={setEffortId}
             />
+          </View>
+        )}
+        {/* Read-only round chip — orientation only. Mobile always assigns the ACTIVE round
+            (drafts are cut on web, archived rounds are read-only), so there's no switcher. */}
+        {!!passLabel && (
+          <View style={styles.passChip}>
+            <View style={styles.passDot} />
+            <Text style={styles.passChipText}>{passLabel} · active</Text>
           </View>
         )}
       </View>
@@ -1304,6 +1319,22 @@ function makeStyles(t) {
     headerTitle: { ...type.h3, textAlign: 'center' },
     context: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     roundLine: { ...type.caption, color: colors.textSecondary, marginTop: 2 },
+    // Read-only "which round am I assigning" chip in the context row.
+    passChip: {
+      marginTop: spacing.sm,
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs + 2,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs + 1,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    passDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.success },
+    passChipText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
 
     segmentWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     segment: {

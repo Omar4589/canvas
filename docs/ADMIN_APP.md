@@ -35,8 +35,10 @@ dashboard). Five tabs:
 
 ### The Books tab
 Pick a **campaign** (and **effort**, if there's more than one — segmented for ≤3, a dropdown at 4+). It
-works the effort's **active round**, with a "Round 1 · 340/600 doors done" line and a "N books · M
-unassigned" count. A segmented toggle switches between:
+works the effort's **active round** — a read-only **"Pass N · active"** chip under the pickers names it
+(custom round names append: "Pass 2 · GOTV sweep · active"), so the silent swap to a newly activated
+round is visible; there is deliberately no round switcher (drafts are cut on web, archived rounds are
+read-only). Below it, a "Round 1 · 340/600 doors done" line and a "N books · M unassigned" count. A segmented toggle switches between:
 - **By book** — books are sorted by name; each row shows doors, a **knocked/total** progress bar, and
   who's assigned. **Tap a book → its map detail** (see below). An **"Unassigned only"** filter finds
   books with nobody. **Select** turns on checkboxes (+ Select all) → a bottom bar **"Assign N books →"**

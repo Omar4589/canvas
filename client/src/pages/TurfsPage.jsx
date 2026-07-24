@@ -16,6 +16,7 @@ import NextStepBanner from '../components/NextStepBanner.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
 import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
+import { passBookIds, visibleCutDoors, countLooseDoors } from '../lib/cutMapDoors.js';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -894,30 +895,23 @@ export default function TurfsPage() {
   const publishedCount = turfs.filter((t) => t.status === 'published').length;
   const colorByTurf = useMemo(() => new Map(turfs.map((t, i) => [String(t._id), colorFor(i)])), [turfsQ.data]);
   const selectedTurfs = turfs.filter((t) => selectedBooks.has(String(t._id)));
-  // "In a book" is judged against THIS PASS's books, not `turfId != null`: Household.turfId
-  // is a single global pointer and a cut only re-points the doors it selects, so a door a
-  // targeted Pass-2 cut skipped still carries its Pass-1 book id. By turfId-null it would
-  // read "booked" (and gray-fallback on this pass's palette); by pass membership it reads
-  // loose, which is what this page means.
-  const passTurfIds = useMemo(() => new Set(turfs.map((t) => String(t._id))), [turfsQ.data]);
+  // Loose-door rules (pass-membership, never turfId presence) live in lib/cutMapDoors.js,
+  // pinned by cutMapDoors.test.js — a targeted Pass-2 cut leaves skipped doors carrying
+  // their Pass-1 book ids, so `turfId != null` is NOT "in a book" on this page.
+  const passTurfIds = useMemo(() => passBookIds(turfs), [turfsQ.data]);
   // Group stacked apartment units (same geocode) into buildings; lone doors stay
   // singles. Used for the dot layer, the building markers, and the popup.
   //
-  // The "Not in a book" Layers toggle hides every LOOSE door (not in one of this pass's
-  // books) — already-worked leftovers a targeted cut skipped, restricted homes, voters added
-  // since the cut — which otherwise pad the map's density. Before any cut there are no books,
-  // so nothing hides: the classic full-universe gray pre-cut map stays intact.
-  const grouped = useMemo(() => {
-    const all = doorsQ.data?.doors || [];
-    const hideLoose = passTurfIds.size > 0 && !layerVis.notInBook;
-    const visible = hideLoose ? all.filter((d) => passTurfIds.has(String(d.turfId))) : all;
-    return groupDoors(visible);
-  }, [doorsQ.data, passTurfIds, layerVis.notInBook]);
+  // The "Not in a book" Layers toggle hides every LOOSE door — already-worked leftovers a
+  // targeted cut skipped, restricted homes, voters added since the cut — which otherwise
+  // pad the map's density. Before any cut nothing hides (the full-universe gray map).
+  const grouped = useMemo(
+    () => groupDoors(visibleCutDoors(doorsQ.data?.doors, passTurfIds, layerVis.notInBook)),
+    [doorsQ.data, passTurfIds, layerVis.notInBook]
+  );
   // Loose doors (not in one of this pass's books): already-worked leftovers a targeted cut
   // skipped, restricted homes, and voters added since the cut. Drives the toggle count.
-  const looseDoorCount = passTurfIds.size
-    ? (doorsQ.data?.doors || []).filter((d) => !passTurfIds.has(String(d.turfId))).length
-    : 0;
+  const looseDoorCount = countLooseDoors(doorsQ.data?.doors, passTurfIds);
   // Doors not yet in any book — e.g. voters imported after this pass was cut. Restricted
   // homes are loose too (they're kept out of the cut), but when we're excluding them they
   // aren't actionable, so don't let them inflate the "not in any book" nag.
