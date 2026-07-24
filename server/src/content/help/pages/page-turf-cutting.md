@@ -24,14 +24,11 @@ Once a round has been knocked, the map starts showing you how it's going:
 
 Status colors appear on their own once the round has knocks. While you're still cutting, houses stay colored by book — a brand-new cut has no progress to show yet. The **Door status** checkbox in the map's **Layers** box turns it on or off yourself.
 
-**Hiding doors that aren't in a book.** After a cut — especially a second pass where you only cut the unknocked doors — every door left out of a book (the already-worked ones, restricted homes, voters added since you cut) still shows on the map as a gray dot, so the round can look bigger than the actual walk. Two checkboxes in the **Layers** box clean that up, and both start hidden so the map opens showing just the cut's books:
-
-- **Not in a book** — hides every door that isn't in a book.
-- **Restricted** — hides just the restricted homes.
-
-Each only appears when the round has those doors. Homes a canvasser marked restricted *inside* a book keep their book color and stay put, so you never lose worked doors.
+**Hiding doors that aren't in a book.** After a cut — especially a second pass where you only cut the unknocked doors — every door left out of a book (the already-worked ones, restricted homes, voters added since you cut) still shows on the map as a gray dot, so the round can look bigger than the actual walk. The **Not in a book** checkbox in the **Layers** box hides them all in one flip. It starts hidden, so the map opens showing just the cut's books, and only appears when the cut left doors loose. Homes that are *inside* a book — including one a canvasser marked restricted mid-round — keep their book color and stay put, so you never lose worked doors.
 
 Switch rounds with the **Pass** dropdown at the top right — the colors, the counts, and the bar all follow the round you pick. The page doesn't refresh on its own; reload it to see the latest.
+
+**Making the map bigger.** Use the chevron on the **Generate books** header to collapse that panel so the map fills the space — a small button at the top-left of the map brings it back, and it stays collapsed next time. For an even bigger view, the **fullscreen** button (also top-left of the map) expands the map to the whole screen; press **Esc** or the button again to come back.
 
 ## Marking a book restricted
 

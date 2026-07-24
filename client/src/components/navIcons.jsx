@@ -229,6 +229,30 @@ export function IconChevron({ size = 18 }) {
   );
 }
 
+// Arrows pointing OUT to the corners — "make this bigger / fullscreen".
+export function IconExpand({ size = 18 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <path d="M15 3h6v6" />
+      <path d="M9 21H3v-6" />
+      <path d="M21 3l-7 7" />
+      <path d="M3 21l7-7" />
+    </svg>
+  );
+}
+
+// Arrows pointing IN from the corners — "shrink back / exit fullscreen".
+export function IconMinimize({ size = 18 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <path d="M4 14h6v6" />
+      <path d="M20 10h-6V4" />
+      <path d="M14 10l7-7" />
+      <path d="M3 21l7-7" />
+    </svg>
+  );
+}
+
 export function IconAlertShield({ size = 22 }) {
   return (
     <svg width={size} height={size} {...baseProps}>

@@ -14,6 +14,8 @@ import StatCard from '../components/StatCard.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
+import IconButton from '../components/ui/IconButton.jsx';
+import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -846,11 +848,17 @@ export default function TurfsPage() {
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
   const [popupBuildingKey, setPopupBuildingKey] = useState(null);
   // Map layer visibility toggles + book status filter + crew-load bar open state.
-  // `notInBook` (all loose doors) and `restricted` (the restricted subset) both start
-  // HIDDEN so the cut map opens showing only this cut's booked doors — a targeted second
-  // cut otherwise leaves every already-worked/excluded door on the map as a gray dot,
-  // padding the density. Their Layers-box rows only appear when such doors exist.
-  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true, notInBook: false, restricted: false });
+  // `notInBook` starts HIDDEN so the cut map opens showing only this cut's booked doors —
+  // a targeted second cut otherwise leaves every already-worked/excluded/restricted door on
+  // the map as a gray dot, padding the density. Its Layers-box row appears only when the cut
+  // actually left doors loose.
+  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true, notInBook: false });
+  // Reclaim map width: collapse the "Generate books" panel (persisted) and/or fullscreen the
+  // map. Both just resize the map's container — the ResizeObserver below repaints the canvas.
+  const [panelCollapsed, setPanelCollapsed] = useState(() => {
+    try { return localStorage.getItem('turfPanelCollapsed') === '1'; } catch { return false; }
+  });
+  const [mapFullscreen, setMapFullscreen] = useState(false);
   const [statusFilter, setStatusFilter] = useState(new Set()); // empty = show all books
   const [crewOpen, setCrewOpen] = useState(false);
 
@@ -889,22 +897,15 @@ export default function TurfsPage() {
   // Group stacked apartment units (same geocode) into buildings; lone doors stay
   // singles. Used for the dot layer, the building markers, and the popup.
   //
-  // Two Layers toggles hide LOOSE doors (turfId=null) — the doors a cut left out of every
-  // book, which otherwise pad the map's density: "Not in a book" hides all of them,
-  // "Restricted" hides just the restricted ones. A loose door shows only when EVERY toggle
-  // covering it is on (a restricted loose door needs both). Doors that ARE in a book always
-  // stay — a canvasser can mark one restricted mid-pass and it keeps its book color — so an
-  // active-pass audit never loses worked doors.
+  // The "Not in a book" Layers toggle hides every LOOSE door (turfId=null) — the doors a cut
+  // left out of a book (already-worked leftovers a targeted cut skipped, restricted homes,
+  // voters added since the cut), which otherwise pad the map's density. Doors that ARE in a
+  // book always stay, so an active-pass audit never loses worked doors.
   const grouped = useMemo(() => {
     const all = doorsQ.data?.doors || [];
-    const visible = all.filter((d) => {
-      if (d.turfId) return true;
-      if (!layerVis.notInBook) return false;
-      if (d.status === 'restricted' && !layerVis.restricted) return false;
-      return true;
-    });
+    const visible = all.filter((d) => d.turfId || layerVis.notInBook);
     return groupDoors(visible);
-  }, [doorsQ.data, layerVis.notInBook, layerVis.restricted]);
+  }, [doorsQ.data, layerVis.notInBook]);
   // Loose doors (not in any book): already-worked leftovers a targeted cut skipped,
   // restricted homes, and voters added since the cut. Drives the "Not in a book" toggle count.
   const looseDoorCount = (doorsQ.data?.doors || []).filter((d) => !d.turfId).length;
@@ -1359,6 +1360,19 @@ export default function TurfsPage() {
     return () => ro.disconnect();
   }, [mapReady]);
 
+  // Remember whether the controls panel is collapsed across visits.
+  useEffect(() => {
+    try { localStorage.setItem('turfPanelCollapsed', panelCollapsed ? '1' : '0'); } catch { /* ignore */ }
+  }, [panelCollapsed]);
+
+  // Esc leaves fullscreen (listener removed on exit, per the effect-cleanup rule).
+  useEffect(() => {
+    if (!mapFullscreen) return;
+    const onKey = (e) => { if (e.key === 'Escape') setMapFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mapFullscreen]);
+
   // Swap the basemap when the picker changes; re-register layers on style.load and
   // bump styleEpoch so paint() + building markers re-hydrate. fittedSigRef is kept
   // so the view isn't reset on a swap.
@@ -1408,7 +1422,9 @@ export default function TurfsPage() {
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }
-  useEffect(() => { paint(); }, [turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
+  // `grouped` MUST be here: paint() draws the door dots from grouped.singles, so the "Not in
+  // a book" toggle (which only changes `grouped`, not doorsQ.data) has to re-run this.
+  useEffect(() => { paint(); }, [grouped, turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
 
   // Building markers (HTML overlays) for stacked apartment units — synced apart from paint()
   // so book-select toggles don't churn the DOM. Hidden when Houses/Buildings is toggled off
@@ -1558,8 +1574,13 @@ export default function TurfsPage() {
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: '1.25rem' }} className="px-6 pb-6">
-        <section style={{ flexShrink: 0, overflowY: 'auto' }} className="w-80 rounded-lg border border-border bg-card p-5">
-          <h2 className="mb-3 text-base font-medium">Generate books</h2>
+        <section style={{ flexShrink: 0, overflowY: 'auto', display: panelCollapsed ? 'none' : undefined }} className="w-80 rounded-lg border border-border bg-card p-5">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-base font-medium">Generate books</h2>
+            <IconButton label="Collapse panel" variant="subtle" onClick={() => setPanelCollapsed(true)}>
+              <IconChevron />
+            </IconButton>
+          </div>
 
           <div className="mb-4">
             <div className="mb-1.5 flex items-center gap-1.5">
@@ -2063,7 +2084,12 @@ export default function TurfsPage() {
           )}
         </section>
 
-        <section style={{ flex: 1, minHeight: 0, position: 'relative' }} className="overflow-hidden rounded-lg border border-border bg-card">
+        <section
+          style={mapFullscreen
+            ? { position: 'fixed', inset: 0, zIndex: 50, minHeight: 0 }
+            : { flex: 1, minHeight: 0, position: 'relative' }}
+          className={`overflow-hidden bg-card ${mapFullscreen ? '' : 'rounded-lg border border-border'}`}
+        >
           {!tokenQ.data?.isReady ? (
             <div style={{ height: '100%' }} className="flex items-center justify-center text-sm text-fg-muted">
               {tokenQ.isLoading ? 'Loading map…' : 'Set MAPBOX_PUBLIC_TOKEN to enable the map.'}
@@ -2071,6 +2097,27 @@ export default function TurfsPage() {
           ) : (
             <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
           )}
+          {/* Top-left control cluster: restore the collapsed panel + toggle fullscreen. */}
+          <div className="absolute left-3 top-3 z-10 flex flex-col gap-2">
+            {panelCollapsed && (
+              <IconButton
+                label="Show controls"
+                className="border border-border bg-card/95 shadow-lg backdrop-blur"
+                onClick={() => setPanelCollapsed(false)}
+              >
+                <span className="block rotate-180"><IconChevron /></span>
+              </IconButton>
+            )}
+            {tokenQ.data?.isReady && (
+              <IconButton
+                label={mapFullscreen ? 'Exit fullscreen' : 'Fullscreen map'}
+                className="border border-border bg-card/95 shadow-lg backdrop-blur"
+                onClick={() => setMapFullscreen((v) => !v)}
+              >
+                {mapFullscreen ? <IconMinimize /> : <IconExpand />}
+              </IconButton>
+            )}
+          </div>
           {tokenQ.data?.isReady && (
             <MapStyleControl value={styleId} onChange={setStyle} menuDirection="up" className="absolute bottom-3 left-3 z-10 items-start" />
           )}
@@ -2082,11 +2129,10 @@ export default function TurfsPage() {
                 ['buildings', 'Buildings'],
                 ['fills', 'Book fills'],
                 ['labels', 'Labels'],
-                // Offered only when the cut actually left doors loose. "Not in a book" hides
-                // every loose door; "Restricted" hides just the restricted ones — both default
-                // hidden, so the map opens showing only this cut's booked doors.
+                // Offered only when the cut left doors loose. Hides every door not in a book
+                // (already-worked, newly-added, and restricted) — default hidden, so the map
+                // opens showing only this cut's booked doors.
                 ...(looseDoorCount > 0 ? [['notInBook', `Not in a book (${looseDoorCount.toLocaleString()})`]] : []),
-                ...(restrictedDoorCount > 0 ? [['restricted', `Restricted (${restrictedDoorCount.toLocaleString()})`]] : []),
               ].map(([key, label]) => (
                 <label key={key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-sunken">
                   <input
