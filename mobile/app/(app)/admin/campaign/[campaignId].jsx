@@ -17,30 +17,20 @@ import SectionHeader from '../../../../components/SectionHeader';
 import NavTileGrid from '../../../../components/NavTileGrid';
 import DateRangeBar from '../../../../components/DateRangeBar';
 import CanvasserCard from '../../../../components/CanvasserCard';
-import InfoHint from '../../../../components/InfoHint';
+import InsetGroup, {
+  InsetHeroRow,
+  InsetRow,
+  InsetActionRow,
+  GroupFooter,
+} from '../../../../components/InsetGroup';
+import MetricSheet from '../../../../components/MetricSheet';
 import ElectionCountdownChip from '../../../../components/ElectionCountdownChip';
-import { rangeFor, deviceTimezone } from '../../../../lib/dateRanges';
-import { rateFromPct, makeRateColors } from '../../../../lib/rates';
+import { rangeFor, deviceTimezone, labelForRange } from '../../../../lib/dateRanges';
+import { rateFromPct, makeRateColors, tierWord } from '../../../../lib/rates';
 import { metricHelp } from '../../../../lib/metricHelp';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
-
-function StatTile({ value, label, level, info }) {
-  const { colors } = useTheme();
-  const styles = useThemedStyles(makeStyles);
-  const RATE_COLORS = makeRateColors(colors);
-  const palette = level ? RATE_COLORS[level] : null;
-  return (
-    <View style={[styles.statTile, palette && { backgroundColor: palette.bg, borderColor: palette.bg }]}>
-      <Text style={[styles.statTileValue, palette && { color: palette.fg }]}>{value ?? '—'}</Text>
-      <View style={styles.statTileLabelRow}>
-        <Text style={[styles.statTileLabel, palette && { color: palette.fg }]}>{label}</Text>
-        {info ? <InfoHint title={label} body={info} /> : null}
-      </View>
-    </View>
-  );
-}
 
 function OptionRow({ option, count, percent, onPress }) {
   const styles = useThemedStyles(makeStyles);
@@ -162,6 +152,80 @@ export default function CampaignDetail() {
   const rangePrimary = isLitDrop ? rangeStats.litDropped || 0 : rangeStats.surveyedKnocks || 0;
   const rangeRate = rateFromPct(rangeStats.connectionRate);
 
+  // Which "how these are counted" sheet is open, or null. One state for the whole screen —
+  // Activity and Top canvassers both feed the single <MetricSheet> at the bottom.
+  const [sheet, setSheet] = useState(null);
+  const rateColors = makeRateColors(colors);
+  const loadingActivity = rollupQ.isLoading;
+
+  // ONE description of the Activity numbers: the rows render from it and the sheet explains
+  // from it, so a label can never end up next to a different metric's definition (they used
+  // to be typed out twice). `help` is metricHelp verbatim — no copy is restated here.
+  const activityMetrics = useMemo(() => {
+    const rate = rangeRate;
+    const m = [
+      {
+        key: 'knocks',
+        label: 'Knocks',
+        value: rangeKnocks.toLocaleString(),
+        unit: 'doors',
+        help: metricHelp.doors,
+      },
+      {
+        key: 'primary',
+        label: isLitDrop ? 'Lit drops' : 'Survey doors',
+        value: rangePrimary.toLocaleString(),
+        unit: isLitDrop ? 'doors' : 'houses',
+        help: isLitDrop ? metricHelp.litDrops : metricHelp.surveyDoors,
+      },
+    ];
+    if (!isLitDrop) {
+      m.push({
+        key: 'voters',
+        label: 'Surveyed voters',
+        value: (rangeStats.surveyedVoters || 0).toLocaleString(),
+        unit: 'people',
+        help: metricHelp.surveyedVoters,
+      });
+    }
+    m.push({
+      key: 'rate',
+      label: isLitDrop ? 'Lit rate' : 'Connection rate',
+      value: rate?.value ?? '—',
+      level: rate?.level,
+      // The tier as a WORD plus the fraction it came from — and both operands are already
+      // printed in the rows above, so the rate is checkable without opening anything.
+      sub: rate
+        ? `${tierWord(rate.level)} · ${rangePrimary.toLocaleString()} of ${rangeKnocks.toLocaleString()} doors`
+        : null,
+      math: rate
+        ? `${rangePrimary.toLocaleString()} ${isLitDrop ? 'lit doors' : 'survey doors'} ÷ ${rangeKnocks.toLocaleString()} knocks = ${rate.value}`
+        : null,
+      help: metricHelp.connectionRate,
+    });
+    return m;
+  }, [isLitDrop, rangeKnocks, rangePrimary, rangeStats.surveyedVoters, rangeRate]);
+
+  // The Top-canvassers column key. Same shape as activityMetrics minus the live values —
+  // these explain a table's columns, not four numbers on screen.
+  const canvasserMetrics = useMemo(
+    () => [
+      { key: 'doors', label: 'Doors', help: metricHelp.doors },
+      {
+        key: 'primary',
+        label: isLitDrop ? 'Lit drops' : 'Survey doors',
+        help: isLitDrop ? metricHelp.litDrops : metricHelp.surveyDoors,
+      },
+      ...(isLitDrop ? [] : [{ key: 'voters', label: 'Surveyed voters', help: metricHelp.surveyedVoters }]),
+      { key: 'conn', label: 'Conn %', help: metricHelp.connectionRate },
+      { key: 'contact', label: 'Contact %', help: metricHelp.contactRate },
+      { key: 'pace', label: 'Doors / hr', help: metricHelp.doorsPerHour },
+      { key: 'coordinator', label: 'Coordinator', help: metricHelp.coordinator },
+      { key: 'span', label: 'Start / Last door', help: `${metricHelp.start} ${metricHelp.lastDoor}` },
+    ],
+    [isLitDrop]
+  );
+
   const questions = surveyResultsQ.data?.questions || [];
   const rounds = roundsQ.data?.rounds || [];
   // Pass chips: "All passes" + every real Pass, plus the pre-turf bucket when one exists.
@@ -204,7 +268,7 @@ export default function CampaignDetail() {
         ...c,
         dayKnocks,
         // Survey DOORS, matching the web leaderboard (DashboardPage maps `surveyKnocks` here too)
-        // and the InfoHint below, which labels this column "Survey doors". It read
+        // and `canvasserMetrics` below, which labels this column "Survey doors". It read
         // `surveysSubmitted` — a VOTER-unit count in a door-unit slot, so the card's own
         // server-computed connectionRate (built from surveyKnocks) could not be checked against the
         // number printed beside it.
@@ -319,35 +383,35 @@ export default function CampaignDetail() {
         <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
         <View style={{ paddingHorizontal: spacing.lg }}>
-          {/* Activity in range */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Activity</Text>
-            {rollupQ.isLoading ? (
-              <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-            ) : (
-              <View style={styles.tileRow}>
-                <StatTile value={rangeKnocks.toLocaleString()} label="Knocks" info={metricHelp.doors} />
-                <StatTile
-                  value={rangePrimary.toLocaleString()}
-                  label={isLitDrop ? 'Lit drops' : 'Survey doors'}
-                  info={isLitDrop ? metricHelp.litDrops : metricHelp.surveyDoors}
+          {/* Activity in range. The hero is Knocks: the rate's own operands are the survey-door
+              count and the knock count, so leading with the denominator lets the fraction read
+              straight down the group. Loading renders the group with em-dashes rather than
+              swapping in a spinner, so nothing jumps when the numbers land. */}
+          <SectionHeader title="Activity" subtitle={range ? labelForRange(range) : null} />
+          <InsetGroup>
+            {activityMetrics.map((m, i) =>
+              i === 0 ? (
+                <InsetHeroRow key={m.key} label={m.label} value={loadingActivity ? '—' : m.value} />
+              ) : (
+                <InsetRow
+                  key={m.key}
+                  label={m.label}
+                  unit={m.level ? null : m.unit}
+                  sub={loadingActivity ? null : m.sub}
+                  value={loadingActivity ? '—' : m.value}
+                  chipColors={!loadingActivity && m.level ? rateColors[m.level] : null}
                 />
-                {!isLitDrop && (
-                  <StatTile
-                    value={(rangeStats.surveyedVoters || 0).toLocaleString()}
-                    label="Surveyed voters"
-                    info={metricHelp.surveyedVoters}
-                  />
-                )}
-                <StatTile
-                  value={rangeRate?.value}
-                  label={isLitDrop ? 'Lit rate' : 'Connection rate'}
-                  level={rangeRate?.level}
-                  info={metricHelp.connectionRate}
-                />
-              </View>
+              )
             )}
-          </View>
+            <InsetActionRow
+              label="How these are counted"
+              onPress={() => setSheet({ title: 'How these are counted', items: activityMetrics })}
+            />
+          </InsetGroup>
+          <GroupFooter>
+            {isLitDrop ? 'Lit rate is lit-dropped doors ÷ knocks' : 'Connection rate is survey doors ÷ knocks'}
+            {' — 20% or better is on target.'}
+          </GroupFooter>
 
           {/* By pass (range) — one row per walk list × pass from the billing pipeline */}
           <SectionHeader title="By pass" subtitle="Knocks per walk-list pass in range" />
@@ -364,60 +428,45 @@ export default function CampaignDetail() {
               <Text style={styles.muted}>No passes yet.</Text>
             </View>
           ) : (
-            <View style={styles.card}>
-              {rounds.map((r, i) => (
-                <View key={r.passId || `legacy-${i}`} style={[styles.roundRow, i === rounds.length - 1 && { borderBottomWidth: 0 }]}>
-                  <View style={{ flex: 1, marginRight: spacing.sm }}>
-                    {r.effortName ? (
-                      <Text style={styles.roundEffort} numberOfLines={1}>{r.effortName}</Text>
-                    ) : null}
-                    <Text style={styles.roundLabel} numberOfLines={1}>{r.roundLabel}</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={styles.roundKnocks}>{(r.knocks || 0).toLocaleString()}</Text>
-                    <Text style={styles.roundConn}>{isLitDrop ? 'Lit' : 'Conn'} {r.connectionRate ?? 0}%</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
+            <>
+              {/* The rate moves into the label's sub-line so the right column is exactly one
+                  tabular number per row — a stacked percentage there broke the digit column
+                  and put a rate where the eye is scanning door counts. */}
+              <InsetGroup>
+                {rounds.map((r, i) => {
+                  const rate = rateFromPct(r.connectionRate);
+                  return (
+                    <InsetRow
+                      key={r.passId || `legacy-${i}`}
+                      label={r.effortName || r.roundLabel}
+                      sub={r.effortName ? `${r.roundLabel} · ` : ''}
+                      subAccent={`${isLitDrop ? 'Lit' : 'Conn'} ${r.connectionRate ?? 0}%`}
+                      accentColor={rate ? rateColors[rate.level].deep : null}
+                      value={(r.knocks || 0).toLocaleString()}
+                    />
+                  );
+                })}
+              </InsetGroup>
+              <GroupFooter>
+                Each row is one walk-list pass. Passes add up to the {rangeKnocks.toLocaleString()} above
+                — a home knocked again in a later pass counts again.
+              </GroupFooter>
+            </>
           )}
 
           {/* Coverage (all-time) */}
-          <SectionHeader
-            title="Coverage"
-            subtitle="All-time campaign progress"
-            action={<InfoHint title="Coverage" body={metricHelp.households} />}
-          />
+          <SectionHeader title="Coverage" subtitle="All-time campaign progress" />
           <View style={styles.card}>
             <Text style={styles.coverageSummary}>
               {(totals.households ?? 0).toLocaleString()} households · {(totals.homesKnocked ?? 0).toLocaleString()} knocked
             </Text>
             <CoverageBar canvass={canvass} />
           </View>
+          {/* The definition that used to hide behind an (i) — now simply readable. */}
+          <GroupFooter>{metricHelp.households}</GroupFooter>
 
           {/* Top canvassers (range) */}
-          <SectionHeader
-            title="Top canvassers"
-            onSeeAll={goTimeline}
-            action={
-              <InfoHint
-                title="What these mean"
-                items={[
-                  { label: 'Doors', text: metricHelp.doors },
-                  {
-                    label: isLitDrop ? 'Lit drops' : 'Survey doors',
-                    text: isLitDrop ? metricHelp.litDrops : metricHelp.surveyDoors,
-                  },
-                  ...(isLitDrop ? [] : [{ label: 'Surveyed voters', text: metricHelp.surveyedVoters }]),
-                  { label: 'Conn %', text: metricHelp.connectionRate },
-                  { label: 'Contact %', text: metricHelp.contactRate },
-                  { label: 'Doors / hr', text: metricHelp.doorsPerHour },
-                  { label: 'Coordinator', text: metricHelp.coordinator },
-                  { label: 'Start / Last door', text: `${metricHelp.start} ${metricHelp.lastDoor}` },
-                ]}
-              />
-            }
-          />
+          <SectionHeader title="Top canvassers" onSeeAll={goTimeline} />
           {canvassersQ.isLoading ? (
             <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
           ) : topCanvasserRows.length === 0 ? (
@@ -447,6 +496,14 @@ export default function CampaignDetail() {
                 }
               />
             ))
+          )}
+          {topCanvasserRows.length > 0 && (
+            <InsetGroup>
+              <InsetActionRow
+                label="How these are counted"
+                onPress={() => setSheet({ title: 'What these columns mean', items: canvasserMetrics })}
+              />
+            </InsetGroup>
           )}
 
           {/* Survey results */}
@@ -537,6 +594,14 @@ export default function CampaignDetail() {
           )}
         </View>
       </ScrollView>
+
+      {/* One sheet for the whole screen — Activity and Top canvassers both open it. */}
+      <MetricSheet
+        visible={!!sheet}
+        title={sheet?.title}
+        items={sheet?.items || []}
+        onClose={() => setSheet(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -587,44 +652,21 @@ function makeStyles(t) {
     backgroundColor: colors.card,
   },
   roundChipOn: { backgroundColor: colors.brandTint, borderColor: colors.brand },
-  roundChipText: { ...type.small, color: colors.textMuted },
+  // `type.small` has never existed in theme.js — this spread `undefined`, so the chip silently
+  // fell back to the default 14pt instead of the intended caption size.
+  roundChipText: { ...type.caption, color: colors.textMuted },
   roundChipTextOn: { color: colors.brand, fontWeight: '600' },
-  cardTitle: { ...type.h3, marginBottom: spacing.md },
   cardHeaderRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: spacing.sm },
   cardLink: { color: colors.brand, fontWeight: '700', fontSize: 13 },
   muted: { ...type.caption },
 
-  tileRow: { flexDirection: 'row', gap: spacing.sm },
-  statTile: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    alignItems: 'center',
+  coverageSummary: {
+    ...type.caption,
+    marginBottom: spacing.sm,
+    color: colors.textPrimary,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
-  statTileValue: { ...type.h2, fontSize: 20, fontVariant: ['tabular-nums'], color: colors.textPrimary },
-  // paddingHorizontal + a shrinkable label keep the (i) dot clear of the tile border —
-  // it used to sit flush against the edge on two-line labels (screenshot bug, item D1).
-  statTileLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    marginTop: 2,
-    paddingHorizontal: spacing.sm,
-  },
-  statTileLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', textAlign: 'center', flexShrink: 1 },
-
-  coverageSummary: { ...type.caption, marginBottom: spacing.sm, color: colors.textPrimary, fontWeight: '600' },
-
-  roundRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  roundEffort: { ...type.bodyStrong, fontSize: 14 },
-  roundLabel: { ...type.caption, marginTop: 2 },
-  roundKnocks: { ...type.bodyStrong, fontSize: 14, fontVariant: ['tabular-nums'] },
-  roundConn: { ...type.caption, marginTop: 2, fontVariant: ['tabular-nums'] },
 
   canvasserRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   canvasserRank: { width: 24, fontSize: 14, fontWeight: '800', color: colors.brand },

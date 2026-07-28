@@ -439,7 +439,18 @@ gate, and anchor-tz resolution.
 | Endpoint | Purpose |
 |---|---|
 | `GET /admin/reports/flags` | Runs `detectFlags` over `{ baseFilter + date window + optional userId }`. Returns `{ summary, entries, total, timeZone, tzAbbrev, thresholds }`. **`summary` is always the full picture** for the scope; `reasonType` / `reviewStatus` (incl. `open`) / `severity` narrow the paginated `entries`. `view=summary` skips the entries payload. An explicit range over **62 days** is rejected (same cap as the timeline). |
-| `POST /admin/reports/flags/review` | Body `{ actionModel, actionId, status, note?, reasonsAtReview? }`. Loads the action to re-derive its campaign and re-checks `canManageCampaign` (defense in depth — a lead can't review another campaign's entry by guessing an id). Upserts the decision; `status:'open'` **deletes** it (reopen). |
+| `POST /admin/reports/flags/review` | Body `{ actionModel, actionId, status, note?, reasonsAtReview? }`. Loads the action to re-derive its campaign and re-checks `canManageCampaign` (defense in depth — a lead can't review another campaign's entry by guessing an id). Upserts the decision; `status:'open'` **deletes** it (reopen). **Body-only — it takes no `?campaignId`, and is the one route EXEMPT from the router's campaign-scope guard** (see below). |
+
+> **Why this write is exempt from the campaign-scope guard.** `routes/admin/reports.js` mounts a bare
+> `router.use` that requires `?campaignId` (or `all=1`) so a *read* can't silently blend two campaigns'
+> numbers into one figure. It has no method filter and reads `req.query` only — and `POST /flags/review`
+> is the router's **only** non-GET route. Because the handler re-derives `campaignId` from the flagged
+> record and re-checks `canManageCampaign` itself, it never wants the param, and neither client sends
+> one. Left unexempted the guard **400s admins in any multi-campaign org and 403s team leads in every
+> org** (the lead branch has no single-campaign escape hatch), which shipped and broke flag review on
+> web and mobile alike. The exemption is by exact method+path, deliberately not "any non-GET", so a
+> future write to this router still gets scoped. Regression-tested in `test/locationGate.int.test.js`
+> (admin + granted lead succeed, ungranted lead still 403s, unscoped GET still 400s).
 
 Filtering by `open` happens **after** the live join (it isn't a DB status), so the endpoint slices the
 computed+joined list in memory and returns the pre-slice `total`.

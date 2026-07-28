@@ -31,6 +31,7 @@ const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { FlagReview } = await import('../src/models/FlagReview.js');
+const { CampaignManager } = await import('../src/models/CampaignManager.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -63,7 +64,7 @@ function hh(orgId, campaignId, effortId, n, pin) {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CampaignAssignment, Effort, Pass, Turf, TurfAssignment, Household, Voter, CanvassActivity, SurveyResponse, SurveyTemplate, Subscription, FlagReview]) {
+  for (const M of [Organization, User, Membership, Campaign, CampaignAssignment, Effort, Pass, Turf, TurfAssignment, Household, Voter, CanvassActivity, SurveyResponse, SurveyTemplate, Subscription, FlagReview, CampaignManager]) {
     await M.deleteMany({});
   }
 
@@ -258,4 +259,78 @@ test('mock-GPS nudge: openMockFlags rides both endpoints and tracks reviews', { 
   // ...and reopening (deletes the FlagReview row) brings it back.
   assert.strictEqual((await review('open')).status, 200);
   assert.strictEqual((await listRow()).openMockFlags, 1, 'reopen restores the badge');
+});
+
+// ── The campaign-scope guard must not swallow the flag-review WRITE ────────────────────
+// reports.js mounts a bare `router.use` campaign-scope guard: no method filter, and it reads
+// req.query only. It exists to stop READS from silently blending two campaigns' numbers.
+// POST /flags/review is the router's ONLY write and it scopes itself — it loads the flagged
+// action and re-derives campaignId from the record — so neither client sends ?campaignId.
+// Before the exemption that meant an admin got 400 the moment the org ran a second campaign,
+// and a LEAD got 403 in EVERY org (the lead branch has no single-campaign escape hatch).
+// Both were live in the field. These run LAST because the second campaign they create flips
+// the guard's `campaigns > 1` branch on for the whole org.
+const mockedAction = () => CanvassActivity.findOne({ 'location.mocked': true }).lean();
+const reviewAs = (token, actionId, status) =>
+  call('POST', '/admin/reports/flags/review', {
+    token,
+    orgId: ctx.org._id,
+    body: { actionModel: 'CanvassActivity', actionId: String(actionId), status },
+  });
+
+test('multi-campaign org: an ADMIN can still review a flag with no campaignId', { skip }, async () => {
+  // A SECOND campaign is what arms the guard — with one campaign it never fires.
+  ctx.camp2 = await Campaign.create({
+    organizationId: ctx.org._id, name: 'Gate C2', type: 'survey', state: 'FL', isActive: true,
+  });
+  assert.strictEqual(await Campaign.countDocuments({ organizationId: ctx.org._id }), 2, 'guard is armed');
+
+  const act = await mockedAction();
+  const r = await reviewAs(ctx.adminTok, act._id, 'confirmed');
+  assert.strictEqual(r.status, 200, `expected 200, got ${r.status}: ${r.json?.error}`);
+  assert.strictEqual(r.json.review.status, 'confirmed');
+
+  const saved = await FlagReview.findOne({ actionId: act._id }).lean();
+  assert.strictEqual(saved.status, 'confirmed', 'the decision is persisted, not just echoed');
+  assert.strictEqual(String(saved.campaignId), String(ctx.camp._id), 'campaign re-derived from the ACTION, not the query');
+});
+
+test('multi-campaign org: a LEAD who manages the campaign can review', { skip }, async () => {
+  const lead = await User.create({ firstName: 'Lee', lastName: 'Lead', email: 'gl@t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: lead._id, organizationId: ctx.org._id, role: 'lead', isActive: true });
+  await CampaignManager.create({ userId: lead._id, organizationId: ctx.org._id, campaignId: ctx.camp._id });
+  ctx.leadTok = signUserToken(lead);
+
+  const act = await mockedAction();
+  const r = await reviewAs(ctx.leadTok, act._id, 'dismissed');
+  assert.strictEqual(r.status, 200, `expected 200, got ${r.status}: ${r.json?.error}`);
+  assert.strictEqual(r.json.review.status, 'dismissed');
+  assert.strictEqual((await FlagReview.findOne({ actionId: act._id }).lean()).status, 'dismissed');
+});
+
+test('a LEAD who does NOT manage the campaign is still refused', { skip }, async () => {
+  // A real lead — just granted on the OTHER campaign. The exemption removed the scope
+  // check; authorization must still come from the handler's canManageCampaign re-derivation.
+  const other = await User.create({ firstName: 'Otto', lastName: 'Other', email: 'go@t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: other._id, organizationId: ctx.org._id, role: 'lead', isActive: true });
+  await CampaignManager.create({ userId: other._id, organizationId: ctx.org._id, campaignId: ctx.camp2._id });
+
+  const act = await mockedAction();
+  const before = await FlagReview.findOne({ actionId: act._id }).lean();
+  const r = await reviewAs(signUserToken(other), act._id, 'confirmed');
+  assert.strictEqual(r.status, 403, 'no hole opened by the exemption');
+  const after = await FlagReview.findOne({ actionId: act._id }).lean();
+  assert.strictEqual(after.status, before.status, 'and nothing was written');
+});
+
+test('the READ-scoping guard is untouched: an unscoped report still 400s', { skip }, async () => {
+  const r = await call('GET', '/admin/reports/overview', { token: ctx.adminTok, orgId: ctx.org._id });
+  assert.strictEqual(r.status, 400, 'admins must still scope reads in a multi-campaign org');
+  assert.match(r.json.error, /multiple campaigns/i);
+
+  const scoped = await call('GET', `/admin/reports/overview?campaignId=${ctx.camp._id}`, {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+  });
+  assert.strictEqual(scoped.status, 200, 'and a scoped read still works');
 });

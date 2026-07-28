@@ -173,10 +173,38 @@ Defined in [mobile/lib/theme.js](../mobile/lib/theme.js) (`lightColors` / `darkC
 | `brand` / `brandDark` / `brandTint` | `#DC2626` / `#B91C1C` / `#FEF2F2` | `#EF4444` / `#F87171` / `#3F1414` | brand-accent / -hover / -tint |
 | `success` / `warn` / `danger` / `info` (+ `*Bg`) | base + soft tint | lifted base + deep tint | status colors |
 | `warnFg` / `warnBorder` / `dangerBorder` | `#92400E` / `#FCD34D` / `#FCA5A5` | `#FCD34D` / `#854D0E` / `#7F1D1D` | caution text/border, danger border |
+| `successFg` / `dangerFg` | `#166534` / `#991B1B` | `#4ADE80` / `#FCA5A5` | **small text on `successBg` / `dangerBg`** — see below |
 | `accentPurple` (+ `Bg`) / `teal` (+ `Bg`) | `#7E22CE` / `#0F766E` | `#C084FC` / `#2DD4BF` | campaign-type / voted badges |
 | `backdrop` / `chromeBar` | `rgba(0,0,0,.45)` / `rgba(255,255,255,.95)` | `rgba(0,0,0,.65)` / `rgba(17,24,39,.95)` | modal scrim / map top bar |
 | `mapLabel` / `mapLabelHalo` | `#111827` / `#FFFFFF` | `#E5E7EB` / `#0B0F19` | Mapbox symbol label + halo |
 | `status.*`, `statusLabels.*`, `party.*` | **fixed across themes** | | fixed brand ramp |
+
+### Text on a status tint: `fg` vs `deep`
+
+The vivid status hues are sized for **large** text and icons, where the WCAG floor is 3:1. They do
+**not** clear the 4.5:1 floor for small text against their own soft tint:
+
+| pairing | ratio | verdict |
+|---|---|---|
+| `success` `#16A34A` on `successBg` `#DCFCE7` | **3.00:1** | fails for small text |
+| `danger` `#EF4444` on `dangerBg` `#FEE2E2` | **3.08:1** | fails for small text |
+| `successFg` `#166534` on `successBg` | **6.49:1** | passes |
+| `dangerFg` `#991B1B` on `dangerBg` | **6.80:1** | passes |
+| `warnFg` `#92400E` on `warnBg` | **6.37:1** | passes (amber always had this) |
+
+So `makeRateColors()` in [mobile/lib/rates.js](../mobile/lib/rates.js) returns **three** keys per
+tier: `bg` (the tint), `fg` (vivid — big numerals, dots, icons) and `deep` (the `*Fg` token — any
+text at caption/body size sitting on `bg`). **Pick by size, not by taste.** `caution` maps both `fg`
+and `deep` to `warnFg` because amber has no readable vivid variant.
+
+Two other traps in the same family, both measured:
+
+- **`type.micro` defaults to `textMuted`**, which is **2.54:1** on `card` — below the floor at 11pt.
+  Every real use overrides it to `textSecondary` (**4.83:1**); do the same. `type.caption` is
+  already `textSecondary`, so it needs no override.
+- **`bg` `#F9FAFB` against `card` `#FFFFFF` is 1.05:1.** Cards are legible as cards *only* because
+  of their 1px `border` — which is also why dark mode leans on the border rather than shadows. Do
+  not "clean up" a card by removing its stroke; it will dissolve into the page in both schemes.
 
 ### Maps
 Map **chrome** themes normally (top bars use `chromeBar`; sheets/legends/chips use `card`/`raised`). Mapbox `SymbolLayer` label colors use `mapLabel` / `mapLabelHalo`. The **base tiles** follow the theme via [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) `useMapStyle()`: when the user hasn't explicitly picked a base style, it defaults to **Dark** tiles in dark mode and **Street** otherwise — an explicit Satellite/Hybrid/etc. choice is always preserved.

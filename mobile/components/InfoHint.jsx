@@ -27,18 +27,23 @@ export default function InfoHint({ title, body, items }) {
           {/* Stop propagation so taps inside the card don't dismiss it. */}
           <Pressable style={styles.card} onPress={() => {}}>
             {title ? <Text style={styles.title}>{title}</Text> : null}
-            {items ? (
-              <ScrollView style={{ maxHeight: 360 }}>
-                {items.map((it) => (
+            {/* BOTH branches scroll. `body` used to render as a bare <Text> while only `items`
+                got a scroller, so a long single explanation just ran off the bottom of the card
+                with no way to reach it — the Control Room's "Idle organizations" copy is ~900
+                characters and its last lines were unreadable on a phone. A ScrollView sizes to
+                its content up to maxHeight, so short popups are unchanged. */}
+            <ScrollView style={{ maxHeight: 360 }}>
+              {items ? (
+                items.map((it) => (
                   <View key={it.label} style={styles.item}>
                     <Text style={styles.itemLabel}>{it.label}</Text>
                     <Text style={styles.itemText}>{it.text}</Text>
                   </View>
-                ))}
-              </ScrollView>
-            ) : (
-              <Text style={styles.body}>{body}</Text>
-            )}
+                ))
+              ) : (
+                <Text style={styles.body}>{body}</Text>
+              )}
+            </ScrollView>
             <Pressable style={styles.btn} onPress={() => setOpen(false)}>
               <Text style={styles.btnText}>Got it</Text>
             </Pressable>

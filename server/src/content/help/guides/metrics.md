@@ -49,6 +49,18 @@ If a canvasser shows 18 survey doors but 37 voters surveyed, they've been workin
 - **Connection rate** — of the doors you knocked, the share where the goal was completed: a **survey taken**, or (on a lit-drop campaign) **literature left**. It divides by **doors, not voters** — so 273 survey doors ÷ 1,252 doors = 22%.
 - **Contact rate** — the share where someone actually came to the door. That includes [refusals](restricted-vs-refused): a refusal means you reached a person, even though you didn't get a survey.
 
+### What counts as a good connection rate
+
+The connection rate is graded on three bands, and that's what its color means:
+
+- **On target** (green) — 20% and up
+- **Watch** (amber) — 10% to 19%
+- **Low** (red) — under 10%
+
+In the mobile app the band is spelled out next to the percentage — *On target · 986 of 4,136 doors* — so you can check the number against the two figures printed just above it. Tap **How these are counted** under the Activity list to see the full ladder and which band you're in right now.
+
+A low rate isn't always a canvassing problem: knocking at the wrong time of day, a list heavy on apartments, or a long walk list stretched thin will all pull it down. Compare it against the same campaign's earlier passes before reading much into one day.
+
 ## Coverage (houses knocked)
 
 **Coverage** — "houses knocked" and the coverage bar — is based on each door's *current* status across the whole campaign. It is **not** round-aware: one house has one status no matter how many rounds hit it. So a second round adds knocks but **doesn't** change coverage. See [Coverage vs. knocks](coverage-vs-knocks).

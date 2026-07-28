@@ -116,6 +116,7 @@ export const lightColors = {
 
   success: '#16A34A',
   successBg: '#DCFCE7',
+  successFg: '#166534',  // readable success text on successBg — 6.49:1 (raw `success` is 3.00:1)
   successBorder: '#86EFAC',
 
   warn: '#F59E0B',
@@ -125,6 +126,7 @@ export const lightColors = {
 
   danger: '#EF4444',
   dangerBg: '#FEE2E2',
+  dangerFg: '#991B1B',   // readable danger text on dangerBg — 6.80:1 (raw `danger` is 3.08:1)
 
   info: '#3B82F6',
   infoBg: '#DBEAFE',
@@ -176,6 +178,7 @@ export const darkColors = {
 
   success: '#22C55E',
   successBg: '#052E1B',
+  successFg: '#4ADE80',  // readable success text on the dark successBg — 8.53:1
   successBorder: '#15803D',
 
   warn: '#FBBF24',
@@ -185,6 +188,7 @@ export const darkColors = {
 
   danger: '#F87171',
   dangerBg: '#3A1212',
+  dangerFg: '#FCA5A5',   // readable danger text on the dark dangerBg — 8.68:1
 
   info: '#60A5FA',
   infoBg: '#12243F',

@@ -84,6 +84,23 @@ forms we filed). Field: `surveyedVoters`.
 a subset of Knocks → **the rate is always ≤ 100%.** (Lit-drop campaigns use lit knocks ÷ knocks
 and label it "Lit rate"; the value is computed the same way.) Field: `connectionRate`.
 
+**The tiers, and where they're now visible.** The rate is graded on three bands:
+
+| tier | rate | shown as |
+|---|---|---|
+| **On target** | 20% and up | green |
+| **Watch** | 10–19% | amber |
+| **Low** | under 10% | red |
+
+These have always driven the color. What changed is that they are now **stated to users in words**
+— the mobile campaign screen prints the tier name beside the percentage ("On target · 986 of 4,136
+doors") and lists the whole ladder in its explanation sheet. So the 20% line is a published
+promise, not just a styling constant: **moving a threshold changes what the app tells a customer
+"good" means.** Single source on mobile is `RATE_TIERS` in
+[mobile/lib/rates.js](../mobile/lib/rates.js); the web counterpart is
+[client/src/lib/rates.js](../client/src/lib/rates.js). Change them together, and update
+[the Help Center metrics guide](../server/src/content/help/guides/metrics.md) in the same pass.
+
 ### Refused  *(survey campaigns only)*
 A door where a voter **answered but declined to participate**. It sits beside Not Home and Wrong
 Address as a door disposition, and it is colored amber (`#F59E0B`) everywhere.
@@ -208,7 +225,7 @@ and never reads door counts at all ([BILLING.md](BILLING.md)).
 ## By pass (the per-pass breakdown)
 
 The campaign dashboard's **By pass** section breaks the Activity numbers down one level: one row
-per **walk list × pass** (Pass 1, Pass 2, …), over the same date range as the Activity cards
+per **walk list × pass** (Pass 1, Pass 2, …), over the same date range as the Activity numbers
 above it. Each row shows that pass's **Knocks**, **Survey doors** (**Lit drops** on a lit-drop
 campaign), **Conn %**, and **New homes reached**, with a **TOTAL** row underneath. The same
 per-pass numbers appear on each walk list's Passes panel, and the mobile admin campaign screen has
@@ -1024,6 +1041,13 @@ Shared rate tiers (green ≥20% / amber 10–19% / red <10%): web
 [client/src/lib/rates.js](../client/src/lib/rates.js) (`rateLevel`/`rateAccent`/`ratePct`),
 mobile [mobile/lib/rates.js](../mobile/lib/rates.js) (`rateFromPct` for the server pct;
 `getConnectionRate` for the personal raw-event screens; `RATE_COLORS`).
+
+On mobile the thresholds live in **one** exported constant, `RATE_TIERS` — `{ level, min, word,
+range }` per tier, best-first. Both `rateFromPct` and `getConnectionRate` derive their level from
+it, and the campaign screen prints `word` ("On target" / "Watch" / "Low") in the rate row's sub-line
+and the full ladder in its explanation sheet. **These thresholds are now user-visible** — a lead is
+told, in the app, that 20% or better is on target — so changing a `min` changes a published promise,
+not just a color. Change the numbers here and in `client/src/lib/rates.js` together.
 
 Shared live-refresh contract: [client/src/lib/livePoll.js](../client/src/lib/livePoll.js)
 (`livePollOptions` into **every** count query on a live page, `liveStatusProps` so the pill answers

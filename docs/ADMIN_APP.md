@@ -53,13 +53,56 @@ Only canvassers **assigned to the campaign** can be assigned books (they need th
 them) — if someone's missing, there's a link to Campaign assignments. Canvassers see changes on their
 next sync.
 
+### The campaign screen's Activity group
+
+**Part 1 — For everyone.** Open a campaign and the first thing you see is **Activity** for the date
+range you picked — the range is named right under the heading, so a number is never undated. Knocks
+leads as the big number; beneath it, one row each for Survey doors, Surveyed voters, and the
+Connection rate. Small grey words under two of them (`houses`, `people`) say what's being counted,
+because a house can hold several voters and those two numbers are deliberately different. The
+connection rate carries a colored badge and a plain-English verdict — *On target · 986 of 4,136
+doors* — so you can check the percentage against the two numbers printed right above it.
+
+Nothing has a little **ⓘ** button any more. Instead there's one line at the bottom of the group,
+**How these are counted**, that slides up a panel explaining every number in the group with your
+actual figures in it, plus what the rate's colors mean and where the green line sits (20%). A grey
+sentence under the group repeats the headline rule without any tapping at all. Coverage and Top
+canvassers work the same way.
+
+**Part 2 — Technical reference.** The block is an inset grouped list, not a tile row:
+`components/InsetGroup.jsx` exports `InsetGroup` (card + hairlines interleaved *after* the child
+list is flattened — a conditional row that renders `false` on a lit-drop campaign is dropped by
+`Children.toArray`, so no separator is left stranded), `InsetHeroRow`, `InsetRow`, `InsetActionRow`
+and `GroupFooter`. This shape is load-bearing,
+not cosmetic: an N-column grid converts a long label into a *narrower column* until it
+character-breaks (four tiles across a 375pt phone left **17.25pt** for a label needing 62.51pt, and
+the 20pt value overflowed its 53.25pt box too), whereas a row list converts the same overflow into a
+*taller row*. Don't reintroduce a multi-column variant.
+
+`InsetRow` has no `onPress` and no chevron by design — a chevron promises navigation. The only
+actor is `InsetActionRow`: brand-tinted text, no chevron, opening `components/MetricSheet.jsx`
+(a `Modal` bottom sheet; it wraps its content in its own `GestureHandlerRootView` because a
+`Modal` is a separate native window and the grabber's pan would otherwise never fire).
+
+The screen renders **one** `MetricSheet` fed by `useState`, and both Activity and Top canvassers
+open it. Its `items` come from the same `activityMetrics` array the rows render from, so a label
+can never sit beside another metric's definition; `help` is `lib/metricHelp.js` verbatim, so no copy
+is restated here to drift from the web's. The tier ladder is generated from `RATE_TIERS` in
+`lib/rates.js` — the same constant that picks the chip color, so words and color cannot disagree.
+
+Rate tinting is a ~50×22pt chip rather than a flooded tile: a fully-tinted red rectangle reads as a
+validation error, not a low rate. Small text on a tint uses `makeRateColors(...).deep`, never `fg`
+(`success` on `successBg` is only 3.00:1) — see [THEMING.md](THEMING.md).
+
 ### The campaign screen's "By pass" card
-On a campaign's detail screen, between the Activity tiles and Coverage, a **By pass** card lists
+On a campaign's detail screen, between the Activity group and Coverage, a **By pass** group lists
 one row per walk-list pass (walk list name over the pass label, e.g. "Pass 2 · GOTV") with the
-pass's knocks and a "Conn N%" line ("Lit N%" on a lit-drop campaign) — over the same date range as
-the Activity tiles. The rows are counted exactly like the web dashboard's **By pass** table, so
-they always sum to the same Knocks headline; knocks recorded before passes existed show as a
-"Legacy / no pass" row. Full counting model + the invoice-ready CSV export (web-only) in
+pass's knocks in the value column and a "Conn N%" fragment ("Lit N%" on a lit-drop campaign)
+tier-colored in the row's sub-line — over the same date range as the Activity group. Keeping the
+rate in the sub-line leaves the right-hand column exactly one tabular number per row. The rows are
+counted exactly like the web dashboard's **By pass** table, so they always sum to the same Knocks
+headline — a footer under the group now says so — and knocks recorded before passes existed show as
+a "Legacy / no pass" row. Full counting model + the invoice-ready CSV export (web-only) in
 [METRICS.md](METRICS.md).
 
 ### Drilling into a survey answer (campaign screen)
@@ -163,7 +206,8 @@ in its own amber bucket (color `#F59E0B` everywhere). Where it shows up for an a
 > [METRICS.md](METRICS.md) and [CANVASSER_APP.md](CANVASSER_APP.md). The mobile admin Overview/Timeline
 > tabs render the coverage bar (so the Refused segment shows there too) but currently surface the rate
 > set as Knocks / Surveys / Surveyed voters / Connection rate — the dedicated "Reached a person" card
-> is not on those tiles today.
+> is not in that group today. (Contact rate *is* explained in the campaign screen's Top-canvassers
+> "How these are counted" sheet, since it's a column there.)
 
 ### The "Restricted access" disposition in admin numbers
 Available on **all** campaign types (not just survey), a door can be marked **Restricted access** —

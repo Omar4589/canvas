@@ -70,6 +70,13 @@ router.use(async (req, res, next) => {
     // landing; a lead's self-scopes to their managed campaigns below), so it's allowed
     // without a single campaignId — unlike every other (per-campaign) report.
     if (req.path === '/campaign-rollup') return next();
+    // POST /flags/review is this router's only WRITE, and it scopes ITSELF: it loads the
+    // flagged action, checks org ownership, re-derives campaignId from the record and
+    // re-checks canManageCampaign. It never reads ?campaignId — and neither client sends
+    // one (docs/AUDIT.md documents it as body-only). A read-scoping guard that demands one
+    // therefore 400s admins in multi-campaign orgs and 403s leads in EVERY org. Exempted
+    // by exact method+path rather than "any non-GET", so a future write still gets scoped.
+    if (req.method === 'POST' && req.path === '/flags/review') return next();
     const campaignId = req.query.campaignId;
     const hasCampaign = campaignId && mongoose.isValidObjectId(campaignId);
     if (isOrgAdmin(req)) {
