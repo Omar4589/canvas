@@ -101,6 +101,23 @@ promise, not just a styling constant: **moving a threshold changes what the app 
 [client/src/lib/rates.js](../client/src/lib/rates.js). Change them together, and update
 [the Help Center metrics guide](../server/src/content/help/guides/metrics.md) in the same pass.
 
+### Lit drops vs lit doors — two different numbers
+
+Two server fields, and they are **not** interchangeable:
+
+- **`litKnocks`** — *doors* that got literature, one per house per pass. This is what the **lit
+  rate divides by**, and it is what `metricHelp.litDrops` ("counted once per door per pass")
+  describes.
+- **`litDropped`** — the raw count of lit-drop **actions**. Drop at the same door twice in one
+  pass and that is two. It is therefore **≥ `litKnocks`**, and it is *not* a rate operand.
+  Its copy is `metricHelp.litDropEvents`.
+
+The mobile campaign screen prints `litDropped` (labelled "Lit drops", unit "drops"), so on a
+lit-drop campaign the rate row deliberately shows only its tier word and **not** the
+"X of Y doors" fraction that survey campaigns get — printing that fraction there would assert an
+equation the screen's own numbers don't support. **Never pair one of these fields with the
+other's help string**; that shipped once and told readers a number was something it wasn't.
+
 ### Refused  *(survey campaigns only)*
 A door where a voter **answered but declined to participate**. It sits beside Not Home and Wrong
 Address as a door disposition, and it is colored amber (`#F59E0B`) everywhere.

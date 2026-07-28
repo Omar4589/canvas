@@ -8,7 +8,14 @@ export const metricHelp = {
     'Doors where at least one survey was taken — one per house, per pass. This is what the connection rate divides by. It is usually lower than "Surveyed voters", because one house can have several voters.',
   surveyedVoters:
     'Distinct people surveyed — not how many forms were filled out. One house can have several voters, so this is usually higher than "Survey doors".',
+  // `litDrops` describes litKnocks — the DOOR count, one per house per pass — and is what the
+  // lit rate divides. `litDropEvents` describes litDropped, the raw number of drop actions,
+  // which is higher wherever one door was lit twice in a pass. They are different server
+  // fields and must never share a help string: a screen printing litDropped under the
+  // "once per door per pass" wording is telling the reader the number is something it is not.
   litDrops: 'Doors where literature was dropped, counted once per door per pass.',
+  litDropEvents:
+    'How many times literature was dropped. Drop at the same door twice in one pass and that is two drops — so this can exceed the number of doors, and it is NOT what the lit rate divides by.',
   connectionRate:
     'Of the doors knocked, the share that completed the goal — a survey submitted OR a lit drop. (A lit drop counts even if no one answered.)',
   contactRate:

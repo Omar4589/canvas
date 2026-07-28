@@ -27,14 +27,13 @@ export default function NavTileGrid({ items = [] }) {
               <Text style={styles.badgeText}>{it.badge}</Text>
             </View>
           ) : null}
-          <Text style={styles.tileLabel} numberOfLines={1}>
-            {it.label}
-          </Text>
-          {it.subtitle ? (
-            <Text style={styles.tileSubtitle} numberOfLines={1}>
-              {it.subtitle}
-            </Text>
-          ) : null}
+          {/* No numberOfLines. At width 48% both lines truncated ("Doors & canvasser pings"
+              rendered as "Doors & ca…"), which is the same squeeze-into-truncation failure the
+              inset-group grammar exists to avoid — and a tile can afford to get taller. */}
+          {/* The badge is absolutely positioned, so it does not reserve space — without this
+              the now-wrapping label runs underneath it. */}
+          <Text style={[styles.tileLabel, it.badge > 0 && styles.tileLabelBadged]}>{it.label}</Text>
+          {it.subtitle ? <Text style={styles.tileSubtitle}>{it.subtitle}</Text> : null}
         </Pressable>
       ))}
     </View>
@@ -62,16 +61,21 @@ function makeStyles(t) {
     tilePressed: { opacity: 0.85 },
     tileDisabled: { opacity: 0.5 },
     tileLabel: { ...type.bodyStrong },
-    tileSubtitle: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+    tileLabelBadged: { paddingRight: spacing.xl },
+    // type.caption is already textSecondary (4.83:1); textMuted here was 2.54:1.
+    tileSubtitle: { ...type.caption, marginTop: 2 },
+    // One badge shape app-wide, matching InsetGroup's: pill, micro type, and the READABLE
+    // danger token — `danger` on `dangerBg` is 3.08:1 and fails the 4.5:1 floor for small
+    // text, `dangerFg` is 6.80:1.
     badge: {
       position: 'absolute',
       top: spacing.sm,
       right: spacing.sm,
       backgroundColor: colors.dangerBg,
-      paddingHorizontal: spacing.xs,
+      paddingHorizontal: spacing.sm,
       paddingVertical: 1,
-      borderRadius: radius.sm,
+      borderRadius: radius.pill,
     },
-    badgeText: { color: colors.danger, fontSize: 10, fontWeight: '700' },
+    badgeText: { ...type.micro, color: colors.dangerFg },
   });
 }

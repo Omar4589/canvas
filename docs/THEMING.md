@@ -205,6 +205,14 @@ Two other traps in the same family, both measured:
 - **`bg` `#F9FAFB` against `card` `#FFFFFF` is 1.05:1.** Cards are legible as cards *only* because
   of their 1px `border` — which is also why dark mode leans on the border rather than shadows. Do
   not "clean up" a card by removing its stroke; it will dissolve into the page in both schemes.
+- **`sunken` is not a visible fill.** `sunken` on `card` is **1.10:1** in light and **1.04:1** in
+  dark. It is legal as a *transient* press wash (that is iOS's own faint row highlight, and it is
+  what `InsetGroup`'s `rowPressed` uses) and as a table-header band. It is **not** enough to make
+  a static element read: a progress track uses **`border`** (1.24:1 light / 1.30:1 dark), which is
+  what `CoverageBar.barEmpty` and `InsetGroup`'s `RowBar` both do. A `sunken` block that must read
+  as distinct — like `MetricSheet`'s arithmetic well — needs a `border` hairline too.
+- **`brand` on `brandTint` is 4.41:1** — just under the floor for small text. Use `brandDark`
+  (5.91:1). `brand` on `card` is fine at 4.83:1, which is what `InsetActionRow` uses.
 
 ### Maps
 Map **chrome** themes normally (top bars use `chromeBar`; sheets/legends/chips use `card`/`raised`). Mapbox `SymbolLayer` label colors use `mapLabel` / `mapLabelHalo`. The **base tiles** follow the theme via [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) `useMapStyle()`: when the user hasn't explicitly picked a base style, it defaults to **Dark** tiles in dark mode and **Street** otherwise — an explicit Satellite/Hybrid/etc. choice is always preserved.

@@ -32,6 +32,14 @@ export default function CanvasserCard({
   selectable = false,
   selected = false,
   onToggle,
+  // `bare` drops the card chrome (background, border, shadow, radius, marginBottom) so the
+  // row can sit INSIDE an InsetGroup, which supplies all of that once for the whole list.
+  // Opt-in and default-false: every existing caller renders byte-identically.
+  //
+  // Selection has to be re-expressed when bare, because `rowChecked` tints a border this
+  // variant no longer has — so a selected bare row takes a brandTint wash across the full
+  // row instead. The checkbox itself is unchanged, and it is what actually reads as state.
+  bare = false,
 }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -50,9 +58,12 @@ export default function CanvasserCard({
   return (
     <Pressable
       onPress={handlePress}
+      accessibilityRole={handlePress ? 'button' : undefined}
+      accessibilityState={selectable ? { selected } : undefined}
       style={({ pressed }) => [
         styles.row,
-        selectable && selected && styles.rowChecked,
+        bare && styles.rowBare,
+        selectable && selected && (bare ? styles.rowCheckedBare : styles.rowChecked),
         pressed && handlePress && { opacity: 0.7 },
       ]}
     >
@@ -110,6 +121,21 @@ function makeStyles(t) {
       gap: spacing.sm,
     },
     rowChecked: { borderColor: colors.brand, backgroundColor: colors.brandTint },
+    // Inside an InsetGroup the group owns the card: strip everything that would draw a second
+    // one. paddingHorizontal matches the group's own spacing.lg row origin, and minHeight
+    // holds the 44pt touch floor now that the card's padding is gone.
+    rowBare: {
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      borderRadius: 0,
+      marginBottom: 0,
+      shadowOpacity: 0,
+      elevation: 0,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+      minHeight: 44,
+    },
+    rowCheckedBare: { backgroundColor: colors.brandTint },
     rank: { width: 22, fontSize: 13, fontWeight: '800', color: colors.brand, textAlign: 'center' },
     check: {
       width: 24,

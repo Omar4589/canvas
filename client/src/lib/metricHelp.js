@@ -18,7 +18,13 @@ export const metricHelp = {
   // second pass and they part company.
   surveysTaken:
     'How many surveys were filled out. Survey the same person again in a later pass and that is another survey — so this can be higher than "Voters surveyed", which counts each person once.',
+  // `litDrops` describes litKnocks — the DOOR count, one per house per pass — and is what the
+  // lit rate divides. `litDropEvents` describes litDropped, the raw number of drop actions,
+  // which is higher wherever one door was lit twice in a pass. They are different server
+  // fields and must never share a help string. Mirrored in mobile/lib/metricHelp.js.
   litDrops: 'Doors where literature was dropped, counted once per door per pass.',
+  litDropEvents:
+    'How many times literature was dropped. Drop at the same door twice in one pass and that is two drops — so this can exceed the number of doors, and it is NOT what the lit rate divides by.',
   connectionRate:
     'Of the doors knocked, the share that completed the goal — a survey submitted OR a lit drop. (A lit drop counts even if no one answered.)',
   contactRate:

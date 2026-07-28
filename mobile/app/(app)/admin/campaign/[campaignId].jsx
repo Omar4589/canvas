@@ -4,7 +4,6 @@ import {
   Text,
   Pressable,
   ScrollView,
-  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -20,7 +19,12 @@ import CanvasserCard from '../../../../components/CanvasserCard';
 import InsetGroup, {
   InsetHeroRow,
   InsetRow,
+  InsetNavRow,
   InsetActionRow,
+  InsetTitleRow,
+  InsetBlockRow,
+  InsetNoteRow,
+  RowBar,
   GroupFooter,
 } from '../../../../components/InsetGroup';
 import MetricSheet from '../../../../components/MetricSheet';
@@ -32,22 +36,10 @@ import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
-function OptionRow({ option, count, percent, onPress }) {
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.optRow, pressed && { opacity: 0.7 }]}>
-      <View style={styles.optTop}>
-        <Text style={styles.optLabel} numberOfLines={1}>{String(option)}</Text>
-        <Text style={styles.optCount}>
-          {count} · {percent}% ›
-        </Text>
-      </View>
-      <View style={styles.optTrack}>
-        <View style={[styles.optFill, { width: `${Math.max(2, Math.min(100, percent))}%` }]} />
-      </View>
-    </Pressable>
-  );
-}
+// The local OptionRow is gone: a survey answer that drills into its voters is an InsetNavRow
+// with a RowBar accessory. Two things it got wrong are fixed by the move — its label was
+// numberOfLines={1} so long answers truncated, and its bar had a 2% minimum width, which
+// painted a visible sliver on a genuine 0% (reading as "a few" when the truth is "none").
 
 export default function CampaignDetail() {
   const { colors, type } = useTheme();
@@ -175,8 +167,13 @@ export default function CampaignDetail() {
         key: 'primary',
         label: isLitDrop ? 'Lit drops' : 'Survey doors',
         value: rangePrimary.toLocaleString(),
-        unit: isLitDrop ? 'doors' : 'houses',
-        help: isLitDrop ? metricHelp.litDrops : metricHelp.surveyDoors,
+        // `rangePrimary` is `litDropped` on a lit campaign — the raw count of drop ACTIONS,
+        // not doors. Calling its unit "doors" (and describing it with metricHelp.litDrops,
+        // which says "once per door per pass") labelled it as a number it is not: that copy
+        // describes `litKnocks`, a different server field, and litKnocks is also what the lit
+        // rate actually divides by. Unit and help now match the field that is printed.
+        unit: isLitDrop ? 'drops' : 'houses',
+        help: isLitDrop ? metricHelp.litDropEvents : metricHelp.surveyDoors,
       },
     ];
     if (!isLitDrop) {
@@ -193,14 +190,20 @@ export default function CampaignDetail() {
       label: isLitDrop ? 'Lit rate' : 'Connection rate',
       value: rate?.value ?? '—',
       level: rate?.level,
-      // The tier as a WORD plus the fraction it came from — and both operands are already
-      // printed in the rows above, so the rate is checkable without opening anything.
+      // The tier as a WORD plus the fraction it came from — and on a SURVEY campaign both
+      // operands are already printed in the rows above, so the rate is checkable without
+      // opening anything. On a LIT campaign the row above prints drop events, not the doors
+      // the rate divides by, so printing a fraction here would assert an equation the screen
+      // cannot support: the tier word stands alone instead.
       sub: rate
-        ? `${tierWord(rate.level)} · ${rangePrimary.toLocaleString()} of ${rangeKnocks.toLocaleString()} doors`
+        ? isLitDrop
+          ? tierWord(rate.level)
+          : `${tierWord(rate.level)} · ${rangePrimary.toLocaleString()} of ${rangeKnocks.toLocaleString()} doors`
         : null,
-      math: rate
-        ? `${rangePrimary.toLocaleString()} ${isLitDrop ? 'lit doors' : 'survey doors'} ÷ ${rangeKnocks.toLocaleString()} knocks = ${rate.value}`
-        : null,
+      math:
+        rate && !isLitDrop
+          ? `${rangePrimary.toLocaleString()} survey doors ÷ ${rangeKnocks.toLocaleString()} knocks = ${rate.value}`
+          : null,
       help: metricHelp.connectionRate,
     });
     return m;
@@ -214,7 +217,9 @@ export default function CampaignDetail() {
       {
         key: 'primary',
         label: isLitDrop ? 'Lit drops' : 'Survey doors',
-        help: isLitDrop ? metricHelp.litDrops : metricHelp.surveyDoors,
+        // CanvasserCard's lit column is `dayLit` ← `c.litDropped`, i.e. drop EVENTS. Same
+        // field/definition mismatch as the Activity row above — see the note there.
+        help: isLitDrop ? metricHelp.litDropEvents : metricHelp.surveyDoors,
       },
       ...(isLitDrop ? [] : [{ key: 'voters', label: 'Surveyed voters', help: metricHelp.surveyedVoters }]),
       { key: 'conn', label: 'Conn %', help: metricHelp.connectionRate },
@@ -337,8 +342,8 @@ export default function CampaignDetail() {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={8}>
-            <Text style={styles.back} numberOfLines={1}>‹ Overview</Text>
+          <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.back}>‹ Overview</Text>
           </Pressable>
         </View>
         <View style={styles.centered}>
@@ -350,12 +355,16 @@ export default function CampaignDetail() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
+      {/* Left-aligned, back link on its own line. The old centered title needed a magic
+          `width: 64` spacer to balance the back link — a number that was already recorded in
+          this file as having wrapped '‹ Overvie / w' once — and squeezed the campaign name into
+          ~230pt. Left-aligned it gets the full width and two lines, so a name like
+          "Springfield City Council 2026" no longer truncates. */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back} numberOfLines={1}>‹ Overview</Text>
+        <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button">
+          <Text style={styles.back}>‹ Overview</Text>
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{campaign?.name || 'Campaign'}</Text>
-        <View style={{ width: 64 }} />
+        <Text style={styles.headerTitle} numberOfLines={2}>{campaign?.name || 'Campaign'}</Text>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
@@ -409,24 +418,30 @@ export default function CampaignDetail() {
             />
           </InsetGroup>
           <GroupFooter>
-            {isLitDrop ? 'Lit rate is lit-dropped doors ÷ knocks' : 'Connection rate is survey doors ÷ knocks'}
-            {' — 20% or better is on target.'}
+            {isLitDrop
+              ? 'Lit rate is doors that got literature ÷ knocks — counted once per door per pass, so it is not the drop count above. '
+              : 'Connection rate is survey doors ÷ knocks. '}
+            20% or better is on target.
           </GroupFooter>
 
           {/* By pass (range) — one row per walk list × pass from the billing pipeline */}
           <SectionHeader title="By pass" subtitle="Knocks per walk-list pass in range" />
+          {/* Every state is a one-row group, so the section keeps its silhouette instead of
+              becoming a differently-shaped card the moment the network hiccups. */}
           {roundsQ.isLoading ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md, marginBottom: spacing.md }} />
+            <InsetGroup>
+              <InsetNoteRow loading />
+            </InsetGroup>
           ) : roundsQ.error ? (
             // A failed fetch (weak signal, or an old server during the OTA window) must
             // never render as an authoritative zero on a billing surface.
-            <View style={styles.card}>
-              <Text style={styles.muted}>Couldn't load passes — {roundsQ.error.message}</Text>
-            </View>
+            <InsetGroup>
+              <InsetNoteRow>Couldn't load passes — {roundsQ.error.message}</InsetNoteRow>
+            </InsetGroup>
           ) : rounds.length === 0 ? (
-            <View style={styles.card}>
-              <Text style={styles.muted}>No passes yet.</Text>
-            </View>
+            <InsetGroup>
+              <InsetNoteRow>No passes yet.</InsetNoteRow>
+            </InsetGroup>
           ) : (
             <>
               {/* The rate moves into the label's sub-line so the right column is exactly one
@@ -456,55 +471,63 @@ export default function CampaignDetail() {
 
           {/* Coverage (all-time) */}
           <SectionHeader title="Coverage" subtitle="All-time campaign progress" />
-          <View style={styles.card}>
-            <Text style={styles.coverageSummary}>
-              {(totals.households ?? 0).toLocaleString()} households · {(totals.homesKnocked ?? 0).toLocaleString()} knocked
-            </Text>
-            <CoverageBar canvass={canvass} />
-          </View>
+          <InsetGroup>
+            <InsetRow
+              label="Households"
+              value={(totals.households ?? 0).toLocaleString()}
+              sub={`${(totals.homesKnocked ?? 0).toLocaleString()} knocked`}
+            />
+            {/* The bar isn't a label/value pair, so it takes a block slot rather than
+                pretending to be a row. */}
+            <InsetBlockRow>
+              <CoverageBar canvass={canvass} />
+            </InsetBlockRow>
+          </InsetGroup>
           {/* The definition that used to hide behind an (i) — now simply readable. */}
           <GroupFooter>{metricHelp.households}</GroupFooter>
 
           {/* Top canvassers (range) */}
           <SectionHeader title="Top canvassers" onSeeAll={goTimeline} />
-          {canvassersQ.isLoading ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
-          ) : topCanvasserRows.length === 0 ? (
-            <View style={styles.card}>
-              <Text style={styles.muted}>No activity in this range.</Text>
-            </View>
-          ) : (
-            topCanvasserRows.map((c, i) => (
-              <CanvasserCard
-                key={c.userId}
-                row={c}
-                tz={tz}
-                rank={i + 1}
-                litMode={isLitDrop}
-                onPress={() =>
-                  router.push({
-                    pathname: `/(app)/admin/canvasser/${c.userId}`,
-                    params: {
-                      // The profile screen must not depend on the cached active campaign —
-                      // with an empty cache it white-screened (queries never enabled).
-                      campaignId: cId,
-                      ...(range?.from ? { from: range.from } : {}),
-                      ...(range?.to ? { to: range.to } : {}),
-                      ...(range?.preset ? { preset: range.preset } : {}),
-                    },
-                  })
-                }
-              />
-            ))
-          )}
-          {topCanvasserRows.length > 0 && (
-            <InsetGroup>
+          {/* One group holds the whole leaderboard: the cards go `bare` so the group draws the
+              card once instead of five floating ones, and the explain row is no longer an
+              orphan below them. They stay pressable — each still drills into its canvasser. */}
+          <InsetGroup>
+            {canvassersQ.isLoading ? (
+              <InsetNoteRow loading />
+            ) : topCanvasserRows.length === 0 ? (
+              <InsetNoteRow>No activity in this range.</InsetNoteRow>
+            ) : (
+              topCanvasserRows.map((c, i) => (
+                <CanvasserCard
+                  key={c.userId}
+                  bare
+                  row={c}
+                  tz={tz}
+                  rank={i + 1}
+                  litMode={isLitDrop}
+                  onPress={() =>
+                    router.push({
+                      pathname: `/(app)/admin/canvasser/${c.userId}`,
+                      params: {
+                        // The profile screen must not depend on the cached active campaign —
+                        // with an empty cache it white-screened (queries never enabled).
+                        campaignId: cId,
+                        ...(range?.from ? { from: range.from } : {}),
+                        ...(range?.to ? { to: range.to } : {}),
+                        ...(range?.preset ? { preset: range.preset } : {}),
+                      },
+                    })
+                  }
+                />
+              ))
+            )}
+            {topCanvasserRows.length > 0 ? (
               <InsetActionRow
                 label="How these are counted"
                 onPress={() => setSheet({ title: 'What these columns mean', items: canvasserMetrics })}
               />
-            </InsetGroup>
-          )}
+            ) : null}
+          </InsetGroup>
 
           {/* Survey results */}
           {!isLitDrop && questions.length > 0 && (
@@ -542,30 +565,40 @@ export default function CampaignDetail() {
                 </ScrollView>
               )}
               {questions.map((qn) => (
-                <View key={qn.key} style={styles.card}>
-                  <Text style={styles.qLabel}>{qn.label}</Text>
-                  {qn.type === 'text' ? (
-                    qn.options.length === 0 ? (
-                      <Text style={styles.muted}>No free-text answers.</Text>
+                <View key={qn.key} style={styles.qGroup}>
+                  <InsetGroup>
+                    {/* The question titles itself INSIDE its own card, so it can't compete
+                        with the "Survey results" SectionHeader above it. */}
+                    <InsetTitleRow title={qn.label} />
+                    {qn.type === 'text' ? (
+                      qn.options.length === 0 ? (
+                        <InsetNoteRow>No free-text answers.</InsetNoteRow>
+                      ) : (
+                        qn.options.slice(0, 10).map((o, i) => (
+                          <InsetRow
+                            key={i}
+                            label={`“${o.option}”`}
+                            unit={`${o.count} ${o.count === 1 ? 'response' : 'responses'}`}
+                          />
+                        ))
+                      )
                     ) : (
-                      qn.options.slice(0, 10).map((o, i) => (
-                        <View key={i} style={styles.verbatim}>
-                          <Text style={styles.verbatimText}>“{o.option}”</Text>
-                          <Text style={styles.muted}>{o.count} {o.count === 1 ? 'response' : 'responses'}</Text>
-                        </View>
+                      // An answer that drills into the voters who gave it: a data row that
+                      // NAVIGATES, so it gets a real chevron rather than the `›` that used to
+                      // be smuggled into the count string. The share bar is the row's
+                      // accessory, full-width — a proportional bar loses data when squeezed.
+                      qn.options.map((o) => (
+                        <InsetNavRow
+                          key={String(o.option)}
+                          label={String(o.option)}
+                          value={`${o.count} · ${o.percent}%`}
+                          hint="Opens the voters who gave this answer"
+                          accessory={<RowBar pct={o.percent} />}
+                          onPress={() => goVoters(qn, o)}
+                        />
                       ))
-                    )
-                  ) : (
-                    qn.options.map((o) => (
-                      <OptionRow
-                        key={String(o.option)}
-                        option={o.option}
-                        count={o.count}
-                        percent={o.percent}
-                        onPress={() => goVoters(qn, o)}
-                      />
-                    ))
-                  )}
+                    )}
+                  </InsetGroup>
                 </View>
               ))}
             </>
@@ -607,20 +640,17 @@ export default function CampaignDetail() {
 }
 
 function makeStyles(t) {
-  const { colors, type, shadow } = t;
+  const { colors, type } = t;
   return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
+  // Stacked, left-aligned: back link, then the title on its own line with the full width.
   header: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
   },
-  // No fixed 64px width — "‹ Overview" wrapped to "‹ Overvie / w" inside it (screenshot bug).
-  back: { color: colors.brand, fontWeight: '600', fontSize: 14, flexShrink: 0 },
-  headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
+  back: { ...type.caption, color: colors.brand, fontWeight: '600', alignSelf: 'flex-start' },
+  headerTitle: { ...type.title, marginTop: 2 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   banner: {
@@ -631,65 +661,29 @@ function makeStyles(t) {
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
-  bannerText: { fontSize: 13, color: colors.warnFg, fontWeight: '600' },
+  bannerText: { ...type.caption, color: colors.warnFg, fontWeight: '600' },
 
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    marginBottom: spacing.sm,
-  },
-  roundChips: { gap: spacing.xs, paddingBottom: spacing.sm },
+  // Chips deliberately mirror DateRangeBar's pills — same paddings, same active treatment.
+  // Two pill rows on one screen that don't match each other is worse than either shape.
+  // (DateRangeBar itself has 16 importers and is not touched.)
+  roundChips: { gap: spacing.sm, paddingBottom: spacing.sm },
   roundChip: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.sm,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.card,
   },
-  roundChipOn: { backgroundColor: colors.brandTint, borderColor: colors.brand },
+  roundChipOn: { backgroundColor: colors.brand, borderColor: colors.brand },
   // `type.small` has never existed in theme.js — this spread `undefined`, so the chip silently
   // fell back to the default 14pt instead of the intended caption size.
-  roundChipText: { ...type.caption, color: colors.textMuted },
-  roundChipTextOn: { color: colors.brand, fontWeight: '600' },
-  cardHeaderRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: spacing.sm },
-  cardLink: { color: colors.brand, fontWeight: '700', fontSize: 13 },
-  muted: { ...type.caption },
+  roundChipText: { ...type.caption, color: colors.textPrimary, fontWeight: '600' },
+  roundChipTextOn: { color: colors.textInverse },
 
-  coverageSummary: {
-    ...type.caption,
-    marginBottom: spacing.sm,
-    color: colors.textPrimary,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-
-  canvasserRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  canvasserRank: { width: 24, fontSize: 14, fontWeight: '800', color: colors.brand },
-  canvasserName: { ...type.bodyStrong, fontSize: 14 },
-  canvasserShift: { fontSize: 11, color: colors.textMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
-
-  qLabel: { ...type.bodyStrong, fontSize: 14, marginBottom: spacing.sm },
-
-  optRow: { paddingVertical: spacing.sm },
-  optTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 },
-  optLabel: { ...type.body, fontSize: 14, flex: 1, marginRight: spacing.sm },
-  optCount: { fontSize: 12, color: colors.textSecondary, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  optTrack: { height: 8, borderRadius: radius.pill, backgroundColor: colors.bg, overflow: 'hidden' },
-  optFill: { height: 8, backgroundColor: colors.brand, borderRadius: radius.pill },
-
-  highlightOpt: { marginBottom: spacing.md },
-  highlightHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
-  highlightOptName: { ...type.bodyStrong, fontSize: 14, flex: 1, marginRight: spacing.sm },
-  highlightCount: { fontSize: 12, fontWeight: '700', color: colors.brand },
-  seeAll: { color: colors.brand, fontWeight: '700', fontSize: 13, marginTop: spacing.xs },
-
-  verbatim: { marginBottom: spacing.sm, paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  verbatimText: { ...type.body, fontSize: 14, fontStyle: 'italic' },
+  // Each survey question is its own group, so they need the section's vertical rhythm
+  // between them rather than the card's old marginBottom.
+  qGroup: { marginBottom: spacing.sm },
 
   quickActions: { marginTop: spacing.sm, marginBottom: spacing.lg },
 

@@ -61,6 +61,15 @@ In the mobile app the band is spelled out next to the percentage — *On target 
 
 A low rate isn't always a canvassing problem: knocking at the wrong time of day, a list heavy on apartments, or a long walk list stretched thin will all pull it down. Compare it against the same campaign's earlier passes before reading much into one day.
 
+### Lit drops vs lit doors
+
+On a lit-drop campaign there are two different numbers, and it's worth knowing which you're looking at:
+
+- **Lit drops** — how many times literature was dropped. Drop at the same door twice in one pass and that's two drops.
+- **Lit doors** — how many *doors* got literature, counted once per door per pass. This is what the **lit rate** divides by.
+
+So the drop count can be higher than the door count, and the lit rate is built from the doors. The campaign screen shows you the drop count; tap **How these are counted** if you want the distinction spelled out.
+
 ## Coverage (houses knocked)
 
 **Coverage** — "houses knocked" and the coverage bar — is based on each door's *current* status across the whole campaign. It is **not** round-aware: one house has one status no matter how many rounds hit it. So a second round adds knocks but **doesn't** change coverage. See [Coverage vs. knocks](coverage-vs-knocks).

@@ -79,10 +79,40 @@ character-breaks (four tiles across a 375pt phone left **17.25pt** for a label n
 the 20pt value overflowed its 53.25pt box too), whereas a row list converts the same overflow into a
 *taller row*. Don't reintroduce a multi-column variant.
 
-`InsetRow` has no `onPress` and no chevron by design — a chevron promises navigation. The only
-actor is `InsetActionRow`: brand-tinted text, no chevron, opening `components/MetricSheet.jsx`
-(a `Modal` bottom sheet; it wraps its content in its own `GestureHandlerRootView` because a
-`Modal` is a separate native window and the grabber's pan would otherwise never fire).
+**Three row kinds, discriminated by the value column** — not by how the tap "feels":
+
+| kind | when | affordance |
+|---|---|---|
+| `InsetRow` | inert; a number you read | none |
+| `InsetNavRow` | the row shows a value another surface owns (a pushed screen) | chevron + press wash |
+| `InsetActionRow` | a verb with an **empty** value column (explain, export) | tinted label, never a chevron |
+
+In one sentence: *if the row displays a value that the thing behind it changes, it's
+`InsetNavRow`; if it's a verb with an empty value column, it's `InsetActionRow`.* An earlier
+version of this doc said data rows never navigate — that described the first two groups
+converted, not a rule about the app: a survey answer that drills into the voters who gave it is
+a data row that navigates, and with no kind for it, it was forced into a hand-rolled card whose
+label truncated. Add a fourth kind only if it is genuinely a fourth *answer* to "what does a tap
+here do"; a new visual treatment is not one.
+
+Supporting members that are **not** kinds: `InsetHeroRow` (the group's headline number),
+`InsetTitleRow` (an h3 inside the card, for a group that owns its heading — a survey question),
+`InsetBlockRow` (a padded slot for a child that isn't a label/value pair, e.g. `CoverageBar`),
+`InsetNoteRow` (a one-line loading/error/empty state so a section keeps its silhouette rather
+than becoming a different card when the network hiccups), `InsetSwitchRow` (the switch is the
+actor; the row isn't pressable), and `RowBar` (a proportional share bar, used as an
+`InsetNavRow` `accessory` so it gets full row width — a squeezed proportional bar loses data).
+
+`InsetActionRow` opens `components/MetricSheet.jsx` — a `Modal` bottom sheet. Two things about
+it are load-bearing and were each a shipped bug: it wraps its content in its **own**
+`GestureHandlerRootView` (a `Modal` is a separate native window, so the app's root one doesn't
+reach it and the grabber's pan silently never fires), and the height cap lives on the **sheet**
+(`maxHeight: '90%'`), never on the ScrollView. RN already gives every ScrollView
+`flexShrink: 1`; capping the scroller instead excludes the grabber and the Done button from the
+bound, and leaves the sheet unbounded so it grows past the window instead of the body
+scrolling. It must also **not** set `statusBarTranslucent` — that strips `fitsSystemWindows`
+off the modal's content frame, so the dialog goes edge-to-edge over the Android nav bar while
+`useSafeAreaInsets()` still reports the *activity* window and returns 0.
 
 The screen renders **one** `MetricSheet` fed by `useState`, and both Activity and Top canvassers
 open it. Its `items` come from the same `activityMetrics` array the rows render from, so a label
