@@ -885,14 +885,14 @@ function makeStyles(t) {
   const { colors, type, shadow } = t;
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.bg },
+    // Left-aligned at type.title, matching the campaign and canvasser screens this sits
+    // beside. No back link here — Timeline is a tab root, not a drill-in — so it is the
+    // title alone rather than the stacked back-link + title those two use.
     header: {
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
     },
-    headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
+    headerTitle: { ...type.title },
     chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
 
     controls: {

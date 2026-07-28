@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
-  Pressable,
   ScrollView,
-  ActivityIndicator,
   RefreshControl,
   StyleSheet,
 } from 'react-native';
@@ -19,8 +17,20 @@ import Logo from '../../../components/Logo';
 import CoverageBar from '../../../components/CoverageBar';
 import SectionHeader from '../../../components/SectionHeader';
 import DateRangeBar from '../../../components/DateRangeBar';
+import InsetGroup, {
+  InsetHeroRow,
+  InsetRow,
+  InsetNavRow,
+  InsetActionRow,
+  InsetBlockRow,
+  InsetNoteRow,
+  GroupFooter,
+} from '../../../components/InsetGroup';
+import MetricSheet from '../../../components/MetricSheet';
 import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
 import { timeAgo } from '../../../lib/datetime';
+import { metricHelp } from '../../../lib/metricHelp';
+import { rateFromPct, makeRateColors, tierWord } from '../../../lib/rates';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -35,67 +45,27 @@ function pct(n) {
   return n == null ? '—' : `${n}%`;
 }
 
-function Stat({ value, label }) {
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statValue}>{fmt(value)}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function CampaignCard({ campaign, onPress }) {
-  const styles = useThemedStyles(makeStyles);
-  const c = campaign;
-  const isLitDrop = c.type === 'lit_drop';
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.campaignCard, pressed && { opacity: 0.85 }]}>
-      <View style={styles.campaignHead}>
-        <Text style={styles.campaignName} numberOfLines={1}>{c.name}</Text>
-        {(c.openMockFlags || 0) > 0 && (
-          <View style={styles.mockPill}>
-            <Text style={styles.mockPillText}>{c.openMockFlags} mock GPS</Text>
-          </View>
-        )}
-        <View style={[styles.typePill, isLitDrop ? styles.typePillLit : styles.typePillSurvey]}>
-          <Text style={[styles.typePillText, isLitDrop ? styles.typePillTextLit : styles.typePillTextSurvey]}>
-            {isLitDrop ? 'Lit drop' : 'Survey'}
-          </Text>
-        </View>
-      </View>
-      <CoverageBar canvass={c.coverage} />
-      <Text style={styles.coverageLine}>
-        {fmt(c.households)} households · {fmt(c.homesKnocked)} knocked ({c.knockedPct ?? 0}%)
-      </Text>
-      <View style={styles.inlineRow}>
-        <Text style={styles.inlineStat}>
-          <Text style={styles.inlineStatVal}>{fmt(c.knocks)}</Text> knocks
-        </Text>
-        {/* Survey DOORS (the conn numerator) + voters. "surveys" here used to be surveysSubmitted —
-            voter-unit, i.e. the SAME number as the "voters" stat beside it in a one-round campaign. */}
-        <Text style={styles.inlineStat}>
-          <Text style={styles.inlineStatVal}>{fmt(isLitDrop ? c.litDropped : c.surveyedKnocks)}</Text>{' '}
-          {isLitDrop ? 'lit' : 'survey doors'}
-        </Text>
-        {!isLitDrop && (
-          <Text style={styles.inlineStat}>
-            <Text style={styles.inlineStatVal}>{fmt(c.surveyedVoters)}</Text> voters
-          </Text>
-        )}
-        <Text style={styles.inlineStat}>
-          <Text style={styles.inlineStatVal}>{pct(c.connectionRate)}</Text> conn
-        </Text>
-        <Text style={styles.inlineStat}>
-          <Text style={styles.inlineStatVal}>{fmt(c.activeCanvassers)}</Text> canv
-        </Text>
-      </View>
-      <Text style={styles.campaignFoot}>
-        {c.lastActivityAt ? `Last activity ${timeAgo(c.lastActivityAt)}` : 'No activity in range'}
-        {'   ›'}
-      </Text>
-    </Pressable>
-  );
+// One campaign as a navigating row. Everything the old card stacked is still here, just
+// distributed into the row's own slots instead of a bespoke layout: the coverage bar becomes
+// the accessory (full row width — a proportional bar loses data when squeezed), the mock-GPS
+// nudge becomes the standard badge, and the connection rate becomes the tier-colored accent so
+// it reads the same as it does inside the campaign itself.
+function campaignRowProps(c, isLitDrop) {
+  const rate = rateFromPct(c.connectionRate);
+  const primary = isLitDrop
+    ? `${fmt(c.litDropped)} lit drops`
+    : `${fmt(c.surveyedKnocks)} survey doors`;
+  const last = c.lastActivityAt ? timeAgo(c.lastActivityAt) : 'no activity in range';
+  return {
+    label: c.name,
+    labelLines: 2,
+    badge: (c.openMockFlags || 0) > 0 ? { text: `${c.openMockFlags} mock GPS` } : null,
+    value: fmt(c.knocks),
+    unit: `${isLitDrop ? 'Lit drop' : 'Survey'} · ${fmt(c.households)} households · ${c.knockedPct ?? 0}% knocked`,
+    sub: `${primary} · ${fmt(c.activeCanvassers)} canv · ${last} · `,
+    subAccent: `${pct(c.connectionRate)} conn`,
+    rate,
+  };
 }
 
 export default function AdminOverview() {
@@ -163,6 +133,54 @@ export default function AdminOverview() {
   const cumulative = activeQ.data?.cumulative || {};
   const campaigns = activeQ.data?.campaigns || [];
 
+  const [sheet, setSheet] = useState(null);
+  const rateColors = makeRateColors(colors);
+  const cumRate = rateFromPct(cumulative.connectionRate);
+
+  // The same shape the campaign screen's Activity group uses, so the org totals and a single
+  // campaign's totals explain themselves identically — one MetricSheet, one vocabulary.
+  const orgMetrics = [
+    { key: 'knocks', label: 'Knocks', value: fmt(cumulative.knocks), unit: 'doors', help: metricHelp.doors },
+    {
+      key: 'surveyDoors',
+      label: 'Survey doors',
+      value: fmt(cumulative.surveyedKnocks),
+      unit: 'houses',
+      help: metricHelp.surveyDoors,
+    },
+    {
+      key: 'voters',
+      label: 'Surveyed voters',
+      value: fmt(cumulative.surveyedVoters),
+      unit: 'people',
+      help: metricHelp.surveyedVoters,
+    },
+    {
+      key: 'lit',
+      label: 'Lit drops',
+      value: fmt(cumulative.litDropped),
+      // litDropped counts drop ACTIONS, not doors — see docs/METRICS.md. It is deliberately
+      // NOT the lit rate's operand, so it gets the event copy, never metricHelp.litDrops.
+      unit: 'drops',
+      help: metricHelp.litDropEvents,
+    },
+    {
+      key: 'rate',
+      label: 'Connection rate',
+      value: pct(cumulative.connectionRate),
+      level: cumRate?.level,
+      sub: cumRate ? tierWord(cumRate.level) : null,
+      help: metricHelp.connectionRate,
+    },
+    {
+      key: 'canvassers',
+      label: 'Canvassers',
+      value: fmt(cumulative.activeCanvassers),
+      unit: 'active in range',
+      help: metricHelp.activeCanvassers,
+    },
+  ];
+
   // Heads-up when a relative preset could read a day off for an off-zone campaign near
   // midnight (server flag). Hidden for All-time / Custom (explicit dates → no seam).
   const seamNames = activeQ.data?.seamCampaigns || [];
@@ -210,90 +228,126 @@ export default function AdminOverview() {
           </View>
         ) : null}
 
-        {activeQ.isLoading ? (
-          <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
-        ) : activeQ.error ? (
-          <View style={[styles.card, { marginHorizontal: spacing.lg }]}>
-            <Text style={styles.errorText}>Couldn't load overview. Pull to retry.</Text>
-          </View>
-        ) : (
-          <View style={{ paddingHorizontal: spacing.lg }}>
-            <SectionHeader title="All active campaigns" />
-            <View style={styles.card}>
-              <CoverageBar canvass={cumulative.coverage} />
-              <Text style={styles.coverageLine}>
-                {fmt(cumulative.households)} households · {fmt(cumulative.homesKnocked)} knocked ({cumulative.knockedPct ?? 0}%)
-              </Text>
-              <View style={styles.divider} />
-              <View style={styles.statRow}>
-                <Stat value={cumulative.knocks} label="Knocks" />
-                {/* Doors, not voters — the Connection stat below divides by these. "Surveys" here
-                    used to be surveysSubmitted (voters), identical to the Surveyed stat beside it
-                    in a single-round campaign: the same number twice, and the rate's numerator
-                    nowhere on the screen. */}
-                <Stat value={cumulative.surveyedKnocks} label="Survey doors" />
-                <Stat value={cumulative.surveyedVoters} label="Surveyed voters" />
-              </View>
-              <View style={[styles.statRow, { marginTop: spacing.md }]}>
-                <Stat value={pct(cumulative.connectionRate)} label="Connection" />
-                <Stat value={cumulative.litDropped} label="Lit" />
-                <Stat value={cumulative.activeCanvassers} label="Canvassers" />
-              </View>
-            </View>
-
-            <SectionHeader title="Campaigns" />
-            {campaigns.length === 0 ? (
-              <View style={styles.card}>
-                <Text style={styles.errorText}>No active campaigns yet.</Text>
-              </View>
+        <View style={{ paddingHorizontal: spacing.lg }}>
+          <SectionHeader title="All active campaigns" />
+          <InsetGroup>
+            {activeQ.isLoading ? (
+              <InsetNoteRow loading />
+            ) : activeQ.error ? (
+              <InsetNoteRow>Couldn't load overview. Pull to retry.</InsetNoteRow>
             ) : (
-              campaigns.map((c) => (
-                <CampaignCard key={c.id} campaign={c} onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)} />
-              ))
+              [
+                <InsetHeroRow key="knocks" label="Knocks" value={fmt(cumulative.knocks)} />,
+                <InsetRow
+                  key="doors"
+                  label="Survey doors"
+                  unit="houses"
+                  value={fmt(cumulative.surveyedKnocks)}
+                />,
+                <InsetRow
+                  key="voters"
+                  label="Surveyed voters"
+                  unit="people"
+                  value={fmt(cumulative.surveyedVoters)}
+                />,
+                <InsetRow
+                  key="rate"
+                  label="Connection rate"
+                  value={pct(cumulative.connectionRate)}
+                  sub={cumRate ? tierWord(cumRate.level) : null}
+                  chipColors={cumRate ? rateColors[cumRate.level] : null}
+                />,
+                <InsetRow
+                  key="canv"
+                  label="Canvassers"
+                  unit="active in range"
+                  value={fmt(cumulative.activeCanvassers)}
+                />,
+                <InsetBlockRow key="bar">
+                  <CoverageBar canvass={cumulative.coverage} />
+                  <Text style={styles.coverageLine}>
+                    {fmt(cumulative.households)} households · {fmt(cumulative.homesKnocked)} knocked (
+                    {cumulative.knockedPct ?? 0}%)
+                  </Text>
+                </InsetBlockRow>,
+                <InsetActionRow
+                  key="explain"
+                  label="How these are counted"
+                  onPress={() => setSheet({ title: 'How these are counted', items: orgMetrics })}
+                />,
+              ]
             )}
+          </InsetGroup>
+          <GroupFooter>
+            Every active campaign added together, over the selected range. Connection rate is survey
+            doors ÷ knocks — 20% or better is on target.
+          </GroupFooter>
 
-            <Pressable style={styles.archivedToggle} onPress={() => setArchivedOpen((v) => !v)}>
-              <Text style={styles.archivedChevron}>{archivedOpen ? '▾' : '▸'}</Text>
-              <Text style={styles.archivedToggleText}>Archived campaigns</Text>
-            </Pressable>
-            {archivedOpen && (
-              <View>
-                {archivedQ.isLoading ? (
-                  <ActivityIndicator color={colors.brand} style={{ marginVertical: spacing.md }} />
-                ) : archived.length === 0 ? (
-                  <View style={styles.card}>
-                    <Text style={styles.errorText}>No archived campaigns.</Text>
-                  </View>
-                ) : (
-                  archived.map((c) => (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
-                      style={({ pressed }) => [styles.archivedRow, pressed && { opacity: 0.85 }]}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.archivedName} numberOfLines={1}>{c.name}</Text>
-                        <Text style={styles.archivedMeta}>
-                          {fmt(c.households)} households · {c.knockedPct ?? 0}% knocked · {fmt(c.knocks)} knocks
-                        </Text>
-                      </View>
-                      <View style={styles.archivedBadge}>
-                        <Text style={styles.archivedBadgeText}>Read-only</Text>
-                      </View>
-                    </Pressable>
-                  ))
-                )}
-              </View>
+          <SectionHeader title="Campaigns" />
+          <InsetGroup>
+            {activeQ.isLoading ? (
+              <InsetNoteRow loading />
+            ) : campaigns.length === 0 ? (
+              <InsetNoteRow>No active campaigns yet.</InsetNoteRow>
+            ) : (
+              campaigns.map((c) => {
+                const isLitDrop = c.type === 'lit_drop';
+                const { rate, ...rowProps } = campaignRowProps(c, isLitDrop);
+                return (
+                  <InsetNavRow
+                    key={c.id}
+                    {...rowProps}
+                    accentColor={rate ? rateColors[rate.level].deep : null}
+                    accessory={<CoverageBar canvass={c.coverage} compact />}
+                    hint="Opens this campaign"
+                    onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
+                  />
+                );
+              })
             )}
-          </View>
-        )}
+          </InsetGroup>
+
+          {/* A reveal, not a navigation — so it is an action row, and it carries no chevron. */}
+          <SectionHeader title="Archived" />
+          <InsetGroup>
+            <InsetActionRow
+              label={archivedOpen ? 'Hide archived campaigns' : 'Show archived campaigns'}
+              onPress={() => setArchivedOpen((v) => !v)}
+            />
+            {archivedOpen && archivedQ.isLoading ? <InsetNoteRow loading /> : null}
+            {archivedOpen && !archivedQ.isLoading && archived.length === 0 ? (
+              <InsetNoteRow>No archived campaigns.</InsetNoteRow>
+            ) : null}
+            {archivedOpen && !archivedQ.isLoading
+              ? archived.map((c) => (
+                  <InsetNavRow
+                    key={c.id}
+                    label={c.name}
+                    labelLines={2}
+                    badge={{ text: 'Read-only', bg: colors.warnBg, fg: colors.warnFg }}
+                    value={fmt(c.knocks)}
+                    unit={`${fmt(c.households)} households · ${c.knockedPct ?? 0}% knocked`}
+                    hint="Opens this archived campaign, read-only"
+                    onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
+                  />
+                ))
+              : null}
+          </InsetGroup>
+        </View>
       </ScrollView>
+
+      <MetricSheet
+        visible={!!sheet}
+        title={sheet?.title}
+        items={sheet?.items || []}
+        onClose={() => setSheet(null)}
+      />
     </SafeAreaView>
   );
 }
 
 function makeStyles(t) {
-  const { colors, type, shadow } = t;
+  const { colors, type } = t;
   return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
@@ -306,91 +360,15 @@ function makeStyles(t) {
   },
   headerLabel: { ...type.caption, color: colors.textSecondary },
 
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    marginBottom: spacing.sm,
-  },
-  errorText: { ...type.caption },
   seamBanner: {
     backgroundColor: colors.warnBg,
     borderColor: colors.warnBorder,
     borderWidth: 1,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     padding: spacing.md,
     marginTop: spacing.sm,
   },
-  seamBannerText: { fontSize: 12, color: colors.warnFg, lineHeight: 17 },
-  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
-  statRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  stat: { flex: 1 },
-  statValue: { ...type.h2, fontSize: 19, fontVariant: ['tabular-nums'] },
-  statLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600', marginTop: 1 },
-
-  campaignCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    marginBottom: spacing.sm,
-  },
-  campaignHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  campaignName: { ...type.h3, fontSize: 15, flex: 1 },
-  typePill: { borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 2 },
-  // Mock-GPS nudge pill (open mock-location flags, server-computed) — flagBadge tones.
-  mockPill: {
-    backgroundColor: colors.dangerBg,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    marginRight: spacing.xs,
-  },
-  mockPillText: { fontSize: 10, fontWeight: '700', color: colors.danger, textTransform: 'uppercase', letterSpacing: 0.5 },
-  typePillSurvey: { backgroundColor: colors.infoBg },
-  typePillLit: { backgroundColor: colors.accentPurpleBg },
-  typePillText: { fontSize: 10, fontWeight: '700' },
-  typePillTextSurvey: { color: colors.info },
-  typePillTextLit: { color: colors.accentPurple },
-  coverageLine: { ...type.caption, color: colors.textSecondary, marginTop: spacing.sm },
-  inlineRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm, gap: spacing.md },
-  inlineStat: { fontSize: 12, color: colors.textSecondary },
-  inlineStatVal: { fontWeight: '700', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
-  campaignFoot: { ...type.caption, marginTop: spacing.sm, color: colors.textMuted },
-
-  archivedToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    marginTop: spacing.xs,
-  },
-  archivedChevron: { fontSize: 14, color: colors.textSecondary, width: 16 },
-  archivedToggleText: { ...type.h3, fontSize: 15 },
-  archivedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  archivedName: { ...type.bodyStrong, fontSize: 14 },
-  archivedMeta: { ...type.caption, marginTop: 2 },
-  archivedBadge: { backgroundColor: colors.warnBg, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
-  archivedBadgeText: { fontSize: 10, fontWeight: '700', color: colors.warnFg },
+  seamBannerText: { ...type.caption, color: colors.warnFg },
+  coverageLine: { ...type.caption, marginTop: spacing.sm, fontVariant: ['tabular-nums'] },
   });
 }

@@ -23,6 +23,7 @@ import DateRangeBar from '../../../../../components/DateRangeBar';
 import KpiGrid from '../../../../../components/KpiGrid';
 import BarChart from '../../../../../components/BarChart';
 import SectionHeader from '../../../../../components/SectionHeader';
+import InsetGroup, { InsetNavRow, InsetActionRow } from '../../../../../components/InsetGroup';
 import { downloadCsv } from '../../../../../lib/csv';
 
 const HOUR_LABELS = ['12a', '3a', '6a', '9a', '12p', '3p', '6p', '9p'];
@@ -475,88 +476,55 @@ export default function CanvasserOverview() {
           />
         </View>
 
-        {/* Quick links grid */}
+        {/* Drill down — a menu of destinations, which is exactly what an inset group is for.
+            Note the last one: "Export CSV" does not navigate, so it is an InsetActionRow and
+            gets NO chevron. It carried one as a tile, which is an affordance that lies. */}
         <SectionHeader title="Drill down" />
-        <View style={styles.quickGrid}>
-          <QuickLink
-            label="Activity feed"
-            sub="Every knock"
-            onPress={() =>
-              router.push({
-                pathname: `/(app)/admin/canvasser/${userId}/activity`,
-                params: {
-                  ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
-              })
-            }
-          />
-          <QuickLink
-            label="Households"
-            sub="Places visited"
-            onPress={() =>
-              router.push({
-                pathname: `/(app)/admin/canvasser/${userId}/households`,
-                params: {
-                  ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
-              })
-            }
-          />
-          {!isLitDrop ? (
-            <QuickLink
-              label="Surveys taken"
-              sub="With demographics"
+        <InsetGroup>
+          {[
+            { key: 'activity', label: 'Activity feed', sub: 'Every knock' },
+            { key: 'households', label: 'Households', sub: 'Places visited' },
+            ...(isLitDrop ? [] : [{ key: 'voters', label: 'Surveys taken', sub: 'With demographics' }]),
+            { key: 'notes', label: 'Notes', sub: 'All free-text' },
+            { key: 'map', label: 'Territory map', sub: 'Knock locations' },
+          ].map((d) => (
+            <InsetNavRow
+              key={d.key}
+              label={d.label}
+              sub={d.sub}
               onPress={() =>
                 router.push({
-                  pathname: `/(app)/admin/canvasser/${userId}/voters`,
+                  pathname: `/(app)/admin/canvasser/${userId}/${d.key}`,
                   params: {
-                    ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
+                    ...(campaign?.id ? { campaignId: campaign.id } : {}),
+                    from: range.from || '',
+                    to: range.to || '',
+                    preset: range.preset,
+                  },
                 })
               }
             />
-          ) : null}
-          <QuickLink
-            label="Notes"
-            sub="All free-text"
-            onPress={() =>
-              router.push({
-                pathname: `/(app)/admin/canvasser/${userId}/notes`,
-                params: {
-                  ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
-              })
-            }
-          />
-          <QuickLink
-            label="Territory map"
-            sub="Knock locations"
-            onPress={() =>
-              router.push({
-                pathname: `/(app)/admin/canvasser/${userId}/map`,
-                params: {
-                  ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
-              })
-            }
-          />
-          <QuickLink
-            label="Export CSV"
-            sub="All activity"
-            onPress={exportCsv}
-          />
-        </View>
+          ))}
+          <InsetActionRow label="Export CSV" onPress={exportCsv} />
+        </InsetGroup>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+// Left-aligned, back link on its own line — matching the campaign screen it is reached from.
+// The old centered title needed a magic `width: 80` spacer to balance the back link, and gave
+// the name only what was left over; stacked, it gets the full width and two lines.
 function Header({ onBack, title }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.header}>
-      <Pressable onPress={onBack} hitSlop={8}>
+      <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button">
         <Text style={styles.back}>‹ Back</Text>
       </Pressable>
-      <Text style={styles.headerTitle} numberOfLines={1}>
+      <Text style={styles.headerTitle} numberOfLines={2}>
         {title || ''}
       </Text>
-      <View style={{ width: 80 }} />
     </View>
   );
 }
@@ -569,20 +537,6 @@ function Highlight({ title, value, sub }) {
       <Text style={styles.highlightValue}>{value}</Text>
       {sub ? <Text style={styles.highlightSub}>{sub}</Text> : null}
     </View>
-  );
-}
-
-function QuickLink({ label, sub, onPress }) {
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.7 }]}
-    >
-      <Text style={styles.quickLabel}>{label}</Text>
-      <Text style={styles.quickSub}>{sub}</Text>
-      <Text style={styles.quickChev}>›</Text>
-    </Pressable>
   );
 }
 
@@ -602,14 +556,13 @@ function makeStyles(t) {
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
 
+  // Stacked, left-aligned — matches the campaign screen this is reached from.
   header: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
   },
-  back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
-  headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
+  back: { ...type.caption, color: colors.brand, fontWeight: '600', alignSelf: 'flex-start' },
+  headerTitle: { ...type.title, marginTop: 2 },
 
   idCard: {
     flexDirection: 'row',
@@ -716,33 +669,6 @@ function makeStyles(t) {
   dayMeta: { ...type.caption, marginTop: 2 },
   dayDoors: { ...type.bodyStrong, fontVariant: ['tabular-nums'] },
   chev: { color: colors.textMuted, fontSize: 22, fontWeight: '300' },
-
-  quickGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  quickCard: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    minHeight: 64,
-    position: 'relative',
-  },
-  quickLabel: { ...type.bodyStrong, fontSize: 14 },
-  quickSub: { ...type.caption, marginTop: 2 },
-  quickChev: {
-    position: 'absolute',
-    right: spacing.md,
-    top: spacing.md,
-    color: colors.textMuted,
-    fontSize: 18,
-  },
 
   empty: {
     backgroundColor: colors.card,

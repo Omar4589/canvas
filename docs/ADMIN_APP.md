@@ -124,6 +124,29 @@ Rate tinting is a ~50×22pt chip rather than a flooded tile: a fully-tinted red 
 validation error, not a low rate. Small text on a tint uses `makeRateColors(...).deep`, never `fg`
 (`success` on `successBg` is only 3.00:1) — see [THEMING.md](THEMING.md).
 
+### The grammar across the admin screens
+
+The inset-group grammar now spans the campaign screen and the three screens one tap from it, so
+the vocabulary holds across a whole journey rather than changing shape at each transition:
+
+- **Overview** (`admin/index.jsx`) — org totals are an inset group with the *same*
+  `MetricSheet` affordance the campaign screen uses, so "How these are counted" means the same
+  thing at both levels. Each campaign is an `InsetNavRow`: its coverage bar is the row's
+  accessory (full width), the mock-GPS nudge is the standard badge, and the connection rate is
+  the tier-colored accent. Archived campaigns sit behind an `InsetActionRow` reveal.
+- **Canvasser detail** (`admin/canvasser/[id]/index.jsx`) — the "Drill down" tile grid is a menu
+  of destinations, so it becomes a group of `InsetNavRow`s. **`Export CSV` is now an
+  `InsetActionRow`**: it does not navigate, and as a tile it carried a chevron that lied.
+- **Header treatment** — the campaign and canvasser screens stack a back link over a
+  `type.title` name (two lines, full width) instead of centering a `type.h3` between two magic
+  spacers (`width: 64` and `width: 80`, both deleted); a long campaign name no longer truncates.
+  Timeline takes the same left-aligned title without a back link, since it is a tab root.
+
+**Still on the old idiom** (deliberately, not oversight): Timeline's body — its KPI strip, hourly
+grid, roster and overlaps — and the canvasser screen's KPI strip and highlights row. Both still
+use `KpiGrid`, which `admin/audit.jsx` and `canvasser/[id]/quality.jsx` also depend on, so it is
+unchanged.
+
 ### The campaign screen's "By pass" card
 On a campaign's detail screen, between the Activity group and Coverage, a **By pass** group lists
 one row per walk-list pass (walk list name over the pass label, e.g. "Pass 2 · GOTV") with the

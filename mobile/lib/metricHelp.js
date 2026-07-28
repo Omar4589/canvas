@@ -30,6 +30,8 @@ export const metricHelp = {
   start: 'The first door this canvasser knocked in the range.',
   lastDoor: 'The most recent door this canvasser knocked in the range.',
   households: 'Distinct homes reached at least once (a home counts once no matter how many passes).',
+  activeCanvassers:
+    'People who recorded at least one door in the selected range — not everyone assigned to a campaign. Someone assigned but not out yet does not appear here.',
   restricted:
     'Inaccessible homes — a locked building, a gate, no legal access. Recorded and shown, but never counted as a knock and never billed.',
 };
