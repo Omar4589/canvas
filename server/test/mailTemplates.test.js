@@ -29,7 +29,16 @@ test('inviteSetPassword: a canvasser gets both install links, in HTML and plain 
   assert.ok(r.html.includes(android), 'Android link in html');
   assert.ok(r.text.includes(ios), 'iOS link in text');
   assert.ok(r.text.includes(android), 'Android link in text');
-  assert.ok(both(r).includes('closed test'), 'the walled-tester note is present');
+  // The closing note — the recovery path when a store link can't hand off to the phone's store.
+  // Checked per HALF on purpose: both() concatenates them, so the old form could not have caught
+  // the note falling out of one side only, which is the drift this file exists to catch.
+  for (const [half, body] of [['html', r.html], ['text', r.text]]) {
+    assert.ok(body.includes('App Store'), `store-search fallback missing from ${half}`);
+    assert.ok(body.includes('Google Play'), `store-search fallback missing from ${half}`);
+  }
+  // Both apps went public 2026-07-28. Asserts the phrase, not /beta|testflight/ — those can appear
+  // inside an env-supplied URL and would make this depend on the developer's ambient shell.
+  assert.ok(!both(r).includes('closed test'), 'the beta-era note is gone');
   // The password CTA is still the point of this email.
   assert.ok(r.html.includes(BASE.setPasswordUrl), 'set-password link survives');
 });

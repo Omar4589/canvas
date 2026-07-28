@@ -26,5 +26,5 @@ You'll see one of two things:
 Updating takes about a minute on a normal connection and never touches your work: everything
 you've knocked and recorded is already saved.
 
-If you tap **Update** and the store says the app isn't available, or the update won't install,
-tell your campaign admin — they can check whether the new version has finished rolling out.
+If the update won't install — not enough space on your phone, or the store just won't finish —
+tell your campaign admin. They can confirm the new version has finished rolling out to everyone.

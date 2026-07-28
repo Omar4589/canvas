@@ -5,11 +5,11 @@
 // nag). Duplicated by hand because this repo has no shared client/server module; same convention as
 // client/src/lib/validators.js and client/src/components/ArchiveNudge.jsx. Keep the two in sync.
 //
-// Currently the closed-beta join links. At public launch, swap both files to the public listings
-// and update the marketing badges (see MarketingFooter.jsx).
+// The public store listings — both apps went public 2026-07-28. Unlike the server twin these carry
+// no env override, so a wrong value here can only be fixed by a deploy.
 
-// TestFlight public join links work for anyone, no allow-list.
-export const IOS_INSTALL_URL = 'https://testflight.apple.com/join/8ZHW2nXH';
-// Play INTERNAL testing needs the tester's Google account on an explicit list (100 max) — someone
-// not on it hits a wall, which is why the surfaces rendering this always offer a way to ask.
-export const ANDROID_INSTALL_URL = 'https://play.google.com/apps/internaltest/4700118043777481693';
+export const IOS_INSTALL_URL = 'https://apps.apple.com/app/doorline/id6764581850';
+// The com.doorline.app listing (the new Play org account) — NOT the package the current Android
+// fleet is running. Install and update deliberately point at different apps until the Play
+// cutover; server/src/config/storeLinks.js explains why.
+export const ANDROID_INSTALL_URL = 'https://play.google.com/store/apps/details?id=com.doorline.app';

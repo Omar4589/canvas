@@ -5,8 +5,8 @@ the doors, the slide-out **menu** that holds everything occasional, and the lean
 that keep the quick actions one tap away. This is the shell; the things inside it (the map, surveys,
 efforts) have their own docs.
 
-- **Part 1 — For everyone** is plain language: the flow from sign-in to the doors, the menu, and
-  what each screen's header does.
+- **Part 1 — For everyone** is plain language: how to get the app, the flow from sign-in to the
+  doors, the menu, and what each screen's header does.
 - **Part 2 — Technical reference** is for developers (and Claude): the navigation tree, the drawer
   overlay, the shared header, the merged map context card, and where effort data comes from.
 
@@ -18,6 +18,31 @@ light/dark tokens every screen here is built from).
 ---
 
 # Part 1 — For everyone
+
+## Getting the app
+
+Doorline is **free on the App Store (iPhone) and Google Play (Android)** — search for **Doorline**.
+There is one app for everybody: a canvasser, a team lead, and an admin all install the same thing,
+and what you can do inside it depends on your role, not on which app you downloaded.
+
+A canvasser normally arrives at it one of three ways:
+
+- **The invitation email.** A canvasser's invite carries install links for both platforms, right
+  under the set-password button. See [EMAIL.md](EMAIL.md).
+- **The web page after setting a password.** The set-password link opens in a browser, which is
+  normal — and if canvasser is the only role you hold, that browser lands you on a **Get the app**
+  card with the same two links, not on a dashboard. See [ROLES.md](ROLES.md).
+- **Searching the store directly.** Any of the three gets you the same app.
+
+**Sign in with the account you already have.** Same email, same password as the web — there is no
+separate app account to create. If your admin or team lead handed you a temporary password, the app
+makes you set your own on that first sign-in (see below). Forgot it later? **Forgot password?** on
+the sign-in screen emails you a reset link.
+
+**What it asks for on first run** is location, and it means it — a door can't be recorded without a
+GPS stamp, so recording is blocked when location is off. On iPhone, leave **Precise Location** on;
+without it the stamp is too coarse to place you at a house. Full detail in
+[Location is required](#location-is-required-no-location--no-knock) below.
 
 ## The flow to the doors
 
@@ -347,15 +372,18 @@ Two mechanisms steer people to newer versions, and they answer different questio
 Shared invariants: both surfaces link to the same `STORE_URL` (single copy in
 [lib/config.js](../mobile/lib/config.js)) — though the nag prefers a server-supplied
 `storeUrl` when the response carries one (`MOBILE_STORE_URL_IOS`/`_ANDROID`; exists because the
-Note these are the **update** override, for someone who already has the app. Where a NEW canvasser
-goes to *install* it is a separate pair — `MOBILE_INSTALL_URL_IOS`/`_ANDROID`, rendered into their
-invite email (see [EMAIL.md](EMAIL.md) and `server/src/config/storeLinks.js`).
-baked-in URL is the public store page, which iOS doesn't have until public release — the
-TestFlight era needs a TestFlight link instead); the nag **fails open** on every error path (no
+baked-in URL is the public store page, which iOS didn't have until the 2026-07-28 App Store
+release — so that override is a no-op now — and which on Android still names the fleet's
+`com.canvassapp.mobile` rather than the new `com.doorline.app` listing, making `_ANDROID` the lever
+that walks stragglers across at the Play cutover); the nag **fails open** on every error path (no
 runtimeVersion in dev, timeout, 429, malformed response → render nothing — a wrong wall would lock
 the fleet out of a working app); and enforcement is UI-only — no server middleware rejects old
 builds, because a 4xx mid-sync is exactly the offline-queue-eating failure the queue was hardened
 against.
+
+Note these are the **update** override, for someone who already has the app. Where a NEW canvasser
+goes to *install* it is a separate pair — `MOBILE_INSTALL_URL_IOS`/`_ANDROID`, rendered into their
+invite email (see [EMAIL.md](EMAIL.md) and `server/src/config/storeLinks.js`).
 
 ## The profile screen
 

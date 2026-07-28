@@ -116,11 +116,11 @@ export default function SelectOrgPage() {
                 Android
               </a>
             </div>
-            {/* Play internal testing needs the tester's Google account on an explicit list, so this
-                link CAN wall someone. One line, so a wall reads as "ask" rather than "Doorline is
-                broken" — see server/src/config/storeLinks.js. */}
+            {/* Not a beta caveat any more: a store link opened from a desktop browser (which is
+                where this page usually is) often can't hand off to a phone's store at all. One
+                line, so a dead link reads as "search for it" rather than "Doorline is broken". */}
             <p className="mt-2 text-xs text-fg-muted">
-              The app is still in a closed test — if a link doesn’t work, ask whoever invited you.
+              Free on the App Store and Google Play — search “Doorline” if a link doesn’t open.
             </p>
           </div>
         )}

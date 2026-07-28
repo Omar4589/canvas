@@ -97,13 +97,13 @@ test('hard mode and note come from env; mode tolerates case and whitespace', { s
   assert.equal(soft.mode, 'soft');
 });
 
-test('storeUrl override is per-platform (TestFlight era: iOS only)', { skip }, async () => {
+test('storeUrl override is per-platform (set on one side only)', { skip }, async () => {
   process.env.MOBILE_CURRENT_RUNTIME_ANDROID = ANDROID_RV;
   process.env.MOBILE_CURRENT_RUNTIME_IOS = IOS_RV;
-  process.env.MOBILE_STORE_URL_IOS = 'https://beta.itunes.apple.com/v1/app/6764581850';
+  process.env.MOBILE_STORE_URL_IOS = 'https://apps.apple.com/app/doorline/id6764581850';
 
   const ios = await check({ platform: 'ios', runtimeVersion: OLD_RV });
-  assert.equal(ios.storeUrl, 'https://beta.itunes.apple.com/v1/app/6764581850');
+  assert.equal(ios.storeUrl, 'https://apps.apple.com/app/doorline/id6764581850');
 
   // Android keeps its built-in URL — the override must not bleed across platforms.
   const android = await check({ platform: 'android', runtimeVersion: OLD_RV });

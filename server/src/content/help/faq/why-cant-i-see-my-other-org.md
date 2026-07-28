@@ -15,7 +15,7 @@ You have **one account**, but a **separate role in each organization** you belon
 
 **Everything you need for that organization is in the Doorline mobile app.** Sign in with the same email and password. In the app, *all* your organizations are selectable, because every role has a home there — switching orgs in the app is how you move between running one campaign and knocking doors for another.
 
-**Don't have the app yet?** If you're *only* a canvasser, signing in on the web takes you to a page with the install links for iPhone and Android. They're also in the invitation email you were sent. Doorline is still in a closed test, so if a link doesn't work — on Android especially, where testers are added by name — reply to whoever invited you and ask them to add you.
+**Don't have the app yet?** Search for **Doorline** in the App Store or Google Play — it's free, and you sign in with this same email and password. If you're *only* a canvasser, signing in on the web takes you to a page with the install links, and they're in your invitation email too. See [Installing the Doorline app](canvasser-install-app).
 
 A few related things worth knowing:
 

@@ -5,7 +5,7 @@
 // sets a password in a browser and, without these links, has no way to discover the app exists.
 //
 // ── There are FOUR store-URL locations in this repo. They are not duplicates. ────────────────
-//   1. HERE — where a NEW person INSTALLS. Currently the closed-beta join links.
+//   1. HERE — where a NEW person INSTALLS. The public store listings.
 //   2. client/src/lib/appLinks.js — the same two URLs for the web /select-org install card.
 //      Mirrored by hand (no shared module in this repo; see client/src/lib/validators.js:57 and
 //      client/src/components/ArchiveNudge.jsx for the same convention). Keep in sync.
@@ -15,22 +15,23 @@
 //   4. MOBILE_STORE_URL_IOS / _ANDROID (routes/public/buildStatus.js) — an optional override of
 //      (3). Its absent-means-null is load-bearing there, so it must never be reused for install.
 //
-// At public launch these converge: SET MOBILE_INSTALL_URL_* to the public listings and UNSET
-// MOBILE_STORE_URL_* (the update nag's baked-in default becomes correct). Opposite operations —
-// which is exactly why install and update can't share one pair of vars.
+// ── Install and update CONVERGED ON iOS, and have NOT on Android. ─────────────────────────────
+// Both apps went public 2026-07-28. On iOS install and update are now the same App Store page, so
+// MOBILE_STORE_URL_IOS is a no-op. On Android they still point at two DIFFERENT APPS: a new person
+// installs com.doorline.app (the new Play org account), while the fielded fleet is running
+// com.canvassapp.mobile and its baked-in (3) still names that older listing. They merge at the Play
+// cutover, when MOBILE_STORE_URL_ANDROID walks the stragglers across — mobile/README.md → "The
+// two-store window". Until then, do not "fix" one of these pairs to match the other.
 //
-// Env-overridable because email is the one surface you cannot take back: a broken TestFlight or
-// Play tester link is fixed for all FUTURE mail with `heroku config:set`, no deploy.
+// Env-overridable because email is the one surface you cannot take back: a wrong link is fixed for
+// all FUTURE mail from the Heroku dashboard (Settings → Config Vars), no deploy.
 
 export function installLinks() {
   return {
-    // TestFlight public join links work for anyone (up to 10k testers) — no allow-list.
-    ios: process.env.MOBILE_INSTALL_URL_IOS || 'https://testflight.apple.com/join/8ZHW2nXH',
-    // Play INTERNAL testing requires the tester's Google account on an explicit list (100 max).
-    // Someone not on it hits a wall, which is why the copy that renders these carries a short
-    // "if a link doesn't work, reply to this email" line rather than promising a download.
+    ios: process.env.MOBILE_INSTALL_URL_IOS || 'https://apps.apple.com/app/doorline/id6764581850',
+    // The new Play org account's listing — deliberately a different package from (3). See above.
     android:
       process.env.MOBILE_INSTALL_URL_ANDROID ||
-      'https://play.google.com/apps/internaltest/4700118043777481693',
+      'https://play.google.com/store/apps/details?id=com.doorline.app',
   };
 }

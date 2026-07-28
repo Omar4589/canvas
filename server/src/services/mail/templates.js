@@ -78,7 +78,7 @@ function appLinks() {
   return (
     para('<strong>Doorline is a phone app</strong> — that’s where you knock doors. The web dashboard is only for admins and team leads.') +
     `      <p style="margin:0 0 8px;">${link('Get it for iPhone', ios)}${link('Get it for Android', android)}</p>\n` +
-    muted('The app is still in a closed test — if a link doesn’t work, just reply to this email.')
+    muted('Free on the App Store and Google Play — if a link doesn’t open, search for “Doorline” in your phone’s app store.')
   );
 }
 
@@ -94,7 +94,7 @@ function appLinksText() {
     `iPhone:  ${ios}`,
     `Android: ${android}`,
     '',
-    'The app is still in a closed test — if a link doesn’t work, just reply to this email.',
+    'Free on the App Store and Google Play — if a link doesn’t open, search for “Doorline” in your phone’s app store.',
   ];
 }
 

@@ -48,6 +48,21 @@ recipient.
 - An expired or used link shows "This link is invalid or has expired" with a one-tap way to
   request a fresh one. A too-weak new password does **not** burn the link — fix it and resubmit.
 
+## The install links in a canvasser's invite
+
+A canvasser works entirely in the mobile app, but the set-password link in their invite opens a
+**browser** — so without help, someone could set a password and never learn the app exists. Their
+invite therefore carries an **install block**: a link to the App Store, a link to Google Play, and
+one line telling them to search for **Doorline** if a link doesn't open (a store link tapped from a
+desktop mail client often can't hand off to a phone's store).
+
+Only canvassers see it. Admins and team leads work in the web console and are never told to install
+a field app. The three emails that carry it are the two invites and the added-to-a-campaign notice.
+
+Both apps have been publicly listed since **2026-07-28**; the app is free. If a store link ever
+needs to change, it is a config change rather than a code release — which matters because an email
+already sent cannot be recalled, so the fix has to reach *future* mail immediately.
+
 ## What an email will never do
 
 - **Never contain a password.** Invites carry a set-password link; typed temporary passwords are
@@ -105,7 +120,7 @@ is awaited first.
 ### Role-aware copy — canvassers are pointed at the app, not the console
 
 `inviteSetPassword`, `addedToOrg` and `addedToCampaign` take a **`role`**. When it is
-`'canvasser'` they carry an **install block** (both store links + a one-line closed-test note);
+`'canvasser'` they carry an **install block** (both store links + a one-line store-search fallback);
 otherwise they render the console wording unchanged. `provisioningWelcome` never does — it is always
 an org's first admin.
 
@@ -124,17 +139,23 @@ map from the `memberships` array **it already loaded** for the is-a-member check
 
 Install URLs live in [`config/storeLinks.js`](../server/src/config/storeLinks.js) →
 `installLinks()`, overridable per-platform with `MOBILE_INSTALL_URL_IOS` /
-`MOBILE_INSTALL_URL_ANDROID` and defaulting to the closed-beta join links. **These are not
+`MOBILE_INSTALL_URL_ANDROID` and defaulting to the public store listings. **These are not
 `MOBILE_STORE_URL_*`** — those override where the in-app *update* button sends someone who already
 has the app ([mobile/README.md](../mobile/README.md)), and their absent-means-null is load-bearing
-there. At public launch you *set* `MOBILE_INSTALL_URL_*` and *unset* `MOBILE_STORE_URL_*`. The web
-mirror is [`client/src/lib/appLinks.js`](../client/src/lib/appLinks.js) (no shared module in this
-repo — keep the two in sync; `storeLinks.js` carries the full four-location map).
+there. The web mirror is [`client/src/lib/appLinks.js`](../client/src/lib/appLinks.js) (no shared
+module in this repo — keep the two in sync; `storeLinks.js` carries the full four-location map).
 
-⚠️ Google Play **internal testing** only admits testers on an explicit list (100 max), so that link
-can wall someone. Every surface rendering it therefore ends with a short "if a link doesn't work,
-ask/reply" line rather than promising a download. `services/campaignRoster.js`'s silent auto-add is comment- and test-guarded to
-never email.
+**Post-launch state (both stores went public 2026-07-28).** Both `MOBILE_INSTALL_URL_*` are set in
+Heroku. On **iOS** install and update converged on one App Store page, so `MOBILE_STORE_URL_IOS` is
+now a no-op. On **Android** they have *not* converged and must not be forced to: a new person
+installs `com.doorline.app` (the new Play org account) while the fielded fleet runs
+`com.canvassapp.mobile`, so `MOBILE_STORE_URL_ANDROID` stays deliberately **unset** until the Play
+cutover, when it becomes the lever that walks stragglers across.
+
+The install block still ends with a short "search for Doorline if a link doesn't open" line rather
+than promising a one-tap download — a store link opened from a desktop mail client or an in-app
+webview frequently can't hand off to the phone's store. `services/campaignRoster.js`'s silent
+auto-add is comment- and test-guarded to never email.
 
 ## Reset/invite tokens (`services/auth/passwordReset.js`)
 
@@ -203,7 +224,9 @@ there. That is a preview artifact, not a bug — check it here or in a real inbo
 `test/mailTemplates.test.js` — **pure, no mongod, never skips.** Locks the role→install-links rule:
 canvasser gets both URLs in HTML *and* text; admin, lead and an *absent* role get none;
 `provisioningWelcome` never does; `addedToOrg` drops the console-only "switch into it" wording for a
-canvasser; and the env override renders `&` escaped in HTML but raw in text. Every other content
+canvasser; and the env override renders `&` escaped in HTML but raw in text. It also holds the
+closing note to both halves independently — "App Store" and "Google Play" must each appear in the
+HTML *and* the text, and the retired phrase `closed test` must appear in neither. Every other content
 assertion in this file is an integration test that silently skips without `MONGODB_URI_TEST` —
 which is precisely how the canvasser dead-end shipped.
 
