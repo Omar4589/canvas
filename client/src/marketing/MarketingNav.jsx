@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Logo from '../components/Logo.jsx';
 import { useAuthCta } from './useAuthCta.js';
-import { demoMailto } from './contact.js';
+import { useDemoRequest } from './DemoRequest.jsx';
 
 // Sticky top nav for the public marketing site. Anchor links scroll to the
 // in-page sections; the auth control adapts to whether someone is signed in.
@@ -18,6 +18,7 @@ const SECTIONS = [
 
 export default function MarketingNav() {
   const cta = useAuthCta();
+  const demo = useDemoRequest();
   const [open, setOpen] = useState(false);
 
   return (
@@ -48,32 +49,38 @@ export default function MarketingNav() {
           </nav>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            {/* Auth control. Hidden until auth resolves so logged-in visitors
-                don't see a "Sign in" flash that swaps to "Go to dashboard". */}
-            {!cta.loading &&
-              (cta.authed ? (
-                <Link
-                  to={cta.to}
-                  className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4"
-                >
-                  <span className="sm:hidden">Dashboard</span>
-                  <span className="hidden sm:inline">Go to dashboard</span>
-                </Link>
-              ) : (
-                <Link
-                  to={cta.to}
-                  className="hidden rounded text-sm text-gray-600 transition-colors hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:inline-flex"
-                >
-                  Sign in
-                </Link>
-              ))}
-            <a
-              href={demoMailto()}
+            {/* Auth control. Hidden until auth resolves so logged-in visitors don't see a
+                "Sign in" flash that swaps to "Go to dashboard".
+
+                ONE treatment in both states — an outline button. It used to be a bare text link
+                when signed out and a button when signed in, so the nav gained and lost a button
+                depending on who was looking. And it was `hidden sm:inline-flex`, which put the
+                only way back in behind the hamburger on a phone: for a product whose users are
+                provisioned-only returning traffic, hiding sign-in is the wrong trade. It is
+                ~90px wide and there is room. */}
+            {!cta.loading && (
+              <Link
+                to={cta.to}
+                className="inline-flex items-center justify-center rounded-md border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-900 shadow-sm transition-colors hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4"
+              >
+                {cta.authed ? (
+                  <>
+                    <span className="sm:hidden">Dashboard</span>
+                    <span className="hidden sm:inline">Go to dashboard</span>
+                  </>
+                ) : (
+                  'Sign in'
+                )}
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={demo.open}
               className="inline-flex items-center justify-center rounded-md bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4"
             >
               <span className="sm:hidden">Demo</span>
               <span className="hidden sm:inline">Request a demo</span>
-            </a>
+            </button>
 
             {/* Mobile section menu toggle */}
             <button
@@ -125,17 +132,8 @@ export default function MarketingNav() {
                   </a>
                 </li>
               ))}
-              {!cta.authed && (
-                <li className="sm:hidden">
-                  <Link
-                    to={cta.to}
-                    onClick={() => setOpen(false)}
-                    className="block rounded-md px-2 py-3 text-sm text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                  >
-                    Sign in
-                  </Link>
-                </li>
-              )}
+              {/* No "Sign in" row here any more — the header's auth control is visible at every
+                  width now, so this was a second copy of the same link one tap deeper. */}
             </ul>
           </div>
         </nav>

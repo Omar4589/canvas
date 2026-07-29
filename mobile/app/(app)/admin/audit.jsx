@@ -8,12 +8,19 @@ import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, deviceTimezone } from '../../../lib/dateRanges';
 import { spacing, radius } from '../../../lib/theme';
+import { makeRateColors } from '../../../lib/rates';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
-import KpiGrid from '../../../components/KpiGrid';
+import InsetGroup, {
+  InsetHeroRow,
+  InsetRow,
+  InsetNoteRow,
+  InsetActionRow,
+  GroupFooter,
+} from '../../../components/InsetGroup';
 import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
@@ -141,14 +148,16 @@ export default function AdminAudit() {
     });
   }
 
-  const kpiTiles = [
-    { label: 'Open', value: (totals.open || 0).toLocaleString(), sub: 'Need review', level: totals.open > 0 ? 'caution' : undefined },
+  // Total is the group's hero; Open leads the rows and gets the caution chip when nonzero
+  // (the only judgment call on this screen — everything else is a plain count by flag type).
+  const rateColors = makeRateColors(colors);
+  const flagRows = [
+    { label: 'Open', value: (totals.open || 0).toLocaleString(), sub: 'Need review', caution: totals.open > 0 },
     { label: 'Mock GPS', value: (totals.mockGps || 0).toLocaleString(), sub: 'Mock provider' },
     { label: 'Far', value: (totals.far || 0).toLocaleString(), sub: 'From house' },
     { label: 'Rapid', value: (totals.rapid || 0).toLocaleString(), sub: 'Too fast' },
     { label: 'One-spot', value: (totals.oneSpot || 0).toLocaleString(), sub: 'One place' },
     { label: 'Weak GPS', value: (totals.weakGps || 0).toLocaleString(), sub: 'Unreliable' },
-    { label: 'Total', value: (totals.flaggedActions || 0).toLocaleString(), sub: rangeLabel },
   ];
 
   const canvasserTabs = [
@@ -189,17 +198,21 @@ export default function AdminAudit() {
       </View>
 
       {rangeInvalid ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>That range won't work</Text>
-          <Text style={styles.emptyText}>Pick a range spanning at most {AUDIT_MAX_DAYS} days.</Text>
+        <View style={styles.groupWrap}>
+          <InsetGroup>
+            <InsetNoteRow>
+              That range won't work — pick a range spanning at most {AUDIT_MAX_DAYS} days.
+            </InsetNoteRow>
+          </InsetGroup>
         </View>
       ) : q.isError && !q.data ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>Couldn't load the audit</Text>
-          <Text style={styles.emptyText}>{q.error?.message || 'Check your connection and try again.'}</Text>
-          <Pressable onPress={() => q.refetch()} style={styles.retryBtn} hitSlop={6}>
-            <Text style={styles.retryBtnText}>Try again</Text>
-          </Pressable>
+        <View style={styles.groupWrap}>
+          <InsetGroup>
+            <InsetNoteRow>
+              Couldn't load the audit — {q.error?.message || 'check your connection and try again.'}
+            </InsetNoteRow>
+            <InsetActionRow label="Try again" onPress={() => q.refetch()} />
+          </InsetGroup>
         </View>
       ) : q.isLoading ? (
         <View style={styles.center}>
@@ -207,8 +220,23 @@ export default function AdminAudit() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
-          <View style={styles.kpiWrap}>
-            <KpiGrid tiles={kpiTiles} columns={3} compact />
+          <View style={styles.groupWrap}>
+            <InsetGroup>
+              <InsetHeroRow
+                label="Total"
+                value={(totals.flaggedActions || 0).toLocaleString()}
+                sub={rangeLabel}
+              />
+              {flagRows.map((r) => (
+                <InsetRow
+                  key={r.label}
+                  label={r.label}
+                  value={r.value}
+                  sub={r.sub}
+                  chipColors={r.caution ? rateColors.caution : null}
+                />
+              ))}
+            </InsetGroup>
           </View>
 
           {byCanvasser.length > 0 ? (
@@ -216,36 +244,36 @@ export default function AdminAudit() {
           ) : null}
 
           <View style={styles.listWrap}>
-            {entries.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyTitle}>No flagged entries</Text>
-                <Text style={styles.emptyText}>
+            <InsetGroup>
+              {entries.length === 0 ? (
+                <InsetNoteRow>
                   {reviewStatus === 'open'
-                    ? 'Nothing needs review for this range.'
+                    ? 'No flagged entries — nothing needs review for this range.'
                     : `No ${reviewStatus === 'all' ? '' : reviewStatus + ' '}flags in this range.`}
-                </Text>
-              </View>
-            ) : (
-              entries.map((e) => (
-                <FlaggedEntryCard
-                  key={e.actionId}
-                  entry={e}
-                  tz={tz}
-                  onReviewed={onReviewed}
-                  // "View on map" (item D4) — the web audit has this per entry; the map turns
-                  // its flag layer on, selects this entry, and flies to its GPS point.
-                  onViewOnMap={(entry) =>
-                    router.push(
-                      `/(app)/admin/map?flag=1&focusActivityId=${entry.actionId}&focusAt=${Date.now()}`
-                    )
-                  }
-                />
-              ))
-            )}
+                </InsetNoteRow>
+              ) : (
+                entries.map((e) => (
+                  <FlaggedEntryCard
+                    key={e.actionId}
+                    bare
+                    entry={e}
+                    tz={tz}
+                    onReviewed={onReviewed}
+                    // "View on map" (item D4) — the web audit has this per entry; the map turns
+                    // its flag layer on, selects this entry, and flies to its GPS point.
+                    onViewOnMap={(entry) =>
+                      router.push(
+                        `/(app)/admin/map?flag=1&focusActivityId=${entry.actionId}&focusAt=${Date.now()}`
+                      )
+                    }
+                  />
+                ))
+              )}
+            </InsetGroup>
             {data.total > entries.length ? (
-              <Text style={styles.truncated}>
+              <GroupFooter>
                 Showing {entries.length} of {data.total} — narrow the range or filters to see the rest.
-              </Text>
+              </GroupFooter>
             ) : null}
           </View>
         </ScrollView>
@@ -284,28 +312,8 @@ function makeStyles(t) {
       flexWrap: 'wrap',
     },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
-    emptyTitle: { ...type.h3 },
-    emptyText: { ...type.caption, textAlign: 'center' },
-    retryBtn: {
-      marginTop: spacing.sm,
-      paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.sm,
-      borderRadius: radius.md,
-      backgroundColor: colors.brand,
-    },
-    retryBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 14 },
-    kpiWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+    groupWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
     listWrap: { paddingHorizontal: spacing.lg, marginTop: spacing.sm },
-    emptyCard: {
-      backgroundColor: colors.card,
-      borderRadius: radius.lg,
-      padding: spacing.xl,
-      borderWidth: 1,
-      borderColor: colors.border,
-      alignItems: 'center',
-      gap: spacing.xs,
-    },
-    truncated: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
     flash: {
       position: 'absolute',
       bottom: spacing.xl,

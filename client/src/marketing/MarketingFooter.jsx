@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import Logo from '../components/Logo.jsx';
-import { demoMailto } from './contact.js';
+import { contactMailto } from './contact.js';
 import { useAuthCta } from './useAuthCta.js';
 import { IOS_INSTALL_URL, ANDROID_INSTALL_URL } from '../lib/appLinks.js';
 import badgeAppStore from '../assets/marketing/badge-app-store.svg';
@@ -28,9 +28,11 @@ const LINKS = [
 
 export default function MarketingFooter() {
   const cta = useAuthCta();
-  // Privacy/Terms are static; the last link is auth-aware — "Dashboard" when signed in,
-  // "Sign in" when not — so the footer never disagrees with the nav.
-  const links = [...LINKS, { to: cta.to, label: cta.authed ? 'Dashboard' : 'Sign in' }];
+  // Privacy/Terms are static; the last link is auth-aware. It reads from useAuthCta's own label
+  // rather than a hand-rolled ternary — that local copy said "Dashboard" at every width while
+  // the nav says "Go to dashboard" from sm up, so the comment claiming the footer never
+  // disagrees with the nav was false on every desktop.
+  const links = [...LINKS, { to: cta.to, label: cta.label }];
   return (
     <footer className="border-t border-stone-200 bg-white">
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
@@ -41,7 +43,19 @@ export default function MarketingFooter() {
               Doorline is the door-to-door canvassing platform for political campaigns and every
               cause that knocks doors — a web operations console plus an offline-first field app.
             </p>
-            <div className="mt-5 flex flex-wrap items-center gap-3">
+            {/* Labelled, and pointing at /app for the canvasser who wants the "do I need an
+                account first?" answer before tapping a store link. The heading sits ABOVE the
+                badges, never beside them — the badge clear-space rules forbid adjacent text. */}
+            <p className="mt-6 text-sm font-semibold text-stone-900">
+              Get the app ·{' '}
+              <a
+                href="/app"
+                className="rounded font-semibold text-stone-600 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 hover:decoration-stone-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+              >
+                for canvassers
+              </a>
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
               <a
                 href={IOS_INSTALL_URL}
                 target="_blank"
@@ -98,9 +112,12 @@ export default function MarketingFooter() {
                   )}
                 </li>
               ))}
+              {/* A plain mailto, unlike the four primary "Request a demo" controls which open
+                  the dialog. This one is the deliberate escape hatch for someone who would
+                  rather compose their own email — never the main path. */}
               <li>
                 <a
-                  href={demoMailto()}
+                  href={contactMailto()}
                   className="rounded text-sm text-stone-600 transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                 >
                   Contact

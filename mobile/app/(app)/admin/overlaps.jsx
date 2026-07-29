@@ -4,7 +4,6 @@ import {
   Text,
   Pressable,
   ScrollView,
-  ActivityIndicator,
   RefreshControl,
   StyleSheet,
 } from 'react-native';
@@ -14,24 +13,33 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
 import { useAdminCampaign } from '../../../lib/useAdminCampaign';
-import { rangeFor } from '../../../lib/dateRanges';
-import { timeAgo, formatExact } from '../../../lib/datetime';
-import { radius, spacing, actionLabel } from '../../../lib/theme';
+import { PRESETS, rangeFor } from '../../../lib/dateRanges';
+import { timeAgo } from '../../../lib/datetime';
+import { spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
+import TabSwitcher from '../../../components/TabSwitcher';
+import InsetGroup, {
+  InsetHeroRow,
+  InsetNavRow,
+  InsetNoteRow,
+  InsetActionRow,
+  GroupFooter,
+} from '../../../components/InsetGroup';
 
-const PRESETS = [
-  { key: 'today', label: 'Today' },
-  { key: 'yesterday', label: 'Yesterday' },
-  { key: '7d', label: '7 days' },
-  { key: '30d', label: '30 days' },
-  { key: 'all', label: 'All time' },
-];
+// 'custom' needs the from/to pickers this screen doesn't have; every other preset applies.
+const OVERLAP_PRESETS = PRESETS.filter((p) => p.key !== 'custom');
 
-
-function actionColor(colors, t) {
-  return colors.status[t === 'survey_submitted' ? 'surveyed' : t] || colors.textMuted;
+// The most recent knock across every pass on the door — the "latest ⏱" in the row's sub.
+function latestAt(o) {
+  let max = null;
+  for (const p of o.passes || []) {
+    for (const c of p.canvassers || []) {
+      if (c.lastAt && (!max || c.lastAt > max)) max = c.lastAt;
+    }
+  }
+  return max;
 }
 
 export default function AdminOverlaps() {
@@ -89,32 +97,7 @@ export default function AdminOverlaps() {
         Houses knocked by 2+ canvassers within the same pass.
       </Text>
 
-      {/* flexGrow:0 — without it this horizontal ScrollView flexes in the screen column:
-          it stretched the pills tall when the list was empty and clipped their descenders
-          when it was full (the screenshot bug). */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0 }}
-        contentContainerStyle={styles.presetRow}
-      >
-        {PRESETS.map((p) => {
-          const active = p.key === preset;
-          return (
-            <Pressable
-              key={p.key}
-              onPress={() => setPreset(p.key)}
-              style={[styles.presetPill, active && styles.presetPillActive]}
-            >
-              <Text
-                style={[styles.presetPillText, active && styles.presetPillTextActive]}
-              >
-                {p.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+      <TabSwitcher tabs={OVERLAP_PRESETS} activeKey={preset} onChange={setPreset} />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -124,113 +107,91 @@ export default function AdminOverlaps() {
         }
       >
         {campaign === null ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>No campaign selected</Text>
-            <Text style={styles.emptyText}>
-              Pick a campaign you manage from the Overview, then come back here.
-            </Text>
-          </View>
+          <InsetGroup>
+            <InsetNoteRow>
+              No campaign selected — pick a campaign you manage from the Overview, then come back here.
+            </InsetNoteRow>
+          </InsetGroup>
         ) : overlapsQ.error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>Couldn't load overlaps: {overlapsQ.error.message}</Text>
-            <Pressable onPress={() => overlapsQ.refetch()} hitSlop={6}>
-              <Text style={styles.retry}>Try again</Text>
-            </Pressable>
-          </View>
+          <InsetGroup>
+            <InsetNoteRow>Couldn't load overlaps: {overlapsQ.error.message}</InsetNoteRow>
+            <InsetActionRow label="Try again" onPress={() => overlapsQ.refetch()} />
+          </InsetGroup>
         ) : overlapsQ.isLoading ? (
-          <ActivityIndicator color={colors.brand} />
+          <InsetGroup>
+            <InsetNoteRow loading />
+          </InsetGroup>
         ) : overlaps.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>No overlap 🎉</Text>
-            <Text style={styles.emptyText}>
-              Every house in this range was visited by at most one canvasser.
+          <InsetGroup>
+            <InsetNoteRow>
+              No overlap 🎉 — every house in this range was visited by at most one canvasser.
               {outOfRange > 0 ? ` ${outOfRange} more sit outside your dates — widen the range to see them.` : ''}
-            </Text>
-          </View>
+            </InsetNoteRow>
+          </InsetGroup>
         ) : (
           <>
-            <View style={styles.summary}>
-              <Text style={styles.summaryValue}>{overlaps.length}</Text>
-              <Text style={styles.summaryLabel}>
-                {overlaps.length === 1 ? 'house' : 'houses'} with overlap
-              </Text>
+            <View style={styles.summaryWrap}>
+              <InsetGroup>
+                <InsetHeroRow
+                  label={overlaps.length === 1 ? 'House with overlap' : 'Houses with overlap'}
+                  value={overlaps.length.toLocaleString()}
+                />
+              </InsetGroup>
+              {outOfRange > 0 ? (
+                <GroupFooter>
+                  +{outOfRange} more outside your dates — widen the range to see them.
+                </GroupFooter>
+              ) : null}
             </View>
-            {outOfRange > 0 ? (
-              <Text style={styles.outOfRangeHint}>
-                +{outOfRange} more outside your dates — widen the range to see them.
-              </Text>
-            ) : null}
 
-            {overlaps.map((o) => (
-              <Pressable
-                key={o.householdId}
-                // Item D14 — each entry opens a detail screen with a map of the house.
-                // The whole entry threads through params so the detail renders instantly.
-                onPress={() =>
-                  router.push({
-                    pathname: `/(app)/admin/overlap/${o.householdId}`,
-                    params: {
-                      data: JSON.stringify(o),
-                      campaignId: cId,
-                      tz: campaign?.timeZone || '',
-                    },
-                  })
-                }
-                style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}>
-                <View style={styles.cardHead}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.address}>
-                      {o.household
+            {/* One summary row per house — who/when per pass lives on the drill-in, which
+                renders instantly because the whole entry threads through params (item D14). */}
+            <InsetGroup>
+              {overlaps.map((o) => {
+                const latest = latestAt(o);
+                const passCount = (o.passes || []).length;
+                return (
+                  <InsetNavRow
+                    key={o.householdId}
+                    label={
+                      o.household
                         ? `${o.household.addressLine1}${o.household.addressLine2 ? `, ${o.household.addressLine2}` : ''}`
-                        : 'Address unavailable'}
-                    </Text>
-                    {o.household ? (
-                      <Text style={styles.addressSub}>
-                        {o.household.city}, {o.household.state} {o.household.zipCode}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <View style={styles.countBadge}>
-                    <Text style={styles.countBadgeText}>{o.totalCanvassers} canvassers</Text>
-                  </View>
-                </View>
-
-                {o.passes.map((p) => (
-                  <View key={p.passId || 'none'} style={styles.passBlock}>
-                    <Text style={styles.passLabel}>{p.roundLabel}</Text>
-                    <View style={styles.canvassers}>
-                      {p.canvassers.map((c, i) => (
-                        <View key={`${c.userId}-${i}`} style={styles.canvasserRow}>
-                          <View
-                            style={[
-                              styles.actionDot,
-                              { backgroundColor: actionColor(colors, c.actionType) },
-                            ]}
-                          />
-                          <View style={{ flex: 1 }}>
-                            <View style={styles.canvasserTopLine}>
-                              <Text style={styles.canvasserName} numberOfLines={1}>
-                                {c.firstName} {c.lastName}
-                              </Text>
-                              <Text style={styles.canvasserAction}>
-                                {actionLabel(c.actionType)}
-                              </Text>
-                              <Text style={styles.canvasserTimeAgo}>
-                                {timeAgo(c.lastAt)}
-                              </Text>
-                            </View>
-                            <Text style={styles.canvasserTimestamp}>
-                              {formatExact(c.lastAt, campaign?.timeZone)}
-                              {c.inRange === false ? ' · earlier' : ''}
-                            </Text>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                ))}
-              </Pressable>
-            ))}
+                        : 'Address unavailable'
+                    }
+                    unit={
+                      o.household
+                        ? `${o.household.city}, ${o.household.state} ${o.household.zipCode}`
+                        : null
+                    }
+                    sub={[
+                      `${o.totalCanvassers} canvassers`,
+                      `${passCount} ${passCount === 1 ? 'pass' : 'passes'}`,
+                      latest ? `latest ${timeAgo(latest)}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                    // Overlap is a fact to review, not an error — brand tint, with brandDark
+                    // for the small text (raw brand on brandTint is 4.41:1 and fails).
+                    badge={{
+                      text: String(o.totalCanvassers),
+                      bg: colors.brandTint,
+                      fg: colors.brandDark,
+                    }}
+                    hint="Opens this house's overlap detail"
+                    onPress={() =>
+                      router.push({
+                        pathname: `/(app)/admin/overlap/${o.householdId}`,
+                        params: {
+                          data: JSON.stringify(o),
+                          campaignId: cId,
+                          tz: campaign?.timeZone || '',
+                        },
+                      })
+                    }
+                  />
+                );
+              })}
+            </InsetGroup>
           </>
         )}
       </ScrollView>
@@ -239,164 +200,25 @@ export default function AdminOverlaps() {
 }
 
 function makeStyles(t) {
-  const { colors, type, shadow } = t;
+  const { colors, type } = t;
   return StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
-  headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
+    screen: { flex: 1, backgroundColor: colors.bg },
+    header: {
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
+    headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
 
-  intro: {
-    ...type.caption,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
+    intro: {
+      ...type.caption,
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm,
+    },
 
-  presetRow: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  presetPill: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  presetPillActive: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  presetPillText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
-  presetPillTextActive: { color: colors.textInverse },
-
-  empty: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.successBorder,
-    alignItems: 'center',
-  },
-  emptyTitle: { ...type.h3, marginBottom: spacing.xs },
-  emptyText: { ...type.caption, textAlign: 'center' },
-
-  summary: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    marginBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  summaryValue: { ...type.title, color: colors.brand },
-  summaryLabel: { ...type.caption },
-
-  outOfRangeHint: {
-    ...type.caption,
-    fontSize: 11,
-    marginBottom: spacing.sm,
-    marginLeft: spacing.xs,
-  },
-  errorBox: {
-    backgroundColor: colors.dangerBg,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  errorText: { ...type.body, fontSize: 13, color: colors.danger },
-  retry: { fontSize: 13, fontWeight: '700', color: colors.danger },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-  },
-  cardHead: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  address: { ...type.bodyStrong, fontSize: 14 },
-  addressSub: { ...type.caption, marginTop: 2 },
-  countBadge: {
-    backgroundColor: colors.brandTint,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.brand,
-  },
-  countBadgeText: {
-    color: colors.brand,
-    fontWeight: '800',
-    fontSize: 12,
-  },
-
-  passBlock: { marginTop: spacing.sm },
-  passLabel: {
-    ...type.caption,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-  },
-  canvassers: {
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    gap: spacing.sm,
-  },
-  canvasserRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  actionDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 6,
-  },
-  canvasserTopLine: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: spacing.sm,
-  },
-  canvasserName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    flex: 1,
-  },
-  canvasserAction: {
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  canvasserTimeAgo: {
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  canvasserTimestamp: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 2,
-    fontVariant: ['tabular-nums'],
-  },
+    summaryWrap: { marginBottom: spacing.md },
   });
 }

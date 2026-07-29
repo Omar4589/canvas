@@ -184,8 +184,9 @@ export function InsetNavRow({
 }
 
 // (c) ACTS IN PLACE. Tinted, no chevron — the convention for "does something here" as opposed
-// to "goes elsewhere".
-export function InsetActionRow({ label, onPress, disabled }) {
+// to "goes elsewhere". `tone="danger"` for destructive verbs (sign out, delete) — same shape,
+// danger tint, so a destructive action never reads like navigation either.
+export function InsetActionRow({ label, onPress, disabled, tone = 'brand' }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
@@ -195,19 +196,33 @@ export function InsetActionRow({ label, onPress, disabled }) {
       accessibilityLabel={label}
       style={({ pressed }) => [styles.row, disabled && styles.rowDisabled, pressed && styles.rowPressed]}
     >
-      <Text style={styles.actionLabel}>{label}</Text>
+      <Text style={[styles.actionLabel, tone === 'danger' && styles.actionLabelDanger]}>{label}</Text>
     </Pressable>
   );
 }
 
-// The group's headline number: small caps label over a large tabular value.
-export function InsetHeroRow({ label, value, sub }) {
+// The group's headline number: small caps label over a large tabular value. `subAccent` /
+// `accentColor` mirror InsetRow's: a trailing sub-line fragment that carries the color, so a
+// hero can show the same '▲ 12 vs team' delta its sibling rows do.
+export function InsetHeroRow({ label, value, sub, subAccent, accentColor }) {
   const styles = useThemedStyles(makeStyles);
   return (
-    <View style={styles.hero} accessible accessibilityRole="text" accessibilityLabel={a11yLabel(label, value, sub)}>
+    <View
+      style={styles.hero}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={a11yLabel(label, value, sub, subAccent)}
+    >
       <Text style={styles.heroLabel}>{label}</Text>
       <Text style={styles.heroValue}>{value}</Text>
-      {sub ? <Text style={styles.sub}>{sub}</Text> : null}
+      {sub || subAccent ? (
+        <Text style={styles.sub}>
+          {sub}
+          {subAccent ? (
+            <Text style={[styles.subAccent, accentColor && { color: accentColor }]}>{subAccent}</Text>
+          ) : null}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -308,7 +323,7 @@ function makeStyles(t) {
 
     hero: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
     // type.micro defaults to textMuted, which is only 2.54:1 on card — below the floor for
-    // 11pt text. Override to textSecondary (4.83:1), the same thing KpiTile does.
+    // 11pt text. Override to textSecondary (4.83:1).
     heroLabel: { ...type.micro, color: colors.textSecondary },
     heroValue: { ...type.display, fontVariant: ['tabular-nums'], marginTop: 2 },
 
@@ -357,6 +372,7 @@ function makeStyles(t) {
     badgeText: { ...type.micro, color: colors.dangerFg },
 
     actionLabel: { ...type.bodyStrong, color: colors.brand },
+    actionLabelDanger: { color: colors.danger },
 
     titleRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
     titleText: { ...type.h3 },

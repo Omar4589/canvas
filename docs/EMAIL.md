@@ -30,6 +30,15 @@ disclosed subprocessor — DPA §6 + the privacy policy's service-providers para
 | 7 | **Support-access notice** | Doorline staff opens a **new** support-access grant into an org | **Billing admins only** (see below) |
 | 8 | **Wind-down warning** | The nightly sweep finds a canceled org within ~30 days of data deletion — sent once, and the deletion **cannot proceed without it** | **Billing admins only** |
 | 9 | **Dormancy warning** | The nightly sweep finds a non-paying org nearing the ~30-month inactivity boundary — sent once; any recorded canvassing cancels the deletion | **Billing admins only** |
+| 10 | **Demo request** | A visitor submits the demo form on the public marketing site | **Us** — `DEMO_REQUEST_TO`, default `hello@doorline.app` |
+
+**Email 10 is the odd one out and stays that way deliberately.** It is the only email addressed to
+Doorline rather than to a customer, so: it overrides the shared layout's footer (telling ourselves
+our address "is associated with a Doorline account" would be a false sentence), it is the only
+sender to pass `replyTo` — the prospect's address, so Reply answers them instead of `MAIL_FROM` —
+and its subject is `Demo request — {organization}` and nothing else. That last one is a privacy
+constraint, not a style choice: subjects are copied verbatim into `EmailLog`, so the prospect's
+name and address live in the body, which is never logged. See [MARKETING_SITE.md](MARKETING_SITE.md).
 
 **Billing admins only** (emails 7–9, an owner decision): these billing-grade notices go to the
 admins who hold **Billing access**, or — only when an org has none — to the **billing contact**
@@ -114,8 +123,14 @@ already sent cannot be recalled, so the fix has to reach *future* mail immediate
 `mustChangePassword` holders) · `routes/superAdmin/organizations.js` (provisioningWelcome) ·
 `routes/superAdmin/access.js` (supportGrantNotice — only when `createGrant` reports
 `created: true`) · `services/retention/triggers.js` (windDownWarning / dormancyWarning via
-`deliverWarning`). All route sends are fire-and-forget (sendMail never rejects); token issuance
-is awaited first.
+`deliverWarning`) · `routes/public/demoRequest.js` (demoRequest — the only **public,
+unauthenticated** send site). All route sends are fire-and-forget (sendMail never rejects); token
+issuance is awaited first.
+
+**One exception to fire-and-forget:** `demoRequest` **awaits** the send and returns 502 if it
+fails. `POST /auth/forgot-password` answers before doing its work so response time can't reveal
+whether an account exists; there is no such oracle on a demo form, and a silently failed send is a
+lost sale — so it follows `resendInvite.js` instead, where the send *is* the request.
 
 ### Role-aware copy — canvassers are pointed at the app, not the console
 

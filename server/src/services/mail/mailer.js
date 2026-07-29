@@ -109,10 +109,16 @@ function toArray(to) {
  * Resend 2xx. The retention wind-down / dormancy WARNING job keys "we told this customer before we
  * delete their data" off this flag, so a false positive here would let us delete data we never warned
  * about. Every other outcome — dormant, non-2xx, thrown, aborted — is { sent: false, ... }.
+ *
+ * `replyTo` is optional and only used by the demo-request notice (routes/public/demoRequest.js),
+ * where the message goes to US and Reply must reach the prospect instead of MAIL_FROM. It is
+ * sanitized like any other header and deliberately NEVER reaches EmailLog — that log is
+ * metadata-only, and this address belongs to a member of the public, not to a user of ours.
  */
-export async function sendMail({ to, subject, html, text, kind, meta } = {}) {
+export async function sendMail({ to, subject, html, text, kind, meta, replyTo } = {}) {
   const recipients = toArray(to);
   const safeSubject = sanitizeHeader(subject);
+  const safeReplyTo = replyTo ? sanitizeHeader(replyTo) : null;
 
   if (!mailEnabled()) {
     if (process.env.RESEND_API_KEY && !process.env.MAIL_FROM && !warnedKeyNoFrom) {
@@ -121,7 +127,7 @@ export async function sendMail({ to, subject, html, text, kind, meta } = {}) {
     }
     // Dormant: log intent (full addresses are fine in dev) and stash on the ring buffer.
     console.log(`[mailer] DORMANT ${kind || 'mail'} → ${recipients.join(', ') || '(none)'} :: ${safeSubject}`);
-    pushOutbox({ to: recipients, subject: safeSubject, html, text, kind, at: new Date() });
+    pushOutbox({ to: recipients, subject: safeSubject, html, text, kind, replyTo: safeReplyTo, at: new Date() });
     recordEmail({ kind, recipients, subject: safeSubject, outcome: 'dormant', meta });
     return { sent: false, disabled: true };
   }
@@ -137,7 +143,7 @@ export async function sendMail({ to, subject, html, text, kind, meta } = {}) {
       warnedTestTransport = true;
       console.warn('[mailer] TEST transport active — no real mail is being delivered.');
     }
-    pushOutbox({ to: recipients, subject: safeSubject, html, text, kind, at: new Date() });
+    pushOutbox({ to: recipients, subject: safeSubject, html, text, kind, replyTo: safeReplyTo, at: new Date() });
     // Accepted test sends fabricate a resendId, so tests can drive the full accept → webhook →
     // delivery-status loop with no network (test/resendWebhook.int.test.js).
     recordEmail({
@@ -160,7 +166,14 @@ export async function sendMail({ to, subject, html, text, kind, meta } = {}) {
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from, to: recipients, subject: safeSubject, html, text }),
+      body: JSON.stringify({
+        from,
+        to: recipients,
+        subject: safeSubject,
+        html,
+        text,
+        ...(safeReplyTo ? { reply_to: safeReplyTo } : {}),
+      }),
       signal: ctrl.signal,
     });
     if (!res.ok) {

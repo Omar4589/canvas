@@ -142,10 +142,30 @@ the vocabulary holds across a whole journey rather than changing shape at each t
   spacers (`width: 64` and `width: 80`, both deleted); a long campaign name no longer truncates.
   Timeline takes the same left-aligned title without a back link, since it is a tab root.
 
-**Still on the old idiom** (deliberately, not oversight): Timeline's body — its KPI strip, hourly
-grid, roster and overlaps — and the canvasser screen's KPI strip and highlights row. Both still
-use `KpiGrid`, which `admin/audit.jsx` and `canvasser/[id]/quality.jsx` also depend on, so it is
-unchanged.
+**The conversion is complete.** Every admin screen now speaks the grammar: More,
+response-details, Notes, answer-voters, Users (list), GPS audit, Overlaps, Timeline's scrollable
+body (its ~100 lines of pinned control chrome — stepper, metric toggle, search/sort, compare —
+deliberately stay as controls, not rows), and both canvasser sub-screens (index KPIs/highlights/
+quality rows, quality tab). **`KpiTile`/`KpiGrid` are deleted** — the grid idiom is retired,
+because a grid turns every extra character into a narrower column (the label-truncation bug that
+started this redesign) while a row list turns the same overflow into a taller row. Specifics
+worth knowing:
+
+- The canvasser screen's **team deltas** render as the row's sub-line accent (`▲ 1.4h vs team`,
+  `success` when ahead, muted otherwise) — the retired tile's semantics in the row idiom.
+  `InsetHeroRow` grew the same `subAccent`/`accentColor` pair so the headline metric keeps its
+  delta too.
+- **Timeline's KPI group** ends in the same "How these are counted" → `MetricSheet` affordance
+  as Overview and the campaign screen — one vocabulary at all three levels. Its roster is one
+  group of `bare` `CanvasserCard`s; audit's flag list is one group of `bare`
+  `FlaggedEntryCard`s (both cards keep their chrome everywhere else — `map.jsx` renders
+  FlaggedEntryCard as a standalone card).
+- **Overlaps** (both the Overlaps screen and Timeline's section) collapsed to one summary row
+  per house — `N canvassers · M passes · latest ⏱` with a brand-tinted count badge. The
+  Overlaps screen's rows navigate to the per-house drill-in; Timeline's stay inert because its
+  payload (`computeOverlaps`) isn't the drill-in's shape.
+- Retry lives inside the grammar: a failed group is an `InsetNoteRow` (message) followed by an
+  `InsetActionRow` ("Try again") — no bespoke retry buttons remain.
 
 ### The campaign screen's "By pass" card
 On a campaign's detail screen, between the Activity group and Coverage, a **By pass** group lists

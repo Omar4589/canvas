@@ -251,6 +251,36 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   *deleting a campaign removes only that campaign's copies; "do not contact" survives any
   campaign delete; org deletion sweeps DNC uploads and pendings with everything else.*
 
+- *(v4 2026-07-29)* **⚠️ NEW DATA-SUBJECT CLASS: prospects. Needs an owner decision on the published
+  Privacy Policy.** The marketing site's "Request a demo" CTA was a `mailto:` and is now a real form
+  (`POST /api/demo-request`, `server/src/routes/public/demoRequest.js`). It collects a **name, work
+  email, organization, and optional free-text message, volunteered by a member of the public** — a
+  person who is not a user, not a voter, and not a customer.
+  **This is the part to look at, not the mechanics:** `client/public/privacy.html` enumerates exactly
+  three collection categories, and its account paragraph reads *"When an administrator creates an
+  account for you…"* — i.e. it currently describes a product in which personal data is **never**
+  self-submitted by a stranger. That sentence is not false yet (a demo request is not an account),
+  but the policy has no category this data belongs to. **Owner decision: whether to add a sentence
+  covering information volunteered through the website.** The static legal pages are edited
+  deliberately by the owner, never as a side effect of code — so this entry records the gap rather
+  than closing it.
+  What keeps the exposure minimal, and both are load-bearing invariants, not incidental:
+  **(a) Nothing is stored.** There is no `Lead`/`DemoRequest` model and there must not be one without
+  a fresh review. The submission becomes an email and nothing else; the only persistent trace is the
+  metadata-only `EmailLog` row, whose `to` is *our own* address (`DEMO_REQUEST_TO`), so it holds no
+  prospect PII. The subject is deliberately `Demo request — {organization}` with the name and address
+  confined to the unlogged body — subjects are copied verbatim into `EmailLog` and shown on
+  `/super-admin/emails` for 365 days.
+  **(b) No new subprocessor.** Mail goes via Resend, already disclosed in `DPA.md` §6. Bot defence is
+  a **honeypot + a time-to-submit floor**, chosen specifically because a hosted captcha (Turnstile /
+  hCaptcha / reCAPTCHA) would receive end-user IP and browser signals and therefore be a new
+  subprocessor — a **DPA §6 customer-notice event, not a code decision**. If anyone later reaches for
+  a captcha, that gate applies.
+  Guard test: `server/test/demoRequest.test.js` (subject carries no prospect identifier; bot
+  rejections send nothing). Reference: `docs/MARKETING_SITE.md`.
+  **Assessment: NO published-policy sentence becomes FALSE. One published-policy sentence becomes
+  INCOMPLETE — flagged above for the owner.**
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact

@@ -15,9 +15,10 @@ Doorline is a phone app — that's where you knock doors. It's free, and there's
 
 Any of these gets you the same app:
 
-1. **Search your app store** for **Doorline** — the App Store on iPhone, Google Play on Android.
-2. **Tap the install link in your invitation email.** A canvasser's invite has one for each platform, just under the button that sets your password.
-3. **Use the links on the web page after you set your password.** That link opens in a browser, which is normal — and if canvasser is your only role, the page it lands on has a **Get the app** card with both links instead of a dashboard.
+1. **Tap the install link in your invitation email.** A canvasser's invite has one for each platform, just under the button that sets your password.
+2. **Use the links on the web page after you set your password.** That link opens in a browser, which is normal — and if canvasser is your only role, the page it lands on has a **Get the app** card with both links instead of a dashboard.
+3. **Go to doorline.app/app.** A page with both store links that needs no login — the one to use if you've lost your invitation email, and the one to send a teammate who has.
+4. **Search your app store** for **Doorline** — the App Store on iPhone, Google Play on Android.
 
 If a link doesn't open the store, don't worry about it — just search for **Doorline** instead. Links sent to email sometimes can't hand off to the store app, especially when you open them on a computer rather than your phone.
 

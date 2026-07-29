@@ -18,17 +18,27 @@ import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, shiftDays, deviceTimezone } from '../../../lib/dateRanges';
-import { rateFromPct } from '../../../lib/rates';
+import { rateFromPct, makeRateColors } from '../../../lib/rates';
+import { metricHelp } from '../../../lib/metricHelp';
 import { downloadCsv } from '../../../lib/csv';
-import { radius, spacing, actionLabel } from '../../../lib/theme';
+import { timeAgo } from '../../../lib/datetime';
+import { radius, spacing, withAlpha } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
-import KpiGrid from '../../../components/KpiGrid';
 import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
 import CanvasserCard from '../../../components/CanvasserCard';
+import SectionHeader from '../../../components/SectionHeader';
+import MetricSheet from '../../../components/MetricSheet';
+import InsetGroup, {
+  InsetHeroRow,
+  InsetRow,
+  InsetNoteRow,
+  InsetActionRow,
+  GroupFooter,
+} from '../../../components/InsetGroup';
 
 const ROW_H = 46;
 const CELL_W = 40;
@@ -80,8 +90,17 @@ function fmtDayCol(ymd) {
   const [, m, d] = ymd.split('-');
   return `${Number(m)}/${Number(d)}`;
 }
-function actionColor(colors, t) {
-  return colors.status[t === 'survey_submitted' ? 'surveyed' : t] || colors.textMuted;
+
+// Most recent knock across a house's passes (the timeline overlap payload carries
+// `timestamp` per canvasser; ISO strings compare correctly as strings).
+function latestOverlapAt(o) {
+  let max = null;
+  for (const p of o.passes || []) {
+    for (const c of p.canvassers || []) {
+      if (c.timestamp && (!max || c.timestamp > max)) max = c.timestamp;
+    }
+  }
+  return max;
 }
 
 export default function AdminTimeline() {
@@ -118,6 +137,8 @@ export default function AdminTimeline() {
   const [hideInactive, setHideInactive] = useState(false);
   const [compareMode, setCompareMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [sheet, setSheet] = useState(null);
+  const rateColors = makeRateColors(colors);
   // Range seeded in device tz so the screen loads immediately; refined to the
   // campaign tz once known, until the admin picks a range (canvassers.jsx pattern).
   const [range, setRange] = useState(() => {
@@ -386,8 +407,12 @@ export default function AdminTimeline() {
       const v = c[bucketKey]?.[col.key] || 0;
       if (v > maxCell) maxCell = v;
     }
+  // Heat wash derived from the `info` token via withAlpha — the old literal rgb(59,130,246)
+  // was identical in both schemes, which put near-black `textPrimary` on a saturated blue in
+  // dark mode. The ramp tops out at 0.6 so `textPrimary` stays readable on the hottest cell
+  // in both schemes.
   const cellBg = (v) =>
-    v && maxCell ? `rgba(59,130,246,${(0.12 + 0.88 * (v / maxCell)).toFixed(3)})` : 'transparent';
+    v && maxCell ? withAlpha(colors.info, +(0.12 + 0.48 * (v / maxCell)).toFixed(3)) : 'transparent';
 
   // Column + grand totals from the displayed rows (respects the coordinator filter,
   // hide-inactive, and search so the grid footer matches what's on screen).
@@ -403,31 +428,61 @@ export default function AdminTimeline() {
 
   const rangeLabel = labelForRange(range);
 
-  const kpiTiles = [
+  // The KPI group's rows AND the MetricSheet's items — one list, so the sheet is anchored to
+  // exactly the values on screen (same shape admin/index and the campaign screen pass it).
+  const connLevel = rateFromPct(kpis.connPct)?.level;
+  const timelineMetrics = [
     {
+      key: 'doors',
       label: kpis.billRestricted ? 'Billable doors' : 'Doors',
       value: (kpis.billRestricted ? kpis.billableDoors : kpis.doors).toLocaleString(),
       sub: kpis.billRestricted
         ? `${kpis.doors.toLocaleString()} knocked + ${kpis.restrictedDoors.toLocaleString()} restricted`
         : `Distinct doors · ${rangeLabel}`,
+      help: metricHelp.doors,
     },
-    { label: 'Survey doors', value: kpis.surveys.toLocaleString(), sub: 'Doors with a survey' },
     {
+      key: 'surveyDoors',
+      label: 'Survey doors',
+      value: kpis.surveys.toLocaleString(),
+      sub: 'Doors with a survey',
+      help: metricHelp.surveyDoors,
+    },
+    {
+      key: 'rate',
       label: 'Connection rate',
       value: kpis.connPct != null ? `${kpis.connPct}%` : '—',
       sub: 'Surveys + lit ÷ doors',
-      level: rateFromPct(kpis.connPct)?.level,
+      level: connLevel,
+      help: metricHelp.connectionRate,
     },
     {
+      key: 'pace',
       label: 'Doors / hour',
       value: kpis.doorsPerHour != null ? kpis.doorsPerHour.toFixed(1) : '—',
       sub: 'While on doors',
+      help: metricHelp.doorsPerHour,
     },
     {
+      key: 'knocking',
       label: 'Knocking',
       value: `${knockingCount} of ${rosterIds.size}`,
       sub: coordinatorId ? 'Crew canvassers' : 'Roster canvassers',
+      help: metricHelp.activeCanvassers,
     },
+    // Sheet-only when restricted doors are on the bill — the count already rides the hero's
+    // sub line, so it isn't a row, but it still deserves its explanation.
+    ...(kpis.billRestricted
+      ? [
+          {
+            key: 'restricted',
+            label: 'Restricted',
+            value: kpis.restrictedDoors.toLocaleString(),
+            sheetOnly: true,
+            help: metricHelp.restricted,
+          },
+        ]
+      : []),
   ];
 
   function openCanvasser(r) {
@@ -445,11 +500,16 @@ export default function AdminTimeline() {
   }
 
   function toggleSelected(id) {
+    // The refusal is decided OUTSIDE the updater: React is allowed to double-invoke a
+    // setState updater (StrictMode does), so an Alert inside one can fire twice.
+    if (!selectedIds.has(id) && selectedIds.size >= 5) {
+      Alert.alert('Limit reached', 'Compare up to 5 canvassers at a time.');
+      return;
+    }
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
-      else if (next.size < 5) next.add(id);
-      else Alert.alert('Limit reached', 'Compare up to 5 canvassers at a time.');
+      else next.add(id);
       return next;
     });
   }
@@ -595,23 +655,24 @@ export default function AdminTimeline() {
       </View>
 
       {rangeInvalid ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>That range won't work</Text>
-          <Text style={styles.emptyText}>
-            Pick a start date on or before the end date, spanning at most {TIMELINE_MAX_DAYS} days.
-          </Text>
+        <View style={styles.groupWrap}>
+          <InsetGroup>
+            <InsetNoteRow>
+              That range won't work — pick a start date on or before the end date, spanning at
+              most {TIMELINE_MAX_DAYS} days.
+            </InsetNoteRow>
+          </InsetGroup>
         </View>
       ) : q.isError && !q.data ? (
         // Only a first-load failure blanks the screen; a poll error with cached data
         // below keeps the last-good dashboard on screen (LiveStatus shows how stale).
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>Couldn't load the timeline</Text>
-          <Text style={styles.emptyText}>
-            {q.error?.message || 'Something went wrong. Check your connection and try again.'}
-          </Text>
-          <Pressable onPress={() => q.refetch()} style={styles.retryBtn} hitSlop={6}>
-            <Text style={styles.retryBtnText}>Try again</Text>
-          </Pressable>
+        <View style={styles.groupWrap}>
+          <InsetGroup>
+            <InsetNoteRow>
+              Couldn't load the timeline — {q.error?.message || 'check your connection and try again.'}
+            </InsetNoteRow>
+            <InsetActionRow label="Try again" onPress={() => q.refetch()} />
+          </InsetGroup>
         </View>
       ) : q.isLoading ? (
         <View style={styles.center}>
@@ -619,10 +680,32 @@ export default function AdminTimeline() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl + (compareMode ? 72 : 0) }}>
-          {/* KPI strip — only when there's activity to summarize. */}
+          {/* KPI group — only when there's activity to summarize. Hero = the invoice figure;
+              the dedup commentary above `kpis` explains why none of these can be summed here. */}
           {coordRows.length > 0 ? (
-            <View style={styles.kpiWrap}>
-              <KpiGrid tiles={kpiTiles} columns={2} compact />
+            <View style={styles.groupWrap}>
+              <InsetGroup>
+                <InsetHeroRow
+                  label={timelineMetrics[0].label}
+                  value={timelineMetrics[0].value}
+                  sub={timelineMetrics[0].sub}
+                />
+                {timelineMetrics
+                  .filter((m, i) => i > 0 && !m.sheetOnly)
+                  .map((m) => (
+                    <InsetRow
+                      key={m.key}
+                      label={m.label}
+                      value={m.value}
+                      sub={m.sub}
+                      chipColors={m.level ? rateColors[m.level] : null}
+                    />
+                  ))}
+                <InsetActionRow
+                  label="How these are counted"
+                  onPress={() => setSheet({ title: 'How these are counted', items: timelineMetrics })}
+                />
+              </InsetGroup>
             </View>
           ) : null}
 
@@ -652,63 +735,69 @@ export default function AdminTimeline() {
           ) : null}
 
           {rows.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No activity</Text>
-              <Text style={styles.emptyText}>
-                {effortId ? 'No knocks in this walk list' : 'No knocks recorded'} — {rangeLabel}. Pick
-                another {efforts.length > 1 ? 'walk list or ' : ''}range above.
-              </Text>
+            <View style={styles.groupWrap}>
+              <InsetGroup>
+                <InsetNoteRow>
+                  No activity — {effortId ? 'no knocks in this walk list' : 'no knocks recorded'},{' '}
+                  {rangeLabel}. Pick another {efforts.length > 1 ? 'walk list or ' : ''}range above.
+                </InsetNoteRow>
+              </InsetGroup>
             </View>
           ) : coordRows.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No activity for this crew</Text>
-              <Text style={styles.emptyText}>Nobody on this crew knocked in the selected range.</Text>
+            <View style={styles.groupWrap}>
+              <InsetGroup>
+                <InsetNoteRow>
+                  No activity for this crew — nobody on this crew knocked in the selected range.
+                </InsetNoteRow>
+              </InsetGroup>
             </View>
           ) : displayRows.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No matches</Text>
-              <Text style={styles.emptyText}>
-                {search ? `No one matches “${search.trim()}”.` : 'No active canvassers in this range.'}
-              </Text>
+            <View style={styles.groupWrap}>
+              <InsetGroup>
+                <InsetNoteRow>
+                  {search
+                    ? `No matches — no one matches “${search.trim()}”.`
+                    : 'No matches — no active canvassers in this range.'}
+                </InsetNoteRow>
+              </InsetGroup>
             </View>
           ) : (
             <>
-              {/* Per-canvasser cards (checkbox selection in compare mode) */}
+              {/* Per-canvasser roster — one group of bare cards (hairlines from the group;
+                  checkbox selection in compare mode renders as the rowCheckedBare wash).
+                  Keys are r.userId, so a live re-sort re-orders instead of remounting. */}
               <View style={styles.cardsWrap}>
-                {displayRows.map((r, i) => (
-                  <CanvasserCard
-                    key={r.userId}
-                    row={r}
-                    tz={tz}
-                    rank={i + 1}
-                    litMode={litMode}
-                    onPress={() => openCanvasser(r)}
-                    selectable={compareMode}
-                    selected={selectedIds.has(r.userId)}
-                    onToggle={() => toggleSelected(r.userId)}
-                  />
-                ))}
-              </View>
-
-              {/* Reconciliation — reflects the campaign/walk-list/range selection
-                  (effortId is applied server-side), but NOT the client-side coordinator
-                  filter, so its totals ignore any crew selection. */}
-              <View style={styles.reconCard}>
-                <Text style={styles.reconText}>
-                  <Text style={styles.reconStrong}>{(data.grandKnocks || 0).toLocaleString()}</Text> knocks across{' '}
-                  <Text style={styles.reconStrong}>{(data.canvassers || []).length}</Text>{' '}
-                  {(data.canvassers || []).length === 1 ? 'canvasser' : 'canvassers'}
-                </Text>
-                {data.overlapDoors > 0 ? (
-                  <Text style={styles.reconWarn}>
-                    {data.overlapDoors} overlap door-pass{data.overlapDoors === 1 ? '' : 'es'} (counted once →{' '}
-                    {data.billableKnocks})
-                  </Text>
-                ) : (
-                  <Text style={styles.reconMuted}>No overlaps</Text>
-                )}
+                <InsetGroup>
+                  {displayRows.map((r, i) => (
+                    <CanvasserCard
+                      key={r.userId}
+                      bare
+                      row={r}
+                      tz={tz}
+                      rank={i + 1}
+                      litMode={litMode}
+                      onPress={() => openCanvasser(r)}
+                      selectable={compareMode}
+                      selected={selectedIds.has(r.userId)}
+                      onToggle={() => toggleSelected(r.userId)}
+                    />
+                  ))}
+                </InsetGroup>
+                {/* Reconciliation — reflects the campaign/walk-list/range selection
+                    (effortId is applied server-side), but NOT the client-side coordinator
+                    filter, so its totals ignore any crew selection. */}
+                <GroupFooter>
+                  {(data.grandKnocks || 0).toLocaleString()} knocks across{' '}
+                  {(data.canvassers || []).length}{' '}
+                  {(data.canvassers || []).length === 1 ? 'canvasser' : 'canvassers'} —{' '}
+                  {data.overlapDoors > 0
+                    ? `${data.overlapDoors} overlap door-pass${data.overlapDoors === 1 ? '' : 'es'} (counted once → ${data.billableKnocks}).`
+                    : 'no overlaps.'}
+                </GroupFooter>
                 {coordinatorId ? (
-                  <Text style={styles.reconMuted}>Overlap totals cover the whole selection — the coordinator filter isn't applied.</Text>
+                  <GroupFooter>
+                    Overlap totals cover the whole selection — the coordinator filter isn't applied.
+                  </GroupFooter>
                 ) : null}
               </View>
 
@@ -755,13 +844,13 @@ export default function AdminTimeline() {
                           return (
                             <View
                               key={col.key}
-                              style={[styles.cellBase, styles.dataCell, { width: CELL_W, backgroundColor: cellBg(v) }]}
+                              style={[styles.cellBase, { width: CELL_W, backgroundColor: cellBg(v) }]}
                             >
                               <Text style={styles.cellText}>{v || ''}</Text>
                             </View>
                           );
                         })}
-                        <View style={[styles.cellBase, styles.dataCell, { width: SUM_W }]}>
+                        <View style={[styles.cellBase, { width: SUM_W }]}>
                           <Text style={styles.sumStrong}>
                             {metric === 'surveys' ? c.daySurveys || 0 : c.dayKnocks || 0}
                           </Text>
@@ -784,50 +873,55 @@ export default function AdminTimeline() {
               )}
 
               {isTotals && (
-                <Text style={styles.totalsNote}>
+                <GroupFooter>
                   Campaign to date — everyone who has worked this campaign, including anyone who
                   has since left the team. The hour-by-hour grid needs a range of{' '}
                   {TIMELINE_MAX_DAYS} days or less.
-                </Text>
+                </GroupFooter>
               )}
             </>
           )}
 
-          {/* Range's overlaps (card list caps at 200 worst-first; overlapCount is the true total) */}
+          {/* Range's overlaps (card list caps at 200 worst-first; overlapCount is the true
+              total). One summary row per house, same shape as the Overlaps screen; these stay
+              inert because this payload (computeOverlaps) isn't the drill-in's shape — the
+              full who/when detail lives on the Overlaps screen. */}
           {overlaps.length > 0 && (
-            <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.lg }}>
-              <Text style={styles.sectionLabel}>
-                Overlaps (
-                {data.overlapCount > overlaps.length
-                  ? `${overlaps.length} of ${data.overlapCount} shown`
-                  : overlaps.length}
-                )
-              </Text>
-              {overlaps.map((o) => (
-                <View key={o.household.id} style={styles.card}>
-                  <Text style={styles.address}>
-                    {o.household.addressLine1}
-                    {o.household.addressLine2 ? `, ${o.household.addressLine2}` : ''}
-                  </Text>
-                  <Text style={styles.addressSub}>
-                    {[o.household.city, o.household.state, o.household.zipCode].filter(Boolean).join(', ')}
-                  </Text>
-                  {o.passes.map((p) => (
-                    <View key={p.passId || 'none'} style={styles.passBlock}>
-                      <Text style={styles.passLabel}>{p.roundLabel}</Text>
-                      {p.canvassers.map((c, i) => (
-                        <View key={`${c.userId}-${i}`} style={styles.canvasserRow}>
-                          <View style={[styles.actionDot, { backgroundColor: actionColor(colors, c.actionType) }]} />
-                          <Text style={styles.canvasserName} numberOfLines={1}>
-                            {c.firstName} {c.lastName}
-                          </Text>
-                          <Text style={styles.canvasserAction}>{actionLabel(c.actionType)}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ))}
-                </View>
-              ))}
+            <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.sm }}>
+              <SectionHeader
+                title={`Overlaps (${
+                  data.overlapCount > overlaps.length
+                    ? `${overlaps.length} of ${data.overlapCount} shown`
+                    : overlaps.length
+                })`}
+              />
+              <InsetGroup>
+                {overlaps.map((o) => {
+                  const latest = latestOverlapAt(o);
+                  const passCount = (o.passes || []).length;
+                  return (
+                    <InsetRow
+                      key={o.household.id}
+                      label={`${o.household.addressLine1}${o.household.addressLine2 ? `, ${o.household.addressLine2}` : ''}`}
+                      unit={[o.household.city, o.household.state, o.household.zipCode].filter(Boolean).join(', ')}
+                      sub={[
+                        `${o.totalCanvassers} canvassers`,
+                        `${passCount} ${passCount === 1 ? 'pass' : 'passes'}`,
+                        latest ? `latest ${timeAgo(latest)}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                      // A fact to review, not an error — brand tint, brandDark for the small
+                      // text (raw brand on brandTint is 4.41:1 and fails).
+                      badge={{
+                        text: String(o.totalCanvassers),
+                        bg: colors.brandTint,
+                        fg: colors.brandDark,
+                      }}
+                    />
+                  );
+                })}
+              </InsetGroup>
             </View>
           )}
         </ScrollView>
@@ -877,6 +971,13 @@ export default function AdminTimeline() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <MetricSheet
+        visible={!!sheet}
+        title={sheet?.title}
+        items={sheet?.items || []}
+        onClose={() => setSheet(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -986,55 +1087,11 @@ function makeStyles(t) {
     actionBtnTextActive: { color: colors.textInverse },
 
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
-    emptyTitle: { ...type.h3 },
-    emptyText: { ...type.caption, textAlign: 'center' },
-    retryBtn: {
-      marginTop: spacing.sm,
-      paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.sm,
-      borderRadius: radius.md,
-      backgroundColor: colors.brand,
-    },
-    retryBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 14 },
-    emptyCard: {
-      marginHorizontal: spacing.lg,
-      marginBottom: spacing.md,
-      backgroundColor: colors.card,
-      borderRadius: radius.lg,
-      padding: spacing.xl,
-      borderWidth: 1,
-      borderColor: colors.border,
-      alignItems: 'center',
-      gap: spacing.xs,
-    },
+    groupWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
 
-    kpiWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+    cardsWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
 
-    cardsWrap: { paddingHorizontal: spacing.lg },
-
-    reconCard: {
-      margin: spacing.lg,
-      marginTop: spacing.xs,
-      marginBottom: spacing.sm,
-      backgroundColor: colors.card,
-      borderRadius: radius.lg,
-      padding: spacing.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      ...shadow.card,
-    },
-    reconText: { ...type.body },
-    reconStrong: { fontWeight: '800', color: colors.textPrimary },
-    reconWarn: { ...type.caption, color: colors.warnFg, marginTop: 2, fontWeight: '600' },
-    reconMuted: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-    totalsNote: {
-      ...type.caption,
-      color: colors.textMuted,
-      paddingHorizontal: spacing.lg,
-      marginTop: spacing.md,
-    },
-
-    gridRow: { flexDirection: 'row', paddingHorizontal: spacing.lg },
+    gridRow: { flexDirection: 'row', paddingHorizontal: spacing.lg, marginTop: spacing.sm },
     cellBase: {
       height: ROW_H,
       alignItems: 'center',
@@ -1047,30 +1104,10 @@ function makeStyles(t) {
     headText: { ...type.caption, fontWeight: '700', color: colors.textMuted, fontSize: 11 },
     nameCell: { alignItems: 'flex-start', backgroundColor: colors.card },
     nameText: { ...type.body, fontSize: 13, fontWeight: '600', color: colors.textPrimary },
-    dataCell: {},
     cellText: { fontSize: 12, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
     sumStrong: { fontSize: 12, fontWeight: '700', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
     totalCell: { backgroundColor: colors.bg, borderBottomWidth: 0, borderTopWidth: 1, borderTopColor: colors.border },
     totalText: { fontSize: 12, fontWeight: '800', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
-
-    sectionLabel: { ...type.caption, fontWeight: '700', color: colors.textSecondary, marginBottom: spacing.sm },
-    card: {
-      backgroundColor: colors.card,
-      borderRadius: radius.lg,
-      padding: spacing.md,
-      marginBottom: spacing.sm,
-      borderWidth: 1,
-      borderColor: colors.border,
-      ...shadow.card,
-    },
-    address: { ...type.bodyStrong, fontSize: 14 },
-    addressSub: { ...type.caption, marginTop: 2 },
-    passBlock: { marginTop: spacing.sm },
-    passLabel: { ...type.caption, fontWeight: '700', color: colors.textSecondary },
-    canvasserRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
-    actionDot: { width: 8, height: 8, borderRadius: 4 },
-    canvasserName: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, flex: 1 },
-    canvasserAction: { fontSize: 12, color: colors.textSecondary },
 
     compareBar: {
       position: 'absolute',

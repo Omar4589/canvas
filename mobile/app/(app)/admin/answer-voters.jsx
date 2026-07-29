@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { saveActiveCampaign } from '../../../lib/cache';
-import VoterRow from '../../../components/VoterRow';
+import InsetGroup, {
+  InsetNavRow,
+  InsetActionRow,
+  InsetNoteRow,
+} from '../../../components/InsetGroup';
 import TabSwitcher from '../../../components/TabSwitcher';
 import { deviceTimezone } from '../../../lib/dateRanges';
 import { formatInTz, timeAgo } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
-import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
 const PAGE = 25;
@@ -45,7 +48,6 @@ function MenuItem({ label, active, onPress }) {
 }
 
 export default function AnswerVoters() {
-  const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -248,75 +250,85 @@ export default function AnswerVoters() {
               </View>
             ) : null}
 
-            {items.map((v) => (
-              <VoterRow
-                key={v.responseId}
-                v={v}
-                showCanvasser
-                showBadges
-                exactTime={formatInTz(v.submittedAt, tz)}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(app)/admin/response-details',
-                    params: { responseId: v.responseId, campaignId },
-                  })
-                }
-              />
-            ))}
+            <InsetGroup>
+              {items.map((v) => {
+                // One response entry ({ responseId, submittedAt, voter, household,
+                // canvasser } from /voters-by-answer). Name + party on the label line,
+                // address then meta (when · who · offline/note tags) stacked in the sub;
+                // the exact campaign-tz time rides the value column.
+                const canv = v.canvasser
+                  ? ` · ${v.canvasser.firstName || ''}${v.canvasser.lastName ? ' ' + v.canvasser.lastName[0] + '.' : ''}`
+                  : '';
+                const meta = `${timeAgo(v.submittedAt)}${canv}${v.wasOfflineSubmission ? ' · offline' : ''}${v.note ? ' · note' : ''}`;
+                const address = v.household
+                  ? `${v.household.addressLine1}${v.household.city ? `, ${v.household.city}` : ''}`
+                  : '';
+                return (
+                  <InsetNavRow
+                    key={v.responseId}
+                    label={`${v.voter?.fullName || 'Unknown voter'}${v.voter?.party ? ` · ${v.voter.party}` : ''}`}
+                    labelLines={1}
+                    sub={address ? `${address}\n${meta}` : meta}
+                    value={formatInTz(v.submittedAt, tz)}
+                    hint="Opens the full response"
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(app)/admin/response-details',
+                        params: { responseId: v.responseId, campaignId },
+                      })
+                    }
+                  />
+                );
+              })}
 
-            {q.isLoading && items.length === 0 ? (
-              <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
-            ) : q.error && items.length === 0 ? (
-              // An error must never render as an authoritative zero on an audit surface.
-              <Text style={styles.muted}>{q.error.message}</Text>
-            ) : items.length === 0 ? (
-              <Text style={styles.muted}>No voters for this answer.</Text>
-            ) : items.length < total ? (
-              <Pressable
-                onPress={() => setSkip(items.length)}
-                disabled={q.isFetching}
-                style={({ pressed }) => [styles.loadMore, pressed && { opacity: 0.85 }]}
-              >
-                {q.isFetching ? (
-                  <ActivityIndicator color={colors.brand} />
+              {q.isLoading && items.length === 0 ? (
+                <InsetNoteRow loading>Loading…</InsetNoteRow>
+              ) : q.error && items.length === 0 ? (
+                // An error must never render as an authoritative zero on an audit surface.
+                <InsetNoteRow>{q.error.message}</InsetNoteRow>
+              ) : items.length === 0 ? (
+                <InsetNoteRow>No voters for this answer.</InsetNoteRow>
+              ) : items.length < total ? (
+                q.isFetching ? (
+                  <InsetNoteRow loading>Loading more…</InsetNoteRow>
                 ) : (
-                  <Text style={styles.loadMoreText}>Load more ({total - items.length} left)</Text>
-                )}
-              </Pressable>
-            ) : null}
+                  <InsetActionRow label={`Load more (${total - items.length} left)`} onPress={() => setSkip(items.length)} />
+                )
+              ) : null}
+            </InsetGroup>
           </>
         ) : (
-          <>
+          <InsetGroup>
             {canvassersQ.isLoading ? (
-              <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
+              <InsetNoteRow loading>Loading…</InsetNoteRow>
             ) : canvassersQ.error ? (
-              <Text style={styles.muted}>{canvassersQ.error.message}</Text>
+              <InsetNoteRow>{canvassersQ.error.message}</InsetNoteRow>
             ) : canvasserRows.length === 0 ? (
-              <Text style={styles.muted}>No canvassers recorded this answer.</Text>
+              <InsetNoteRow>No canvassers recorded this answer.</InsetNoteRow>
             ) : (
+              // Tapping re-filters the voters list and flips back to that tab — a nav
+              // row all the same: the value column (the count) is owned by the list the
+              // tap reveals, which is exactly the InsetNavRow discriminator.
               canvasserRows.map((r, i) => (
-                <Pressable
+                <InsetNavRow
                   key={r.userId}
+                  leading={<Text style={styles.rank}>{i + 1}</Text>}
+                  label={`${r.firstName} ${r.lastName}`.trim() || 'Unknown'}
+                  labelLines={1}
+                  sub={[
+                    r.status === 'deleted' ? 'removed' : null,
+                    `${r.pctOfOwnAnswers}% of their answers on this question`,
+                    r.lastAt ? `last entry ${timeAgo(r.lastAt)}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  value={r.count}
+                  hint="Shows this canvasser's voters"
                   onPress={() => { setCanvasserId(String(r.userId)); setTab('voters'); }}
-                  style={({ pressed }) => [styles.canvRow, pressed && { opacity: 0.85 }]}
-                >
-                  <Text style={styles.rank}>{i + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.canvName} numberOfLines={1}>
-                      {`${r.firstName} ${r.lastName}`.trim() || 'Unknown'}
-                      {r.status === 'deleted' ? <Text style={styles.canvGone}> · removed</Text> : null}
-                    </Text>
-                    <Text style={styles.canvMeta} numberOfLines={2}>
-                      {r.pctOfOwnAnswers}% of their answers on this question
-                      {r.lastAt ? ` · last entry ${timeAgo(r.lastAt)}` : ''}
-                    </Text>
-                  </View>
-                  <Text style={styles.canvCount}>{r.count}</Text>
-                  <Text style={styles.chevron}>›</Text>
-                </Pressable>
+                />
               ))
             )}
-          </>
+          </InsetGroup>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -337,19 +349,8 @@ function makeStyles(t) {
   },
   back: { color: colors.brand, fontWeight: '600', fontSize: 14 },
   mapLink: { color: colors.brand, fontWeight: '600', fontSize: 14 },
-  title: { ...type.h2, fontSize: 18, marginTop: spacing.xs },
+  title: { ...type.h2, marginTop: spacing.xs },
   subtitle: { ...type.caption, marginBottom: spacing.md },
-  muted: { ...type.caption, marginTop: spacing.lg, textAlign: 'center' },
-  loadMore: {
-    marginTop: spacing.sm,
-    paddingVertical: spacing.md,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-  },
-  loadMoreText: { color: colors.brand, fontWeight: '700', fontSize: 14 },
 
   filterRow: { flexDirection: 'row', marginBottom: spacing.sm },
   filterChip: {
@@ -386,26 +387,11 @@ function makeStyles(t) {
     paddingVertical: spacing.sm,
   },
   menuItemActive: { backgroundColor: colors.brandTint },
-  menuItemText: { flex: 1, fontSize: 14, color: colors.textPrimary },
+  menuItemText: { flex: 1, ...type.body },
   menuItemTextActive: { color: colors.brand, fontWeight: '700' },
   menuCheck: { color: colors.brand, fontWeight: '700' },
 
-  canvRow: {
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    padding: spacing.sm + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.xs,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
+  // The By-canvasser rows' leading rank ordinal.
   rank: { ...type.caption, color: colors.textMuted, fontWeight: '700', width: 22, textAlign: 'center' },
-  canvName: { ...type.bodyStrong, fontSize: 14 },
-  canvGone: { color: colors.textMuted, fontWeight: '400' },
-  canvMeta: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-  canvCount: { ...type.bodyStrong, fontSize: 16, color: colors.brand },
-  chevron: { fontSize: 18, color: colors.textMuted },
   });
 }

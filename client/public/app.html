@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="/favicon.ico" sizes="32x32" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#DC2626" />
+  <title>Get the Doorline app — iPhone and Android</title>
+  <meta name="description" content="Download Doorline free on the App Store or Google Play. Sign in with the email and password your campaign gave you — there is no separate app account to create." />
+  <link rel="canonical" href="https://doorline.app/app" />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="Doorline" />
+  <meta property="og:title" content="Get the Doorline app" />
+  <meta property="og:description" content="Free on the App Store and Google Play. Sign in with the account your campaign already gave you." />
+  <meta property="og:url" content="https://doorline.app/app" />
+  <meta property="og:image" content="https://doorline.app/og-image.png" />
+  <meta name="twitter:card" content="summary" />
+
+  <!-- WHY THIS IS STATIC AND NOT A REACT ROUTE.
+       This page exists to be FOUND (someone searching "doorline app") and SHARED (an organizer
+       texting the link to a crew). Both are decided by the tags above, and a React route cannot
+       get either right: client/index.html hard-codes rel=canonical to https://doorline.app/, so
+       an SPA-served /app would declare itself a duplicate of the homepage and drop out of the
+       index — and social scrapers never run JS, so a shared link would preview as the homepage.
+       That is the exact failure server/src/app.js documents as the reason the static pages exist.
+
+       Wiring lives in FOUR places and a miss only breaks PRODUCTION: STATIC_PAGES + the .html→
+       clean-URL 301 in server/src/app.js, STATIC_PAGE_SEGMENTS in server/test/webRoutes.test.js,
+       and client/public/sitemap.xml. Do NOT add 'app' to server/src/webRoutes.js — that list is
+       React routes only, and the test asserts the two sets never overlap.
+
+       Copy is derived from docs/CANVASSER_APP.md "Getting the app" and the in-product install
+       card (client/src/pages/SelectOrgPage.jsx). Keep the three in step. The Help Center's
+       canvasser-install-app guide says the same thing at greater length but is login-walled
+       (server/src/routes/help.js), which is precisely why this page has to restate it. -->
+  <style>
+    :root{color-scheme:light}
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#f9fafb;color:#111827;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;min-height:100vh}
+    .site-header{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border-bottom:1px solid #e5e7eb}
+    .site-header .bar{max-width:72rem;margin:0 auto;padding:0 1rem;height:4rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+    .brand{display:flex;align-items:center;gap:.5rem;text-decoration:none}
+    .brand span{font-weight:700;font-size:1.35rem;letter-spacing:-.5px;color:#111827}
+    .site-nav{display:none;align-items:center;gap:2rem}
+    @media(min-width:768px){.site-nav{display:flex}}
+    .site-nav a{font-size:.875rem;color:#4b5563;text-decoration:none;font-weight:400}
+    .site-nav a:hover{color:#111827}
+    .signin{border:1px solid #d1d5db;background:#fff;border-radius:.375rem;padding:.6rem 1rem;font-size:.875rem;font-weight:600;color:#111827;text-decoration:none;box-shadow:0 1px 2px 0 rgb(0 0 0/.05);white-space:nowrap}
+    .signin:hover{background:#f9fafb}
+    .content{flex:1;width:100%;padding:2.5rem 1rem}
+    main{max-width:46rem;margin:0 auto;background:#fff;border-radius:.5rem;box-shadow:0 1px 2px 0 rgb(0 0 0/.05);padding:2rem}
+    .site-footer{border-top:1px solid #e5e7eb;background:#fff;margin-top:2.5rem}
+    .site-footer .inner{max-width:72rem;margin:0 auto;padding:2rem 1rem}
+    .site-footer .brand span{font-size:1.05rem}
+    .site-footer nav{display:flex;flex-wrap:wrap;gap:1.25rem;margin-top:1rem}
+    .site-footer nav a{font-size:.875rem;color:#57534e;text-decoration:none;font-weight:400}
+    .site-footer nav a:hover{color:#1c1917}
+    .site-footer .here{font-size:.875rem;color:#a8a29e}
+    .site-footer .copyright{display:block;margin-top:1.75rem;font-size:.75rem;color:#78716c}
+    .site-footer .legal{display:block;margin-top:.5rem;font-size:.6875rem;line-height:1.6;color:#a8a29e}
+    h1{font-size:1.875rem;font-weight:600;letter-spacing:-.01em}
+    .lede{margin-top:.5rem;font-size:1.0625rem;color:#4b5563}
+    h2{margin-top:2rem;font-size:1.125rem;font-weight:600}
+    p,ul,ol{margin-top:.75rem;font-size:.9375rem;color:#374151}
+    ul,ol{padding-left:1.25rem}
+    li{margin-top:.35rem}
+    strong{color:#111827}
+    a{color:#dc2626;font-weight:500}
+    /* Store badges. The artwork is Apple's and Google's and may not be altered — no recolor,
+       restyle, corner rounding, shadow, or cropping, and the wording may not be paraphrased. So
+       the focus ring lives on the <a>, never on the <img>. Both are tight lockups (Apple
+       119.66x40, Google 478x142), so a shared 40px height renders them at equal visual weight —
+       itself a brand requirement when the two sit side by side. gap satisfies Google's
+       clear-space rule (1/4 of badge height = 10px). Mirrors client/src/marketing/MarketingFooter.jsx. */
+    .badges{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;margin-top:1.25rem}
+    .badges a{display:inline-block;border-radius:.5rem}
+    .badges img{display:block;height:40px;width:auto}
+    .note{margin-top:1rem;font-size:.875rem;color:#6b7280}
+    main footer{margin-top:2.5rem;border-top:1px solid #e5e7eb;padding-top:1.5rem;font-size:.875rem;color:#6b7280}
+  </style>
+</head>
+<body>
+<!-- Static port of the marketing site's chrome (MarketingNav/MarketingFooter) — pure HTML/CSS,
+     no hamburger and no auth-aware button, because this page must stay zero-JS. The section
+     links point back at the homepage's anchors, which only exist there. -->
+<header class="site-header">
+  <div class="bar">
+    <a class="brand" href="/" aria-label="Doorline home">
+      <svg width="28" height="34" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M18 0 C8.06 0 0 8.06 0 18 C0 29.5 12 36.5 17 43.2 C17.5 43.9 18.5 43.9 19 43.2 C24 36.5 36 29.5 36 18 C36 8.06 27.94 0 18 0 Z" fill="#DC2626"/><path d="M12 11 L12 26 L24 26 L24 11 C24 8.79 22.21 7 20 7 L16 7 C13.79 7 12 8.79 12 11 Z" fill="#ffffff"/><rect x="20.4" y="17.2" width="1.8" height="1.8" rx="0.9" fill="#DC2626"/></svg>
+      <span>Doorline</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/#turf">Turf</a>
+      <a href="/#field">Field app</a>
+      <a href="/#oversight">Oversight</a>
+      <a href="/#reports">Reports</a>
+      <a href="/#how">How it works</a>
+    </nav>
+    <a class="signin" href="/login">Sign in</a>
+  </div>
+</header>
+<div class="content">
+<main>
+  <h1>Get the Doorline app</h1>
+  <p class="lede">Doorline is a phone app — that&rsquo;s where you knock doors. It&rsquo;s free, and it&rsquo;s the same app for canvassers, team leads, and admins.</p>
+
+  <div class="badges">
+    <a href="https://apps.apple.com/app/doorline/id6764581850">
+      <img src="/badge-app-store.svg" alt="Download Doorline on the App Store" width="120" height="40" />
+    </a>
+    <a href="https://play.google.com/store/apps/details?id=com.doorline.app">
+      <img src="/badge-google-play.png" alt="Get Doorline on Google Play" width="135" height="40" />
+    </a>
+  </div>
+  <p class="note">If a link doesn&rsquo;t open, search for <strong>Doorline</strong> in your phone&rsquo;s app store.</p>
+
+  <h2>You need an account from your campaign</h2>
+  <p><strong>There is no sign-up.</strong> Doorline accounts are created by your campaign&rsquo;s admin or team lead, not by you — so installing the app is only half of it. If you haven&rsquo;t been added yet, ask whoever runs your canvass to add you; you&rsquo;ll get an email with a link to set your password.</p>
+  <p>Once you have that account, <strong>sign in with the same email and password</strong> you set on the web. There&rsquo;s no separate app account to create, so don&rsquo;t sign up for a new one — if you do, it won&rsquo;t have your campaigns in it.</p>
+
+  <h2>Already have an account?</h2>
+  <ol>
+    <li><strong>Install the app</strong> using a badge above, or by searching for Doorline in your store.</li>
+    <li><strong>Sign in</strong> with your email and password. If your admin gave you a temporary password, the app asks you to set your own on that first sign-in.</li>
+    <li><strong>Allow location</strong> when the app asks, and on iPhone leave <strong>Precise Location</strong> on. Every door you record carries a GPS stamp — that&rsquo;s how your work is verified — so the app can&rsquo;t record doors without it. You can canvass with no signal, but not with location off.</li>
+  </ol>
+  <p>Forgot your password? Use <a href="/forgot-password">Forgot password</a> and we&rsquo;ll email you a reset link.</p>
+
+  <h2>The web console is for admins and team leads</h2>
+  <p>If you&rsquo;re a canvasser, everything you need is in the app — there&rsquo;s nothing for you to do on the website. Admins and team leads use the web console to import a voter file, cut turf, assign books, and watch results land. They can <a href="/login">sign in here</a>.</p>
+
+  <footer>
+    Running a campaign and want to see the whole thing? <a href="/">Take the tour</a> or request a demo from the homepage.
+  </footer>
+</main>
+</div>
+<footer class="site-footer">
+  <div class="inner">
+    <a class="brand" href="/" aria-label="Doorline home">
+      <svg width="22" height="27" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M18 0 C8.06 0 0 8.06 0 18 C0 29.5 12 36.5 17 43.2 C17.5 43.9 18.5 43.9 19 43.2 C24 36.5 36 29.5 36 18 C36 8.06 27.94 0 18 0 Z" fill="#DC2626"/><path d="M12 11 L12 26 L24 26 L24 11 C24 8.79 22.21 7 20 7 L16 7 C13.79 7 12 8.79 12 11 Z" fill="#ffffff"/><rect x="20.4" y="17.2" width="1.8" height="1.8" rx="0.9" fill="#DC2626"/></svg>
+      <span>Doorline</span>
+    </a>
+    <nav aria-label="Footer">
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <span class="here">Get the app</span>
+      <a href="mailto:hello@doorline.app">Contact</a>
+      <a href="/">Home</a>
+    </nav>
+    <small class="copyright">© 2026 Doorline LLC</small>
+    <!-- Required wherever the two badges appear; kept out of their clear space. -->
+    <small class="legal">Apple and the Apple logo are trademarks of Apple Inc., registered in the U.S. and other countries. App Store is a service mark of Apple Inc. Google Play and the Google Play logo are trademarks of Google LLC.</small>
+  </div>
+</footer>
+</body>
+</html>

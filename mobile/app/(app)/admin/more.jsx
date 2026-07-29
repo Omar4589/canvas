@@ -16,7 +16,12 @@ import {
 } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
 import ThemeToggle from '../../../components/ThemeToggle';
-import { useTheme } from '../../../lib/ThemeContext';
+import InsetGroup, {
+  InsetNavRow,
+  InsetActionRow,
+  InsetBlockRow,
+} from '../../../components/InsetGroup';
+import SectionHeader from '../../../components/SectionHeader';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { radius, spacing } from '../../../lib/theme';
 
@@ -37,28 +42,8 @@ const WEB_NOTES = {
   },
 };
 
-function Row({ icon, label, sub, onPress, danger, badge }) {
-  const { colors } = useTheme();
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
-    >
-      <Text style={styles.rowIcon}>{icon}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.rowLabel, danger && { color: colors.danger }]}>{label}</Text>
-        {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
-      </View>
-      {badge > 0 ? (
-        <View style={styles.rowBadge}>
-          <Text style={styles.rowBadgeText}>{badge}</Text>
-        </View>
-      ) : null}
-      <Text style={styles.rowChevron}>›</Text>
-    </Pressable>
-  );
-}
+// The emoji sits in the row's `leading` slot, same box the old local Row gave it.
+const Emoji = ({ children }) => <Text style={{ fontSize: 18, width: 24, textAlign: 'center' }}>{children}</Text>;
 
 export default function AdminMore() {
   const router = useRouter();
@@ -127,54 +112,64 @@ export default function AdminMore() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
-        <Pressable
-          onPress={() => router.push('/(app)/profile')}
-          style={({ pressed }) => [styles.accountCard, pressed && { opacity: 0.85 }]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.accountName}>
-              {user?.firstName || ''} {user?.lastName || ''}
-            </Text>
-            <Text style={styles.accountEmail}>{user?.email || ''}</Text>
-          </View>
-          <Text style={styles.accountChevron}>›</Text>
-        </Pressable>
-
-        <Text style={styles.sectionLabel}>Manage</Text>
-        <View style={styles.group}>
-          <Row icon="👥" label="Users" onPress={() => router.push('/(app)/admin/users')} />
-          <Row icon="🚩" label="GPS audit" sub="Review flagged entries" badge={openMockTotal} onPress={() => router.push('/(app)/admin/audit')} />
-          <Row icon="📝" label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
-          <Row icon="🔁" label="Overlaps" sub="Doors two canvassers both knocked" onPress={() => router.push('/(app)/admin/overlaps')} />
-          <Row icon="🔍" label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
-          <Row icon="🚪" label="Switch to canvass mode" onPress={onCanvassMode} />
+        <View style={{ marginTop: spacing.xs }}>
+          <InsetGroup>
+            <InsetNavRow
+              label={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Account'}
+              sub={user?.email || ''}
+              hint="Opens your profile"
+              onPress={() => router.push('/(app)/profile')}
+            />
+          </InsetGroup>
         </View>
 
-        <Text style={styles.sectionLabel}>On the web</Text>
-        <View style={styles.group}>
-          <Row icon="📤" label="CSV import" sub="Manage on the web" onPress={() => setWebNote(WEB_NOTES.import)} />
-          <Row icon="🗳️" label="Early voting" sub="Manage on the web" onPress={() => setWebNote(WEB_NOTES.earlyVoting)} />
-          <Row icon="✂️" label="Turf cutting" sub="Drawing is web-only" onPress={() => setWebNote(WEB_NOTES.turf)} />
-        </View>
+        <SectionHeader title="Manage" />
+        <InsetGroup>
+          <InsetNavRow leading={<Emoji>👥</Emoji>} label="Users" onPress={() => router.push('/(app)/admin/users')} />
+          <InsetNavRow
+            leading={<Emoji>🚩</Emoji>}
+            label="GPS audit"
+            sub="Review flagged entries"
+            badge={openMockTotal > 0 ? { text: String(openMockTotal) } : null}
+            onPress={() => router.push('/(app)/admin/audit')}
+          />
+          <InsetNavRow leading={<Emoji>📝</Emoji>} label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
+          <InsetNavRow leading={<Emoji>🔁</Emoji>} label="Overlaps" sub="Doors two canvassers both knocked" onPress={() => router.push('/(app)/admin/overlaps')} />
+          <InsetNavRow leading={<Emoji>🔍</Emoji>} label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
+          <InsetNavRow leading={<Emoji>🚪</Emoji>} label="Switch to canvass mode" onPress={onCanvassMode} />
+        </InsetGroup>
 
-        <Text style={styles.sectionLabel}>Support</Text>
-        <View style={styles.group}>
-          <Row icon="❓" label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
-        </View>
+        {/* These OPEN A MODAL rather than navigate — action rows, no chevron. The old local
+            Row gave every entry a chevron, which lied here. */}
+        <SectionHeader title="On the web" />
+        <InsetGroup>
+          <InsetActionRow label="CSV import — manage on the web" onPress={() => setWebNote(WEB_NOTES.import)} />
+          <InsetActionRow label="Early voting — manage on the web" onPress={() => setWebNote(WEB_NOTES.earlyVoting)} />
+          <InsetActionRow label="Turf cutting — drawing is web-only" onPress={() => setWebNote(WEB_NOTES.turf)} />
+        </InsetGroup>
 
-        <Text style={styles.sectionLabel}>Appearance</Text>
-        <View style={styles.appearanceGroup}>
-          <ThemeToggle />
-        </View>
+        <SectionHeader title="Support" />
+        <InsetGroup>
+          <InsetNavRow leading={<Emoji>❓</Emoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
+        </InsetGroup>
 
-        <Text style={styles.sectionLabel}>Account</Text>
-        <View style={styles.group}>
+        <SectionHeader title="Appearance" />
+        <InsetGroup>
+          {/* ThemeToggle is shared with super-admin More — housed, never restyled. */}
+          <InsetBlockRow>
+            <ThemeToggle />
+          </InsetBlockRow>
+        </InsetGroup>
+
+        <SectionHeader title="Account" />
+        <InsetGroup>
           {user?.isSuperAdmin && (
-            <Row icon="🌐" label="Platform view" sub="All organizations" onPress={onPlatformView} />
+            <InsetNavRow leading={<Emoji>🌐</Emoji>} label="Platform view" sub="All organizations" onPress={onPlatformView} />
           )}
-          <Row icon="🔁" label="Switch organization" onPress={onSwitchOrg} />
-          <Row icon="↩︎" label="Sign out" onPress={onLogout} danger />
-        </View>
+          <InsetNavRow leading={<Emoji>🔁</Emoji>} label="Switch organization" onPress={onSwitchOrg} />
+          {/* Acts in place (ends the session) — danger tone, no chevron. */}
+          <InsetActionRow label="Sign out" tone="danger" onPress={onLogout} />
+        </InsetGroup>
       </ScrollView>
 
       <Modal visible={!!webNote} transparent animationType="fade" onRequestClose={() => setWebNote(null)}>
@@ -205,58 +200,6 @@ function makeStyles(t) {
     },
     headerLabel: { ...t.type.caption, color: t.colors.textSecondary },
 
-    accountCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: t.colors.card,
-      borderRadius: radius.lg,
-      padding: spacing.lg,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-      ...t.shadow.card,
-      marginTop: spacing.xs,
-      marginBottom: spacing.lg,
-    },
-    accountName: { ...t.type.h3 },
-    accountEmail: { ...t.type.caption, marginTop: 2 },
-    accountChevron: { fontSize: 22, color: t.colors.textMuted, marginLeft: spacing.sm },
-
-    sectionLabel: { ...t.type.micro, marginBottom: spacing.sm, marginLeft: spacing.xs },
-    group: {
-      backgroundColor: t.colors.card,
-      borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-      ...t.shadow.card,
-      marginBottom: spacing.lg,
-      overflow: 'hidden',
-    },
-    appearanceGroup: {
-      marginBottom: spacing.lg,
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.md,
-      borderBottomWidth: 1,
-      borderBottomColor: t.colors.border,
-      gap: spacing.md,
-    },
-    rowIcon: { fontSize: 18, width: 24, textAlign: 'center' },
-    rowLabel: { ...t.type.bodyStrong, fontSize: 15 },
-    rowSub: { ...t.type.caption, marginTop: 1 },
-    rowChevron: { fontSize: 20, color: t.colors.textMuted },
-    // Mock-GPS nudge count on the GPS-audit row (flagBadge tones).
-    rowBadge: {
-      backgroundColor: t.colors.dangerBg,
-      borderRadius: radius.pill,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: 2,
-      marginRight: spacing.sm,
-    },
-    rowBadgeText: { fontSize: 11, fontWeight: '700', color: t.colors.danger },
-
     noteBackdrop: {
       flex: 1,
       backgroundColor: t.colors.backdrop,
@@ -283,6 +226,6 @@ function makeStyles(t) {
       alignItems: 'center',
       marginTop: spacing.lg,
     },
-    noteBtnText: { color: t.colors.textInverse, fontWeight: '700', fontSize: 15 },
+    noteBtnText: { ...t.type.bodyStrong, color: t.colors.textInverse, fontWeight: '700' },
   });
 }

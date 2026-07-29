@@ -13,19 +13,21 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../../../lib/api';
 import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
-import { formatExact, formatInTz, timeAgo } from '../../../../../lib/datetime';
+import { formatInTz, timeAgo } from '../../../../../lib/datetime';
 import { formatDistance } from '../../../../../lib/geo';
+import { makeRateColors } from '../../../../../lib/rates';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import BarChart from '../../../../../components/BarChart';
 import SectionHeader from '../../../../../components/SectionHeader';
-import KpiGrid from '../../../../../components/KpiGrid';
+import InsetGroup, { InsetRow } from '../../../../../components/InsetGroup';
 import ActivityRow from '../../../../../components/ActivityRow';
 
 export default function QualityScreen() {
   const { colors } = useTheme();
+  const rateColors = makeRateColors(colors);
   const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -93,50 +95,50 @@ export default function QualityScreen() {
           <ActivityIndicator color={colors.brand} />
         ) : (
           <>
-            <KpiGrid
-              tiles={[
-                {
-                  label: 'Offline submissions',
-                  value: `${data.offlinePercent}%`,
-                  sub: `${data.offlineCount} of ${data.totalActivities}`,
-                  level: data.offlinePercent > 30 ? 'caution' : undefined,
-                },
-                {
-                  label: 'Avg distance from house',
-                  // ft/mi at display time, metric comparison for the level — thresholds stay meters.
-                  value: formatDistance(data.avgDistanceFromHouseMeters),
-                  level:
-                    data.avgDistanceFromHouseMeters != null && data.avgDistanceFromHouseMeters > 25
-                      ? 'caution'
-                      : undefined,
-                },
-                {
-                  // The detector's verdict, not a raw meter cutoff: effective distance minus GPS
-                  // accuracy, with honest corrections and post-knock pin fixes forgiven. The
-                  // forgiven count explains why this number can drop after someone fixes a pin.
-                  label: 'Far knocks',
-                  value: `${data.farFromHousePercent}%`,
-                  sub:
-                    data.farForgivenByPinCount != null && data.farForgivenByPinCount > 0
-                      ? `${data.farFromHouseCount} flagged · ${data.farForgivenByPinCount} forgiven`
-                      : `${data.farFromHouseCount} flagged`,
-                  level:
-                    data.farFromHousePercent > 10
-                      ? 'low'
-                      : data.farFromHousePercent > 5
-                      ? 'caution'
-                      : undefined,
-                },
-                {
-                  label: 'Last sync',
-                  value: data.lastSyncAt ? timeAgo(data.lastSyncAt) : '—',
-                  sub: data.lastSyncAt
-                    ? formatInTz(data.lastSyncAt, campaign?.timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)
-                    : null,
-                },
-              ]}
-              compact
-            />
+            <InsetGroup>
+              <InsetRow
+                label="Offline submissions"
+                value={`${data.offlinePercent}%`}
+                sub={`${data.offlineCount} of ${data.totalActivities}`}
+                chipColors={data.offlinePercent > 30 ? rateColors.caution : undefined}
+              />
+              <InsetRow
+                label="Avg distance from house"
+                // ft/mi at display time, metric comparison for the level — thresholds stay meters.
+                value={formatDistance(data.avgDistanceFromHouseMeters)}
+                chipColors={
+                  data.avgDistanceFromHouseMeters != null && data.avgDistanceFromHouseMeters > 25
+                    ? rateColors.caution
+                    : undefined
+                }
+              />
+              <InsetRow
+                // The detector's verdict, not a raw meter cutoff: effective distance minus GPS
+                // accuracy, with honest corrections and post-knock pin fixes forgiven. The
+                // forgiven count explains why this number can drop after someone fixes a pin.
+                label="Far knocks"
+                value={`${data.farFromHousePercent}%`}
+                sub={
+                  data.farForgivenByPinCount != null && data.farForgivenByPinCount > 0
+                    ? `${data.farFromHouseCount} flagged · ${data.farForgivenByPinCount} forgiven`
+                    : `${data.farFromHouseCount} flagged`
+                }
+                chipColors={
+                  data.farFromHousePercent > 10
+                    ? rateColors.low
+                    : data.farFromHousePercent > 5
+                    ? rateColors.caution
+                    : undefined
+                }
+              />
+              <InsetRow
+                label="Last sync"
+                value={data.lastSyncAt ? timeAgo(data.lastSyncAt) : '—'}
+                sub={data.lastSyncAt
+                  ? formatInTz(data.lastSyncAt, campaign?.timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)
+                  : null}
+              />
+            </InsetGroup>
 
             <SectionHeader
               title="Distance from house"

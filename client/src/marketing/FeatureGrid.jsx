@@ -70,9 +70,12 @@ const FEATURES = [
   },
 ];
 
+// No id/scroll-mt on the section: `id="features"` was an anchor target nothing ever linked to, and
+// scroll-mt-16 exists purely to clear the sticky header for a nav anchor. The nav's five section
+// links (MarketingNav SECTIONS) are the complete set.
 export default function FeatureGrid() {
   return (
-    <section id="features" className="scroll-mt-16 bg-stone-100">
+    <section className="bg-stone-100">
       <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
         <Reveal className="max-w-2xl">
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">

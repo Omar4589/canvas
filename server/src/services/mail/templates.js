@@ -117,7 +117,14 @@ function logoUrl() {
 // brand row = logomark <img> + TEXT wordmark side by side; alt is empty on purpose (the text
 // beside it IS the accessible name — an alt would read "Doorline Doorline" in screen readers
 // and render doubled when images are blocked).
-function layout(bodyHtml) {
+//
+// `footerText` defaults to the account-holder line every customer-facing template wants. The one
+// template that overrides it is demoRequest(), which is addressed to US — telling ourselves our
+// address "is associated with a Doorline account" would be a false sentence in an email we send.
+const DEFAULT_FOOTER =
+  'Doorline — canvassing for campaigns. You received this because your email is associated with a Doorline account.';
+
+function layout(bodyHtml, footerText = DEFAULT_FOOTER) {
   return `
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${PAGE_BG};margin:0;padding:24px 0;">
   <tr>
@@ -137,7 +144,7 @@ function layout(bodyHtml) {
 ${bodyHtml}
         </td></tr>
         <tr><td style="padding:16px 8px;font-family:${FONT};font-size:12px;line-height:18px;color:${MUTED};">
-          Doorline — canvassing for campaigns. You received this because your email is associated with a Doorline account.
+          ${esc(footerText)}
         </td></tr>
       </table>
     </td>
@@ -349,6 +356,48 @@ export function dormancyWarning({ orgName, deleteOnDate }) {
     'The deletion is canceled automatically — any recorded canvassing activity, or simply reactivating your use of the account, stops it. You do not need to reply.',
     '',
     '— Doorline',
+  ].join('\n');
+  return { subject, html, text };
+}
+
+// The ONLY template addressed to Doorline rather than to a customer — the demo request submitted
+// on the public marketing site (routes/public/demoRequest.js). Three things follow from that and
+// none of them are style choices:
+//
+//   · The footer is overridden. The default line tells the reader their address "is associated
+//     with a Doorline account", which is not a true sentence to send to ourselves.
+//   · The SUBJECT carries only the organization. Every subject is copied verbatim into EmailLog,
+//     which is metadata-only by design and readable on the super-admin Emails page — so the
+//     prospect's name and address stay in the BODY, which is never logged.
+//   · The caller passes the prospect's address as sendMail's `replyTo`, so hitting Reply in the
+//     inbox answers the person instead of MAIL_FROM. Nothing in this template links anywhere;
+//     it is a notification, not a CTA.
+//
+// `organization` is the only field guaranteed present besides name/email — teamSize and message
+// are optional and simply drop out of both halves when absent.
+export function demoRequest({ name, email, organization, teamSize, message }) {
+  const subject = `Demo request — ${organization}`;
+  const row = (label, value) => para(`<strong>${esc(label)}:</strong> ${esc(value)}`);
+  const html = layout(
+    heading('New demo request') +
+    row('Name', name) +
+    row('Email', email) +
+    row('Organization', organization) +
+    (teamSize ? row('Approx. team size', teamSize) : '') +
+    (message ? para(`<strong>Message:</strong><br />${esc(message).replace(/\n/g, '<br />')}`) : '') +
+    muted('Submitted from the demo form on doorline.app. Reply to this email to answer them directly.'),
+    'Doorline — sent by the demo request form on doorline.app.'
+  );
+  const text = [
+    'New demo request',
+    '',
+    `Name:         ${name}`,
+    `Email:        ${email}`,
+    `Organization: ${organization}`,
+    ...(teamSize ? [`Team size:    ${teamSize}`] : []),
+    ...(message ? ['', 'Message:', message] : []),
+    '',
+    'Submitted from the demo form on doorline.app. Reply to this email to answer them directly.',
   ].join('\n');
   return { subject, html, text };
 }

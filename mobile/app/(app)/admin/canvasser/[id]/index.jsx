@@ -15,15 +15,19 @@ import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../../lib/dateRanges';
 import { formatRange, timeAgo } from '../../../../../lib/datetime';
 import { formatDistance } from '../../../../../lib/geo';
-import { rateFromPct } from '../../../../../lib/rates';
+import { rateFromPct, makeRateColors } from '../../../../../lib/rates';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
-import KpiGrid from '../../../../../components/KpiGrid';
 import BarChart from '../../../../../components/BarChart';
 import SectionHeader from '../../../../../components/SectionHeader';
-import InsetGroup, { InsetNavRow, InsetActionRow } from '../../../../../components/InsetGroup';
+import InsetGroup, {
+  InsetHeroRow,
+  InsetRow,
+  InsetNavRow,
+  InsetActionRow,
+} from '../../../../../components/InsetGroup';
 import { downloadCsv } from '../../../../../lib/csv';
 
 const HOUR_LABELS = ['12a', '3a', '6a', '9a', '12p', '3p', '6p', '9p'];
@@ -124,7 +128,20 @@ export default function CanvasserOverview() {
   const s = summaryQ.data;
   const team = teamQ.data?.avg;
 
-  const kpiTiles = useMemo(() => {
+  // Deltas render as the sub-line accent: '▲ 1.4h vs team' in success when ahead, muted
+  // otherwise — the retired grid tile's exact semantics, re-expressed in the row idiom.
+  const rateColors = makeRateColors(colors);
+  const deltaAccent = (d) => {
+    if (!d) return null;
+    const up = d.value > 0;
+    const mark = up ? '▲' : d.value === 0 ? '·' : '▼';
+    return {
+      subAccent: `${mark} ${Math.abs(d.value)}${d.unit || ''} vs team`,
+      accentColor: up ? colors.success : colors.textMuted,
+    };
+  };
+
+  const kpiRows = useMemo(() => {
     if (!s) return [];
     const k = s.kpi;
     // Server-computed connection rate (completion knocks ÷ knocks, capped at 100).
@@ -314,42 +331,68 @@ export default function CanvasserOverview() {
           {teamQ.data?.canvasserCount ? ` · ${teamQ.data.canvasserCount} canvassers in scope` : ''}
         </Text>
 
-        {/* KPI grid */}
-        <KpiGrid tiles={kpiTiles} />
+        {/* KPIs — hero (Knocks) over supporting rows. Each delta rides the sub line as the
+            accent fragment, so the tier color lands on '▲ 1.4h vs team' and never on the
+            label beside it. */}
+        <InsetGroup>
+          <InsetHeroRow
+            label={kpiRows[0]?.label || 'Knocks'}
+            value={kpiRows[0]?.value ?? '—'}
+            subAccent={deltaAccent(kpiRows[0]?.delta)?.subAccent}
+            accentColor={deltaAccent(kpiRows[0]?.delta)?.accentColor}
+          />
+          {kpiRows.slice(1).map((tile) => {
+            const acc = deltaAccent(tile.delta);
+            return (
+              <InsetRow
+                key={tile.label}
+                label={tile.label}
+                value={tile.value}
+                sub={tile.sub ? `${tile.sub}${acc ? ' · ' : ''}` : acc ? '' : null}
+                subAccent={acc?.subAccent}
+                accentColor={acc?.accentColor}
+                chipColors={tile.level ? rateColors[tile.level] : null}
+              />
+            );
+          })}
+        </InsetGroup>
 
-        {/* Highlights */}
-        <View style={styles.highlightRow}>
-          <Highlight
-            title="Best day"
-            value={
-              s.highlights.bestDay
-                ? `${s.highlights.bestDay.homesKnocked} knocks`
-                : '—'
-            }
-            sub={
-              s.highlights.bestDay
-                ? fmtDate(s.highlights.bestDay.date)
-                : 'No activity yet'
-            }
-          />
-          <Highlight
-            title="Streak"
-            value={`${s.highlights.currentStreak || 0}d`}
-            sub="consecutive active days"
-          />
-          <Highlight
-            title="Last activity"
-            value={
-              s.highlights.lastActivityAt
-                ? timeAgo(s.highlights.lastActivityAt)
-                : '—'
-            }
-            sub={
-              s.highlights.firstActivityAt
-                ? `since ${formatRange(s.highlights.firstActivityAt, null, campaign?.timeZone)}`
-                : ''
-            }
-          />
+        {/* Highlights — was a 3-across squeeze of mini-cards; rows give each value the
+            full width. */}
+        <View style={styles.groupGap}>
+          <InsetGroup>
+            <InsetRow
+              label="Best day"
+              value={
+                s.highlights.bestDay
+                  ? `${s.highlights.bestDay.homesKnocked} knocks`
+                  : '—'
+              }
+              sub={
+                s.highlights.bestDay
+                  ? fmtDate(s.highlights.bestDay.date)
+                  : 'No activity yet'
+              }
+            />
+            <InsetRow
+              label="Streak"
+              value={`${s.highlights.currentStreak || 0}d`}
+              sub="consecutive active days"
+            />
+            <InsetRow
+              label="Last activity"
+              value={
+                s.highlights.lastActivityAt
+                  ? timeAgo(s.highlights.lastActivityAt)
+                  : '—'
+              }
+              sub={
+                s.highlights.firstActivityAt
+                  ? `since ${formatRange(s.highlights.firstActivityAt, null, campaign?.timeZone)}`
+                  : ''
+              }
+            />
+          </InsetGroup>
         </View>
 
         {/* Days preview */}
@@ -452,21 +495,20 @@ export default function CanvasserOverview() {
             })
           }
         />
-        <View style={styles.qualityRow}>
-          <Highlight
-            title="Offline"
+        <InsetGroup>
+          <InsetRow
+            label="Offline"
             value={`${s.quality.offlinePercent}%`}
             sub={`${s.quality.offlineCount} submissions`}
           />
-          <Highlight
-            title="Avg distance"
+          <InsetRow
+            label="Avg distance from house"
             value={formatDistance(s.quality.avgDistanceFromHouseMeters)}
-            sub="from house"
           />
           {/* Detector-rule far (accuracy-aware, corrections + pin fixes forgiven) — the
               forgiven count explains a drop after someone corrects a pin. */}
-          <Highlight
-            title="Far knocks"
+          <InsetRow
+            label="Far knocks"
             value={`${s.quality.farFromHousePercent}%`}
             sub={
               s.quality.farForgivenByPinCount != null && s.quality.farForgivenByPinCount > 0
@@ -474,7 +516,7 @@ export default function CanvasserOverview() {
                 : `${s.quality.farFromHouseCount} flagged`
             }
           />
-        </View>
+        </InsetGroup>
 
         {/* Drill down — a menu of destinations, which is exactly what an inset group is for.
             Note the last one: "Export CSV" does not navigate, so it is an InsetActionRow and
@@ -525,17 +567,6 @@ function Header({ onBack, title }) {
       <Text style={styles.headerTitle} numberOfLines={2}>
         {title || ''}
       </Text>
-    </View>
-  );
-}
-
-function Highlight({ title, value, sub }) {
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <View style={styles.highlight}>
-      <Text style={styles.highlightTitle}>{title}</Text>
-      <Text style={styles.highlightValue}>{value}</Text>
-      {sub ? <Text style={styles.highlightSub}>{sub}</Text> : null}
     </View>
   );
 }
@@ -615,28 +646,8 @@ function makeStyles(t) {
     fontStyle: 'italic',
   },
 
-  highlightRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  highlight: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-  },
-  highlightTitle: { ...type.micro },
-  highlightValue: { ...type.h2, fontSize: 18, marginTop: 4 },
-  highlightSub: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-
-  qualityRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
+  // Breathing room between back-to-back groups that share no SectionHeader.
+  groupGap: { marginTop: spacing.md },
 
   chartCard: {
     backgroundColor: colors.card,

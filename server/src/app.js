@@ -35,6 +35,10 @@ const STATIC_PAGES = [
   ['/privacy', 'privacy.html'],
   ['/terms', 'terms.html'],
   ['/delete-account', 'delete-account.html'],
+  // Not a legal notice, but here for the same reason: /app has to be findable in search and
+  // correct in a link preview, and the SPA shell would hand it the homepage's canonical tag and
+  // OG copy. See the comment block in client/public/app.html.
+  ['/app', 'app.html'],
 ];
 // The zero-JS 404 document. If a stale dist lacks it, serve the SPA shell WITH a 404 status —
 // App.jsx's catch-all renders its NotFoundPage, so the status code stays honest either way.
@@ -118,7 +122,7 @@ export function createApp() {
   if (isProd && HAS_CLIENT_DIST) {
     // The clean URL is canonical for the static legal documents. Registered BEFORE
     // express.static, which would otherwise serve the .html twin at a duplicate, crawlable URL.
-    app.get(['/privacy.html', '/terms.html', '/delete-account.html'], (req, res) => {
+    app.get(['/privacy.html', '/terms.html', '/delete-account.html', '/app.html'], (req, res) => {
       res.redirect(301, req.path.replace(/\.html$/i, ''));
     });
 

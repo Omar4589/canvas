@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { demoMailto } from './contact.js';
+import { useDemoRequest } from './DemoRequest.jsx';
 import { useAuthCta } from './useAuthCta.js';
 import BrowserFrame from './frames/BrowserFrame.jsx';
 import { Reveal } from './useReveal.jsx';
@@ -38,10 +38,14 @@ function DoorDots() {
 // A real field-app screenshot (the books map) peeking over the console map's corner
 // — the "console and field app on the same map" story. Decorative, so hidden from
 // assistive tech (the map image carries the descriptive alt).
+//
+// Visible at EVERY width. It used to be lg-only, which meant a buyer evaluating a mobile
+// canvassing product on their own phone saw no phone in the hero at all — the one audience
+// most likely to want the field-app half of the story got only the console half.
 function MiniPhone() {
   return (
     <div
-      className="absolute -bottom-10 -right-3 z-10 hidden w-44 overflow-hidden rounded-[1.6rem] border border-stone-200 bg-white p-1.5 shadow-[0_18px_50px_rgba(28,25,23,0.22)] lg:block xl:w-52"
+      className="absolute -bottom-6 -right-2 z-10 w-24 overflow-hidden rounded-[1.6rem] border border-stone-200 bg-white p-1.5 shadow-[0_18px_50px_rgba(28,25,23,0.22)] sm:-bottom-8 sm:w-32 lg:-bottom-10 lg:-right-3 lg:w-44 xl:w-52"
       aria-hidden="true"
     >
       <img
@@ -57,6 +61,7 @@ function MiniPhone() {
 
 export default function Hero() {
   const cta = useAuthCta();
+  const demo = useDemoRequest();
   return (
     <section className="relative overflow-hidden bg-white">
       <div
@@ -80,22 +85,38 @@ export default function Hero() {
               in every canvasser&apos;s hand, and lands every door and every result on one live map
               — no clipboards, no spreadsheet.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3.5">
-              <a
-                href={demoMailto()}
-                className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+            {/* Stacked full-width below sm, side by side above. The row used to be a bare
+                `flex flex-wrap`, which at 320-375px wrapped the second button into a ragged
+                orphan against the left edge — signed in ("Go to dashboard") that happens on any
+                phone, since the pair is wider than the container. Stacking is deliberate rather
+                than accidental, and gives both a full-width tap target. */}
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-3.5">
+              <button
+                type="button"
+                onClick={demo.open}
+                className="inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:w-auto"
               >
                 Request a demo
-              </a>
+              </button>
               <Link
                 to={cta.to}
-                className="inline-flex items-center justify-center rounded-lg border border-stone-300 bg-white px-5 py-3 text-[15px] font-semibold text-stone-900 shadow-sm transition-colors hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                className="inline-flex w-full items-center justify-center rounded-lg border border-stone-300 bg-white px-5 py-3 text-[15px] font-semibold text-stone-900 shadow-sm transition-colors hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:w-auto"
               >
                 {cta.label}
               </Link>
             </div>
-            <p className="mt-4 text-[13px] text-stone-400">
-              Web console for the office · iOS &amp; Android app for the field
+            {/* The app half of the sentence is a real link now — this line was the only place
+                above the footer that mentioned iOS/Android, and it pointed nowhere. It is also
+                the hero's whole nod to the field app: the download CTA belongs on /app, not in a
+                third hero button aimed at someone who can't create an account. */}
+            <p className="mt-4 text-[13px] text-stone-500">
+              Web console for the office ·{' '}
+              <a
+                href="/app"
+                className="rounded font-semibold text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 hover:decoration-stone-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+              >
+                iOS &amp; Android app for the field
+              </a>
             </p>
           </Reveal>
 

@@ -82,6 +82,16 @@ const SAMPLES = [
   ['dormancyWarning', 'Dormancy deletion warning', () => t.dormancyWarning({
     orgName: 'Fox Bryant LLC', deleteOnDate: new Date(Date.now() + 30 * 86400000),
   })],
+  // The only template addressed to US. Awkward values on purpose, like the rest: an apostrophe in
+  // the name, an ampersand in the org, and a multi-line message — the newline→<br /> conversion in
+  // the HTML half is the bit worth actually looking at.
+  ['demoRequest', 'Demo request (inbound, to us)', () => t.demoRequest({
+    name: "Dana O'Neill",
+    email: 'dana@bryant-fox.org',
+    organization: 'Bryant & Fox Strategies',
+    teamSize: '20–50 canvassers',
+    message: 'We run three state races this cycle.\nCan you walk us through turf cutting?',
+  })],
 ];
 
 function esc(s) {

@@ -1,7 +1,7 @@
 import { Reveal } from './useReveal.jsx';
 
 // FAQ — answers the objections a consultant actually raises before a demo call.
-// Static (no accordion): four short answers read faster than four clicks.
+// Static (no accordion): short answers read faster than clicks.
 const ITEMS = [
   {
     q: 'How fast can we be knocking doors?',
@@ -22,6 +22,13 @@ const ITEMS = [
   {
     q: 'Can different teams work the same campaign?',
     a: "Yes — split a campaign into walk lists with separate crews, passes, and even different surveys, without ever double-knocking each other's doors.",
+  },
+  {
+    // A BUYER's objection ("am I about to spend a week doing IT support for 40 people?"), not a
+    // canvasser's question — which is why it belongs here rather than in the Help Center, whose
+    // articles are login-walled and written for people who already have an account.
+    q: 'How do my canvassers get set up?',
+    a: "You add them in the console and they get an email with a set-password link and install links for both phones. The app is free on the App Store and Google Play, and there's no separate app account to create — they sign in with the same email and password. Anyone who loses the email can start from doorline.app/app.",
   },
 ];
 

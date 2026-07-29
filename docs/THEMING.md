@@ -214,6 +214,17 @@ Two other traps in the same family, both measured:
 - **`brand` on `brandTint` is 4.41:1** — just under the floor for small text. Use `brandDark`
   (5.91:1). `brand` on `card` is fine at 4.83:1, which is what `InsetActionRow` uses.
 
+### Derived washes — `withAlpha(hex, alpha)`
+For an intensity ramp (heat scales, overlays) there is no per-step token — derive the wash from a
+token with `withAlpha` in `theme.js` instead of writing an `rgba(...)` literal. A literal rgb
+triple is identical in both schemes, which is exactly how the Timeline heat grid shipped its dark-
+mode bug: near-black `textPrimary` over a saturated blue wash. The rule, in two parts:
+
+1. **Base on a scheme-aware token** — the Timeline grid uses `withAlpha(colors.info, …)`, so the
+   hue itself flips with the scheme.
+2. **Cap the alpha** so the text color on top stays readable at the ramp's hottest step — the
+   heat grid ramps `0.12 → 0.6`; at 0.6 `textPrimary` still clears the floor in both schemes.
+
 ### Maps
 Map **chrome** themes normally (top bars use `chromeBar`; sheets/legends/chips use `card`/`raised`). Mapbox `SymbolLayer` label colors use `mapLabel` / `mapLabelHalo`. The **base tiles** follow the theme via [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) `useMapStyle()`: when the user hasn't explicitly picked a base style, it defaults to **Dark** tiles in dark mode and **Street** otherwise — an explicit Satellite/Hybrid/etc. choice is always preserved.
 

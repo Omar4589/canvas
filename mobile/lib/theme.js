@@ -77,6 +77,17 @@ export const ACTION_LABELS = {
 
 export const actionLabel = (t) => ACTION_LABELS[t] || t || '—';
 
+// Hex token + alpha → rgba string. For DERIVED washes (heat scales, overlays) so intensity
+// ramps stay tied to a scheme-aware token instead of a hardcoded rgb triple that ignores dark
+// mode — the exact bug the timeline heat grid shipped with.
+export function withAlpha(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 // Shadows. Black drop shadows read poorly on dark surfaces, so dark UIs lean on
 // the `border` token (cards already carry a 1px border) to separate surfaces;
 // the shadow values are shared and effectively a no-op against a dark bg.

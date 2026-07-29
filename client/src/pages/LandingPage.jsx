@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { DemoRequestProvider } from '../marketing/DemoRequest.jsx';
 import MarketingNav from '../marketing/MarketingNav.jsx';
 import Hero from '../marketing/Hero.jsx';
 import CredibilityStrip from '../marketing/CredibilityStrip.jsx';
@@ -29,19 +30,23 @@ export default function LandingPage() {
     // `theme-light` re-pins light tokens so the public site stays light even when
     // the app's dark theme is saved globally; bg-white masks the dark body.
     <div className="theme-light min-h-screen bg-white text-stone-900">
-      <MarketingNav />
-      <main>
-        <Hero />
-        <CredibilityStrip />
-        <ProblemStrip />
-        <ProductTour />
-        <PortalSpotlight />
-        <FeatureGrid />
-        <HowItWorks />
-        <Faq />
-        <CtaBand />
-      </main>
-      <MarketingFooter />
+      {/* Wraps the whole page because the "Request a demo" controls that open the dialog sit in
+          three different sections (nav, hero, cta band) at three different scroll depths. */}
+      <DemoRequestProvider>
+        <MarketingNav />
+        <main>
+          <Hero />
+          <CredibilityStrip />
+          <ProblemStrip />
+          <ProductTour />
+          <PortalSpotlight />
+          <FeatureGrid />
+          <HowItWorks />
+          <Faq />
+          <CtaBand />
+        </main>
+        <MarketingFooter />
+      </DemoRequestProvider>
     </div>
   );
 }

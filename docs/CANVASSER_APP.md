@@ -25,14 +25,18 @@ Doorline is **free on the App Store (iPhone) and Google Play (Android)** — sea
 There is one app for everybody: a canvasser, a team lead, and an admin all install the same thing,
 and what you can do inside it depends on your role, not on which app you downloaded.
 
-A canvasser normally arrives at it one of three ways:
+A canvasser normally arrives at it one of four ways:
 
 - **The invitation email.** A canvasser's invite carries install links for both platforms, right
   under the set-password button. See [EMAIL.md](EMAIL.md).
 - **The web page after setting a password.** The set-password link opens in a browser, which is
   normal — and if canvasser is the only role you hold, that browser lands you on a **Get the app**
   card with the same two links, not on a dashboard. See [ROLES.md](ROLES.md).
-- **Searching the store directly.** Any of the three gets you the same app.
+- **[doorline.app/app](https://doorline.app/app).** A public page with both store badges and the
+  part the store listings can't tell you: that you need an account from your campaign first, and
+  that you must not create a new one. It needs no login, so it's the link to send someone who lost
+  their invitation email. See [MARKETING_SITE.md](MARKETING_SITE.md).
+- **Searching the store directly.** Any of the four gets you the same app.
 
 **Sign in with the account you already have.** Same email, same password as the web — there is no
 separate app account to create. If your admin or team lead handed you a temporary password, the app

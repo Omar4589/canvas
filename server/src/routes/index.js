@@ -43,6 +43,7 @@ import mobileVotersRouter from './mobile/voters.js';
 import adminClientReportsRouter from './admin/clientReports.js';
 import shareRouter from './public/share.js';
 import buildStatusRouter from './public/buildStatus.js';
+import demoRequestRouter from './public/demoRequest.js';
 import resendWebhookRouter from './public/resendWebhook.js';
 import helpRouter from './help.js';
 
@@ -61,6 +62,10 @@ router.use('/share', shareRouter);
 // client draws a nag/wall from the answer. Mounted BEFORE the auth gate so the wall can cover
 // the login screen; env-driven, see routes/public/buildStatus.js.
 router.use('/build-status', buildStatusRouter);
+
+// Demo request from the public marketing site (no login — the submitter has no account and
+// cannot get one; that is the point). Rate-limited, stores nothing, mails hello@doorline.app.
+router.use('/demo-request', demoRequestRouter);
 
 // Resend delivery webhook (no login — Resend calls it; auth = the Svix signature over the raw
 // body, which app.js preserves with an express.raw mount on this exact path).

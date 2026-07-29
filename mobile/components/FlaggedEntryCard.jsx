@@ -24,7 +24,10 @@ function houseLine(h) {
   return `${h.addressLine1 || ''}${l2}, ${h.city || ''} ${h.state || ''}`.trim().replace(/^,|,$/g, '') || '—';
 }
 
-export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, defaultExpanded = false }) {
+// `bare` drops the card chrome so the entry can sit inside an InsetGroup, which draws the
+// card once for the whole list (audit.jsx). Opt-in and default-false: map.jsx renders this as
+// a single standalone card inside its flag sheet and depends on the chrome staying.
+export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, defaultExpanded = false, bare = false }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -41,7 +44,7 @@ export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, d
   const correction = correctionContextText(entry);
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, bare && styles.cardBare]}>
       <Pressable onPress={() => setExpanded((v) => !v)} style={styles.header} hitSlop={4}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.name} numberOfLines={1}>
@@ -111,6 +114,18 @@ function makeStyles(t) {
       borderWidth: 1,
       borderColor: colors.border,
       ...shadow.card,
+    },
+    // Inside an InsetGroup the group owns the card. paddingHorizontal matches the group's
+    // spacing.lg row origin (same trade CanvasserCard.rowBare makes).
+    cardBare: {
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      borderRadius: 0,
+      marginBottom: 0,
+      shadowOpacity: 0,
+      elevation: 0,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
     },
     header: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
     name: { ...type.bodyStrong, fontSize: 14 },

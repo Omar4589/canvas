@@ -23,7 +23,7 @@ Every time a canvasser marks a door, the app quietly records **where the phone w
 
 The app also refuses to record a door **without** a location: a canvasser with location off, denied, or set to approximate is blocked at the tap with instructions to fix it. So "no GPS trail at all" isn't something you'll see — entries either carry a stamp or don't exist.
 
-You don't have to go looking for mock-location flags: when one is waiting, a red **Mock GPS** alert appears on the campaign dashboard and a red count badge appears on **Audit** in the sidebar (and on the GPS-audit tiles and campaign cards in the mobile admin app). Click through and the Audit page opens already filtered to the open mock-location entries. The badges clear as you review.
+You don't have to go looking for mock-location flags: when one is waiting, a red **Mock GPS** alert appears on the campaign dashboard and a red count badge appears on **Audit** in the sidebar (and on the GPS-audit row and campaign cards in the mobile admin app). Click through and the Audit page opens already filtered to the open mock-location entries. The badges clear as you review.
 
 Each flag also carries a **severity** — low, medium, or high — so the worst ones stand out.
 

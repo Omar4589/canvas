@@ -17,6 +17,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import PasswordInput from '../../../components/PasswordInput';
 import MemberSheet from '../../../components/MemberSheet';
+import InsetGroup, {
+  InsetNavRow,
+  InsetActionRow,
+  InsetNoteRow,
+} from '../../../components/InsetGroup';
 import CreateCanvasserSheet from '../../../components/CreateCanvasserSheet';
 import { useConsoleRole, useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../lib/validators';
@@ -58,91 +63,30 @@ function initials(name) {
     .toUpperCase();
 }
 
-function UserCard({ user, onPress, assigned, coordinatorName }) {
+// The initials circle, for the row's `leading` slot — admins get the brand tint.
+const Avatar = ({ name, role }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const name = `${user.firstName} ${user.lastName}`.trim();
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.userCard, pressed && { opacity: 0.85 }]}
-    >
-      <View
-        style={[
-          styles.userAvatar,
-          user.role === 'admin' && { backgroundColor: colors.brandTint },
-        ]}
-      >
-        <Text
-          style={[
-            styles.userAvatarText,
-            user.role === 'admin' && { color: colors.brand },
-          ]}
-        >
-          {initials(name) || '?'}
-        </Text>
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.userName}>{name || user.email}</Text>
-        <Text style={styles.userEmail} numberOfLines={1}>
-          {user.email}
-        </Text>
-        <View style={styles.userPills}>
-          <View
-            style={[
-              styles.pill,
-              user.role === 'admin' ? styles.pillBrand : styles.pillNeutral,
-            ]}
-          >
-            <Text
-              style={[
-                styles.pillText,
-                user.role === 'admin'
-                  ? { color: colors.brand }
-                  : { color: colors.textSecondary },
-              ]}
-            >
-              {user.role === 'admin' ? 'admin' : user.role === 'lead' ? 'team lead' : 'canvasser'}
-            </Text>
-          </View>
-          {/* Campaign-scoped extras: assigned state + coordinator (the merged Team view). */}
-          {assigned !== undefined && (
-            <View style={[styles.pill, assigned ? styles.pillSuccess : styles.pillNeutral]}>
-              <Text style={[styles.pillText, { color: assigned ? colors.success : colors.textMuted }]}>
-                {assigned ? 'assigned' : 'not assigned'}
-              </Text>
-            </View>
-          )}
-          {coordinatorName ? (
-            <View style={[styles.pill, styles.pillNeutral]}>
-              <Text style={[styles.pillText, { color: colors.textSecondary }]} numberOfLines={1}>
-                {coordinatorName}
-              </Text>
-            </View>
-          ) : null}
-          <View
-            style={[
-              styles.pill,
-              user.isActive ? styles.pillSuccess : styles.pillDanger,
-            ]}
-          >
-            <Text
-              style={[
-                styles.pillText,
-                user.isActive
-                  ? { color: colors.success }
-                  : { color: colors.danger },
-              ]}
-            >
-              {user.isActive ? 'active' : 'inactive'}
-            </Text>
-          </View>
-        </View>
-      </View>
-      <Text style={styles.chevron}>›</Text>
-    </Pressable>
+    <View style={[styles.userAvatar, role === 'admin' && { backgroundColor: colors.brandTint }]}>
+      <Text style={[styles.userAvatarText, role === 'admin' && { color: colors.brand }]}>
+        {initials(name) || '?'}
+      </Text>
+    </View>
   );
-}
+};
+
+// The old pill strip (role / assigned / coordinator / active) collapsed into one quiet meta
+// line — the grammar allows ONE badge, and it's reserved for the exceptional state (inactive).
+const userMeta = ({ role, assigned, coordinatorName }) =>
+  [
+    role === 'admin' ? 'admin' : role === 'lead' ? 'team lead' : 'canvasser',
+    // Campaign-scoped extras: assigned state + coordinator (the merged Team view).
+    assigned === undefined ? null : assigned ? 'assigned' : 'not assigned',
+    coordinatorName || null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
 function FilterPill({ active, label, onPress }) {
   const styles = useThemedStyles(makeStyles);
@@ -419,56 +363,65 @@ export default function AdminUsers() {
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
       >
-        {usersQ.isLoading ? (
-          <ActivityIndicator color={colors.brand} />
-        ) : usersQ.isError ? (
-          // NEVER fall through to the empty state on an error. A team lead reaching this screen
-          // gets a 403 from /admin/memberships, which used to render as "No users yet" — the app
-          // stating as fact that the organization is empty to somebody who is simply not allowed
-          // to look. Say which of the two it is.
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>
+        <InsetGroup>
+          {usersQ.isLoading ? (
+            <InsetNoteRow loading />
+          ) : usersQ.isError ? (
+            // NEVER fall through to the empty state on an error. A team lead reaching this screen
+            // gets a 403 from /admin/memberships, which used to render as "No users yet" — the app
+            // stating as fact that the organization is empty to somebody who is simply not allowed
+            // to look. Say which of the two it is.
+            <InsetNoteRow>
               {usersQ.error?.code === 'FORBIDDEN_ROLE'
                 ? 'Your account can’t view users in this organization.'
                 : 'Could not load users. Pull to retry, or check your connection.'}
-            </Text>
-          </View>
-        ) : visibleUsers.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>
+            </InsetNoteRow>
+          ) : visibleUsers.length === 0 ? (
+            <InsetNoteRow>
               {users.length === 0
                 ? 'No users yet. Tap "+ New" to add one.'
                 : 'No users match your filters.'}
-            </Text>
-          </View>
-        ) : (
-          <>
-            {/* Bulk assign — admin, campaign scoped (ported from the Team page). */}
-            {cId && !isLead && visibleUsers.some((u) => !u.assigned) ? (
-              <Pressable
-                onPress={() => assignAll.mutate(visibleUsers.filter((u) => !u.assigned).map((u) => u.id))}
-                style={styles.bulkBtn}
-                disabled={assignAll.isPending}
-              >
-                <Text style={styles.bulkBtnText}>
-                  {assignAll.isPending
-                    ? 'Assigning…'
-                    : `Assign all shown (${visibleUsers.filter((u) => !u.assigned).length})`}
-                </Text>
-              </Pressable>
-            ) : null}
-            {visibleUsers.map((u) => (
-              <UserCard
-                key={u.id}
-                user={u}
-                assigned={cId ? u.assigned : undefined}
-                coordinatorName={cId ? rosterByUser.get(String(u.id))?.coordinatorName : undefined}
-                // Campaign scoped → the member sheet (campaign actions); org view → full page.
-                onPress={() => (cId ? setSheetUserId(u.id) : router.push(`/(app)/admin/users/${u.id}`))}
-              />
-            ))}
-          </>
-        )}
+            </InsetNoteRow>
+          ) : (
+            // An array, not a fragment: InsetGroup flattens arrays, so the hairlines land
+            // between the action row and every user row. A fragment would read as ONE child.
+            [
+              /* Bulk assign — admin, campaign scoped (ported from the Team page). Acts in
+                 place (mutates the roster), so an action row, no chevron. */
+              cId && !isLead && visibleUsers.some((u) => !u.assigned) ? (
+                <InsetActionRow
+                  key="bulk-assign"
+                  label={
+                    assignAll.isPending
+                      ? 'Assigning…'
+                      : `Assign all shown (${visibleUsers.filter((u) => !u.assigned).length})`
+                  }
+                  onPress={() => assignAll.mutate(visibleUsers.filter((u) => !u.assigned).map((u) => u.id))}
+                  disabled={assignAll.isPending}
+                />
+              ) : null,
+              ...visibleUsers.map((u) => {
+                const name = `${u.firstName} ${u.lastName}`.trim();
+                return (
+                  <InsetNavRow
+                    key={u.id}
+                    leading={<Avatar name={name} role={u.role} />}
+                    label={name || u.email}
+                    sub={u.email}
+                    unit={userMeta({
+                      role: u.role,
+                      assigned: cId ? u.assigned : undefined,
+                      coordinatorName: cId ? rosterByUser.get(String(u.id))?.coordinatorName : undefined,
+                    })}
+                    badge={u.isActive ? null : { text: 'inactive' }}
+                    // Campaign scoped → the member sheet (campaign actions); org view → full page.
+                    onPress={() => (cId ? setSheetUserId(u.id) : router.push(`/(app)/admin/users/${u.id}`))}
+                  />
+                );
+              }),
+            ]
+          )}
+        </InsetGroup>
       </ScrollView>
 
       {/* Member sheet — campaign-scoped actions for the tapped person. */}
@@ -812,7 +765,7 @@ function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
 }
 
 function makeStyles(t) {
-  const { colors, type, shadow } = t;
+  const { colors, type } = t;
   return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
@@ -852,16 +805,6 @@ function makeStyles(t) {
     paddingRight: spacing.lg,
     marginBottom: spacing.xs,
   },
-  bulkBtn: {
-    backgroundColor: colors.brandTint,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.brand,
-    paddingVertical: spacing.sm,
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  bulkBtnText: { color: colors.brand, fontWeight: '700' },
   filterDivider: {
     width: 1,
     alignSelf: 'stretch',
@@ -910,32 +853,6 @@ function makeStyles(t) {
   sortChevron: { fontSize: 11, color: colors.textSecondary },
   countText: { ...type.caption },
 
-  empty: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.xl,
-    alignItems: 'center',
-  },
-  emptyText: {
-    ...type.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-
-  userCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
-    gap: spacing.md,
-  },
   userAvatar: {
     width: 44,
     height: 44,
@@ -949,29 +866,6 @@ function makeStyles(t) {
     fontWeight: '800',
     fontSize: 14,
   },
-  userName: { ...type.bodyStrong, fontSize: 15 },
-  userEmail: { ...type.caption, marginTop: 1 },
-  userPills: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.xs },
-  pill: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  pillBrand: { backgroundColor: colors.brandTint, borderColor: colors.brand },
-  pillNeutral: { backgroundColor: colors.bg, borderColor: colors.border },
-  pillSuccess: {
-    backgroundColor: colors.successBg,
-    borderColor: colors.successBorder,
-  },
-  pillDanger: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
-  pillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  chevron: { fontSize: 24, color: colors.textMuted },
 
   modalBackdrop: {
     flex: 1,

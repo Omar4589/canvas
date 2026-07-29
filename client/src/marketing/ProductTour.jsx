@@ -13,7 +13,10 @@ import shotPhoneSurvey from '../assets/marketing/shot-phone-survey.webp';
 // max-w-6xl container is at full width (≥ ~1152px): gap = (100vw − 1152)/2 + 32px padding
 // = 50vw − 544px. Below that it degrades gracefully; the section's overflow-x-clip guards
 // against sub-pixel scroll. Only on lg+, where the two-column layout exists.
-function TourRow({ id, tag, title, children, bullets, visual, side = 'right', bleed = false }) {
+// `footer` is an optional node under the bullets. Only the Field app row uses one: it is the
+// single tour row the nav links to directly (#field), and until that link existed the section a
+// visitor deliberately navigated to was a dead end with nothing clickable in it.
+function TourRow({ id, tag, title, children, bullets, visual, footer, side = 'right', bleed = false }) {
   const left = side === 'left';
   const bleedClass = bleed ? (left ? 'lg:ml-[calc(544px-50vw)]' : 'lg:mr-[calc(544px-50vw)]') : '';
   return (
@@ -37,6 +40,7 @@ function TourRow({ id, tag, title, children, bullets, visual, side = 'right', bl
             </li>
           ))}
         </ul>
+        {footer}
       </Reveal>
       <Reveal delay={120} className={`${left ? 'lg:order-1' : ''} ${bleedClass}`}>
         {visual}
@@ -135,6 +139,19 @@ export default function ProductTour() {
             'Doors that already voted drop off the book automatically',
           ]}
           visual={<FieldAppShots />}
+          footer={
+            // Tertiary on purpose. The section's job is to sell the field app to the BUYER, and
+            // /app is the utility page for the canvasser they'll hand it to — worth reaching,
+            // never worth competing with "Request a demo". A full page load: /app is an
+            // Express-served static document, not a React route.
+            <a
+              href="/app"
+              className="mt-5 inline-flex items-center gap-1.5 rounded text-[14.5px] font-semibold text-brand-600 transition-colors hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+            >
+              How canvassers get the app
+              <span aria-hidden="true">→</span>
+            </a>
+          }
         >
           Canvassers open their assigned book and walk. Pins recolor the instant an outcome is
           recorded — survey, not home, refused, wrong address, restricted access — and every action carries a GPS

@@ -17,7 +17,7 @@ const APP_JSX = path.resolve(
 // Served by explicit Express routes ahead of the fallback, so they are deliberately NOT in
 // WEB_SEGMENTS and deliberately NOT React routes. If someone re-adds them to App.jsx, the
 // bidirectional check below fails and forces a decision.
-const STATIC_PAGE_SEGMENTS = new Set(['privacy', 'terms', 'delete-account']);
+const STATIC_PAGE_SEGMENTS = new Set(['privacy', 'terms', 'delete-account', 'app']);
 
 test('WEB_SEGMENTS exactly mirrors the first segments of App.jsx routes', () => {
   const src = fs.readFileSync(APP_JSX, 'utf8');
