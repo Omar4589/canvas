@@ -313,3 +313,145 @@ test('the freed email can be used for a brand-new account', { skip }, async () =
   const oldRows = await CanvassActivity.countDocuments({ userId: fresh._id });
   assert.strictEqual(oldRows, 0, 'the returning person does NOT inherit the deleted account’s history');
 });
+
+// ── Console deletion (super admin) ───────────────────────────────────────────────────────────
+// Until this existed, `npm run delete:account <email> --apply` from the Heroku Run console was the
+// ONLY staff path. The GUI route must be a one-for-one replacement — same service, same blockers,
+// no force flag — not a looser second door. These tests exist to pin exactly that.
+
+async function makeSupers() {
+  const bg = await makeUser('Bossglass', {
+    email: 'bg@doorline.app', isSuperAdmin: true, platformRole: 'break_glass',
+  });
+  const sup = await makeUser('Supportonly', {
+    email: 'sup@doorline.app', isSuperAdmin: true, platformRole: 'support',
+  });
+  return { bgTok: signUserToken(bg), supTok: signUserToken(sup), bgId: bg._id };
+}
+
+// A deletable canvasser in the main org: no admin role, so no LAST_ADMIN blocker.
+async function makeDeletable(first) {
+  const u = await makeUser(first);
+  await Membership.create({
+    userId: u._id, organizationId: ctx.org._id, role: 'canvasser', isActive: true,
+  });
+  return u;
+}
+
+test('console delete: a support-tier super cannot destroy an account', { skip }, async () => {
+  const { supTok } = await makeSupers();
+  const target = await makeDeletable('Deletablea');
+
+  const res = await call('DELETE', `/super-admin/users/${target._id}`, {
+    token: supTok, body: { confirmEmail: target.email },
+  });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.code, 'BREAK_GLASS_REQUIRED');
+  assert.strictEqual((await User.findById(target._id)).deletedAt, null, 'account survived');
+});
+
+test('console delete: the typed email must match, and a mismatch writes nothing', { skip }, async () => {
+  const bg = signUserToken(await User.findOne({ email: 'bg@doorline.app' }));
+  const target = await makeDeletable('Deletableb');
+
+  for (const body of [{}, { confirmEmail: 'someone-else@t.co' }]) {
+    const res = await call('DELETE', `/super-admin/users/${target._id}`, { token: bg, body });
+    assert.strictEqual(res.status, 400, JSON.stringify(res.json));
+    assert.strictEqual(res.json.code, 'confirm-email-mismatch');
+  }
+  assert.strictEqual((await User.findById(target._id)).deletedAt, null);
+  assert.strictEqual(await DeletedUserRecord.countDocuments({ userId: target._id }), 0, 'no snapshot written');
+});
+
+test('console delete: preflight names the blocker, and the write refuses too', { skip }, async () => {
+  const bg = signUserToken(await User.findOne({ email: 'bg@doorline.app' }));
+  // ctx.solo is the ONLY admin of org2 — the same case the self-serve path blocks.
+  const check = await call('GET', `/super-admin/users/${ctx.solo.userId}/deletion-check`, { token: bg });
+  assert.strictEqual(check.status, 200);
+  assert.strictEqual(check.json.canDelete, false);
+  assert.ok(check.json.blockers.map((b) => b.code).includes('LAST_ADMIN'));
+  assert.strictEqual(check.json.confirmEmail, 'solo@t.co', 'the console echoes the SERVER\'s email');
+
+  const del = await call('DELETE', `/super-admin/users/${ctx.solo.userId}`, {
+    token: bg, body: { confirmEmail: 'solo@t.co' },
+  });
+  assert.strictEqual(del.status, 409, 'staff get no bypass of the org-bricking guard');
+  assert.strictEqual(del.json.code, 'BLOCKED');
+  assert.strictEqual((await User.findById(ctx.solo.userId)).deletedAt, null);
+});
+
+test('console delete: scrubs the identity, releases work, and never moves the money', { skip }, async () => {
+  const bg = signUserToken(await User.findOne({ email: 'bg@doorline.app' }));
+  const target = await makeDeletable('Deletablec');
+  await TurfAssignment.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id,
+    passId: ctx.pass._id, turfId: ctx.turf._id, userId: target._id,
+  });
+  const knocksBefore = await billableKnocks(ctx.campaign._id);
+
+  const res = await call('DELETE', `/super-admin/users/${target._id}`, {
+    token: bg, body: { confirmEmail: target.email.toUpperCase() }, // case-insensitive, like confirmSlug
+  });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+
+  const after = await User.findById(target._id);
+  assert.strictEqual(after.firstName, 'Deleted');
+  assert.ok(after.email.includes(String(target._id)), 'tombstone email embeds the id so it stays unique');
+  assert.strictEqual(after.lastLoginAt, null);
+  assert.strictEqual(after.lastSeenAt, null);
+  assert.strictEqual(after.isActive, false);
+
+  assert.strictEqual(
+    await TurfAssignment.countDocuments({ userId: target._id }), 0,
+    'held books were released'
+  );
+  assert.strictEqual(
+    (await Membership.findOne({ userId: target._id, organizationId: ctx.org._id })).isActive, false
+  );
+  assert.strictEqual(
+    await billableKnocks(ctx.campaign._id), knocksBefore,
+    'the invoice did not move — the ledger never joins User'
+  );
+});
+
+// The whole "no new audit model needed" argument rests on this snapshot, so assert it.
+test('console delete: the snapshot records WHO ordered it and by which door', { skip }, async () => {
+  const bgUser = await User.findOne({ email: 'bg@doorline.app' });
+  const target = await makeDeletable('Deletabled');
+
+  assert.strictEqual(
+    (await call('DELETE', `/super-admin/users/${target._id}`, {
+      token: signUserToken(bgUser), body: { confirmEmail: target.email },
+    })).status,
+    200
+  );
+
+  const snap = await DeletedUserRecord.findOne({ userId: target._id }).lean();
+  assert.ok(snap, 'a snapshot was written');
+  assert.strictEqual(snap.reason, 'super_admin', '`reason` is persisted, not dropped on the floor');
+  assert.strictEqual(String(snap.deletedBy), String(bgUser._id), 'and it names the acting staff member');
+  // A self-deletion must stay attributable to nobody — there is no third party to name.
+  const selfSnap = await DeletedUserRecord.findOne({ userId: ctx.cara.userId }).lean();
+  if (selfSnap) {
+    assert.strictEqual(selfSnap.reason, 'self');
+    assert.strictEqual(selfSnap.deletedBy, null);
+  }
+});
+
+test('console delete: an already-deleted account is refused, not silently re-deleted', { skip }, async () => {
+  const bg = signUserToken(await User.findOne({ email: 'bg@doorline.app' }));
+  // Any already-scrubbed account will do — the scrub rewrites the name to "Deleted user", so
+  // match on the tombstone marker itself rather than on the fixture's original name.
+  const gone = await User.findOne({ deletedAt: { $ne: null } });
+  assert.ok(gone, 'an earlier test in this file has already deleted someone');
+
+  const check = await call('GET', `/super-admin/users/${gone._id}/deletion-check`, { token: bg });
+  assert.strictEqual(check.status, 409);
+  assert.strictEqual(check.json.code, 'ALREADY_DELETED');
+
+  const del = await call('DELETE', `/super-admin/users/${gone._id}`, {
+    token: bg, body: { confirmEmail: gone.email },
+  });
+  assert.strictEqual(del.status, 409);
+  assert.strictEqual(del.json.code, 'ALREADY_DELETED');
+});

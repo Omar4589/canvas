@@ -47,6 +47,25 @@ const deletedUserRecordSchema = new mongoose.Schema(
     // (180) — long enough to cover a campaign cycle plus its billing dispute window.
     retentionUntil: { type: Date, required: true, index: true },
     purgedAt: { type: Date, default: null },
+    // WHO ordered the deletion, and by which door. Deliberately NOT scrubbed by
+    // purgeDeletedIdentities (which only blanks firstName/lastName and unsets email/phone):
+    // these describe the ACTOR, not the person deleted, so attribution for a staff-initiated
+    // deletion outlives the subject's PII rather than competing with it. Retaining "an admin
+    // did this on this date" is the opposite of a privacy problem — the alternative is an
+    // irreversible destruction of a customer's account with nothing on record.
+    //
+    // `reason` used to be a parameter of deleteAccount() that was destructured and then never
+    // referenced; both callers passed a value into a void. It is persisted now.
+    //   'self'        — the account holder, in-app (DELETE /auth/account)
+    //   'operator'    — npm run delete:account, honouring an emailed request
+    //   'super_admin' — the console, break-glass (DELETE /super-admin/users/:userId)
+    reason: {
+      type: String,
+      enum: ['self', 'operator', 'super_admin'],
+      default: 'self',
+    },
+    // null for a self-deletion — there is no third party to name.
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }
 );

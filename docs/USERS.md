@@ -280,6 +280,57 @@ Three things are load-bearing:
 Authorization reuses `leadMayManageTarget`, the same guard as the temp-password reset, so a lead may
 act only on a canvasser rostered to a campaign they manage. `isOrgAdmin` covers org admins and super
 admins. The router's blanket non-GET guard means a support-grant holder gets `VENDOR_READ_ONLY`.
+
+### Staff resend, across orgs
+
+**Part 1 — For everyone.** The button above needs you to be *in* the organization. Doorline staff
+usually aren't — so when a client is provisioned, never signs in, and their 72-hour temp password
+lapses, nobody inside the org can help and staff have no button either. The platform console fixes
+that: **super-admin → All Users → the person → Memberships**, and each row they belong to has its own
+**Resend invite**. The org is picked per row on purpose — the invite email names an organization, and
+someone who belongs to two must never be sent a link naming the wrong company.
+
+**Part 2 — Technical reference.** `POST /super-admin/users/:userId/resend-invite`, body
+`{ organizationId }` — **required, never inferred**. Plain `requireSuperAdmin`, deliberately *not*
+break-glass: the precedent is `POST /:userId/clear-lockout`, which is also plain super-admin, so
+unsticking a locked-out user is already support-tier work. The line drawn is **recoverable help →
+support tier; irreversible destruction → break-glass**.
+
+Both routes call one implementation, `services/memberships/resendInvite.js` — a second invite path
+drifting from the first is the exact failure this feature existed to prevent.
+
+**This is not a `VENDOR_READ_ONLY` bypass**, and the distinction matters. That guard stops a
+*grant-holder* writing through the customer-facing `/admin` router, up to and including minting
+themselves a membership. This is one named capability on `/super-admin` that cannot change a role,
+cannot create an account, and exposes no data. The asymmetry that makes it safe:
+
+| action | why |
+|---|---|
+| **Resend invite — safe for staff** | Emails the address already on the account; the *user* chooses the password. Staff never learn a credential and cannot sign in as them. |
+| **Set temp password — NOT offered to staff** | The operator *chooses* the secret, so they know it, and could then sign in as that customer's user. |
+
+Attribution is free: `sendMail` writes an `EmailLog` row carrying kind, recipient, `organizationId`
+and `userId`, visible at **super-admin → Emails**. No new audit model.
+
+### Deleting an account from the console
+
+**Part 1 — For everyone.** A super admin can delete someone's account from **All Users → the person →
+Delete account…**. It shows what would break first (being the sole admin of an org blocks it), states
+plainly that field work is *not* deleted, and makes you type the account's email to confirm. It cannot
+be undone. Until this existed, the only staff route was a command-line script on the server.
+
+**Part 2 — Technical reference.** `GET /super-admin/users/:userId/deletion-check` (preflight) and
+`DELETE /super-admin/users/:userId` with `{ confirmEmail }` — both **break-glass**, matching
+`DELETE /super-admin/organizations/:orgId`: deleting one person should not be easier than deleting
+their whole org. `confirmEmail` is the analogue of that route's `confirmSlug` and is *the same string
+`npm run delete:account` takes*, so this is a one-for-one replacement for the command it retires
+rather than a looser second door. Every blocker is enforced and there is no force flag.
+
+`deleteAccount()` gained a real `deletedBy`, and its long-dead `reason` parameter — destructured and
+then never referenced, so both callers passed a value into a void — is now persisted on
+`DeletedUserRecord`. Neither field is touched by the 180-day purge, deliberately: they describe the
+**actor**, not the subject, so a staff-ordered deletion stays answerable after the subject's name is
+scrubbed. See `docs/PRIVACY_VERIFICATION.md` (v4 2026-07-29 stamps).
 - When the person sets **their own** password, it has to be reasonably strong: at least 8 characters
   with an uppercase letter, a lowercase letter, a number, and a special character. A live checklist
   ticks each rule off as they type. (A *temporary* password isn't held to this — it only needs to be at

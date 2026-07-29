@@ -173,7 +173,7 @@ async function activeAdminIds(organizationId, excludeUserId) {
  * removing them would silently rewrite campaign counts and invoices. Both stores allow this
  * retention; both require it be disclosed, which the deletion sheet and privacy policy do.
  */
-export async function deleteAccount(userId, { reason = 'self' } = {}) {
+export async function deleteAccount(userId, { reason = 'self', deletedBy = null } = {}) {
   const { user, memberships, blockers } = await checkDeletionBlockers(userId);
   if (blockers.length > 0) {
     throw new AccountDeletionError(
@@ -202,6 +202,12 @@ export async function deleteAccount(userId, { reason = 'self' } = {}) {
         organizationIds: orgIds,
         deletedAt: now,
         retentionUntil,
+        // WHO ordered it. `reason` was accepted and dropped on the floor for as long as this
+        // function has existed — both callers passed a value that reached nothing. A deletion
+        // an operator or staff member ordered must be answerable later, and these two fields
+        // are the only record of it (the purge leaves them alone by design).
+        reason,
+        deletedBy,
       },
       $unset: { email: 1, phone: 1 },
     },

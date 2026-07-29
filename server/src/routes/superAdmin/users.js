@@ -4,9 +4,20 @@ import { z } from 'zod';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { Organization } from '../../models/Organization.js';
 import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
 import { clearLoginLockout, loginLockoutStatus } from '../../middleware/loginRateLimit.js';
 import { buildUserOversight } from '../../services/platform/userOversight.js';
+import {
+  resendInvite,
+  loadResendUser,
+  ResendInviteError,
+} from '../../services/memberships/resendInvite.js';
+import {
+  checkDeletionBlockers,
+  deleteAccount,
+  AccountDeletionError,
+} from '../../services/users/deleteAccount.js';
 
 const router = Router();
 router.use(requireAuth, requireSuperAdmin);
@@ -197,6 +208,153 @@ router.post('/:userId/promote', requireBreakGlass, async (req, res, next) => {
     await target.save();
     res.json({ user: target.toSafeJSON() });
   } catch (err) {
+    next(err);
+  }
+});
+
+// Re-send a set-password invite into ANY org, including one staff are not members of.
+//
+// Why this exists as a staff route rather than by relaxing a guard: the org-scoped button
+// (POST /admin/memberships/:userId/resend-invite) needs MEMBERSHIP, and staff entering a customer
+// org get req.supportGrant, which that router refuses for every non-GET (VENDOR_READ_ONLY). So a
+// provisioned client whose 72h temp password lapsed — "I'm trying to use it but I can't get in" —
+// could not be helped from the console at all.
+//
+// This is NOT a VENDOR_READ_ONLY bypass, and the distinction is the point. That guard stops a
+// grant-holder WRITING through the customer-facing /admin router, up to and including minting
+// themselves a membership. This is one named capability on /super-admin that cannot change a role,
+// cannot create an account, and exposes no data: it emails the address already on the account a
+// link to set THEIR OWN password. Staff never learn a credential and cannot sign in as them —
+// which is exactly why the sibling action (set a temporary password, where staff choose the secret
+// and could then impersonate) is deliberately NOT offered here.
+//
+// Tier: plain super-admin, not break-glass. Unsticking a locked-out user is already support-tier
+// work — see POST /:userId/clear-lockout below. The line is recoverable help → support tier,
+// irreversible destruction → break-glass (see DELETE /:userId).
+//
+// Attribution is free: sendMail writes an EmailLog row carrying kind, to, organizationId and
+// userId, visible at super-admin → Emails. No new model.
+router.post('/:userId/resend-invite', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid userId' });
+    }
+    // REQUIRED, never inferred. A user can belong to several orgs and the invite email names one
+    // ("You've been added to {orgName}"), so guessing would mail a client the wrong company's name.
+    // The console never has to ask: buildUserOversight already returns memberships with org names,
+    // so the action sits on a specific membership row.
+    const organizationId = String(req.body?.organizationId || '');
+    if (!mongoose.isValidObjectId(organizationId)) {
+      return res.status(400).json({
+        error: 'organizationId is required — an invite names the organization it is for.',
+        code: 'ORG_REQUIRED',
+      });
+    }
+
+    const [org, membership, user] = await Promise.all([
+      Organization.findById(organizationId, 'name').lean(),
+      Membership.findOne({ userId: req.params.userId, organizationId }, 'role').lean(),
+      loadResendUser(req.params.userId),
+    ]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+    if (!membership) {
+      return res.status(404).json({ error: 'That user is not a member of that organization.' });
+    }
+    // Someone who has signed in already has a working password; the honest remedy for them is
+    // Forgot password, not an admin silently killing whatever link they hold.
+    if (user.lastLoginAt) {
+      return res.status(409).json({
+        error: 'This person has already signed in — they should use Forgot password instead.',
+        code: 'ALREADY_SIGNED_IN',
+      });
+    }
+
+    const result = await resendInvite({ user, membership, org });
+    console.warn(
+      `[staff-resend-invite] ${req.user.email || req.user._id} re-invited ${user.email} to '${org.name}'`
+    );
+    res.json(result);
+  } catch (err) {
+    if (err instanceof ResendInviteError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
+    next(err);
+  }
+});
+
+// What would stand in the way of deleting this account. The console calls this BEFORE offering
+// the button, so an operator sees "sole admin of Acme" instead of discovering it on submit.
+// Mirrors GET /auth/account/deletion-check, which the mobile deletion sheet uses for the same
+// reason. Break-glass because it is the preflight for a break-glass action: showing a support
+// tier a refusal list for a button they can never press is noise.
+router.get('/:userId/deletion-check', requireBreakGlass, async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid userId' });
+    }
+    const { user, blockers } = await checkDeletionBlockers(req.params.userId);
+    res.json({
+      canDelete: blockers.length === 0,
+      blockers,
+      // The console echoes this back as the typed confirmation, so it must come from the server
+      // rather than from whatever the list happened to be showing.
+      confirmEmail: user.email,
+    });
+  } catch (err) {
+    if (err instanceof AccountDeletionError) {
+      // NOT_FOUND → 404; ALREADY_DELETED → 409. checkDeletionBlockers THROWS these rather than
+      // returning them as blockers, so they need mapping or they surface as a 500.
+      return res.status(err.code === 'NOT_FOUND' ? 404 : 409).json({ error: err.message, code: err.code });
+    }
+    next(err);
+  }
+});
+
+// Delete an account from the console — the GUI replacement for `npm run delete:account`, which
+// until now was the ONLY staff path and required Heroku Run-console access.
+//
+// Break-glass, matching DELETE /super-admin/organizations/:orgId ("this destroys a customer's
+// entire account, irreversibly"). Deleting one person should not be easier than deleting their org.
+//
+// `confirmEmail` is the analogue of that route's typed `confirmSlug`, and is deliberately the SAME
+// string the CLI takes — so this is a one-for-one replacement for the command it retires, not a new
+// and looser way in. Every blocker still applies and there is no force flag, matching the CLI's
+// "Deliberately no --force".
+router.delete('/:userId', requireBreakGlass, async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid userId' });
+    }
+    const target = await User.findById(req.params.userId, 'email').lean();
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    const confirmEmail = String(req.body?.confirmEmail || '').trim().toLowerCase();
+    if (confirmEmail !== String(target.email || '').toLowerCase()) {
+      return res.status(400).json({
+        error: `Type the account's email (${target.email}) to confirm deletion.`,
+        code: 'confirm-email-mismatch',
+      });
+    }
+
+    const result = await deleteAccount(req.params.userId, {
+      reason: 'super_admin',
+      deletedBy: req.user._id,
+    });
+    // Mirrors [org-delete]. Ephemeral on Heroku, so it is the incident-response copy, not the
+    // record — DeletedUserRecord.deletedBy/reason is the durable one.
+    console.warn(
+      `[user-delete] ${req.user.email || req.user._id} deleted account ${target.email} ` +
+        `(orgs: ${result.organizationIds.length})`
+    );
+    res.json(result);
+  } catch (err) {
+    if (err instanceof AccountDeletionError) {
+      if (err.code === 'NOT_FOUND') return res.status(404).json({ error: err.message, code: err.code });
+      if (err.code === 'ALREADY_DELETED') return res.status(409).json({ error: err.message, code: err.code });
+      // BLOCKED carries the refusal list, so the console can name what has to change first.
+      return res.status(409).json({ error: err.message, code: err.code, ...err.details });
+    }
     next(err);
   }
 });

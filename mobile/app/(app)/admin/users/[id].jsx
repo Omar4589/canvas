@@ -196,7 +196,7 @@ export default function AdminUserDetail() {
         res?.sent ? 'success' : 'error',
         res?.sent
           ? `Invite sent. The link works for ${res.expiresInHours} hours.`
-          : 'Could not send the invite \u2014 check the mail settings.'
+          : 'Could not send the invite — check the mail settings.'
       ),
     onError: (err) => flash('error', err.message),
   });
@@ -605,14 +605,14 @@ export default function AdminUserDetail() {
               </Text>
             </Pressable>
 
-            {/* Never-signed-in only \u2014 lastLoginAt is written in exactly one place, so null is
+            {/* Never-signed-in only — lastLoginAt is written in exactly one place, so null is
                 unambiguous, and a resend kills any link they already hold. */}
             {!user.lastLoginAt && (
               <Pressable
                 onPress={() =>
                   Alert.alert(
                     'Resend invite?',
-                    `Email ${user.email} a new set-password link.\n\nThis replaces any earlier invite or reset link \u2014 if they still have one, it will stop working.`,
+                    `Email ${user.email} a new set-password link.\n\nThis replaces any earlier invite or reset link — if they still have one, it will stop working.`,
                     [
                       { text: 'Cancel', style: 'cancel' },
                       { text: 'Send', onPress: () => resendInvite.mutate() },
@@ -623,7 +623,7 @@ export default function AdminUserDetail() {
                 style={styles.secondaryBtn}
               >
                 <Text style={styles.secondaryBtnText}>
-                  {resendInvite.isPending ? 'Sending\u2026' : 'Resend invite'}
+                  {resendInvite.isPending ? 'Sending…' : 'Resend invite'}
                 </Text>
               </Pressable>
             )}
