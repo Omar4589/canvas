@@ -125,6 +125,15 @@ eas build --profile staging --platform android && eas submit --profile staging -
 > serves a tester whichever build has the highest code they qualify for. If production ends up above
 > internal, your internal testers silently receive the production build instead.
 
+> **Bump `expo.version` in `app.json` before any App Store submission.** `autoIncrement` only moves
+> the *build number*; Apple separately refuses any new build whose **marketing version** matches one
+> it has already approved — *"the train version '1.0.0' is closed for new build submissions"* (error
+> 90186). Builds 24–26 were all rejected this way on 2026-07-28 before the bump to `1.0.1`. Google
+> Play has no equivalent rule (it only requires an increasing `versionCode`), so **Android builds do
+> not need rebuilding** when this bites — which is why Android sat at `1.0.0` while iOS moved to
+> `1.0.1`. The bump is free: `ExpoConfigVersions` keeps `app.json` `version` out of the fingerprint,
+> so already-cut builds stay OTA-compatible. Verify with `npm run ota:check` after bumping.
+
 Where each lands, and what it costs:
 
 | Submit | Lands in | Review |
