@@ -46,6 +46,7 @@ export default function PublicReportDetailPage() {
           </h1>
           <div className="text-sm text-fg-muted">
             {formatWeekRange(report.weekStart, report.weekEnd)}
+            {report.effortName ? ` · Walk list: ${report.effortName}` : ''}
           </div>
         </div>
         <Button variant="secondary" size="sm" loading={pdfBusy} onClick={downloadPdf}>

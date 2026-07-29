@@ -492,6 +492,7 @@ export default function AdminTimeline() {
         // The profile screen must not depend on the cached active campaign —
         // with an empty cache it white-screened (queries never enabled).
         ...(cId ? { campaignId: cId } : {}),
+        ...(effortId ? { effortId } : {}),
         ...(fromDay ? { from: fromDay } : {}),
         ...(range?.to ? { to: range.to } : {}),
         ...(range?.preset ? { preset: range.preset } : {}),
@@ -523,6 +524,7 @@ export default function AdminTimeline() {
       pathname: '/(app)/admin/canvasser/compare',
       params: {
         ...(cId ? { campaignId: cId } : {}),
+        ...(effortId ? { effortId } : {}),
         ids: Array.from(selectedIds).join(','),
         from: fromDay || '',
         to: range?.to || '',
@@ -535,6 +537,7 @@ export default function AdminTimeline() {
     if (!cId) return;
     const params = new URLSearchParams();
     params.set('campaignId', cId);
+    if (effortId) params.set('effortId', effortId);
     if (fromDay) params.set('from', fromDay);
     if (effectiveTo) params.set('to', effectiveTo);
     params.set('tz', deviceTimezone());
@@ -783,9 +786,10 @@ export default function AdminTimeline() {
                     />
                   ))}
                 </InsetGroup>
-                {/* Reconciliation — reflects the campaign/walk-list/range selection
-                    (effortId is applied server-side), but NOT the client-side coordinator
-                    filter, so its totals ignore any crew selection. */}
+                {/* Reconciliation — reflects the FULL selection: campaign, walk list, range,
+                    AND crew. effortId and coordinatorId are both applied server-side (the
+                    crew scope rides the ledger — reports.js folds it into every number,
+                    including the deduped billableKnocks), so no caveat footer is needed. */}
                 <GroupFooter>
                   {(data.grandKnocks || 0).toLocaleString()} knocks across{' '}
                   {(data.canvassers || []).length}{' '}
@@ -794,11 +798,6 @@ export default function AdminTimeline() {
                     ? `${data.overlapDoors} overlap door-pass${data.overlapDoors === 1 ? '' : 'es'} (counted once → ${data.billableKnocks}).`
                     : 'no overlaps.'}
                 </GroupFooter>
-                {coordinatorId ? (
-                  <GroupFooter>
-                    Overlap totals cover the whole selection — the coordinator filter isn't applied.
-                  </GroupFooter>
-                ) : null}
               </View>
 
               {/* Frozen-name-column grid (hours or days). Campaign-to-date ships no buckets —

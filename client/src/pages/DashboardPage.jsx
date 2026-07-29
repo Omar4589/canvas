@@ -785,6 +785,7 @@ export default function DashboardPage() {
           canvasser={selectedCanvasser}
           dateRange={dateRange}
           campaignId={campaignId}
+          effortId={effortId}
           tz={tz}
           onClose={() => setSelectedCanvasser(null)}
         />

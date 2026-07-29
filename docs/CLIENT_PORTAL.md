@@ -50,6 +50,9 @@ A report reads top to bottom as a document, in this order:
 
 The header shows the campaign, a human week range (e.g. *May 31 – Jun 13, 2026*), and a **Download PDF**
 button — a one-click, paginated PDF of the numbers, breakdowns, and observations (the map is left out).
+A report scoped to one **walk list** (see below) says so wherever its numbers appear — *Walk list:
+North* on the report hub's list, under the report's title, and in the PDF header — so scoped numbers
+can never be mistaken for campaign totals.
 
 The numbers and the map are **frozen at publish time** — a published report never changes, even as the
 team keeps knocking. Next week's report picks up the new activity and appears at the same link.
@@ -59,6 +62,15 @@ team keeps knocking. Next week's report picks up the new activity and appears at
 On the admin side, drill into the campaign and open its **Client Reports** tab, then click **Create
 draft** for a week (a start and end date). The system pre-computes all the numbers for two windows —
 everything through the week's end (cumulative) and just the week itself (the delta).
+
+The create form also has a **Walk list** select. The default — **Whole campaign** — is exactly what
+every report was before. Pick a walk list instead and the entire report covers only that walk list's
+doors and activity: both stat windows, every breakdown, and the frozen coverage map. The scope is
+fixed at creation (create a second report for a different walk list — two same-week reports, one per
+walk list, is the intended pattern), and the builder header plus the **"What the client sees"** recap
+both name it. One thing to know before you pick: **the walk-list name appears on the public report
+pages and the PDF**, readable by anyone with the share link — it's operator-authored labeling, the
+same exposure class as the report title, so name walk lists accordingly.
 
 In the builder you:
 
@@ -112,6 +124,11 @@ publish appear automatically — so you share it once. Recipients only ever see 
 
 - Scope/window: `organizationId`, `campaignId`, `weekStart`/`weekEnd` (`YYYY-MM-DD` in the campaign
   tz), `timeZone`, and the frozen `rangeStartUtc`/`rangeEndUtc` instants (from `zonedDayRange`).
+- Optional walk-list scope: `effortId` + `effortName` — `null` = the whole campaign (every
+  pre-existing report, and the default). `effortName` is **frozen at creation** on purpose: the
+  public share page renders the label without an admin API lookup, and it survives the walk list
+  being renamed or deleted later. Create-time only — `updateSchema` doesn't accept it, so a draft's
+  scope can't drift from its computed stats.
 - `status`: `draft | published | archived`.
 - `observations`: `[{ heading, body }]`.
 - `stats`: **dual-window** — `cumulative` and `period`, each `{ totals, contactBreakdown, coverage,
@@ -150,6 +167,11 @@ a snapshot is reproducible and can't drift. It reuses the shared knock primitive
 - **cumulative** = `{ $lt: rangeEndUtc }` (everything through the week's end).
 - **period** = `{ $gte: rangeStartUtc, $lt: rangeEndUtc }` (just the week).
 
+`computeWindowStats` also takes an optional `effortId`, and `computeBothWindows` reads it **off the
+report itself** — so create, recompute, and the publish-time recompute all stay scoped without any
+caller passing it. `effortId` is denormalized onto the activity/response rows
+([EFFORTS.md](EFFORTS.md) §E), so the one filter scopes knocks, surveys, and breakdowns together.
+
 **Voter-contact breakdown is a DOOR-OUTCOME breakdown, not a raw-event count.** `contactBreakdown`
 collapses each `(household, pass)` to its single resolved outcome via
 `resolveStatus(campaignType, acts)` ([statusPrecedence.js](../server/src/utils/statusPrecedence.js)) —
@@ -186,7 +208,10 @@ question's own answer total), and `ReportBreakdown` rounds them to total exactly
    its status **as of `rangeEndUtc`** via `resolveStatus(campaign.type, activities-before-end)` — the
    same precedence the live app uses ([statusPrecedence.js](../server/src/utils/statusPrecedence.js)),
    but point-in-time — plus the operator-whitelisted survey answers (latest response per household).
-   Canvasser identity is stripped.
+   Canvasser identity is stripped. A walk-list scope narrows the **household set only**
+   (`Household.effortId` is the ownership source of truth); the activity/response scans stay
+   campaign-wide and household-keyed, so a door's as-of status still reflects knocks stamped before
+   it joined the walk list, and only in-scope households are ever looked up from those maps.
 3. Replace the report's points (`deleteMany` + `insertMany`), stash the cumulative `coverage` tally,
    set `status='published'`, `publishedAt/By`, `mapPointCount`.
 
@@ -203,7 +228,9 @@ inside the campaign drill-in — list at `/campaigns/:campaignId/reports`
 both reading `campaignId` from `useParams` (the old "Client Reports" launchpad + campaign dropdown are
 gone; the legacy `/admin/client-reports[/:id]` client routes redirect to `/campaigns` — see
 [App.jsx](../client/src/App.jsx)). Server endpoints:
-`POST /` (create draft) · `GET /?campaignId=` (list; rows carry `viewCount`/`lastViewedAt`/`timeZone`) ·
+`POST /` (create draft; optional `effortId` — must name an `Effort` of **this** campaign, 400
+otherwise, and is frozen onto the report with its `name`) ·
+`GET /?campaignId=` (list; rows carry `viewCount`/`lastViewedAt`/`timeZone`/`effortName`) ·
 `GET /:id` (also returns `campaignName`/`orgName` so the builder's PDF header matches the client's) ·
 `PATCH /:id` (drafts only) · `POST /:id/recompute` · `GET /:id/preview` · `GET /:id/preview/map` ·
 `POST /:id/publish` · `POST /:id/unpublish` · `DELETE /:id`.
@@ -243,6 +270,11 @@ active `ReportShareLink` (404 otherwise):
 - Every public read is scoped to the link's single `campaignId` and `status:'published'`, so there is
   no path to drafts, other campaigns, or live `Household` / `CanvassActivity` / `SurveyResponse` data;
   map points carry no canvasser/voter identity.
+- The public shapers expose the walk-list **name only** — `effortName` rides both
+  `shapeReportListRow` (so two same-week reports, one scoped and one campaign-wide, are
+  distinguishable on the share list without opening each) and `shapeReportForClient` — **never
+  `effortId`** or any other internal id. The name is operator-authored metadata, the same exposure
+  class as the report title (flagged in Part 1).
 - **Revoke is immediate**: `isActive:false` (Disable) or **Rotate** (new token) makes the old URL 404
   on the next request; a share JWT can't be re-minted without the password/link.
 - The Mapbox token is the public `pk.` `MAPBOX_PUBLIC_TOKEN`, served at `/share/:token/mapbox-token`
@@ -251,8 +283,12 @@ active `ReportShareLink` (404 otherwise):
 ## Frontend
 
 - Admin: [ClientReportsPage](../client/src/pages/ClientReportsPage.jsx) (list + create + the **Share
-  link** panel) and [ClientReportBuilderPage](../client/src/pages/ClientReportBuilderPage.jsx) (edit +
-  preview + publish).
+  link** panel; the create form's **Walk list** select only sends an `effortId` that belongs to the
+  *current* campaign — the page stays mounted across campaign switches, so a stale selection could
+  otherwise leak into the POST — and scoped rows get an `effortName` badge) and
+  [ClientReportBuilderPage](../client/src/pages/ClientReportBuilderPage.jsx) (edit + preview +
+  publish; a scoped report's header line and "What the client sees" recap name the walk list).
+  The public list/detail pages append *· Walk list: name* under the week range on scoped reports.
 - Public hub (no login): [PublicReportLayout](../client/src/components/PublicReportLayout.jsx) (brand +
   password gate; provides `{token, accessToken}` via Outlet context),
   [PublicReportListPage](../client/src/pages/PublicReportListPage.jsx) (the archive, newest first), and
@@ -263,8 +299,9 @@ active `ReportShareLink` (404 otherwise):
   single source consumed by **both** the on-screen view and the PDF, so they can't drift.
 - PDF export: [lib/reportPdf.js](../client/src/lib/reportPdf.js) `generateReportPdf()` lazily imports
   `jspdf` (its own bundle chunk — never on the report's first paint) and draws the document from
-  `deriveReportSections` (header + KPI grid + labeled bars + observations; **map omitted**). Mounted on
-  the public detail page and the builder Preview tab.
+  `deriveReportSections` (header + KPI grid + labeled bars + observations; **map omitted**). A scoped
+  report's header line appends *· Walk list: name* — scoped numbers under an unlabeled header would
+  read as campaign totals. Mounted on the public detail page and the builder Preview tab.
 - Shared render: [ClientReportView](../client/src/components/ClientReportView.jsx) (KPIs + breakdowns +
   observations, used by both the public page and the admin preview),
   [StatCard](../client/src/components/StatCard.jsx) (the report opts into a `prominent` look + a delta
@@ -291,4 +328,6 @@ already exist. Mobile is unaffected.
 
 The PDF export adds one client dependency, **`jspdf`** (lazy-loaded into its own chunk) — `npm --prefix
 client install` (the `heroku-postbuild` `install:all` already does this). The `viewCount`/`lastViewedAt`
-fields need **no migration** (`$inc` treats a missing field as 0; schema defaults apply on read).
+fields need **no migration** (`$inc` treats a missing field as 0; schema defaults apply on read) — and
+neither do `effortId`/`effortName` (both default `null` = whole campaign, which is what every existing
+report already is; no new index).

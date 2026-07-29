@@ -232,7 +232,7 @@ export default function ClientReportsPage() {
   const { campaignId } = useParams();
   const { selected, isLoading: campaignsLoading } = useCampaignSelection(campaignId);
 
-  const [form, setForm] = useState(() => ({ title: '', ...defaultWeek() }));
+  const [form, setForm] = useState(() => ({ title: '', effortId: '', ...defaultWeek() }));
   const [error, setError] = useState(null);
 
   const reportsQ = useQuery({
@@ -240,6 +240,13 @@ export default function ClientReportsPage() {
     queryFn: () => api(`/admin/client-reports?campaignId=${campaignId}`),
     enabled: !!campaignId,
   });
+
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId,
+  });
+  const efforts = effortsQ.data?.efforts || [];
 
   const createM = useMutation({
     mutationFn: (body) => api('/admin/client-reports', { method: 'POST', body }),
@@ -261,11 +268,15 @@ export default function ClientReportsPage() {
     setError(null);
     if (!campaignId) return setError('Pick a campaign first.');
     if (form.weekStart > form.weekEnd) return setError('Week start must be on or before week end.');
+    // Only send an effortId that belongs to the CURRENT campaign — the page stays mounted
+    // across campaign switches, so a stale selection could otherwise leak into the POST.
+    const effortId = efforts.some((ef) => String(ef._id) === form.effortId) ? form.effortId : undefined;
     createM.mutate({
       campaignId,
       weekStart: form.weekStart,
       weekEnd: form.weekEnd,
       title: form.title || undefined,
+      effortId,
     });
   }
 
@@ -315,6 +326,23 @@ export default function ClientReportsPage() {
               className="rounded border border-border bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none"
             />
           </label>
+          {efforts.length > 0 && (
+            <label className="flex flex-col gap-1 text-xs text-fg-muted">
+              Walk list
+              <select
+                value={form.effortId}
+                onChange={(e) => setForm((f) => ({ ...f, effortId: e.target.value }))}
+                className="rounded border border-border bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none"
+              >
+                <option value="">Whole campaign</option>
+                {efforts.map((ef) => (
+                  <option key={ef._id} value={ef._id}>
+                    {ef.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <Button type="submit" loading={createM.isPending} disabled={!campaignId}>
             Create draft
           </Button>
@@ -341,6 +369,7 @@ export default function ClientReportsPage() {
                 <Badge variant={STATUS_VARIANT[r.status] || 'neutral'} dot>
                   {r.status}
                 </Badge>
+                {r.effortName && <Badge variant="info">{r.effortName}</Badge>}
               </div>
               <div className="mt-1 text-xs text-fg-muted">
                 {formatWeekRange(r.weekStart, r.weekEnd)} ·{' '}

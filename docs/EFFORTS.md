@@ -93,6 +93,18 @@ people leave when you unassign their book on the Turf page).
   shown the survey of that door's walk list. Lit-drop campaigns have no survey, as before.
 - The dashboard can be **filtered to one walk list** (knocks, surveys, coverage), or left on "All
   walk lists" for the whole-campaign totals (the sum across walk lists).
+- That same filter runs through the rest of the console once a campaign has **two or more** walk
+  lists (single-list campaigns hide it): the web dashboard's canvasser-responses modal honors it,
+  the **live maps** get a walk-list select (web) / chip (mobile) ([MAPS.md](MAPS.md)), the **GPS
+  audit** filters by walk list on web and mobile ([AUDIT.md](AUDIT.md)), the mobile **campaign
+  screen** scopes Activity / By pass / Coverage / Top canvassers with a pill row, and the mobile
+  **Timeline**'s walk-list pick follows into the whole canvasser drill-in and Compare
+  ([ADMIN_APP.md](ADMIN_APP.md)).
+- **Client reports** can be scoped to one walk list at creation (default: the whole campaign) — the
+  report freezes the walk-list *name* and shows it to recipients
+  ([CLIENT_PORTAL.md](CLIENT_PORTAL.md)).
+- **Overlap round labels name their walk list** once a campaign has more than one — *North · Pass 2 ·
+  GOTV* — because pass numbers restart per walk list, so "Pass 2" alone would be ambiguous.
 
 ## Step-by-step
 
@@ -264,6 +276,18 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
 totals. The mobile personal daily-stats breakdown ([me.js](../server/src/routes/mobile/me.js)) is
 per-walk-list aware — it unions the choice questions from whatever survey(s) the canvasser's responses
 actually used.
+
+Surfaces that send it (each renders its walk-list control only with 2+ efforts): **web** —
+DashboardPage (+ its `CanvasserResponsesModal`), MapPage, AuditPage; **mobile** — the campaign
+screen (overview / campaign-rollup / canvassers / knocks-by-pass), Timeline (`/canvasser-timeline`,
+then threaded as a route param through every canvasser drill-in screen, the CSV export, and Compare —
+so `/canvassers/:userId/summary` and `/team-averages` compare within the walk list), the GPS audit
+(`/flags`), and the admin map. Client reports persist a per-report `effortId` + frozen `effortName`
+instead of taking a query param ([CLIENT_PORTAL.md](CLIENT_PORTAL.md)). The overlap engines
+(`computeOverlapDoors` / `computeOverlaps`,
+[services/reports/overlaps.js](../server/src/services/reports/overlaps.js)) also emit a per-pass
+`effortName` and prefix `roundLabel` with the walk-list name when the campaign has 2+ efforts
+(`passLabeler`; single-list campaigns keep the short "Pass N · name" label).
 
 ## F. Deploy & migrate (runbook)
 

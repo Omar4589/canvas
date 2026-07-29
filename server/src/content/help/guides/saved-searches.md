@@ -32,7 +32,7 @@ A saved search holds **doors, not voters**, so a home joins if **any** voter the
 
 A saved search doesn't assign work on its own — it feeds a [walk list](walk-lists), two ways:
 
-1. **Seed at creation** — create a new walk list and pick your saved search under "Seed door-set."
+1. **Seed at creation** — create a new walk list and pick your saved search under **Doors**.
 2. **Claim later** — open a walk list, choose Claim, and pick the saved search.
 
 Either way, claiming only takes the saved search's unowned doors (those sitting in [Intake](what-is-intake)). If some already belong to another walk list, the app offers to re-carve them over cleanly.

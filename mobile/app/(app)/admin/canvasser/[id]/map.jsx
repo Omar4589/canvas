@@ -54,6 +54,8 @@ export default function MapScreen() {
   const { styleURL } = useMapStyle();
   const params = useLocalSearchParams();
   const userId = params.id;
+  // Walk-list scope threaded from the overview — keeps this map inside the same walk list.
+  const effortId = params.effortId || null;
 
   // Threaded campaignId wins; the validated cache is the fallback — never the raw
   // cache, which can hold a campaign a team lead doesn't manage (or be empty, which
@@ -90,12 +92,13 @@ export default function MapScreen() {
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
+    if (effortId) p.set('effortId', effortId);
     if (range?.from) p.set('from', range.from);
     if (range?.to) p.set('to', range.to);
     if (actionFilter !== 'all') p.set('actionType', actionFilter);
     p.set('limit', '2000');
     return p.toString();
-  }, [cId, range?.from, range?.to, actionFilter]);
+  }, [cId, effortId, range?.from, range?.to, actionFilter]);
 
   const q = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'path', qs],

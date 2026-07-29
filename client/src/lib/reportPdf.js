@@ -62,7 +62,10 @@ export async function generateReportPdf(report, { campaignName = '', orgName = '
   }
   setFont(10.5, 'normal', GRAY);
   const titlePrefix = report.title && (campaignName || orgName) ? `${report.title}  ·  ` : '';
-  doc.text(`${titlePrefix}${formatWeekRange(report.weekStart, report.weekEnd)}`, MARGIN, y);
+  // A walk-list-scoped report must SAY so — scoped numbers under an unlabeled header read
+  // as campaign totals.
+  const scopeSuffix = report.effortName ? `  ·  Walk list: ${report.effortName}` : '';
+  doc.text(`${titlePrefix}${formatWeekRange(report.weekStart, report.weekEnd)}${scopeSuffix}`, MARGIN, y);
   y += 12;
   doc.setDrawColor(TRACK[0], TRACK[1], TRACK[2]);
   doc.line(MARGIN, y, pageW - MARGIN, y);

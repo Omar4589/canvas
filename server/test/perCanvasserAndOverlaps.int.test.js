@@ -395,3 +395,45 @@ test('lead gating on /overlap-doors: granted lead + campaignId 200; lead without
   const bare = await call('GET', '/api/admin/reports/overlap-doors', { token: leadTok, orgId: org._id });
   assert.strictEqual(bare.status, 403, 'lead without campaignId hits the reports router gate');
 });
+
+test('overlap round labels name their walk list ONLY once the campaign has 2+ efforts', { skip }, async () => {
+  const { adminTok, org, camp, H } = ctx;
+  // Single-effort campaign: short label, but effortName is still populated for clients
+  // that want the walk list structurally.
+  const before = await call('GET', `/api/admin/reports/overlap-doors?campaignId=${camp._id}`, { token: adminTok, orgId: org._id });
+  assert.strictEqual(before.status, 200);
+  const shortRow = before.json.doors
+    .find((d) => String(d.householdId) === String(H._id))
+    .passes.find((p) => String(p.passId) === String(ctx.pass1._id));
+  assert.strictEqual(shortRow.roundLabel, 'Pass 1 · Round 1', 'one walk list → no noisy prefix');
+  assert.strictEqual(shortRow.effortName, 'North', 'effortName rides along regardless');
+
+  // A second walk list makes "Pass 1" ambiguous (roundNumber restarts per effort), so the
+  // label must now carry the walk-list name — on BOTH overlap builders.
+  const south = await Effort.create({ organizationId: org._id, campaignId: camp._id, name: 'South' });
+  try {
+    const doors = await call('GET', `/api/admin/reports/overlap-doors?campaignId=${camp._id}`, { token: adminTok, orgId: org._id });
+    const prefixed = doors.json.doors
+      .find((d) => String(d.householdId) === String(H._id))
+      .passes.find((p) => String(p.passId) === String(ctx.pass1._id));
+    assert.strictEqual(prefixed.roundLabel, 'North · Pass 1 · Round 1', '2+ walk lists → prefixed');
+    assert.strictEqual(prefixed.effortName, 'North');
+
+    // computeOverlaps (the /overlaps + timeline builder) must agree. Window = DAY1 so Chad's
+    // survey and Chris's not_home... only Chad's day — use a window covering both so H surfaces.
+    const windowed = await call(
+      'GET',
+      `/api/admin/reports/overlaps?campaignId=${camp._id}&from=${DAY1}&to=${DAY5}`,
+      { token: adminTok, orgId: org._id }
+    );
+    assert.strictEqual(windowed.status, 200);
+    const card = windowed.json.overlaps.find((o) => o.household.id === String(H._id));
+    assert.ok(card, 'H surfaces in the windowed report over the full span');
+    const cardPass = card.passes.find((p) => String(p.passId) === String(ctx.pass1._id));
+    assert.strictEqual(cardPass.roundLabel, 'North · Pass 1 · Round 1', 'both builders label alike');
+    assert.strictEqual(cardPass.effortName, 'North');
+  } finally {
+    // Leave the fixture as the earlier tests knew it, in case of future reordering.
+    await Effort.deleteOne({ _id: south._id });
+  }
+});

@@ -119,6 +119,9 @@ export default function Compare() {
   // Threaded campaignId wins; the validated cache is the fallback — never the raw cache,
   // which can hold a campaign a team lead doesn't manage.
   const campaign = useAdminCampaign(params.campaignId);
+  // Walk-list scope threaded from a filtered Timeline — the compared numbers (and the
+  // team averages they're judged against) stay inside the same walk list.
+  const effortId = params.effortId || null;
 
   const tz = campaign?.timeZone || deviceTimezone();
 
@@ -147,11 +150,12 @@ export default function Compare() {
   const qsBase = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
+    if (effortId) p.set('effortId', effortId);
     if (range?.from) p.set('from', range.from);
     if (range?.to) p.set('to', range.to);
     p.set('tz', deviceTimezone());
     return p.toString();
-  }, [cId, range?.from, range?.to]);
+  }, [cId, effortId, range?.from, range?.to]);
 
   // One summary query per selected canvasser
   const summaryQs = useQueries({
@@ -213,6 +217,7 @@ export default function Compare() {
             {teamQ.data?.canvasserCount
               ? `team of ${teamQ.data.canvasserCount}`
               : ''}
+            {effortId ? ' · one walk list' : ''}
           </Text>
 
           {/* Person header row */}

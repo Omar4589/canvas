@@ -66,6 +66,7 @@ export default function AdminAudit() {
 
   const [reviewStatus, setReviewStatus] = useState('open');
   const [userId, setUserId] = useState(''); // '' = all canvassers
+  const [effortId, setEffortId] = useState(''); // '' = all walk lists
   const [live, setLive] = useState(true);
   const [range, setRange] = useState(() => {
     const r = rangeFor('today', null, deviceTimezone());
@@ -80,6 +81,7 @@ export default function AdminAudit() {
     setPrevCid(cId);
     setReviewStatus('open');
     setUserId('');
+    setEffortId('');
     setLive(true);
     const r = rangeFor('today', null, tz);
     setRange({ preset: 'today', from: r.from, to: r.to });
@@ -104,7 +106,7 @@ export default function AdminAudit() {
     !!range && (!fromDay || fromDay > effectiveTo || ymdSpanDays(fromDay, effectiveTo) > AUDIT_MAX_DAYS);
 
   const q = useQuery({
-    queryKey: ['admin', 'flags', cId, fromDay, range?.to, reviewStatus, userId],
+    queryKey: ['admin', 'flags', cId, fromDay, range?.to, reviewStatus, userId, effortId],
     queryFn: () => {
       const p = new URLSearchParams();
       p.set('campaignId', cId);
@@ -112,6 +114,7 @@ export default function AdminAudit() {
       if (range?.to) p.set('to', range.to);
       if (reviewStatus && reviewStatus !== 'all') p.set('reviewStatus', reviewStatus);
       if (userId) p.set('userId', userId);
+      if (effortId) p.set('effortId', effortId);
       p.set('limit', '500');
       return api(`/admin/reports/flags?${p.toString()}`);
     },
@@ -121,6 +124,13 @@ export default function AdminAudit() {
     placeholderData: keepPreviousData,
     ...useFocusedPoll(20 * 1000),
   });
+
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/efforts`),
+    enabled: !!cId,
+  });
+  const efforts = effortsQ.data?.efforts || [];
 
   const data = q.data || {};
   const totals = data.summary?.totals || {};
@@ -196,6 +206,20 @@ export default function AdminAudit() {
           />
         ) : null}
       </View>
+
+      {/* Walk-list filter (server-side effortId, like Timeline's) — scopes the KPI totals,
+          the by-canvasser tabs, and the entries list alike. Lives in the fixed filter area
+          so picking an empty walk list is never a dead end. */}
+      {efforts.length > 1 ? (
+        <TabSwitcher
+          tabs={[
+            { key: '', label: 'All walk lists' },
+            ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
+          ]}
+          activeKey={effortId}
+          onChange={setEffortId}
+        />
+      ) : null}
 
       {rangeInvalid ? (
         <View style={styles.groupWrap}>

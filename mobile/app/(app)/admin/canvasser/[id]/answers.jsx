@@ -25,6 +25,8 @@ export default function AnswersScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
+  // Walk-list scope threaded from the overview — keeps these answers inside the same walk list.
+  const effortId = params.effortId || null;
 
   // Threaded campaignId wins; the validated cache is the fallback — never the raw
   // cache, which can hold a campaign a team lead doesn't manage (or be empty, which
@@ -55,12 +57,13 @@ export default function AnswersScreen() {
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
+    if (effortId) p.set('effortId', effortId);
     if (range?.from) p.set('from', range.from);
     if (range?.to) p.set('to', range.to);
     p.set('userId', userId);
     p.set('compareToOrg', 'true');
     return p.toString();
-  }, [cId, range?.from, range?.to, userId]);
+  }, [cId, effortId, range?.from, range?.to, userId]);
 
   const q = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'answers', qs],

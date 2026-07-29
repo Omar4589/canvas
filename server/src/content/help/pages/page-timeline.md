@@ -9,7 +9,7 @@ summary: Who knocked when, each team's numbers, and an All time view of everyone
 tags: timeline, knocks, hours, page, all time, former canvassers, team, coordinator, doors, live, refresh
 ---
 
-The **Timeline** page shows an hourly grid of your canvassers' activity — who knocked when — with a day stepper to move between days and a toggle between knocks and surveys. It's the quickest way to see how a shift actually unfolded and to spot two canvassers overlapping on the same doors.
+The **Timeline** page shows an hourly grid of your canvassers' activity — who knocked when — with a day stepper to move between days and a toggle between knocks and surveys. It's the quickest way to see how a shift actually unfolded and to spot two canvassers overlapping on the same doors. On a campaign with more than one [walk list](walk-lists), a walk-list filter narrows everything on the page — the grid, the teams, and the totals — to that one list.
 
 ## It updates itself
 

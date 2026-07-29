@@ -78,6 +78,14 @@ const clientReportSchema = new mongoose.Schema(
     // back-compat with reports created before this field — those render everything.
     campaignType: { type: String, enum: ['survey', 'lit_drop'], default: null },
 
+    // Optional walk-list scope: null = the whole campaign (every report before this field, and
+    // the default). When set, both stat windows and the frozen map cover only this effort's
+    // doors/activity. effortName is FROZEN at creation on purpose — the public share page
+    // renders the label without an admin API lookup, and it survives the walk list being
+    // renamed or deleted later.
+    effortId: { type: mongoose.Schema.Types.ObjectId, ref: 'Effort', default: null },
+    effortName: { type: String, default: null },
+
     // The week window. weekStart/weekEnd are calendar days ('YYYY-MM-DD') in the campaign's
     // timezone; rangeStartUtc/rangeEndUtc are the frozen half-open UTC instants the
     // aggregations actually used (from zonedDayRange), so the window is reproducible.

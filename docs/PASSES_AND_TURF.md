@@ -31,27 +31,32 @@ the billing unit), [TURF_RUNBOOK.md](../TURF_RUNBOOK.md) (operational runbook),
 
 # Part 1 — For everyone
 
-## The pieces: campaign → pass → book → households
+## The pieces: campaign → walk list → pass → book → households
 
 ```
 Campaign
-  └─ Pass            one round of canvassing (Round 1, Round 2, …)
-       └─ Book       a walkable, ordered slice of households (a canvasser's turf)
-            └─ Households → Voters
+  └─ Walk list       a parallel operation (an area or a team) — owns its own disjoint set of doors
+       └─ Pass       one sweep of that walk list's doors (Pass 1, Pass 2, …)
+            └─ Book  a walkable, ordered slice of households (a canvasser's turf)
+                 └─ Households → Voters
 ```
 
-A **campaign** is the whole effort. Inside it you run one or more **passes**. Each pass is cut into
-**books**, and each book is an ordered list of households for one person to walk.
+A **campaign** is the whole effort, split into one or more **walk lists** — each owning its own
+doors, with no door ever in two lists (a new address waits in **Intake** until assigned to one —
+see [EFFORTS.md](EFFORTS.md)). Inside each walk list you run one or more **passes**. Each pass is
+cut into **books**, and each book is an ordered list of households for one person to walk.
 
 ## What a pass is
 
-A **pass** is a single planned sweep of the campaign — Round 1, Round 2, and so on. It has a round
-number, a name, and a status that only moves **one way**:
+A **pass** is a single planned sweep of one **walk list** — Pass 1, Pass 2, and so on. It has a
+pass number (counted **per walk list**, so every walk list has its own Pass 1), a name, and a
+status that only moves **one way**:
 
 **draft → active → archived.** An archived pass is never reopened — you make a new pass instead.
 
-A pass either covers **all voters** in the campaign, or a frozen **walk list** (a saved snapshot of
-a subset — e.g. "only Precinct 12" or "only not-homes from last time").
+A pass's doors are its **walk list's owned doors** — the full set by default, or, on a follow-up
+round, just the doors that still need work via the optional **Target doors** filter (knock status
+and/or survey answers — see *Targeted follow-up rounds* below).
 
 ## What a book is
 
@@ -349,32 +354,35 @@ See [METRICS.md](METRICS.md) for the exact definitions.
 
 ## Adding new voters after a pass exists (worked scenario)
 
-You have a pass covering **all voters**, then you import **new voters at new addresses**. What
-happens?
+A walk list's pass is underway, then you import **new voters at new addresses**. What happens?
 
-- The new addresses become **new household records with no book** — they're not in any book yet, so
-  canvassers on the active pass **won't see them**. Existing books are **not** auto-updated.
+- The new addresses land in **Intake** — owned by **no walk list** ([EFFORTS.md](EFFORTS.md)) — so
+  they're in no book and no cut can reach them yet. Canvassers on the active pass **won't see
+  them**, and existing books are **not** auto-updated. (A new voter at a door a walk list *already
+  owns* simply rides along — same physical door, nothing to do.)
 
-Your options:
+**First, claim the new doors into a walk list** — on the Walk Lists page, assign the Intake doors
+to the walk list that should work them (or make a new one). Then get them into books:
 
 1. **Add them to the live pass as a supplemental book (recommended).** On the Turf page, when there
-   are doors "not in any book," click **Add as new book** — the unassigned households are cut into
-   new draft book(s) on the *current* pass without touching the existing books or knocks. Then
-   **Accept** and **assign** them like any other book. No recut, no archive; canvassers see the new
-   doors on their next refresh. → keeps the round running.
+   are doors "not in any book," click **Add as new book** — the walk list's unassigned households
+   are cut into new draft book(s) on the *current* pass without touching the existing books or
+   knocks. Then **Accept** and **assign** them like any other book. No recut, no archive; canvassers
+   see the new doors on their next refresh. → keeps the round running.
 2. **Recut the same pass.** Discard its books (this resets the pass to draft), then generate again.
-   Because this pass is "all voters," regeneration pulls in **all** current households, so the new
-   addresses are **included**. → the "remove all existing books and recut" path; use when you also
-   want the whole pass re-balanced.
-3. **Create a new pass** for the updated voter universe and cut fresh books there. The old pass and
-   its knocks stay exactly as they were. → the "keep them and make a new pass" path.
+   Regeneration pulls from the walk list's **current** owned doors, so the newly claimed addresses
+   are **included**. → the "remove all existing books and recut" path; use when you also want the
+   whole pass re-balanced.
+3. **Create a new pass** in the walk list and cut fresh books there. The old pass and its knocks
+   stay exactly as they were. → the "keep them and make a new pass" path.
 4. **Manually** move the new households into existing books one at a time (see **Editing books after
    the cut** above). Fine for a few; impractical for a bulk import.
 
-> **Walk-list gotcha.** The above "recut includes new addresses" only holds for an **all-voters**
-> pass. If the pass is bound to a **walk list** (frozen snapshot), a recut uses that frozen list and
-> will **not** pick up the new addresses — re-imports never modify a saved walk list. To include
-> them you'd make a new walk list (or a new all-voters pass).
+> **The gotcha moved.** Passes used to be able to bind a *frozen* walk-list snapshot that a recut
+> would replay, silently skipping new addresses. Passes no longer freeze anything — every cut pulls
+> from the walk list's **current** owned doors — so the thing to remember now is the claim step
+> above: a new address sits in **Intake** until you assign it to a walk list, and until then **no**
+> recut or supplemental book can see it.
 
 ### New voters at homes you've **already worked**
 
@@ -417,7 +425,7 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 | Active passes (derived) | [services/passes/activePasses.js](../server/src/services/passes/activePasses.js) | `activePassIds(campaignId)` derives the live passes from `Pass.status==='active'` — **one per active walk list** (a campaign can have several at once). There is **no** `Campaign.activePassId` field. |
 | `Household.turfId` / `walkOrder` | [models/Household.js](../server/src/models/Household.js) | Denormalized mirror of "which book + position" for the household; `null` until assigned by a cut. |
 | `TurfAssignment` | [models/TurfAssignment.js](../server/src/models/TurfAssignment.js) | Which user is assigned which book on which pass (`{userId, campaignId, passId, turfId}`); drives the mobile bootstrap's per-canvasser scoping. |
-| `SavedSearch` | [models/SavedSearch.js](../server/src/models/SavedSearch.js) | Frozen `householdIds[]` snapshot a pass can target; **immutable** w.r.t. later imports. (Formerly `WalkList`.) |
+| `SavedSearch` | [models/SavedSearch.js](../server/src/models/SavedSearch.js) | Frozen `householdIds[]` snapshot a **walk list** seeds/claims its doors from (`Effort.seededFromWalkListId` — see [EFFORTS.md](EFFORTS.md)); **immutable** w.r.t. later imports. No longer targeted by passes (that was the deprecated `Pass.walkListId`). (Formerly `WalkList`.) |
 
 ## B. Generation pipeline
 
@@ -527,7 +535,7 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 
 | Route | Behavior |
 |---|---|
-| `POST /campaigns/:campaignId/passes` | Create (auto-increments `roundNumber`, optional `walkListId`); starts `draft`. |
+| `POST /campaigns/:campaignId/passes` | Create a round **within a walk list**: body `{ effortId, name? }` — `effortId` required (400 without; 404 if not this campaign's), blank `name` auto-labels "Pass {roundNumber}". `roundNumber` auto-increments **per walk list** (`createNextPass`; 409 if a number can't be allocated); starts `draft`. |
 | `POST /passes/:id/activate` ([:111](../server/src/routes/admin/passes.js#L111)) | 409 if archived ([:115-116](../server/src/routes/admin/passes.js#L115-L116)); 400 if no published books; **archives other active rounds of the same walk list only** ([:127-132](../server/src/routes/admin/passes.js#L127-L132)) — other walk lists keep their active rounds; sets `activatedAt` once ([:134](../server/src/routes/admin/passes.js#L134)). No campaign-level pointer is written — active rounds are **derived** (see the data-model table). |
 | `POST /passes/:id/archive` | **409 `archive-confirm-required`** `{ knockCount, isActive }` when the round is active **or** has knocks and `confirmArchive` isn't set (one-way + canvassers lose it — knocks kept). Else archive (`status:'archived'` + `archivedAt`, [:163-164](../server/src/routes/admin/passes.js#L163-L164)). |
 | `GET /campaigns/:campaignId/passes` | Each pass row carries `turfCount` **and `knockCount`** (distinct `(household, pass)` over `KNOCK_ACTIONS`) for the Passes page. |
@@ -561,9 +569,11 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 CSV import upserts households on `{campaignId, normalizedAddress}`
 ([csvImporter.js](../server/src/services/import/csvImporter.js)); the post-import processor
 ([importProcessor.js](../server/src/services/import/importProcessor.js)) recomputes cut attributes and
-early-voting flags but performs **no book assignment**. New households therefore carry
-`turfId: null` and are invisible to canvassers on the active pass until a (re)cut assigns them — see
-the Part 1 scenario.
+early-voting flags but performs **no walk-list or book assignment**. New households therefore carry
+`effortId: null` (**Intake** — owned by no walk list; [EFFORTS.md](EFFORTS.md)) and `turfId: null`.
+Every cut's base filter is `{ effortId: pass.effortId, … }` (§B), so a new address is invisible to
+canvassers — and unreachable by any recut or supplemental book — until it's claimed into a walk
+list and a (re)cut assigns it. See the Part 1 scenario.
 
 ## E. Aggregation: pass-aware vs campaign-wide
 

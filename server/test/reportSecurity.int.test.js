@@ -30,6 +30,7 @@ const { Organization } = await import('../src/models/Organization.js');
 const { User } = await import('../src/models/User.js');
 const { Membership } = await import('../src/models/Membership.js');
 const { Campaign } = await import('../src/models/Campaign.js');
+const { Effort } = await import('../src/models/Effort.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { ClientReport } = await import('../src/models/ClientReport.js');
 const { ClientReportMapPoint } = await import('../src/models/ClientReportMapPoint.js');
@@ -66,7 +67,7 @@ async function call(method, path, { token, orgId, body } = {}) {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, SurveyTemplate, ClientReport, ClientReportMapPoint, ReportShareLink, Subscription, Household, Voter, CanvassActivity, SurveyResponse, FlagReview]) {
+  for (const M of [Organization, User, Membership, Campaign, Effort, SurveyTemplate, ClientReport, ClientReportMapPoint, ReportShareLink, Subscription, Household, Voter, CanvassActivity, SurveyResponse, FlagReview]) {
     await M.deleteMany({});
   }
 
@@ -392,4 +393,68 @@ test('publish gate: openMockFlags warns, stamps at publish, tracks reviews, neve
   assert.strictEqual(repub.status, 200);
   const refrozen = await ClientReport.findById(draft._id).lean();
   assert.strictEqual(refrozen.openMockFlagsAtPublish, 0, 'the republish stamp reflects the review');
+});
+
+// ── Walk-list scope. A report created with an effortId freezes only that effort's numbers;
+// the default (no effortId) stays campaign-wide, exactly as every report before the field.
+
+const makeEffortKnock = async (effort, n) => {
+  const hh = await Household.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, isActive: true,
+    effortId: effort._id,
+    addressLine1: `${n} Pine St`, city: 'Tampa', state: 'FL', zipCode: '33601',
+    normalizedAddress: `${n} PINE ST|TAMPA|FL|33601`,
+    location: { type: 'Point', coordinates: [-82.47 + n / 1e4, 27.96] },
+  });
+  const admin = await User.findOne({ email: 'ada@t.co' });
+  await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, householdId: hh._id,
+    effortId: effort._id, userId: admin._id, actionType: 'not_home',
+    location: { lat: 27.96, lng: -82.47 }, timestamp: new Date('2026-07-08T17:00:00Z'),
+  });
+  return hh;
+};
+
+test('a walk-list-scoped report freezes only that effort\'s numbers; campaign-wide still counts all', { skip }, async () => {
+  const effortA = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, name: 'North Side' });
+  const effortB = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, name: 'South Side' });
+  for (const n of [21, 22]) await makeEffortKnock(effortA, n);
+  for (const n of [31, 32, 33]) await makeEffortKnock(effortB, n);
+
+  const body = { campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12' };
+
+  // An effort belonging to another campaign is refused with a clear error.
+  const foreign = await Effort.create({
+    organizationId: ctx.org._id, campaignId: new mongoose.Types.ObjectId(), name: 'Elsewhere',
+  });
+  const bad = await call('POST', '/admin/client-reports', {
+    ...ctx.admin, body: { ...body, effortId: String(foreign._id) },
+  });
+  assert.strictEqual(bad.status, 400);
+  assert.match(bad.json.error, /Walk list not found/);
+
+  const scoped = await call('POST', '/admin/client-reports', {
+    ...ctx.admin, body: { ...body, effortId: String(effortA._id) },
+  });
+  assert.strictEqual(scoped.status, 201, JSON.stringify(scoped.json));
+  assert.strictEqual(String(scoped.json.report.effortId), String(effortA._id));
+  assert.strictEqual(scoped.json.report.effortName, 'North Side', 'the name is frozen at creation');
+  assert.strictEqual(scoped.json.report.stats.cumulative.totals.doorsKnocked, 2, 'only effort-A knocks count');
+  assert.strictEqual(scoped.json.report.stats.period.totals.doorsKnocked, 2);
+
+  const wide = await call('POST', '/admin/client-reports', { ...ctx.admin, body });
+  assert.strictEqual(wide.status, 201, JSON.stringify(wide.json));
+  assert.strictEqual(wide.json.report.effortId, null);
+  const wideKnocks = wide.json.report.stats.cumulative.totals.doorsKnocked;
+  assert.ok(wideKnocks >= 5, `campaign-wide counts both efforts' knocks (got ${wideKnocks})`);
+
+  // Recompute re-reads report.effortId, so a scoped report STAYS scoped; and the client-facing
+  // shape carries the frozen label — never the id.
+  const re = await call('POST', `/admin/client-reports/${scoped.json.report._id}/recompute`, { ...ctx.admin });
+  assert.strictEqual(re.status, 200);
+  assert.strictEqual(re.json.report.stats.cumulative.totals.doorsKnocked, 2, 'recompute stays scoped');
+  const preview = await call('GET', `/admin/client-reports/${scoped.json.report._id}/preview`, { ...ctx.admin });
+  assert.strictEqual(preview.status, 200);
+  assert.strictEqual(preview.json.report.effortName, 'North Side', 'the public shape carries the label');
+  assert.strictEqual(preview.json.report.effortId, undefined, 'the public shape never carries the id');
 });

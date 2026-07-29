@@ -223,6 +223,7 @@ export default function ClientReportBuilderPage() {
           </div>
           <div className="text-xs text-fg-muted">
             {formatWeekRange(report.weekStart, report.weekEnd)} · {report.timeZone}
+            {report.effortName ? ` · Walk list: ${report.effortName}` : ''}
           </div>
           {report.status === 'published' && (
             <div className="mt-0.5 text-xs text-fg-subtle">
@@ -352,6 +353,7 @@ export default function ClientReportBuilderPage() {
           <Card className="p-4">
             <div className="text-sm font-semibold text-fg">What the client sees</div>
             <div className="mt-2 flex flex-wrap gap-1.5">
+              <span className={chipCls}>Scope: {report.effortName || 'Whole campaign'}</span>
               <span className={chipCls}>Support: {supportLabel || 'None'}</span>
               <span className={chipCls}>
                 {visibleCount} of {questions.length} question{questions.length === 1 ? '' : 's'} shown

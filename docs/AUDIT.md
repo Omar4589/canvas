@@ -96,7 +96,9 @@ in the app display in **feet**, switching to **miles** once a distance reaches a
   statuses while arriving). The mobile audit also **defaults to Today** (it opened on 30 days).
 
 Filter the list by flag type, by review status (Open / Reviewed / Dismissed / Confirmed), by walk
-list, or by date.
+list, or by date. The walk-list filter appears only once the campaign has a second walk list — a
+select on web, a pill row on mobile — and it scopes everything at once: the KPI totals, the
+per-canvasser table, and the entries list.
 
 **2) The map** (the same admin map you already use). Turn on **"Show flagged entries"** in the left
 panel and each flag appears as a colored dot at the spot it was recorded, with a line back to the
@@ -438,7 +440,7 @@ gate, and anchor-tz resolution.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /admin/reports/flags` | Runs `detectFlags` over `{ baseFilter + date window + optional userId }`. Returns `{ summary, entries, total, timeZone, tzAbbrev, thresholds }`. **`summary` is always the full picture** for the scope; `reasonType` / `reviewStatus` (incl. `open`) / `severity` narrow the paginated `entries`. `view=summary` skips the entries payload. An explicit range over **62 days** is rejected (same cap as the timeline). |
+| `GET /admin/reports/flags` | Runs `detectFlags` over `{ baseFilter + date window + optional userId }` — `baseFilter` carries the optional `effortId`, so the walk-list filter (web select, mobile pill row) is server-side and scopes `summary` and `entries` together. Returns `{ summary, entries, total, timeZone, tzAbbrev, thresholds }`. **`summary` is always the full picture** for the scope; `reasonType` / `reviewStatus` (incl. `open`) / `severity` narrow the paginated `entries`. `view=summary` skips the entries payload. An explicit range over **62 days** is rejected (same cap as the timeline). |
 | `POST /admin/reports/flags/review` | Body `{ actionModel, actionId, status, note?, reasonsAtReview? }`. Loads the action to re-derive its campaign and re-checks `canManageCampaign` (defense in depth — a lead can't review another campaign's entry by guessing an id). Upserts the decision; `status:'open'` **deletes** it (reopen). **Body-only — it takes no `?campaignId`, and is the one route EXEMPT from the router's campaign-scope guard** (see below). |
 
 > **Why this write is exempt from the campaign-scope guard.** `routes/admin/reports.js` mounts a bare

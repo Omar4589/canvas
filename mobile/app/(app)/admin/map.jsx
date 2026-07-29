@@ -499,6 +499,19 @@ export default function AdminMap() {
     ...useFocusedPoll(),
   });
 
+  // Walk lists for the in-map picker (shared cache with Timeline/Notes/Audit). The chip only
+  // renders on a 2+ list campaign, but the query stays cheap and warm either way.
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/efforts`),
+    enabled: !!cId,
+  });
+  const efforts = effortsQ.data?.efforts || [];
+  const hasEffortPicker = efforts.length > 1;
+  const effortLabel = effortId
+    ? efforts.find((e) => String(e._id) === String(effortId))?.name || 'Walk list'
+    : 'All walk lists';
+
   const households = mapQ.data?.households || [];
   const activities = mapQ.data?.activities || [];
   const canvassers = mapQ.data?.canvassers || [];
@@ -1271,6 +1284,9 @@ export default function AdminMap() {
             contentContainerStyle={styles.chipScroll}
           >
             <FilterChip label={labelForRange(range)} active={range.preset !== 'all'} open={openMenu === 'date'} onPress={() => toggleMenu('date')} />
+            {hasEffortPicker && (
+              <FilterChip label={effortLabel} active={!!effortId} open={openMenu === 'walklist'} onPress={() => toggleMenu('walklist')} />
+            )}
             <FilterChip label={canvasserLabel} active={!!canvasserId} open={openMenu === 'canvasser'} onPress={() => toggleMenu('canvasser')} />
             <FilterChip label={statusLabel} active={statusFilter.length > 0} open={openMenu === 'status'} onPress={() => toggleMenu('status')} />
             {surveyQuestions.length > 0 && (
@@ -1283,12 +1299,22 @@ export default function AdminMap() {
             )}
           </ScrollView>
 
-          {(effortId || passId || importId) && (
+          {/* With the walk-list chip present, the chip IS the effort scope control — this row
+              then only announces pass/import deep-link scopes, and its ✕ leaves the picked
+              walk list alone. On a <2-list campaign the old behavior is unchanged. */}
+          {(passId || importId || (effortId && !hasEffortPicker)) && (
             <View style={styles.scopeRow}>
               <Text style={styles.scopeText} numberOfLines={1}>
-                Scoped to {effortId ? 'a walk list' : passId ? 'a pass' : 'an import'}
+                Scoped to {passId ? 'a pass' : importId ? 'an import' : 'a walk list'}
               </Text>
-              <Pressable onPress={() => setScope({ effortId: '', passId: '', importId: '' })} hitSlop={8}>
+              <Pressable
+                onPress={() =>
+                  setScope((s) =>
+                    hasEffortPicker ? { ...s, passId: '', importId: '' } : { effortId: '', passId: '', importId: '' }
+                  )
+                }
+                hitSlop={8}
+              >
                 <Text style={styles.scopeClear}>✕ clear</Text>
               </Pressable>
             </View>
@@ -1378,6 +1404,28 @@ export default function AdminMap() {
                 }}
               />
             ))}
+          </View>
+        )}
+        {openMenu === 'walklist' && (
+          <View style={styles.menu}>
+            <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
+              {/* Picking here takes over the whole scope: a pass/import deep-link scope would
+                  silently intersect with the chosen walk list (a pass belongs to ONE effort),
+                  so it is cleared rather than left to zero out the map. */}
+              <MenuItem
+                label="All walk lists"
+                active={!effortId}
+                onPress={() => { setScope({ effortId: '', passId: '', importId: '' }); setOpenMenu(null); }}
+              />
+              {efforts.map((ef) => (
+                <MenuItem
+                  key={String(ef._id)}
+                  label={ef.name}
+                  active={String(effortId) === String(ef._id)}
+                  onPress={() => { setScope({ effortId: String(ef._id), passId: '', importId: '' }); setOpenMenu(null); }}
+                />
+              ))}
+            </ScrollView>
           </View>
         )}
         {openMenu === 'canvasser' && (
@@ -1969,9 +2017,6 @@ function makeStyles(t) {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  topBarLeft: { width: 80 },
-  topBarTitle: { ...type.h3, fontSize: 15, flex: 1, textAlign: 'center' },
-  back: { color: colors.brand, fontWeight: '700', fontSize: 15 },
 
   subBar: {
     flexDirection: 'row',

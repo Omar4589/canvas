@@ -43,6 +43,7 @@ export default function PublicReportListPage() {
               <div className="font-medium text-fg">{r.title || weekOfTitle(r.weekStart)}</div>
               <div className="mt-1 text-xs text-fg-muted">
                 {formatWeekRange(r.weekStart, r.weekEnd)}
+                {r.effortName ? ` · Walk list: ${r.effortName}` : ''}
               </div>
               <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm">
                 <Metric

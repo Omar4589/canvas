@@ -61,6 +61,9 @@ export default function CanvasserOverview() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
+  // Walk-list scope threaded from a filtered Timeline — every query and onward push
+  // carries it, so the whole drill-in stays inside the same walk list.
+  const effortId = params.effortId || null;
 
   // Threaded campaignId wins; the validated cache is the fallback — never the raw
   // cache, which can hold a campaign a team lead doesn't manage (or be empty, which
@@ -100,11 +103,12 @@ export default function CanvasserOverview() {
   const qsBase = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
+    if (effortId) p.set('effortId', effortId);
     if (range?.from) p.set('from', range.from);
     if (range?.to) p.set('to', range.to);
     p.set('tz', deviceTimezone());
     return p.toString();
-  }, [cId, range?.from, range?.to]);
+  }, [cId, effortId, range?.from, range?.to]);
 
   const summaryQ = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'summary', qsBase],
@@ -124,6 +128,17 @@ export default function CanvasserOverview() {
       api(`/admin/reports/survey-results?${qsBase}&userId=${userId}&compareToOrg=true`),
     enabled: !!cId && !!userId && !isLitDrop && !!range,
   });
+
+  // Only to name the walk list in the scope line — Timeline's efforts key, so the
+  // list is usually already cached from the screen that threaded the scope here.
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/efforts`),
+    enabled: !!cId && !!effortId,
+  });
+  const effortName = effortId
+    ? (effortsQ.data?.efforts || []).find((ef) => String(ef._id) === String(effortId))?.name
+    : null;
 
   const s = summaryQ.data;
   const team = teamQ.data?.avg;
@@ -329,6 +344,7 @@ export default function CanvasserOverview() {
         <Text style={styles.rangeLabel}>
           Showing: {labelForRange(range)}
           {teamQ.data?.canvasserCount ? ` · ${teamQ.data.canvasserCount} canvassers in scope` : ''}
+          {effortId ? (effortName ? ` · walk list: ${effortName}` : ' · one walk list') : ''}
         </Text>
 
         {/* KPIs — hero (Knocks) over supporting rows. Each delta rides the sub line as the
@@ -402,7 +418,7 @@ export default function CanvasserOverview() {
             router.push({
               pathname: `/(app)/admin/canvasser/${userId}/days`,
               params: {
-                ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
+                ...(campaign?.id ? { campaignId: campaign.id } : {}), ...(effortId ? { effortId } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
             })
           }
         />
@@ -416,7 +432,7 @@ export default function CanvasserOverview() {
                 router.push({
                   pathname: `/(app)/admin/canvasser/${userId}/day/${d.date}`,
                   params: {
-                    ...(campaign?.id ? { campaignId: campaign.id } : {}), preset: range.preset },
+                    ...(campaign?.id ? { campaignId: campaign.id } : {}), ...(effortId ? { effortId } : {}), preset: range.preset },
                 })
               }
               style={({ pressed }) => [styles.dayRow, pressed && { opacity: 0.7 }]}
@@ -460,7 +476,7 @@ export default function CanvasserOverview() {
                 router.push({
                   pathname: `/(app)/admin/canvasser/${userId}/answers`,
                   params: {
-                    ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
+                    ...(campaign?.id ? { campaignId: campaign.id } : {}), ...(effortId ? { effortId } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
                 })
               }
             />
@@ -491,7 +507,7 @@ export default function CanvasserOverview() {
             router.push({
               pathname: `/(app)/admin/canvasser/${userId}/quality`,
               params: {
-                ...(campaign?.id ? { campaignId: campaign.id } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
+                ...(campaign?.id ? { campaignId: campaign.id } : {}), ...(effortId ? { effortId } : {}), from: range.from || '', to: range.to || '', preset: range.preset },
             })
           }
         />
@@ -539,6 +555,7 @@ export default function CanvasserOverview() {
                   pathname: `/(app)/admin/canvasser/${userId}/${d.key}`,
                   params: {
                     ...(campaign?.id ? { campaignId: campaign.id } : {}),
+                    ...(effortId ? { effortId } : {}),
                     from: range.from || '',
                     to: range.to || '',
                     preset: range.preset,

@@ -13,6 +13,7 @@ import { api } from '../../../../lib/api';
 import { saveActiveCampaign, clearBootstrap } from '../../../../lib/cache';
 import CoverageBar from '../../../../components/CoverageBar';
 import SectionHeader from '../../../../components/SectionHeader';
+import TabSwitcher from '../../../../components/TabSwitcher';
 import NavTileGrid from '../../../../components/NavTileGrid';
 import DateRangeBar from '../../../../components/DateRangeBar';
 import CanvasserCard from '../../../../components/CanvasserCard';
@@ -88,14 +89,29 @@ export default function CampaignDetail() {
     return p;
   }
 
+  // Walk-list roster for the scoping pills (same source Timeline uses).
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/efforts`),
+    enabled: !!cId,
+  });
+  const efforts = effortsQ.data?.efforts || [];
+  // Walk-list scoping for Activity, By pass, Coverage, and Top canvassers. '' = all.
+  // Applied SERVER-SIDE (baseFilter's ?effortId) on the overview, rollup, canvassers, and
+  // knocks-by-pass queries; survey results keep their own per-(walk list · pass) chips.
+  // No reset on campaign change — this is a pushed drill-in that remounts per campaign
+  // (surveyPassId below already leans on the same fact).
+  const [effortId, setEffortId] = useState('');
+  const effortParam = effortId ? { effortId } : {};
+
   const overviewQ = useQuery({
-    queryKey: ['admin', 'reports', 'overview', cId],
-    queryFn: () => api(`/admin/reports/overview?campaignId=${cId}`),
+    queryKey: ['admin', 'reports', 'overview', cId, effortId],
+    queryFn: () => api(`/admin/reports/overview?campaignId=${cId}${effortId ? `&effortId=${effortId}` : ''}`),
     enabled: !!cId,
   });
   const canvassersQ = useQuery({
-    queryKey: ['admin', 'reports', 'canvassers', cId, range?.from, range?.to],
-    queryFn: () => api(`/admin/reports/canvassers?${rangeParams().toString()}`),
+    queryKey: ['admin', 'reports', 'canvassers', cId, range?.from, range?.to, effortId],
+    queryFn: () => api(`/admin/reports/canvassers?${rangeParams(effortParam).toString()}`),
     enabled: !!cId && !!range,
   });
   // Roster for the coordinator label (shared cache with Books/Timeline).
@@ -121,16 +137,17 @@ export default function CampaignDetail() {
   // In-range totals from the same rollup the landing uses (deduped door-days),
   // so the detail's numbers match the Overview exactly.
   const rollupQ = useQuery({
-    queryKey: ['admin', 'reports', 'campaign-rollup', 'one', cId, range?.from, range?.to],
-    queryFn: () => api(`/admin/reports/campaign-rollup?${rangeParams().toString()}`),
+    queryKey: ['admin', 'reports', 'campaign-rollup', 'one', cId, range?.from, range?.to, effortId],
+    queryFn: () => api(`/admin/reports/campaign-rollup?${rangeParams(effortParam).toString()}`),
     enabled: !!cId && !!range,
   });
   // Per-round knocks (walk list × round) over the SAME window — the billing
   // pipeline's rows, so they sum exactly to the invoice. Server sorts: walk list
-  // asc, round asc, legacy last.
+  // asc, round asc, legacy last. Follows the walk-list filter so the By-pass rows
+  // reconcile against the (also filtered) Activity knocks above them.
   const roundsQ = useQuery({
-    queryKey: ['admin', 'reports', 'knocks-by-pass', cId, range?.from, range?.to],
-    queryFn: () => api(`/admin/reports/knocks-by-pass?${rangeParams().toString()}`),
+    queryKey: ['admin', 'reports', 'knocks-by-pass', cId, range?.from, range?.to, effortId],
+    queryFn: () => api(`/admin/reports/knocks-by-pass?${rangeParams(effortParam).toString()}`),
     enabled: !!cId && !!range,
   });
 
@@ -391,6 +408,24 @@ export default function CampaignDetail() {
 
         <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
+        {/* Walk-list filter (Timeline's pattern) — only worth showing once a campaign HAS a
+            second walk list. Switching lists also clears any picked survey pass: the pass
+            chips below draw from the (now filtered) By-pass rows, so a pass from another
+            walk list would keep scoping the survey numbers with no visible chip saying so. */}
+        {efforts.length > 1 && (
+          <TabSwitcher
+            tabs={[
+              { key: '', label: 'All walk lists' },
+              ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
+            ]}
+            activeKey={effortId}
+            onChange={(k) => {
+              setEffortId(k);
+              setSurveyPassId('');
+            }}
+          />
+        )}
+
         <View style={{ paddingHorizontal: spacing.lg }}>
           {/* Activity in range. The hero is Knocks: the rate's own operands are the survey-door
               count and the knock count, so leading with the denominator lets the fraction read
@@ -469,8 +504,11 @@ export default function CampaignDetail() {
             </>
           )}
 
-          {/* Coverage (all-time) */}
-          <SectionHeader title="Coverage" subtitle="All-time campaign progress" />
+          {/* Coverage (all-time; effortId narrows it to one walk list's doors) */}
+          <SectionHeader
+            title="Coverage"
+            subtitle={effortId ? 'All-time walk-list progress' : 'All-time campaign progress'}
+          />
           <InsetGroup>
             <InsetRow
               label="Households"

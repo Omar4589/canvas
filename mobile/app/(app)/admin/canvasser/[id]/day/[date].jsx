@@ -59,6 +59,8 @@ export default function DayDetail() {
   const params = useLocalSearchParams();
   const userId = params.id;
   const date = params.date;
+  // Walk-list scope threaded from the overview/days list — keeps this day inside the same walk list.
+  const effortId = params.effortId || null;
 
   // Threaded campaignId wins; the validated cache is the fallback — never the raw
   // cache, which can hold a campaign a team lead doesn't manage (or be empty, which
@@ -72,11 +74,12 @@ export default function DayDetail() {
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (cId) p.set('campaignId', cId);
+    if (effortId) p.set('effortId', effortId);
     p.set('from', from);
     p.set('to', to);
     p.set('tz', tz);
     return p.toString();
-  }, [cId, from, to, tz]);
+  }, [cId, effortId, from, to, tz]);
 
   const summaryQ = useQuery({
     queryKey: ['admin', 'canvasser', userId, 'day-summary', date, qs],

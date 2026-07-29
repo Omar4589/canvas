@@ -37,4 +37,4 @@ Below the activity numbers, the **By pass** section lists one row per walk list 
 
 In the survey results, **click any answer** to see the entries behind its count — each one names the voter, the address, **who recorded it and at what time**, any note, and an Offline badge if it synced later. Click an entry for the full response, flip to **By canvasser** to see who's been recording that answer, or click **Open full view** to take the drill to the [Survey Explorer](page-survey-explorer) with a map and export.
 
-> Tip: Use the walk-list filter to see one operation's numbers, or leave it on "All walk lists" for the whole-campaign totals.
+> Tip: Use the walk-list filter to see one operation's numbers, or leave it on "All walk lists" for the whole-campaign totals. Everything on the page follows it — including the survey-answer drill, so the entries behind a count always match the count.

@@ -178,6 +178,36 @@ headline — a footer under the group now says so — and knocks recorded before
 a "Legacy / no pass" row. Full counting model + the invoice-ready CSV export (web-only) in
 [METRICS.md](METRICS.md).
 
+### Scoping a campaign to one walk list (the pill row)
+
+Once a campaign has **two or more walk lists**, a pill row — **All walk lists · North · South …** —
+appears in the filter area of several admin screens (a single-list campaign shows nothing; a
+"Main ·" prefix everywhere would be noise). Where it lives and what it scopes:
+
+- **The campaign screen** — picking a walk list scopes **Activity**, the **By pass** group,
+  **Coverage** (its subtitle flips to *All-time walk-list progress*), and **Top canvassers**
+  together, so the By-pass rows still reconcile against the Knocks number above them. Picking a walk
+  list also clears any selected survey **pass chip**: those chips draw from the (now filtered)
+  By-pass rows, so a pass from another walk list would otherwise keep scoping the survey numbers
+  with no visible chip saying so.
+- **Timeline → a canvasser's profile.** Timeline's own pill row (pre-existing) now **follows you
+  into the drill-in**: open a canvasser from a filtered Timeline and the profile, every sub-screen
+  (days, single-day detail, activity feed, answers, quality, households, surveys taken, notes, the
+  territory map), the CSV export, and **Compare** all stay inside that walk list. The profile's
+  "Showing:" line appends *· walk list: North*, Compare appends *· one walk list* to its range line
+  — and the **vs-team deltas** on both then compare against the walk list's canvassers, not the
+  whole campaign's.
+- **GPS audit** — the same pill row scopes the KPI totals, the per-canvasser table, and the entries
+  list alike ([AUDIT.md](AUDIT.md)).
+- **The Map tab** — a **walk-list chip** in the filter row opens a picker. Picking a walk list
+  clears any pass/import deep-link scope (a pass belongs to ONE walk list, so a stale pass scope
+  would silently zero out the map); with the chip present, the "Scoped to …" row only announces
+  pass/import scopes and its ✕ leaves the picked walk list alone ([MAPS.md](MAPS.md)).
+
+One deletion rides along: Timeline's reconciliation footer claiming the coordinator filter wasn't
+applied to its overlap totals is gone — the crew filter is applied server-side, so the
+reconciliation reflects the full selection (campaign, walk list, range, AND crew).
+
 ### Drilling into a survey answer (campaign screen)
 On a campaign's detail screen, the survey results list each answer with its count — **tap a count**
 to open the entries behind it. That screen now has a **Voters | By canvasser** toggle (who *recorded*
@@ -369,7 +399,7 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 
 | Screen | What changed |
 |---|---|
-| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate). |
+| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate) and the **walk-list pill row** (Timeline's `TabSwitcher` pattern, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows). |
 | [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, surveyTemplateId, userId, from, to, scid, seedAt }`). |
 | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`) and **template-scoped** — it carries `templateId` (seeded, or stamped from the current survey's `surveyTemplate.id` when an option is picked) and sends it as `surveyTemplateId` on the households query ([MAPS.md](MAPS.md) §D). |
 | [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. |
@@ -393,6 +423,10 @@ client-only:
   doors beneath the pins (`admin-overlaps` `ShapeSource` + `CircleLayer`).
 - **Per-canvasser coloring** is automatic from the server `status` field (`?userId` now returns that
   canvasser's own disposition).
+- **Walk-list scope:** a `FilterChip` + menu (rendered with 2+ efforts, from the shared
+  `['admin','efforts', cId]` query) sets the same `effortId` the deep-link scope params use; picking
+  a walk list clears `passId`/`importId`, and the "Scoped to …" row + its ✕ then cover pass/import
+  scopes only ([MAPS.md](MAPS.md) §D).
 
 The full server/data/render depth for all three lives in [MAPS.md](MAPS.md) (§D endpoints, §E render,
 §J file map) and [METRICS.md](METRICS.md) §D (the two overlap surfaces) — not duplicated here.

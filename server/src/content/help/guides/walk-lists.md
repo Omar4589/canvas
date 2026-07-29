@@ -21,7 +21,7 @@ Doors that haven't been claimed by any walk list sit in **Intake**. When you imp
 
 ## Running several at once
 
-A campaign can have many active walk lists at once, each with its own active pass. Canvassers only see the books assigned to them, and if someone is on more than one walk list, their phone shows a switcher so book numbers don't collide. The dashboard can filter to one walk list or show whole-campaign totals. More in [Multiple walk lists](multiple-walk-lists).
+A campaign can have many active walk lists at once, each with its own active pass. Canvassers only see the books assigned to them, and if someone is on more than one walk list, their phone shows a switcher so book numbers don't collide. And once a campaign has two or more, a walk-list filter appears on the dashboard, the [maps](maps), the Timeline, and the [GPS audit](audit) — and a [client report](client-reports) can be scoped to one list too — so every surface can show one operation's numbers or the whole-campaign totals. More in [Multiple walk lists](multiple-walk-lists).
 
 ## Giving a walk list its doors
 

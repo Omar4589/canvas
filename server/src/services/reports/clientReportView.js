@@ -24,6 +24,9 @@ export function shapeReportListRow(r) {
     title: r.title || '',
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
+    // Scope label only (never the id): two same-week reports — one scoped, one campaign-wide —
+    // must be distinguishable on the share link's list, not just after opening each.
+    effortName: r.effortName || null,
     publishedAt: r.publishedAt || null,
     mapPointCount: r.mapPointCount || 0,
     showMap: r.visibility?.showMap !== false,
@@ -42,6 +45,7 @@ export function shapeReportForClient(report) {
     campaignId: String(r.campaignId),
     campaignType: r.campaignType || null,
     title: r.title || '',
+    effortName: r.effortName || null, // walk-list scope label (frozen at creation); null = whole campaign
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
     timeZone: r.timeZone,

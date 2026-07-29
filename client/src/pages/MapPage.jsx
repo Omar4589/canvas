@@ -167,7 +167,9 @@ export default function MapPage() {
   const appliedStyleRef = useRef(styleURL);
 
   // Scoped audit: a deep-link from an Effort/Pass (?effortId / ?passId) narrows the
-  // map to that scope. Seeded once from the URL; the chip's ✕ clears it.
+  // map to that scope. Seeded once from the URL. The toolbar's walk-list <select> owns
+  // effortId whenever the campaign has 2+ efforts; the chip (with its ✕) covers the
+  // pass/import scopes the select doesn't manage.
   const [scopeEffortId, setScopeEffortId] = useState(searchParams.get('effortId') || '');
   const [scopePassId, setScopePassId] = useState(searchParams.get('passId') || '');
   const [scopeImportId, setScopeImportId] = useState(searchParams.get('importId') || '');
@@ -202,20 +204,34 @@ export default function MapPage() {
     if (campTz && campTz !== orgTz) setDateRange(defaultRange('today', campTz));
   }, [selectedCampaign?.timeZone, orgTz]);
 
-  // Resolve a friendly name for the scope chip (reuses the cached efforts/passes lists).
+  // Walk lists — feeds the toolbar's walk-list <select> (shown with 2+ efforts) and the
+  // scope chip's friendly name. Passes stay chip-only, so that list still loads on demand.
   const scopeEffortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
-    enabled: !!campaignId && !!scopeEffortId,
+    enabled: !!campaignId,
   });
+  const efforts = scopeEffortsQ.data?.efforts || [];
+  const showEffortSelect = efforts.length > 1;
+  // Safety net (same as the canvasser filter below): a stale deep-linked effortId that
+  // isn't in the list would leave the select claiming "All walk lists" while the map
+  // stays secretly scoped — reset the scope instead.
+  useEffect(() => {
+    if (scopeEffortId && efforts.length && !efforts.some((x) => String(x._id) === scopeEffortId)) {
+      setScopeEffortId('');
+    }
+  }, [efforts, scopeEffortId]);
   const scopePassesQ = useQuery({
     queryKey: ['admin', 'passes', campaignId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
     enabled: !!campaignId && !!scopePassId,
   });
   let scopeLabel = null;
-  if (scopeEffortId) {
-    const e = (scopeEffortsQ.data?.efforts || []).find((x) => String(x._id) === scopeEffortId);
+  // With the select rendered, IT displays the effort scope — a chip too would be a second,
+  // competing affordance. The effort branch survives only as the fallback for a deep link
+  // into a campaign with fewer than 2 efforts, where there's no select to show it.
+  if (scopeEffortId && !showEffortSelect) {
+    const e = efforts.find((x) => String(x._id) === scopeEffortId);
     scopeLabel = e ? e.name : 'Walk list';
   } else if (scopePassId) {
     const p = (scopePassesQ.data?.passes || []).find((x) => String(x._id) === scopePassId);
@@ -224,7 +240,9 @@ export default function MapPage() {
     scopeLabel = "this import's homes";
   }
   function clearScope() {
-    setScopeEffortId('');
+    // The ✕ clears only what the chip is showing — once the select owns the effort
+    // scope, clearing a pass/import chip must not silently reset the walk list too.
+    if (!showEffortSelect) setScopeEffortId('');
     setScopePassId('');
     setScopeImportId('');
   }
@@ -793,6 +811,19 @@ export default function MapPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <AddressSearch households={households} onSelect={flyToHousehold} />
+          {showEffortSelect && (
+            <select
+              value={scopeEffortId}
+              onChange={(e) => setScopeEffortId(e.target.value)}
+              title="Filter to one walk list"
+              className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            >
+              <option value="">All walk lists</option>
+              {efforts.map((ef) => (
+                <option key={ef._id} value={ef._id}>{ef.name}</option>
+              ))}
+            </select>
+          )}
           <DateRangeSelector
             value={dateRange}
             onChange={(next) => {

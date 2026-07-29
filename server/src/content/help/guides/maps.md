@@ -23,6 +23,10 @@ Turn pings on and each dot marks **where a canvasser stood** when they logged a 
 
 Normally each house is colored by its status across the **whole campaign** — has *anyone* surveyed it, found nobody home, and so on. **Filter the map to a single canvasser** and the colors change to show **only what that person did**: green where *they* surveyed, blue where *they* got no answer, and gray for any door they never touched — even if a teammate worked it. It's the quickest way to see one canvasser's own results on the map. Clear the filter and the colors go back to the shared campaign status. (The pins stay put — only their color changes.)
 
+## Scope to one walk list
+
+Running more than one [walk list](walk-lists)? Once a campaign has two or more, both the web map and the mobile admin map add a **walk-list filter** — pick a list and the whole map follows: the doors, the pings, and the overlap rings all narrow to just that operation.
+
 ## Overlaps: doors worked by more than one canvasser
 
 Turn on **Show overlaps** and the map rings the doors that **more than one canvasser knocked in the same pass** — an amber ring around each, with an **"N overlaps"** count up top. Tap one and its detail panel names the other canvassers who worked it. Once a pass has covered a door, nobody should knock it again until the next pass, so an overlap is a turf collision worth a look — usually two walk lists that ran into each other.

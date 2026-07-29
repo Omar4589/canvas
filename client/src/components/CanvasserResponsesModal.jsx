@@ -77,7 +77,7 @@ function ResponseCard({ r, tz }) {
   );
 }
 
-export default function CanvasserResponsesModal({ canvasser, dateRange, campaignId, onClose, tz }) {
+export default function CanvasserResponsesModal({ canvasser, dateRange, campaignId, effortId, onClose, tz }) {
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
   const [skip, setSkip] = useState(0);
@@ -86,7 +86,7 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, campaign
   useEffect(() => {
     setSkip(0);
     setAccumulated([]);
-  }, [canvasser?.userId, dateRange?.from, dateRange?.to, campaignId]);
+  }, [canvasser?.userId, dateRange?.from, dateRange?.to, campaignId, effortId]);
 
   useEffect(() => {
     function onKey(e) {
@@ -99,6 +99,7 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, campaign
   const userId = canvasser?.userId;
   const queryString = buildQuery({
     campaignId,
+    effortId: effortId || undefined,
     from: dateRange?.from,
     to: dateRange?.to,
     skip,
@@ -111,6 +112,7 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, campaign
       'canvasser-responses',
       userId,
       campaignId,
+      effortId,
       dateRange?.from,
       dateRange?.to,
       skip,

@@ -184,12 +184,18 @@ export function publicPointAnswer(question, row) {
 export async function buildFrozenMapPoints({ report, campaign, template = null, mapAnswerKeys = [] }) {
   const orgId = report.organizationId;
   const campaignId = report.campaignId;
+  const effortId = report.effortId || null;
   const before = report.rangeEndUtc;
 
+  // Walk-list scope applies to the HOUSEHOLD set only (Household.effortId is the ownership
+  // source of truth). The activity/response scans below stay campaign-wide and household-keyed:
+  // a door's as-of status must reflect knocks stamped before it joined the walk list, and only
+  // in-scope households are ever looked up from those maps.
   const households = await Household.find(
     {
       organizationId: orgId,
       campaignId,
+      ...(effortId ? { effortId } : {}),
       isActive: true,
       'location.coordinates': { $exists: true, $ne: null },
     },

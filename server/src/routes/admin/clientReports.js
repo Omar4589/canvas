@@ -10,6 +10,7 @@ import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { Campaign } from '../../models/Campaign.js';
+import { Effort } from '../../models/Effort.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 import { computeWindowStats, buildFrozenMapPoints } from '../../services/reports/computeReport.js';
@@ -53,6 +54,8 @@ const createSchema = z.object({
   weekStart: z.string().regex(dateRe),
   weekEnd: z.string().regex(dateRe),
   title: z.string().max(200).optional(),
+  // Optional walk-list scope; omitted = the whole campaign (every pre-existing report).
+  effortId: z.string().optional(),
 });
 const sectionSchema = z.object({ heading: z.string().min(1).max(200), body: z.string().max(20000).default('') });
 const updateSchema = z.object({
@@ -88,10 +91,13 @@ function choiceQuestionKeys(template) {
 async function computeBothWindows(report, campaign, template) {
   const orgId = report.organizationId;
   const campaignId = report.campaignId;
+  // Walk-list scope rides on the report itself, so create AND recompute stay scoped.
+  const effortId = report.effortId || null;
   const [cumulative, period] = await Promise.all([
     computeWindowStats({
       orgId,
       campaignId,
+      effortId,
       range: { $lt: report.rangeEndUtc },
       campaignType: campaign.type,
       template,
@@ -100,6 +106,7 @@ async function computeBothWindows(report, campaign, template) {
     computeWindowStats({
       orgId,
       campaignId,
+      effortId,
       range: { $gte: report.rangeStartUtc, $lt: report.rangeEndUtc },
       campaignType: campaign.type,
       template,
@@ -128,6 +135,7 @@ function adminListRow(r) {
     id: String(r._id),
     campaignId: String(r.campaignId),
     title: r.title || '',
+    effortName: r.effortName || null, // walk-list scope label; null = whole campaign
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
     timeZone: r.timeZone,
@@ -372,6 +380,17 @@ router.post('/', async (req, res, next) => {
     if (!range.$gte || !range.$lt) {
       return res.status(400).json({ error: 'Invalid week range' });
     }
+    // Optional walk-list scope — the effort must belong to THIS campaign. Its name is frozen
+    // onto the report so the public page never needs a live Effort lookup (see the model).
+    let effort = null;
+    if (data.effortId) {
+      if (!mongoose.isValidObjectId(data.effortId)) {
+        return res.status(400).json({ error: 'Invalid effortId' });
+      }
+      effort = await Effort.findOne({ _id: data.effortId, campaignId: campaign._id }, { name: 1 }).lean();
+      if (!effort) return res.status(400).json({ error: 'Walk list not found in this campaign' });
+    }
+
     const template = await resolveTemplate(orgId, campaign);
     const keys = choiceQuestionKeys(template);
 
@@ -380,6 +399,8 @@ router.post('/', async (req, res, next) => {
       campaignId: campaign._id,
       campaignType: campaign.type,
       title: data.title || '',
+      effortId: effort ? effort._id : null,
+      effortName: effort ? effort.name : null,
       weekStart: data.weekStart,
       weekEnd: data.weekEnd,
       timeZone: tz,

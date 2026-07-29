@@ -6,7 +6,7 @@ kind: guide
 order: 21
 sourceDoc: CLIENT_PORTAL.md
 summary: Build a weekly client report, publish it to freeze the numbers, and share it with a login-free link.
-tags: client reports, share link, publish, weekly report, PDF, coverage map
+tags: client reports, share link, publish, weekly report, PDF, coverage map, walk list
 ---
 
 ## What a client report is
@@ -17,10 +17,12 @@ Whoever you share the link with sees a clean hub with that campaign's reports, n
 
 ## Build and publish
 
-1. Open the campaign and go to its **Client Reports** tab, then **Create draft** for a week (a start and end date).
+1. Open the campaign and go to its **Client Reports** tab, then **Create draft** for a week (a start and end date). Running more than one walk list? A **Walk list** select lets you scope the report to just one operation — the default is the whole campaign.
 2. Write your **Canvasser observations** as sections — a heading and a paragraph each.
 3. Pick the **headline support question**, which survey questions the client may see, and whether to show the map. A live "What the client sees" recap keeps you honest.
 4. Hit **Preview** to see exactly what recipients get, then **Publish**.
+
+A walk-list report scopes everything — the numbers, the breakdowns, the map — to that list's doors, and it says so: the report list, the builder, the shared page, and the PDF all carry a **Walk list: North Dallas** line. That does mean the walk list's *name* is visible to your client, just like the report title — worth a glance before you publish if your internal names are colorful.
 
 > Heads up: Publishing freezes the numbers and takes a snapshot of the map. A published report never changes, even as the team keeps knocking — next week's report picks up the new activity at the same link. Need an edit? Click **Unpublish to edit**, then republish.
 

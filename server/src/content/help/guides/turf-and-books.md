@@ -21,6 +21,8 @@ On the Turf Cutting page, pick how to slice the doors:
 
 Cuts only include knockable doors. Already-voted homes are skipped, and you can leave out apartments and [restricted-access homes](restricted-vs-refused) too.
 
+Cutting a follow-up round? The **Target doors** panel narrows the cut to just the doors you're chasing — the not-homes, the undecided — so canvassers only get those. See [Passes](passes) for how it works.
+
 ## Accept, then assign
 
 New books start as **drafts** — canvassers see nothing yet. Re-cut freely; when you're happy, **Accept** to publish them. Only published books can be [assigned to canvassers](assigning-canvassers).

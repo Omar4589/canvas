@@ -11,7 +11,7 @@ tags: overlaps, double knock, turf collision, coaching, page, rounds
 
 The **Overlaps** page lists doors that **more than one canvasser knocked in the same round**. Once a round has covered a door, nobody should go back until the next round starts — so an overlap usually means two walk lists ran into each other, or someone worked a book that wasn't theirs.
 
-Each door shows its address, which round the collision happened in, and every canvasser who knocked it — with the action they recorded (surveyed, not home, refused…) and the date and time. **View on map** opens that door's pin.
+Each door shows its address, which round the collision happened in, and every canvasser who knocked it — with the action they recorded (surveyed, not home, refused…) and the date and time. **View on map** opens that door's pin. On a campaign with more than one walk list, the round's label starts with its walk list's name — like **North · Pass 1** — because each walk list numbers its own passes, so "Pass 1" alone wouldn't tell you which one collided.
 
 ## It follows your dates — and still catches the split ones
 

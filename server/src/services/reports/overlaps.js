@@ -2,7 +2,26 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Household } from '../../models/Household.js';
 import { User } from '../../models/User.js';
 import { Pass } from '../../models/Pass.js';
+import { Effort } from '../../models/Effort.js';
 import { KNOCK_ACTIONS } from './aggregations.js';
+
+// Round labels must name their walk list once a campaign has more than one: roundNumber
+// restarts per EFFORT (models/Pass.js), so "Pass 1" alone is ambiguous across lists. Resolves
+// the surfaced passes' Effort names and returns a labeler; single-walk-list campaigns keep the
+// short label (prefixing "Main · " everywhere would be noise). When the caller's match carries
+// no campaignId (org-wide /overlaps), fall back to "the surfaced passes span 2+ efforts".
+const passLabeler = async (passes, campaignId) => {
+  const effortIds = [...new Set(passes.map((p) => (p.effortId ? String(p.effortId) : null)).filter(Boolean))];
+  const efforts = effortIds.length ? await Effort.find({ _id: { $in: effortIds } }, 'name').lean() : [];
+  const eMap = new Map(efforts.map((e) => [String(e._id), e.name]));
+  const multi = campaignId ? (await Effort.countDocuments({ campaignId })) > 1 : effortIds.length > 1;
+  return (pass) => {
+    if (!pass) return { roundLabel: 'Legacy / no pass', effortName: null };
+    const effortName = eMap.get(String(pass.effortId)) || null;
+    const base = `Pass ${pass.roundNumber} · ${pass.name}`;
+    return { roundLabel: multi && effortName ? `${effortName} · ${base}` : base, effortName };
+  };
+};
 
 // Overlap detection (shared by GET /admin/reports/overlaps and the canvasser timeline).
 // A house is an "overlap" only when 2+ DISTINCT canvassers knocked it within the SAME pass.
@@ -103,8 +122,9 @@ export async function computeOverlapDoors(match, { dateRange = null, userId = nu
         ).lean()
       : [],
     userIds.length ? User.find({ _id: { $in: userIds } }, 'firstName lastName').lean() : [],
-    passIds.length ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean() : [],
+    passIds.length ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name effortId').lean() : [],
   ]);
+  const labelFor = await passLabeler(passes, match.campaignId);
   const uMap = new Map(users.map((u) => [String(u._id), u]));
   const pMap = new Map(passes.map((p) => [String(p._id), p]));
   const hMap = new Map(households.map((h) => [String(h._id), h]));
@@ -135,7 +155,7 @@ export async function computeOverlapDoors(match, { dateRange = null, userId = nu
     const pass = g.passId ? pMap.get(String(g.passId)) : null;
     byHousehold.get(hid).passes.push({
       passId: g.passId ? String(g.passId) : null,
-      roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
+      ...labelFor(pass),
       // Newest first so "who hit it most recently" reads off the top. `inRange` lets the UI mark
       // which knock is the one you're looking at vs the earlier one that made it a collision.
       // firstName/lastName/actionType mirror /overlaps so the shared card needs no adapter.
@@ -224,8 +244,9 @@ export async function computeOverlaps(match, { organizationId, limit = 200 } = {
       'addressLine1 addressLine2 city state zipCode location'
     ).lean(),
     User.find({ _id: { $in: userIds } }, 'firstName lastName email').lean(),
-    passIds.length ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean() : [],
+    passIds.length ? Pass.find({ _id: { $in: passIds } }, 'roundNumber name effortId').lean() : [],
   ]);
+  const labelFor = await passLabeler(passes, match.campaignId);
 
   const hMap = new Map(households.map((h) => [String(h._id), h]));
   const uMap = new Map(users.map((u) => [String(u._id), u]));
@@ -261,7 +282,7 @@ export async function computeOverlaps(match, { organizationId, limit = 200 } = {
     entry.passes.push({
       passId: c._id.passId ? String(c._id.passId) : null,
       roundNumber,
-      roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
+      ...labelFor(pass),
       canvassers: c.events
         .map((e) => {
           const u = uMap.get(String(e.userId));
