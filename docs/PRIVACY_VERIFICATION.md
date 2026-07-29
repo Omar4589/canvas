@@ -357,7 +357,22 @@ already on the account a link to set **their own** password, so staff never lear
 them. It is recorded in `EmailLog` (kind, recipient, organizationId, userId, timestamp), visible at super-admin →
 Emails. It is **not** a weakening of `VENDOR_READ_ONLY`: that guard still blocks every write through the customer-facing
 `/admin` router, including the sibling action — setting a temporary password — which is deliberately NOT offered to
-staff, because there the operator chooses the secret and could then impersonate the customer's user.]* Every bypass v1 found is closed: the identity-console triage lists are now grant-gated and
+staff, because there the operator chooses the secret and could then impersonate the customer's user.]*
+
+*[v4 2026-07-29 (later the same day): **the previous stamp's `VENDOR_READ_ONLY` sentence is SUPERSEDED by owner decision.**
+The blanket write-block on team management is REMOVED: under a support grant, staff may now administer a customer's
+users — create accounts, set temporary passwords, resend invites, change roles, deactivate — and every such write is
+recorded in `AccessLog` by the existing middleware, exactly like the many grant-holder writes the other admin routers
+always allowed (turfs, voters, imports, reports, billing…), which is what made the old carve-out inconsistent rather
+than protective. The temp-password impersonation risk is accepted on the org-admin route's own reasoning (misuse is
+not silent — the legitimate user is visibly locked out), now with an attributable AccessLog row on top. The ONE
+surviving refusal, shared by `memberships.js` and `leadCrew.js` via `services/memberships/vendorGuards.js`: a
+membership write targeting a SUPER-ADMIN account (`STAFF_SELF_MINT`) — the single write that would END the logging by
+flipping orgContext to the member branch. The customer-side path is untouched: their own admin may add staff as a
+member, which is what "authorized users" means in the published policy. The policy sentences themselves — grant-gated,
+logged — remain TRUE; the grant now covers more actions, all recorded. `denyVendorPrivilegeWrite` (middleware/auth.js)
+is deleted with its call sites. Pinned by seven tests in `supportAccess.int.test.js`; the two tests that pinned the
+old blanket (`internalOrg`, `perCampaignCrews`) are updated to the new contract.]* Every bypass v1 found is closed: the identity-console triage lists are now grant-gated and
 logged (F1), the audit logger fails closed across `/admin` + `/mobile` (F2), the `leadCrew` self-mint is
 blocked (F3). **The carve-out to state honestly:** the audit *write* is best-effort — if the audit store
 itself is down, a staff read still completes and simply isn't recorded (it is not blocked). So: *"every

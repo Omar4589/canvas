@@ -209,14 +209,15 @@ test('with a grant, a CUSTOMER org is READ-ONLY for the vendor — and the read 
   });
   assert.strictEqual(read.status, 200, 'the grant opens the door');
 
-  // But a WRITE is refused: a grant buys read access to help, not the power to mint a member.
+  // A WRITE now works under the grant — owner decision 2026-07-29: support means being able to
+  // help, on the record. What stays refused is a membership targeting a STAFF account (the write
+  // that would END the logging) — pinned in supportAccess.int.test.js.
   const write = await call('POST', '/admin/memberships', {
     token: ctx.support.token,
     orgId: ctx.custOrg._id,
     body: { email: 'sneak@acme.com', firstName: 'S', lastName: 'Neak', password: 'TempSneak123', role: 'canvasser' },
   });
-  assert.strictEqual(write.status, 403, 'the customer-org write is blocked');
-  assert.strictEqual(write.json.code, 'VENDOR_READ_ONLY');
+  assert.strictEqual(write.status, 201, 'a grant-holder may administer users in a customer org');
 
   const logs = await waitForLogs({ organizationId: ctx.custOrg._id });
   assert.ok(logs.length > 0, 'the granted read of a customer org IS logged — unlike the internal org (test 3)');

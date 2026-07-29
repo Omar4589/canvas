@@ -294,6 +294,25 @@ export function IconHelp({ size = 22 }) {
 }
 
 // Route path -> icon component. Joined to navItems.js NAV/SUPER_NAV at render time.
+export function IconMail({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3 7 9 6 9-6" />
+    </svg>
+  );
+}
+
+export function IconKey({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <circle cx="8" cy="14" r="4" />
+      <path d="M11 11 20 2" />
+      <path d="M16 6l3 3" />
+    </svg>
+  );
+}
+
 export const NAV_ICONS = {
   '/admin': IconDashboard,
   '/map': IconPin,
@@ -321,6 +340,10 @@ export const NAV_ICONS = {
   '/super-admin/users': IconUsers,
   '/super-admin/people': IconUsers,
   '/super-admin/imports': IconUpload,
+  // A key, not the shield: a key reads as "granted access", and IconAlertShield keeps meaning
+  // "something is wrong" (audit) instead of becoming a generic security glyph.
+  '/super-admin/access': IconKey,
+  '/super-admin/emails': IconMail,
   '/organizations': IconBuilding,
   '/queues': IconLayers,
 };

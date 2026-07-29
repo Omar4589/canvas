@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { requireAuth, requireCampaignManager, denyVendorPrivilegeWrite } from '../../middleware/auth.js';
+import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
+import { refuseVendorStaffTarget } from '../../services/memberships/vendorGuards.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Membership } from '../../models/Membership.js';
@@ -43,23 +44,10 @@ import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
 
-// A support-grant holder is a VENDOR here, not a member. They may READ a customer's crew to do
-// support; they must not reshape it. Blanket rather than per-route because this router now carries
-// a membership write: PATCH /admin/memberships/:id/deactivate is already 403 for a grant holder
-// (routes/admin/memberships.js), and the identical write must not be 200 just because it arrived
-// through a campaign-scoped door. denyVendorPrivilegeWrite is deliberately narrower than this —
-// it covers account/role CREATION only (middleware/auth.js) — so it cannot stand in.
-router.use((req, res, next) => {
-  if (req.supportGrant && req.method !== 'GET') {
-    return res.status(403).json({
-      error:
-        'Support access is read-only for team management. Creating or changing accounts, roles, or ' +
-        'crew must be done by an administrator who is a member of this organization.',
-      code: 'VENDOR_READ_ONLY',
-    });
-  }
-  next();
-});
+// Vendor writes: a support grant now permits crew administration — every write recorded by
+// middleware/accessLog.js — with ONE refusal: any membership write targeting a Doorline staff
+// account. Rule + rationale in services/memberships/vendorGuards.js, shared with memberships.js
+// so an identical write can never be 200 through one door and 403 through the other.
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -124,12 +112,13 @@ router.get('/', async (req, res, next) => {
 });
 
 // Create a brand-new canvasser and put them on this campaign in one step.
-router.post('/', denyVendorPrivilegeWrite, async (req, res, next) => {
+router.post('/', async (req, res, next) => {
   try {
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     const orgId = activeOrgId(req);
     const data = createSchema.parse(req.body);
+    if (await refuseVendorStaffTarget(req, res, { email: data.email })) return;
 
     const coordRes = await resolveCoordinatorId({ orgId, raw: data.coordinatorId, memberUserId: null });
     if (!coordRes.ok) return res.status(400).json({ error: coordRes.error });
@@ -231,8 +220,9 @@ router.get('/:userId/coordinator-preview', async (req, res, next) => {
 
 // Set (or clear) a crew member's coordinator. Scoped to this campaign's roster so a
 // lead can only reorganize their own crew, not arbitrary org members.
-router.patch('/:userId/coordinator', denyVendorPrivilegeWrite, async (req, res, next) => {
+router.patch('/:userId/coordinator', async (req, res, next) => {
   try {
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     if (!mongoose.isValidObjectId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
@@ -320,6 +310,7 @@ async function loadStatusTarget(req, campaign) {
 // Switch a canvasser's access OFF. Org-wide — see the router note and `alsoAffects`.
 router.patch('/:userId/deactivate', async (req, res, next) => {
   try {
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     const orgId = activeOrgId(req);
@@ -391,6 +382,7 @@ router.patch('/:userId/deactivate', async (req, res, next) => {
 // org admin could unfreeze.
 router.patch('/:userId/reactivate', async (req, res, next) => {
   try {
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     const orgId = activeOrgId(req);

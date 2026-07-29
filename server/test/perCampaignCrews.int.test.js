@@ -452,8 +452,12 @@ test('a support-grant holder is refused — same write, same answer as the org r
     expiresAt: new Date(Date.now() + 3600_000),
   });
   const res = await status(hd54, maria._id, 'deactivate', signUserToken(staff));
-  assert.equal(res.status, 403, 'support access is read-only for team management');
-  assert.equal(res.json.code, 'VENDOR_READ_ONLY');
+  // Owner decision 2026-07-29: crew administration now works under a grant (and is logged).
+  // The surviving refusal is a STAFF-targeted membership write — supportAccess.int.test.js.
+  assert.equal(res.status, 200, 'a grant-holder may deactivate a canvasser, on the record');
+  // Put Maria back so the following tests see the fixture they expect.
+  const undo = await status(hd54, maria._id, 'reactivate', signUserToken(staff));
+  assert.equal(undo.status, 200);
 });
 
 test('deactivating keeps their books — reactivating finds them intact', { skip }, async () => {

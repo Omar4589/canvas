@@ -304,10 +304,17 @@ drifting from the first is the exact failure this feature existed to prevent.
 themselves a membership. This is one named capability on `/super-admin` that cannot change a role,
 cannot create an account, and exposes no data. The asymmetry that makes it safe:
 
+*(Superseded 2026-07-29: the table below described the interim state. The blanket vendor
+write-block is now gone — under a support grant, staff may administer a customer's users
+(create, temp password, resend, roles, deactivate), every write recorded in AccessLog. The one
+refusal is a membership write targeting a staff account — `STAFF_SELF_MINT`, in
+`services/memberships/vendorGuards.js` — because that write would end the logging. A customer's
+own admin can still add staff as a member from their side.)*
+
 | action | why |
 |---|---|
 | **Resend invite — safe for staff** | Emails the address already on the account; the *user* chooses the password. Staff never learn a credential and cannot sign in as them. |
-| **Set temp password — NOT offered to staff** | The operator *chooses* the secret, so they know it, and could then sign in as that customer's user. |
+| **Set temp password — allowed under a grant, logged** | The operator chooses the secret — accepted on the org-admin route's own reasoning (misuse is visible: the real user is locked out), now with an AccessLog row naming the staff actor. |
 
 Attribution is free: `sendMail` writes an `EmailLog` row carrying kind, recipient, `organizationId`
 and `userId`, visible at **super-admin → Emails**. No new audit model.

@@ -49,7 +49,27 @@ router.get('/', async (req, res, next) => {
     const limit = paged ? Math.min(Math.max(Number(req.query.limit) || 25, 1), 100) : 0;
     const skip = paged ? Math.max(Number(req.query.skip) || 0, 0) : 0;
 
-    let query = User.find(filter).sort({ createdAt: -1 });
+    // Allowlisted sort (never user input into .sort() — the imports-route precedent). The default
+    // CHANGED from { createdAt: -1 } to alphabetical: creation order reads as random, because no
+    // list column shows it. Mobile sends no sort param, so the new default reaches it too.
+    //
+    // `_id` as the final tiebreaker is NOT decoration. Names collide, and Mongo gives ties no
+    // stable order across separate skip/limit queries — without it, web's Prev/Next and mobile's
+    // infinite scroll can duplicate or drop a row at a page boundary.
+    //
+    // lastActivityAt is deliberately absent: it is fetched per-row AFTER the page is chosen
+    // (below) and withheld from the un-paged path — a test pins that. Sorting by it needs an
+    // aggregation or a denormalized field; don't add it here casually.
+    const SORTS = {
+      name: { lastName: 1, firstName: 1, _id: 1 },
+      email: { email: 1, _id: 1 },
+      created: { createdAt: -1, _id: 1 },
+      lastLogin: { lastLoginAt: -1, _id: 1 },
+      lastSeen: { lastSeenAt: -1, _id: 1 },
+    };
+    const sortSpec = SORTS[req.query.sort] || SORTS.name;
+
+    let query = User.find(filter).sort(sortSpec);
     if (paged) query = query.skip(skip).limit(limit);
     const [users, total, deletedCount] = await Promise.all([
       query.lean(),

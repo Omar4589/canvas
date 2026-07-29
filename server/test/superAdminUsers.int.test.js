@@ -321,3 +321,61 @@ test('the lockout state is READABLE (per-process, honestly labeled), not just bl
   assert.strictEqual(cleared.status, 200);
   assert.strictEqual(cleared.json.ok, true);
 });
+
+// ── Server-side sort ─────────────────────────────────────────────────────────────────────────
+// The default CHANGED from { createdAt: -1 } to alphabetical: creation order reads as random
+// because no list column showed it. Mobile sends no sort param, so the new default reaches the
+// phone too — which is why every spec carries `_id` as a final tiebreaker: names collide, ties
+// have no stable order across separate skip/limit queries, and an unstable order makes mobile's
+// infinite scroll duplicate or drop a row at a page boundary.
+
+test('sort: the default is alphabetical, on the legacy path too', { skip }, async () => {
+  const res = await call('GET', '/super-admin/users', { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200);
+  const names = res.json.users.map((u) => `${u.lastName}|${u.firstName}`);
+  const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  assert.deepStrictEqual(names, sorted, 'the full legacy list arrives in name order');
+});
+
+test('sort=lastLogin puts a real login first and the never-logged-in last', { skip }, async () => {
+  await User.updateOne({ email: 'c2@acme.com' }, { $set: { lastLoginAt: new Date() } });
+  const res = await call('GET', '/super-admin/users?sort=lastLogin&limit=25&skip=0', { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.users[0].email, 'c2@acme.com', 'the seeded login leads');
+  // Mongo sorts missing/null first ASCENDING, so descending sinks them — assert, don't assume.
+  const last = res.json.users[res.json.users.length - 1];
+  assert.strictEqual(last.lastLoginAt, null, 'null clocks sink to the bottom');
+});
+
+test('sort composes with a filter', { skip }, async () => {
+  const res = await call('GET', '/super-admin/users?super=1&sort=name&limit=25&skip=0', { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.total, 2);
+  const names = res.json.users.map((u) => u.lastName);
+  assert.deepStrictEqual(names, [...names].sort(), 'both supers, in name order');
+});
+
+test('identical names cannot straddle a page boundary (the _id tiebreaker)', { skip }, async () => {
+  // Two users with the SAME name — precisely the tie the old default never had.
+  const twinA = await User.create({ firstName: 'Twin', lastName: 'Aardvark', email: 'twin.a@t.co', passwordHash: 'x', isActive: true });
+  const twinB = await User.create({ firstName: 'Twin', lastName: 'Aardvark', email: 'twin.b@t.co', passwordHash: 'x', isActive: true });
+
+  // "Aardvark" sorts before every fixture name, so the twins are rows 0 and 1.
+  const p1 = await call('GET', '/super-admin/users?limit=1&skip=0', { token: ctx.owner.token });
+  const p2 = await call('GET', '/super-admin/users?limit=1&skip=1', { token: ctx.owner.token });
+  const ids = [p1.json.users[0].id, p2.json.users[0].id];
+  assert.notStrictEqual(ids[0], ids[1], 'two windows over a tie return two DIFFERENT users');
+  assert.deepStrictEqual(
+    new Set(ids),
+    new Set([String(twinA._id), String(twinB._id)]),
+    'and together they cover both twins — nobody duplicated, nobody dropped'
+  );
+  await User.deleteMany({ _id: { $in: [twinA._id, twinB._id] } });
+});
+
+test('an unknown sort value falls back to the default instead of erroring', { skip }, async () => {
+  const res = await call('GET', "/super-admin/users?sort=$where&limit=5&skip=0", { token: ctx.owner.token });
+  assert.strictEqual(res.status, 200, 'user input never reaches .sort()');
+  const names = res.json.users.map((u) => `${u.lastName}|${u.firstName}`);
+  assert.deepStrictEqual(names, [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+});

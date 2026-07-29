@@ -33,6 +33,7 @@ import {
   loadResendUser,
   ResendInviteError,
 } from '../../services/memberships/resendInvite.js';
+import { refuseVendorStaffTarget } from '../../services/memberships/vendorGuards.js';
 import { phoneSchema, nameSchema, emailSchema, passwordSchema as passwordField } from '../../utils/validators.js';
 
 // Team leads reach this router too — READ scoped to their campaigns' rosters, and a narrow
@@ -42,25 +43,11 @@ import { phoneSchema, nameSchema, emailSchema, passwordSchema as passwordField }
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
-// A support-grant holder is a VENDOR in this organization, not a member — orgContext set req.supportGrant
-// precisely because they have no membership here. They may READ team data to do support, but they must
-// not create accounts, change roles, grant billing, or reset passwords in a customer's org. That path is
-// the membership self-mint escalation: requireOrgRole('admin') passes any super-admin unconditionally
-// (auth.js), so without this a grant-holder could POST a Membership for THEMSELVES, at which point
-// orgContext takes the member branch forever after and their access stops being logged. A grant buys
-// read access to help; it does not buy the power to make yourself a permanent, unaudited member.
-router.use((req, res, next) => {
-  if (req.supportGrant && req.method !== 'GET') {
-    return res.status(403).json({
-      error:
-        'Support access is read-only for team management. Creating or changing accounts, roles, or ' +
-        'passwords must be done by an administrator who is a member of this organization.',
-      code: 'VENDOR_READ_ONLY',
-    });
-  }
-  next();
-});
-
+// A support-grant holder is a VENDOR here — orgContext set req.supportGrant precisely because
+// they have no membership. A grant now permits USER ADMINISTRATION, every write recorded by
+// middleware/accessLog.js; the ONE refusal is a membership targeting a staff account. Rationale
+// and rule live in services/memberships/vendorGuards.js — shared with leadCrew.js so the two
+// routers cannot drift.
 // The routes a lead may never touch (create, role/grants, delete, identity edits).
 function requireAdminRole(req, res, next) {
   if (isOrgAdmin(req)) return next();
@@ -251,6 +238,9 @@ router.post('/', requireAdminRole, async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
     const data = addSchema.parse(req.body);
+    // Vendor rule: a grant-holder may administer users, never mint a STAFF membership (see
+    // the STAFF_TARGET_ERROR comment). Creates only know the email at this point.
+    if (await refuseVendorStaffTarget(req, res, { email: data.email })) return;
 
     // Validate the grant set up front (fail before creating anything) for leads.
     let managed = [];
@@ -381,6 +371,7 @@ router.patch('/:userId', requireAdminRole, async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     const orgId = activeOrgId(req);
     const data = updateMembershipSchema.parse(req.body);
     // You can't strip your own org-admin (demote yourself to lead or canvasser) —
@@ -484,6 +475,7 @@ router.delete('/:userId', requireAdminRole, async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     if (
       String(req.params.userId) === String(req.user._id) &&
       !req.user.isSuperAdmin
@@ -523,6 +515,7 @@ router.patch('/:userId/user', requireAdminRole, async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     const membership = await Membership.findOne({
       userId: req.params.userId,
       organizationId: activeOrgId(req),
@@ -577,6 +570,7 @@ router.patch('/:userId/password', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     // A lead may reset only a CANVASSER on a campaign they manage — never a fellow
     // lead or an admin.
     if (!isOrgAdmin(req) && !(await leadMayManageTarget(req, req.params.userId))) {
@@ -638,6 +632,7 @@ router.post('/:userId/resend-invite', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     // Same boundary as the temp-password reset: a lead may act only on a CANVASSER rostered to a
     // campaign they manage. Re-sending an invite is strictly LESS powerful than setting someone's
     // password, which leads can already do, so refusing it here would be inconsistent.
@@ -672,6 +667,7 @@ router.post('/:userId/resend-invite', async (req, res, next) => {
 router.patch('/:userId/deactivate', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     // Same lead boundary as /password. The write is still org-wide by design (Membership
     // has no campaignId) — the disclosure lives in the leadCrew variant's alsoAffects.
     if (!isOrgAdmin(req) && !(await leadMayManageTarget(req, req.params.userId))) {
@@ -703,6 +699,7 @@ router.patch('/:userId/deactivate', async (req, res, next) => {
 router.patch('/:userId/reactivate', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     if (!isOrgAdmin(req) && !(await leadMayManageTarget(req, req.params.userId))) {
       return res.status(403).json({ error: 'You can only reactivate canvassers on your campaigns.' });
     }

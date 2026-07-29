@@ -30,16 +30,22 @@ export default function SuperAdminUsersPage() {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
   const [skip, setSkip] = useState(0);
+  // Server-side sort — the page only ever holds 25 rows, so a client-side sort would reorder
+  // the visible page while the list stayed unsorted. 'name' is the server default; it is
+  // omitted from the query string (the OrganizationsPage convention) to keep URLs clean.
+  const [sort, setSort] = useState('name');
   const [expandedId, setExpandedId] = useState(null);
   const [actionError, setActionError] = useState(null);
 
   const params = new URLSearchParams({ limit: String(LIMIT), skip: String(skip) });
   if (q) params.set('q', q);
+  if (sort !== 'name') params.set('sort', sort);
   for (const [k, v] of Object.entries(FILTERS.find((f) => f.key === filter)?.params || {})) {
     params.set(k, v);
   }
   const usersQ = useQuery({
-    queryKey: ['super-admin', 'users', 'table', q, filter, skip],
+    // `sort` must live in the key, or React Query serves the previous ordering from cache.
+    queryKey: ['super-admin', 'users', 'table', q, filter, skip, sort],
     queryFn: () => api(`/super-admin/users?${params.toString()}`),
     placeholderData: keepPreviousData,
   });
@@ -130,22 +136,43 @@ export default function SuperAdminUsersPage() {
         <table className="min-w-full text-sm">
           <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
             <tr>
-              <th className="px-4 py-3 text-left">Name</th>
-              <th className="px-4 py-3 text-left">Email</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Memberships</th>
-              {/* Three clocks, labeled apart: typing a password, using the app at all, and
-                  knocking doors. The third lives in the expanded row — most accounts never canvass,
-                  so it earns its space there rather than in the table. */}
-              <th className="px-4 py-3 text-left">Last login</th>
-              <th className="px-4 py-3 text-left">Last active</th>
+              {/* Sortable headers drive the SERVER sort param (OrganizationsPage pattern) — one
+                  fixed direction per column, ▾ marks the active one. Status/Memberships aren't
+                  sortable: memberships are joined per page AFTER the window is chosen. Three
+                  clocks, labeled apart: typing a password, using the app at all, and knocking
+                  doors — the third lives in the expanded row and can't be sorted for the same
+                  per-page reason. */}
+              {[
+                { key: 'name', label: 'Name', sortable: true },
+                { key: 'email', label: 'Email', sortable: true },
+                { key: 'status', label: 'Status' },
+                { key: 'memberships', label: 'Memberships' },
+                { key: 'lastLogin', label: 'Last login', sortable: true },
+                { key: 'lastSeen', label: 'Last active', sortable: true },
+                { key: 'created', label: 'Created', sortable: true },
+              ].map((c) => (
+                <th key={c.key} className="px-4 py-3 text-left">
+                  {c.sortable ? (
+                    <button
+                      type="button"
+                      onClick={() => { setSkip(0); setSort(c.key); }}
+                      className={`uppercase tracking-wide hover:text-fg ${sort === c.key ? 'text-fg' : ''}`}
+                    >
+                      {c.label}
+                      {sort === c.key && ' ▾'}
+                    </button>
+                  ) : (
+                    c.label
+                  )}
+                </th>
+              ))}
               <th className="px-4 py-3 text-right"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {usersQ.isLoading && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-fg-muted">
+                <td colSpan={8} className="px-4 py-8 text-center text-fg-muted">
                   Loading…
                 </td>
               </tr>
@@ -223,6 +250,11 @@ export default function SuperAdminUsersPage() {
                   <td className="px-4 py-3 text-xs text-fg-muted" title="Last authenticated request from this account, on any surface. Recorded at most every 15 minutes.">
                     {formatRelative(u.lastSeenAt, { never: '—' })}
                   </td>
+                  {/* Visible on purpose: creation order WAS the old default sort, and with no
+                      column showing it the list read as random. */}
+                  <td className="px-4 py-3 text-xs text-fg-muted whitespace-nowrap">
+                    {formatDate(u.createdAt)}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <button
                       onClick={() => setExpandedId(expanded ? null : u.id)}
@@ -234,7 +266,7 @@ export default function SuperAdminUsersPage() {
                 </tr>,
                 expanded && (
                   <tr key={`${u.id}-detail`} className="bg-sunken/50">
-                    <td colSpan={7} className="px-4 pb-4">
+                    <td colSpan={8} className="px-4 pb-4">
                       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-fg-muted">
                         <span>Phone: {u.phone || '—'}</span>
                         <span>Joined: {formatDate(u.createdAt)}</span>
@@ -290,7 +322,7 @@ export default function SuperAdminUsersPage() {
             })}
             {!usersQ.isLoading && users.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-fg-muted">
+                <td colSpan={8} className="px-4 py-8 text-center text-fg-muted">
                   No users match.
                 </td>
               </tr>

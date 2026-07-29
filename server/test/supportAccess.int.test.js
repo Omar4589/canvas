@@ -618,3 +618,116 @@ test('editing your own owner-less Person applies canonically instead of filing a
   await Voter.deleteMany({});
   await Household.deleteMany({});
 });
+
+// ── Grant-scoped USER ADMINISTRATION (owner decision 2026-07-29) ─────────────────────────────
+// The blanket VENDOR_READ_ONLY on team management is gone: a grant-holder may administer a
+// customer's users — create, temp password, resend, roles, deactivate — every write recorded by
+// accessLog like the many grant-holder writes the other admin routers always allowed. The ONE
+// refusal is a membership write targeting a STAFF account: the single write that would END the
+// logging (a staff membership flips orgContext to the member branch and req.supportGrant stops
+// being set). The customer can authorize staff membership; staff cannot self-authorize.
+
+async function grantFor(actorId, orgId) {
+  return SupportAccessGrant.create({
+    actorUserId: actorId, organizationId: orgId,
+    reason: 'helping the client onboard their team (ticket 42)',
+    expiresAt: new Date(Date.now() + 3600_000),
+  });
+}
+const logsFor = (orgId) => AccessLog.find({ organizationId: orgId }).lean();
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('under a grant: creating a canvasser WORKS and is logged against the actor', { skip }, async () => {
+  await grantFor(ctx.support._id, ctx.org._id);
+  const res = await call('POST', '/admin/memberships', {
+    token: ctx.support.token, orgId: ctx.org._id,
+    body: { email: 'newhire@acme.com', firstName: 'New', lastName: 'Hire', role: 'canvasser' },
+  });
+  assert.strictEqual(res.status, 201, JSON.stringify(res.json));
+
+  // The promise the policy rests on: the write is ATTRIBUTABLE. accessLog's finish hook is
+  // async, so poll briefly.
+  let row = null;
+  for (let i = 0; i < 40 && !row; i++) {
+    const rows = await logsFor(ctx.org._id);
+    row = rows.find((r) => r.method === 'POST' && String(r.actorUserId) === String(ctx.support._id));
+    if (!row) await sleepMs(50);
+  }
+  assert.ok(row, 'the membership CREATE under a grant is in the access log');
+});
+
+test('under a grant: a temp password for a customer user works and is logged', { skip }, async () => {
+  await grantFor(ctx.support._id, ctx.org._id);
+  const target = await User.findOne({ email: 'newhire@acme.com' });
+  const res = await call('PATCH', `/admin/memberships/${target._id}/password`, {
+    token: ctx.support.token, orgId: ctx.org._id,
+    body: { password: 'TempHelp!23' },
+  });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+  let logged = false;
+  for (let i = 0; i < 40 && !logged; i++) {
+    const rows = await logsFor(ctx.org._id);
+    logged = rows.some((r) => r.method === 'PATCH' && String(r.actorUserId) === String(ctx.support._id));
+    if (!logged) await sleepMs(50);
+  }
+  assert.ok(logged, 'the password write is on the record');
+});
+
+test('under a grant: a membership for YOUR OWN staff account is refused', { skip }, async () => {
+  await grantFor(ctx.support._id, ctx.org._id);
+  const res = await call('POST', '/admin/memberships', {
+    token: ctx.support.token, orgId: ctx.org._id,
+    body: { email: 'support@doorline.app', firstName: 'Sam', lastName: 'Support', role: 'admin', linkExisting: true },
+  });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.code, 'STAFF_SELF_MINT');
+  assert.strictEqual(
+    await Membership.countDocuments({ userId: ctx.support._id, organizationId: ctx.org._id }), 0,
+    'nothing was written'
+  );
+});
+
+test('under a grant: ANY staff account is refused — the alias-adjacent case', { skip }, async () => {
+  await grantFor(ctx.support._id, ctx.org._id);
+  // Not self: the OTHER staff account. An alias with staff powers is the same hole as self.
+  const res = await call('POST', '/admin/memberships', {
+    token: ctx.support.token, orgId: ctx.org._id,
+    body: { email: 'owner@doorline.app', firstName: 'Omar', lastName: 'Owner', role: 'admin', linkExisting: true },
+  });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.code, 'STAFF_SELF_MINT');
+});
+
+test('under a grant: role changes on a STAFF-held membership are refused', { skip }, async () => {
+  // ctx.staffMember is a super admin who is a REAL member of ctx.ownOrg. Another staffer with a
+  // grant into that org must not be able to touch that membership either.
+  await grantFor(ctx.support._id, ctx.ownOrg._id);
+  const res = await call('PATCH', `/admin/memberships/${ctx.staffMember._id}`, {
+    token: ctx.support.token, orgId: ctx.ownOrg._id,
+    body: { role: 'canvasser' },
+  });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.code, 'STAFF_SELF_MINT');
+});
+
+test('the customer-side path stays open: their admin can add a super admin as a member', { skip }, async () => {
+  // No grant anywhere in sight — Ada is a MEMBER admin acting in her own org.
+  const res = await call('POST', '/admin/memberships', {
+    token: ctx.customer.token, orgId: ctx.org._id,
+    body: { email: 'support@doorline.app', firstName: 'Sam', lastName: 'Support', role: 'admin', linkExisting: true },
+  });
+  assert.strictEqual(res.status, 201, JSON.stringify(res.json));
+  // Clean up so earlier grant-based tests in a re-run see the vendor branch, not a membership.
+  await Membership.deleteMany({ userId: ctx.support._id, organizationId: ctx.org._id });
+});
+
+test('VENDOR_READ_ONLY is gone from the allowed writes', { skip }, async () => {
+  await grantFor(ctx.support._id, ctx.org._id);
+  const target = await User.findOne({ email: 'newhire@acme.com' });
+  const res = await call('POST', `/admin/memberships/${target._id}/resend-invite`, {
+    token: ctx.support.token, orgId: ctx.org._id,
+  });
+  // 200 (sent) or 429 (cooldown from an earlier test) are both fine; the old blanket 403 is not.
+  assert.ok([200, 429].includes(res.status), `expected 200/429, got ${res.status}: ${JSON.stringify(res.json)}`);
+  assert.notStrictEqual(res.json?.code, 'VENDOR_READ_ONLY');
+});
