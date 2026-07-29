@@ -98,14 +98,32 @@ Every time you `eas build` + `eas submit` a new mobile build:
 
 Verify by hitting `GET /api/build-status?platform=…&runtimeVersion=…`: the new build must read `ok`, an
 older one `outdated`. Anyone reading this after the user says they built/submitted: remind them of this
-step. (Related knobs: `MOBILE_UPDATE_MODE` soft|hard, `MOBILE_UPDATE_NOTE`, `MOBILE_STORE_URL_IOS` for the
-TestFlight-era Update button — see [`mobile/README.md`](mobile/README.md).)
+step. **List the `staging` and `production` runtime versions BOTH** — they are identical when cut from the
+same commit, but if they ever diverge, omitting one nags that whole lane toward a store page offering it
+nothing. (Related knobs: `MOBILE_UPDATE_MODE` soft|hard, `MOBILE_UPDATE_NOTE`, and `MOBILE_STORE_URL_ANDROID`
+— which stays SET while the legacy `com.canvassapp.mobile` fleet exists, and `MOBILE_STORE_URL_IOS` which
+stays UNSET now that the App Store listing is public. See [`mobile/README.md`](mobile/README.md).)
 
-**During the Google Play relaunch (new org account / new applicationId):** the rename lives on branch
-`play-org-launch`, field hotfixes still ship from `sharedVoters`, and cutover re-points BOTH runtime vars
-(the rename moves the iOS fingerprint too, so cutover ships an iOS build as well). Full procedure — the
-two-store window, the dual-publish compat step for un-migrated phones, and the cutover checklist — is in
-[`mobile/README.md`](mobile/README.md) → **The two-store window (Play relaunch)**.
+## Two release lanes: `staging` first, then `production`.
+
+**Both stores went public 2026-07-28 and `main` is now the working branch** — deploy server/web from
+`main`, and ship mobile from `main`. Mobile has two lanes, separated by the **channel** baked into each
+binary, never by the store or the Play track:
+
+- **`staging`** → TestFlight + Play internal track. Publish with `npm run ota:staging`, normally from a
+  feature branch.
+- **`production`** → App Store + Play production track. Publish with `npm run ota:production` from `main`
+  after the change is confirmed in staging.
+
+Both profiles come from one tree, so they share a fingerprint; a JS-only feature branch can therefore feed
+`staging` and, once merged, feed `production` with no rebuild. Touching a hashed input (`app.json`,
+`eas.json`, a native dep, an icon) diverges the fingerprint and `ota:check` will refuse — that refusal is
+the signal to cut a fresh set of four builds, never something to override.
+
+**Two frozen refs exist and must never be moved:** `sharedVoters` (tag `legacy-android-lifeline`) is the
+only tree that can still OTA the retired `com.canvassapp.mobile` app, and `play-org-launch` is the tree the
+first `com.doorline.app` builds came from. Background in [`mobile/README.md`](mobile/README.md) →
+**History: the Play relaunch**.
 
 ## Ops is run from the Heroku DASHBOARD, never the CLI.
 

@@ -30,13 +30,24 @@
         "EXPO_PUBLIC_API_BASE_URL": "https://api.doorline.app"
       }
     },
-    "playorg": {
+    "staging": {
       "extends": "production",
-      "channel": "playorg"
+      "channel": "staging"
     }
   },
   "submit": {
     "production": {
+      "ios": {
+        "appleId": "omar4589@hotmail.com",
+        "ascAppId": "6764581850",
+        "appleTeamId": "62RUXR2CLQ"
+      },
+      "android": {
+        "track": "production",
+        "releaseStatus": "completed"
+      }
+    },
+    "staging": {
       "ios": {
         "appleId": "omar4589@hotmail.com",
         "ascAppId": "6764581850",

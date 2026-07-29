@@ -6,7 +6,15 @@
 //     "remote", so the store version comes from EAS servers, not this field.
 //   · eas.json's `submit` block (ascAppId). Read only by `eas submit`, never compiled into
 //     anything.
-// This config stops exactly those two classes of edit from moving the fingerprint. Everything
+// A third class was added on 2026-07-28, after the same trap fired again: a `test` script added
+// to mobile/package.json moved BOTH platform fingerprints and ota:check rightly blocked the
+// publish (fixed by 65570ec, which moved the runner to the root package.json). npm scripts are
+// build-time tooling — they are never compiled into the binary — so none of them belong in the
+// hash. `PackageJsonScriptsAll` drops the whole `packageJson:scripts` source, which supersedes
+// the narrower stock skip below. Native DEPENDENCIES are unaffected: they reach the hash through
+// autolinking, not through this source, so adding a native module still moves the fingerprint.
+//
+// This config stops exactly those three classes of edit from moving the fingerprint. Everything
 // that DOES reach the binary (plugins, native deps, permissions, icons, build profiles) still
 // hashes as before.
 //
@@ -18,6 +26,7 @@ module.exports = {
   // NOTE: this REPLACES @expo/fingerprint's default skip set (normalizeOptionsAsync spreads
   // the config over the defaults), so the stock default must be re-listed explicitly.
   sourceSkips: [
+    'PackageJsonScriptsAll', // no npm script reaches the binary; supersedes the stock skip below
     'PackageJsonAndroidAndIosScriptsIfNotContainRun', // the stock default — re-listed on purpose
     'ExpoConfigVersions', // app.json version / android.versionCode / ios.buildNumber
   ],

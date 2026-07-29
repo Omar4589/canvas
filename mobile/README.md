@@ -2,17 +2,27 @@
 
 Expo SDK 54 app. Uses `@rnmapbox/maps`, so it cannot run in Expo Go — you need a Dev Client build.
 
-## Three build flavors
+## Four build flavors
 
-`eas.json` defines three profiles:
+`eas.json` defines four profiles. The two that matter day to day are `staging` and `production` —
+they are the **test lane** and the **live lane**, and the thing that separates them is the
+**channel** baked into each binary, never the store or the track.
 
-| Profile | What it is | Use for |
-|---|---|---|
-| `development` | Dev Client + dev server | Day-to-day coding (`npx expo start`) |
-| `preview` | Signed but internal | Sharing with your 3 canvassers via TestFlight + Play Internal |
-| `production` | Signed for stores | App Store / Google Play release |
+| Profile | Channel | What it is | Goes to |
+|---|---|---|---|
+| `development` | `development` | Dev Client + dev server | Day-to-day coding (`npx expo start`) |
+| `preview` | `preview` | Signed, internal distribution | Ad-hoc installs; iOS needs registered device UDIDs |
+| `staging` | `staging` | Signed for stores | **TestFlight** + **Play internal track** — where you try things first |
+| `production` | `production` | Signed for stores | **App Store** + **Play production track** — real users |
 
-You can build any of these **locally** (Xcode / Android Studio) or in the **EAS cloud**. EAS is recommended for `preview` and `production` because it handles iOS signing certificates and Android keystores for you.
+`staging` is `extends: production`, so the two are byte-identical apart from the channel: same
+signing, same `EXPO_PUBLIC_API_BASE_URL` (the real API — there is only one backend; test against the
+demo org). Because they come from the same tree they share a **fingerprint**, which is exactly what
+lets one commit serve both lanes.
+
+You can build any of these **locally** (Xcode / Android Studio) or in the **EAS cloud**. EAS is
+recommended for everything but `development` because it handles iOS signing certificates and Android
+keystores for you.
 
 ---
 
@@ -54,7 +64,8 @@ The Mapbox public token is already pre-filled with yours.
 
 ### 4. Submit setup (only for `eas submit`)
 
-In `eas.json` `submit.production` block, fill in:
+In `eas.json`'s `submit.production` **and** `submit.staging` blocks (they carry the same Apple
+identity and differ only in the Android track), fill in:
 
 - `ios.appleId` — your Apple Developer email
 - `ios.appleTeamId` — find it at https://developer.apple.com/account → Membership
@@ -95,26 +106,38 @@ eas build --profile development --platform android
 # Each build takes ~10 min. EAS emails you a link to install on your device.
 ```
 
-### Building for TestFlight + Google Play Internal
+### Cutting builds for both lanes
+
+You only need new **binaries** when a native input changes (see `fingerprint.config.js` below).
+Everything else ships as an OTA. When you do need them, cut all four from the same commit:
 
 ```bash
-# iOS preview (TestFlight)
-eas build --profile preview --platform ios
-eas submit --profile production --platform ios --latest
+# live lane first
+eas build --profile production --platform ios     && eas submit --profile production --platform ios --latest
+eas build --profile production --platform android && eas submit --profile production --platform android --latest
 
-# Android preview (Play Internal track)
-eas build --profile preview --platform android
-eas submit --profile production --platform android --latest
+# test lane LAST — see the version-code note
+eas build --profile staging --platform ios     && eas submit --profile staging --platform ios --latest
+eas build --profile staging --platform android && eas submit --profile staging --platform android --latest
 ```
 
-`eas submit` uploads the build to App Store Connect / Play Console. From there:
+> **Build the staging pair LAST.** `autoIncrement` bumps the version code per build, and Google Play
+> serves a tester whichever build has the highest code they qualify for. If production ends up above
+> internal, your internal testers silently receive the production build instead.
 
-- **TestFlight:** Apple does a quick automated review (usually < 1 hour). Once approved, add internal testers in App Store Connect → TestFlight.
-- **Google Play Internal:** Available immediately to testers you've added in Play Console → Internal testing.
+Where each lands, and what it costs:
 
-### Production release
+| Submit | Lands in | Review |
+|---|---|---|
+| `production` iOS | App Store | Full App Store review |
+| `production` Android | Play **production** track | Play review |
+| `staging` iOS | TestFlight | Beta App Review for *external* testers (~a day); internal testers, none |
+| `staging` Android | Play **internal** track | None — live in minutes |
 
-Same as preview but with `--profile production`. EAS auto-increments the version number.
+`submit.production.android.track` is `production` and `submit.staging.android.track` is `internal`,
+so the profile you build with is the profile you submit with. Don't cross them.
+
+Everything already installed keeps working while any of this is in review.
 
 ---
 
@@ -164,96 +187,67 @@ Deliberate override (e.g. you just cut a build and EAS hasn't listed it as finis
 
 ### The tamed inputs: `fingerprint.config.js`
 
-Two inert edits used to strand the fleet, and no longer move the fingerprint:
+Three inert edits used to strand the fleet, and no longer move the fingerprint:
 
 - **`app.json` `version`** — skipped via `ExpoConfigVersions` (it's inert here because
   `appVersionSource: "remote"` means the store version comes from EAS, not that field);
 - **`eas.json`'s `submit` block** (ascAppId, appleId, Play track) — stripped from the hash by a
-  file transform before hashing; **build profiles still count** (channel/env reach the binary).
+  file transform before hashing; **build profiles still count** (channel/env reach the binary);
+- **every npm script in `mobile/package.json`** — skipped via `PackageJsonScriptsAll`. Scripts are
+  build-time tooling and never compile into a binary. Added 2026-07-28 after a `test` script moved
+  both fingerprints and blocked a publish. Native **dependencies** are unaffected — they reach the
+  hash through autolinking, so adding a native module still moves it, correctly.
 
 **Editing `fingerprint.config.js` itself changes every fingerprint** — only touch it in a commit
 that ships a native build. `ota:check` catches it loudly if you forget.
 
-### The two-store window (Play relaunch)
+### Two lanes: test first, then live
 
-We are relaunching on a new Google Play organization account, which needs a **new Android
-applicationId** (`com.doorline.app`, permanent once uploaded). The rename is a native change (new
-fingerprint), so it lives on branch **`play-org-launch`** — not here.
-
-> **Field hotfixes ship from `sharedVoters`. `play-org-launch` exists ONLY to build for the new
-> store account. Merge it into `sharedVoters` at cutover, and only after all canvassers have
-> migrated to the new store app.**
-
-**`play-org-launch` = `sharedVoters` + exactly one commit** (the id + `lib/config.js` Android
-store URL + a `playorg` build profile in `eas.json` + the at-action-only location copy). Keep it
-current by rebasing the single commit forward:
+**The branch you publish from decides who gets it.** `main` is the live lane; a feature branch is
+the test lane. Both produce the same fingerprint as long as you only change JS — which is why one
+commit can serve both.
 
 ```bash
-git fetch origin
-git checkout sharedVoters && git merge --ff-only origin/sharedVoters
-git rebase sharedVoters play-org-launch
-git push --force-with-lease origin play-org-launch
+# on a feature branch — reaches TestFlight + Play internal only
+npm run ota:staging
+
+# after merging to main — reaches the App Store + Play production
+npm run ota:production
 ```
 
-> **Hazard:** every rebase that pulls a hashed input from `sharedVoters` (anything in `app.json`,
-> `eas.json`, `package.json` scripts, native deps) **silently moves the branch fingerprint and
-> strands the already-cut `playorg` test build** — `eas update --branch playorg` is ungated and
-> reaches nobody with no error. **After any such rebase, cut a fresh `playorg` build.**
+Each script gates itself first (`ota:check` against that lane's newest finished build) and refuses
+to publish an update no installed binary can accept.
 
-**Internal-testing loop for the new store app** (from `play-org-launch`):
+**Why the lanes can't leak into each other:** a binary only reads its own **channel**, and the
+channel is compiled in at build time from `eas.json`. A `staging` build reads branch `staging`; a
+`production` build reads branch `production`. Nothing you type at publish time can cross that line —
+the worst a mistake does is reach nobody.
 
-1. Build once — first run is interactive (EAS mints a new Android keystore for the new id):
-   `eas build --platform android --profile playorg`
-2. Upload that first AAB **manually** in the new org's Play Console (internal track). `eas submit`
-   works only after the app exists there and the org's service account is wired.
-3. Iterate JS onto testers, gated against the `playorg` builds (not the fleet):
-   `npm run ota:check -- --build-profile=playorg --platform=android && eas update --branch playorg --environment production`
-4. Add the `playorg` build's Runtime Version to `MOBILE_CURRENT_RUNTIME_ANDROID` (comma-separated)
-   so testers don't get nagged.
+**The one case that needs new builds:** if your feature branch touches a hashed input — `app.json`,
+`eas.json`, a native dependency, an icon — its fingerprint diverges from the builds you cut, and
+`ota:staging` will refuse. That refusal is the signal to cut a fresh set of four, not something to
+override.
 
-**The gate protects the fleet by construction:** `ota:production` from `sharedVoters` compares
-against the newest **production-profile** build (the fleet) and passes; from `play-org-launch` it
-**fails loudly** (`FINGERPRINT MISMATCH — reach NOBODY`) and refuses to publish. This holds ONLY
-while new-store builds use `--profile playorg` — **never build the new app with `--profile
-production` before cutover**, or it becomes `ota:check`'s comparison target and breaks the fleet gate.
+### History: the Play relaunch (closed 2026-07-28)
 
-**Cutover** (once the fleet has migrated off the old app):
+Kept because two branches and a tag still exist and it explains why.
 
-1. Final rebase, then `git checkout sharedVoters && git merge --ff-only play-org-launch`.
-2. Build **Android AND iOS** under `--profile production` from merged HEAD — **iOS is mandatory**:
-   the per-platform fingerprint hashes the whole config, so the Android rename moved iOS's
-   fingerprint too, and iOS OTAs strand without a fresh build.
-3. Submit/upload both; re-point `MOBILE_CURRENT_RUNTIME_ANDROID`/`_IOS` (see the nag section below).
-4. Set `MOBILE_STORE_URL_ANDROID` to the new listing so the nag walks stragglers to the new app
-   (`soft`, later `hard`). Optional: `eas channel:edit playorg --branch production` so lingering
-   test builds keep receiving production updates.
-5. Same fingerprint-rollover commit is the free moment to harden: add `'PackageJsonScriptsAll'` to
-   `fingerprint.config.js` (stops future script edits from being native-grade changes), and update
-   the stale old-id references: `client/src/marketing/MarketingFooter.jsx` Android beta URL and
-   `PROJECT_BRIEF.md`.
+Doorline relaunched Android on a new Play organization account, which required a new
+`applicationId` (`com.canvassapp.mobile` → `com.doorline.app`, permanent once uploaded). That rename
+was a native change, so it lived on branch `play-org-launch` while the old app stayed shippable from
+`sharedVoters`. Both stores approved on 2026-07-28; `main` was then fast-forwarded to
+`play-org-launch`, and the `playorg` build profile was repurposed as `staging`.
 
-### The migration-window dual publish (do this NOW, until the fleet updates)
+Two frozen refs remain, and **neither should ever be moved**:
 
-Independent of the relaunch: the newest finished **production** builds are the `allowBackup`
-builds (19/23-era), so a plain `npm run ota:production` from `sharedVoters` reaches only phones
-that already installed them — **un-updated vc18/vc22 phones receive nothing, silently** (the gate
-validates against the newest build, not the installed base). Until that population drains, a fleet
-hotfix needs **two** publishes:
+| Ref | Tree fingerprints to | Why it exists |
+|---|---|---|
+| `sharedVoters` (`685969b`), tagged `legacy-android-lifeline` | android `444667d0` | The only tree that can still OTA the **legacy** `com.canvassapp.mobile` app. Not actively supported — an escape hatch if a straggler crew hits something urgent mid-migration. |
+| `play-org-launch` (`3255eb6`) | android `bc62990a` | The tree the first `com.doorline.app` Play builds were cut from. Its channel is `playorg`, which no new build uses. |
 
-1. On clean `sharedVoters` HEAD, delete the single line `"allowBackup": false,` from `app.json`
-   (**working tree only — never commit**). This restores the 18/22 fingerprint exactly (verified:
-   it is the only hashed-input change since those builds).
-2. Confirm: `npx expo-updates fingerprint:generate --platform android` equals build 18's Runtime
-   Version (and iOS vs 22) — get those from `eas build:list -p android --build-profile production
-   --status finished --limit 5 --json --non-interactive`.
-3. Publish to the old fleet with the loud override (the gate correctly sees a mismatch vs 19/23):
-   `OTA_ALLOW_MISMATCH=1 npm run ota:production`
-4. `git checkout -- mobile/app.json`, then plain `npm run ota:production` to publish the same JS
-   under the new fingerprint for 19/23 installers. Order doesn't matter — updates coexist per
-   runtimeVersion on the branch.
-
-Retire this once the build stamps / `MOBILE_CURRENT_RUNTIME_*` monitoring show the 18/22
-population at ≈ zero.
+To reach either population, check the ref out and publish from there; from `main` the fingerprint no
+longer matches and `ota:check` will correctly refuse. Once the legacy Android install base reaches
+zero, both refs can be deleted.
 
 ### Telling old builds to update (the nag)
 
@@ -267,12 +261,24 @@ Unset = feature off. To flip it, set Heroku config vars — Dashboard → your A
 | `MOBILE_CURRENT_RUNTIME_IOS` | same for iOS — each platform is independent |
 | `MOBILE_UPDATE_MODE` | `soft` (default) = dismissible banner · `hard` = blocking "Update Doorline" wall |
 | `MOBILE_UPDATE_NOTE` | optional one-line custom message shown on the nag |
-| `MOBILE_STORE_URL_IOS` / `_ANDROID` | optional override of where the Update button goes. Needed for iOS **until the app is publicly released**: the baked-in URL is the public App Store page, which doesn't exist during the TestFlight-only era — point it at TestFlight (e.g. `https://beta.itunes.apple.com/v1/app/6764581850`, or your TestFlight public invite link), then delete it at launch. Play needs no override — internal-testing releases serve through the normal store page. |
+| `MOBILE_STORE_URL_IOS` / `_ANDROID` | optional override of where the Update button goes; absent → the app's baked-in `STORE_URL`. **iOS: leave unset** — since the public App Store release the baked-in URL is correct. **Android: set it** while the legacy `com.canvassapp.mobile` fleet still exists, because their baked-in URL points at the app being retired, not at `com.doorline.app`. |
 
 Builds whose runtimeVersion isn't listed show the nag; everyone else sees nothing. Everything
 fails open — server unreachable, endpoint erroring, var typo'd to nonsense → **no nag**, never a
 wrong wall. Don't flip `hard` until you've eyeballed the wall once on a real device: it blocks
 the entire app (login included) until the store update is installed.
+
+> **The nag can't tell your lanes apart.** It keys on platform + runtimeVersion only, and a
+> `staging` build shares its fingerprint with the `production` build cut from the same commit. So
+> list **both** lanes' runtime versions as current, or testers get nagged toward a store page that
+> offers them something they already have.
+
+⚠️ **Android migration note.** `com.doorline.app` is a different `applicationId`, so installing it
+does **not** replace `com.canvassapp.mobile` — the two coexist with separate storage, and anything
+still queued offline in the old app is lost if someone stops opening it. Keep `MOBILE_UPDATE_MODE`
+on `soft` and use `MOBILE_UPDATE_NOTE` to say "open Doorline once on wifi to sync, then install the
+new app." Set `MOBILE_STORE_URL_ANDROID` **before** narrowing `MOBILE_CURRENT_RUNTIME_ANDROID`, or
+the nag walks people back to the listing you're retiring.
 
 ### Reading it off a phone
 

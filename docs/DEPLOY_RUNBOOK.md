@@ -6,7 +6,7 @@ are in the last section if you ever want them.
 | Fact | Value |
 |---|---|
 | Heroku app | **`doorline-test`** — the name is a leftover. **This is production.** There is no app called `canvass`. |
-| Branch to deploy | **`sharedVoters`** |
+| Branch to deploy | **`main`** (since 2026-07-28; it fast-forwarded past `sharedVoters`) |
 | Apps | **ONE.** API + web are the same dyno (`server/src/app.js:79-90` serves `client/dist`) |
 | Dynos | `web`, `worker` |
 | `autoIndex` in prod | **OFF** — indexes never appear on their own |
@@ -217,10 +217,10 @@ finish*. This is the safety net for STEP 4, and STEP 4 is a one-way door.
 
 # STEP 2 — Deploy
 
-**Deploy** tab → **Manual deploy** → choose branch **`sharedVoters`** → **Deploy Branch**.
+**Deploy** tab → **Manual deploy** → choose branch **`main`** → **Deploy Branch**.
 
 *(If your Deploy tab is wired to GitHub, the branch dropdown is there. If you deploy by git instead:
-`git push heroku sharedVoters:main`.)*
+`git push heroku main:main`.)*
 
 Watch the build log finish. **~3–5 minutes** — this is the long pole of the whole deploy.
 
@@ -512,7 +512,7 @@ after step 4.** That is the entire reason for the snapshot.
 ```
 heroku releases -a doorline-test | head -3
 heroku maintenance:on  -a doorline-test
-git push heroku sharedVoters:main
+git push heroku main:main
 heroku ps -a doorline-test                 # worker.1 must be up
 heroku ps:scale worker=1 -a doorline-test
 heroku run -a doorline-test "npm run migrate:platform-roles -- --apply"
