@@ -41,9 +41,19 @@ They can disagree (Knocks can exceed Houses once you do a second pass) — that'
 ## Metric definitions
 
 ### Houses knocked
-Distinct households that have been knocked at least once (status ≠ `unknocked`). This is
-**current-state and all-time** — it doesn't move with the date filter. It answers "how much of
-the turf is done." Field: `homesKnocked`.
+Distinct households that have been knocked at least once — **status outside
+`NON_KNOCKED_STATUSES` (`unknocked`, `restricted`)**, and at bucket level also outside the
+synthetic `dnc`/`voted` segments, which are carved exclusively out of raw-`unknocked` doors.
+This is **current-state and all-time** — it doesn't move with the date filter. It answers "how
+much of the turf is done." Field: `homesKnocked`.
+
+> The definition used to be a bare `status ≠ 'unknocked'`, and one surface (the Campaigns list)
+> still computed it that way after Restricted Access shipped — presenting 3,226 gated doors
+> nobody could knock as "knocked" and running 20 points hot against the dashboard (69% vs 49%
+> on a real campaign). Owner ruling 2026-07-29: *a door we could not knock is not a knocked
+> door.* All three surfaces (Campaigns list, overview, campaign-rollup) now derive from the
+> shared constants in `services/reports/aggregations.js`; the rollup's hand-rolled bucket list
+> also silently omitted `dnc`, which the shared constant closes.
 
 ### Knocks
 **One knock = one distinct (household, pass).** So:

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { NON_KNOCKED_STATUSES } from '../../services/reports/aggregations.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
@@ -100,7 +101,10 @@ async function withCounts(campaigns, organizationId) {
     const slot = byCampaign.get(k);
     if (!slot) continue;
     slot.households += row.count;
-    if (row._id.status !== 'unknocked') slot.knocked += row.count;
+    // NOT `status !== 'unknocked'` — that swept `restricted` in, presenting doors nobody
+    // could knock as "Houses knocked" (owner ruling 2026-07-29; the dashboard and rollup
+    // already excluded them, so this page ran 20 points hot on a real campaign).
+    if (!NON_KNOCKED_STATUSES.includes(row._id.status)) slot.knocked += row.count;
   }
   for (const row of surveyAgg) {
     const slot = byCampaign.get(String(row._id));

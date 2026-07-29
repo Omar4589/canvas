@@ -94,3 +94,56 @@ test('campaign-rollup cumulative.coverage sums restricted across campaigns', { s
   assert.strictEqual(byName.get('Camp A').coverage.restricted, 2, 'Camp A restricted');
   assert.strictEqual(byName.get('Camp B').coverage.restricted, 1, 'Camp B restricted');
 });
+
+// ── One "houses knocked" definition, three surfaces (owner ruling 2026-07-29) ────────────────
+// "A door we could not knock is not a knocked door." Restricted doors — and the synthetic
+// dnc/voted buckets, which are carved exclusively out of raw-unknocked doors — never count as
+// knocked. Before this, the Campaigns list counted anything ≠ unknocked (running 20 points hot
+// on a real campaign: 11,390 vs the dashboard's 8,164), and the rollup's hand-rolled bucket
+// list skipped `dnc`. All three now derive from NON_KNOCKED_STATUSES / NON_KNOCKED_BUCKETS in
+// services/reports/aggregations.js.
+
+const authed = (path) =>
+  fetch(`${base}/api${path}`, {
+    headers: { Authorization: `Bearer ${ctx.adminTok}`, 'X-Org-Id': String(ctx.org._id) },
+  });
+
+test('the Campaigns list does not count restricted doors as knocked', { skip }, async () => {
+  const res = await authed('/admin/campaigns');
+  assert.strictEqual(res.status, 200);
+  const json = await res.json();
+  const byName = new Map(json.campaigns.map((c) => [c.name, c]));
+  // Camp A: 6 households; knocked = 1 surveyed. The 2 restricted must NOT inflate it.
+  assert.strictEqual(byName.get('Camp A').counts.households, 6);
+  assert.strictEqual(byName.get('Camp A').counts.knocked, 1, 'restricted is not knocked');
+  // Camp B: 4 households; knocked = 1 not_home only.
+  assert.strictEqual(byName.get('Camp B').counts.knocked, 1);
+});
+
+test('the rollup does not count a dnc-suppressed unknocked door as knocked', { skip }, async () => {
+  // A fullyDnc door nobody ever visited: raw status unknocked → synthetic `dnc` bucket. The
+  // rollup's old hand-rolled check (unknocked/voted/restricted) let this through.
+  await Household.collection.insertOne({
+    organizationId: ctx.org._id, campaignId: ctx.A._id, isActive: true,
+    fullyDnc: true, status: 'unknocked',
+  });
+  const res = await authed('/admin/reports/campaign-rollup');
+  const json = await res.json();
+  const campA = json.campaigns.find((c) => c.name === 'Camp A');
+  assert.strictEqual(campA.homesKnocked, 1, 'still only the surveyed door — dnc is not knocked');
+  assert.strictEqual(campA.households, 7, 'the dnc door still exists in the denominator');
+});
+
+test('overview and rollup agree on homesKnocked for the same campaign', { skip }, async () => {
+  const [ov, ru] = await Promise.all([
+    authed(`/admin/reports/overview?campaignId=${ctx.A._id}`),
+    authed(`/admin/reports/campaign-rollup?campaignId=${ctx.A._id}`),
+  ]);
+  const ovJson = await ov.json();
+  const ruJson = await ru.json();
+  const ruA = ruJson.campaigns.find((c) => String(c.id) === String(ctx.A._id));
+  assert.strictEqual(
+    ovJson.totals.homesKnocked, ruA.homesKnocked,
+    'one definition, two surfaces, one number'
+  );
+});

@@ -27,6 +27,8 @@ import {
   contactRate,
   coverageBucketExpr,
   teamFoldStage,
+  NON_KNOCKED_STATUSES,
+  NON_KNOCKED_BUCKETS,
 } from '../../services/reports/aggregations.js';
 import { billRestrictedFor, resolveBillRestricted } from '../../services/reports/billRestricted.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
@@ -429,7 +431,7 @@ router.get('/overview', async (req, res, next) => {
       memberCountPromise,
       statTotals ? statTotals.surveysSubmitted : SurveyResponse.countDocuments(cFilter),
       SurveyResponse.distinct('voterId', cFilter),
-      Household.countDocuments({ ...householdMatch, status: { $nin: ['unknocked', 'restricted'] } }),
+      Household.countDocuments({ ...householdMatch, status: { $nin: NON_KNOCKED_STATUSES } }),
       Household.aggregate([
         { $match: householdMatch },
         { $group: { _id: coverageBucketExpr, count: { $sum: 1 } } },
@@ -730,7 +732,9 @@ router.get('/campaign-rollup', async (req, res, next) => {
       c.households += r.count;
       // 'voted' (early-voted, never knocked), 'unknocked', and 'restricted' (inaccessible)
       // are not "homes knocked". Restricted is its own coverage segment, never billable.
-      if (bucket !== 'unknocked' && bucket !== 'voted' && bucket !== 'restricted') c.homesKnocked += r.count;
+      // NON_KNOCKED_BUCKETS, not a hand-rolled list: the old one skipped `dnc`, so a
+      // do-not-contact door nobody ever visited counted as knocked here.
+      if (!NON_KNOCKED_BUCKETS.includes(bucket)) c.homesKnocked += r.count;
       if (bucket in c.coverage) c.coverage[bucket] = r.count;
     }
     // Stats path: the per-campaign activity numbers come off the campaign doc; the agg loops

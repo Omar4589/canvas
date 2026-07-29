@@ -171,6 +171,21 @@ export function contactRate({ knocks = 0, surveyedKnocks = 0, refusedKnocks = 0 
 // not to be contacted — permanent) outranks `voted` (this election's early voting — cyclical),
 // so a door that is both buckets once, as dnc, and segment totals always sum to the universe.
 // Used by the status group-by in /overview and /campaign-rollup.
+// "Houses knocked" — the ONE definition (owner ruling 2026-07-29: a door we could not knock is
+// not a knocked door). Two forms because two kinds of surface consume it:
+//
+//   NON_KNOCKED_STATUSES — for queries over RAW Household.status. `restricted` is excluded:
+//     a gated community nobody could enter was never knocked, and counting it inflated the
+//     Campaigns page 20 points over the dashboard (11,390 vs 8,164 on a real campaign).
+//   NON_KNOCKED_BUCKETS — for queries over coverageBucketExpr output (below). Adds `dnc` and
+//     `voted`, which are SYNTHETIC buckets carved exclusively out of raw-`unknocked` doors —
+//     so at bucket level they must be excluded too, or a suppressed door nobody visited counts
+//     as knocked. (The rollup excluded voted but not dnc — that was a bug, not a choice.)
+//
+// Every "houses knocked" / knockedPct on any surface must derive from one of these two.
+export const NON_KNOCKED_STATUSES = ['unknocked', 'restricted'];
+export const NON_KNOCKED_BUCKETS = [...NON_KNOCKED_STATUSES, 'dnc', 'voted'];
+
 export const coverageBucketExpr = {
   $switch: {
     branches: [
