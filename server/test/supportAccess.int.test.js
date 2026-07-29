@@ -681,9 +681,17 @@ test('under a grant: a membership for YOUR OWN staff account is refused', { skip
   });
   assert.strictEqual(res.status, 403);
   assert.strictEqual(res.json.code, 'STAFF_SELF_MINT');
+  // Role-agnostic: a CANVASSER membership evades the audit trail exactly as well as an admin
+  // one (any membership flips orgContext to the member branch), so it is refused the same way.
+  const asCanvasser = await call('POST', '/admin/memberships', {
+    token: ctx.support.token, orgId: ctx.org._id,
+    body: { email: 'support@doorline.app', firstName: 'Sam', lastName: 'Support', role: 'canvasser', linkExisting: true },
+  });
+  assert.strictEqual(asCanvasser.status, 403);
+  assert.strictEqual(asCanvasser.json.code, 'STAFF_SELF_MINT');
   assert.strictEqual(
     await Membership.countDocuments({ userId: ctx.support._id, organizationId: ctx.org._id }), 0,
-    'nothing was written'
+    'nothing was written either way'
   );
 });
 

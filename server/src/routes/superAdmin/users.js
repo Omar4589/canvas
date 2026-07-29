@@ -61,7 +61,10 @@ router.get('/', async (req, res, next) => {
     // (below) and withheld from the un-paged path — a test pins that. Sorting by it needs an
     // aggregation or a denormalized field; don't add it here casually.
     const SORTS = {
-      name: { lastName: 1, firstName: 1, _id: 1 },
+      // First name first — the list renders "First Last", and sorting by the DISPLAYED order is
+      // what reads as alphabetical (UsersPage's comparator states the same rule). Last-name-first
+      // is for directories that render "Last, First"; this table doesn't.
+      name: { firstName: 1, lastName: 1, _id: 1 },
       email: { email: 1, _id: 1 },
       created: { createdAt: -1, _id: 1 },
       lastLogin: { lastLoginAt: -1, _id: 1 },

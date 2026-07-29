@@ -329,12 +329,19 @@ test('the lockout state is READABLE (per-process, honestly labeled), not just bl
 // have no stable order across separate skip/limit queries, and an unstable order makes mobile's
 // infinite scroll duplicate or drop a row at a page boundary.
 
+
+// Compare PER FIELD, the way Mongo's compound sort does. A composite `first|last` string is
+// subtly wrong: when one first name is a prefix of another ('Canvasser1' / 'Canvasser10'),
+// the separator '|' (0x7C) sorts above digits, inverting the pair the server orders correctly.
+const byName = (a, b) =>
+  a.firstName < b.firstName ? -1 : a.firstName > b.firstName ? 1 :
+  a.lastName < b.lastName ? -1 : a.lastName > b.lastName ? 1 : 0;
+
 test('sort: the default is alphabetical, on the legacy path too', { skip }, async () => {
   const res = await call('GET', '/super-admin/users', { token: ctx.owner.token });
   assert.strictEqual(res.status, 200);
-  const names = res.json.users.map((u) => `${u.lastName}|${u.firstName}`);
-  const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  assert.deepStrictEqual(names, sorted, 'the full legacy list arrives in name order');
+  const got = res.json.users.map((u) => ({ firstName: u.firstName, lastName: u.lastName }));
+  assert.deepStrictEqual(got, [...got].sort(byName), 'the full legacy list arrives in name order');
 });
 
 test('sort=lastLogin puts a real login first and the never-logged-in last', { skip }, async () => {
@@ -351,16 +358,17 @@ test('sort composes with a filter', { skip }, async () => {
   const res = await call('GET', '/super-admin/users?super=1&sort=name&limit=25&skip=0', { token: ctx.owner.token });
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.json.total, 2);
-  const names = res.json.users.map((u) => u.lastName);
-  assert.deepStrictEqual(names, [...names].sort(), 'both supers, in name order');
+  const names = res.json.users.map((u) => u.firstName);
+  assert.deepStrictEqual(names, [...names].sort(), 'both supers, in FIRST-name order — the displayed order');
 });
 
 test('identical names cannot straddle a page boundary (the _id tiebreaker)', { skip }, async () => {
-  // Two users with the SAME name — precisely the tie the old default never had.
-  const twinA = await User.create({ firstName: 'Twin', lastName: 'Aardvark', email: 'twin.a@t.co', passwordHash: 'x', isActive: true });
-  const twinB = await User.create({ firstName: 'Twin', lastName: 'Aardvark', email: 'twin.b@t.co', passwordHash: 'x', isActive: true });
+  // Two users with the SAME full name — precisely the tie the old default never had.
+  const twinA = await User.create({ firstName: 'Aaron', lastName: 'Twin', email: 'twin.a@t.co', passwordHash: 'x', isActive: true });
+  const twinB = await User.create({ firstName: 'Aaron', lastName: 'Twin', email: 'twin.b@t.co', passwordHash: 'x', isActive: true });
 
-  // "Aardvark" sorts before every fixture name, so the twins are rows 0 and 1.
+  // "Aaron" sorts before every fixture FIRST name (Canvasser0…, Deleted, Omar, Sam, Zelda),
+  // so the identically-named twins are rows 0 and 1.
   const p1 = await call('GET', '/super-admin/users?limit=1&skip=0', { token: ctx.owner.token });
   const p2 = await call('GET', '/super-admin/users?limit=1&skip=1', { token: ctx.owner.token });
   const ids = [p1.json.users[0].id, p2.json.users[0].id];
@@ -376,6 +384,6 @@ test('identical names cannot straddle a page boundary (the _id tiebreaker)', { s
 test('an unknown sort value falls back to the default instead of erroring', { skip }, async () => {
   const res = await call('GET', "/super-admin/users?sort=$where&limit=5&skip=0", { token: ctx.owner.token });
   assert.strictEqual(res.status, 200, 'user input never reaches .sort()');
-  const names = res.json.users.map((u) => `${u.lastName}|${u.firstName}`);
-  assert.deepStrictEqual(names, [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+  const got = res.json.users.map((u) => ({ firstName: u.firstName, lastName: u.lastName }));
+  assert.deepStrictEqual(got, [...got].sort(byName));
 });
