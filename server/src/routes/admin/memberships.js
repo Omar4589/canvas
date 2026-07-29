@@ -105,6 +105,12 @@ async function leadMaySeeTarget(req, userId) {
 
 const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
 
+// Resend-invite cooldown. Long enough to swallow a double-click and an impatient re-click, short
+// enough not to obstruct "wrong person — fix it and send again". This is the ONLY throttle on that
+// path: express-rate-limit is mounted on login / forgot-password / reset and two public routes,
+// never on /admin/*, and sendMail itself has no dedupe.
+const INVITE_COOLDOWN_MS = 60 * 1000;
+
 const addSchema = z.object({
   ...memberIdentityShape,
   role: z.enum(['admin', 'lead', 'canvasser']).default('canvasser'),
@@ -614,6 +620,101 @@ router.patch('/:userId/password', async (req, res, next) => {
     res.json({ user: user.toSafeJSON() });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Re-send the set-password invite. Until this existed, an invite was sent ONCE, at account
+// creation, and there was no second chance: the admin-typed temp password expires after
+// TEMP_PASSWORD_TTL_HOURS (72), so a person who never signed in within three days — or who was
+// created before invite emails existed at all — was simply stranded. Their only escape was
+// self-serve /auth/forgot-password, which requires telling them to go and do it.
+//
+// This re-mints the SAME 72h invite token and re-sends the SAME template the create path uses,
+// so there is one invite experience rather than two that can drift.
+router.post('/:userId/resend-invite', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid userId' });
+    }
+    // Same boundary as the temp-password reset: a lead may act only on a CANVASSER rostered to a
+    // campaign they manage. Re-sending an invite is strictly LESS powerful than setting someone's
+    // password, which leads can already do, so refusing it here would be inconsistent.
+    // isOrgAdmin covers org admins AND super admins.
+    if (!isOrgAdmin(req) && !(await leadMayManageTarget(req, req.params.userId))) {
+      return res
+        .status(403)
+        .json({ error: 'You can only resend invites for canvassers on your campaigns.' });
+    }
+
+    const membership = await Membership.findOne({
+      userId: req.params.userId,
+      organizationId: activeOrgId(req),
+    }).lean();
+    if (!membership) return res.status(404).json({ error: 'Member not in this org' });
+
+    const user = await User.findById(req.params.userId).select(
+      'firstName email deletedAt passwordResetExpiresAt'
+    );
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    // Deletion must not be undoable by an admin — same guard as the temp-password route.
+    if (user.deletedAt) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    }
+
+    // The only throttle on this path: no limiter is mounted on /admin/*, and sendMail has no dedupe.
+    //
+    // Deliberately measured off the TOKEN, not off EmailLog. The obvious implementation — "was an
+    // inviteSetPassword row written in the last minute" — races the thing it is meant to stop:
+    // recordEmail() is fire-and-forget inside sendMail (it calls EmailLog.create() and only attaches
+    // a .catch), so two clicks 200ms apart can both read an empty EmailLog and both send.
+    // issuePasswordResetToken's write IS awaited, so passwordResetExpiresAt is exact.
+    //
+    // An invite mints a 72h token, a forgot-password reset mints a 1h one, so "expiry still within a
+    // minute of the full invite window" identifies a just-issued INVITE with no ambiguity.
+    // Caveat, accepted: this throttles on mint rather than on delivery, so a send that failed still
+    // starts the cooldown. That is the safer direction — the mint is what kills the recipient's
+    // existing link, so it is the half worth rate-limiting.
+    const invitedJustNow =
+      user.passwordResetExpiresAt &&
+      user.passwordResetExpiresAt.getTime() >
+        Date.now() + INVITE_TOKEN_HOURS * 3600_000 - INVITE_COOLDOWN_MS;
+    if (invitedJustNow) {
+      return res.status(429).json({
+        error: 'An invite was just sent to this person. Try again in a minute.',
+        code: 'INVITE_COOLDOWN',
+      });
+    }
+
+    // Re-minting OVERWRITES User.passwordResetToken, so any invite or reset link already sitting
+    // in their inbox dies right here. That is the intent — but it is why the clients warn first.
+    const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
+    // role decides app-vs-console copy, and it MUST come from the membership row: isFieldRole()
+    // tests `role === 'canvasser'`, so passing undefined silently renders the console version and
+    // a canvasser would get an invite with no app-store links and nothing looking wrong.
+    const mail = inviteSetPassword({
+      firstName: user.firstName,
+      orgName: req.activeOrg.name,
+      setPasswordUrl: url,
+      role: membership.role,
+    });
+    // AWAITED, unlike the three create-time sends. Those are fire-and-forget so a mail hiccup
+    // can't fail an admin's add; here the send IS the request, so the admin has to learn whether
+    // it actually left.
+    const result = await sendMail({
+      to: user.email,
+      ...mail,
+      kind: 'inviteSetPassword',
+      meta: {
+        organizationId: req.activeOrg._id,
+        organizationName: req.activeOrg.name,
+        userId: user._id,
+      },
+    });
+
+    res.json({ sent: !!result?.sent, to: user.email, expiresInHours: INVITE_TOKEN_HOURS });
+  } catch (err) {
     next(err);
   }
 });

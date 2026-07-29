@@ -26,6 +26,7 @@ const { Campaign } = await import('../src/models/Campaign.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
 const { SupportAccessGrant } = await import('../src/models/SupportAccessGrant.js');
+const { CampaignManager } = await import('../src/models/CampaignManager.js');
 const { outbox, clearOutbox } = await import('../src/services/mail/mailer.js');
 const { installLinks } = await import('../src/config/storeLinks.js');
 const { ensureCampaignAssignments } = await import('../src/services/campaignRoster.js');
@@ -78,7 +79,7 @@ async function call(method, path, { token, orgId, body } = {}) {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, Subscription, CampaignAssignment, SupportAccessGrant]) {
+  for (const M of [Organization, User, Membership, Campaign, Subscription, CampaignAssignment, SupportAccessGrant, CampaignManager]) {
     await M.deleteMany({});
   }
 
@@ -390,4 +391,132 @@ test('supportGrantNotice: an org with no reachable recipient sends nothing and t
   assert.strictEqual(res.status, 201, 'the grant is created regardless of notifiability');
   await sleep(250);
   assert.strictEqual(kinds('supportGrantNotice').length, 0, 'no recipient → no email, no crash');
+});
+
+// ── Resend invite ────────────────────────────────────────────────────────────────────────────
+// The invite used to be a one-shot: sent at account creation and never again. An admin-typed temp
+// password dies after TEMP_PASSWORD_TTL_HOURS (72), so anyone who did not sign in within three days
+// — or who was created before invite emails existed — was stranded with no admin-side remedy.
+// POST /admin/memberships/:userId/resend-invite re-mints the SAME 72h token and re-sends the SAME
+// template the create path uses.
+
+// A fresh never-signed-in canvasser, rostered on ctx.campaign so a lead can be given a real grant.
+async function makeStranded(email, { role = 'canvasser', assign = true } = {}) {
+  const u = await User.create({
+    firstName: 'Stan', lastName: 'Stranded', email,
+    passwordHash: 'x', isActive: true, mustChangePassword: true, tempPasswordSetAt: new Date(),
+  });
+  await Membership.create({ userId: u._id, organizationId: ctx.org._id, role, isActive: true });
+  if (assign) {
+    await CampaignAssignment.create({
+      organizationId: ctx.org._id, campaignId: ctx.campaign._id, userId: u._id,
+    });
+  }
+  return u;
+}
+
+const resend = (userId, token = ctx.adminTok) =>
+  call('POST', `/admin/memberships/${userId}/resend-invite`, { token, orgId: ctx.org._id });
+
+test('resend-invite: a stranded canvasser gets a fresh, working set-password link', { skip }, async () => {
+  const email = 'stranded.one@t.co';
+  const u = await makeStranded(email);
+
+  const res = await resend(u._id);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+  assert.strictEqual(res.json.to, email);
+  // Dormant mailer → sent:false is expected; the assertion that matters is that the route REPORTS
+  // the outcome rather than pretending, since here the send is the whole request.
+  assert.ok('sent' in res.json, 'the route reports whether the mail actually left');
+
+  const seen = await waitFor(() => kinds('inviteSetPassword').length === 1);
+  assert.ok(seen, `expected one inviteSetPassword, saw ${outbox.length} total`);
+  const entry = kinds('inviteSetPassword')[0];
+  assert.deepStrictEqual(entry.to, [email]);
+
+  const m = bodyOf(entry).match(/reset-password\/([A-Za-z0-9_-]+)/);
+  assert.ok(m, 'the resent invite carries a set-password link');
+  const consume = await call('POST', '/auth/reset-password', {
+    body: { token: m[1], newPassword: 'Chosen!Pass9' },
+  });
+  assert.strictEqual(consume.status, 200, 'the resent link is a live token');
+});
+
+// The role trap: isFieldRole() tests `role === 'canvasser'`, so a resend that forgot to read the
+// membership row would silently send every canvasser the CONSOLE email and nothing would look wrong.
+test('resend-invite: role comes from the membership — canvasser gets app links, admin does not', { skip }, async () => {
+  const canv = await makeStranded('stranded.canv@t.co', { role: 'canvasser' });
+  const adm = await makeStranded('stranded.adm@t.co', { role: 'admin', assign: false });
+
+  assert.strictEqual((await resend(canv._id)).status, 200);
+  assert.ok(await waitFor(() => kinds('inviteSetPassword').length === 1));
+  assert.ok(hasInstallLinks(kinds('inviteSetPassword')[0]), 'a canvasser resend carries both install links');
+
+  clearOutbox();
+  assert.strictEqual((await resend(adm._id)).status, 200);
+  assert.ok(await waitFor(() => kinds('inviteSetPassword').length === 1));
+  assert.ok(!hasInstallLinks(kinds('inviteSetPassword')[0]), 'an admin resend must never carry app links');
+});
+
+// User.passwordResetToken is a SINGLE field, so re-minting overwrites it. The old link in their
+// inbox dies — intended, and the clients warn about it, but it has to actually be true.
+test('resend-invite: the previous link dies the moment a new one is issued', { skip }, async () => {
+  const u = await makeStranded('stranded.two@t.co');
+
+  assert.strictEqual((await resend(u._id)).status, 200);
+  assert.ok(await waitFor(() => kinds('inviteSetPassword').length === 1));
+  const firstToken = bodyOf(kinds('inviteSetPassword')[0]).match(/reset-password\/([A-Za-z0-9_-]+)/)[1];
+
+  // Clear the cooldown the same way real time would, then resend.
+  await User.updateOne({ _id: u._id }, { $set: { passwordResetExpiresAt: new Date(Date.now() + 3600_000) } });
+  clearOutbox();
+  assert.strictEqual((await resend(u._id)).status, 200);
+  assert.ok(await waitFor(() => kinds('inviteSetPassword').length === 1));
+  const secondToken = bodyOf(kinds('inviteSetPassword')[0]).match(/reset-password\/([A-Za-z0-9_-]+)/)[1];
+  assert.notStrictEqual(firstToken, secondToken, 'a resend mints a new token');
+
+  const stale = await call('POST', '/auth/reset-password', {
+    body: { token: firstToken, newPassword: 'Chosen!Pass9' },
+  });
+  assert.strictEqual(stale.status, 400, 'the superseded link is dead');
+  const fresh = await call('POST', '/auth/reset-password', {
+    body: { token: secondToken, newPassword: 'Chosen!Pass9' },
+  });
+  assert.strictEqual(fresh.status, 200, 'the newest link still works');
+});
+
+test('resend-invite: a lead may resend for their own canvasser, never for an admin', { skip }, async () => {
+  const lead = await User.create({
+    firstName: 'Lee', lastName: 'Lead', email: 'lee.lead.resend@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: lead._id, organizationId: ctx.org._id, role: 'lead', isActive: true });
+  await CampaignManager.create({
+    userId: lead._id, organizationId: ctx.org._id, campaignId: ctx.campaign._id,
+  });
+  const leadTok = signUserToken(lead);
+
+  const mine = await makeStranded('lead.canv@t.co');           // rostered on the managed campaign
+  const notMine = await makeStranded('other.adm@t.co', { role: 'admin', assign: false });
+
+  assert.strictEqual((await resend(mine._id, leadTok)).status, 200, 'a lead may resend for their canvasser');
+  const denied = await resend(notMine._id, leadTok);
+  assert.strictEqual(denied.status, 403, 'a lead may never act on an admin account');
+});
+
+test('resend-invite: a second send inside the cooldown is refused', { skip }, async () => {
+  const u = await makeStranded('stranded.three@t.co');
+  assert.strictEqual((await resend(u._id)).status, 200);
+
+  const again = await resend(u._id);
+  assert.strictEqual(again.status, 429, 'the double-click is refused');
+  assert.strictEqual(again.json.code, 'INVITE_COOLDOWN');
+});
+
+test('resend-invite: a deleted account cannot be re-invited back to life', { skip }, async () => {
+  const u = await makeStranded('stranded.gone@t.co');
+  await User.updateOne({ _id: u._id }, { $set: { deletedAt: new Date() } });
+
+  const res = await resend(u._id);
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.json.code, 'ACCOUNT_DELETED');
 });

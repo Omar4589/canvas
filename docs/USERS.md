@@ -245,8 +245,41 @@ ever sees, and the emailed link is the account's only way in. The same typed-pas
   **"Set temporary password"** on the user's profile to rescue someone.
 - The next time that person signs in, they're **required to choose a new password** before they can
   do anything (on web or mobile). The temporary one stops working the moment they set their own.
-- A temporary password is only good for **72 hours** — after that an admin has to set a new one. This
-  applies to a freshly created account too, so have new people sign in promptly.
+- A temporary password is only good for **72 hours**. After that, an admin can either set a new one or
+  — better, if the person has a reachable inbox — click **"Resend invite"**, which emails them a fresh
+  set-password link so no password ever has to be read aloud. This applies to a freshly created account
+  too, so have new people sign in promptly.
+
+### Resend invite
+
+**Part 1 — For everyone.** An invitation is emailed once, when the account is created. If the person
+never got it, or let the 72-hour link lapse, open their profile and click **Resend invite** — they get
+a brand-new set-password link, good for another 72 hours. The button appears **only for people who
+have never signed in**, because that is the only situation it helps: anyone who has signed in already
+has a working password and can use *Forgot password* themselves. Resending **replaces** any earlier
+link, so if they were mid-signup on an old email, that one stops working — both clients warn you
+before sending. **Admins** can resend for anyone in the org; a **team lead** can resend for canvassers
+on the campaigns they manage.
+
+**Part 2 — Technical reference.** `POST /admin/memberships/:userId/resend-invite`. Re-mints via
+`issuePasswordResetToken(userId, { hours: INVITE_TOKEN_HOURS })` and re-sends the same
+`inviteSetPassword` template the create path uses — one invite experience, not two that can drift.
+Three things are load-bearing:
+
+- **`role` comes from the Membership row**, never the request. `isFieldRole()` tests
+  `role === 'canvasser'`, so a missing role silently renders the *console* email and a canvasser would
+  get an invite with no app-store links and nothing looking wrong.
+- **The send is awaited** and the response carries `{ sent }`, unlike the three fire-and-forget
+  create-time sends — here the send *is* the request.
+- **The 60s cooldown is measured off `passwordResetExpiresAt`, not off `EmailLog`.** `recordEmail()` is
+  fire-and-forget inside `sendMail`, so an EmailLog-based check races the double-click it exists to
+  stop; the token write is awaited, and a 72h invite window is unambiguously distinguishable from a 1h
+  reset. The trade-off is that it throttles on *mint* rather than *delivery* — deliberate, since the
+  mint is what invalidates the recipient's existing link.
+
+Authorization reuses `leadMayManageTarget`, the same guard as the temp-password reset, so a lead may
+act only on a canvasser rostered to a campaign they manage. `isOrgAdmin` covers org admins and super
+admins. The router's blanket non-GET guard means a support-grant holder gets `VENDOR_READ_ONLY`.
 - When the person sets **their own** password, it has to be reasonably strong: at least 8 characters
   with an uppercase letter, a lowercase letter, a number, and a special character. A live checklist
   ticks each rule off as they type. (A *temporary* password isn't held to this — it only needs to be at

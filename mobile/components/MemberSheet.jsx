@@ -120,6 +120,20 @@ export default function MemberSheet({
     },
     onError: (e) => Alert.alert('Could not set password', e?.message || 'Please try again.'),
   });
+  // Re-send the set-password invite. Only ever offered to someone who has never signed in: the
+  // invite goes out once at account creation and the temp password beside it dies after 72h, so
+  // anyone who missed that window had no way in that an admin could trigger.
+  const inviteMut = useMutation({
+    mutationFn: () => api(`/admin/memberships/${u.id}/resend-invite`, { method: 'POST' }),
+    onSuccess: (res) =>
+      Alert.alert(
+        res?.sent ? 'Invite sent' : 'Invite not sent',
+        res?.sent
+          ? `${u.email} can set a password for the next ${res.expiresInHours} hours.`
+          : 'The email could not be sent. Check the mail settings.'
+      ),
+    onError: (e) => Alert.alert('Could not resend invite', e?.message || 'Please try again.'),
+  });
 
   // Campaign roster toggles — admin only.
   const assignMut = useMutation({
@@ -351,6 +365,29 @@ export default function MemberSheet({
                       <Text style={styles.btnPrimaryText}>{pwMut.isPending ? 'Setting…' : 'Set password'}</Text>
                     </Pressable>
                   </View>
+                ) : null}
+                {/* Never-signed-in only. lastLoginAt is written in exactly one place (a successful
+                    login), so null is unambiguous — and resending kills any link they already
+                    have, which would be gratuitous for someone already using the app. */}
+                {!u.lastLoginAt ? (
+                  <Pressable
+                    onPress={() =>
+                      Alert.alert(
+                        'Resend invite?',
+                        `Email ${u.email} a new set-password link.\n\nThis replaces any earlier invite or reset link — if they still have one, it will stop working.`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Send', onPress: () => inviteMut.mutate() },
+                        ]
+                      )
+                    }
+                    style={styles.link}
+                    disabled={inviteMut.isPending}
+                  >
+                    <Text style={styles.linkText}>
+                      {inviteMut.isPending ? 'Sending invite…' : 'Resend invite…'}
+                    </Text>
+                  </Pressable>
                 ) : null}
               </>
             ) : null}

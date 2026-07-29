@@ -486,7 +486,9 @@ export default function AdminUsers() {
                   coordinatorId: roster?.coordinatorId || null,
                   coordinatorName: roster?.coordinatorName || null,
                   assigned: !!roster,
-                  user: { id: String(u.id), firstName: u.firstName, lastName: u.lastName, email: u.email },
+                  // lastLoginAt gates the resend-invite action (never-signed-in only) — MemberSheet has no
+                  // way to fetch it itself, so it has to be threaded through here.
+                  user: { id: String(u.id), firstName: u.firstName, lastName: u.lastName, email: u.email, lastLoginAt: u.lastLoginAt },
                 }}
                 campaign={selectedCampaign}
                 coordinators={coordinators}

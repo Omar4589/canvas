@@ -63,6 +63,25 @@ make specific claims about what we collect, how long we keep it, who can see it,
 **Never ship a change that makes a published policy sentence false.** The policy is a promise; the code is
 whether we keep it.
 
+## Touched a server route? Run `npm run audit:mobile-api` before you deploy.
+
+**"I only changed admin routes, not mobile routes" is the trap this catches.** The mobile app has a
+whole admin section — books, turf, timeline, audit, users, flags, reports — and it calls **56
+`/admin/*` endpoints**, more than double what it calls under `/mobile/*`. Editing one of those is a
+mobile-facing change even though nothing under `server/src/routes/mobile/` moved.
+
+```
+npm run audit:mobile-api            # flags which of your uncommitted server changes mobile depends on
+npm run audit:mobile-api -- main    # ...against a git ref
+npm run audit:mobile-api -- --list  # the whole mobile-facing surface, with the files that call each
+```
+
+It resolves each route file to its real mount prefix from `routes/index.js`, so it works even when a
+router's own paths are all params. It flags files, not diffs — it **cannot** see a response-shape
+change, so read the flagged diffs yourself. **Adding** a field, endpoint, or optional param is always
+safe. **Removing** a field, renaming a route, or making a param required is not — that is the case
+below.
+
 ## Breaking server change? Bump the client-version gate.
 
 **If you change the server in a way an already-released mobile app can't handle** (removing or changing

@@ -179,6 +179,22 @@ export default function UserProfileModal({ membership, onClose }) {
     onError: (err) => flash('error', err.message),
   });
 
+  // Re-send the set-password invite. Offered ONLY to someone who has never signed in — an invite
+  // is sent once, at account creation, and the temp password issued alongside it expires after 72
+  // hours, so anyone who missed that window (or predates invite emails entirely) had no way back
+  // in short of being told to use Forgot password themselves.
+  const resendInvite = useMutation({
+    mutationFn: () => api(`/admin/memberships/${user.id}/resend-invite`, { method: 'POST' }),
+    onSuccess: (res) =>
+      flash(
+        res?.sent ? 'success' : 'error',
+        res?.sent
+          ? `Invite sent to ${res.to}. The link works for ${res.expiresInHours} hours.`
+          : 'Could not send the invite — check the email settings.'
+      ),
+    onError: (err) => flash('error', err.message),
+  });
+
   const toggleActive = useMutation({
     mutationFn: () =>
       api(
@@ -643,6 +659,27 @@ export default function UserProfileModal({ membership, onClose }) {
             >
               {showResetPw ? 'Cancel' : 'Set temporary password'}
             </button>
+            {/* Never-signed-in only. lastLoginAt is written in exactly one place (a successful
+                login), so null is unambiguous; showing this for an active user would invite
+                killing a working account's password link for no reason. */}
+            {!user.lastLoginAt && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Email ${user.email} a new set-password link?\n\nThis replaces any earlier invite or reset link — if they still have one, it will stop working.`
+                    )
+                  ) {
+                    resendInvite.mutate();
+                  }
+                }}
+                disabled={resendInvite.isPending}
+                className="rounded-md border border-border-strong px-3 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-sunken disabled:opacity-50"
+              >
+                {resendInvite.isPending ? 'Sending…' : 'Resend invite'}
+              </button>
+            )}
             {!isSelf && (
               <>
                 <button

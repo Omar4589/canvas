@@ -106,6 +106,21 @@ eas build --profile development --platform android
 # Each build takes ~10 min. EAS emails you a link to install on your device.
 ```
 
+### Which command do I run?
+
+| I want to… | Command | Covers |
+|---|---|---|
+| Ship JS to **testers** | `npm run ota:staging` | **both platforms**, one command |
+| Ship JS to **real users** | `npm run ota:production` | **both platforms**, one command |
+| Check a lane without publishing | `npm run ota:check [-- --build-profile=staging]` | both platforms |
+| Ship **native** changes | four `eas build`s + four `eas submit`s | see below |
+
+**OTA ≠ submit.** `ota:*` publishes a **JS bundle** to phones that already have the app — no store,
+no review. `eas submit` uploads a **binary** to a store. Different things; you rarely need the second.
+
+Neither `ota:` script passes `--platform`, and `eas update` defaults to **all** — so one command
+covers iOS and Android together, each stamped with its own platform fingerprint.
+
 ### Cutting builds for both lanes
 
 You only need new **binaries** when a native input changes (see `fingerprint.config.js` below).
@@ -113,13 +128,31 @@ Everything else ships as an OTA. When you do need them, cut all four from the sa
 
 ```bash
 # live lane first
-eas build --profile production --platform ios     && eas submit --profile production --platform ios --latest
-eas build --profile production --platform android && eas submit --profile production --platform android --latest
+eas build --profile production --platform ios
+eas build --profile production --platform android
 
 # test lane LAST — see the version-code note
-eas build --profile staging --platform ios     && eas submit --profile staging --platform ios --latest
-eas build --profile staging --platform android && eas submit --profile staging --platform android --latest
+eas build --profile staging --platform ios
+eas build --profile staging --platform android
 ```
+
+**Builds need no `--id`.** Submits do — grab them with `eas build:list --limit 4`:
+
+```bash
+eas submit --profile production --platform ios     --id <ios-production-build-id>
+eas submit --profile production --platform android --id <android-production-build-id>
+eas submit --profile staging    --platform android --id <android-staging-build-id>
+eas submit --profile staging    --platform ios     --id <ios-staging-build-id> \
+  --groups "Team (Expo)" --what-to-test "what changed since the last staging build"
+```
+
+> 🛑 **Never `eas submit --latest`.** It picks the newest build for the **platform**, ignoring the
+> profile — and `eas submit` has no `--build-profile` filter. With two lanes producing builds for the
+> same platform, `--latest` on iOS grabs your *staging* build and sends it to the App Store. Always
+> `--id`. (Omitting both `--id` and `--latest` drops into an interactive picker, which is also safe.)
+
+`--groups` (iOS only) assigns the build to a TestFlight group at submit time instead of clicking
+through App Store Connect afterwards. `--what-to-test` fills in the TestFlight release note.
 
 > **Build the staging pair LAST.** `autoIncrement` bumps the version code per build, and Google Play
 > serves a tester whichever build has the highest code they qualify for. If production ends up above
@@ -257,6 +290,31 @@ Two frozen refs remain, and **neither should ever be moved**:
 To reach either population, check the ref out and publish from there; from `main` the fingerprint no
 longer matches and `ota:check` will correctly refuse. Once the legacy Android install base reaches
 zero, both refs can be deleted.
+
+### Where things stood at the lane split (2026-07-28)
+
+A snapshot, not live state — verify with `eas build:list` and `GET /api/build-status` before trusting it.
+
+| Population | Build | Fingerprint | Channel |
+|---|---|---|---|
+| iOS App Store | `1.0.0 (23)` | `8eb8796c` | `production` |
+| iOS App Store (in review) | `1.0.1 (27)` | `190f0a92` | `production` |
+| iOS TestFlight internal | `1.0.1 (28)` | `190f0a92` | `staging` |
+| Play production | `1.0.0 (3)` | `bc62990a` | `playorg` |
+| Play production (in review) | `1.0.0 (4)` | `efdcd132` | `production` |
+| Play internal | `1.0.0 (5)` | `efdcd132` | `staging` |
+| Legacy `com.canvassapp.mobile` | `(18)`, `(19)` | `711a257c`, `444667d0` | `production` — being retired |
+
+Two consequences of that spread, both temporary:
+
+- **`main` reaches only the staging lane** until 27 and code 4 are approved *and* installed. The
+  production populations sit on older fingerprints; to reach them in an emergency, publish from the
+  frozen refs (see the History section).
+- **`MOBILE_CURRENT_RUNTIME_*` lists every fingerprint still installed**, not just the newest —
+  otherwise a current build nags itself. Because production and staging are cut from the same tree
+  they share a fingerprint, so one entry covers both lanes.
+
+Retire this table once everyone is on `190f0a92` / `efdcd132`.
 
 ### Telling old builds to update (the nag)
 

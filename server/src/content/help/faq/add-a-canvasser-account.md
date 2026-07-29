@@ -15,7 +15,9 @@ The **temporary password field is optional**: leave it blank and the emailed inv
 
 Admins can also add people org-wide from the **Users** page — same idea, and you can set the role (canvasser, team lead, or admin) there.
 
-> Heads up: a temporary password is valid for **72 hours**. Have the new person sign in and set their own password within that window — if it lapses, just set a new temporary password for them.
+> Heads up: a temporary password is valid for **72 hours**. Have the new person sign in and set their own password within that window — if it lapses, open their profile and click **Resend invite** to email them a fresh set-password link, or set a new temporary password if they can't get to their inbox.
+
+**Never got the invite?** Open the person's profile and click **Resend invite**. They get a brand-new set-password link, good for another 72 hours. You'll only see the button for people who have **never signed in** — anyone who has already signed in has a working password and can use **Forgot password** themselves. Resending replaces any earlier link, so if they were part-way through setting a password from an old email, that one stops working.
 
 **What if they already have a Door Line account?** If someone has canvassed before — even for a different organization — their email is already in the system, so you can't create a duplicate. When you enter an email that already exists, we switch on **Existing user** for you: confirm it, and they're linked to your organization and campaign. They keep the password they already use, so no new temporary password is issued. (If they're already in *your* organization, just add them from the campaign roster instead.)
 

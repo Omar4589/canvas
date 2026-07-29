@@ -107,25 +107,38 @@ Visit `https://doorline.app` to log in.
 
 (Alternatively, do the upload locally against the prod Mongo URI if you trust the data — but the dashboard works fine.)
 
-## Deploying the mobile app to TestFlight + Google Play
+## Shipping the mobile app
 
-See [`mobile/README.md`](mobile/README.md) for the full walkthrough. Short version:
+Two lanes, separated by the **channel** baked into each binary: `staging` (TestFlight + Play internal)
+and `production` (App Store + Play production). Full walkthrough in
+[`mobile/README.md`](mobile/README.md). Short version:
+
+**Most changes are JS and need no build at all** — one command per lane, both platforms:
 
 ```bash
 cd mobile
-npm install -g eas-cli
-eas login
-eas init                                    # one-time, creates EAS project
-eas secret:create --scope project --name RNMAPBOX_MAPS_DOWNLOAD_TOKEN --value sk.xxxxx
-
-# Set EXPO_PUBLIC_API_BASE_URL=https://api.doorline.app in the EAS env (preview + production)
-
-eas build --profile preview --platform ios          # ~10 min, emails you a link
-eas submit --profile production --platform ios --latest  # uploads to TestFlight
-
-eas build --profile preview --platform android
-eas submit --profile production --platform android --latest  # uploads to Play Internal
+npm run ota:staging      # from a feature branch -> testers
+npm run ota:production   # from main, once confirmed -> real users
 ```
+
+**Native changes** (anything touching `app.json`, `eas.json`, a native dep, an icon) need four
+builds from one commit — production pair first, staging pair last:
+
+```bash
+eas build --profile production --platform ios
+eas build --profile production --platform android
+eas build --profile staging    --platform ios
+eas build --profile staging    --platform android
+
+eas build:list --limit 4       # grab the ids
+eas submit --profile <production|staging> --platform <ios|android> --id <build-id>
+```
+
+> 🛑 **Never `eas submit --latest`** — it ignores the profile and picks the newest build for the
+> platform, so on iOS it sends your *staging* build to the App Store. Always `--id`.
+
+One-time setup (EAS account, Mapbox token, submit credentials) is in
+[`mobile/README.md`](mobile/README.md) → **One-time setup**.
 
 ## Status checklist
 

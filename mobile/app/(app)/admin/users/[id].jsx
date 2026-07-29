@@ -187,6 +187,20 @@ export default function AdminUserDetail() {
     onError: (err) => flash('error', err.message),
   });
 
+  // Re-send the set-password invite. Offered only to someone who has never signed in — the invite
+  // is sent once at account creation and the temp password beside it expires after 72h.
+  const resendInvite = useMutation({
+    mutationFn: () => api(`/admin/memberships/${userId}/resend-invite`, { method: 'POST' }),
+    onSuccess: (res) =>
+      flash(
+        res?.sent ? 'success' : 'error',
+        res?.sent
+          ? `Invite sent. The link works for ${res.expiresInHours} hours.`
+          : 'Could not send the invite \u2014 check the mail settings.'
+      ),
+    onError: (err) => flash('error', err.message),
+  });
+
   const toggleActive = useMutation({
     mutationFn: () =>
       api(
@@ -590,6 +604,29 @@ export default function AdminUserDetail() {
                 {showResetPw ? 'Cancel' : 'Set temporary password'}
               </Text>
             </Pressable>
+
+            {/* Never-signed-in only \u2014 lastLoginAt is written in exactly one place, so null is
+                unambiguous, and a resend kills any link they already hold. */}
+            {!user.lastLoginAt && (
+              <Pressable
+                onPress={() =>
+                  Alert.alert(
+                    'Resend invite?',
+                    `Email ${user.email} a new set-password link.\n\nThis replaces any earlier invite or reset link \u2014 if they still have one, it will stop working.`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Send', onPress: () => resendInvite.mutate() },
+                    ]
+                  )
+                }
+                disabled={resendInvite.isPending}
+                style={styles.secondaryBtn}
+              >
+                <Text style={styles.secondaryBtnText}>
+                  {resendInvite.isPending ? 'Sending\u2026' : 'Resend invite'}
+                </Text>
+              </Pressable>
+            )}
 
             {showResetPw && (
               <View style={styles.resetPwBox}>
