@@ -20,7 +20,6 @@ import { formatRange } from '../../../../../../lib/datetime';
 import { radius, spacing } from '../../../../../../lib/theme';
 import { useTheme } from '../../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../../../../lib/useBottomInset';
 import { useMapStyle } from '../../../../../../lib/mapStyles';
 import ActivityRow from '../../../../../../components/ActivityRow';
 
@@ -47,8 +46,6 @@ export default function DayDetail() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const { styleURL } = useMapStyle();
   const ACTION_COLOR = {
     survey_submitted: colors.status.surveyed,
@@ -162,7 +159,7 @@ export default function DayDetail() {
         <View style={{ width: 80 }} />
       </View>
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
+      <ScrollView contentContainerStyle={styles.scroll}>
         {summaryQ.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : !s ? null : (

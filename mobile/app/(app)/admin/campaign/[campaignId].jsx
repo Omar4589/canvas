@@ -36,7 +36,6 @@ import { metricHelp } from '../../../../lib/metricHelp';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../../lib/useBottomInset';
 
 // The local OptionRow is gone: a survey answer that drills into its voters is an InsetNavRow
 // with a RowBar accessory. Two things it got wrong are fixed by the move — its label was
@@ -46,8 +45,6 @@ import { useBottomInset } from '../../../../lib/useBottomInset';
 export default function CampaignDetail() {
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const router = useRouter();
   const qc = useQueryClient();
   const { campaignId } = useLocalSearchParams();
@@ -387,7 +384,7 @@ export default function CampaignDetail() {
         <Text style={styles.headerTitle} numberOfLines={2}>{campaign?.name || 'Campaign'}</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl + bottomInset }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
         {isArchived && (
           <View style={[styles.banner, { marginHorizontal: spacing.lg }]}>
             <Text style={styles.bannerText}>

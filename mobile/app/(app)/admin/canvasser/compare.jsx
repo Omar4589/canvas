@@ -16,7 +16,6 @@ import { rangeFor, deviceTimezone, labelForRange } from '../../../../lib/dateRan
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../../lib/useBottomInset';
 import DateRangeBar from '../../../../components/DateRangeBar';
 
 // Each KPI row in the table. accessor pulls value out of the summary
@@ -110,8 +109,6 @@ function initials(name) {
 export default function Compare() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const ids = useMemo(
@@ -214,7 +211,7 @@ export default function Compare() {
           <Text style={styles.empty}>No canvassers selected.</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
+        <ScrollView contentContainerStyle={styles.scroll}>
           <Text style={styles.rangeLabel}>
             {labelForRange(range)} ·{' '}
             {teamQ.data?.canvasserCount

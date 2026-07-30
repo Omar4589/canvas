@@ -23,7 +23,6 @@ import { makeRateColors } from '../../../lib/rates';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
-import { useBottomInset } from '../../../lib/useBottomInset';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
 import InsetGroup, {
@@ -73,10 +72,6 @@ function ymdSpanDays(from, to) {
 export default function AdminAudit() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The console tab bar floats (components/FloatingTabBar.jsx), so it no longer occupies layout
-  // space: the bulk bar, the flash toast and the scroll bottom all have to clear it themselves.
-  // makeStyles has no hook access, so the inset is applied INLINE at each of those sites.
-  const bottomInset = useBottomInset();
   const roleLabel = useConsoleRoleLabel();
   const router = useRouter();
   const qc = useQueryClient();
@@ -342,7 +337,7 @@ export default function AdminAudit() {
 
   // Both toasts sit at the same height: clear of the tab bar normally, clear of the bulk bar while
   // selection mode is up (an error flash can coexist with the bar).
-  const flashBottom = bottomInset + (selectMode ? FLASH_OVER_BULK_BAR : spacing.md);
+  const flashBottom = selectMode ? FLASH_OVER_BULK_BAR : spacing.md;
 
   // Total is the group's hero; Open leads the rows and gets the caution chip when nonzero
   // (the only judgment call on this screen — everything else is a plain count by flag type).
@@ -448,7 +443,7 @@ export default function AdminAudit() {
           <ActivityIndicator color={colors.brand} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: (selectMode ? 260 : spacing.xxl) + bottomInset }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: selectMode ? 260 : spacing.xxl }}>
           <View style={styles.groupWrap}>
             <InsetGroup>
               <InsetHeroRow
@@ -533,13 +528,11 @@ export default function AdminAudit() {
         </ScrollView>
       )}
 
-      {/* Bulk bar, docked ABOVE the floating tab bar. Nothing extra is needed for the note input:
-          the tab bar hides itself while the keyboard is up and reports height 0, so `bottomInset`
-          collapses to the safe-area inset on its own and the KeyboardAvoidingView lifts from there. */}
+      {/* Bulk bar, docked to the bottom edge above the tab bar. */}
       {selectMode ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={[styles.bulkBarWrap, { bottom: bottomInset }]}
+          style={styles.bulkBarWrap}
           pointerEvents="box-none"
         >
           <View style={styles.bulkBar}>

@@ -175,7 +175,6 @@ Defined in [mobile/lib/theme.js](../mobile/lib/theme.js) (`lightColors` / `darkC
 | `successFg` / `dangerFg` | `#166534` / `#991B1B` | `#4ADE80` / `#FCA5A5` | **small text on `successBg` / `dangerBg`** — see below |
 | `accentPurple` (+ `Bg`) / `teal` (+ `Bg`) | `#7E22CE` / `#0F766E` | `#C084FC` / `#2DD4BF` | campaign-type / voted badges |
 | `backdrop` / `chromeBar` | `rgba(0,0,0,.45)` / `rgba(255,255,255,.95)` | `rgba(0,0,0,.65)` / `rgba(17,24,39,.95)` | modal scrim / map top bar |
-| `glassBar` | `rgba(255,255,255,.92)` | `rgba(17,24,39,.92)` | the floating tab bar's pill — icons only, **never text** (see below) |
 | `mapLabel` / `mapLabelHalo` | `#111827` / `#FFFFFF` | `#E5E7EB` / `#0B0F19` | Mapbox symbol label + halo |
 | `status.*`, `statusLabels.*`, `party.*` | **fixed across themes** | | fixed brand ramp |
 
@@ -218,37 +217,6 @@ Four other traps in the same family, all measured:
 - **`brand` on `brandTint` is 4.41:1** — just under the floor for small text. Use `brandDark`
   (5.91:1). `brand` on `card` is fine at 4.83:1, which is what `InsetActionRow` uses.
 
-### The translucent bar fill — `glassBar`
-
-`glassBar` is the fill of the floating console tab bar
-([mobile/components/FloatingTabBar.jsx](../mobile/components/FloatingTabBar.jsx)): `card` at **0.92**,
-i.e. *more* transparent than `chromeBar` (0.95, which is tuned for a bar that carries text and is
-effectively opaque). The alpha is arithmetic, not eye. A translucent fill has no single contrast
-ratio, so it is measured against **the worst backdrop that can sit under it** — black in light mode,
-white in dark:
-
-| the fill | composites to | `textSecondary` on it | `textMuted` on it |
-|---|---|---|---|
-| light — `#FFFFFF` @ .92 over black | `#EBEBEB` | **4.06:1** | **2.13:1** |
-| dark — `#111827` @ .92 over white | `#242A38` | **5.65:1** | 2.97:1 |
-
-Which decides three things:
-
-- **4.06:1 clears the 3:1 floor** that applies to the bar's 24pt SVG **icon strokes** (non-text). It
-  does **not** clear the **4.5:1** floor for text.
-- **The idle tint had to move `textMuted` → `textSecondary`.** 2.13:1 on that fill is not a near miss.
-- **0.92 is a margin, not a cliff.** 0.88 composites to `#E0E0E0` / **3.66:1**, still past the non-text
-  floor. So it can be lowered to let more of the map through — but re-run the arithmetic; don't eyeball
-  it.
-
-**The rule: nothing that is text may sit on `glassBar`.** The bar therefore reveals a label on the
-**active tab only**, and that label does not sit on the wash — it sits on a solid `brandTint` capsule
-in `brandDark` (**5.91:1** light, **5.74:1** dark; raw `brand` is 4.41:1 / 4.22:1 and fails). Those two
-decisions travel together, so anything that breaks the second breaks the first: showing a second
-label, dropping the capsule, or hanging a text badge/count on the pill all put text back on a 4.06:1
-fill. If a future design needs text there, make the fill opaque first (or land the deferred blur
-below) — do not loosen the label rule on its own.
-
 ### Derived washes — `withAlpha(hex, alpha)`
 For an intensity ramp (heat scales, overlays) there is no per-step token — derive the wash from a
 token with `withAlpha` in `theme.js` instead of writing an `rgba(...)` literal. A literal rgb
@@ -266,8 +234,6 @@ Map **chrome** themes normally (top bars use `chromeBar`; sheets/legends/chips u
 ### Gotcha — OTA and the `fingerprint` runtime version
 `app.json` `userInterfaceStyle` now reads **`"automatic"`**, which is what lets "System" follow the OS — and it got there the only way it could: it was flipped **in a native build** (`eas build`), never over OTA. That field is **native config**: changing it changes the `fingerprint` runtimeVersion and **strands OTA updates** from every installed build. So the rule stands even though the value has moved — treat `userInterfaceStyle` as untouchable outside a native build cycle, and never expect an edit to it to reach anyone who already has the app. All the *rest* of dark mode does ship over OTA, because it flips at runtime via `Appearance.setColorScheme()`.
 
-Same rule, currently live: the floating tab bar renders its `tabBarBackground` slot but leaves it **empty**. Real backdrop blur needs `expo-blur`, a native module, so it would move the fingerprint too — the translucent `glassBar` fill stands in until a native build carries the blur (see [mobile/README.md](../mobile/README.md) for the build/submit cost).
-
 ### Adding a new screen or component — checklist
 - Define a top-level `function makeStyles(t) { const { colors, type, shadow } = t; return StyleSheet.create({ ... }); }` and call `const styles = useThemedStyles(makeStyles)` in the component (and in every sub-component that uses `styles`).
 - For inline color props (`placeholderTextColor`, `<ActivityIndicator color>`, Mapbox style objects), read `const { colors } = useTheme()`.
@@ -282,4 +248,3 @@ Same rule, currently live: the floating tab bar renders its `tabBarBackground` s
 - [mobile/components/ThemeToggle.jsx](../mobile/components/ThemeToggle.jsx) — the Light/Dark/System control housed by all three menus (admin More, super-admin More, canvasser drawer). It also exports a compact sun/moon `ThemeIconButton`, which currently has **no call sites** — every surface uses the segmented control.
 - [mobile/app/_layout.jsx](../mobile/app/_layout.jsx) — `ThemeProvider` mount + `ThemedStatusBar`; [mobile/app/index.jsx](../mobile/app/index.jsx) — first-paint gate.
 - [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) — theme-aware base map default.
-- [mobile/components/FloatingTabBar.jsx](../mobile/components/FloatingTabBar.jsx) — the only consumer of `glassBar`, and where the icons-only/one-label contrast constraint is enforced.

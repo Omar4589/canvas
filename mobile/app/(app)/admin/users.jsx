@@ -29,7 +29,6 @@ import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '..
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../lib/useBottomInset';
 
 const SORT_OPTIONS = [
   { key: 'name-asc', label: 'Name A–Z' },
@@ -113,8 +112,6 @@ function FilterPill({ active, label, onPress }) {
 export default function AdminUsers() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   // Android's system nav bar overlaps bottom sheets without this inset (item D8).
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -394,7 +391,7 @@ export default function AdminUsers() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
       >
         {usersQ.isLoading || usersQ.isError || visibleUsers.length === 0 ? (
           <InsetGroup>

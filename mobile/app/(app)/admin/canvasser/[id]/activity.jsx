@@ -17,7 +17,6 @@ import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../../../lib/useBottomInset';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import TabSwitcher from '../../../../../components/TabSwitcher';
 import ActivityRow from '../../../../../components/ActivityRow';
@@ -38,8 +37,6 @@ const ACTION_TABS = [
 export default function ActivityFeed() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -159,7 +156,7 @@ export default function ActivityFeed() {
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
+      <ScrollView contentContainerStyle={styles.scroll}>
         {q.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : activities.length === 0 ? (

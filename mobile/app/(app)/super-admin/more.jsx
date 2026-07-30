@@ -19,7 +19,6 @@ import InsetGroup, {
 } from '../../../components/InsetGroup';
 import SectionHeader from '../../../components/SectionHeader';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../lib/useBottomInset';
 import { spacing } from '../../../lib/theme';
 
 // The super-admin More tab — the platform twin of admin/more.jsx, and the new home for the
@@ -32,8 +31,6 @@ export default function SuperAdminMore() {
   const router = useRouter();
   const qc = useQueryClient();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -64,7 +61,7 @@ export default function SuperAdminMore() {
         <Text style={styles.headerLabel}>More</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
         <View style={{ marginTop: spacing.xs }}>
           <InsetGroup>
             <InsetNavRow

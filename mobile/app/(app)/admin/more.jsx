@@ -21,7 +21,6 @@ import InsetGroup, {
 } from '../../../components/InsetGroup';
 import SectionHeader from '../../../components/SectionHeader';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../lib/useBottomInset';
 import { radius, spacing } from '../../../lib/theme';
 
 // Setup-heavy features that live on the web dashboard (file uploads / turf drawing
@@ -51,8 +50,6 @@ export default function AdminMore() {
   const router = useRouter();
   const qc = useQueryClient();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const [user, setUser] = useState(null);
   const [webNote, setWebNote] = useState(null);
 
@@ -107,7 +104,7 @@ export default function AdminMore() {
         <Text style={styles.headerLabel}>More</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
         {/* The identity row the screen opens with — `hero` gives it back the height and the 16/600
             name the old standalone card had. NOT the literal string 'Account': `user` is null until
             the cache read resolves, so that first frame called the signed-in person a generic noun.

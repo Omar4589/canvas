@@ -17,7 +17,6 @@ import { formatRelative } from '../../../lib/dates';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../lib/useBottomInset';
 
 // The super-admin Emails screen — a metadata-only view of the transactional-email log
 // (server/src/routes/superAdmin/emails.js). A drill-in off the More tab, not a bottom-tab of its
@@ -62,8 +61,6 @@ function badgeFor(email) {
 export default function SuperAdminEmailsScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const router = useRouter();
 
   const [outcome, setOutcome] = useState(null); // null = All
@@ -160,7 +157,7 @@ export default function SuperAdminEmailsScreen() {
       <FlatList
         data={emails}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
         ListHeaderComponent={header}
         refreshControl={
           <RefreshControl

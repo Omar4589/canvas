@@ -1,7 +1,7 @@
 import { useMemo, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import { initMapbox } from '../../../../lib/mapbox';
 import { useMapStyle } from '../../../../lib/mapStyles';
@@ -9,7 +9,6 @@ import { formatExact, timeAgo } from '../../../../lib/datetime';
 import { radius, spacing, actionLabel } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../../lib/useBottomInset';
 import { useConsoleRoleLabel } from '../../../../lib/useConsoleRole';
 
 initMapbox();
@@ -21,9 +20,7 @@ initMapbox();
 export default function OverlapDetail() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // Swapped off the raw safe-area inset: the floating tab bar overlays this screen and
-  // its height already contains that inset.
-  const bottomInset = useBottomInset();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const roleLabel = useConsoleRoleLabel();
   const params = useLocalSearchParams();
@@ -81,7 +78,7 @@ export default function OverlapDetail() {
         <View style={{ width: 80 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: Math.max(bottomInset, spacing.xxl) }}>
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: Math.max(insets.bottom, spacing.xxl) }}>
         <Text style={styles.address}>
           {h ? `${h.addressLine1}${h.addressLine2 ? `, ${h.addressLine2}` : ''}` : 'Address unavailable'}
         </Text>

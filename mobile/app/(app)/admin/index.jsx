@@ -34,7 +34,6 @@ import { rateFromPct, makeRateColors, tierWord } from '../../../lib/rates';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../lib/useBottomInset';
 
 function fmt(n) {
   if (n == null) return '—';
@@ -72,8 +71,6 @@ function campaignRowProps(c, isLitDrop) {
 export default function AdminOverview() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -203,7 +200,7 @@ export default function AdminOverview() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: spacing.xxl + bottomInset }}
+        contentContainerStyle={{ paddingBottom: spacing.xxl }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

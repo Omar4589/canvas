@@ -15,7 +15,6 @@ import { deviceTimezone } from '../../../lib/dateRanges';
 import { formatInTz, timeAgo } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../lib/useBottomInset';
 
 const PAGE = 25;
 
@@ -50,8 +49,6 @@ function MenuItem({ label, active, onPress }) {
 
 export default function AnswerVoters() {
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const campaignId = one(params.campaignId);
@@ -202,7 +199,7 @@ export default function AnswerVoters() {
         ) : null}
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
         <Text style={styles.title} numberOfLines={2}>{label || 'Responses'}</Text>
         {/* "entries", not "voters" — this is response-unit (a voter re-surveyed in a
             later round appears once per round), same wording as the web explorer. */}

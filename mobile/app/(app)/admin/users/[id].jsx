@@ -23,7 +23,6 @@ import { radius, spacing, ACTION_LABELS } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useConsoleRole } from '../../../../lib/useConsoleRole';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../../lib/useBottomInset';
 
 
 function initials(first, last) {
@@ -50,8 +49,6 @@ function StatCell({ label, value }) {
 export default function AdminUserDetail() {
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const ACTION_DOT_COLOR = {
     survey_submitted: colors.status.surveyed,
     not_home: colors.status.not_home,
@@ -327,7 +324,7 @@ export default function AdminUserDetail() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
         <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: spacing.xxl + bottomInset }]}
+          contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
         >

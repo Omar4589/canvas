@@ -14,8 +14,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
-import { useBottomInset } from '../../../lib/useBottomInset';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { api } from '../../../lib/api';
@@ -249,10 +248,7 @@ function MovePinGlyph() {
 
 export default function AdminMap() {
   const router = useRouter();
-  // The tab bar floats over this screen, so everything bottom-anchored here — legend, base-map
-  // picker, toasts, the move bar, all four selection sheets — has to clear it by hand. Applied
-  // INLINE at each usage: makeStyles(t) has no hook access, and this is a hook.
-  const bottomInset = useBottomInset();
+  const insets = useSafeAreaInsets();
   const { styleId, styleURL, setStyle } = useMapStyle();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -1644,7 +1640,7 @@ export default function AdminMap() {
 
       {/* First/last-knock legend — only while auditing one canvasser. */}
       {firstLastKnock.first && !selected && !selectedPing && (
-        <View style={[styles.legend, { bottom: bottomInset + spacing.lg }]}>
+        <View style={[styles.legend, { bottom: insets.bottom + spacing.lg }]}>
           <View style={styles.legendRow}>
             <View style={[styles.legendDot, { borderColor: FIRST_KNOCK_COLOR }]} />
             <Text style={styles.legendText}>Start (first knock)</Text>
@@ -1670,9 +1666,7 @@ export default function AdminMap() {
                 stays — draggable annotations break pinch-zoom on Fabric. */}
             <MovePinGlyph />
           </View>
-          {/* A plain View, not SafeAreaView edges={['bottom']}: bottomInset already contains the
-              safe-area inset, so paying it twice would leave a dead strip under the buttons. */}
-          <View style={[styles.moveBar, { bottom: bottomInset }]}>
+          <SafeAreaView edges={['bottom']} style={styles.moveBar}>
             <Text style={styles.moveTitle}>Move pin</Text>
             <Text style={styles.moveSub} numberOfLines={2}>
               Drag the map so the crosshair sits on {moveTarget.addressLine1}, then save.
@@ -1700,7 +1694,7 @@ export default function AdminMap() {
                 </Text>
               </Pressable>
             </View>
-          </View>
+          </SafeAreaView>
         </>
       )}
 
@@ -1711,14 +1705,12 @@ export default function AdminMap() {
           value={styleId}
           onChange={setStyle}
           menuDirection="up"
-          style={{ position: 'absolute', right: spacing.lg, bottom: bottomInset + spacing.lg }}
+          style={{ position: 'absolute', right: spacing.lg, bottom: insets.bottom + spacing.lg }}
         />
       )}
 
-      {/* The four sheets below all share `styles.sheet` and all get the same treatment as the move
-          bar: a plain View lifted by bottomInset, never SafeAreaView edges={['bottom']}. */}
       {selected && (
-        <View style={[styles.sheet, { bottom: bottomInset }]}>
+        <SafeAreaView edges={['bottom']} style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             <View style={{ flex: 1 }}>
@@ -1911,11 +1903,11 @@ export default function AdminMap() {
               <Text style={styles.closeButtonText}>Close</Text>
             </Pressable>
           </View>
-        </View>
+        </SafeAreaView>
       )}
 
       {selectedFlag && (
-        <View style={[styles.sheet, { bottom: bottomInset }]}>
+        <SafeAreaView edges={['bottom']} style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <View style={styles.flagSheetHeaderRow}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
@@ -1933,11 +1925,11 @@ export default function AdminMap() {
           >
             <FlaggedEntryCard entry={selectedFlag} tz={tz} onReviewed={onFlagReviewed} defaultExpanded />
           </ScrollView>
-        </View>
+        </SafeAreaView>
       )}
 
       {bulkSheetOpen && (
-        <View style={[styles.sheet, { bottom: bottomInset }]}>
+        <SafeAreaView edges={['bottom']} style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <View style={styles.flagSheetHeaderRow}>
             <Text style={styles.flagSheetTitle}>
@@ -1965,12 +1957,12 @@ export default function AdminMap() {
               </Pressable>
             ))}
           </View>
-        </View>
+        </SafeAreaView>
       )}
 
       {bulkFlash && (
         <Pressable
-          style={[styles.flagFlash, { bottom: bottomInset + spacing.md }]}
+          style={styles.flagFlash}
           onPress={() => bulkFlash.undo && runBulkUndo(bulkFlash.undo)}
           disabled={!bulkFlash.undo}
         >
@@ -1983,13 +1975,13 @@ export default function AdminMap() {
       )}
 
       {flagFlash && (
-        <View style={[styles.flagFlash, { bottom: bottomInset + spacing.md }]} pointerEvents="none">
+        <View style={styles.flagFlash} pointerEvents="none">
           <Text style={styles.flagFlashText}>✓ Flag {flagFlash}</Text>
         </View>
       )}
 
       {mapNotice && (
-        <View style={[styles.flagFlash, { bottom: bottomInset + spacing.md }]} pointerEvents="none">
+        <View style={styles.flagFlash} pointerEvents="none">
           <Text style={styles.flagFlashText}>{mapNotice}</Text>
         </View>
       )}
@@ -2006,7 +1998,7 @@ export default function AdminMap() {
         const surveyResponse = detail?.surveyResponse;
         const noteText = surveyResponse?.note || detail?.activity?.note || a.note || null;
         return (
-          <View style={[styles.sheet, { bottom: bottomInset }]}>
+          <SafeAreaView edges={['bottom']} style={styles.sheet}>
             <View style={styles.sheetHandle} />
 
             <ScrollView
@@ -2136,7 +2128,7 @@ export default function AdminMap() {
                 <Text style={styles.closeButtonText}>Close</Text>
               </Pressable>
             </View>
-          </View>
+          </SafeAreaView>
         );
       })()}
     </View>
@@ -2233,10 +2225,9 @@ function makeStyles(t) {
   },
   flagSheetTitle: { ...type.h3 },
   flagSheetClose: { color: colors.brand, fontWeight: '700', fontSize: 14 },
-  // `bottom` is set at each of the three call sites (bottomInset + spacing.md) — the toast has to
-  // clear the floating tab bar, and that distance is only knowable from a hook.
   flagFlash: {
     position: 'absolute',
+    bottom: spacing.xl,
     alignSelf: 'center',
     backgroundColor: colors.textPrimary,
     borderRadius: radius.pill,
@@ -2380,10 +2371,9 @@ function makeStyles(t) {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // `bottom` comes from the call site (bottomInset), so the bar sits on top of the floating tab bar
-  // instead of behind it.
   moveBar: {
     position: 'absolute',
+    bottom: 0,
     left: 0,
     right: 0,
     backgroundColor: colors.card,
@@ -2402,9 +2392,9 @@ function makeStyles(t) {
     marginBottom: spacing.sm,
   },
 
-  // Shared by all four selection sheets; like moveBar, each supplies its own `bottom: bottomInset`.
   sheet: {
     position: 'absolute',
+    bottom: 0,
     left: 0,
     right: 0,
     backgroundColor: colors.card,

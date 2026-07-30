@@ -12,7 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
 import Mapbox from '@rnmapbox/maps';
@@ -25,7 +25,6 @@ import { initMapbox } from '../../../lib/mapbox';
 import CampaignChip from '../../../components/CampaignChip';
 import EffortPicker from '../../../components/EffortPicker';
 import { radius, spacing } from '../../../lib/theme';
-import { useBottomInset } from '../../../lib/useBottomInset';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { outlineRing, doorsPerAcre } from '../../../lib/bookDensity';
@@ -96,12 +95,7 @@ export default function AdminBooks() {
   const [mapReady, setMapReady] = useState(false);
   // Pullable-sheet shared values (see components/PullableSheet.jsx): opens at
   // PEEK so the promoted book stays visible; pull up for the full roster.
-  //
-  // The console tab bar floats over the scene (components/FloatingTabBar.jsx), so it costs no layout
-  // space — every bottom-anchored thing on this screen (legend, action bar, sheet peek, camera pad,
-  // list scroll) has to clear it by hand. `bottomInset` is that distance; the static styles in
-  // makeStyles can't see a hook, so it's applied inline at each usage site.
-  const bottomInset = useBottomInset();
+  const insets = useSafeAreaInsets();
   const sheetTranslateY = useSharedValue(0);
   const sheetSnapDelta = useSharedValue(1);
   const bookSheetHeight = useSharedValue(0);
@@ -560,9 +554,7 @@ export default function AdminBooks() {
       sheetSizedRef.current = false;
       return;
     }
-    // Peek clears the floating bar, so the counts + tally the peek is meant to reveal aren't the
-    // rows sitting behind it.
-    const peek = BOOK_SHEET_PEEK + bottomInset;
+    const peek = BOOK_SHEET_PEEK + insets.bottom;
     const expanded = Math.round(Dimensions.get('window').height * 0.8);
     const nextSnap = Math.max(0, expanded - peek);
     sheetSnapDelta.value = nextSnap;
@@ -574,7 +566,7 @@ export default function AdminBooks() {
       bookSheetHeight.value = withTiming(expanded, SHEET_TIMING);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapSheetBookId, bottomInset]);
+  }, [mapSheetBookId, insets.bottom]);
 
   // Promotion: ease the camera to the tapped book's doors, padded at the bottom
   // so the book lands above the sheet's PEEK height (pulling the sheet up
@@ -590,11 +582,7 @@ export default function AdminBooks() {
       if (lat < minLat) minLat = lat;
       if (lat > maxLat) maxLat = lat;
     }
-    // Same peek arithmetic as the sizing effect above — the padding has to match what the sheet
-    // actually covers (sheet peek, which now includes the floating bar) or the promoted book flies
-    // to a centre that sits behind it. Deliberately NOT in the dep array: bottomInset drops to the
-    // raw inset while the keyboard is up, and re-running would re-fly the camera on every focus.
-    const bottomPad = BOOK_SHEET_PEEK + bottomInset + 40;
+    const bottomPad = BOOK_SHEET_PEEK + insets.bottom + 40;
     if (pts.length === 1 || (minLng === maxLng && minLat === maxLat)) {
       cameraRef.current.setCamera({
         centerCoordinate: pts[0],
@@ -884,7 +872,7 @@ export default function AdminBooks() {
             </View>
           )}
           {!mapSheetBook && (
-            <View style={[styles.mapLegend, { bottom: bottomInset + spacing.lg }]}>
+            <View style={styles.mapLegend}>
               <View style={styles.legendItem}>
                 <View style={[styles.legendDot, { backgroundColor: colors.success }]} />
                 <Text style={styles.legendText}>Assigned</Text>
@@ -1011,11 +999,7 @@ export default function AdminBooks() {
           )}
         </View>
       ) : (
-      <ScrollView
-        // 96 in select mode = the action bar's own height; + bottomInset is what BOTH of them have
-        // to clear so the last card stays reachable above the floating tab bar.
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: (selectMode ? 96 : spacing.xxl) + bottomInset }}
-      >
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: selectMode ? 96 : spacing.xxl }}>
         {!cId ? (
           <Empty styles={styles}>Pick a campaign to manage book assignments.</Empty>
         ) : loading ? (
@@ -1133,7 +1117,7 @@ export default function AdminBooks() {
         // selection holds any bulk marks. Bulk marks only; field marks always survive.
         const selectedBulkMarks = selected.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
         return (
-          <View style={[styles.actionBar, { bottom: bottomInset }]}>
+          <View style={styles.actionBar}>
             <Text style={styles.actionBarText}>
               {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'} selected
             </Text>
@@ -1389,7 +1373,7 @@ function makeStyles(t) {
 
     mapLegend: {
       position: 'absolute',
-      // `bottom` is set inline at the usage site (bottomInset + spacing.lg) — see useBottomInset.
+      bottom: spacing.lg,
       left: spacing.lg,
       flexDirection: 'row',
       alignItems: 'center',
@@ -1514,19 +1498,18 @@ function makeStyles(t) {
     emptyText: { ...type.body, color: colors.textSecondary, textAlign: 'center' },
     link: { color: colors.brand, fontWeight: '700' },
 
-    // bottom action bar — `bottom` is set inline (bottomInset) so it rides ABOVE the floating tab
-    // bar. paddingBottom is plain spacing again — the old spacing.xl was a hand-rolled
-    // home-indicator pad, and bottomInset already carries the safe area.
+    // bottom action bar
     actionBar: {
       position: 'absolute',
       left: 0,
       right: 0,
+      bottom: 0,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.md,
-      paddingBottom: spacing.md,
+      paddingBottom: spacing.xl,
       backgroundColor: colors.card,
       borderTopWidth: 1,
       borderTopColor: colors.border,

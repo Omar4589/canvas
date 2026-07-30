@@ -1,8 +1,8 @@
 import { View, Pressable, StyleSheet } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, spacing } from '../lib/theme';
-import { useBottomInset } from '../lib/useBottomInset';
 import { useThemedStyles } from '../lib/useThemedStyles';
 
 export const SHEET_TIMING = { duration: 240, easing: Easing.out(Easing.cubic) };
@@ -19,14 +19,9 @@ export const SHEET_TIMING = { duration: 240, easing: Easing.out(Easing.cubic) };
 // (see the sizing effects in map.jsx / admin/books.jsx) and can derive other
 // UI from the live sheet edge (e.g. the recenter button rides
 // `sheetHeight - translateY`).
-//
-// The body's bottom pad comes from useBottomInset, not the raw safe-area inset, because this one
-// component serves both callers: on the admin Books tab it has to clear the floating tab bar, and on
-// the canvasser map (a Stack screen, no tabs) the hook returns exactly insets.bottom — so that screen
-// keeps the padding it has always had.
 export default function PullableSheet({ translateY, snapDelta, sheetHeight, children }) {
   const styles = useThemedStyles(makeStyles);
-  const bottomInset = useBottomInset();
+  const insets = useSafeAreaInsets();
   const startY = useSharedValue(0);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -62,7 +57,7 @@ export default function PullableSheet({ translateY, snapDelta, sheetHeight, chil
           <View style={styles.sheetHandle} />
         </Pressable>
       </GestureDetector>
-      <View style={[styles.sheetBody, { paddingBottom: spacing.xl + bottomInset }]}>
+      <View style={[styles.sheetBody, { paddingBottom: spacing.xl + insets.bottom }]}>
         {children}
       </View>
     </Animated.View>

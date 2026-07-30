@@ -25,7 +25,6 @@ import { timeAgo } from '../../../lib/datetime';
 import { radius, spacing, withAlpha } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../lib/useBottomInset';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
 import TabSwitcher from '../../../components/TabSwitcher';
@@ -107,10 +106,6 @@ function latestOverlapAt(o) {
 export default function AdminTimeline() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The console tab bar floats (components/FloatingTabBar.jsx) and takes no layout space, so the
-  // compare bar and the scroll bottom have to clear it themselves. makeStyles has no hook access,
-  // so the inset is applied INLINE at both sites.
-  const bottomInset = useBottomInset();
   const router = useRouter();
 
   // Campaign scoping via the shared CampaignChip (as used by Insights/Map): it
@@ -720,7 +715,7 @@ export default function AdminTimeline() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingBottom: spacing.xxl + bottomInset + (compareMode ? 72 : 0) }}
+          contentContainerStyle={{ paddingBottom: spacing.xxl + (compareMode ? 72 : 0) }}
         >
           {/* KPI group — only when there's activity to summarize. Hero = the invoice figure;
               the dedup commentary above `kpis` explains why none of these can be summed here. */}
@@ -949,7 +944,7 @@ export default function AdminTimeline() {
       {/* Compare selection bar (folded in from Insights) — floats above the floating tab bar, so
           its offset is the tab-bar inset plus the gap it always had. */}
       {compareMode ? (
-        <View style={[styles.compareBar, { bottom: bottomInset + spacing.lg }]}>
+        <View style={styles.compareBar}>
           <Text style={styles.compareCount}>{selectedIds.size} selected</Text>
           <Pressable
             onPress={openCompare}

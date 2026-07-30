@@ -162,13 +162,6 @@ export const lightColors = {
 
   backdrop: 'rgba(0,0,0,0.45)',          // modal scrims
   chromeBar: 'rgba(255,255,255,0.95)',   // translucent map top bars
-  // The floating tab bar's fill — `card` at 0.92, i.e. more transparent than chromeBar (which is
-  // tuned for a bar holding TEXT and is effectively opaque). The alpha is capped for readability,
-  // not chosen by eye: over the worst possible backdrop (black, light mode) it composites to
-  // #EBEBEB, where `textSecondary` is 4.06:1 — clear of the 3:1 floor the idle SVG icons need, but
-  // UNDER the 4.5:1 text floor. That is exactly why the bar shows a label on the active tab only,
-  // where it sits on a solid brandTint capsule instead of on this wash. See docs/THEMING.md.
-  glassBar: 'rgba(255,255,255,0.92)',
   mapLabel: '#111827',                   // Mapbox symbol label text
   mapLabelHalo: '#FFFFFF',               // Mapbox symbol label halo
   doorDot: '#6B7280',                    // assign-map density dots — neutral gray, never status-colored
@@ -229,7 +222,6 @@ export const darkColors = {
 
   backdrop: 'rgba(0,0,0,0.65)',
   chromeBar: 'rgba(17,24,39,0.95)',
-  glassBar: 'rgba(17,24,39,0.92)',       // `card` at 0.92 — composites to #242A38 over white (5.65:1)
   mapLabel: '#E5E7EB',
   mapLabelHalo: '#0B0F19',
   doorDot: '#9CA3AF',                    // assign-map density dots — neutral gray, never status-colored

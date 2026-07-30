@@ -5,7 +5,6 @@ import { loadCurrentUser } from '../../../lib/cache';
 import { useTheme } from '../../../lib/ThemeContext';
 // Shared with the admin Tabs layout — one icon set, one style.
 import { OverviewIcon, BuildingsIcon, PeopleIcon, ClockIcon, MoreIcon } from '../../../components/icons/tabIcons';
-import FloatingTabBar from '../../../components/FloatingTabBar';
 
 export default function SuperAdminLayout() {
   const { colors } = useTheme();
@@ -40,11 +39,11 @@ export default function SuperAdminLayout() {
       backBehavior="history"
       screenOptions={{
         headerShown: false,
-        // tabBarStyle / tabBarLabelStyle / the tint colors are gone: the bar is a floating pill
-        // rendered by components/FloatingTabBar.jsx, which owns its own geometry, tints and
-        // typography (and reads each screen's `title` + `tabBarIcon` from here as before).
+        tabBarActiveTintColor: colors.brand,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
       }}
-      tabBar={(props) => <FloatingTabBar {...props} />}
     >
       <Tabs.Screen
         name="index"

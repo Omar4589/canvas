@@ -17,7 +17,6 @@ import { formatExact, timeAgo } from '../../../../../lib/datetime';
 import { radius, spacing, ACTION_LABELS } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../../../lib/useBottomInset';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import PinIcon from '../../../../../components/PinIcon';
 
@@ -34,8 +33,6 @@ const ACTION_PIN = {
 export default function NotesScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -100,7 +97,7 @@ export default function NotesScreen() {
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
+      <ScrollView contentContainerStyle={styles.scroll}>
         {!range || q.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : notes.length === 0 ? (

@@ -33,12 +33,6 @@ dashboard). Five tabs:
 - **Books** — **assign/unassign books** (turf) to canvassers for the active round (see below).
 - **More** — everything else (a hub).
 
-The tab bar **floats**: a rounded, translucent pill hovering just above the bottom edge rather than a
-solid bar welded to it, so the map and the lists run the full height of the screen behind it. Tabs you
-aren't on show only their icon; **the tab you're on widens to show its name**, so exactly one label is
-ever on screen. It gets out of the way when it would be in the way — it disappears while the keyboard
-is up, and every sheet, toast and action bar sits *above* it rather than behind it.
-
 ### The Books tab
 Pick a **campaign** (and **effort**, if there's more than one — segmented for ≤3, a dropdown at 4+). It
 works the effort's **active round** — a read-only **"Pass N · active"** chip under the pickers names it
@@ -513,78 +507,6 @@ these screens in-org. `isConsoleRole` lives in [lib/role.js](../mobile/lib/role.
 **includes** `lead`) split. Gate admin *entry points* on `isConsoleUser` — the canvasser drawer's "Admin
 dashboard" row was gated on `isOrgAdmin`, which left a lead who tapped "Switch to canvass mode" with no
 way back short of restarting the app.
-
-### The floating tab bar
-
-[components/FloatingTabBar.jsx](../mobile/components/FloatingTabBar.jsx) replaces the stock docked bar
-on **both** console navigators via `tabBar={(props) => <FloatingTabBar {...props} />}` — admin
-([_layout.jsx](../mobile/app/(app)/admin/_layout.jsx)) and super-admin
-([_layout.jsx](../mobile/app/(app)/super-admin/_layout.jsx)). `tabBarStyle` / `tabBarLabelStyle` / the
-tint colors are gone from both `screenOptions`; the component owns its geometry, tints and typography
-and still reads each screen's `title` + `tabBarIcon` from the same `Tabs.Screen` options as before.
-
-An absolutely-positioned translucent **pill**: 44pt icon-only items, and the active one animates wider
-to reveal its label on a `brandTint` capsule. The two rules below are what hold it together.
-
-**Rule 1 — the translucency and the active-label-only rule are ONE decision.** `glassBar` (new token in
-[lib/theme.js](../mobile/lib/theme.js), both palettes) is `card` at **0.92**. Over the worst possible
-backdrop (black, light mode) that composites to `#EBEBEB`, where `textSecondary` is **4.06:1** — clear
-of the **3:1** floor the 24pt SVG icon strokes need as non-text, and **under the 4.5:1 text floor**.
-The one label that does show sits on a **solid** `brandTint` capsule using `brandDark` (**5.91:1**;
-raw `brand` there is 4.41:1 and fails). Inactive tint also moved `textMuted` → `textSecondary`,
-because 11pt `textMuted` on that fill is 2.13:1. **Show all five labels and the translucency stops
-being defensible** — if you want persistent labels, the fill has to go opaque first. See
-[THEMING.md](THEMING.md).
-
-**Rule 2 — `useBottomInset` is how a bottom-anchored element clears it.** A floating bar occupies **no
-layout space**, so every sheet, toast, action bar, map-camera pad and scroll bottom on a tab screen has
-to clear it explicitly or it hides behind it. The bar reports its own height through
-`BottomTabBarHeightCallbackContext`; [lib/useBottomInset.js](../mobile/lib/useBottomInset.js) is the
-single idiom that consumes it:
-
-```js
-Math.max(insets.bottom, tabBarHeight ?? 0)
-```
-
-Call sites swap `insets.bottom` for `useBottomInset()` and stop caring which kind of screen they are
-on — off a tab screen the hook returns exactly the safe-area inset, which is why one shared component
-([PullableSheet.jsx](../mobile/components/PullableSheet.jsx)) can serve the admin Books tab *and* the
-canvasser map Stack unchanged. It reads the **context**, never `useBottomTabBarHeight()`, which
-**throws** when there is no tab navigator above it (`?? 0` is the whole guard). It is applied in 32
-files today — the admin map's four selection sheets + move-pin bar + legend + style control + toasts,
-Books' action bar/legend/sheet peek/Mapbox camera padding, audit's bulk bar + both toasts, Timeline's
-compare bar, and the scroll paddings on every console screen. Two consequences worth knowing:
-
-- **Five `SafeAreaView edges={['bottom']}` wrappers in `admin/map.jsx` became plain `View`s** — the
-  reported height already contains the safe-area inset, so keeping both double-padded them.
-- **Anything inside a `<Modal>` was deliberately left alone.** A `Modal` is its own native window; the
-  tab bar isn't in it, so there is nothing to clear (the same reason `MetricSheet` owns its own
-  `GestureHandlerRootView`).
-
-Implementation notes that are easy to get wrong a second time:
-
-- It **filters `state.routes`**. The 21 `href:null` admin screens are still real entries (26 routes, 5
-  tabs); expo-router hides them by stamping `tabBarItemStyle: { display: 'none' }` and **strips
-  `href` off the options**, so flattening that style is the only signal available. The stock bar
-  renders all 26 and lets them collapse; a custom bar must filter — while keeping each route's
-  original index, because `state.index` indexes `state.routes`, never the filtered array.
-- **The pill's width never changes.** One shared transition value drives a cross-fade between two
-  slots with per-item weights that always sum to exactly 1, so there is no layout pass and no
-  reflowing shadow, and tab 0 → tab 4 cross-fades those two directly instead of smearing every label
-  in between. The label slot is measured once from the longest label in a hidden `Text`, so it
-  re-measures for free on a theme or OS-font-scale change. It reuses `SHEET_TIMING` from
-  `PullableSheet` rather than introducing a spring.
-- **It hides itself while the keyboard is up** (a floating bar would hover *over* a raised keyboard
-  instead of being pushed by the window) and reports height 0 while gone, so bottom-anchored elements
-  reclaim the space — which is why `audit.jsx`'s bulk-bar note input needs nothing extra.
-- When the focused route is one of the hidden screens, `activeSlot` is `-1`: the highlight **stays on
-  the tab you came from**, and a cold deep-link straight into a hidden screen seeds slot 0, preserving
-  the invariant that exactly one item is ever lit.
-
-**True backdrop blur is deferred, on purpose.** `expo-blur` is a **native module**, so adding it moves
-the EAS fingerprint — four builds and four store submissions ([mobile/README.md](../mobile/README.md)).
-The `tabBarBackground` slot is already rendered (and empty) inside the pill's clipped bounds, so the
-future change is **one option per layout** and no edit to this file.
 
 ## The Books screen
 [app/(app)/admin/books.jsx](../mobile/app/(app)/admin/books.jsx) — the active round's books, assignable

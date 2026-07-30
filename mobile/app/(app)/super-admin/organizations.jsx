@@ -30,7 +30,6 @@ import LiveStatus from '../../../components/LiveStatus';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { useBottomInset } from '../../../lib/useBottomInset';
 
 // The Orgs tab — THE org surface (merged from the old Control Room org cards + this screen's
 // lifecycle actions). Reads platform-overview (the richer payload: active-now, last activity,
@@ -53,8 +52,6 @@ function billingTag(b) {
 export default function OrganizationsScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  // The floating tab bar overlays this screen, so bottom padding must clear it.
-  const bottomInset = useBottomInset();
   // Android's system nav bar overlaps bottom sheets without this inset (item D8).
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -164,7 +161,7 @@ export default function OrganizationsScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
