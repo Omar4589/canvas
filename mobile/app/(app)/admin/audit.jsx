@@ -337,7 +337,7 @@ export default function AdminAudit() {
 
   // Both toasts sit at the same height: clear of the tab bar normally, clear of the bulk bar while
   // selection mode is up (an error flash can coexist with the bar).
-  const flashBottom = selectMode ? FLASH_OVER_BULK_BAR : spacing.md;
+  const flashBottom = selectMode ? FLASH_OVER_BULK_BAR : spacing.xl;
 
   // Total is the group's hero; Open leads the rows and gets the caution chip when nonzero
   // (the only judgment call on this screen — everything else is a plain count by flag type).
@@ -443,7 +443,10 @@ export default function AdminAudit() {
           <ActivityIndicator color={colors.brand} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: selectMode ? 260 : spacing.xxl }}>
+        // flex:1 keeps this scroller's content height OUT of the column's flex base sum, so the
+        // filter strips above can't be crushed by a long flag list. See timeline.jsx for the full
+        // mechanism.
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: selectMode ? 260 : spacing.xxl }}>
           <View style={styles.groupWrap}>
             <InsetGroup>
               <InsetHeroRow
@@ -632,16 +635,20 @@ function makeStyles(t) {
       paddingHorizontal: spacing.sm,
     },
     selectRowAction: { fontSize: 13, fontWeight: '700', color: colors.brand },
-    // `bottom` is set inline (the tab-bar inset), which also carries the home-indicator clearance
-    // this bar used to hand-roll as an oversized paddingBottom.
-    bulkBarWrap: { position: 'absolute', left: 0, right: 0 },
+    // Keep `bottom` HERE. An absolutely-positioned child with neither bottom nor top is pinned by
+    // Yoga to the container's flex start — the TOP of the screen, over the header — not statically
+    // positioned. Both this and the paddingBottom below briefly regressed when the floating tab
+    // bar was reverted and the inline values went with it.
+    bulkBarWrap: { position: 'absolute', left: 0, right: 0, bottom: 0 },
     bulkBar: {
       backgroundColor: colors.card,
       borderTopWidth: 1,
       borderTopColor: colors.border,
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.md,
-      paddingBottom: spacing.md,
+      // xl, not md: the bar sits flush at the screen edge, so this padding is what clears the
+      // home indicator.
+      paddingBottom: spacing.xl,
       gap: spacing.sm,
     },
     bulkHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
@@ -673,7 +680,8 @@ function makeStyles(t) {
     bulkBtnDisabled: { opacity: 0.5 },
     bulkBtnText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
     bulkBtnTextDanger: { color: colors.danger },
-    // `bottom` is set inline (flashBottom) — it depends on the tab-bar inset and the bulk bar.
+    // `bottom` is supplied inline (flashBottom): the toast lifts clear of the bulk bar in select
+    // mode and sits at the screen edge otherwise.
     flash: {
       position: 'absolute',
       alignSelf: 'center',

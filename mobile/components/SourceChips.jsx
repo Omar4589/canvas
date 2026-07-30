@@ -13,6 +13,11 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 export default function SourceChips({ sources, selected, onToggle }) {
   const styles = useThemedStyles(makeStyles);
   return (
+    // ⚠️ This root carries RN's ScrollView defaults (flexGrow:1 AND flexShrink:1) — it renders
+    // correctly only because its one call site (notes.jsx) sits INSIDE a vertical scroller's
+    // content, where no flex deficit can exist. Drop it straight into a screen's flex column and
+    // it will stretch or get crushed like TabSwitcher's pills did — read the rule at the top of
+    // TabSwitcher.jsx before adding a call site.
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}

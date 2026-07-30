@@ -12,6 +12,22 @@ export default function TabSwitcher({ tabs, activeKey, onChange }) {
     // screen flex columns; without it the pills stretched to fill leftover height (tall
     // pills on empty screens) or got compressed below content height (clipped descenders,
     // the Help-center screenshot bug).
+    //
+    // ⚠️ THE OTHER HALF IS THE CALLER'S JOB, and it is not optional. RN also puts flexShrink:1
+    // on every ScrollView, and there is deliberately NO flexShrink:0 here: flexShrink is
+    // MAIN-AXIS only, and this component is used in both orientations. In a column, shrink:1 is
+    // the bug; in a row (app/(app)/map.jsx's controlRow) it is load-bearing — pinning it there
+    // clips the Sort chip off the right edge with no gesture to recover it. No single value is
+    // correct, so the fix lives where the axis is known:
+    //
+    //   Any vertical ScrollView that is a SIBLING of this strip in a screen's flex column MUST
+    //   carry style={{ flex: 1 }}. Otherwise that scroller's CONTENT height enters the column's
+    //   flex base sum, and Yoga shares the deficit out by flexBasis — crushing these 42pt pills
+    //   to ~13pt as soon as the screen has data.
+    //
+    // Reference: admin/overlaps.jsx (column, always had flex:1, never had the bug) and
+    // admin/books.jsx (row context, uses flexShrink:0 at the call site instead). This has now
+    // bitten three screens — Help center, books, timeline. Check the sibling before you add one.
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}

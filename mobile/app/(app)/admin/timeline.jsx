@@ -549,48 +549,14 @@ export default function AdminTimeline() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
+      {/* LiveStatus + tz live in the title row (audit.jsx's shape — its right cell holds the
+          flag legend the same way). They used to sit in `controls` as a right-hand cell, which
+          silently wrapped the whole row to two lines on EVERY width: stepper + metric toggle
+          (~324pt) plus LiveStatus at its widest ("Paused" + Refresh, ~168pt) need ~500pt. The
+          24pt pill fits inside the title band, so this costs no height at all. */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Timeline</Text>
-      </View>
-      <View style={styles.chipWrap}>
-        <CampaignChip value={campaign} onChange={setCampaign} />
-      </View>
-
-      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} />
-
-      {/* Stepper (single-day) + metric toggle + live pill */}
-      <View style={styles.controls}>
-        <View style={styles.controlsLeft}>
-          {isSingleDay ? (
-            <View style={styles.stepper}>
-              <Pressable onPress={() => stepDay(-1)} style={styles.stepBtn} hitSlop={6}>
-                <Text style={styles.stepBtnText}>‹</Text>
-              </Pressable>
-              <Text style={styles.dayLabel}>{fmtDay(fromDay)}</Text>
-              <Pressable
-                onPress={() => stepDay(1)}
-                disabled={fromDay >= today}
-                style={[styles.stepBtn, fromDay >= today && styles.stepBtnDisabled]}
-                hitSlop={6}
-              >
-                <Text style={styles.stepBtnText}>›</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          <View style={styles.toggle}>
-            {['knocks', 'surveys'].map((m) => {
-              const active = m === metric;
-              return (
-                <Pressable key={m} onPress={() => setMetric(m)} style={[styles.pill, active && styles.pillActive]}>
-                  <Text style={[styles.pillText, active && styles.pillTextActive]}>
-                    {m === 'knocks' ? 'Knocks' : 'Surveys'}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-        <View style={styles.controlsRight}>
+        <View style={styles.headerRight}>
           {includesToday ? (
             <LiveStatus
               live={live}
@@ -601,6 +567,44 @@ export default function AdminTimeline() {
             />
           ) : null}
           {data.tzAbbrev ? <Text style={styles.tzText}>{data.tzAbbrev}</Text> : null}
+        </View>
+      </View>
+      <View style={styles.chipWrap}>
+        <CampaignChip value={campaign} onChange={setCampaign} />
+      </View>
+
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} />
+
+      {/* Stepper (single-day) + metric toggle. One flat row — the live pill moved up to the
+          title band, which is what lets this fit on a single line again (~324pt of 343). */}
+      <View style={styles.controls}>
+        {isSingleDay ? (
+          <View style={styles.stepper}>
+            <Pressable onPress={() => stepDay(-1)} style={styles.stepBtn} hitSlop={6}>
+              <Text style={styles.stepBtnText}>‹</Text>
+            </Pressable>
+            <Text style={styles.dayLabel}>{fmtDay(fromDay)}</Text>
+            <Pressable
+              onPress={() => stepDay(1)}
+              disabled={fromDay >= today}
+              style={[styles.stepBtn, fromDay >= today && styles.stepBtnDisabled]}
+              hitSlop={6}
+            >
+              <Text style={styles.stepBtnText}>›</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        <View style={styles.toggle}>
+          {['knocks', 'surveys'].map((m) => {
+            const active = m === metric;
+            return (
+              <Pressable key={m} onPress={() => setMetric(m)} style={[styles.pill, active && styles.pillActive]}>
+                <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                  {m === 'knocks' ? 'Knocks' : 'Surveys'}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
@@ -630,32 +634,10 @@ export default function AdminTimeline() {
         </Pressable>
       </View>
 
-      {/* Hide-inactive + compare + CSV export */}
-      <View style={styles.toggleRow}>
-        <View style={styles.toggleItem}>
-          <Switch
-            value={hideInactive}
-            onValueChange={setHideInactive}
-            trackColor={{ true: colors.brand, false: colors.border }}
-            thumbColor={colors.card}
-          />
-          <Text style={styles.toggleLabel}>Hide inactive</Text>
-        </View>
-        <Pressable
-          onPress={() => {
-            setCompareMode((v) => !v);
-            setSelectedIds(new Set());
-          }}
-          style={[styles.actionBtn, compareMode && styles.actionBtnActive]}
-        >
-          <Text style={[styles.actionBtnText, compareMode && styles.actionBtnTextActive]}>
-            {compareMode ? 'Cancel' : 'Compare'}
-          </Text>
-        </Pressable>
-        <Pressable onPress={exportCsv} style={styles.actionBtn}>
-          <Text style={styles.actionBtnText}>Export CSV</Text>
-        </Pressable>
-      </View>
+      {/* Hide-inactive / Compare / Export CSV have no row of their own any more — all three are
+          secondary, and their 42pt row was the one band whose every control could move behind a
+          single affordance. They live in the sort button's sheet ("View options") below; compare
+          mode's EXIT lives on the compare bar itself, which the mode puts on screen. */}
 
       {/* Both filters live in the FIXED header, ABOVE the loading/error/invalid-range branch — a
           control that can empty the screen must never live inside the thing it empties, or there is
@@ -714,7 +696,15 @@ export default function AdminTimeline() {
           <ActivityIndicator color={colors.brand} />
         </View>
       ) : (
+        // flex:1 is LOAD-BEARING, not cosmetic. RN gives every ScrollView flexShrink:1 with a
+        // flexBasis of `auto`, so without this the scroller's CONTENT height entered this column's
+        // flex base sum — and Yoga shares the resulting deficit out by flexBasis, which crushed the
+        // 42pt filter strips above to ~13pt and sheared their labels off the moment a date had data.
+        // flex:1 resolves flexBasis to 0, so there is no deficit to share. Same shape as
+        // overlaps.jsx, which never had the bug. Any scroller that is a SIBLING in a screen's flex
+        // column needs this.
         <ScrollView
+          style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: spacing.xxl + (compareMode ? 72 : 0) }}
         >
           {/* KPI group — only when there's activity to summarize. Hero = the invoice figure;
@@ -941,11 +931,21 @@ export default function AdminTimeline() {
         </ScrollView>
       )}
 
-      {/* Compare selection bar (folded in from Insights) — floats above the floating tab bar, so
-          its offset is the tab-bar inset plus the gap it always had. */}
+      {/* Compare selection bar (folded in from Insights). Cancel lives HERE, not in the header:
+          the old header button was the mode's only exit, and it moved into the View-options
+          sheet — the bar the mode itself puts on screen is the right place for the way out. */}
       {compareMode ? (
         <View style={styles.compareBar}>
           <Text style={styles.compareCount}>{selectedIds.size} selected</Text>
+          <Pressable
+            onPress={() => {
+              setCompareMode(false);
+              setSelectedIds(new Set());
+            }}
+            hitSlop={8}
+          >
+            <Text style={styles.compareCancel}>Cancel</Text>
+          </Pressable>
           <Pressable
             onPress={openCompare}
             disabled={selectedIds.size < 2}
@@ -964,25 +964,66 @@ export default function AdminTimeline() {
       >
         <Pressable style={styles.modalBackdrop} onPress={() => setSortMenuOpen(false)}>
           <Pressable style={styles.sortSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.sortSheetTitle}>Sort by</Text>
-            {SORT_OPTIONS.map((opt) => {
-              const active = opt.key === sortKey;
-              return (
-                <Pressable
-                  key={opt.key}
-                  onPress={() => {
-                    setSortKey(opt.key);
-                    setSortMenuOpen(false);
-                  }}
-                  style={[styles.sortOpt, active && styles.sortOptActive]}
-                >
-                  <Text style={[styles.sortOptText, active && styles.sortOptTextActive]}>
-                    {active ? '✓ ' : '  '}
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+            <Text style={styles.sortSheetTitle}>View options</Text>
+            {/* grow 0 / shrink 1, ON PURPOSE: the card is content-sized while it fits, and when
+                it hits its maxHeight the whole deficit lands on this scroller — the only
+                shrinkable child — so the options scroll instead of the last rows clipping under
+                Larger Text. This is the exact flex mechanism documented in TabSwitcher.jsx,
+                pointed the direction we want. */}
+            <ScrollView style={{ flexGrow: 0, flexShrink: 1 }}>
+              <Text style={styles.sheetSection}>Sort by</Text>
+              {SORT_OPTIONS.map((opt) => {
+                const active = opt.key === sortKey;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    onPress={() => {
+                      setSortKey(opt.key);
+                      setSortMenuOpen(false);
+                    }}
+                    style={[styles.sortOpt, active && styles.sortOptActive]}
+                  >
+                    <Text style={[styles.sortOptText, active && styles.sortOptTextActive]}>
+                      {active ? '✓ ' : '  '}
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <View style={styles.sheetDivider} />
+              <Text style={styles.sheetSection}>Show</Text>
+              <View style={styles.sheetSwitchRow}>
+                <Text style={styles.sortOptText}>Hide inactive</Text>
+                <Switch
+                  value={hideInactive}
+                  onValueChange={setHideInactive}
+                  trackColor={{ true: colors.brand, false: colors.border }}
+                  thumbColor={colors.card}
+                />
+              </View>
+              <View style={styles.sheetDivider} />
+              <Pressable
+                style={styles.sortOpt}
+                onPress={() => {
+                  setSortMenuOpen(false);
+                  setCompareMode((v) => !v);
+                  setSelectedIds(new Set());
+                }}
+              >
+                <Text style={styles.sortOptText}>
+                  {compareMode ? 'Cancel compare' : 'Compare canvassers'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.sortOpt}
+                onPress={() => {
+                  setSortMenuOpen(false);
+                  exportCsv();
+                }}
+              >
+                <Text style={styles.sortOptText}>Export CSV</Text>
+              </Pressable>
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1004,24 +1045,29 @@ function makeStyles(t) {
     // Left-aligned at type.title, matching the campaign and canvasser screens this sits
     // beside. No back link here — Timeline is a tab root, not a drill-in — so it is the
     // title alone rather than the stacked back-link + title those two use.
+    // Row, like audit.jsx's header: the title on the left, LiveStatus + tz on the right. The
+    // wrap is Larger-Text safety (wrap, don't clip) — at normal type the row needs ~268pt of 343.
     header: {
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
-    },
-    headerTitle: { ...type.title },
-    chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-
-    controls: {
-      paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.sm,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: spacing.sm,
       flexWrap: 'wrap',
     },
-    controlsLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
-    controlsRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    headerTitle: { ...type.title },
+    headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xs },
+
+    controls: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.xs,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      flexWrap: 'wrap',
+    },
     stepper: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     stepBtn: {
       paddingHorizontal: spacing.md,
@@ -1054,7 +1100,7 @@ function makeStyles(t) {
       alignItems: 'center',
       paddingHorizontal: spacing.lg,
       gap: spacing.sm,
-      paddingBottom: spacing.sm,
+      paddingBottom: spacing.xs,
     },
     searchWrap: {
       flex: 1,
@@ -1080,27 +1126,6 @@ function makeStyles(t) {
     },
     sortBtnText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
 
-    toggleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.sm,
-      gap: spacing.sm,
-    },
-    toggleItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-    toggleLabel: { ...type.caption, color: colors.textSecondary },
-    actionBtn: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderRadius: radius.md,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    actionBtnActive: { backgroundColor: colors.danger, borderColor: colors.danger },
-    actionBtnText: { ...type.caption, color: colors.textPrimary, fontWeight: '700' },
-    actionBtnTextActive: { color: colors.textInverse },
-
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
     groupWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
 
@@ -1124,11 +1149,15 @@ function makeStyles(t) {
     totalCell: { backgroundColor: colors.bg, borderBottomWidth: 0, borderTopWidth: 1, borderTopColor: colors.border },
     totalText: { fontSize: 12, fontWeight: '800', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
 
-    // `bottom` is set inline — it depends on the floating tab bar's inset.
     compareBar: {
       position: 'absolute',
       left: spacing.lg,
       right: spacing.lg,
+      // Keep `bottom` HERE. An absolutely-positioned child with no bottom AND no top is not
+      // statically positioned by Yoga — it gets pinned to the container's flex start, i.e. the
+      // TOP of the screen, over the header. This style briefly lost its bottom when the floating
+      // tab bar was reverted and the inline value went with it.
+      bottom: spacing.lg,
       backgroundColor: colors.textPrimary,
       borderRadius: radius.lg,
       padding: spacing.md,
@@ -1137,6 +1166,14 @@ function makeStyles(t) {
       ...shadow.raised,
     },
     compareCount: { color: colors.textInverse, fontWeight: '700', flex: 1 },
+    // Padded to a real target — this is now the mode's only exit.
+    compareCancel: {
+      color: colors.textInverse,
+      fontWeight: '700',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm,
+      marginRight: spacing.xs,
+    },
     compareGo: {
       backgroundColor: colors.brand,
       borderRadius: radius.md,
@@ -1159,10 +1196,35 @@ function makeStyles(t) {
       padding: spacing.lg,
       width: '100%',
       maxWidth: 320,
+      // ~11 rows now (sort + show + actions) — cap the card and let its inner scroller absorb
+      // the overflow, or the last rows clip under Larger Text on a 667pt device.
+      maxHeight: '85%',
       ...shadow.raised,
     },
     sortSheetTitle: { ...type.h3, marginBottom: spacing.sm },
-    sortOpt: { paddingVertical: spacing.md, paddingHorizontal: spacing.sm, borderRadius: radius.md },
+    // type.micro defaults to textMuted (2.54:1 on card) — textSecondary, per the house rule.
+    sheetSection: {
+      ...type.micro,
+      color: colors.textSecondary,
+      marginTop: spacing.xs,
+      marginBottom: spacing.xs,
+      paddingHorizontal: spacing.sm,
+    },
+    sheetDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: spacing.sm },
+    sheetSwitchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.sm,
+      minHeight: 44,
+    },
+    sortOpt: {
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.sm,
+      borderRadius: radius.md,
+      minHeight: 44, // the touch-target floor; padding alone left these at ~42pt
+      justifyContent: 'center',
+    },
     sortOptActive: { backgroundColor: colors.brandTint },
     sortOptText: { ...type.body },
     sortOptTextActive: { color: colors.brand, fontWeight: '700' },

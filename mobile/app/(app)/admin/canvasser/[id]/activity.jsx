@@ -156,7 +156,9 @@ export default function ActivityFeed() {
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      {/* flex:1 keeps this scroller's content height out of the column's flex base sum, so the
+          action pills above can't be crushed. See admin/timeline.jsx for the mechanism. */}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {q.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : activities.length === 0 ? (

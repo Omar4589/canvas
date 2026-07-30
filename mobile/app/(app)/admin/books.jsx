@@ -39,6 +39,12 @@ const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true
 // (the map owns the screen); expanded gives the roster real room.
 const BOOK_SHEET_PEEK = 220;
 
+// Scroll clearance for the select-mode action bar, which is now a two-row stack (label row +
+// wrapping button row): paddingTop 12 + label ~17 + gap 8 + 44pt buttons + paddingBottom 24
+// ≈ 105pt one-row, ~153pt with the buttons wrapped. An over-estimate is invisible at the
+// bottom of a scroll list; an under-estimate occludes the last book card.
+const ACTION_BAR_CLEARANCE = 160;
+
 const BOOK_STATUS_CHIPS = [
   { key: 'assigned', label: 'Assigned' },
   { key: 'unassigned', label: 'Unassigned' },
@@ -999,7 +1005,7 @@ export default function AdminBooks() {
           )}
         </View>
       ) : (
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: selectMode ? 96 : spacing.xxl }}>
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: selectMode ? ACTION_BAR_CLEARANCE : spacing.xxl }}>
         {!cId ? (
           <Empty styles={styles}>Pick a campaign to manage book assignments.</Empty>
         ) : loading ? (
@@ -1121,7 +1127,7 @@ export default function AdminBooks() {
             <Text style={styles.actionBarText}>
               {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'} selected
             </Text>
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <View style={styles.actionBarBtnRow}>
               <Pressable
                 onPress={() => confirmRestrictBooks(selected)}
                 disabled={restrictPending}
@@ -1498,25 +1504,38 @@ function makeStyles(t) {
     emptyText: { ...type.body, color: colors.textSecondary, textAlign: 'center' },
     link: { color: colors.brand, fontWeight: '700' },
 
-    // bottom action bar
+    // Bottom action bar — STACK AND WRAP (audit.jsx's bulkBar shape). The old single row put
+    // four elements side by side: label + Restrict… + Unmark (N) + Assign to… needs ~451pt in a
+    // 370pt box, so Assign fell off the right edge — entirely off-screen at plural selections
+    // with big counts, with no scroll to reach it. Column + a wrapping button row can't overflow
+    // at any count or text size; the labels are documented (docs/ADMIN_APP.md) and mirror the
+    // web Turf Cutting panel, so the BAR yields, never the words. The `…` are literal
+    // opens-a-dialog characters, not truncation.
     actionBar: {
       position: 'absolute',
       left: 0,
       right: 0,
       bottom: 0,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
+      gap: spacing.sm,
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.md,
-      paddingBottom: spacing.xl,
+      paddingBottom: spacing.xl, // flush at the screen edge — this is the home-indicator clearance
       backgroundColor: colors.card,
       borderTopWidth: 1,
       borderTopColor: colors.border,
       ...shadow.raised,
     },
     actionBarText: { ...type.bodyStrong, fontSize: 14 },
-    actionBarBtn: { backgroundColor: colors.brand, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2 },
+    actionBarBtnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center' },
+    actionBarBtn: {
+      backgroundColor: colors.brand,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
+      minHeight: 44, // the touch-target floor; padding alone left these at ~37pt
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     actionBarBtnRestrict: { backgroundColor: colors.status.restricted },
     actionBarBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 14 },
 

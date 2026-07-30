@@ -142,7 +142,11 @@ export default function HelpIndex() {
         <TabSwitcher tabs={tabs} activeKey={activeAudience} onChange={setAudience} />
       ) : null}
 
+      {/* flex:1 keeps this scroller's content height out of the column's flex base sum, so the
+          audience pills above can't be crushed by a long article list — the original instance of
+          that bug. See admin/timeline.jsx for the mechanism. */}
       <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"

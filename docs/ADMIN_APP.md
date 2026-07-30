@@ -145,8 +145,12 @@ the vocabulary holds across a whole journey rather than changing shape at each t
 **The conversion is complete — and it now covers the canvasser drawer too.** Every admin screen
 speaks the grammar: More, response-details, Notes, answer-voters, Users (list), GPS audit, Overlaps,
 Timeline's scrollable
-body (its ~100 lines of pinned control chrome — stepper, metric toggle, search/sort, compare —
-deliberately stay as controls, not rows), and both canvasser sub-screens (index KPIs/highlights/
+body (its pinned control chrome — stepper, metric toggle, search/sort — deliberately stays as
+controls, not rows; the sort button's sheet is now **"View options"** and also holds the three
+secondary tools whose own header row was retired: the **Hide inactive** switch, **Compare
+canvassers**, and **Export CSV**. Compare's *exit* lives on the compare bar itself — the bar the
+mode puts on screen — and LiveStatus + the tz label sit in the title row, which is what lets the
+stepper/metric row fit on one line again), and both canvasser sub-screens (index KPIs/highlights/
 quality rows, quality tab). **Three menus that were *claimed* as converted were actually private
 forks and are now real** — the super-admin More tab
 ([super-admin/more.jsx](../mobile/app/(app)/super-admin/more.jsx)) and the canvasser drawer
@@ -299,6 +303,19 @@ filtering cannot remove the filter
 
 Both strips (walk list *and* crew) also moved **out of the `ScrollView`** and above the
 `rangeInvalid` / error / loading branches, so no state of the screen can take them away.
+
+**The layout rule that move demands** (it has now bitten three screens — Help center, Books,
+Timeline): React Native puts `flexGrow: 1, flexShrink: 1` on *every* `ScrollView`, and a vertical
+scroller with no `style` prop keeps `flexBasis: auto` — so its **content height enters the column's
+flex base sum**, and once the column overflows, Yoga shares the deficit out *scaled by flexBasis*
+across every shrinkable sibling. The 42pt pill strips (also ScrollViews, also shrinkable) got crushed
+to ~13pt the moment a date had data, shearing their labels off — while an empty date rendered them
+perfectly, which is what made the bug look data-dependent. So: **any vertical `ScrollView` that is a
+sibling in a screen's flex column carries `style={{ flex: 1 }}`** (flexBasis 0 → its content height
+never enters the base sum → no deficit exists). `TabSwitcher` itself deliberately does **not** set
+`flexShrink: 0`: flexShrink is main-axis only, and in row contexts (the canvasser map's control row)
+shrinking is load-bearing — the full reasoning lives at the top of
+[components/TabSwitcher.jsx](../mobile/components/TabSwitcher.jsx).
 
 The crew empty-state was **unreachable dead code** for the same reason: it tested
 `coordRows.length === 0`, and `const coordRows = rows` — so the generic `rows.length === 0` branch
@@ -484,7 +501,9 @@ tapped by accident; List view reaches the same action via the **⋯** in the boo
 header. Either **⋯** menu closes by tapping anywhere off it (or re-tapping the **⋯**), and it never
 carries over to the next book you open. Select mode's action bar has **Restrict…** for several books at
 once — plus **Unmark (N)** when the selection holds bulk marks, clearing them all in one action — and the
-web Turf Cutting page has the same actions on the selected-books panel. All three mobile entry points
+web Turf Cutting page has the same actions on the selected-books panel. (The bar stacks its
+"N books selected" label above a **wrapping** button row: label + three buttons in one line needed
+~451pt on a ~370pt screen, which pushed *Assign to…* off the right edge with no way to reach it.) All three mobile entry points
 share one scope-aware flow (`mobile/lib/restrictBooks.js`): when the crew has already reached doors
 (not-home / refused / wrong-address) you choose **Only unknocked** (the safe default, listed first) or
 **Every unfinished**, which takes a second confirm before it also marks the reached doors — matching the
