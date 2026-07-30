@@ -281,6 +281,41 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   **Assessment: NO published-policy sentence becomes FALSE. One published-policy sentence becomes
   INCOMPLETE — flagged above for the owner.**
 
+- *(v4 2026-07-29)* **Recorded as a NEGATIVE, plus the trap that would turn it positive: the mobile
+  Users list is now campaign-PARTITIONED, and that is NOT privacy-affecting.** Picking a campaign on
+  `mobile/app/(app)/admin/users.jsx` used to annotate and re-sort one flat list of every org member;
+  it now renders two sections — **"On this campaign (N)"** first, then **"Not on this campaign (N)"**
+  collapsed behind a reveal with the bulk-assign action inside it. Written down because "the users
+  list changed" is exactly the sentence that sends the next reviewer to the privacy checklist, and
+  the answer should not have to be re-derived.
+  **Why it clears every trigger.** No new field. No route change and **no new query parameter** — the
+  screen still calls the parameterless `GET /admin/memberships` plus
+  `GET /admin/campaigns/:id/assignments`, and the roster it partitions on was already on the client
+  from the second of those; the change is one pass over an array. Response bytes identical, recipient
+  the same already-authenticated console user, no export, no third party. The visible set is
+  **partitioned, not filtered**: every row a viewer could see before is still reachable, one tap away.
+  And the server-side lead scope is untouched — `GET /admin/memberships` still runs
+  `if (!isOrgAdmin(req)) { … leadVisibleUserIds … }` (`routes/admin/memberships.js:182-185`), so a
+  team lead's visible set is byte-identical and merely regrouped. **This narrows or holds; it never
+  widens** — the only direction that needs no review.
+  **TRAP 1 — do NOT move the partition to the server as `?campaignId=`. That WOULD be
+  privacy-affecting.** A query parameter that changes which *people* a route returns is a new access
+  path and belongs in this document. If it is ever added it must **INTERSECT** with the lead filter,
+  never replace it: `leadVisibleUserIds` narrows first, the campaign scope narrows what survives.
+  Replacing it hands a lead every member of any campaign id they can name — a real widening, and
+  precisely the shape of the "scope the query instead of filtering the result" refactor that reads as
+  tidier than what is there.
+  **TRAP 2 — `GET /admin/campaigns/:id/crew` is not a crew list and must never back a user list.**
+  Despite the name and the campaign-nested mount, the handler returns **every active membership in
+  the organization** (`routes/admin/leadCrew.js:80` — `Membership.find({ organizationId, isActive:
+  true })`), annotated with each person's coordinator *on that campaign*; the per-campaign fact it
+  adds is the coordinator, not the membership. Its purpose is to populate a picker of people you
+  *could* add. `requireCampaignManager` (`:45`) does still gate which campaign a lead may ask about,
+  so this is not a hole — but the answer it gives for that campaign is the whole org's active roster,
+  strictly wider than `leadVisibleUserIds`. Sourcing a roster from it would both show every org
+  member as if rostered and, for a lead, skip the visibility filter that exists on the list route.
+  **Assessment: NO published-policy change, and no claim in this document moves.**
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact
@@ -1318,7 +1353,7 @@ Raw `dateOfBirth` is stored (`Voter.js:45`, `Person.js:80`) and returned in full
 
 **The mobile bootstrap deliberately strips it and sends only a derived integer age** (`routes/mobile/bootstrap.js:22-38`), on the stated reasoning that *"a DOB is the most identity-theft-useful field in a voter file"* and must not sit in a volunteer's offline cache. **I verified this protection is intact: DOB is not in the offline file.**
 
-**But the protection is route-scoped, not role-scoped.** `GET /mobile/voters/:voterId` returns raw `dateOfBirth` **plus `phone` and `cellPhone`** (`services/voters/voterProfile.js:141-146`; `routes/mobile/voters.js:151`), and **that route has no role gate** — the `isAdminOrSuper` check only *widens* scope. In the shipped app the only screen calling it is inside the **admin tab** (`mobile/app/(app)/voters/[id].jsx`, reachable only from `admin/more.jsx:131` and `admin/notes.jsx:184`, behind a role redirect at `admin/_layout.jsx:102-103`), so **no canvasser-facing screen requests it**. But a canvasser's own credentials calling that endpoint directly, for a voter inside their assigned books, **would receive raw DOB and phone.** That is an authorization gap, not a product data flow.
+**But the protection is route-scoped, not role-scoped.** `GET /mobile/voters/:voterId` returns raw `dateOfBirth` **plus `phone` and `cellPhone`** (`services/voters/voterProfile.js:141-146`; `routes/mobile/voters.js:151`), and **that route has no role gate** — the `isAdminOrSuper` check only *widens* scope. In the shipped app the only screen calling it is inside the **admin tab** (`mobile/app/(app)/voters/[id].jsx`, whose only two entry points from outside its own subtree are the **"Voter search"** row in `mobile/app/(app)/admin/more.jsx` — which opens the voter list, and the list opens the detail — and the tapped-voter link on `mobile/app/(app)/admin/notes.jsx`; both sit under `admin/_layout.jsx`, which redirects anyone who is not a super-admin and fails its `isConsoleRole(activeMembership?.role)` check), so **no canvasser-facing screen requests it**. But a canvasser's own credentials calling that endpoint directly, for a voter inside their assigned books, **would receive raw DOB and phone.** That is an authorization gap, not a product data flow. *[2026-07-29: this sentence used to pin three MOBILE line numbers (`more.jsx:131`, `notes.jsx:184`, `_layout.jsx:102-103`); every one of them had rotted — the rows and the gate had moved. **Cite a mobile entry point by its row LABEL and a gate by its predicate, never by line number.** The server-side pins in this paragraph are left as-is: they name a function in a service, which is stable. Re-verify by grepping `(app)/voters` outside `app/(app)/voters/` (two hits, both listed above) and `isConsoleRole` in the admin layout.]*
 
 > **Do NOT write:** *"Dates of birth are never sent to canvasser devices"* (the API path is not blocked) **and do NOT write** *"canvassers' phones receive dates of birth"* (no canvasser screen requests them). **Write:** *"Dates of birth are stored and are visible to administrators and team leads. They are deliberately excluded from the offline data downloaded to a canvasser's device, which carries only a derived age."*
 

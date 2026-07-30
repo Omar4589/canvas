@@ -74,11 +74,18 @@ export default function InsetGroup({ children }) {
 
 // The shared row interior. Private, and `styles` is passed IN rather than re-derived: a
 // 40-row roster must not run the theme hook twice per row.
-function RowBody({ label, labelLines, unit, value, sub, subAccent, accentColor, chipColors, badge, styles }) {
+function RowBody({ label, labelLines, unit, value, sub, subAccent, accentColor, chipColors, badge, emphasis, styles }) {
   return (
     <View style={styles.rowText}>
       <View style={styles.labelLine}>
-        <Text style={styles.rowLabel} numberOfLines={labelLines}>
+        <Text
+          style={[
+            styles.rowLabel,
+            emphasis === 'menu' && styles.rowLabelMenu,
+            emphasis === 'hero' && styles.rowLabelHero,
+          ]}
+          numberOfLines={labelLines}
+        >
           {label}
         </Text>
         {badge ? (
@@ -140,6 +147,14 @@ export function InsetRow({ label, labelLines, unit, value, sub, subAccent, accen
 // (b) NAVIGATES. Chevron + press wash. `accessory` is a full-width node UNDER the text block
 // but INSIDE the press target — a share bar, a coverage bar. It gets the row's full width
 // because a proportional bar loses DATA when it is squeezed into a label column.
+//
+// `emphasis` is the row's TYPOGRAPHIC WEIGHT, not a new row kind — the tap still answers
+// "navigates", so the three-kinds rule above is untouched. Three steps, because the app has three
+// jobs for a nav row: a datum you read (default), a MENU destination you tap ('menu' — 15/600, the
+// More tabs and the canvasser drawer), and the ONE identity row a settings screen opens with
+// ('hero' — 16/600, taller, 22pt chevron: the account row). It is threaded through THIS kind only,
+// so the metric rows on every converted screen are structurally unable to change weight. Don't add
+// a fourth step for a one-off.
 export function InsetNavRow({
   label,
   labelLines,
@@ -152,6 +167,7 @@ export function InsetNavRow({
   badge,
   leading,
   accessory,
+  emphasis,
   onPress,
   hint,
   disabled,
@@ -166,15 +182,24 @@ export function InsetNavRow({
       accessibilityState={{ disabled: !!disabled }}
       accessibilityLabel={accessibilityLabel || a11yLabel(label, value, unit, sub, subAccent)}
       accessibilityHint={hint}
-      style={({ pressed }) => [styles.navRow, disabled && styles.rowDisabled, pressed && styles.rowPressed]}
+      style={({ pressed }) => [
+        styles.navRow,
+        emphasis === 'hero' && styles.navRowHero,
+        disabled && styles.rowDisabled,
+        pressed && styles.rowPressed,
+      ]}
     >
       <View style={styles.navTop}>
         {leading}
-        <RowBody {...{ label, labelLines, unit, sub, subAccent, accentColor, badge, styles }} />
+        <RowBody {...{ label, labelLines, unit, sub, subAccent, accentColor, badge, emphasis, styles }} />
         <RowValue {...{ value, chipColors, styles }} />
         {/* A text glyph, not an SVG: the app has no icon library and already writes its
             chevrons this way (SectionHeader's "See all ›"). */}
-        <Text style={styles.chev} accessibilityElementsHidden importantForAccessibility="no">
+        <Text
+          style={[styles.chev, emphasis === 'hero' && styles.chevHero]}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
           ›
         </Text>
       </View>
@@ -186,7 +211,12 @@ export function InsetNavRow({
 // (c) ACTS IN PLACE. Tinted, no chevron — the convention for "does something here" as opposed
 // to "goes elsewhere". `tone="danger"` for destructive verbs (sign out, delete) — same shape,
 // danger tint, so a destructive action never reads like navigation either.
-export function InsetActionRow({ label, onPress, disabled, tone = 'brand' }) {
+//
+// `leading` takes the same glyph slot the other two kinds have. Without it an action row sitting in
+// a group of icon rows starts its label at 16pt while every neighbour starts at 52 (16 padding + a
+// 24pt glyph + a 12pt gap) — a visible jog, which is exactly what Sign out looked like. This is a
+// slot, not a fourth answer to "what does a tap do", so the three-kinds rule above still holds.
+export function InsetActionRow({ label, leading, onPress, disabled, tone = 'brand' }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
@@ -196,10 +226,19 @@ export function InsetActionRow({ label, onPress, disabled, tone = 'brand' }) {
       accessibilityLabel={label}
       style={({ pressed }) => [styles.row, disabled && styles.rowDisabled, pressed && styles.rowPressed]}
     >
+      {leading}
       <Text style={[styles.actionLabel, tone === 'danger' && styles.actionLabelDanger]}>{label}</Text>
     </Pressable>
   );
 }
+
+// A row's leading glyph. The app has no icon library — an emoji in a fixed 24pt box is the
+// convention (the chevrons are text glyphs for the same reason). The FIXED WIDTH is the point:
+// every label in a group then starts at the same x, which is the whole job of the slot.
+export const RowEmoji = ({ children }) => {
+  const styles = useThemedStyles(makeStyles);
+  return <Text style={styles.rowEmoji}>{children}</Text>;
+};
 
 // The group's headline number: small caps label over a large tabular value. `subAccent` /
 // `accentColor` mirror InsetRow's: a trailing sub-line fragment that carries the color, so a
@@ -337,6 +376,8 @@ function makeStyles(t) {
     },
     // A nav row stacks: [leading | text | value | chevron] on top, accessory underneath.
     navRow: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, minHeight: 44 },
+    // The identity row a settings screen opens with — the old standalone account card's height.
+    navRowHero: { paddingVertical: spacing.md },
     navTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
     accessory: { marginTop: spacing.xs },
     rowPressed: { backgroundColor: colors.sunken },
@@ -346,11 +387,17 @@ function makeStyles(t) {
     rowText: { flex: 1 },
     labelLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     rowLabel: { ...type.body, color: colors.textPrimary, flexShrink: 1 },
+    // `type.body` is 15pt and `type.bodyStrong` is 15/600, so the menu step is exactly the weight.
+    rowLabelMenu: { fontWeight: '600' },
+    rowLabelHero: { ...type.h3 },
+    // Sized to match the label column's origin: see RowEmoji.
+    rowEmoji: { fontSize: 18, width: 24, textAlign: 'center' },
     rowValue: { ...type.bodyStrong, fontVariant: ['tabular-nums'], color: colors.textPrimary },
     // type.caption is already 13/textSecondary (4.83:1). textMuted here would be 2.54:1.
     sub: { ...type.caption, marginTop: 1 },
     subAccent: { fontWeight: '600', fontVariant: ['tabular-nums'] },
     chev: { ...type.body, color: colors.textMuted, marginLeft: -spacing.xs },
+    chevHero: { fontSize: 22 },
 
     chip: {
       paddingHorizontal: spacing.sm,
@@ -371,7 +418,8 @@ function makeStyles(t) {
     },
     badgeText: { ...type.micro, color: colors.dangerFg },
 
-    actionLabel: { ...type.bodyStrong, color: colors.brand },
+    // flexShrink so a long verb wraps rather than pushing a `leading` glyph out of the row.
+    actionLabel: { ...type.bodyStrong, color: colors.brand, flexShrink: 1 },
     actionLabelDanger: { color: colors.danger },
 
     titleRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },

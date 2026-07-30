@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -12,35 +12,28 @@ import {
 } from '../../../lib/cache';
 import Logo from '../../../components/Logo';
 import ThemeToggle from '../../../components/ThemeToggle';
-import { useTheme } from '../../../lib/ThemeContext';
+import InsetGroup, {
+  InsetNavRow,
+  InsetActionRow,
+  RowEmoji,
+} from '../../../components/InsetGroup';
+import SectionHeader from '../../../components/SectionHeader';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import { radius, spacing } from '../../../lib/theme';
+import { useBottomInset } from '../../../lib/useBottomInset';
+import { spacing } from '../../../lib/theme';
 
 // The super-admin More tab — the platform twin of admin/more.jsx, and the new home for the
-// actions that used to be orphaned on the Control Room header (sign-out, theme). Row pattern
-// matches the admin More exactly.
-function Row({ icon, label, sub, onPress, danger }) {
-  const { colors } = useTheme();
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
-    >
-      <Text style={styles.rowIcon}>{icon}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.rowLabel, danger && { color: colors.danger }]}>{label}</Text>
-        {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
-      </View>
-      <Text style={styles.rowChevron}>›</Text>
-    </Pressable>
-  );
-}
-
+// actions that used to be orphaned on the Control Room header (sign-out, theme). It renders the
+// SHARED inset-group grammar (components/InsetGroup.jsx), not a local Row: this file used to keep a
+// verbatim copy of the admin More's Row, so "matches the admin More exactly" was a claim about a
+// fork, and it drifted the moment that screen changed. Change the row look in InsetGroup and all
+// three menus (here, admin More, CanvasserDrawer) move together.
 export default function SuperAdminMore() {
   const router = useRouter();
   const qc = useQueryClient();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -62,6 +55,8 @@ export default function SuperAdminMore() {
     router.replace('/(app)/select-org');
   }
 
+  const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
@@ -69,45 +64,46 @@ export default function SuperAdminMore() {
         <Text style={styles.headerLabel}>More</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
-        <Pressable
-          onPress={() => router.push('/(app)/profile')}
-          style={({ pressed }) => [styles.accountCard, pressed && { opacity: 0.85 }]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.accountName}>
-              {user?.firstName || ''} {user?.lastName || ''}
-            </Text>
-            <Text style={styles.accountEmail}>{user?.email || ''}</Text>
-          </View>
-          <Text style={styles.accountChevron}>›</Text>
-        </Pressable>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}>
+        <View style={{ marginTop: spacing.xs }}>
+          <InsetGroup>
+            <InsetNavRow
+              emphasis="hero"
+              label={fullName || user?.email || 'Your account'}
+              sub={fullName ? user?.email : null}
+              hint="Opens your profile"
+              onPress={() => router.push('/(app)/profile')}
+            />
+          </InsetGroup>
+        </View>
 
-        <Text style={styles.sectionLabel}>Platform</Text>
-        <View style={styles.group}>
-          <Row
-            icon="✉️"
+        <SectionHeader caption title="Platform" />
+        <InsetGroup>
+          <InsetNavRow
+            emphasis="menu"
+            leading={<RowEmoji>✉️</RowEmoji>}
             label="Emails"
             sub="Transactional send log"
             onPress={() => router.push('/(app)/super-admin/emails')}
           />
-        </View>
+        </InsetGroup>
 
-        <Text style={styles.sectionLabel}>Support</Text>
-        <View style={styles.group}>
-          <Row icon="❓" label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
-        </View>
+        <SectionHeader caption title="Support" />
+        <InsetGroup>
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>❓</RowEmoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
+        </InsetGroup>
 
-        <Text style={styles.sectionLabel}>Appearance</Text>
-        <View style={styles.appearanceGroup}>
+        <SectionHeader caption title="Appearance" />
+        {/* Bare, like the admin More — ThemeToggle is its own bordered segment. */}
+        <View style={styles.appearanceWrap}>
           <ThemeToggle />
         </View>
 
-        <Text style={styles.sectionLabel}>Account</Text>
-        <View style={styles.group}>
-          <Row icon="🔁" label="Switch into an organization" sub="Leave platform view" onPress={onSwitchOrg} />
-          <Row icon="↩︎" label="Sign out" onPress={onLogout} danger />
-        </View>
+        <SectionHeader caption title="Account" />
+        <InsetGroup>
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Switch into an organization" sub="Leave platform view" onPress={onSwitchOrg} />
+          <InsetActionRow tone="danger" leading={<RowEmoji>↩︎</RowEmoji>} label="Sign out" onPress={onLogout} />
+        </InsetGroup>
       </ScrollView>
     </SafeAreaView>
   );
@@ -126,47 +122,6 @@ function makeStyles(t) {
     },
     headerLabel: { ...t.type.caption, color: t.colors.textSecondary },
 
-    accountCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: t.colors.card,
-      borderRadius: radius.lg,
-      padding: spacing.lg,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-      ...t.shadow.card,
-      marginTop: spacing.xs,
-      marginBottom: spacing.lg,
-    },
-    accountName: { ...t.type.h3 },
-    accountEmail: { ...t.type.caption, marginTop: 2 },
-    accountChevron: { fontSize: 22, color: t.colors.textMuted, marginLeft: spacing.sm },
-
-    sectionLabel: { ...t.type.micro, marginBottom: spacing.sm, marginLeft: spacing.xs },
-    group: {
-      backgroundColor: t.colors.card,
-      borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-      ...t.shadow.card,
-      marginBottom: spacing.lg,
-      overflow: 'hidden',
-    },
-    appearanceGroup: {
-      marginBottom: spacing.lg,
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.md,
-      borderBottomWidth: 1,
-      borderBottomColor: t.colors.border,
-      gap: spacing.md,
-    },
-    rowIcon: { fontSize: 18, width: 24, textAlign: 'center' },
-    rowLabel: { ...t.type.bodyStrong, fontSize: 15 },
-    rowSub: { ...t.type.caption, marginTop: 1 },
-    rowChevron: { fontSize: 20, color: t.colors.textMuted },
+    appearanceWrap: { marginBottom: spacing.lg },
   });
 }

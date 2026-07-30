@@ -10,6 +10,7 @@ import { isConsoleRole } from '../../../lib/role';
 import { useTheme } from '../../../lib/ThemeContext';
 // Shared with the super-admin Tabs layout — one icon set, one style.
 import { OverviewIcon, ClockIcon, MapPinIcon, BooksIcon, MoreIcon } from '../../../components/icons/tabIcons';
+import FloatingTabBar from '../../../components/FloatingTabBar';
 
 export default function AdminLayout() {
   const { colors } = useTheme();
@@ -59,11 +60,11 @@ export default function AdminLayout() {
       backBehavior="history"
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.brand,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        // tabBarStyle / tabBarLabelStyle / the tint colors are gone: the bar is a floating pill
+        // rendered by components/FloatingTabBar.jsx, which owns its own geometry, tints and
+        // typography (and reads each screen's `title` + `tabBarIcon` from here as before).
       }}
+      tabBar={(props) => <FloatingTabBar {...props} />}
     >
       {/* Visible tabs */}
       <Tabs.Screen

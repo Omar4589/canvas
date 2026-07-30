@@ -309,11 +309,21 @@ and would fight the Mapbox pan gesture). It opens by **tap**.
   **right-side** panel (matches the top-right hamburger). Closes on backdrop press or a **right**-swipe
   `Gesture.Pan` bound **only to the open panel** (the map is covered by the backdrop, so the two pans
   never compete). It **renders `null` while closed**, so it never intercepts a touch on the map
-  underneath — the key correctness property. The body reuses the `admin/more.jsx` Row/grouped-card
-  pattern and embeds `<ThemeToggle/>`; rows are gated by `loadRoleContext()` (admin/super) and active
-  campaign (My stats). Canvassers have **no voter-lookup entry** — they work their assigned doors and
-  see each household's voters at the door; the `/(app)/voters` screens + `/mobile/voters*` endpoints
-  still exist (unreached) for a possible future admin use.
+  underneath — the key correctness property. The body is the **shared inset-group grammar**
+  ([components/InsetGroup.jsx](../mobile/components/InsetGroup.jsx)) in its menu treatment — the same
+  vocabulary the two admin **More** tabs render, so the three menus move together
+  ([ADMIN_APP.md](ADMIN_APP.md) → *The grammar grew four opt-in members*). It used to hold a
+  **verbatim fork** of `admin/more.jsx`'s old local `Row`; both the fork and its ~28 orphaned styles
+  are gone, along with the fork's `last` prop (a trailing hairline is not expressible — `InsetGroup`
+  interleaves the separators itself). Concretely: an `emphasis="hero"` `InsetNavRow` for the account,
+  `emphasis="menu"` rows with `RowEmoji` leading glyphs under `SectionHeader caption` titles, a
+  `tone="danger"` `InsetActionRow` for Sign out, and `<ThemeToggle/>` standing **bare** between its
+  caption and the next group (nesting a bordered control inside a bordered card bought a second
+  outline and no separation). The **org name**, previously a brand micro-line inside the account card,
+  is now the caption above it — so the row keeps one job. Rows are gated by `loadRoleContext()`
+  (admin/super) and active campaign (My stats). Canvassers have **no voter-lookup entry** — they work
+  their assigned doors and see each household's voters at the door; the `/(app)/voters` screens +
+  `/mobile/voters*` endpoints still exist (unreached) for a possible future admin use.
 - Mount: rendered in [_layout.jsx](../mobile/app/(app)/_layout.jsx) as a sibling **after** `<Stack>`
   and `<AddedToOrgBanner/>`, so it paints above the map and the bottom sheet. Inert until a screen's
   header calls `openDrawer()`, so it never shows on admin tab screens.
@@ -392,17 +402,21 @@ invite email (see [EMAIL.md](EMAIL.md) and `server/src/config/storeLinks.js`).
 ## The profile screen
 
 [app/(app)/profile.jsx](../mobile/app/(app)/profile.jsx) — a self-service account screen, pushed onto
-the `(app)` stack (back-button header, no hamburger). Reached from the **account card** at the top of
+the `(app)` stack (back-button header, no hamburger). Reached from the **account row** at the top of
 the canvasser drawer ([CanvasserDrawer.jsx](../mobile/components/CanvasserDrawer.jsx)) and from the
-admin **More** tab's account card ([admin/more.jsx](../mobile/app/(app)/admin/more.jsx)) — same screen
-for both, since the endpoints are role-agnostic.
+identical row on the admin ([admin/more.jsx](../mobile/app/(app)/admin/more.jsx)) and super-admin
+([super-admin/more.jsx](../mobile/app/(app)/super-admin/more.jsx)) **More** tabs — same screen for all
+three, since the endpoints are role-agnostic. All three are one `InsetNavRow` with `emphasis="hero"`
+(the standalone account *card* is gone), and all three label it `name || email || 'Your account'` —
+**never** the literal `'Account'`, which is what the first frame rendered while the cached `user` was
+still `null`.
 
 - **Edit info:** first name, last name, phone. Saves via `PATCH /auth/me`
   ([server/.../auth.js](../server/src/routes/auth.js)) — a `requireAuth`-only handler (no org context,
   like change-password) validated by `updateProfileSchema`. **Email is read-only** on purpose: it's
   globally unique and shared across a user's orgs, so email changes go through an admin (the existing
   multi-org guard). On success the screen re-caches the user (`saveCurrentUser` / `saveMemberships`) so
-  the drawer's account card and greetings refresh.
+  the drawer's account row and greetings refresh.
 - **Change password:** current / new / confirm, inline. Posts to the existing
   `POST /auth/change-password` (requires the current password; the **new** password must meet the
   strength rules — 8+ with an uppercase, a lowercase, a number, and a special character — shown as a
@@ -499,9 +513,10 @@ survives on the voter profile (`voters/[id].jsx`) and admin response-details, bo
 endpoints; consequently `precinct` was dropped from the `/mobile/bootstrap` voter projection, where
 it had become dead payload shipped for every voter.
 
-> Don't confuse `VoterMeta` with the pre-existing
-> [components/VoterRow.jsx](../mobile/components/VoterRow.jsx) — that one is a *survey-response* row
-> (`{responseId, submittedAt, voter, household, canvasser}`) used by admin screens.
+> This used to warn against confusing `VoterMeta` with a `components/VoterRow.jsx` — a
+> *survey-response* row (`{responseId, submittedAt, voter, household, canvasser}`) used by admin
+> screens. That component **no longer exists**: it was retired in `7c6708a` when the admin screens
+> converted to the inset-group grammar, so `VoterMeta` is now the only voter row component.
 
 `StatusPill` recognizes a third visual state for `refused`: amber `warnBg`/`warnBorder`/`warnFg` (done
 statuses stay green `successBg`, everything else — including `restricted` — neutral chrome). The dot

@@ -16,6 +16,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import PasswordInput from '../../../components/PasswordInput';
+import SectionHeader from '../../../components/SectionHeader';
 import MemberSheet from '../../../components/MemberSheet';
 import InsetGroup, {
   InsetNavRow,
@@ -28,6 +29,7 @@ import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '..
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 
 const SORT_OPTIONS = [
   { key: 'name-asc', label: 'Name A–Z' },
@@ -78,11 +80,12 @@ const Avatar = ({ name, role }) => {
 
 // The old pill strip (role / assigned / coordinator / active) collapsed into one quiet meta
 // line — the grammar allows ONE badge, and it's reserved for the exceptional state (inactive).
-const userMeta = ({ role, assigned, coordinatorName }) =>
+// No 'assigned' / 'not assigned' word: campaign-scoped rows now live under a section header that
+// already says which side they are on, and restating it on every row is exactly the noise this
+// single line was written to kill.
+const userMeta = ({ role, coordinatorName }) =>
   [
     role === 'admin' ? 'admin' : role === 'lead' ? 'team lead' : 'canvasser',
-    // Campaign-scoped extras: assigned state + coordinator (the merged Team view).
-    assigned === undefined ? null : assigned ? 'assigned' : 'not assigned',
     coordinatorName || null,
   ]
     .filter(Boolean)
@@ -110,6 +113,8 @@ function FilterPill({ active, label, onPress }) {
 export default function AdminUsers() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   // Android's system nav bar overlaps bottom sheets without this inset (item D8).
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -183,6 +188,8 @@ export default function AdminUsers() {
   );
 
   const [sheetUserId, setSheetUserId] = useState(null);
+  // The "not on this campaign" section starts collapsed — see the render.
+  const [offOpen, setOffOpen] = useState(false);
 
   const createUser = useMutation({
     mutationFn: (body) => api('/admin/memberships', { method: 'POST', body }),
@@ -241,17 +248,43 @@ export default function AdminUsers() {
     // Can't be repointed either: lastSeenAt is super-admin-only and absent from /admin/memberships.
     else if (sortMode === 'recent-signin')
       list.sort((a, b) => compareDate(a, b, 'lastLoginAt'));
-    // Campaign scoped: tag assigned state, then partition the campaign's people first (a
-    // stable partition, so the chosen sort still orders each half); the rest of the org
-    // follows so an admin can assign them from the sheet.
-    if (cId) {
-      list = list.map((u) => ({ ...u, assigned: rosterByUser.has(String(u.id)) }));
-      list = [...list.filter((u) => u.assigned), ...list.filter((u) => !u.assigned)];
-    }
     return list;
-  }, [users, search, roleFilter, statusFilter, sortMode, cId, rosterByUser]);
+  }, [users, search, roleFilter, statusFilter, sortMode]);
+
+  // Campaign scoped → two sections: this campaign's people, then the rest of the org. ONE pass over
+  // the already-sorted list, so the chosen sort still orders each section — the property the old
+  // stable partition existed to protect. `rosterByUser` membership IS the answer, so no row needs an
+  // `assigned` tag any more (which also drops an object copy per user per render).
+  const [onCampaign, offCampaign] = useMemo(() => {
+    if (!cId) return [visibleUsers, []];
+    const on = [];
+    const off = [];
+    for (const u of visibleUsers) (rosterByUser.has(String(u.id)) ? on : off).push(u);
+    return [on, off];
+  }, [visibleUsers, cId, rosterByUser]);
 
   const sortLabel = SORT_OPTIONS.find((s) => s.key === sortMode)?.label;
+
+  // One row renderer for both sections and for the flat org view, so a row can never drift
+  // between them. Keyed on u.id, so a re-sort re-orders instead of remounting.
+  const userRow = (u) => {
+    const name = `${u.firstName} ${u.lastName}`.trim();
+    return (
+      <InsetNavRow
+        key={u.id}
+        leading={<Avatar name={name} role={u.role} />}
+        label={name || u.email}
+        sub={u.email}
+        unit={userMeta({
+          role: u.role,
+          coordinatorName: cId ? rosterByUser.get(String(u.id))?.coordinatorName : undefined,
+        })}
+        badge={u.isActive ? null : { text: 'inactive' }}
+        // Campaign scoped → the member sheet (campaign actions); org view → full page.
+        onPress={() => (cId ? setSheetUserId(u.id) : router.push(`/(app)/admin/users/${u.id}`))}
+      />
+    );
+  };
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -361,67 +394,71 @@ export default function AdminUsers() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}
       >
-        <InsetGroup>
-          {usersQ.isLoading ? (
-            <InsetNoteRow loading />
-          ) : usersQ.isError ? (
-            // NEVER fall through to the empty state on an error. A team lead reaching this screen
-            // gets a 403 from /admin/memberships, which used to render as "No users yet" — the app
-            // stating as fact that the organization is empty to somebody who is simply not allowed
-            // to look. Say which of the two it is.
-            <InsetNoteRow>
-              {usersQ.error?.code === 'FORBIDDEN_ROLE'
-                ? 'Your account can’t view users in this organization.'
-                : 'Could not load users. Pull to retry, or check your connection.'}
-            </InsetNoteRow>
-          ) : visibleUsers.length === 0 ? (
-            <InsetNoteRow>
-              {users.length === 0
-                ? 'No users yet. Tap "+ New" to add one.'
-                : 'No users match your filters.'}
-            </InsetNoteRow>
-          ) : (
-            // An array, not a fragment: InsetGroup flattens arrays, so the hairlines land
-            // between the action row and every user row. A fragment would read as ONE child.
-            [
-              /* Bulk assign — admin, campaign scoped (ported from the Team page). Acts in
-                 place (mutates the roster), so an action row, no chevron. */
-              cId && !isLead && visibleUsers.some((u) => !u.assigned) ? (
+        {usersQ.isLoading || usersQ.isError || visibleUsers.length === 0 ? (
+          <InsetGroup>
+            {usersQ.isLoading ? (
+              <InsetNoteRow loading />
+            ) : usersQ.isError ? (
+              // NEVER fall through to the empty state on an error. A team lead reaching this screen
+              // gets a 403 from /admin/memberships, which used to render as "No users yet" — the app
+              // stating as fact that the organization is empty to somebody who is simply not allowed
+              // to look. Say which of the two it is.
+              <InsetNoteRow>
+                {usersQ.error?.code === 'FORBIDDEN_ROLE'
+                  ? 'Your account can’t view users in this organization.'
+                  : 'Could not load users. Pull to retry, or check your connection.'}
+              </InsetNoteRow>
+            ) : (
+              <InsetNoteRow>
+                {users.length === 0
+                  ? 'No users yet. Tap "+ New" to add one.'
+                  : 'No users match your filters.'}
+              </InsetNoteRow>
+            )}
+          </InsetGroup>
+        ) : cId ? (
+          /* Campaign scoped → the campaign's people lead, and the rest of the org sits behind a
+             reveal. Picking a campaign should answer "who is on this campaign"; the remainder is a
+             means to an end (assigning someone), not the default view. */
+          <>
+            <SectionHeader caption title={`On this campaign (${onCampaign.length})`} />
+            <InsetGroup>
+              {onCampaign.length === 0 ? (
+                <InsetNoteRow>Nobody on this campaign matches these filters.</InsetNoteRow>
+              ) : (
+                onCampaign.map(userRow)
+              )}
+            </InsetGroup>
+
+            <SectionHeader caption title={`Not on this campaign (${offCampaign.length})`} />
+            <InsetGroup>
+              {/* A reveal, not a navigation — action row, no chevron (same idiom as the archived
+                  campaigns list on admin/index.jsx). */}
+              <InsetActionRow
+                label={offOpen ? 'Hide' : `Show ${offCampaign.length} not on this campaign`}
+                onPress={() => setOffOpen((v) => !v)}
+                disabled={offCampaign.length === 0}
+              />
+              {offOpen ? offCampaign.map(userRow) : null}
+              {/* Bulk assign lives HERE, and only while the section is open: "all shown" must mean a
+                  set the reader can actually see — it used to be able to fire against dozens of
+                  people who were never on screen. Every row in this section is unassigned by
+                  construction, so the section IS the predicate; no per-row filter is needed. */}
+              {offOpen && !isLead && offCampaign.length > 0 ? (
                 <InsetActionRow
-                  key="bulk-assign"
-                  label={
-                    assignAll.isPending
-                      ? 'Assigning…'
-                      : `Assign all shown (${visibleUsers.filter((u) => !u.assigned).length})`
-                  }
-                  onPress={() => assignAll.mutate(visibleUsers.filter((u) => !u.assigned).map((u) => u.id))}
+                  label={assignAll.isPending ? 'Assigning…' : `Assign all shown (${offCampaign.length})`}
+                  onPress={() => assignAll.mutate(offCampaign.map((u) => u.id))}
                   disabled={assignAll.isPending}
                 />
-              ) : null,
-              ...visibleUsers.map((u) => {
-                const name = `${u.firstName} ${u.lastName}`.trim();
-                return (
-                  <InsetNavRow
-                    key={u.id}
-                    leading={<Avatar name={name} role={u.role} />}
-                    label={name || u.email}
-                    sub={u.email}
-                    unit={userMeta({
-                      role: u.role,
-                      assigned: cId ? u.assigned : undefined,
-                      coordinatorName: cId ? rosterByUser.get(String(u.id))?.coordinatorName : undefined,
-                    })}
-                    badge={u.isActive ? null : { text: 'inactive' }}
-                    // Campaign scoped → the member sheet (campaign actions); org view → full page.
-                    onPress={() => (cId ? setSheetUserId(u.id) : router.push(`/(app)/admin/users/${u.id}`))}
-                  />
-                );
-              }),
-            ]
-          )}
-        </InsetGroup>
+              ) : null}
+            </InsetGroup>
+          </>
+        ) : (
+          /* Org view — one flat list, exactly as before. */
+          <InsetGroup>{visibleUsers.map(userRow)}</InsetGroup>
+        )}
       </ScrollView>
 
       {/* Member sheet — campaign-scoped actions for the tapped person. */}

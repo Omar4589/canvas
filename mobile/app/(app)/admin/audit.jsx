@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import { makeRateColors } from '../../../lib/rates';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
+import { useBottomInset } from '../../../lib/useBottomInset';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
 import InsetGroup, {
@@ -58,6 +59,10 @@ const BULK_ACTIONS = [
 ];
 // Anything bigger than a screenful gets an explicit "yes, that many" Alert.
 const BULK_CONFIRM_OVER = 25;
+// Height of the bulk bar, for lifting the flash toast clear of it while selection mode is up.
+// Applied ON TOP of the bottom inset — the bar is itself lifted by that inset, so this clearance
+// is additive, never a replacement for it.
+const FLASH_OVER_BULK_BAR = 230;
 
 function ymdSpanDays(from, to) {
   const [fy, fm, fd] = from.split('-').map(Number);
@@ -68,6 +73,10 @@ function ymdSpanDays(from, to) {
 export default function AdminAudit() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The console tab bar floats (components/FloatingTabBar.jsx), so it no longer occupies layout
+  // space: the bulk bar, the flash toast and the scroll bottom all have to clear it themselves.
+  // makeStyles has no hook access, so the inset is applied INLINE at each of those sites.
+  const bottomInset = useBottomInset();
   const roleLabel = useConsoleRoleLabel();
   const router = useRouter();
   const qc = useQueryClient();
@@ -88,6 +97,12 @@ export default function AdminAudit() {
 
   const [reviewStatus, setReviewStatus] = useState('open');
   const [userId, setUserId] = useState(''); // '' = all canvassers
+  // The picked canvasser's NAME, captured at pick time. The pill strip is built from a payload
+  // ?userId has already filtered, so it cannot offer the pill that produced it: narrow the range
+  // after picking somebody and `byCanvasser` comes back empty, which used to unmount the strip and
+  // leave no way to clear the filter (the same trap Timeline's crew row had). Holding the name lets
+  // us keep a pill on screen — labelled "(0)", which is TRUE, they have zero flags in this scope.
+  const [pickedName, setPickedName] = useState(null);
   const [effortId, setEffortId] = useState(''); // '' = all walk lists
   const [live, setLive] = useState(true);
 
@@ -117,6 +132,7 @@ export default function AdminAudit() {
     setPrevCid(cId);
     setReviewStatus('open');
     setUserId('');
+    setPickedName(null);
     setEffortId('');
     setSelectMode(false);
     setSelectedIds(new Set());
@@ -324,6 +340,10 @@ export default function AdminAudit() {
     });
   }
 
+  // Both toasts sit at the same height: clear of the tab bar normally, clear of the bulk bar while
+  // selection mode is up (an error flash can coexist with the bar).
+  const flashBottom = bottomInset + (selectMode ? FLASH_OVER_BULK_BAR : spacing.md);
+
   // Total is the group's hero; Open leads the rows and gets the caution chip when nonzero
   // (the only judgment call on this screen — everything else is a plain count by flag type).
   const rateColors = makeRateColors(colors);
@@ -336,10 +356,23 @@ export default function AdminAudit() {
     { label: 'Weak GPS', value: (totals.weakGps || 0).toLocaleString(), sub: 'Unreliable' },
   ];
 
-  const canvasserTabs = [
-    { key: '', label: 'All' },
-    ...byCanvasser.map((c) => ({ key: String(c.userId), label: `${c.name || 'Canvasser'} (${c.openCount || 0})` })),
-  ];
+  const canvasserTabs = useMemo(() => {
+    const tabs = [
+      { key: '', label: 'All' },
+      ...byCanvasser.map((c) => ({ key: String(c.userId), label: `${c.name || 'Canvasser'} (${c.openCount || 0})` })),
+    ];
+    // Keep the picked canvasser on screen even when this scope has no flags for them, so the
+    // strip can never unmount while a userId filter is still applied. See `pickedName`.
+    if (userId && !tabs.some((t) => t.key === userId)) {
+      tabs.push({ key: userId, label: `${pickedName || 'Canvasser'} (0)` });
+    }
+    return tabs;
+  }, [byCanvasser, userId, pickedName]);
+
+  const onCanvasserChange = (key) => {
+    setUserId(key);
+    setPickedName(key ? byCanvasser.find((c) => String(c.userId) === key)?.name || null : null);
+  };
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -386,6 +419,12 @@ export default function AdminAudit() {
           onChange={setEffortId}
         />
       ) : null}
+      {/* Canvasser filter — fixed area for the same reason, and gated on the tab list rather than
+          on `byCanvasser`: the payload it comes from is already ?userId-filtered, so gating on it
+          hid the pill that could clear it. `canvasserTabs` always carries the picked person. */}
+      {canvasserTabs.length > 1 ? (
+        <TabSwitcher tabs={canvasserTabs} activeKey={userId} onChange={onCanvasserChange} />
+      ) : null}
 
       {rangeInvalid ? (
         <View style={styles.groupWrap}>
@@ -409,7 +448,7 @@ export default function AdminAudit() {
           <ActivityIndicator color={colors.brand} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: selectMode ? 260 : spacing.xxl }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: (selectMode ? 260 : spacing.xxl) + bottomInset }}>
           <View style={styles.groupWrap}>
             <InsetGroup>
               <InsetHeroRow
@@ -428,10 +467,6 @@ export default function AdminAudit() {
               ))}
             </InsetGroup>
           </View>
-
-          {byCanvasser.length > 0 ? (
-            <TabSwitcher tabs={canvasserTabs} activeKey={userId} onChange={setUserId} />
-          ) : null}
 
           <View style={styles.listWrap}>
             {entries.length > 0 ? (
@@ -498,10 +533,13 @@ export default function AdminAudit() {
         </ScrollView>
       )}
 
+      {/* Bulk bar, docked ABOVE the floating tab bar. Nothing extra is needed for the note input:
+          the tab bar hides itself while the keyboard is up and reports height 0, so `bottomInset`
+          collapses to the safe-area inset on its own and the KeyboardAvoidingView lifts from there. */}
       {selectMode ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.bulkBarWrap}
+          style={[styles.bulkBarWrap, { bottom: bottomInset }]}
           pointerEvents="box-none"
         >
           <View style={styles.bulkBar}>
@@ -547,7 +585,7 @@ export default function AdminAudit() {
 
       {bulkFlash ? (
         <Pressable
-          style={[styles.flash, selectMode && styles.flashAboveBar]}
+          style={[styles.flash, { bottom: flashBottom }]}
           onPress={() => bulkFlash.undo && runUndo(bulkFlash.undo)}
           disabled={!bulkFlash.undo}
         >
@@ -559,7 +597,7 @@ export default function AdminAudit() {
         </Pressable>
       ) : null}
       {flash ? (
-        <View style={[styles.flash, selectMode && styles.flashAboveBar]} pointerEvents="none">
+        <View style={[styles.flash, { bottom: flashBottom }]} pointerEvents="none">
           <Text style={styles.flashText}>✓ {flash}</Text>
         </View>
       ) : null}
@@ -601,14 +639,16 @@ function makeStyles(t) {
       paddingHorizontal: spacing.sm,
     },
     selectRowAction: { fontSize: 13, fontWeight: '700', color: colors.brand },
-    bulkBarWrap: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+    // `bottom` is set inline (the tab-bar inset), which also carries the home-indicator clearance
+    // this bar used to hand-roll as an oversized paddingBottom.
+    bulkBarWrap: { position: 'absolute', left: 0, right: 0 },
     bulkBar: {
       backgroundColor: colors.card,
       borderTopWidth: 1,
       borderTopColor: colors.border,
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.md,
-      paddingBottom: spacing.xl,
+      paddingBottom: spacing.md,
       gap: spacing.sm,
     },
     bulkHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
@@ -640,17 +680,15 @@ function makeStyles(t) {
     bulkBtnDisabled: { opacity: 0.5 },
     bulkBtnText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
     bulkBtnTextDanger: { color: colors.danger },
+    // `bottom` is set inline (flashBottom) — it depends on the tab-bar inset and the bulk bar.
     flash: {
       position: 'absolute',
-      bottom: spacing.xl,
       alignSelf: 'center',
       backgroundColor: colors.textPrimary,
       borderRadius: radius.pill,
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
     },
-    // Lifted clear of the bulk bar while selection mode is up (error flashes can coexist).
-    flashAboveBar: { bottom: 230 },
     flashText: { color: colors.textInverse, fontWeight: '700', fontSize: 13 },
   });
 }

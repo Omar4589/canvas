@@ -17,6 +17,7 @@ import { formatRange } from '../../../../../lib/datetime';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../../../lib/useBottomInset';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 
 function fmtDate(dateStr) {
@@ -33,6 +34,8 @@ function fmtDate(dateStr) {
 export default function DaysScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -98,7 +101,7 @@ export default function DaysScreen() {
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
         {dailyQ.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : days.length === 0 ? (

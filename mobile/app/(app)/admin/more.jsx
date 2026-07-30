@@ -7,8 +7,6 @@ import { api } from '../../../lib/api';
 import { signOut } from '../../../lib/authState';
 import {
   loadCurrentUser,
-  loadMemberships,
-  loadActiveOrgId,
   loadActiveCampaign,
   saveActiveCampaign,
   clearBootstrap,
@@ -19,10 +17,11 @@ import ThemeToggle from '../../../components/ThemeToggle';
 import InsetGroup, {
   InsetNavRow,
   InsetActionRow,
-  InsetBlockRow,
+  RowEmoji,
 } from '../../../components/InsetGroup';
 import SectionHeader from '../../../components/SectionHeader';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 import { radius, spacing } from '../../../lib/theme';
 
 // Setup-heavy features that live on the web dashboard (file uploads / turf drawing
@@ -42,19 +41,20 @@ const WEB_NOTES = {
   },
 };
 
-// The emoji sits in the row's `leading` slot, same box the old local Row gave it.
-const Emoji = ({ children }) => <Text style={{ fontSize: 18, width: 24, textAlign: 'center' }}>{children}</Text>;
-
+// This screen is a MENU, not a data list — every row is a destination you tap, so the rows carry
+// `emphasis="menu"` (15/600 labels) under small ALL-CAPS `caption` headers, and the shared
+// `RowEmoji` slot keeps every label starting at the same x. The card, the interleaved hairlines and
+// the a11y labels still come from InsetGroup; only the typography is menu-flavoured. The
+// super-admin More tab and the canvasser drawer render the identical shape — change it in
+// InsetGroup and all three move together.
 export default function AdminMore() {
   const router = useRouter();
   const qc = useQueryClient();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const [user, setUser] = useState(null);
   const [webNote, setWebNote] = useState(null);
-  // Leads see the Users hub too — /admin/memberships is lead-scoped server-side to their
-  // campaigns' rosters, and their write set (temp password / deactivate, canvassers only)
-  // is enforced there. isLead still gates a few admin-only rows below.
-  const [isLead, setIsLead] = useState(false);
 
   // Mock-GPS nudge on the GPS-audit row: SUM of open mock flags across every campaign
   // the viewer can see (the server lead-scopes the list). Shared cache with the campaign
@@ -67,13 +67,7 @@ export default function AdminMore() {
   const openMockTotal = (campaignsQ.data?.campaigns || []).reduce((n, c) => n + (c.openMockFlags || 0), 0);
 
   useEffect(() => {
-    Promise.all([loadCurrentUser(), loadMemberships(), loadActiveOrgId()]).then(
-      ([u, memberships, activeOrgId]) => {
-        setUser(u);
-        const mem = (memberships || []).find((m) => m.organizationId === activeOrgId);
-        setIsLead(!u?.isSuperAdmin && mem?.role === 'lead');
-      }
-    );
+    loadCurrentUser().then(setUser);
   }, []);
 
   async function onLogout() {
@@ -104,6 +98,8 @@ export default function AdminMore() {
     router.push(c?.id ? '/(app)/books' : '/(app)/campaigns');
   }
 
+  const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
@@ -111,64 +107,76 @@ export default function AdminMore() {
         <Text style={styles.headerLabel}>More</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}>
+        {/* The identity row the screen opens with — `hero` gives it back the height and the 16/600
+            name the old standalone card had. NOT the literal string 'Account': `user` is null until
+            the cache read resolves, so that first frame called the signed-in person a generic noun.
+            The email is always there once loaded; 'Your account' reads as a destination. */}
         <View style={{ marginTop: spacing.xs }}>
           <InsetGroup>
             <InsetNavRow
-              label={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Account'}
-              sub={user?.email || ''}
+              emphasis="hero"
+              label={fullName || user?.email || 'Your account'}
+              sub={fullName ? user?.email : null}
               hint="Opens your profile"
               onPress={() => router.push('/(app)/profile')}
             />
           </InsetGroup>
         </View>
 
-        <SectionHeader title="Manage" />
+        <SectionHeader caption title="Manage" />
         <InsetGroup>
-          <InsetNavRow leading={<Emoji>👥</Emoji>} label="Users" onPress={() => router.push('/(app)/admin/users')} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>👥</RowEmoji>} label="Users" onPress={() => router.push('/(app)/admin/users')} />
           <InsetNavRow
-            leading={<Emoji>🚩</Emoji>}
+            emphasis="menu"
+            leading={<RowEmoji>🚩</RowEmoji>}
             label="GPS audit"
             sub="Review flagged entries"
             badge={openMockTotal > 0 ? { text: String(openMockTotal) } : null}
             onPress={() => router.push('/(app)/admin/audit')}
           />
-          <InsetNavRow leading={<Emoji>📝</Emoji>} label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
-          <InsetNavRow leading={<Emoji>🔁</Emoji>} label="Overlaps" sub="Doors two canvassers both knocked" onPress={() => router.push('/(app)/admin/overlaps')} />
-          <InsetNavRow leading={<Emoji>🔍</Emoji>} label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
-          <InsetNavRow leading={<Emoji>🚪</Emoji>} label="Switch to canvass mode" onPress={onCanvassMode} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>📝</RowEmoji>} label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Overlaps" sub="Doors two canvassers both knocked" onPress={() => router.push('/(app)/admin/overlaps')} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>🔍</RowEmoji>} label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>🚪</RowEmoji>} label="Switch to canvass mode" onPress={onCanvassMode} />
         </InsetGroup>
 
-        {/* These OPEN A MODAL rather than navigate — action rows, no chevron. The old local
-            Row gave every entry a chevron, which lied here. */}
-        <SectionHeader title="On the web" />
+        {/* InsetNavRow, deliberately — and yes, these open a MODAL rather than push a screen. The
+            grammar's discriminator is the VALUE COLUMN, not the destination: InsetActionRow is for a
+            VERB with an empty value column ("Export CSV", "Try again"), while "CSV import" is a NOUN
+            naming a feature and the row prints a value — "Manage on the web" — that the sheet
+            behind it elaborates. The rule itself pre-authorizes a nav row opening a picker/sheet.
+            Classifying these as action rows is what produced three chevron-less red lines in a row.
+            Don't change them back. */}
+        <SectionHeader caption title="On the web" />
         <InsetGroup>
-          <InsetActionRow label="CSV import — manage on the web" onPress={() => setWebNote(WEB_NOTES.import)} />
-          <InsetActionRow label="Early voting — manage on the web" onPress={() => setWebNote(WEB_NOTES.earlyVoting)} />
-          <InsetActionRow label="Turf cutting — drawing is web-only" onPress={() => setWebNote(WEB_NOTES.turf)} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>📤</RowEmoji>} label="CSV import" sub="Manage on the web" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.import)} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>🗳️</RowEmoji>} label="Early voting" sub="Manage on the web" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.earlyVoting)} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>✂️</RowEmoji>} label="Turf cutting" sub="Drawing is web-only" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.turf)} />
         </InsetGroup>
 
-        <SectionHeader title="Support" />
+        <SectionHeader caption title="Support" />
         <InsetGroup>
-          <InsetNavRow leading={<Emoji>❓</Emoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>❓</RowEmoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
         </InsetGroup>
 
-        <SectionHeader title="Appearance" />
-        <InsetGroup>
-          {/* ThemeToggle is shared with super-admin More — housed, never restyled. */}
-          <InsetBlockRow>
-            <ThemeToggle />
-          </InsetBlockRow>
-        </InsetGroup>
+        <SectionHeader caption title="Appearance" />
+        {/* Bare, not inside an InsetGroup. ThemeToggle is itself a bordered `sunken` segment, so
+            nesting it bought a second outline and no separation (`sunken` on `card` is 1.10:1).
+            Shared with the super-admin More tab: house it, never restyle it. */}
+        <View style={styles.appearanceWrap}>
+          <ThemeToggle />
+        </View>
 
-        <SectionHeader title="Account" />
+        <SectionHeader caption title="Account" />
         <InsetGroup>
           {user?.isSuperAdmin && (
-            <InsetNavRow leading={<Emoji>🌐</Emoji>} label="Platform view" sub="All organizations" onPress={onPlatformView} />
+            <InsetNavRow emphasis="menu" leading={<RowEmoji>🌐</RowEmoji>} label="Platform view" sub="All organizations" onPress={onPlatformView} />
           )}
-          <InsetNavRow leading={<Emoji>🔁</Emoji>} label="Switch organization" onPress={onSwitchOrg} />
-          {/* Acts in place (ends the session) — danger tone, no chevron. */}
-          <InsetActionRow label="Sign out" tone="danger" onPress={onLogout} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Switch organization" onPress={onSwitchOrg} />
+          {/* Acts in place (ends the session) — danger tone, no chevron. The `leading` slot is what
+              keeps its label aligned with every row above it. */}
+          <InsetActionRow tone="danger" leading={<RowEmoji>↩︎</RowEmoji>} label="Sign out" onPress={onLogout} />
         </InsetGroup>
       </ScrollView>
 
@@ -199,6 +207,8 @@ function makeStyles(t) {
       justifyContent: 'space-between',
     },
     headerLabel: { ...t.type.caption, color: t.colors.textSecondary },
+
+    appearanceWrap: { marginBottom: spacing.lg },
 
     noteBackdrop: {
       flex: 1,

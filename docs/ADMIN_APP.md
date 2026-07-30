@@ -33,6 +33,12 @@ dashboard). Five tabs:
 - **Books** — **assign/unassign books** (turf) to canvassers for the active round (see below).
 - **More** — everything else (a hub).
 
+The tab bar **floats**: a rounded, translucent pill hovering just above the bottom edge rather than a
+solid bar welded to it, so the map and the lists run the full height of the screen behind it. Tabs you
+aren't on show only their icon; **the tab you're on widens to show its name**, so exactly one label is
+ever on screen. It gets out of the way when it would be in the way — it disappears while the keyboard
+is up, and every sheet, toast and action bar sits *above* it rather than behind it.
+
 ### The Books tab
 Pick a **campaign** (and **effort**, if there's more than one — segmented for ≤3, a dropdown at 4+). It
 works the effort's **active round** — a read-only **"Pass N · active"** chip under the pickers names it
@@ -142,11 +148,21 @@ the vocabulary holds across a whole journey rather than changing shape at each t
   spacers (`width: 64` and `width: 80`, both deleted); a long campaign name no longer truncates.
   Timeline takes the same left-aligned title without a back link, since it is a tab root.
 
-**The conversion is complete.** Every admin screen now speaks the grammar: More,
-response-details, Notes, answer-voters, Users (list), GPS audit, Overlaps, Timeline's scrollable
+**The conversion is complete — and it now covers the canvasser drawer too.** Every admin screen
+speaks the grammar: More, response-details, Notes, answer-voters, Users (list), GPS audit, Overlaps,
+Timeline's scrollable
 body (its ~100 lines of pinned control chrome — stepper, metric toggle, search/sort, compare —
 deliberately stay as controls, not rows), and both canvasser sub-screens (index KPIs/highlights/
-quality rows, quality tab). **`KpiTile`/`KpiGrid` are deleted** — the grid idiom is retired,
+quality rows, quality tab). **Three menus that were *claimed* as converted were actually private
+forks and are now real** — the super-admin More tab
+([super-admin/more.jsx](../mobile/app/(app)/super-admin/more.jsx)) and the canvasser drawer
+([CanvasserDrawer.jsx](../mobile/components/CanvasserDrawer.jsx)) each carried a **verbatim copy of
+the admin More's old local `Row`**, so a comment saying "matches the admin More exactly" was a claim
+about a fork, not about shared code — and it went stale the moment that screen was converted. Both
+forks and their ~28 orphaned styles are deleted; all three menus render `InsetGroup` now, so the row
+look changes in one file or in none. (`CanvasserDrawer`'s `last` prop went with them: `InsetGroup`
+interleaves the separators itself, so a stranded trailing hairline is no longer expressible.)
+**`KpiTile`/`KpiGrid` are deleted** — the grid idiom is retired,
 because a grid turns every extra character into a narrower column (the label-truncation bug that
 started this redesign) while a row list turns the same overflow into a taller row. Specifics
 worth knowing:
@@ -166,6 +182,56 @@ worth knowing:
   payload (`computeOverlaps`) isn't the drill-in's shape.
 - Retry lives inside the grammar: a failed group is an `InsetNoteRow` (message) followed by an
   `InsetActionRow` ("Try again") — no bespoke retry buttons remain.
+
+### The grammar grew four opt-in members (a menu is not a data list)
+
+Converting the three menus surfaced a real gap: the grammar could express a **list of numbers**
+beautifully and a **list of destinations** only flatly. A settings menu wants a heavier label (the row
+*is* the content, not a caption on a number), a quiet all-caps section title, and one prominent
+identity row at the top. Four additions cover that, **all opt-in and all defaulting to today's
+behavior**, so no converted screen moved:
+
+| addition | where | what it does |
+|---|---|---|
+| `emphasis` | `InsetNavRow` only | a three-step typographic scale: default (a datum you read) · `'menu'` (15/600 labels — the two More tabs, the drawer) · `'hero'` (`type.h3`, taller row, 22pt chevron — the one account row a menu opens with) |
+| `leading` | `InsetActionRow` | the glyph slot the other two kinds already had. Without it an action row inside a group of icon rows starts its label **36pt to the left** of every neighbour's — x=16 (the row's padding) against 16 + a 24pt glyph + a 12pt gap = **52**. That jog is what "Sign out" looked like |
+| `RowEmoji` | exported from `InsetGroup` | the fixed-24pt glyph box itself, so the three menus can't each re-derive it. The **fixed width** is the whole point: every label in a group starts at the same x |
+| `caption` | `SectionHeader` | swaps the `type.h3` title for a small ALL-CAPS caption. A 16pt semibold heading competes with the row labels beneath it when those rows are destinations rather than data |
+
+Two constraints on those, both learned the hard way:
+
+- **`emphasis` is threaded through `InsetNavRow` and nothing else.** It is a typographic weight, not a
+  fourth row kind — the tap still answers "navigates", so the three-kinds table above is untouched.
+  Confining it to that one kind makes the metric rows on every converted screen *structurally* unable
+  to change weight — the property that let three menus be restyled without re-reviewing the rest.
+- **`caption` uses `textSecondary`, not `textMuted`.** `type.micro` defaults to `textMuted`, which is
+  **2.54:1** — the look this restores originally shipped *with* that bug. Don't "restore" it further;
+  see [THEMING.md](THEMING.md).
+
+### The More screens are MENUS again (inside the grammar)
+
+The conversion had flattened the two More tabs and the drawer into what read as data lists: no emoji,
+no grey sub-line, `h3` section headings, plain-weight labels, and a bordered `ThemeToggle` nested
+inside a bordered card (`sunken` on `card` is 1.10:1 — a second outline buying no separation). All of
+that is back, now expressed in the shared vocabulary rather than a local `Row`: `emphasis="menu"` rows
+with `RowEmoji` leading glyphs under `caption` headers, the account row as `emphasis="hero"`, and
+**`ThemeToggle` standing bare** between its caption and the next group.
+
+Two details a future reader will want to "fix" back, and shouldn't:
+
+- **The three "On the web" rows are `InsetNavRow` BY RULE**, even though they open a modal note rather
+  than pushing a screen. The grammar's discriminator is the **value column**, not the destination:
+  "CSV import" is a **noun naming a feature** and the row **prints a value** ("Manage on the web")
+  that the sheet behind it elaborates — whereas `InsetActionRow` is a **verb with an empty value
+  column** ("Export CSV", "Try again"). Classifying them as action rows is what produced three
+  chevron-less red lines in a row where a menu section belonged.
+- **The account row's fallback label is `name || email || 'Your account'`, never the literal
+  `'Account'`.** `user` is `null` until the cache read resolves, so the old fallback spent the first
+  frame calling the signed-in person a generic noun.
+
+One dead branch went with the restoration: `admin/more.jsx` was loading memberships and the active org
+solely to compute an `isLead` flag that gated nothing (the Users hub is lead-scoped server-side). The
+state and both cache reads are gone — the screen now reads only `loadCurrentUser()`.
 
 ### The campaign screen's "By pass" card
 On a campaign's detail screen, between the Activity group and Coverage, a **By pass** group lists
@@ -208,6 +274,91 @@ One deletion rides along: Timeline's reconciliation footer claiming the coordina
 applied to its overlap totals is gone — the crew filter is applied server-side, so the
 reconciliation reflects the full selection (campaign, walk list, range, AND crew).
 
+### Filters live in the FIXED header — a control that can empty a screen is never inside it
+
+**Part 1 — For everyone.** Picking a crew on **Timeline** used to be able to trap you. Pick a crew
+that hasn't knocked anything in the range you're looking at, or the **No coordinator** pill, and the
+screen emptied — *including the crew row itself*, which was the only thing that could put it back.
+The only ways out were switching campaigns or force-quitting the app. And the message left behind
+blamed the wrong control: it talked about the walk list and the date range, never mentioning the crew
+filter that had actually emptied the screen.
+
+Both filter rows now sit in the **fixed header**, above everything that can change. They stay put
+through an empty result, a first-load error, an invalid date range, and the loading spinner. When a
+crew filter is what emptied the screen, the message says so **and names the way out by its on-screen
+label** — *"Tap 'All' in the crew row above to see everyone, or pick another range."* The same fix is
+in on the **GPS audit**'s by-canvasser row and on the survey answer drill's canvasser filter.
+
+**Part 2 — Technical reference.** The bug is one shape, and it is worth recognizing on sight: **the
+control was gated on the very payload it filters.** On
+[admin/timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) the crew `TabSwitcher` was gated
+`rows.length > 0`, but `rows` **is** the `?coordinatorId`-filtered server response (the crew filter is
+applied server-side — it has to be, since the billable door count is deduped by house×round *across*
+canvassers). So the act of filtering could unmount the filter. The gate is now
+`coordinatorOptions.length > 0 || coordinatorId`: no `rows` term at all, and the `|| coordinatorId`
+arm keeps an escape even for a coordinator who has left **both** the ledger and the roster — the one
+case `coordinatorOptions` can't cover, since it is built from those two sources. The web console
+sidesteps the trap structurally rather than by luck: its picker is fed by a **separate, unfiltered**
+query (`/admin/reports/team-breakdown`, which never carries `coordinatorId`), so on web the act of
+filtering cannot remove the filter
+([client/src/pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx)).
+
+Both strips (walk list *and* crew) also moved **out of the `ScrollView`** and above the
+`rangeInvalid` / error / loading branches, so no state of the screen can take them away.
+
+The crew empty-state was **unreachable dead code** for the same reason: it tested
+`coordRows.length === 0`, and `const coordRows = rows` — so the generic `rows.length === 0` branch
+above it always won, and an emptied screen blamed the walk list or the range. The crew case is now
+tested on `coordinatorId` and ordered **first**.
+
+Two sibling fixes, same shape:
+
+- **[admin/audit.jsx](../mobile/app/(app)/admin/audit.jsx)** — the by-canvasser strip is built from a
+  `byCanvasser` payload that `?userId` has already filtered, so it could not offer the pill that
+  produced it (narrow the range after picking somebody and it came back empty). A **sticky pill**
+  fixes it: the picked canvasser's `name` is captured **at pick time** (`pickedName`) and appended to
+  `canvasserTabs` whenever the payload no longer carries them, labelled `Name (0)` — and the `0` is
+  *true*, they have zero flags in this scope. The strip is gated on `canvasserTabs.length > 1`, which
+  by construction always holds while a filter is applied, and it moved into the fixed header beside
+  the walk-list strip.
+- **[admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx)** — the canvasser
+  `FilterChip` is gated `canvasserRows.length > 0 || canvasserId`, so a background refetch that empties
+  the rows can't strand the filter.
+
+### The Users list is campaign-scoped, not just campaign-annotated
+
+**Part 1 — For everyone.** On **Users**, picking a campaign used to only *label* people — every member
+of the org stayed in one long list, with "assigned" or "not assigned" printed on each row. Now the
+question the chip asks ("who is on this campaign?") is the answer you get:
+
+- **On this campaign (N)** — first, expanded.
+- **Not on this campaign (N)** — a collapsed section with a **"Show N not on this campaign"** line;
+  tap to reveal them, and **Assign all shown** appears *inside* that section, only while it's open.
+
+Search, the role/status filters and the sort all still work across everyone — they just order people
+*within* each section. Nobody's visible set changed: a team lead sees exactly the same people as
+before, regrouped.
+
+**Part 2 — Technical reference.** [admin/users.jsx](../mobile/app/(app)/admin/users.jsx). Purely
+client-side — the roster was already on the client from the assignments query, so there is **no new
+request and no server change**, and the visible set is byte-identical (this **narrows** presentation,
+never widens access).
+
+- The old code tagged each user with `assigned` and then ran a **stable partition** to float the
+  campaign's people. The sections do that job by construction: one pass over the already-sorted
+  `visibleUsers` splits it on `rosterByUser.has(id)`, which preserves the chosen sort inside each half
+  (the exact property the stable partition existed to protect) and drops an object copy per user per
+  render. `visibleUsers`' own memo no longer depends on `cId`/`rosterByUser` at all.
+- `userMeta` lost its `'assigned'`/`'not assigned'` words — the section header states it once instead
+  of every row restating it, which is the noise that one quiet meta line exists to prevent.
+- **Bulk assign moved inside the collapsed section and is gated on it being open.** "Assign all
+  shown" must mean a set the reader can actually see; it could previously fire against dozens of
+  people who were never on screen. Every row in that section is unassigned **by construction**, so
+  the section *is* the predicate and no per-row filter is needed. It stays admin-only (`!isLead`).
+- The reveal is an `InsetActionRow`, not a nav row — the same idiom as the archived-campaigns reveal
+  on `admin/index.jsx`. One shared `userRow` renderer serves both sections *and* the unscoped org
+  view, so a row cannot drift between them; the org view is still one flat list.
+
 ### Drilling into a survey answer (campaign screen)
 On a campaign's detail screen, the survey results list each answer with its count — **tap a count**
 to open the entries behind it. That screen now has a **Voters | By canvasser** toggle (who *recorded*
@@ -237,8 +388,13 @@ own disposition** (green only where *they* surveyed, etc.), exactly like the web
 [MAPS.md](MAPS.md).
 
 ### The More hub
+It reads as a **settings menu**: your name and email in a prominent row at the very top (it opens the
+profile screen), then small all-caps section captions over rows that each carry an icon, a label and
+where relevant a grey line of explanation.
+
 - **Manage:** **Users — the one people surface** (all roles incl. team leads, who see it scoped to
-  their campaigns): a campaign filter chip scopes the list; the old standalone campaign Team screen
+  their campaigns): a campaign filter chip splits the list into **On this campaign** and a collapsed
+  **Not on this campaign** (above); the old standalone campaign Team screen
   merged in here, so a campaign's "Team" tile lands pre-filtered. Rows open a member sheet —
   campaign KPIs, a **Coordinator dropdown**, recent doors (each taps through to the live map, "See
   all" opens the paged activity screen), temp password, assign/unassign (admins), deactivate/
@@ -249,7 +405,13 @@ own disposition** (green only where *they* surveyed, etc.), exactly like the web
   to canvass mode.
 - **On the web:** CSV import, Early voting, Turf cutting — these open a short note (managed on the web
   dashboard; file uploads / turf drawing aren't mobile-friendly).
-- **Appearance**, and **Account** (Platform view for super admins, Switch organization, Sign out).
+- **Support:** Help center.
+- **Appearance** — the theme toggle, standing on its own rather than boxed inside a card.
+- **Account:** Platform view (super admins), Switch organization, Sign out.
+
+The **super admin**'s own More tab ([super-admin/more.jsx](../mobile/app/(app)/super-admin/more.jsx))
+and the **canvasser's slide-out drawer** ([CANVASSER_APP.md](CANVASSER_APP.md)) are the same menu in a
+different set of rows — one shared implementation now, not three lookalikes.
 
 ---
 
@@ -351,6 +513,78 @@ these screens in-org. `isConsoleRole` lives in [lib/role.js](../mobile/lib/role.
 **includes** `lead`) split. Gate admin *entry points* on `isConsoleUser` — the canvasser drawer's "Admin
 dashboard" row was gated on `isOrgAdmin`, which left a lead who tapped "Switch to canvass mode" with no
 way back short of restarting the app.
+
+### The floating tab bar
+
+[components/FloatingTabBar.jsx](../mobile/components/FloatingTabBar.jsx) replaces the stock docked bar
+on **both** console navigators via `tabBar={(props) => <FloatingTabBar {...props} />}` — admin
+([_layout.jsx](../mobile/app/(app)/admin/_layout.jsx)) and super-admin
+([_layout.jsx](../mobile/app/(app)/super-admin/_layout.jsx)). `tabBarStyle` / `tabBarLabelStyle` / the
+tint colors are gone from both `screenOptions`; the component owns its geometry, tints and typography
+and still reads each screen's `title` + `tabBarIcon` from the same `Tabs.Screen` options as before.
+
+An absolutely-positioned translucent **pill**: 44pt icon-only items, and the active one animates wider
+to reveal its label on a `brandTint` capsule. The two rules below are what hold it together.
+
+**Rule 1 — the translucency and the active-label-only rule are ONE decision.** `glassBar` (new token in
+[lib/theme.js](../mobile/lib/theme.js), both palettes) is `card` at **0.92**. Over the worst possible
+backdrop (black, light mode) that composites to `#EBEBEB`, where `textSecondary` is **4.06:1** — clear
+of the **3:1** floor the 24pt SVG icon strokes need as non-text, and **under the 4.5:1 text floor**.
+The one label that does show sits on a **solid** `brandTint` capsule using `brandDark` (**5.91:1**;
+raw `brand` there is 4.41:1 and fails). Inactive tint also moved `textMuted` → `textSecondary`,
+because 11pt `textMuted` on that fill is 2.13:1. **Show all five labels and the translucency stops
+being defensible** — if you want persistent labels, the fill has to go opaque first. See
+[THEMING.md](THEMING.md).
+
+**Rule 2 — `useBottomInset` is how a bottom-anchored element clears it.** A floating bar occupies **no
+layout space**, so every sheet, toast, action bar, map-camera pad and scroll bottom on a tab screen has
+to clear it explicitly or it hides behind it. The bar reports its own height through
+`BottomTabBarHeightCallbackContext`; [lib/useBottomInset.js](../mobile/lib/useBottomInset.js) is the
+single idiom that consumes it:
+
+```js
+Math.max(insets.bottom, tabBarHeight ?? 0)
+```
+
+Call sites swap `insets.bottom` for `useBottomInset()` and stop caring which kind of screen they are
+on — off a tab screen the hook returns exactly the safe-area inset, which is why one shared component
+([PullableSheet.jsx](../mobile/components/PullableSheet.jsx)) can serve the admin Books tab *and* the
+canvasser map Stack unchanged. It reads the **context**, never `useBottomTabBarHeight()`, which
+**throws** when there is no tab navigator above it (`?? 0` is the whole guard). It is applied in 32
+files today — the admin map's four selection sheets + move-pin bar + legend + style control + toasts,
+Books' action bar/legend/sheet peek/Mapbox camera padding, audit's bulk bar + both toasts, Timeline's
+compare bar, and the scroll paddings on every console screen. Two consequences worth knowing:
+
+- **Five `SafeAreaView edges={['bottom']}` wrappers in `admin/map.jsx` became plain `View`s** — the
+  reported height already contains the safe-area inset, so keeping both double-padded them.
+- **Anything inside a `<Modal>` was deliberately left alone.** A `Modal` is its own native window; the
+  tab bar isn't in it, so there is nothing to clear (the same reason `MetricSheet` owns its own
+  `GestureHandlerRootView`).
+
+Implementation notes that are easy to get wrong a second time:
+
+- It **filters `state.routes`**. The 21 `href:null` admin screens are still real entries (26 routes, 5
+  tabs); expo-router hides them by stamping `tabBarItemStyle: { display: 'none' }` and **strips
+  `href` off the options**, so flattening that style is the only signal available. The stock bar
+  renders all 26 and lets them collapse; a custom bar must filter — while keeping each route's
+  original index, because `state.index` indexes `state.routes`, never the filtered array.
+- **The pill's width never changes.** One shared transition value drives a cross-fade between two
+  slots with per-item weights that always sum to exactly 1, so there is no layout pass and no
+  reflowing shadow, and tab 0 → tab 4 cross-fades those two directly instead of smearing every label
+  in between. The label slot is measured once from the longest label in a hidden `Text`, so it
+  re-measures for free on a theme or OS-font-scale change. It reuses `SHEET_TIMING` from
+  `PullableSheet` rather than introducing a spring.
+- **It hides itself while the keyboard is up** (a floating bar would hover *over* a raised keyboard
+  instead of being pushed by the window) and reports height 0 while gone, so bottom-anchored elements
+  reclaim the space — which is why `audit.jsx`'s bulk-bar note input needs nothing extra.
+- When the focused route is one of the hidden screens, `activeSlot` is `-1`: the highlight **stays on
+  the tab you came from**, and a cold deep-link straight into a hidden screen seeds slot 0, preserving
+  the invariant that exactly one item is ever lit.
+
+**True backdrop blur is deferred, on purpose.** `expo-blur` is a **native module**, so adding it moves
+the EAS fingerprint — four builds and four store submissions ([mobile/README.md](../mobile/README.md)).
+The `tabBarBackground` slot is already rendered (and empty) inside the pill's clipped bounds, so the
+future change is **one option per layout** and no edit to this file.
 
 ## The Books screen
 [app/(app)/admin/books.jsx](../mobile/app/(app)/admin/books.jsx) — the active round's books, assignable

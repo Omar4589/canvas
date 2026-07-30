@@ -18,6 +18,7 @@ import { timeAgo } from '../../../../../lib/datetime';
 import { radius, spacing, ACTION_LABELS } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../../../lib/useBottomInset';
 import { useDebouncedValue } from '../../../../../lib/useDebouncedValue';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import PinIcon from '../../../../../components/PinIcon';
@@ -35,6 +36,8 @@ const ACTION_PIN = {
 export default function HouseholdsScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -118,7 +121,7 @@ export default function HouseholdsScreen() {
         ) : null}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
         {q.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : households.length === 0 ? (

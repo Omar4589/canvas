@@ -18,6 +18,7 @@ import { timeAgo } from '../../../lib/datetime';
 import { spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import TabSwitcher from '../../../components/TabSwitcher';
 import InsetGroup, {
@@ -45,6 +46,8 @@ function latestAt(o) {
 export default function AdminOverlaps() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const roleLabel = useConsoleRoleLabel();
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -101,7 +104,7 @@ export default function AdminOverlaps() {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />
         }

@@ -20,6 +20,7 @@ import { formatDistance } from '../../../../../lib/geo';
 import { radius, spacing, ACTION_LABELS } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../../../lib/useBottomInset';
 import { useMapStyle } from '../../../../../lib/mapStyles';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import TabSwitcher from '../../../../../components/TabSwitcher';
@@ -51,6 +52,8 @@ export default function MapScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so the bottom-anchored detail card must clear it.
+  const bottomInset = useBottomInset();
   const { styleURL } = useMapStyle();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -209,7 +212,7 @@ export default function MapScreen() {
         </View>
 
         {selected ? (
-          <View style={styles.detail}>
+          <View style={[styles.detail, { bottom: bottomInset + spacing.lg }]}>
             <View style={styles.detailRow}>
               <PinIcon
                 status={ACTION_PIN[selected.actionType] || 'unknocked'}

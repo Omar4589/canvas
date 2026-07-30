@@ -19,6 +19,7 @@ import InsetGroup, {
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 
 initMapbox();
 
@@ -36,6 +37,8 @@ function answerText(a) {
 export default function ResponseDetails() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const router = useRouter();
   const { styleURL } = useMapStyle();
   const params = useLocalSearchParams();
@@ -81,7 +84,7 @@ export default function ResponseDetails() {
           </InsetGroup>
         </View>
       ) : !d ? null : (
-        <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}>
           <Text style={styles.title} numberOfLines={2}>
             {d.voter?.fullName || 'Unknown voter'}
             {d.voter?.party ? <Text style={styles.titleParty}> · {d.voter.party}</Text> : null}

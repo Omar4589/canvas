@@ -19,6 +19,7 @@ import { spacing, radius, actionLabel } from '../../../lib/theme';
 import { formatInTz } from '../../../lib/datetime';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
@@ -53,6 +54,8 @@ const SourceDot = ({ color }) => <View style={{ width: 8, height: 8, borderRadiu
 export default function AdminNotes() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const roleLabel = useConsoleRoleLabel();
   const router = useRouter();
 
@@ -274,7 +277,7 @@ export default function AdminNotes() {
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={PRESETS} />
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ paddingBottom: spacing.xxl + bottomInset }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         refreshControl={

@@ -19,6 +19,7 @@ import LiveStatus from '../../../components/LiveStatus';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 
 // Shared helper; feeds render nothing (not 'Never') for a missing timestamp.
 const formatRelative = (d) => sharedFormatRelative(d, { never: '' });
@@ -26,6 +27,8 @@ const formatRelative = (d) => sharedFormatRelative(d, { never: '' });
 export default function ActivityScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const DOT_COLOR = dotColors(colors);
 
   const [live, setLive] = useState(true);
@@ -84,7 +87,7 @@ export default function ActivityScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

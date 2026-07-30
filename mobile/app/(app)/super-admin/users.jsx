@@ -20,6 +20,7 @@ import { loadCurrentUser } from '../../../lib/cache';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 
 
 // Filter pills → server query params: the phone no longer downloads the whole user table.
@@ -34,6 +35,8 @@ const FILTERS = [
 export default function SuperAdminUsersScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
@@ -118,7 +121,7 @@ export default function SuperAdminUsersScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

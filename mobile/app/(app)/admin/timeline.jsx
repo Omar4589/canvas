@@ -25,6 +25,7 @@ import { timeAgo } from '../../../lib/datetime';
 import { radius, spacing, withAlpha } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
 import TabSwitcher from '../../../components/TabSwitcher';
@@ -106,6 +107,10 @@ function latestOverlapAt(o) {
 export default function AdminTimeline() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The console tab bar floats (components/FloatingTabBar.jsx) and takes no layout space, so the
+  // compare bar and the scroll bottom have to clear it themselves. makeStyles has no hook access,
+  // so the inset is applied INLINE at both sites.
+  const bottomInset = useBottomInset();
   const router = useRouter();
 
   // Campaign scoping via the shared CampaignChip (as used by Insights/Map): it
@@ -657,6 +662,38 @@ export default function AdminTimeline() {
         </Pressable>
       </View>
 
+      {/* Both filters live in the FIXED header, ABOVE the loading/error/invalid-range branch — a
+          control that can empty the screen must never live inside the thing it empties, or there is
+          no way back. (Same reason and same placement as audit.jsx's walk-list strip.)
+
+          The coordinator gate deliberately has NO `rows` term: `rows` IS the ?coordinatorId-filtered
+          response, so gating on it unmounted the only pill that could clear the filter — pick a crew
+          with no activity in range (or "No coordinator") and the screen was a trap with no escape but
+          switching campaigns. The web console never had the bug (client/src/pages/TimelinePage.jsx).
+          `|| coordinatorId` keeps an escape even for a coordinator who has since left BOTH the ledger
+          and the roster, which is the one case coordinatorOptions can't cover. */}
+      {efforts.length > 1 ? (
+        <TabSwitcher
+          tabs={[
+            { key: '', label: 'All walk lists' },
+            ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
+          ]}
+          activeKey={effortId}
+          onChange={setEffortId}
+        />
+      ) : null}
+      {coordinatorOptions.length > 0 || coordinatorId ? (
+        <TabSwitcher
+          tabs={[
+            { key: '', label: 'All' },
+            ...coordinatorOptions.map((c) => ({ key: c.id, label: c.name })),
+            { key: 'none', label: 'No coordinator' },
+          ]}
+          activeKey={coordinatorId}
+          onChange={setCoordinatorId}
+        />
+      ) : null}
+
       {rangeInvalid ? (
         <View style={styles.groupWrap}>
           <InsetGroup>
@@ -682,7 +719,9 @@ export default function AdminTimeline() {
           <ActivityIndicator color={colors.brand} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl + (compareMode ? 72 : 0) }}>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: spacing.xxl + bottomInset + (compareMode ? 72 : 0) }}
+        >
           {/* KPI group — only when there's activity to summarize. Hero = the invoice figure;
               the dedup commentary above `kpis` explains why none of these can be summed here. */}
           {coordRows.length > 0 ? (
@@ -712,45 +751,26 @@ export default function AdminTimeline() {
             </View>
           ) : null}
 
-          {/* Walk-list filter stays visible even when the chosen list is empty, so
-              picking a not-yet-knocked list is never a dead end. Coordinator chips
-              only when there are rows to filter. */}
-          {efforts.length > 1 ? (
-            <TabSwitcher
-              tabs={[
-                { key: '', label: 'All walk lists' },
-                ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
-              ]}
-              activeKey={effortId}
-              onChange={setEffortId}
-            />
-          ) : null}
-          {rows.length > 0 && coordinatorOptions.length > 0 ? (
-            <TabSwitcher
-              tabs={[
-                { key: '', label: 'All' },
-                ...coordinatorOptions.map((c) => ({ key: c.id, label: c.name })),
-                { key: 'none', label: 'No coordinator' },
-              ]}
-              activeKey={coordinatorId}
-              onChange={setCoordinatorId}
-            />
-          ) : null}
-
-          {rows.length === 0 ? (
+          {/* Crew case FIRST. It used to be tested via `coordRows.length === 0`, which can never be
+              true — `coordRows` IS `rows` — so a crew filter that emptied the screen printed the
+              generic note below and blamed the walk list or the range instead. Name the control that
+              actually did it, and name the escape by its on-screen label. */}
+          {rows.length === 0 && coordinatorId ? (
+            <View style={styles.groupWrap}>
+              <InsetGroup>
+                <InsetNoteRow>
+                  No activity for this crew — nobody on this crew knocked{' '}
+                  {effortId ? 'in this walk list, ' : ''}
+                  {rangeLabel}. Tap “All” in the crew row above to see everyone, or pick another range.
+                </InsetNoteRow>
+              </InsetGroup>
+            </View>
+          ) : rows.length === 0 ? (
             <View style={styles.groupWrap}>
               <InsetGroup>
                 <InsetNoteRow>
                   No activity — {effortId ? 'no knocks in this walk list' : 'no knocks recorded'},{' '}
                   {rangeLabel}. Pick another {efforts.length > 1 ? 'walk list or ' : ''}range above.
-                </InsetNoteRow>
-              </InsetGroup>
-            </View>
-          ) : coordRows.length === 0 ? (
-            <View style={styles.groupWrap}>
-              <InsetGroup>
-                <InsetNoteRow>
-                  No activity for this crew — nobody on this crew knocked in the selected range.
                 </InsetNoteRow>
               </InsetGroup>
             </View>
@@ -926,9 +946,10 @@ export default function AdminTimeline() {
         </ScrollView>
       )}
 
-      {/* Compare selection bar (folded in from Insights) */}
+      {/* Compare selection bar (folded in from Insights) — floats above the floating tab bar, so
+          its offset is the tab-bar inset plus the gap it always had. */}
       {compareMode ? (
-        <View style={styles.compareBar}>
+        <View style={[styles.compareBar, { bottom: bottomInset + spacing.lg }]}>
           <Text style={styles.compareCount}>{selectedIds.size} selected</Text>
           <Pressable
             onPress={openCompare}
@@ -1108,11 +1129,11 @@ function makeStyles(t) {
     totalCell: { backgroundColor: colors.bg, borderBottomWidth: 0, borderTopWidth: 1, borderTopColor: colors.border },
     totalText: { fontSize: 12, fontWeight: '800', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
 
+    // `bottom` is set inline — it depends on the floating tab bar's inset.
     compareBar: {
       position: 'absolute',
       left: spacing.lg,
       right: spacing.lg,
-      bottom: spacing.lg,
       backgroundColor: colors.textPrimary,
       borderRadius: radius.lg,
       padding: spacing.md,

@@ -19,6 +19,7 @@ import { makeRateColors } from '../../../../../lib/rates';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../../../lib/useBottomInset';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import BarChart from '../../../../../components/BarChart';
 import SectionHeader from '../../../../../components/SectionHeader';
@@ -29,6 +30,8 @@ export default function QualityScreen() {
   const { colors } = useTheme();
   const rateColors = makeRateColors(colors);
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -93,7 +96,7 @@ export default function QualityScreen() {
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
         {q.isLoading || !data ? (
           <ActivityIndicator color={colors.brand} />
         ) : (

@@ -28,6 +28,7 @@ import {
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 
 // The Control Room tab: "is anything on fire" + the platform numbers. Org cards live on the Orgs
 // tab, the activity feed on the Activity tab, and sign-out/theme on More — the bottom bar owns
@@ -51,6 +52,8 @@ export default function SuperAdminHome() {
   const qc = useQueryClient();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -155,7 +158,7 @@ export default function SuperAdminHome() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

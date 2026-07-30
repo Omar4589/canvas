@@ -19,6 +19,7 @@ import { rateFromPct, makeRateColors } from '../../../../../lib/rates';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../../../lib/useBottomInset';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import BarChart from '../../../../../components/BarChart';
 import SectionHeader from '../../../../../components/SectionHeader';
@@ -58,6 +59,8 @@ function delta(value, baseline, unit = '') {
 export default function CanvasserOverview() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -307,7 +310,7 @@ export default function CanvasserOverview() {
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
         {/* Identity */}
         <View style={styles.idCard}>
           <View style={styles.avatar}>

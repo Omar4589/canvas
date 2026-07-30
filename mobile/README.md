@@ -270,6 +270,53 @@ the worst a mistake does is reach nobody.
 `ota:staging` will refuse. That refusal is the signal to cut a fresh set of four, not something to
 override.
 
+### Undoing an OTA
+
+**A bad update is a publish, not a build — so the undo is also a publish.** No store review, no
+resubmit. Three paths, cheapest first; all three act on a **branch**, so name the lane that broke.
+
+```bash
+# 1. Re-point the branch at an update you already shipped. The normal undo:
+#    seconds, no bundling, no rebuild. Read the group id off the list first.
+eas update:list --branch production
+eas update:republish --group <update-group-id> -m 'back out the tab bar'
+
+# 2. Re-publish from a tree you trust. The NEWEST update on a branch wins, so a
+#    good bundle published on top of a bad one supersedes it.
+git checkout <known-good-ref>
+npm run ota:production          # still gates itself with ota:check
+
+# 3. Fall back to the JS baked into the installed binary — when you don't trust
+#    any published update on the branch. Prompts for the rest; answer them.
+eas update:roll-back-to-embedded --branch production
+```
+
+Three things `--help` buries, all three verified against the installed `eas-cli`:
+
+- **Path 1: `--group` is exclusive with `--branch`/`--channel`** — pass the group id alone (it already
+  knows its branch) or the command errors. `--branch` on its own is the interactive picker.
+- **Path 2's gate is the expected outcome, not a failure.** If the known-good ref predates a native
+  change, its fingerprint won't match the fielded builds and `ota:check` will refuse. That refusal is
+  correct; use path 1 or 3 instead.
+- **Path 3 is per-runtimeVersion** — a rollback-to-embedded directive is published against **one**
+  fingerprint, which it prompts you to pick from the branch. With two fingerprints still installed in
+  a lane (see the table below), that is one rollback each. And it lands every phone on whatever *its
+  own* build shipped with, so different builds land on different JS. It supersedes the whole branch's
+  updates, not just the last one; you undo it with another publish.
+
+**Two facts that make a working rollback look broken.**
+
+- **Budget two launches, not one.** `app.json`'s `updates` block sets only `url` — no
+  `checkAutomatically`, no `fallbackToCacheTimeout` — so `expo-updates` runs its defaults: check on
+  every cold start, but wait **0 ms** for the answer. A phone therefore launches on the bundle it
+  already has, fetches yours in the background, and runs it on the **next** cold start. The first
+  relaunch after you republish still shows the bug. Force-quit and reopen before concluding the
+  rollback failed.
+- **A staging rollback can't reach store users — and the bug couldn't either.** `staging` and
+  `production` are separate channels compiled into the binary (`eas.json`), so publishing to one
+  never touches the other. Undo the lane that broke; if the bad update reached both lanes, that's two
+  publishes.
+
 ### History: the Play relaunch (closed 2026-07-28)
 
 Kept because two branches and a tag still exist and it explains why.

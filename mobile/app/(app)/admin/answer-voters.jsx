@@ -15,6 +15,7 @@ import { deviceTimezone } from '../../../lib/dateRanges';
 import { formatInTz, timeAgo } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../lib/useBottomInset';
 
 const PAGE = 25;
 
@@ -49,6 +50,8 @@ function MenuItem({ label, active, onPress }) {
 
 export default function AnswerVoters() {
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const campaignId = one(params.campaignId);
@@ -199,7 +202,7 @@ export default function AnswerVoters() {
         ) : null}
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + bottomInset }}>
         <Text style={styles.title} numberOfLines={2}>{label || 'Responses'}</Text>
         {/* "entries", not "voters" — this is response-unit (a voter re-surveyed in a
             later round appears once per round), same wording as the web explorer. */}
@@ -222,7 +225,10 @@ export default function AnswerVoters() {
 
         {tab === 'voters' ? (
           <>
-            {canvasserRows.length > 0 ? (
+            {/* `|| canvasserId` so the chip can never unmount while a filter is applied: the rows
+                behind it come from a query a picked canvasser narrows, and a background refetch
+                that empties them would otherwise leave no way to clear it. */}
+            {canvasserRows.length > 0 || canvasserId ? (
               <View style={styles.filterRow}>
                 <FilterChip
                   label={canvasserLabel}

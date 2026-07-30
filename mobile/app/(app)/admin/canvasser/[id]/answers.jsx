@@ -16,12 +16,15 @@ import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
+import { useBottomInset } from '../../../../../lib/useBottomInset';
 import DateRangeBar from '../../../../../components/DateRangeBar';
 import BarChart from '../../../../../components/BarChart';
 
 export default function AnswersScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  // The floating tab bar overlays this screen, so bottom padding must clear it.
+  const bottomInset = useBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const userId = params.id;
@@ -86,7 +89,7 @@ export default function AnswersScreen() {
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.xxl + bottomInset }]}>
         {q.isLoading ? (
           <ActivityIndicator color={colors.brand} />
         ) : isLitDrop ? (

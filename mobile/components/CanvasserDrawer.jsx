@@ -25,33 +25,14 @@ import {
 } from '../lib/cache';
 import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
+import InsetGroup, { InsetNavRow, InsetActionRow, RowEmoji } from './InsetGroup';
+import SectionHeader from './SectionHeader';
 import { useDrawer } from '../lib/DrawerContext';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { radius, spacing } from '../lib/theme';
 
 const DRAWER_TIMING = { duration: 240, easing: Easing.out(Easing.cubic) };
-
-// A single tappable settings row — mirrors the admin "More" tab pattern so the
-// drawer and that screen read the same. `last` drops the divider on the final
-// row so it sits flush with the rounded card edge.
-function Row({ icon, label, sub, onPress, danger, last }) {
-  const { colors } = useTheme();
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, last && styles.rowLast, pressed && { opacity: 0.85 }]}
-    >
-      <Text style={styles.rowIcon}>{icon}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.rowLabel, danger && { color: colors.danger }]}>{label}</Text>
-        {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
-      </View>
-      <Text style={styles.rowChevron}>›</Text>
-    </Pressable>
-  );
-}
 
 // The canvasser slide-out drawer: the home for occasional actions (stats,
 // voters, appearance, org/account) so the per-screen headers can stay lean.
@@ -157,6 +138,7 @@ export default function CanvasserDrawer() {
   }
 
   const canSwitchOrg = ctx.isSuperAdmin || (ctx.memberships?.length || 0) > 1;
+  const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -178,55 +160,52 @@ export default function CanvasserDrawer() {
               contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}
               showsVerticalScrollIndicator={false}
             >
-              <Pressable
-                onPress={() => go('/(app)/profile')}
-                style={({ pressed }) => [styles.accountCard, pressed && { opacity: 0.85 }]}
-              >
-                <View style={{ flex: 1 }}>
-                  {orgName ? (
-                    <Text style={styles.accountOrg} numberOfLines={1}>
-                      {orgName}
-                    </Text>
-                  ) : null}
-                  <Text style={styles.accountName}>
-                    {(user?.firstName || '') + (user?.lastName ? ` ${user.lastName}` : '') || 'Account'}
-                  </Text>
-                  <Text style={styles.accountEmail}>{user?.email || ''}</Text>
-                </View>
-                <Text style={styles.accountChevron}>›</Text>
-              </Pressable>
+              {/* The org name was a brand micro-line INSIDE the old account card; it is a caption,
+                  so the shared caption slot holds it and the row keeps one job. */}
+              {orgName ? <SectionHeader caption title={orgName} /> : <View style={{ marginTop: spacing.xs }} />}
+              <InsetGroup>
+                <InsetNavRow
+                  emphasis="hero"
+                  label={fullName || user?.email || 'Your account'}
+                  sub={fullName ? user?.email : null}
+                  hint="Opens your profile"
+                  onPress={() => go('/(app)/profile')}
+                />
+              </InsetGroup>
 
-              <Text style={styles.sectionLabel}>Navigate</Text>
-              <View style={styles.group}>
+              <SectionHeader caption title="Navigate" />
+              <InsetGroup>
                 {/* Voter lookup intentionally omitted for canvassers — they work
                     the doors assigned to them and see each household's voters at
                     the door. Voter search remains an admin-only tool. */}
-                {activeCampaign && <Row icon="📊" label="My stats" onPress={() => go('/(app)/stats')} />}
-                <Row icon="❓" label="Help center" sub="Guides, FAQ & tips" onPress={() => go('/(app)/help')} last />
-              </View>
+                {activeCampaign && (
+                  <InsetNavRow emphasis="menu" leading={<RowEmoji>📊</RowEmoji>} label="My stats" onPress={() => go('/(app)/stats')} />
+                )}
+                <InsetNavRow emphasis="menu" leading={<RowEmoji>❓</RowEmoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => go('/(app)/help')} />
+              </InsetGroup>
 
-              <Text style={styles.sectionLabel}>Appearance</Text>
-              <View style={styles.appearanceGroup}>
+              <SectionHeader caption title="Appearance" />
+              <View style={styles.appearanceWrap}>
                 <ThemeToggle />
               </View>
 
-              <Text style={styles.sectionLabel}>Account</Text>
-              <View style={styles.group}>
+              <SectionHeader caption title="Account" />
+              <InsetGroup>
                 {ctx.isSuperAdmin && (
-                  <Row icon="🌐" label="Platform view" sub="All organizations" onPress={onPlatformView} />
+                  <InsetNavRow emphasis="menu" leading={<RowEmoji>🌐</RowEmoji>} label="Platform view" sub="All organizations" onPress={onPlatformView} />
                 )}
                 {/* isConsoleUser, NOT isOrgAdmin — a team lead reaches the admin tab too
                     (admin/_layout.jsx admits them). Gating on isOrgAdmin hid this row from
                     leads, so a lead who tapped "Switch to canvass mode" was stuck in the
                     canvasser flow until they restarted the app. */}
                 {ctx.isConsoleUser && (
-                  <Row icon="🛠" label="Admin dashboard" onPress={onAdminDashboard} />
+                  <InsetNavRow emphasis="menu" leading={<RowEmoji>🛠</RowEmoji>} label="Admin dashboard" onPress={onAdminDashboard} />
                 )}
                 {canSwitchOrg && (
-                  <Row icon="🔁" label="Switch organization" onPress={onSwitchOrg} />
+                  <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Switch organization" onPress={onSwitchOrg} />
                 )}
-                <Row icon="↩︎" label="Sign out" onPress={onLogout} danger last />
-              </View>
+                <InsetActionRow tone="danger" leading={<RowEmoji>↩︎</RowEmoji>} label="Sign out" onPress={onLogout} />
+              </InsetGroup>
             </ScrollView>
           </SafeAreaView>
         </Animated.View>
@@ -268,48 +247,10 @@ function makeStyles(t) {
     },
     closeText: { fontSize: 15, color: t.colors.textSecondary, fontWeight: '700' },
 
-    accountCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: t.colors.card,
-      borderRadius: radius.lg,
-      padding: spacing.lg,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-      ...t.shadow.card,
-      marginTop: spacing.xs,
-      marginBottom: spacing.lg,
-    },
-    accountOrg: { ...t.type.micro, color: t.colors.brand, marginBottom: 3 },
-    accountName: { ...t.type.h3 },
-    accountEmail: { ...t.type.caption, marginTop: 2 },
-    accountChevron: { fontSize: 22, color: t.colors.textMuted, marginLeft: spacing.sm },
-
-    sectionLabel: { ...t.type.micro, marginBottom: spacing.sm, marginLeft: spacing.xs },
-    group: {
-      backgroundColor: t.colors.card,
-      borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-      ...t.shadow.card,
-      marginBottom: spacing.lg,
-      overflow: 'hidden',
-    },
-    appearanceGroup: { marginBottom: spacing.lg },
-
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.md,
-      borderBottomWidth: 1,
-      borderBottomColor: t.colors.border,
-      gap: spacing.md,
-    },
-    rowLast: { borderBottomWidth: 0 },
-    rowIcon: { fontSize: 18, width: 24, textAlign: 'center' },
-    rowLabel: { ...t.type.bodyStrong, fontSize: 15 },
-    rowSub: { ...t.type.caption, marginTop: 1 },
-    rowChevron: { fontSize: 20, color: t.colors.textMuted },
+    // The card, hairlines, row typography and the account row all come from InsetGroup now — the
+    // local Row (and its 14 styles) was a verbatim fork of the admin More's, which is exactly how
+    // the two drifted apart. `rowLast` went with it: InsetGroup interleaves separators BETWEEN
+    // children, so a trailing hairline is structurally impossible.
+    appearanceWrap: { marginBottom: spacing.lg },
   });
 }
