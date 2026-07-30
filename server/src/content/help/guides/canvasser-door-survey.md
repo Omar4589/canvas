@@ -21,4 +21,4 @@ Work through the questions and tap your answers. Some questions only appear **ba
 
 When you're done, submit. That records the response for that voter and marks the door as reached. If there's more than one voter at the house, you can survey each of them.
 
-> Tip: Each voter can be surveyed once per pass. If you come back in a later pass, you'll survey them fresh — that's expected.
+> Tip: Each voter can be surveyed once per pass. If you come back in a later pass, the app shows the door and everyone at it fresh — no "surveyed" marks from earlier rounds — and you'll survey them fresh. That's expected: have the conversation again. (If a voter mentions they were asked before, that's normal on a follow-up round.)

@@ -247,8 +247,8 @@ filter so undo attribution stays clean), `POST /undo` (reverts only rows carryin
 **Mobile** ([mobile/app/(app)/voters](../mobile/app/(app)/voters)):
 | File | Renders |
 |---|---|
-| [voters/index.jsx](../mobile/app/(app)/voters/index.jsx) | Campaign-scoped search list; row → profile. Entry point: "Voters" link in the [books](../mobile/app/(app)/books.jsx) header. |
-| [voters/[id].jsx](../mobile/app/(app)/voters/[id].jsx) | Read-only profile (details, household, voted, surveys, notes) + add-note. |
+| [voters/index.jsx](../mobile/app/(app)/voters/index.jsx) | Campaign-scoped search list; row → profile. Entry points: the "Voter search" row on the mobile admin **More** tab and tapped-voter links on the admin **Notes** screen (the old canvasser-facing "Voters" link in the books header was removed). |
+| [voters/[id].jsx](../mobile/app/(app)/voters/[id].jsx) | Read-only profile (details, household, voted, surveys, notes) + add-note. **Management-only**: `GET /mobile/voters/:voterId` requires lead (per-campaign grant, entry voter must belong to the granted campaign) / admin / super — a plain canvasser gets 403. The profile carries cross-round survey answers, raw DOB, and phone; the door screen deliberately presents each round fresh, and none of that belongs in a canvasser's hands (see [PASSES_AND_TURF.md](PASSES_AND_TURF.md) → the round-fresh presentation). The search *list* stays canvasser-reachable (book-scoped, identity + status booleans only, no answers). |
 
 ## F. Status semantics (surveyed vs. voted)
 

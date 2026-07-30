@@ -14,6 +14,7 @@ import { VotedVoter } from '../../models/VotedVoter.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
+import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -139,7 +140,16 @@ router.get('/voters', async (req, res, next) => {
   }
 });
 
-// GET /mobile/voters/:voterId?campaignId= — read profile (scoped).
+// GET /mobile/voters/:voterId?campaignId= — read profile. MANAGEMENT-ONLY (super,
+// org admin, or a lead with a grant for this campaign): the profile carries the
+// voter's full cross-round survey history WITH answers, raw DOB, and phone — none of
+// which a canvasser at the door should hold. The door screen deliberately presents
+// each round fresh (per-round surveyStatus on the wire), and shipping last round's
+// answers here would let a knock be "confirmed" without a conversation. The only
+// screens calling this are the admin Voter search and Notes surfaces (lead/admin);
+// the old canvasser entry point was removed from the app long ago — this closes the
+// vestigial server side of it (the authorization gap PRIVACY_VERIFICATION.md
+// recorded against this route).
 router.get('/voters/:voterId', async (req, res, next) => {
   try {
     const campaign = await resolveCampaign(req, res);
@@ -147,15 +157,19 @@ router.get('/voters/:voterId', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.voterId)) {
       return res.status(400).json({ error: 'Invalid voterId' });
     }
+    if (!(await canManageCampaign(req, campaign._id))) {
+      return res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN_ROLE' });
+    }
     const voter = await Voter.findOne(
       { _id: req.params.voterId, organizationId: activeOrgId(req) },
-      'householdId'
+      'householdId campaignId'
     ).lean();
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
-
-    const scope = await scopeHouseholdIds(req, campaign);
-    if (scope && !scope.includes(String(voter.householdId))) {
-      return res.status(403).json({ error: 'Voter not in your assigned books' });
+    // A lead's grant is per-campaign: the entry voter must belong to the campaign the
+    // grant covers (admins/super stay org-wide, as before). The profile itself still
+    // shows the person's cross-campaign history — that's its documented design.
+    if (!isAdminOrSuper(req) && String(voter.campaignId) !== String(campaign._id)) {
+      return res.status(403).json({ error: 'Voter not in this campaign' });
     }
     const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
     if (!profile) return res.status(404).json({ error: 'Voter not found' });

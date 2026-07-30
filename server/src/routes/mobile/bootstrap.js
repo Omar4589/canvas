@@ -14,7 +14,7 @@ import { VotedVoter } from '../../models/VotedVoter.js';
 import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
-import { statusesFromDoorPass } from '../../services/passes/passStatus.js';
+import { doorStateFromDoorPass, surveyedVotersFromDoorPass } from '../../services/passes/passStatus.js';
 import { canvasserScopeWithPasses, isOrgAdminOrSuper } from '../../services/canvass/canvasserScope.js';
 
 const router = Router();
@@ -248,17 +248,23 @@ router.get('/bootstrap', async (req, res, next) => {
 
     const householdIds = households.map((h) => h._id);
 
-    // Per-round status: each door's status IN THE ROUND OF THE CANVASSER'S ASSIGNED
-    // BOOK (from doorPass), so prepping a future round (which moves Household.turfId)
-    // can't flip an active round's worked doors to "fresh". Household.status stays
+    // Per-round status + last visit: each door as it stands IN THE ROUND OF THE
+    // CANVASSER'S ASSIGNED BOOK (from doorPass), so prepping a future round (which
+    // moves Household.turfId) can't flip an active round's worked doors to "fresh".
+    // lastActionAt is rewritten too — a door untouched this round reads unknocked
+    // with NO last visit (the round-fresh presentation the docs promise), instead of
+    // "Unknocked · Last visit 3 weeks ago". Household.status / lastActionAt stay
     // global for admin/reports.
-    const perRound = await statusesFromDoorPass(doorPass, campaign.type);
+    const perRound = await doorStateFromDoorPass(doorPass, campaign.type);
     for (const h of households) {
       const s = perRound.get(String(h._id));
-      if (s) h.status = s;
+      if (s) {
+        h.status = s.status;
+        h.lastActionAt = s.lastActionAt;
+      }
     }
 
-    const [votersRaw, survey, votedRecs] = await Promise.all([
+    const [votersRaw, survey, votedRecs, surveyedThisRound] = await Promise.all([
       campaign.type === 'survey'
         ? Voter.find(
             { householdId: { $in: householdIds }, organizationId: orgId },
@@ -282,11 +288,24 @@ router.get('/bootstrap', async (req, res, next) => {
           }).lean()
         : Promise.resolve(null),
       VotedVoter.find({ campaignId: campaign._id }, { voterId: 1 }).lean(),
+      campaign.type === 'survey' ? surveyedVotersFromDoorPass(doorPass) : Promise.resolve(new Set()),
     ]);
     // Early voting: flag (not hide) voters who already voted so the app can show
     // a ✓ next to their name. Fully-voted doors were already dropped above.
     const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
-    const voters = votersRaw.map((v) => toWireVoter(v, votedSet.has(String(v._id))));
+    // Per-round voter state, same principle as the door status above: on the wire,
+    // 'surveyed' means surveyed in THIS round (the round of the door's assigned book),
+    // so a pass-1 supporter presents fresh in a pass-3 book — no "Surveyed" badge, no
+    // Re-survey label, no cross-round tell. The stored Voter.surveyStatus stays the
+    // campaign-global "ever surveyed" for admin/reports. Voters at doors outside
+    // doorPass (legacy null-pass books) keep the global value, matching door status.
+    const voters = votersRaw.map((v) => {
+      const w = toWireVoter(v, votedSet.has(String(v._id)));
+      if (doorPass.has(String(w.householdId))) {
+        w.surveyStatus = surveyedThisRound.has(String(v._id)) ? 'surveyed' : 'not_surveyed';
+      }
+      return w;
+    });
 
     const { books, efforts } = await canvasserBooks(req, campaign);
     // The campaign's active round ids — the client compares this to the /changes
@@ -374,13 +393,18 @@ router.get('/changes', async (req, res, next) => {
       coordSource: 1,
       coordConfidence: 1,
     }).lean();
-    // Per-round status from the canvasser's book round (same as bootstrap) so deltas
-    // don't re-introduce a global status for a door fresh in its current round.
-    {
-      const perRound = await statusesFromDoorPass(doorPass, access.campaign.type);
+    // Per-round status + last visit from the canvasser's book round (same as
+    // bootstrap) so deltas don't re-introduce a global status — or a prior round's
+    // "Last visit" — for a door fresh in its current round. Skipped entirely on the
+    // (common) empty poll.
+    if (changedHouseholds.length) {
+      const perRound = await doorStateFromDoorPass(doorPass, access.campaign.type);
       for (const h of changedHouseholds) {
         const s = perRound.get(String(h._id));
-        if (s) h.status = s;
+        if (s) {
+          h.status = s.status;
+          h.lastActionAt = s.lastActionAt;
+        }
       }
     }
 
@@ -415,12 +439,23 @@ router.get('/changes', async (req, res, next) => {
       const seen = new Set(byHousehold.map((v) => String(v._id)));
       const raw = [...byHousehold, ...byOwnEdit.filter((v) => !seen.has(String(v._id)))];
       if (raw.length > 0) {
-        const votedRecs = await VotedVoter.find(
-          { campaignId: cId, voterId: { $in: raw.map((v) => v._id) } },
-          { voterId: 1 }
-        ).lean();
+        const [votedRecs, surveyedThisRound] = await Promise.all([
+          VotedVoter.find(
+            { campaignId: cId, voterId: { $in: raw.map((v) => v._id) } },
+            { voterId: 1 }
+          ).lean(),
+          // Per-round voter state (same rewrite as the bootstrap) so a delta can't
+          // re-introduce the global "ever surveyed" for a round-fresh voter.
+          surveyedVotersFromDoorPass(doorPass),
+        ]);
         const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
-        changedVoters = raw.map((v) => toWireVoter(v, votedSet.has(String(v._id))));
+        changedVoters = raw.map((v) => {
+          const w = toWireVoter(v, votedSet.has(String(v._id)));
+          if (doorPass.has(String(w.householdId))) {
+            w.surveyStatus = surveyedThisRound.has(String(v._id)) ? 'surveyed' : 'not_surveyed';
+          }
+          return w;
+        });
       }
     }
 

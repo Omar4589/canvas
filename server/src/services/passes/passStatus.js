@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { ACTION_TO_STATUS } from '../../utils/statusPrecedence.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
@@ -70,22 +71,59 @@ export async function getUserStatusMap(userId, householdIds, campaignType, passI
   return map;
 }
 
-// Per-round status from an EXPLICIT door→pass map (e.g. the canvasser's assigned
-// book's round) — correct even when Household.turfId points at a freshly-cut future
-// round. Returns Map<doorIdStr, status>; doors absent from the map get nothing.
-export async function statusesFromDoorPass(doorPass, campaignType) {
-  const out = new Map();
-  if (!doorPass || !doorPass.size) return out;
+// Group an explicit door→pass map by pass. Shared by the per-round wire helpers below.
+function groupDoorPass(doorPass) {
   const byPass = new Map();
+  if (!doorPass || !doorPass.size) return byPass;
   for (const [hid, pid] of doorPass) {
     if (!pid) continue;
     let arr = byPass.get(pid);
     if (!arr) { arr = []; byPass.set(pid, arr); }
     arr.push(hid);
   }
-  for (const [pid, hids] of byPass) {
+  return byPass;
+}
+
+// Per-round door STATE from an EXPLICIT door→pass map (e.g. the canvasser's assigned
+// book's round) — status AND last visit, both scoped to the door's round, correct even
+// when Household.turfId points at a freshly-cut future round. A door with no activity
+// in its round reads { status: 'unknocked', lastActionAt: null } — the round-fresh
+// presentation. Doors absent from the map get nothing (callers keep the global value).
+export async function doorStateFromDoorPass(doorPass, campaignType) {
+  const out = new Map();
+  for (const [pid, hids] of groupDoorPass(doorPass)) {
     const m = await getPassStatusMap(pid, hids, campaignType);
-    for (const hid of hids) out.set(hid, m.get(hid)?.status || 'unknocked');
+    for (const hid of hids) {
+      const e = m.get(hid);
+      out.set(hid, { status: e?.status || 'unknocked', lastActionAt: e?.lastActionAt || null });
+    }
+  }
+  return out;
+}
+
+// Status-only view of doorStateFromDoorPass — Map<doorIdStr, status>. Kept for
+// callers that only color doors (e.g. /mobile/me/today's "Remaining").
+export async function statusesFromDoorPass(doorPass, campaignType) {
+  const state = await doorStateFromDoorPass(doorPass, campaignType);
+  const out = new Map();
+  for (const [hid, s] of state) out.set(hid, s.status);
+  return out;
+}
+
+// The VOTER-level analog of doorStateFromDoorPass: which voters have a SurveyResponse
+// in THE ROUND their door's assigned book belongs to. Returns Set<voterIdStr>. This is
+// what makes the phone's per-voter "Surveyed" badge per-round — the stored
+// Voter.surveyStatus stays the campaign-global "ever surveyed" for admin/reports,
+// exactly as Household.status stays global while the wire status is per-round.
+// Rides the { householdId, passId } index ("per-pass survey existence").
+export async function surveyedVotersFromDoorPass(doorPass) {
+  const out = new Set();
+  for (const [pid, hids] of groupDoorPass(doorPass)) {
+    const rows = await SurveyResponse.find(
+      { householdId: { $in: hids.map(oid) }, passId: oid(pid) },
+      { voterId: 1 }
+    ).lean();
+    for (const r of rows) out.add(String(r.voterId));
   }
   return out;
 }

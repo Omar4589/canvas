@@ -329,6 +329,22 @@ book pointer), so you can **cut/prep the next round at any time** — even while
 being walked — without disturbing the active round's canvassers. (Activating the new round still archives
 the old one and needs its own book assignments — a new round is a fresh assignment.)
 
+**The round-fresh presentation goes all the way down to the voter.** On the canvasser's wire
+(bootstrap + delta), three fields are rewritten to the round of their assigned book: the door's
+`status`, its `lastActionAt` (a round-fresh door shows **no** "Last visit", not "Unknocked · Last
+visit 3 weeks ago"), and each voter's `surveyStatus` — 'surveyed' means *surveyed in this round*, so
+a Round-1 supporter presents "Take survey", not a "Surveyed" badge with a "Re-survey" button. The
+stored fields stay campaign-global for admin/reports. This is deliberate integrity design, not just
+cosmetics: a canvasser who can see who answered last round can "confirm" a knock without a
+conversation. The same principle gates the mobile voter profile (full cross-round answers, DOB,
+phone) to **leads/admins only** — see [VOTERS.md](VOTERS.md). The one voter-level marker that stays
+visible across rounds is the ✓ voted flag (and DNC, which never resets — it's consent, not
+progress). The trade-off, chosen deliberately: a canvasser at a revisited door gets no hint anyone
+was there before, so a voter may say "you already asked me this." Per-round wire helpers:
+`doorStateFromDoorPass` / `surveyedVotersFromDoorPass` in
+[passStatus.js](../server/src/services/passes/passStatus.js), pinned by
+[perRoundVoterView.int.test.js](../server/test/perRoundVoterView.int.test.js).
+
 **Seeing it as an admin.** The **Passes page** shows a **Knocks** count per round (the billable
 `door × round` figure) next to the books + progress. The **audit map** (Passes → *Audit →*) is
 **pass-scoped**: with a round selected it shows *that round's* door status + activity, not the global
