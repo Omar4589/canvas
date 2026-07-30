@@ -204,6 +204,18 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
     ...(excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
   };
 
+  // A targeted round only ever wants its matching doors: resolve the pass's own
+  // recorded targetFilter (exclude branch included) and constrain to it. Without
+  // this, a supplemental book would sweep up every bookless door — including the
+  // ones the target skipped or the exclusion deliberately removed. A genuinely new
+  // door still flows in (it's unknocked and has no survey answers, so it matches
+  // the usual follow-up targets and can't match an answer-based exclusion).
+  if (isActiveTargetFilter(pass.targetFilter)) {
+    const { householdIds } = await resolveWalkList(campaign, pass.targetFilter, { effortId: pass.effortId });
+    if (!householdIds.length) return { added: 0, bookCount: 0, bookIds: [] };
+    baseFilter._id = { $in: householdIds };
+  }
+
   const households = await Household.find(baseFilter, CUT_COLUMNS).lean();
   if (!households.length) return { added: 0, bookCount: 0, bookIds: [] };
 

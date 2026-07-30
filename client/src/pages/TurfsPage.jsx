@@ -916,12 +916,15 @@ export default function TurfsPage() {
   // Loose doors (not in one of this pass's books): already-worked leftovers a targeted cut
   // skipped, restricted homes, and voters added since the cut. Drives the toggle count.
   const looseDoorCount = countLooseDoors(doorsQ.data?.doors, passTurfIds);
-  // Doors not yet in any book — e.g. voters imported after this pass was cut. Restricted
-  // homes are loose too (they're kept out of the cut), but when we're excluding them they
-  // aren't actionable, so don't let them inflate the "not in any book" nag.
-  const unassignedCount = (doorsQ.data?.doors || []).filter(
-    (d) => !d.turfId && !(excludeRestricted && d.status === 'restricted')
-  ).length;
+  // Doors not yet in any book that this pass actually WANTS — e.g. voters imported after
+  // the cut. Server-computed (GET /turfs rollup) so a targeted round's skipped doors and
+  // an exclusion's removed doors never inflate the nag: they are bookless on purpose.
+  // Restricted homes mirror the "exclude restricted" checkbox, same as the cut.
+  const unassignedCount = Math.max(
+    0,
+    (turfsQ.data?.supplementalDoorCount || 0) -
+      (excludeRestricted ? turfsQ.data?.supplementalRestrictedCount || 0 : 0)
+  );
   // Inaccessible homes a canvasser flagged (Household.status === 'restricted'). The admin
   // can drop them from this cut so nobody is routed back to an unreachable door.
   const restrictedDoorCount = (doorsQ.data?.doors || []).filter((d) => d.status === 'restricted').length;
@@ -1302,9 +1305,14 @@ export default function TurfsPage() {
     onSuccess: invalidateTurfs,
   });
   // Fold voters imported after this pass was cut (currently unassigned to any
-  // book) into the pass as new draft book(s) — no recut, no archive.
+  // book) into the pass as new draft book(s) — no recut, no archive. Carries the
+  // restricted checkbox so the button books exactly what the nag counted.
   const addSupplemental = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/add-supplemental`, { method: 'POST', body: { passId } }),
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/turfs/add-supplemental`, {
+        method: 'POST',
+        body: { passId, excludeRestricted: excludeRestricted && restrictedDoorCount > 0 },
+      }),
     onSuccess: invalidateTurfs,
   });
 

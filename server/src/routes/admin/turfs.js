@@ -22,7 +22,7 @@ import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLoc
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
-import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
+import { resolveWalkList, isActiveTargetFilter } from '../../services/walklist/resolveWalkList.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
 
 const router = Router({ mergeParams: true });
@@ -524,8 +524,13 @@ router.get('/', async (req, res, next) => {
     let dncDoorCount = 0;
     let excludedApartmentCount = 0;
     let knockCount = 0;
+    let supplementalDoorCount = 0;
+    let supplementalRestrictedCount = 0;
     if (filter.passId) {
-      const pass = await Pass.findOne({ _id: filter.passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+      const pass = await Pass.findOne(
+        { _id: filter.passId, campaignId: req.campaign._id },
+        { effortId: 1, targetFilter: 1 }
+      ).lean();
       if (pass) {
         const base = {
           campaignId: req.campaign._id,
@@ -539,9 +544,41 @@ router.get('/', async (req, res, next) => {
           Household.countDocuments({ ...base, excludedFromTurf: true }),
           CanvassActivity.countDocuments({ passId: filter.passId }),
         ]);
+        // Doors a supplemental book would actually pick up: bookless + knockable,
+        // and — when the round is targeted — matching the pass's own recorded
+        // targetFilter (exclude branch included). Computed server-side so the
+        // "N doors not in any book" nag can't count doors a targeted cut skipped
+        // or an exclusion deliberately removed (they are bookless ON PURPOSE).
+        const supplementalBase = {
+          campaignId: req.campaign._id,
+          effortId: pass.effortId,
+          turfId: null,
+          ...KNOCKABLE_DOOR_FILTER,
+          'location.coordinates': { $exists: true, $ne: null },
+        };
+        if (isActiveTargetFilter(pass.targetFilter)) {
+          const { householdIds } = await resolveWalkList(req.campaign, pass.targetFilter, {
+            effortId: pass.effortId,
+          });
+          supplementalBase._id = { $in: householdIds };
+        }
+        [supplementalDoorCount, supplementalRestrictedCount] = await Promise.all([
+          Household.countDocuments(supplementalBase),
+          // The restricted slice, so the client can mirror its "exclude restricted"
+          // checkbox: shown count = supplementalDoorCount − (checkbox ? this : 0).
+          Household.countDocuments({ ...supplementalBase, status: 'restricted' }),
+        ]);
       }
     }
-    res.json({ turfs: withCounts, votedDoorCount, dncDoorCount, excludedApartmentCount, knockCount });
+    res.json({
+      turfs: withCounts,
+      votedDoorCount,
+      dncDoorCount,
+      excludedApartmentCount,
+      knockCount,
+      supplementalDoorCount,
+      supplementalRestrictedCount,
+    });
   } catch (err) {
     next(err);
   }

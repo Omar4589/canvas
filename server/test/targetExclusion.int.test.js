@@ -35,7 +35,7 @@ const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { SavedSearch } = await import('../src/models/SavedSearch.js');
 const { Turf } = await import('../src/models/Turf.js');
 const { resolveWalkList, isActiveTargetFilter } = await import('../src/services/walklist/resolveWalkList.js');
-const { generateTurf } = await import('../src/services/turf/generateTurf.js');
+const { generateTurf, addSupplementalBooks } = await import('../src/services/turf/generateTurf.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -469,4 +469,46 @@ test('9. backward compatibility: no exclude key → identical behavior, quiet ne
   const r = await resolveWalkList(campaign, legacy);
   assert.equal(r.householdCount, 10, 'the 7 survivors plus the 3 the exclude would have removed');
   assert.equal(r.excludedDoorCount, 0);
+});
+
+test('10. supplemental books respect the pass\'s target: excluded doors are never re-introduced', { skip }, async () => {
+  const { campaign, effort, org, p2, h4, h6 } = ctx;
+
+  // Cut the round with the HD54 filter — books over the 7 surviving doors, and the
+  // filter (exclude branch included) recorded on the Pass.
+  await generateTurf({
+    campaignId: campaign._id, passId: p2._id, mode: 'geometric',
+    params: { maxDoors: 65, targetFilter: HD54() },
+  });
+  const booked = await Turf.find({ passId: p2._id }).lean();
+  assert.equal(booked.reduce((n, t) => n + t.doorCount, 0), 7);
+
+  // The exact bug from the field: the excluded doors (H4, H6) and the never-included
+  // doors (H7, H8) are all bookless — but they are bookless ON PURPOSE, so the
+  // supplemental count must be 0 and the supplemental cut must add nothing.
+  const rollup = await call(`/admin/campaigns/${campaign._id}/turfs?passId=${p2._id}`);
+  assert.equal(rollup.status, 200);
+  assert.equal(rollup.json.supplementalDoorCount, 0,
+    'the "N doors not in any book" nag has nothing to nag about');
+  const none = await addSupplementalBooks({ campaignId: campaign._id, passId: p2._id });
+  assert.equal(none.added, 0, 'no book of deliberately-removed doors');
+
+  // A genuinely NEW door (post-cut import: unknocked, no answers) matches the target's
+  // unknocked branch, can't match the answer exclusion, and flows in — alone.
+  const fresh = await Household.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: '99 Newcomer Way', city: 'Spring Hill', state: 'FL', zipCode: '34606',
+    normalizedAddress: '99 NEWCOMER WAY|SPRING HILL|FL|34606',
+    location: { type: 'Point', coordinates: [-82.49, 28.475] },
+  });
+  const rollup2 = await call(`/admin/campaigns/${campaign._id}/turfs?passId=${p2._id}`);
+  assert.equal(rollup2.json.supplementalDoorCount, 1, 'exactly the newcomer');
+  const added = await addSupplementalBooks({ campaignId: campaign._id, passId: p2._id });
+  assert.equal(added.added, 1);
+  const supp = await Turf.find({ passId: p2._id, 'params.supplemental': true }).lean();
+  assert.equal(supp.length, 1);
+  assert.deepEqual(supp[0].householdIds.map(String), [String(fresh._id)],
+    'the supplemental book holds the newcomer and nothing else — not H4, not H6');
+  const stillLoose = await Household.find({ _id: { $in: [h4._id, h6._id] } }, { turfId: 1 }).lean();
+  assert.ok(stillLoose.every((h) => !h.turfId), 'the excluded doors stay out of every book');
 });
