@@ -50,7 +50,6 @@ Keep that split, cross-link related docs with a "Related:" line, link to source 
 | [THEMING.md](THEMING.md) | Cross-cutting (not a feature): light/dark mode and the web design tokens — how the theme flips, the full token reference, and the rule that every control must use the semantic tokens (`bg-card`/`text-fg`/…) so nothing renders white in dark mode. |
 | [PERFORMANCE.md](PERFORMANCE.md) | Cross-cutting (not a feature): resource hygiene — focus-gated polling and GPS on covered mobile screens, the single-flight offline queue, AbortSignal/debounce on searches, map lifecycle rules, and the state-reset patterns. |
 | [OPERATIONS.md](OPERATIONS.md) | Not a feature doc: the **runbook**. Jobs Heroku Scheduler runs for you (the deleted-identity purge), the one-off commands you type into Heroku's Run console (lock the store reviewers' demo login, build indexes), and why `autoIndex` is off in production. |
-| [REPORTING_BACKLOG.md](REPORTING_BACKLOG.md) | Not a feature doc: deferred reporting/dashboard enhancements — per-round breakdowns and the billing export first — plus a status note on what's already correct. |
 | [PROPOSAL_PARALLEL_EFFORTS.md](PROPOSAL_PARALLEL_EFFORTS.md) | Historical design proposal for the Efforts model — superseded by [EFFORTS.md](EFFORTS.md); kept for the rationale. |
 
 ### Related references (repo root)

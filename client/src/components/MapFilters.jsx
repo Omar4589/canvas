@@ -11,6 +11,14 @@ const REVIEW_STATUS_OPTIONS = [
   { value: 'all', label: 'All' },
 ];
 
+// One decision for every flag matching the current flag filters (bulk review).
+const BULK_ACTIONS = [
+  { status: 'reviewed', label: 'Mark reviewed' },
+  { status: 'dismissed', label: 'Dismiss' },
+  { status: 'confirmed', label: 'Confirm issue', danger: true },
+  { status: 'open', label: 'Reopen', reopenOnly: true },
+];
+
 function StatusChip({ status, active, count, onClick, color, label }) {
   return (
     <button
@@ -68,6 +76,10 @@ export default function MapFilters({
   reviewStatus = 'open',
   onReviewStatusChange,
   flagCounts = null,
+  // Bulk review over the map's current flag scope — MapPage owns the state + the POST; this
+  // renders the button and the armed inline confirm (count comes from the page's dry run).
+  // { show, armed, count, note, busy, showReopen, onArm, onCancel, onNote, onAction } | null.
+  flagBulk = null,
   // The read-only client map has no canvasser identity — hide the Layers toggle + the
   // canvasser dropdown entirely.
   hideCanvassers = false,
@@ -217,6 +229,62 @@ export default function MapFilters({
                   ))}
                 </select>
               </div>
+              {flagBulk?.show &&
+                (!flagBulk.armed ? (
+                  <button
+                    type="button"
+                    onClick={flagBulk.onArm}
+                    className="w-full rounded border border-border bg-card px-3 py-1.5 text-sm font-medium text-brand-accent hover:bg-sunken"
+                  >
+                    Review all matching…
+                  </button>
+                ) : (
+                  <div className="space-y-2 rounded-md border border-brand-600 bg-brand-tint p-2.5">
+                    <p className="text-xs text-fg">
+                      {flagBulk.count == null ? (
+                        'Counting matching flags…'
+                      ) : (
+                        <>
+                          One decision for all <strong>{flagBulk.count.toLocaleString()}</strong>{' '}
+                          flag{flagBulk.count === 1 ? '' : 's'} matching the current flag filters.
+                        </>
+                      )}
+                    </p>
+                    <input
+                      type="text"
+                      value={flagBulk.note}
+                      onChange={(e) => flagBulk.onNote(e.target.value)}
+                      placeholder="Add a shared note (optional)…"
+                      className="w-full rounded border border-border bg-card px-2 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {BULK_ACTIONS.filter((a) => !a.reopenOnly || flagBulk.showReopen).map((a) => (
+                        <button
+                          key={a.status}
+                          type="button"
+                          disabled={!!flagBulk.busy || flagBulk.count == null || flagBulk.count === 0}
+                          onClick={() => flagBulk.onAction(a.status)}
+                          className={
+                            'rounded border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ' +
+                            (a.danger
+                              ? 'border-danger bg-danger-tint text-danger hover:opacity-90'
+                              : 'border-border bg-card text-fg hover:bg-sunken')
+                          }
+                        >
+                          {flagBulk.busy === a.status ? 'Saving…' : a.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        disabled={!!flagBulk.busy}
+                        onClick={flagBulk.onCancel}
+                        className="rounded border border-transparent px-2 py-1 text-xs font-medium text-brand-accent hover:underline disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ))}
               <p className="text-xs text-fg-subtle">
                 Counts show open (unresolved) flags; use the status filter to view reviewed or
                 dismissed ones.

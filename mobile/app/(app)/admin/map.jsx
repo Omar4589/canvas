@@ -8,6 +8,7 @@ import {
   Switch,
   ScrollView,
   Modal,
+  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
@@ -27,6 +28,7 @@ import DateRangePickerModal from '../../../components/DateRangePickerModal';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import FlagLegendHint from '../../../components/FlagLegendHint';
 import { primaryReason, reasonColor, FAR_WARN_M } from '../../../lib/flags';
+import { postBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../../../lib/bulkReview';
 import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { initMapbox } from '../../../lib/mapbox';
@@ -41,6 +43,15 @@ const DEFAULT_CENTER = [-84.5, 39.0];
 
 // Verb shown in the brief post-review confirmation.
 const FLAG_FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirmed: 'confirmed as an issue', open: 'reopened' };
+
+// Bulk actions offered by the flag-badge sheet (open flags only — no Reopen here). Each
+// confirms via a two-button Alert (Android drops buttons past three, so the sheet picks the
+// action and the Alert only confirms it).
+const MAP_BULK_ACTIONS = [
+  { status: 'reviewed', label: 'Mark reviewed', confirm: (n) => `Mark ${n} reviewed` },
+  { status: 'dismissed', label: 'Dismiss', confirm: (n) => `Dismiss ${n}` },
+  { status: 'confirmed', label: 'Confirm issue', confirm: (n) => `Confirm ${n} as issues`, danger: true },
+];
 
 // Status filter options (mirror the web MapFilters set).
 const STATUS_OPTIONS = [
@@ -256,6 +267,13 @@ export default function AdminMap() {
   const [selectedFlagId, setSelectedFlagId] = useState(null);
   const [flagFlash, setFlagFlash] = useState(null);
   const flagFlashTimer = useRef(null);
+  // Bulk review from the map: pressing the flag-count badge opens a small action sheet — one
+  // decision for every OPEN flag in the layer's scope. Undo rides the flash pill.
+  const [bulkSheetOpen, setBulkSheetOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(null);
+  const [bulkFlash, setBulkFlash] = useState(null); // { text, error?, undo?: { scope, ids } }
+  const bulkFlashTimer = useRef(null);
+  useEffect(() => () => clearTimeout(bulkFlashTimer.current), []);
   const [mapNotice, setMapNotice] = useState(null); // brief bottom toast (e.g. door has no location)
   const mapNoticeTimer = useRef(null);
   const [moveTarget, setMoveTarget] = useState(null); // household being repositioned
@@ -1003,6 +1021,87 @@ export default function AdminMap() {
     });
   }
 
+  // ——— Bulk review (flag-badge press) ———
+
+  // Mirrors flagsQ's scope EXACTLY (dates + canvasser, open only) so the set written is the
+  // set the layer draws. Locked to open — this surface never touches earlier decisions, so
+  // every write is a fresh decision and the whole batch is undoable.
+  function mapBulkScope() {
+    return {
+      campaignId: cId ? String(cId) : '',
+      from: range?.from || undefined,
+      to: range?.to || undefined,
+      userId: canvasserId || undefined,
+      reviewStatus: 'open',
+    };
+  }
+
+  // Any scope change (or hiding the layer) closes the sheet — its count no longer describes
+  // what a press would do.
+  useEffect(() => {
+    setBulkSheetOpen(false);
+  }, [cId, range?.from, range?.to, canvasserId, showFlags]);
+
+  function showBulkFlash(f, ms = 10000) {
+    setBulkFlash(f);
+    clearTimeout(bulkFlashTimer.current);
+    bulkFlashTimer.current = setTimeout(() => setBulkFlash(null), ms);
+  }
+
+  function openBulkSheet() {
+    // While an audit deep-link is being consumed the query widens to ALL statuses, so the
+    // badge count wouldn't describe what a bulk press would do — ignore presses until then.
+    if (flagFocusId || !openFlagCount) return;
+    setSelected(null);
+    setSelectedPing(null);
+    setSelectedFlagId(null);
+    setBulkSheetOpen(true);
+  }
+
+  async function applyMapBulk(status) {
+    const scope = mapBulkScope();
+    setBulkBusy(status);
+    try {
+      const res = await postBulkReview(scope, { status });
+      invalidateFlagCaches(qc);
+      const created = res.createdActionIds || [];
+      showBulkFlash({
+        text: `${res.matched || 0} ${BULK_VERB[status] || 'updated'}`,
+        // Open-only scope → every decision was created by this batch; see lib/bulkReview.js.
+        undo: created.length ? { scope, ids: created } : null,
+      });
+      setBulkSheetOpen(false);
+    } catch (err) {
+      showBulkFlash({ text: err?.message || 'Bulk review failed.', error: true });
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  function requestMapBulk(action) {
+    if (bulkBusy) return;
+    const n = openFlagCount;
+    Alert.alert(`${action.confirm(n)}?`, 'This covers every open flag in the current view.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: action.confirm(n),
+        style: action.danger ? 'destructive' : 'default',
+        onPress: () => applyMapBulk(action.status),
+      },
+    ]);
+  }
+
+  async function runBulkUndo(undo) {
+    setBulkFlash(null);
+    try {
+      const res = await undoBulkReview(undo.scope, undo.ids);
+      invalidateFlagCaches(qc);
+      showBulkFlash({ text: `${res.deleted ?? 0} reopened` }, 4000);
+    } catch (err) {
+      showBulkFlash({ text: err?.message || 'Undo failed.', error: true });
+    }
+  }
+
   if (!MAPBOX_PUBLIC_TOKEN) {
     return (
       <SafeAreaView style={styles.center}>
@@ -1332,9 +1431,13 @@ export default function AdminMap() {
               <Switch style={styles.miniSwitch} value={showFlags} onValueChange={setShowFlags} trackColor={{ true: colors.brand, false: colors.border }} thumbColor={colors.card} />
               <Text style={styles.toggleLabel} numberOfLines={1}>Flags</Text>
               {showFlags && openFlagCount > 0 ? (
-                <View style={styles.flagBadge}>
-                  <Text style={styles.flagBadgeText}>{openFlagCount}</Text>
-                </View>
+                // Pressing the count opens the bulk-review sheet (one decision for every
+                // open flag in view). Inert while an audit deep-link is being consumed.
+                <Pressable onPress={openBulkSheet} hitSlop={8} disabled={!!flagFocusId}>
+                  <View style={styles.flagBadge}>
+                    <Text style={styles.flagBadgeText}>{openFlagCount}</Text>
+                  </View>
+                </Pressable>
               ) : null}
             </View>
             <View style={[styles.toggleChip, styles.chipFill]}>
@@ -1825,6 +1928,52 @@ export default function AdminMap() {
         </SafeAreaView>
       )}
 
+      {bulkSheetOpen && (
+        <SafeAreaView edges={['bottom']} style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.flagSheetHeaderRow}>
+            <Text style={styles.flagSheetTitle}>
+              {openFlagCount} open flag{openFlagCount === 1 ? '' : 's'}
+            </Text>
+            <Pressable onPress={() => setBulkSheetOpen(false)} hitSlop={8}>
+              <Text style={styles.flagSheetClose}>Close</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.bulkSheetHint}>
+            One decision for every open flag in this view — the current dates
+            {canvasserId ? ' and canvasser filter' : ''}.
+          </Text>
+          <View style={styles.bulkSheetBtns}>
+            {MAP_BULK_ACTIONS.map((a) => (
+              <Pressable
+                key={a.status}
+                disabled={!!bulkBusy}
+                onPress={() => requestMapBulk(a)}
+                style={[styles.bulkBtn, a.danger && styles.bulkBtnDanger, !!bulkBusy && styles.bulkBtnDisabled]}
+              >
+                <Text style={[styles.bulkBtnText, a.danger && styles.bulkBtnTextDanger]}>
+                  {bulkBusy === a.status ? 'Saving…' : a.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </SafeAreaView>
+      )}
+
+      {bulkFlash && (
+        <Pressable
+          style={styles.flagFlash}
+          onPress={() => bulkFlash.undo && runBulkUndo(bulkFlash.undo)}
+          disabled={!bulkFlash.undo}
+        >
+          <Text style={styles.flagFlashText}>
+            {bulkFlash.error ? '' : '✓ '}
+            {bulkFlash.text}
+            {bulkFlash.undo ? '  ·  Undo' : ''}
+          </Text>
+        </Pressable>
+      )}
+
       {flagFlash && (
         <View style={styles.flagFlash} pointerEvents="none">
           <Text style={styles.flagFlashText}>✓ Flag {flagFlash}</Text>
@@ -2086,6 +2235,28 @@ function makeStyles(t) {
     paddingVertical: spacing.sm,
   },
   flagFlashText: { color: colors.textInverse, fontWeight: '700', fontSize: 13 },
+  // Bulk-review sheet (flag-badge press). Buttons mirror FlagReviewControl's so bulk and
+  // single review read as the same instrument.
+  bulkSheetHint: { ...type.caption, paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+  bulkSheetBtns: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+  },
+  bulkBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  bulkBtnDanger: { backgroundColor: colors.dangerBg, borderColor: colors.danger },
+  bulkBtnDisabled: { opacity: 0.5 },
+  bulkBtnText: { fontSize: 13, fontWeight: '600', color: colors.textPrimary },
+  bulkBtnTextDanger: { color: colors.danger },
   countChip: {
     backgroundColor: colors.card,
     borderRadius: radius.pill,

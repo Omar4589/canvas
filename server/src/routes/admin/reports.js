@@ -72,12 +72,14 @@ router.use(async (req, res, next) => {
     // landing; a lead's self-scopes to their managed campaigns below), so it's allowed
     // without a single campaignId — unlike every other (per-campaign) report.
     if (req.path === '/campaign-rollup') return next();
-    // POST /flags/review is this router's only WRITE, and it scopes ITSELF: it loads the
-    // flagged action, checks org ownership, re-derives campaignId from the record and
-    // re-checks canManageCampaign. It never reads ?campaignId — and neither client sends
-    // one (docs/AUDIT.md documents it as body-only). A read-scoping guard that demands one
-    // therefore 400s admins in multi-campaign orgs and 403s leads in EVERY org. Exempted
-    // by exact method+path rather than "any non-GET", so a future write still gets scoped.
+    // POST /flags/review scopes ITSELF: it loads the flagged action, checks org ownership,
+    // re-derives campaignId from the record and re-checks canManageCampaign. It never reads
+    // ?campaignId — and neither client sends one (docs/AUDIT.md documents it as body-only).
+    // A read-scoping guard that demands one therefore 400s admins in multi-campaign orgs
+    // and 403s leads in EVERY org. Exempted by exact method+path rather than "any non-GET",
+    // so a future write still gets scoped — and POST /flags/review-bulk is that write: it
+    // carries its scope in the QUERY on purpose so this guard vets it (a lead gets the
+    // canManageCampaign check right here). Do not exempt it.
     if (req.method === 'POST' && req.path === '/flags/review') return next();
     const campaignId = req.query.campaignId;
     const hasCampaign = campaignId && mongoose.isValidObjectId(campaignId);
@@ -4040,51 +4042,63 @@ router.get('/canvassers/:userId/export.csv', async (req, res, next) => {
 // reasonType/reviewStatus/severity narrow the paginated `entries` drill-in list.
 const REASON_TYPES = ['far', 'rapid', 'one_spot', 'weak_gps', 'mock_gps'];
 
+// Everything between "parse the request" and "page the list", shared VERBATIM by GET /flags
+// and POST /flags/review-bulk — so the set a bulk decision writes is exactly the set the
+// same query string showed. Validates the range, builds the match, runs detectFlags, then
+// applies the drill-in filters (reasonType / reviewStatus / severity — post-detection: 'open'
+// is not a DB status, so status filtering happens after the live join). Returns
+// { error, status } on a bad range, else { list, summary, truncated, windowActionCount, tz }.
+async function resolveFlagScope(req) {
+  const orgId = activeOrgId(req);
+  const tz = tzOf(req);
+
+  // Bound the scan the way the timeline does: an explicit from/to over 62 days is rejected.
+  // (Relative presets send to:null → to defaults to today, so the span is still checked.
+  // A fully open-ended range = campaign-bounded all-time, consistent with other reports.)
+  const fromDay = req.query.from ? String(req.query.from).slice(0, 10) : null;
+  if (fromDay) {
+    const toDay = req.query.to ? String(req.query.to).slice(0, 10) : zonedDayStr(new Date(), tz);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fromDay) && /^\d{4}-\d{2}-\d{2}$/.test(toDay)) {
+      if (fromDay > toDay) return { error: 'from must be on or before to', status: 400 };
+      if (ymdSpanDays(fromDay, toDay) > TIMELINE_MAX_DAYS) {
+        return { error: `Date range too large (max ${TIMELINE_MAX_DAYS} days)`, status: 400 };
+      }
+    }
+  }
+
+  const match = { ...baseFilter(req), ...parseDateRange(req, 'timestamp') };
+  if (req.query.userId && mongoose.isValidObjectId(req.query.userId)) {
+    match.userId = new mongoose.Types.ObjectId(req.query.userId);
+  }
+
+  // Guarantee a bounded scan even when `from` is absent — an open-ended range would otherwise pull
+  // the whole campaign/org ledger into memory. Default the lower bound to TIMELINE_MAX_DAYS back.
+  if (!match.timestamp || match.timestamp.$gte == null) {
+    const upper = (match.timestamp && (match.timestamp.$lte || match.timestamp.$lt)) || new Date();
+    const lower = new Date(new Date(upper).getTime() - TIMELINE_MAX_DAYS * 24 * 60 * 60 * 1000);
+    match.timestamp = { ...(match.timestamp || {}), $gte: lower };
+  }
+
+  const { entries, summary, truncated, windowActionCount } = await detectFlags(match, { organizationId: orgId });
+
+  const reasonSet = csvSet(req.query.reasonType, REASON_TYPES);
+  const statusSet = csvSet(req.query.reviewStatus, ['open', 'reviewed', 'dismissed', 'confirmed']);
+  const minSev = SEVERITY_RANK[String(req.query.severity || '')] || null;
+
+  let list = entries;
+  if (reasonSet) list = list.filter((e) => e.reasons.some((r) => reasonSet.has(r.type)));
+  if (statusSet) list = list.filter((e) => statusSet.has(e.review?.status || 'open'));
+  if (minSev) list = list.filter((e) => (SEVERITY_RANK[e.maxSeverity] || 0) >= minSev);
+
+  return { list, summary, truncated: !!truncated, windowActionCount, tz };
+}
+
 router.get('/flags', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const orgId = activeOrgId(req);
-    const tz = tzOf(req);
-
-    // Bound the scan the way the timeline does: an explicit from/to over 62 days is rejected.
-    // (Relative presets send to:null → to defaults to today, so the span is still checked.
-    // A fully open-ended range = campaign-bounded all-time, consistent with other reports.)
-    const fromDay = req.query.from ? String(req.query.from).slice(0, 10) : null;
-    if (fromDay) {
-      const toDay = req.query.to ? String(req.query.to).slice(0, 10) : zonedDayStr(new Date(), tz);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(fromDay) && /^\d{4}-\d{2}-\d{2}$/.test(toDay)) {
-        if (fromDay > toDay) return res.status(400).json({ error: 'from must be on or before to' });
-        if (ymdSpanDays(fromDay, toDay) > TIMELINE_MAX_DAYS) {
-          return res.status(400).json({ error: `Date range too large (max ${TIMELINE_MAX_DAYS} days)` });
-        }
-      }
-    }
-
-    const match = { ...baseFilter(req), ...parseDateRange(req, 'timestamp') };
-    if (req.query.userId && mongoose.isValidObjectId(req.query.userId)) {
-      match.userId = new mongoose.Types.ObjectId(req.query.userId);
-    }
-
-    // Guarantee a bounded scan even when `from` is absent — an open-ended range would otherwise pull
-    // the whole campaign/org ledger into memory. Default the lower bound to TIMELINE_MAX_DAYS back.
-    if (!match.timestamp || match.timestamp.$gte == null) {
-      const upper = (match.timestamp && (match.timestamp.$lte || match.timestamp.$lt)) || new Date();
-      const lower = new Date(new Date(upper).getTime() - TIMELINE_MAX_DAYS * 24 * 60 * 60 * 1000);
-      match.timestamp = { ...(match.timestamp || {}), $gte: lower };
-    }
-
-    const { entries, summary, truncated, windowActionCount } = await detectFlags(match, { organizationId: orgId });
-
-    // Drill-in filters (post-detection; note: 'open' is not a DB status, so review-status
-    // filtering happens here after the live join).
-    const reasonSet = csvSet(req.query.reasonType, REASON_TYPES);
-    const statusSet = csvSet(req.query.reviewStatus, ['open', 'reviewed', 'dismissed', 'confirmed']);
-    const minSev = SEVERITY_RANK[String(req.query.severity || '')] || null;
-
-    let list = entries;
-    if (reasonSet) list = list.filter((e) => e.reasons.some((r) => reasonSet.has(r.type)));
-    if (statusSet) list = list.filter((e) => statusSet.has(e.review?.status || 'open'));
-    if (minSev) list = list.filter((e) => (SEVERITY_RANK[e.maxSeverity] || 0) >= minSev);
+    const scope = await resolveFlagScope(req);
+    if (scope.error) return res.status(scope.status).json({ error: scope.error });
+    const { list, summary, truncated, windowActionCount, tz } = scope;
 
     const total = list.length;
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
@@ -4102,7 +4116,7 @@ router.get('/flags', async (req, res, next) => {
       thresholds: FLAG_THRESHOLDS,
       // When the range is too large to audit in memory, entries are empty and this is set — the
       // client shows a "narrow the range" notice with windowActionCount rather than a false "0 flags".
-      truncated: !!truncated,
+      truncated,
       windowActionCount,
     });
   } catch (err) {
@@ -4166,6 +4180,121 @@ router.post('/flags/review', async (req, res, next) => {
         reviewedAt: saved.reviewedAt,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Bulk review — ONE decision applied to every flag matching a /flags query scope. Scope
+// lives in the QUERY STRING deliberately: unlike /flags/review this route is NOT exempt
+// from the router's campaign-scope guard (an admin must name a campaignId, a lead must
+// manage it), and resolveFlagScope reads req.query verbatim — so the set written is exactly
+// the set the same query showed. Body: { status, note?, actionIds?, dryRun? }.
+//   - actionIds NARROWS the resolved set (checkbox selection); ids outside it are ignored,
+//     never written — every decision provably lands on a currently-flagged, in-scope action,
+//     and reasonsAtReview is snapshotted from the server's own detection, not the client.
+//   - dryRun returns { matched } without writing (exact counts for confirm dialogs when the
+//     client's shown list is capped or client-side-filtered).
+//   - status 'open' bulk-REOPENS: deletes the matched decisions (absence = open).
+//   - The response splits createdActionIds (were open — safe to undo by reopening) from
+//     overwrittenActionIds (had a prior decision the bulk replaced; "undoing" those would
+//     DELETE the earlier reviewer's decision, not restore it, so clients offer Undo only
+//     over the created ones).
+// No transactions (the test harness runs a standalone mongod) — one unordered bulkWrite of
+// independent idempotent upserts; a partial failure leaves valid single decisions behind.
+export const BULK_REVIEW_CAP = 2000;
+
+router.post('/flags/review-bulk', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+
+    // Always campaign-scoped, even in single-campaign orgs where the router guard lets a
+    // bare request through — there is deliberately no org-wide bulk decision.
+    if (req.query.all === '1' || !mongoose.isValidObjectId(req.query.campaignId)) {
+      return res.status(400).json({ error: 'Bulk review requires a campaignId — org-wide bulk is not supported.' });
+    }
+
+    const { status, note, actionIds, dryRun } = req.body || {};
+    if (!['open', 'reviewed', 'dismissed', 'confirmed'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const scope = await resolveFlagScope(req);
+    if (scope.error) return res.status(scope.status).json({ error: scope.error });
+    if (scope.truncated) {
+      // Never partial-apply: a window too big to detect in memory is too big to decide on.
+      return res.status(409).json({
+        error: 'This range has too many events to bulk-review at once — narrow the date range.',
+        windowActionCount: scope.windowActionCount,
+      });
+    }
+
+    let targets = scope.list;
+    if (Array.isArray(actionIds)) {
+      const idSet = new Set(actionIds.filter((id) => mongoose.isValidObjectId(id)).map(String));
+      targets = targets.filter((e) => idSet.has(e.actionId));
+    }
+
+    const matched = targets.length;
+    if (matched > BULK_REVIEW_CAP) {
+      return res.status(409).json({
+        error: `That matches ${matched} flags — more than the ${BULK_REVIEW_CAP} one bulk action can take. Narrow the filters.`,
+        matched,
+      });
+    }
+    if (dryRun) return res.json({ matched, dryRun: true });
+    if (!matched) {
+      return res.json({ matched: 0, deleted: 0, createdActionIds: [], overwrittenActionIds: [], status });
+    }
+
+    if (status === 'open') {
+      // Bulk reopen = delete the matched decisions ('open' is never stored).
+      const r = await FlagReview.deleteMany({
+        organizationId: orgId,
+        actionModel: 'CanvassActivity',
+        actionId: { $in: targets.map((e) => new mongoose.Types.ObjectId(e.actionId)) },
+      });
+      return res.json({ matched, deleted: r.deletedCount, createdActionIds: [], overwrittenActionIds: [], status });
+    }
+
+    const now = new Date();
+    const noteText = typeof note === 'string' && note.trim() ? note.trim().slice(0, 2000) : null;
+    const ops = targets.map((e) => ({
+      updateOne: {
+        filter: {
+          organizationId: orgId,
+          actionModel: e.actionModel,
+          actionId: new mongoose.Types.ObjectId(e.actionId),
+        },
+        update: {
+          $set: {
+            campaignId: new mongoose.Types.ObjectId(e.campaignId),
+            status,
+            reviewedBy: req.user._id,
+            reviewedAt: now,
+            reasonsAtReview: e.reasons.map((r) => r.type).slice(0, 8),
+            // An empty shared note leaves each entry's existing note alone — a bulk sweep
+            // must not wipe a per-entry note someone wrote. On inserts the field simply
+            // stays absent, which every reader already treats as null.
+            ...(noteText ? { note: noteText } : {}),
+          },
+        },
+        upsert: true,
+      },
+    }));
+    const result = await FlagReview.bulkWrite(ops, { ordered: false });
+
+    // upsertedIds is keyed by op index → split created (was open) from overwritten (had a
+    // prior decision). See the route comment: Undo is only offered over created ones.
+    const upserted = result.upsertedIds || {};
+    const createdActionIds = [];
+    const overwrittenActionIds = [];
+    targets.forEach((e, i) => {
+      (upserted[i] !== undefined ? createdActionIds : overwrittenActionIds).push(e.actionId);
+    });
+
+    res.json({ matched, createdActionIds, overwrittenActionIds, status });
   } catch (err) {
     next(err);
   }

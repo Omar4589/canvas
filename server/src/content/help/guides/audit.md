@@ -29,7 +29,7 @@ Each flag also carries a **severity** — low, medium, or high — so the worst 
 
 ## Where you review flags
 
-Two places, same data. The **Audit page** (inside a campaign, next to Timeline and [Map](maps)) opens on **Today** with KPI cards, a per-canvasser table sorted worst-first, and one card per flagged door — who, the address, the time, and the reason (*205 ft from house*, *8 s after the previous door*). Filter by flag type, review status, walk list, or date. Or open the **map**, turn on **Show flagged entries**, and each flag becomes a colored dot with a line back to the house — the geography at a glance. Either way, click a flag to review it there.
+Two places, same data. The **Audit page** (inside a campaign, next to Timeline and [Map](maps)) opens on **Today** with KPI cards, a per-canvasser table sorted worst-first, and one card per flagged door — who, the address, the time, and the reason (*205 ft from house*, *8 s after the previous door*). Filter by flag type, review status, severity (Any / Med+ / High), walk list, or date. Or open the **map**, turn on **Show flagged entries**, and each flag becomes a colored dot with a line back to the house — the geography at a glance. Either way, click a flag to review it there.
 
 ## Reviewing a flag
 
@@ -44,5 +44,22 @@ Reviewing records a decision — it never deletes the entry or changes any repor
 **A wrong pin is forgiven the same way.** Some pins are looked up from the address and land a house or two off, so a canvasser who walked to the real door still gets flagged — and the flag used to stick forever, because the distance is measured once, when the door is recorded. Now, if the pin is **corrected after** the fact and the entry turns out to sit right beside the corrected spot, the flag drops to **low** and shows both distances. It can only ever lower a flag, never raise one. And if the person who moved the pin is the same person who recorded the door, it stays at full severity and says so — nobody grades their own work. (Only leads and admins can move pins; see [Fixing a house pin](fix-pin-location).)
 
 > Tip: The **flagged** count means *still open* — as you review, dismiss, or confirm flags, that number drops, so you can work a day's flags down to zero.
+
+## Clearing a backlog: review many at once
+
+Came back to hundreds of flags? You don't have to work them one card at a time. Use the filters to describe the pile — say, *open + Weak GPS*, or one canvasser's flags for the week — then apply **one decision to all of it**:
+
+- **Audit page (web)** — tick the checkbox on each card, or **Select all shown**, and a bar appears with **Mark reviewed / Dismiss / Confirm issue** and an optional shared note. If more flags match your filters than the page shows, choose **"Act on every flag matching the filters instead"** to cover the rest.
+- **Map (web)** — with the flag layer on, press **"Review all matching…"** in the GPS-audit panel. It acts on exactly what the layer is showing — your dates, canvasser, walk list, and flag-type chips.
+- **Audit (mobile)** — tap **Select** (or long-press any card), tick the entries, and use the bar at the bottom.
+- **Map (mobile)** — tap the red flag-count badge next to the Flags switch for one decision over every open flag in view.
+
+A few things the app does to keep a sweep safe:
+
+- **It always tells you the exact number first.** Anything big — or anything filter-wide — asks *"Dismiss 340 flags?"* before it happens, and the count comes from a fresh server check, not the visible list.
+- **Undo.** After a sweep, the confirmation offers **Undo** for about ten seconds, which reopens the flags it just decided. One nuance: if the sweep ran over entries that *already* had a decision (you were viewing "All", for example), those get their status updated but aren't part of Undo — undoing them would erase the earlier reviewer's decision instead of restoring it, so the app leaves those alone and says so.
+- **Notes are protected.** A sweep with an empty note only changes statuses — it never erases a note someone wrote on an individual entry. Type a shared note and it's stamped on everything in the sweep.
+
+A bulk decision is the same recorded decision as a single one — who decided, when, and why it was flagged — just applied to many entries at once. Nothing is deleted, and no report numbers change.
 
 Admins, team leads (for the campaigns they manage), and super-admins can use the audit. See [Team lead vs. admin](team-lead-vs-admin) for who sees what.

@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  StyleSheet,
+  TextInput,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -25,6 +36,7 @@ import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import FlagLegendHint from '../../../components/FlagLegendHint';
+import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../../../lib/bulkReview';
 
 const AUDIT_MAX_DAYS = 62;
 const AUDIT_PRESETS = PRESETS.filter((p) => p.key !== 'all');
@@ -36,6 +48,16 @@ const STATUS_TABS = [
   { key: 'all', label: 'All' },
 ];
 const FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirmed: 'confirmed as an issue', open: 'reopened' };
+
+// Bulk action labels: button text + the imperative confirm line ("Dismiss 340 flags?").
+const BULK_ACTIONS = [
+  { status: 'reviewed', label: 'Mark reviewed', confirm: (n) => `Mark ${n} reviewed` },
+  { status: 'dismissed', label: 'Dismiss', confirm: (n) => `Dismiss ${n}` },
+  { status: 'confirmed', label: 'Confirm issue', confirm: (n) => `Confirm ${n} as issues`, danger: true },
+  { status: 'open', label: 'Reopen', confirm: (n) => `Reopen ${n}`, reopenOnly: true },
+];
+// Anything bigger than a screenful gets an explicit "yes, that many" Alert.
+const BULK_CONFIRM_OVER = 25;
 
 function ymdSpanDays(from, to) {
   const [fy, fm, fd] = from.split('-').map(Number);
@@ -68,6 +90,20 @@ export default function AdminAudit() {
   const [userId, setUserId] = useState(''); // '' = all canvassers
   const [effortId, setEffortId] = useState(''); // '' = all walk lists
   const [live, setLive] = useState(true);
+
+  // Bulk selection mode: cards grow check circles, the poll pauses (a refetch would shift
+  // the list under fingers), and a bottom bar applies ONE decision to the selection — or,
+  // with `scopeWide`, to every flag matching the current filters (the escape hatch when the
+  // fetched list is capped at 500). Everything on this screen filters server-side, so the
+  // fetch scope IS the displayed scope — unlike the web audit page.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [scopeWide, setScopeWide] = useState(false);
+  const [bulkNote, setBulkNote] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(null);
+  const [bulkFlash, setBulkFlash] = useState(null); // { text, error?, undo?: { scope, ids } }
+  const bulkFlashTimer = useRef(null);
+  useEffect(() => () => clearTimeout(bulkFlashTimer.current), []);
   const [range, setRange] = useState(() => {
     const r = rangeFor('today', null, deviceTimezone());
     // Default to TODAY (item D3) — the audit is a daily review; wider windows are one tap away.
@@ -82,6 +118,10 @@ export default function AdminAudit() {
     setReviewStatus('open');
     setUserId('');
     setEffortId('');
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setScopeWide(false);
+    setBulkNote('');
     setLive(true);
     const r = rangeFor('today', null, tz);
     setRange({ preset: 'today', from: r.from, to: r.to });
@@ -119,7 +159,9 @@ export default function AdminAudit() {
       return api(`/admin/reports/flags?${p.toString()}`);
     },
     enabled: !!cId && !!fromDay && !rangeInvalid,
-    refetchInterval: live && includesToday ? 20_000 : false,
+    // Poll pauses while selection mode is on — a refetch would reorder/remove entries under
+    // fingers mid-triage. Cache invalidation after a bulk write still refetches.
+    refetchInterval: live && includesToday && !selectMode ? 20_000 : false,
     refetchIntervalInBackground: false,
     placeholderData: keepPreviousData,
     ...useFocusedPoll(20 * 1000),
@@ -137,6 +179,130 @@ export default function AdminAudit() {
   const byCanvasser = data.summary?.byCanvasser || [];
   const entries = data.entries || [];
   const rangeLabel = labelForRange(range);
+
+  // ——— Bulk review ———
+
+  // Keep the selection honest as the list changes (filter switches, post-write refetch):
+  // anything no longer listed is deselected.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (!prev.size) return prev;
+      const shown = new Set(entries.map((e) => e.actionId));
+      const next = new Set([...prev].filter((id) => shown.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [entries]);
+
+  const bulkScope = {
+    campaignId: cId,
+    from: fromDay,
+    to: range?.to || undefined,
+    reviewStatus: reviewStatus === 'all' ? undefined : reviewStatus,
+    userId: userId || undefined,
+    effortId: effortId || undefined,
+  };
+
+  const allSelected = entries.length > 0 && entries.every((e) => selectedIds.has(e.actionId));
+
+  function enterSelectMode(actionId) {
+    setSelectMode(true);
+    if (actionId) setSelectedIds(new Set([actionId]));
+  }
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setScopeWide(false);
+    setBulkNote('');
+  }
+  function toggleSelect(actionId) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(actionId)) next.delete(actionId);
+      else next.add(actionId);
+      return next;
+    });
+  }
+
+  function showBulkFlash(f, ms = 10000) {
+    setBulkFlash(f);
+    clearTimeout(bulkFlashTimer.current);
+    bulkFlashTimer.current = setTimeout(() => setBulkFlash(null), ms);
+  }
+
+  async function applyBulk(status, wide) {
+    setBulkBusy(status);
+    try {
+      const res = await postBulkReview(bulkScope, {
+        status,
+        note: bulkNote.trim() || undefined,
+        ...(wide ? {} : { actionIds: [...selectedIds] }),
+      });
+      invalidateFlagCaches(qc);
+      const created = res.createdActionIds || [];
+      const overwritten = (res.overwrittenActionIds || []).length;
+      const n = status === 'open' ? res.deleted ?? res.matched : res.matched;
+      let text = `${n} ${BULK_VERB[status] || 'updated'}`;
+      if (overwritten > 0 && status !== 'open') text += ` · ${overwritten} already decided (not undoable)`;
+      showBulkFlash({
+        // Undo reopens only the decisions this bulk CREATED — see lib/bulkReview.js.
+        text,
+        undo: status !== 'open' && created.length ? { scope: bulkScope, ids: created } : null,
+      });
+      exitSelectMode();
+    } catch (err) {
+      showBulkFlash({ text: err?.message || 'Bulk review failed.', error: true });
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  async function requestBulk(action) {
+    if (bulkBusy) return;
+    const wide = scopeWide;
+    let count = selectedIds.size;
+    if (wide) {
+      // Exact count for the confirm line — the paused poll means data.total can be stale.
+      setBulkBusy('count');
+      try {
+        count = await countBulkReview(bulkScope);
+      } catch (err) {
+        showBulkFlash({ text: err?.message || 'Could not count the matching flags.', error: true });
+        return;
+      } finally {
+        setBulkBusy(null);
+      }
+    }
+    if (!count) return;
+    if (wide || count > BULK_CONFIRM_OVER) {
+      Alert.alert(
+        `${action.confirm(count)}?`,
+        wide
+          ? 'This covers every flag matching the current filters, including any beyond the list shown.'
+          : undefined,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: action.confirm(count),
+            style: action.danger ? 'destructive' : 'default',
+            onPress: () => applyBulk(action.status, wide),
+          },
+        ]
+      );
+    } else {
+      applyBulk(action.status, wide);
+    }
+  }
+
+  async function runUndo(undo) {
+    setBulkFlash(null);
+    try {
+      const res = await undoBulkReview(undo.scope, undo.ids);
+      invalidateFlagCaches(qc);
+      showBulkFlash({ text: `${res.deleted ?? 0} reopened` }, 4000);
+    } catch (err) {
+      showBulkFlash({ text: err?.message || 'Undo failed.', error: true });
+    }
+  }
 
   // Brief confirmation after a review; refresh this screen + the map flag layer.
   const [flash, setFlash] = useState(null);
@@ -243,7 +409,7 @@ export default function AdminAudit() {
           <ActivityIndicator color={colors.brand} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: selectMode ? 260 : spacing.xxl }}>
           <View style={styles.groupWrap}>
             <InsetGroup>
               <InsetHeroRow
@@ -268,6 +434,31 @@ export default function AdminAudit() {
           ) : null}
 
           <View style={styles.listWrap}>
+            {entries.length > 0 ? (
+              <View style={styles.selectRow}>
+                {selectMode ? (
+                  <>
+                    <Pressable
+                      onPress={() =>
+                        setSelectedIds(allSelected ? new Set() : new Set(entries.map((e) => e.actionId)))
+                      }
+                      hitSlop={8}
+                    >
+                      <Text style={styles.selectRowAction}>
+                        {allSelected ? 'Deselect all' : `Select all (${entries.length})`}
+                      </Text>
+                    </Pressable>
+                    <Pressable onPress={exitSelectMode} hitSlop={8}>
+                      <Text style={styles.selectRowAction}>Cancel</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <Pressable onPress={() => enterSelectMode()} hitSlop={8}>
+                    <Text style={styles.selectRowAction}>Select</Text>
+                  </Pressable>
+                )}
+              </View>
+            ) : null}
             <InsetGroup>
               {entries.length === 0 ? (
                 <InsetNoteRow>
@@ -283,6 +474,10 @@ export default function AdminAudit() {
                     entry={e}
                     tz={tz}
                     onReviewed={onReviewed}
+                    selectable={selectMode}
+                    selected={selectedIds.has(e.actionId)}
+                    onToggleSelect={toggleSelect}
+                    onLongPress={selectMode ? undefined : () => enterSelectMode(e.actionId)}
                     // "View on map" (item D4) — the web audit has this per entry; the map turns
                     // its flag layer on, selects this entry, and flies to its GPS point.
                     onViewOnMap={(entry) =>
@@ -303,8 +498,68 @@ export default function AdminAudit() {
         </ScrollView>
       )}
 
+      {selectMode ? (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.bulkBarWrap}
+          pointerEvents="box-none"
+        >
+          <View style={styles.bulkBar}>
+            <View style={styles.bulkHeaderRow}>
+              <Text style={styles.bulkCount}>
+                {scopeWide ? 'All flags matching the filters' : `${selectedIds.size} selected`}
+              </Text>
+              {data.total > entries.length || scopeWide ? (
+                <Pressable onPress={() => setScopeWide((v) => !v)} hitSlop={6}>
+                  <Text style={styles.bulkSwitch}>
+                    {scopeWide ? 'Back to selected only' : 'Act on all matching instead'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <TextInput
+              value={bulkNote}
+              onChangeText={setBulkNote}
+              placeholder="Add a shared note (optional)…"
+              placeholderTextColor={colors.textMuted}
+              style={styles.bulkNote}
+            />
+            <View style={styles.bulkBtnRow}>
+              {BULK_ACTIONS.filter((a) => !a.reopenOnly || reviewStatus !== 'open').map((a) => {
+                const disabled = !!bulkBusy || (!scopeWide && selectedIds.size === 0);
+                return (
+                  <Pressable
+                    key={a.status}
+                    disabled={disabled}
+                    onPress={() => requestBulk(a)}
+                    style={[styles.bulkBtn, a.danger && styles.bulkBtnDanger, disabled && styles.bulkBtnDisabled]}
+                  >
+                    <Text style={[styles.bulkBtnText, a.danger && styles.bulkBtnTextDanger]}>
+                      {bulkBusy === a.status ? 'Saving…' : a.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      ) : null}
+
+      {bulkFlash ? (
+        <Pressable
+          style={[styles.flash, selectMode && styles.flashAboveBar]}
+          onPress={() => bulkFlash.undo && runUndo(bulkFlash.undo)}
+          disabled={!bulkFlash.undo}
+        >
+          <Text style={styles.flashText}>
+            {bulkFlash.error ? '' : '✓ '}
+            {bulkFlash.text}
+            {bulkFlash.undo ? '  ·  Undo' : ''}
+          </Text>
+        </Pressable>
+      ) : null}
       {flash ? (
-        <View style={styles.flash} pointerEvents="none">
+        <View style={[styles.flash, selectMode && styles.flashAboveBar]} pointerEvents="none">
           <Text style={styles.flashText}>✓ {flash}</Text>
         </View>
       ) : null}
@@ -338,6 +593,53 @@ function makeStyles(t) {
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
     groupWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
     listWrap: { paddingHorizontal: spacing.lg, marginTop: spacing.sm },
+    selectRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: spacing.lg,
+      marginBottom: spacing.xs,
+      paddingHorizontal: spacing.sm,
+    },
+    selectRowAction: { fontSize: 13, fontWeight: '700', color: colors.brand },
+    bulkBarWrap: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+    bulkBar: {
+      backgroundColor: colors.card,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.xl,
+      gap: spacing.sm,
+    },
+    bulkHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    bulkCount: { ...type.bodyStrong, fontSize: 14 },
+    bulkSwitch: { fontSize: 12, fontWeight: '700', color: colors.brand },
+    // Note input + buttons mirror FlagReviewControl's styling so bulk and single review read
+    // as the same instrument.
+    bulkNote: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm,
+      color: colors.textPrimary,
+      fontSize: 14,
+      minHeight: 40,
+    },
+    bulkBtnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, alignItems: 'center' },
+    bulkBtn: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    bulkBtnDanger: { backgroundColor: colors.dangerBg, borderColor: colors.danger },
+    bulkBtnDisabled: { opacity: 0.5 },
+    bulkBtnText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
+    bulkBtnTextDanger: { color: colors.danger },
     flash: {
       position: 'absolute',
       bottom: spacing.xl,
@@ -347,6 +649,8 @@ function makeStyles(t) {
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
     },
+    // Lifted clear of the bulk bar while selection mode is up (error flashes can coexist).
+    flashAboveBar: { bottom: 230 },
     flashText: { color: colors.textInverse, fontWeight: '700', fontSize: 13 },
   });
 }

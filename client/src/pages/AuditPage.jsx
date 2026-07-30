@@ -12,7 +12,9 @@ import Segmented from '../components/ui/Segmented.jsx';
 import AuditSummaryTable from '../components/AuditSummaryTable.jsx';
 import FlaggedEntryList from '../components/FlaggedEntryList.jsx';
 import FlagLegend from '../components/FlagLegend.jsx';
-import { REASON_META } from '../lib/flags.js';
+import BulkReviewBar from '../components/BulkReviewBar.jsx';
+import { REASON_META, SEV_RANK } from '../lib/flags.js';
+import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -40,6 +42,15 @@ const REVIEW_STATUS = [
   { value: 'dismissed', label: 'Dismissed' },
   { value: 'confirmed', label: 'Confirmed' },
   { value: 'all', label: 'All' },
+];
+
+// MIN-severity filter — "Med+" means med or high, matching the server's `severity` param
+// (>= rank). Exact-match chips would make what's selected diverge from what a bulk call
+// scoped with the same value writes.
+const SEVERITY_OPTIONS = [
+  { value: '', label: 'Any severity' },
+  { value: 'med', label: 'Med+' },
+  { value: 'high', label: 'High' },
 ];
 
 // Verb shown in the brief post-review confirmation toast.
@@ -75,7 +86,23 @@ export default function AuditPage() {
     const s = searchParams.get('status');
     return REVIEW_STATUS.some((o) => o.value === s) ? s : 'open';
   });
+  const [severityMin, setSeverityMin] = useState(''); // '' | 'med' | 'high' (min severity)
   const [userId, setUserId] = useState(''); // drill-in to one canvasser
+
+  // Bulk review. `selectedIds` ⊆ the shown entries (checkboxes); `scopeMode` instead acts on
+  // EVERY flag matching the displayed filters — the escape hatch when the fetch is capped at
+  // ENTRY_LIMIT and checkboxes can't reach the rest. While either is armed the live poll
+  // pauses, so the list can't shift under the checkboxes mid-triage.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [scopeMode, setScopeMode] = useState(false);
+  const [scopeCount, setScopeCount] = useState(0);
+  const [scopeCountLoading, setScopeCountLoading] = useState(false);
+  const [bulkNote, setBulkNote] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(null);
+  const [bulkToast, setBulkToast] = useState(null); // { text, error?, undo?: { scope, ids } }
+  const bulkToastTimer = useRef(null);
+  useEffect(() => () => clearTimeout(bulkToastTimer.current), []);
+  const selectionArmed = scopeMode || selectedIds.size > 0;
 
   const qc = useQueryClient();
   // Brief confirmation after a flag review, mirroring the Map surface.
@@ -117,7 +144,11 @@ export default function AuditPage() {
     setEffortId('');
     setReasonFilter([]);
     setReviewStatus('open');
+    setSeverityMin('');
     setUserId('');
+    setSelectedIds(new Set());
+    setScopeMode(false);
+    setBulkNote('');
     setLive(true);
     setDateRange(defaultRange('today', tz));
     rangeTouchedRef.current = false;
@@ -165,7 +196,9 @@ export default function AuditPage() {
         })}`
       ),
     enabled: !!campaignId && !!fromDay && !rangeInvalid,
-    ...livePollOptions(live, includesToday),
+    // Poll pauses while a bulk selection is armed — a refetch would reorder/remove entries
+    // under the checkboxes. Cache invalidation after a bulk write still refetches.
+    ...livePollOptions(live && !selectionArmed, includesToday),
     placeholderData: keepPreviousData,
   });
   const data = flagsQ.data || {};
@@ -180,11 +213,131 @@ export default function AuditPage() {
       const set = new Set(reasonFilter);
       list = list.filter((e) => e.reasons.some((r) => set.has(r.type)));
     }
+    if (severityMin) {
+      const min = SEV_RANK[severityMin] || 0;
+      list = list.filter((e) => (SEV_RANK[e.maxSeverity] || 0) >= min);
+    }
     return list;
-  }, [entries, userId, reasonFilter]);
+  }, [entries, userId, reasonFilter, severityMin]);
 
   function toggleReason(key) {
     setReasonFilter((p) => (p.includes(key) ? p.filter((k) => k !== key) : [...p, key]));
+  }
+
+  // ——— Bulk review ———
+
+  // Keep the selection honest as data/filters change (poll results, chip toggles): anything
+  // no longer shown is deselected, so the bar's count always equals visible checkboxes.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (!prev.size) return prev;
+      const shown = new Set(shownEntries.map((e) => e.actionId));
+      const next = new Set([...prev].filter((id) => shown.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [shownEntries]);
+
+  // The DISPLAYED scope — what's actually on screen — NOT the fetch's query. The GET
+  // deliberately omits userId (so the summary table lists everyone) and applies
+  // userId/reason/severity client-side; a bulk call composed from the fetch params would act
+  // far wider than the list the admin is looking at.
+  const bulkScope = useMemo(
+    () => ({
+      campaignId,
+      effortId: effortId || undefined,
+      from: fromDay,
+      to: dateRange?.to || undefined,
+      reviewStatus: reviewStatus === 'all' ? undefined : reviewStatus,
+      userId: userId || undefined,
+      reasonType: reasonFilter.length ? reasonFilter.join(',') : undefined,
+      severity: severityMin || undefined,
+    }),
+    [campaignId, effortId, fromDay, dateRange?.to, reviewStatus, userId, reasonFilter, severityMin]
+  );
+
+  const allShownSelected = shownEntries.length > 0 && shownEntries.every((e) => selectedIds.has(e.actionId));
+
+  function toggleSelect(actionId) {
+    setScopeMode(false);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(actionId)) next.delete(actionId);
+      else next.add(actionId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllShown() {
+    setScopeMode(false);
+    setSelectedIds(allShownSelected ? new Set() : new Set(shownEntries.map((e) => e.actionId)));
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setScopeMode(false);
+    setBulkNote('');
+  }
+
+  function showBulkToast(toast, ms = 10000) {
+    setBulkToast(toast);
+    clearTimeout(bulkToastTimer.current);
+    bulkToastTimer.current = setTimeout(() => setBulkToast(null), ms);
+  }
+
+  // "Act on every flag matching the filters" — the exact count comes from a dry run (the
+  // shown list is capped at ENTRY_LIMIT, so no local number is trustworthy here).
+  async function enterScopeMode() {
+    setScopeMode(true);
+    setScopeCountLoading(true);
+    try {
+      setScopeCount(await countBulkReview(bulkScope));
+    } catch (err) {
+      setScopeMode(false);
+      showBulkToast({ text: err?.message || 'Could not count the matching flags.', error: true });
+    } finally {
+      setScopeCountLoading(false);
+    }
+  }
+
+  async function runBulk(status) {
+    if (bulkBusy) return;
+    setBulkBusy(status);
+    try {
+      const res = await postBulkReview(bulkScope, {
+        status,
+        note: bulkNote.trim() || undefined,
+        ...(scopeMode ? {} : { actionIds: [...selectedIds] }),
+      });
+      invalidateFlagCaches(qc);
+      const created = res.createdActionIds || [];
+      const overwritten = (res.overwrittenActionIds || []).length;
+      const n = status === 'open' ? res.deleted ?? res.matched : res.matched;
+      let text = `${n.toLocaleString()} ${BULK_VERB[status] || 'updated'}`;
+      if (overwritten > 0 && status !== 'open') {
+        text += ` · ${overwritten.toLocaleString()} already had a decision (updated — not undoable)`;
+      }
+      showBulkToast({
+        text,
+        // Undo reopens only the decisions this bulk CREATED — see lib/bulkReview.js.
+        undo: status !== 'open' && created.length ? { scope: bulkScope, ids: created } : null,
+      });
+      clearSelection();
+    } catch (err) {
+      showBulkToast({ text: err?.message || 'Bulk review failed.', error: true });
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  async function runUndo(undo) {
+    setBulkToast(null);
+    try {
+      const res = await undoBulkReview(undo.scope, undo.ids);
+      invalidateFlagCaches(qc);
+      showBulkToast({ text: `${(res.deleted ?? 0).toLocaleString()} reopened` }, 4000);
+    } catch (err) {
+      showBulkToast({ text: err?.message || 'Undo failed.', error: true });
+    }
   }
 
   const rangeLabel = dateRange ? labelForRange(dateRange) : '';
@@ -266,6 +419,7 @@ export default function AuditPage() {
             })}
             <FlagLegend className="ml-0.5 self-center" />
           </div>
+          <Segmented value={severityMin} onChange={setSeverityMin} options={SEVERITY_OPTIONS} size="sm" />
           <Segmented value={reviewStatus} onChange={setReviewStatus} options={REVIEW_STATUS} />
         </div>
         <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} presets={AUDIT_PRESETS} />
@@ -311,15 +465,28 @@ export default function AuditPage() {
                   {shownEntries.length.toLocaleString()} shown
                 </span>
               </h2>
-              {userId && (
-                <button
-                  type="button"
-                  onClick={() => setUserId('')}
-                  className="text-xs font-medium text-brand-accent hover:underline"
-                >
-                  Show all canvassers
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {shownEntries.length > 0 && (
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-fg-muted">
+                    <input
+                      type="checkbox"
+                      checked={allShownSelected}
+                      onChange={toggleSelectAllShown}
+                      className="h-3.5 w-3.5 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
+                    />
+                    Select all shown
+                  </label>
+                )}
+                {userId && (
+                  <button
+                    type="button"
+                    onClick={() => setUserId('')}
+                    className="text-xs font-medium text-brand-accent hover:underline"
+                  >
+                    Show all canvassers
+                  </button>
+                )}
+              </div>
             </div>
             {truncated && (
               <div className="mb-2 rounded border border-warning/30 bg-warning-tint px-3 py-1.5 text-xs text-warning-fg">
@@ -334,8 +501,44 @@ export default function AuditPage() {
               dateFrom={fromDay}
               dateTo={dateRange.to || undefined}
               onReviewed={(review) => onFlagReviewed(review)}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           </div>
+        </div>
+      )}
+      {selectionArmed && !rangeInvalid && (
+        <BulkReviewBar
+          count={scopeMode ? scopeCount : selectedIds.size}
+          scopeMode={scopeMode}
+          scopeCountLoading={scopeCountLoading}
+          note={bulkNote}
+          onNoteChange={setBulkNote}
+          busy={bulkBusy}
+          onAction={runBulk}
+          onClear={clearSelection}
+          showReopen={reviewStatus !== 'open'}
+          canSelectAllMatching={truncated && allShownSelected}
+          onSelectAllMatching={enterScopeMode}
+        />
+      )}
+      {bulkToast && (
+        <div
+          className={
+            // Sits above the action bar when one is showing (an error toast can coexist with it).
+            'fixed left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-fg px-4 py-2 text-xs font-medium text-bg shadow-lg ' +
+            (selectionArmed ? 'bottom-24' : 'bottom-6')
+          }
+        >
+          <span>
+            {bulkToast.error ? '' : '✓ '}
+            {bulkToast.text}
+          </span>
+          {bulkToast.undo && (
+            <button type="button" onClick={() => runUndo(bulkToast.undo)} className="font-semibold underline">
+              Undo
+            </button>
+          )}
         </div>
       )}
       {flagFlash && (

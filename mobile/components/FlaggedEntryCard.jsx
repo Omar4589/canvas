@@ -27,7 +27,21 @@ function houseLine(h) {
 // `bare` drops the card chrome so the entry can sit inside an InsetGroup, which draws the
 // card once for the whole list (audit.jsx). Opt-in and default-false: map.jsx renders this as
 // a single standalone card inside its flag sheet and depends on the chrome staying.
-export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, defaultExpanded = false, bare = false }) {
+// In bulk-selection mode (`selectable`) the header press toggles selection instead of
+// expanding, and a check circle leads the row; `onLongPress` lets the audit list enter
+// selection mode from any card.
+export default function FlaggedEntryCard({
+  entry,
+  tz,
+  onReviewed,
+  onViewOnMap,
+  defaultExpanded = false,
+  bare = false,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
+  onLongPress,
+}) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -45,7 +59,17 @@ export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, d
 
   return (
     <View style={[styles.card, bare && styles.cardBare]}>
-      <Pressable onPress={() => setExpanded((v) => !v)} style={styles.header} hitSlop={4}>
+      <Pressable
+        onPress={() => (selectable ? onToggleSelect?.(entry.actionId) : setExpanded((v) => !v))}
+        onLongPress={onLongPress}
+        style={styles.header}
+        hitSlop={4}
+      >
+        {selectable ? (
+          <View style={[styles.checkCircle, selected && styles.checkCircleOn]}>
+            {selected ? <Text style={styles.checkMark}>✓</Text> : null}
+          </View>
+        ) : null}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.name} numberOfLines={1}>
             {entry.canvasser?.name || 'Canvasser'}
@@ -89,7 +113,8 @@ export default function FlaggedEntryCard({ entry, tz, onReviewed, onViewOnMap, d
         </Text>
       ) : null}
 
-      {expanded ? (
+      {/* Selection mode is triage, not per-entry review — the control stays collapsed. */}
+      {expanded && !selectable ? (
         <View style={styles.expanded}>
           <FlagReviewControl entry={entry} tz={tz} onReviewed={onReviewed} />
           {onViewOnMap ? (
@@ -128,6 +153,18 @@ function makeStyles(t) {
       paddingVertical: spacing.sm,
     },
     header: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+    checkCircle: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 2,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      alignSelf: 'center',
+    },
+    checkCircleOn: { backgroundColor: colors.brand, borderColor: colors.brand },
+    checkMark: { color: colors.textInverse, fontSize: 12, fontWeight: '700' },
     name: { ...type.bodyStrong, fontSize: 14 },
     addr: { ...type.caption, marginTop: 1 },
     when: { fontSize: 11, color: colors.textMuted, marginTop: 2, fontVariant: ['tabular-nums'] },

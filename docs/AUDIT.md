@@ -139,6 +139,36 @@ You can add a note, and the app records **who** decided and **when**. Your decis
 entry, so an open flag never quietly disappears and the team can see what's already been checked. You
 can always **reopen** a flag to set it back to Open.
 
+### Reviewing many at once (bulk review)
+
+A backlog doesn't have to be worked one card at a time. Every surface can apply **one decision —
+with an optional shared note — to a whole filtered set**:
+
+- **Web Audit page** — each card has a checkbox, plus **Select all shown**; a bottom bar applies
+  Reviewed / Dismiss / Confirm issue (and Reopen when viewing a non-open status). Narrow first —
+  flag type, review status, the **severity** filter (Any / Med+ / High), walk list, canvasser,
+  dates — then sweep what matches. When more flags match than the page shows, **"Act on every flag
+  matching the filters"** covers the rest.
+- **Web Map** — with the flag layer on, **"Review all matching…"** in the GPS-audit panel acts on
+  exactly what the layer is showing (dates, canvasser, walk list, status, reason chips).
+- **Mobile Audit** — **Select** (or long-press a card) enters selection mode; a bottom bar carries
+  the same actions, with an "all matching" switch when the list is capped.
+- **Mobile Map** — tap the flag-count badge for one decision over every open flag in view.
+
+Three rails keep it safe:
+
+- **The exact count is named before anything big happens** — the server counts first (a dry run),
+  so the number is right even when the visible list is capped at 500.
+- **Undo (~10 seconds)** reopens what the sweep decided — but only the decisions the sweep
+  *created*. An entry that already carried a decision (you were viewing "All", say) gets its
+  status updated and is reported as **not undoable**: undo is a reopen, and reopening would delete
+  the earlier reviewer's decision rather than restore it.
+- **An empty shared note never erases per-entry notes** — a sweep with no note changes statuses
+  only; type one and it's stamped on every entry in the set.
+
+Bulk review is the same recorded decision as a single review — who, when, and the reasons at
+decision time — just written N times.
+
 **Reviewing is a recorded decision, not a data edit.** It never deletes the entry or removes it from
 any report's numbers — a confirmed-issue knock still counts everywhere. What a review drives is the
 **open-flag counts**: the badges, the mock-GPS nudge, and the client-report builder's publish-time
@@ -442,17 +472,21 @@ gate, and anchor-tz resolution.
 |---|---|
 | `GET /admin/reports/flags` | Runs `detectFlags` over `{ baseFilter + date window + optional userId }` — `baseFilter` carries the optional `effortId`, so the walk-list filter (web select, mobile pill row) is server-side and scopes `summary` and `entries` together. Returns `{ summary, entries, total, timeZone, tzAbbrev, thresholds }`. **`summary` is always the full picture** for the scope; `reasonType` / `reviewStatus` (incl. `open`) / `severity` narrow the paginated `entries`. `view=summary` skips the entries payload. An explicit range over **62 days** is rejected (same cap as the timeline). |
 | `POST /admin/reports/flags/review` | Body `{ actionModel, actionId, status, note?, reasonsAtReview? }`. Loads the action to re-derive its campaign and re-checks `canManageCampaign` (defense in depth — a lead can't review another campaign's entry by guessing an id). Upserts the decision; `status:'open'` **deletes** it (reopen). **Body-only — it takes no `?campaignId`, and is the one route EXEMPT from the router's campaign-scope guard** (see below). |
+| `POST /admin/reports/flags/review-bulk` | One decision for every flag matching a `/flags` query scope. **Scope in the QUERY STRING** — the same params as the GET (`campaignId` REQUIRED, `all=1` refused: no org-wide bulk; `from`/`to`, `reviewStatus`, `reasonType`, `severity`, `userId`, `effortId`) — body `{ status, note?, actionIds?, dryRun? }`. Re-runs detection over the scope (`resolveFlagScope`, the helper shared with the GET, so the set written is exactly the set the same query showed); `actionIds` only **narrows** that set (checkbox selection — out-of-scope ids are ignored, never written), and `reasonsAtReview` is snapshotted from the server's own detection, not the client. `dryRun:true` returns `{ matched }` without writing (exact confirm-dialog counts). Writes are one **unordered `bulkWrite` of upserts** (no transactions — the test harness runs a standalone mongod); `status:'open'` bulk-reopens via `deleteMany`. Refusals: a `truncated` detection → **409** (never partial-applies); more than `BULK_REVIEW_CAP` (2000) matches → **409**. The response splits **`createdActionIds`** (were open — undoable by reopening) from **`overwrittenActionIds`** (had a prior decision — clients never auto-undo those, since reopen is a delete). An **empty `note` leaves existing per-entry notes untouched**. **Deliberately NOT exempt from the campaign-scope guard** — the query scope is precisely how a lead's `canManageCampaign` check happens. `test/flagBulkReview.int.test.js`. |
 
-> **Why this write is exempt from the campaign-scope guard.** `routes/admin/reports.js` mounts a bare
-> `router.use` that requires `?campaignId` (or `all=1`) so a *read* can't silently blend two campaigns'
-> numbers into one figure. It has no method filter and reads `req.query` only — and `POST /flags/review`
-> is the router's **only** non-GET route. Because the handler re-derives `campaignId` from the flagged
+> **Why `/flags/review` is exempt from the campaign-scope guard — and `/flags/review-bulk` is not.**
+> `routes/admin/reports.js` mounts a bare `router.use` that requires `?campaignId` (or `all=1`) so a
+> *read* can't silently blend two campaigns' numbers into one figure. It has no method filter and
+> reads `req.query` only. Because the single-review handler re-derives `campaignId` from the flagged
 > record and re-checks `canManageCampaign` itself, it never wants the param, and neither client sends
 > one. Left unexempted the guard **400s admins in any multi-campaign org and 403s team leads in every
 > org** (the lead branch has no single-campaign escape hatch), which shipped and broke flag review on
 > web and mobile alike. The exemption is by exact method+path, deliberately not "any non-GET", so a
-> future write to this router still gets scoped. Regression-tested in `test/locationGate.int.test.js`
-> (admin + granted lead succeed, ungranted lead still 403s, unscoped GET still 400s).
+> future write to this router still gets scoped — and **`POST /flags/review-bulk` is that write**: it
+> carries its scope in the query string on purpose so the guard vets it (that IS the lead's
+> `canManageCampaign` check), and it must never be exempted. Regression-tested in
+> `test/locationGate.int.test.js` (admin + granted lead succeed, ungranted lead still 403s, unscoped
+> GET still 400s) and `test/flagBulkReview.int.test.js` (lead scoping on the bulk route).
 
 Filtering by `open` happens **after** the live join (it isn't a DB status), so the endpoint slices the
 computed+joined list in memory and returns the pre-slice `total`.
@@ -484,6 +518,27 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **Reason/severity/status display metadata** (colors, labels, human detail text) is centralized in
   [client/src/lib/flags.js](../client/src/lib/flags.js), which also mirrors the two thresholds the
   client needs.
+- **Bulk review client plumbing** lives in the twin helpers
+  [client/src/lib/bulkReview.js](../client/src/lib/bulkReview.js) /
+  [mobile/lib/bulkReview.js](../mobile/lib/bulkReview.js) (`postBulkReview`, `countBulkReview` for
+  dry-run counts, `undoBulkReview` — which drops `reviewStatus` from the scope and sends only
+  `createdActionIds` — and the shared cache-invalidation predicate). Surfaces:
+  - **Audit page** — checkbox per card ([FlaggedEntryList.jsx](../client/src/components/FlaggedEntryList.jsx)),
+    a min-severity filter (Any / Med+ / High — MIN semantics to match the server's `severity`
+    param), and the sticky [BulkReviewBar.jsx](../client/src/components/BulkReviewBar.jsx) with the
+    inline confirm + scope-wide mode. **The bulk scope is composed from the DISPLAYED filters, not
+    the fetch's query** — the page fetches without `userId` (the summary table must list everyone)
+    and applies `userId`/reason/severity client-side, so copying the fetch params would sweep far
+    wider than the visible list. The 20 s poll **pauses while a selection is armed** and the
+    selection set is pruned against the shown entries on every data change.
+  - **Web map** — "Review all matching…" in [MapFilters.jsx](../client/src/components/MapFilters.jsx)'
+    GPS-audit section (armed state shows the dry-run count); scope mirrors the flags query plus the
+    client-side reason chips.
+  - **Mobile audit** — Select / long-press selection mode on the bare cards, a bottom action bar
+    with an "all matching" switch; the poll pauses in selection mode.
+  - **Mobile map** — the flag-count badge is pressable → a bulk sheet over the layer's open-flag
+    scope (inert while an audit deep-link is being consumed, when the query widens to all
+    statuses). Undo rides the flash pill on both mobile surfaces.
 
 ## F. Invariants / gotchas
 
@@ -500,6 +555,17 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **Corrections are downgraded, never suppressed.** A downgraded-low far still appears (and still
   counts in `summary.totals.far` while open) — full suppression would let a canvasser who once
   legitimately visited a door rewrite its status from anywhere, unflagged.
+- **Bulk undo only ever reopens what the bulk CREATED.** Reopen is a delete, so "undoing" an
+  overwritten decision would destroy the earlier reviewer's decision instead of restoring it —
+  that's why the response splits `createdActionIds` from `overwrittenActionIds`, and why the undo
+  call drops `reviewStatus` from the scope (the entries just changed status; replaying the original
+  open-only scope would match nothing).
+- **A bulk with an empty note must not touch notes.** The write omits `note` from `$set` unless the
+  shared note is non-empty — a sweep must never wipe a note someone wrote on one entry.
+- **Bulk scope = what's on screen, not what was fetched.** Any surface that filters client-side
+  (the web audit's userId/reason/severity, the web map's reason chips) must fold those filters into
+  the bulk query, or a drill-in sweep acts org-of-canvassers-wide. The server's `reasonType` filter
+  has identical semantics to the clients' (`reasons.some`), so folding them in is exact.
 - **Live geometry may only DOWNGRADE.** The pin-correction check (§B.7) runs inside `if (farSev)` and
   assigns nothing but `'low'`. A pin dragged *away* from a door must never manufacture or worsen a flag
   — a canvasser can't be graded on an edit they didn't make and (pins being lead/admin-only) couldn't

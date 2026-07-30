@@ -18,6 +18,7 @@ import LiveStatus from '../components/LiveStatus.jsx';
 import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
 import { formatInTz } from '../lib/datetime.js';
+import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
 import {
   householdsToGeoJSON,
   overlapDoorsToGeoJSON,
@@ -190,6 +191,18 @@ export default function MapPage() {
   const [reviewStatus, setReviewStatus] = useState(searchParams.get('focusActivityId') ? 'all' : 'open');
   const [selectedFlagId, setSelectedFlagId] = useState(searchParams.get('focusActivityId') || null);
   const didFocusFlagRef = useRef(false);
+
+  // Bulk flag review over the map's CURRENT flag scope (dates + canvasser + walk list +
+  // the review-status filter and active reason chips). Arming runs a dry-run count (the
+  // fetched list is capped at 500, so no local number is trustworthy); the inline confirm
+  // lives in MapFilters' GPS-audit section. Undo rides the toast — lib/bulkReview.js.
+  const [bulkArmed, setBulkArmed] = useState(false);
+  const [bulkCount, setBulkCount] = useState(null); // null while the dry run is counting
+  const [bulkNote, setBulkNote] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(null);
+  const [bulkToast, setBulkToast] = useState(null); // { text, error?, undo?: { scope, ids } }
+  const bulkToastTimer = useRef(null);
+  useEffect(() => () => clearTimeout(bulkToastTimer.current), []);
 
   const { campaignId } = useParams();
   const { selected: selectedCampaign } = useCampaignSelection(campaignId);
@@ -395,6 +408,85 @@ export default function MapPage() {
     const set = new Set(flagReasonFilter);
     return flagEntries.filter((e) => e.reasons.some((r) => set.has(r.type)));
   }, [flagEntries, flagReasonFilter]);
+
+  // The bulk scope mirrors flagsQ EXCEPT it also carries the active reason chips — those are
+  // client-side on this page, and the server's reasonType filter has identical semantics
+  // (reasons.some), so the set written is exactly the set drawn on the map.
+  const mapBulkScope = useMemo(
+    () => ({
+      campaignId,
+      from: dateRange.from || undefined,
+      to: dateRange.to || undefined,
+      userId: canvasserId || undefined,
+      effortId: scopeEffortId || undefined,
+      reviewStatus: reviewStatus === 'all' ? undefined : reviewStatus,
+      reasonType: flagReasonFilter.length ? flagReasonFilter.join(',') : undefined,
+    }),
+    [campaignId, dateRange.from, dateRange.to, canvasserId, scopeEffortId, reviewStatus, flagReasonFilter]
+  );
+
+  // Any scope change (or hiding the layer) invalidates an armed confirm — its count no
+  // longer describes what a press would do.
+  useEffect(() => {
+    setBulkArmed(false);
+    setBulkCount(null);
+  }, [mapBulkScope, showFlags]);
+
+  function showBulkToast(toast, ms = 10000) {
+    setBulkToast(toast);
+    clearTimeout(bulkToastTimer.current);
+    bulkToastTimer.current = setTimeout(() => setBulkToast(null), ms);
+  }
+
+  async function armBulk() {
+    setBulkArmed(true);
+    setBulkCount(null);
+    try {
+      setBulkCount(await countBulkReview(mapBulkScope));
+    } catch (err) {
+      setBulkArmed(false);
+      showBulkToast({ text: err?.message || 'Could not count the matching flags.', error: true });
+    }
+  }
+
+  async function runMapBulk(status) {
+    if (bulkBusy) return;
+    setBulkBusy(status);
+    try {
+      const res = await postBulkReview(mapBulkScope, { status, note: bulkNote.trim() || undefined });
+      invalidateFlagCaches(qc);
+      const created = res.createdActionIds || [];
+      const overwritten = (res.overwrittenActionIds || []).length;
+      const n = status === 'open' ? res.deleted ?? res.matched : res.matched;
+      let text = `${n.toLocaleString()} ${BULK_VERB[status] || 'updated'}`;
+      if (overwritten > 0 && status !== 'open') {
+        text += ` · ${overwritten.toLocaleString()} already had a decision (updated — not undoable)`;
+      }
+      showBulkToast({
+        // Undo reopens only the decisions this bulk CREATED — see lib/bulkReview.js.
+        text,
+        undo: status !== 'open' && created.length ? { scope: mapBulkScope, ids: created } : null,
+      });
+      setBulkArmed(false);
+      setBulkNote('');
+      setSelectedFlagId(null); // the open panel's entry may have just been actioned
+    } catch (err) {
+      showBulkToast({ text: err?.message || 'Bulk review failed.', error: true });
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  async function runMapUndo(undo) {
+    setBulkToast(null);
+    try {
+      const res = await undoBulkReview(undo.scope, undo.ids);
+      invalidateFlagCaches(qc);
+      showBulkToast({ text: `${(res.deleted ?? 0).toLocaleString()} reopened` }, 4000);
+    } catch (err) {
+      showBulkToast({ text: err?.message || 'Undo failed.', error: true });
+    }
+  }
 
   const selectedFlag = useMemo(
     () => flagEntries.find((e) => e.actionId === selectedFlagId) || null,
@@ -862,6 +954,21 @@ export default function MapPage() {
             reviewStatus={reviewStatus}
             onReviewStatusChange={setReviewStatus}
             flagCounts={flagSummary?.totals || null}
+            flagBulk={{
+              show: shownFlags.length > 0,
+              armed: bulkArmed,
+              count: bulkCount,
+              note: bulkNote,
+              busy: bulkBusy,
+              showReopen: reviewStatus !== 'open',
+              onArm: armBulk,
+              onCancel: () => {
+                setBulkArmed(false);
+                setBulkNote('');
+              },
+              onNote: setBulkNote,
+              onAction: runMapBulk,
+            }}
           />
         </aside>
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
@@ -1063,12 +1170,33 @@ export default function MapPage() {
               </ul>
             </div>
           )}
-          {flagFlash && (
+          {(flagFlash || bulkToast) && (
             <div
               style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}
-              className="rounded-full bg-fg px-3 py-1.5 text-xs font-medium text-bg shadow-lg"
+              className="flex flex-col items-center gap-2"
             >
-              ✓ Flag {flagFlash}
+              {bulkToast && (
+                <div className="flex items-center gap-3 rounded-full bg-fg px-4 py-2 text-xs font-medium text-bg shadow-lg">
+                  <span>
+                    {bulkToast.error ? '' : '✓ '}
+                    {bulkToast.text}
+                  </span>
+                  {bulkToast.undo && (
+                    <button
+                      type="button"
+                      onClick={() => runMapUndo(bulkToast.undo)}
+                      className="font-semibold underline"
+                    >
+                      Undo
+                    </button>
+                  )}
+                </div>
+              )}
+              {flagFlash && (
+                <div className="rounded-full bg-fg px-3 py-1.5 text-xs font-medium text-bg shadow-lg">
+                  ✓ Flag {flagFlash}
+                </div>
+              )}
             </div>
           )}
         </div>
