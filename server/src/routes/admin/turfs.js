@@ -638,26 +638,55 @@ router.post('/manual-preview', async (req, res, next) => {
 });
 
 // Preview a targeted follow-up cut: how many of the effort's doors match the
-// filter (knock status + survey answers) AND are cuttable — so the admin sees the
-// universe before generating. Mirrors the cut: resolve effort-scoped, then
-// intersect with the voted/apartment/inactive exclusions.
+// filter (knock status + survey answers, minus its exclude branch) AND are
+// cuttable — so the admin sees the universe before generating. Mirrors the cut:
+// resolve effort-scoped, then intersect with the voted/apartment/inactive
+// exclusions (and the restricted toggle, when the client sends it — so the
+// previewed count equals what Generate will actually cut).
 router.post('/target-preview', async (req, res, next) => {
   try {
-    const { passId, filter } = req.body || {};
+    const { passId, filter, excludeRestricted } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
-    const { householdIds } = await resolveWalkList(req.campaign, filter || {}, { effortId: pass.effortId });
+    const { householdIds, excludedHouseholdIds, excludeDegenerate, warnings } = await resolveWalkList(
+      req.campaign,
+      filter || {},
+      { effortId: pass.effortId }
+    );
+    // The same cuttability the cut itself applies (generateTurf's baseFilter).
+    const cutBase = {
+      ...KNOCKABLE_DOOR_FILTER,
+      ...(excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
+    };
     const cuttable = householdIds.length
       ? (
           await Household.find(
-            { _id: { $in: householdIds }, ...KNOCKABLE_DOOR_FILTER },
+            { _id: { $in: householdIds }, ...cutBase },
             { _id: 1 }
           ).lean()
         ).map((h) => h._id)
       : [];
-    const voterCount = cuttable.length ? await Voter.countDocuments({ householdId: { $in: cuttable } }) : 0;
-    res.json({ doorCount: cuttable.length, voterCount, householdIds: cuttable.map(String) });
+    // "M excluded" = doors the exclusion ACTUALLY removed from the cut: the resolver's
+    // removed set (already ∩ the include result) narrowed to otherwise-cuttable doors.
+    // NOT the raw exclusion population — a fully-voted/excludedFromTurf door with a
+    // matching answer was never going to be cut, so it must not inflate M.
+    const excludedDoorCount = excludedHouseholdIds.length
+      ? await Household.countDocuments({ _id: { $in: excludedHouseholdIds }, ...cutBase })
+      : 0;
+    // Door-population count minus do-not-contact individuals (matching the walk list's
+    // own voter set) — every other resident of a cut door gets walked.
+    const voterCount = cuttable.length
+      ? await Voter.countDocuments({ householdId: { $in: cuttable }, 'doNotContact.flagged': { $ne: true } })
+      : 0;
+    res.json({
+      doorCount: cuttable.length,
+      voterCount,
+      excludedDoorCount,
+      excludeDegenerate,
+      warnings,
+      householdIds: cuttable.map(String),
+    });
   } catch (err) {
     next(err);
   }

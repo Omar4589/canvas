@@ -49,6 +49,12 @@ On the **Saved Searches** page, the "Build a saved search" panel has two modes:
      with that tag — a cross-question "OR" the per-question answer picker can't express. Use this to
      pull, say, "everyone who looks like a volunteer" no matter which question revealed it. See
      [SURVEYS.md](SURVEYS.md) for how tags are defined.
+   - **Exclude doors:** everything above says which doors to *include*; the **Exclude doors** section
+     says which to *throw out* — doors matching **any** of its conditions (door status, survey answers,
+     tags, has-response) are removed from the result, **even when they match the filters above**, and
+     the AND/OR choice never touches them. The classic use: a sign-drop pass that targets supporters
+     but skips every door that already answered *Yard Sign Delivered*. Statuses use the door's current
+     status; survey answers match any round.
 
 2. **Upload a Voter-ID CSV** — upload a file that has a column of Voter IDs. The app matches those IDs
    to this campaign's voters and freezes the doors they live at into a saved search. Use this when you already
@@ -150,8 +156,9 @@ Inside `filter`, survey predicates are split across two fields because they comb
 
 | Field | Schema | Meaning |
 |---|---|---|
-| `answerFilters` | `[{ questionKey, values, texts }]` (`answerFilterSchema`) | Per-question option picks. Each entry is its own predicate set, so it obeys the saved search's global `combine` (`and`/`or`). |
+| `answerFilters` | `[{ questionKey, values, texts }]` (`answerFilterSchema`) | Per-question option picks. Each entry is its own predicate set, so it obeys the saved search's global `combine` (`and`/`or`). `texts` (the legacy-text half of the dual-read match) is declared in the schema — it was silently stripped by strict mode before the exclude branch landed. |
 | `answerTagFilters` | `[{ tag }]` (`tagFilterSchema`) | Per-tag picks. Each tag becomes **one** predicate set that already OR's every option carrying that tag **across questions** — a cross-question OR the per-question `answerFilters` can't express under the single global `combine`. |
+| `exclude` | `excludeFilterSchema` (the same fields as `filter` minus `combine`/`exclude`, default `null`) | The **NOT branch**. Resolves through the same predicate machinery; its sets are always **OR'd together** and then **subtracted** from the include result — `combine` never applies to it, no nesting. Undeclared keys are silently stripped by the strict schema, which is why this is a declared sub-schema and not a Mixed blob. |
 
 A saved search is **campaign-scoped**; the frozen ids are the truth, so seeding/claiming never re-runs the
 filter or re-reads the CSV.
@@ -163,6 +170,25 @@ filter or re-reads the CSV.
   prior-pass/survey predicates into household **sets**, intersected (`and`) or unioned (`or`). The base
   is the campaign's **coordinate-bearing active** households; targeted voters = those matching the voter
   predicate within the final households (or all voters there if no voter predicate).
+  - **The NOT branch (`filter.exclude`).** After the include sets combine, `filter.exclude` — the same
+    predicate fields, resolved through the same `collectPredicateSets` machinery — is **unioned**
+    (excludes always OR among themselves) and **subtracted in place**: `combine` never touches it, and
+    nothing can bring an excluded door back. Subtraction happens *before* the final voter query, so an
+    excluded door's voters drop out of `voterIds` automatically; the exclude side's demographic `vq` is
+    deliberately discarded (it picks doors to remove, never constrains the include side's voters). Each
+    side reads its **own** `priorPassId` — an exclude with none matches across all rounds. Three guards,
+    pinned by [targetExclusion.int.test.js](../server/test/targetExclusion.int.test.js): the union of
+    zero sets is empty, so a degenerate exclude (requested but no predicate could run — e.g. tag filters
+    with no template) excludes **nothing** rather than everything, and sets `excludeDegenerate` (which
+    `generateTurf` refuses to cut on and previews surface); the no-include-predicates branch **copies**
+    `baseSet` so the in-place deletes can't mutate it; and the shared `isActiveTargetFilter` export
+    treats `{ exclude: {} }` as inactive while honoring a legitimate exclude-*only* filter. Extra return
+    keys: `excludedHouseholdIds` / `excludedDoorCount` (exactly the doors removed — the intersection
+    with the include result, not the raw exclusion population), `excludeDegenerate`, `warnings`.
+  - **Template scoping.** `answerFilters` (both sides) match `surveyTemplateId` when the campaign has a
+    template — the same questionKey under a different template (an effort's survey override) no longer
+    cross-matches, aligning the resolver with the map/report endpoints. `surveyResponse`
+    exists/not_exists deliberately stays unscoped: a response is a response.
   - **Survey tags (`filter.answerTagFilters`).** Each `{ tag }` resolves to **one** predicate set:
     `resolveWalkList` loads the campaign's `SurveyTemplate`, then for the tag calls
     `answerTagClause(template, tag)` ([answerAgg.js](../server/src/services/surveys/answerAgg.js)) — a

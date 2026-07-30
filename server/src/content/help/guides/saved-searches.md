@@ -19,7 +19,7 @@ A **saved search** is a named, frozen set of doors carved out of your campaign's
 
 On the **Saved Searches** page, the "Build a saved search" panel has two modes:
 
-- **Filter builder** — pick doors by the data you already have: party, precinct, district, age, geography, door status, and even [survey answers](surveys). Combine filters with **AND** (match all) or **OR** (match any). Use this when the people you want can be *described* by their data.
+- **Filter builder** — pick doors by the data you already have: party, precinct, district, age, geography, door status, and even [survey answers](surveys). Combine filters with **AND** (match all) or **OR** (match any). An **Exclude doors** section lets you throw doors *out* as well: a door matching any of its conditions is removed even if it matches your other filters — say, supporters minus everyone who already took a yard sign. Use this when the people you want can be *described* by their data.
 - **Upload a Voter-ID CSV** — upload a spreadsheet with a column of Voter IDs. The app matches them to this campaign's voters and freezes the doors they live at. Use this when you already have an exact list filters can't express — say, everyone who voted in the first election. These show a **from CSV** badge.
 
 Both produce the same thing: a frozen door set. You can build one the moment your first import finishes, so even your very first walk list can be targeted instead of "everyone."

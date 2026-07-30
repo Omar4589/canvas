@@ -835,8 +835,12 @@ export default function TurfsPage() {
   const [aptThreshold, setAptThreshold] = useState(4);
   // Targeted follow-up round: cut over only doors matching a knock-status / survey
   // filter (e.g. unknocked, or GOTV supporters). Empty = the full effort universe.
-  const [targetFilter, setTargetFilter] = useState({ priorPassStatuses: [], answerFilters: [], combine: 'or' });
+  // `exclude` is the NOT branch: doors matching ANY of it are removed from the cut,
+  // even when they match the target above (e.g. supporters who already took a yard
+  // sign). null until the Exclude panel adds something.
+  const [targetFilter, setTargetFilter] = useState({ priorPassStatuses: [], answerFilters: [], combine: 'or', exclude: null });
   const [showTarget, setShowTarget] = useState(false);
+  const [showExclude, setShowExclude] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnAreas, setDrawnAreas] = useState([]); // [{ id, geometry }] from MapboxDraw
   const [manualSplit, setManualSplit] = useState(false);
@@ -997,16 +1001,26 @@ export default function TurfsPage() {
     queryKey: ['reports', 'survey-results', campaignId, targetSurveyTemplateId],
     queryFn: () =>
       api(`/admin/reports/survey-results?campaignId=${campaignId}${targetSurveyTemplateId ? `&surveyTemplateId=${targetSurveyTemplateId}` : ''}`),
-    enabled: !!campaignId && campaign?.type !== 'lit_drop' && showTarget,
+    enabled: !!campaignId && campaign?.type !== 'lit_drop' && (showTarget || showExclude),
   });
   const targetQuestions = (targetSurveyQ.data?.questions || []).filter(
     (q) => q.type === 'single_choice' || q.type === 'multiple_choice'
   );
-  const targetActive = (targetFilter.priorPassStatuses?.length || 0) > 0 || (targetFilter.answerFilters?.length || 0) > 0;
+  // One side of the filter (include or exclude) is "on" when it holds a predicate.
+  // Mirrors the server's isActiveTargetFilter — an exclude-only filter must still
+  // reach the server, so the exclude side counts too.
+  const sideActive = (f) => !!f && ((f.priorPassStatuses?.length || 0) > 0 || (f.answerFilters?.length || 0) > 0);
+  const targetActive = sideActive(targetFilter) || sideActive(targetFilter.exclude);
+  const excludeActive = sideActive(targetFilter.exclude);
   const targetPreviewQ = useQuery({
-    queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter)],
+    queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter), excludeRestricted && restrictedDoorCount > 0],
     queryFn: () =>
-      api(`/admin/campaigns/${campaignId}/turfs/target-preview`, { method: 'POST', body: { passId, filter: targetFilter } }),
+      api(`/admin/campaigns/${campaignId}/turfs/target-preview`, {
+        method: 'POST',
+        // excludeRestricted rides along under the same condition Generate uses, so the
+        // previewed count equals what the cut will actually produce.
+        body: { passId, filter: targetFilter, excludeRestricted: excludeRestricted && restrictedDoorCount > 0 },
+      }),
     enabled: !!campaignId && !!passId && targetActive,
   });
   const targetedSet = useMemo(
@@ -1020,6 +1034,20 @@ export default function TurfsPage() {
         ? t.priorPassStatuses.filter((x) => x !== s)
         : [...t.priorPassStatuses, s],
     }));
+  // Exclude-side writers. The exclude object normalizes back to null when it empties,
+  // so an untouched/cleared panel sends no `exclude` key at all.
+  const setExcludeSide = (patch) =>
+    setTargetFilter((t) => {
+      const ex = { priorPassStatuses: [], answerFilters: [], ...(t.exclude || {}), ...patch };
+      const empty = ex.priorPassStatuses.length === 0 && ex.answerFilters.length === 0;
+      return { ...t, exclude: empty ? null : ex };
+    });
+  const toggleExcludeStatus = (s) =>
+    setExcludeSide({
+      priorPassStatuses: (targetFilter.exclude?.priorPassStatuses || []).includes(s)
+        ? (targetFilter.exclude?.priorPassStatuses || []).filter((x) => x !== s)
+        : [...(targetFilter.exclude?.priorPassStatuses || []), s],
+    });
 
   const snapshotsQ = useQuery({
     queryKey: ['turf-snapshots', campaignId, passId],
@@ -1784,9 +1812,70 @@ export default function TurfsPage() {
                       <span className="font-semibold text-fg">
                         {targetPreviewQ.isFetching
                           ? '…'
-                          : `${(targetPreviewQ.data?.doorCount ?? 0).toLocaleString()} doors · ${(targetPreviewQ.data?.voterCount ?? 0).toLocaleString()} voters`}
+                          : `${(targetPreviewQ.data?.doorCount ?? 0).toLocaleString()} doors · ${(targetPreviewQ.data?.voterCount ?? 0).toLocaleString()} voters${
+                              targetPreviewQ.data?.excludedDoorCount > 0
+                                ? ` · ${targetPreviewQ.data.excludedDoorCount.toLocaleString()} excluded`
+                                : ''
+                            }`}
                       </span>
                     </div>
+                  )}
+                  {(targetPreviewQ.data?.excludeDegenerate || targetPreviewQ.data?.warnings?.length > 0) && (
+                    <p className="text-[11px] text-danger">
+                      {targetPreviewQ.data?.excludeDegenerate
+                        ? 'The exclusion has no valid conditions — fix or clear it before generating.'
+                        : targetPreviewQ.data.warnings.join(' · ')}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {passId && publishedCount === 0 && (
+            <div className="mb-3">
+              <button
+                type="button"
+                onClick={() => setShowExclude((v) => !v)}
+                className="flex w-full items-center justify-between rounded-md border border-danger/30 px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-danger-tint"
+              >
+                <span>Exclude doors {excludeActive ? '· on' : '(optional)'}</span>
+                <span>{showExclude ? '▾' : '▸'}</span>
+              </button>
+              {showExclude && (
+                <div className="mt-2 space-y-2 rounded-md border border-danger/30 bg-sunken px-3 py-2">
+                  <p className="text-[11px] text-fg-muted">
+                    Doors matching ANY of these are removed from the cut — even when they match the target above. e.g. skip
+                    supporters who already took a yard sign.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <span className="font-medium text-fg-muted">Status:</span>
+                    {['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'lit_dropped', 'wrong_address'].map((s) => (
+                      <label key={s} className="flex items-center gap-1 capitalize">
+                        <input
+                          type="checkbox"
+                          checked={(targetFilter.exclude?.priorPassStatuses || []).includes(s)}
+                          onChange={() => toggleExcludeStatus(s)}
+                        />
+                        {s.replace('_', ' ')}
+                      </label>
+                    ))}
+                  </div>
+                  {targetQuestions.length > 0 && (
+                    <AnswerFilters
+                      questions={targetQuestions}
+                      value={targetFilter.exclude?.answerFilters || []}
+                      onChange={(v) => setExcludeSide({ answerFilters: v })}
+                    />
+                  )}
+                  {excludeActive && (
+                    <p className="text-[11px] text-danger">
+                      {targetPreviewQ.isFetching
+                        ? '…'
+                        : `${(targetPreviewQ.data?.excludedDoorCount ?? 0).toLocaleString()} door${
+                            (targetPreviewQ.data?.excludedDoorCount ?? 0) === 1 ? '' : 's'
+                          } removed from this cut`}
+                    </p>
                   )}
                 </div>
               )}
@@ -1828,9 +1917,11 @@ export default function TurfsPage() {
           {doorsQ.data && !hasNoDoors && publishedCount === 0 && (() => {
             const total = doorsQ.data.doors?.length || 0;
             const n = targetActive ? targetPreviewQ.data?.doorCount ?? null : total;
+            const m = targetActive ? targetPreviewQ.data?.excludedDoorCount ?? 0 : 0;
             return (
               <p className="mb-2 text-xs text-fg-muted">
                 <strong>{(n ?? 0).toLocaleString()}</strong> {targetActive ? 'targeted' : 'knockable'} doors
+                {m > 0 ? ` · ${m.toLocaleString()} excluded` : ''}
                 {mode === 'geometric' && n != null ? ` → ~${Math.max(1, Math.ceil(n / (Number(maxDoors) || 65)))} books` : ''}
               </p>
             );

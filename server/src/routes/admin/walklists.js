@@ -64,7 +64,14 @@ router.post('/preview', async (req, res, next) => {
       { _id: { $in: r.householdIds.slice(0, 20) } },
       { addressLine1: 1, city: 1, state: 1, zipCode: 1 }
     ).lean();
-    res.json({ householdCount: r.householdCount, voterCount: r.voterCount, sample });
+    res.json({
+      householdCount: r.householdCount,
+      voterCount: r.voterCount,
+      excludedDoorCount: r.excludedDoorCount,
+      excludeDegenerate: r.excludeDegenerate,
+      warnings: r.warnings,
+      sample,
+    });
   } catch (err) {
     next(err);
   }

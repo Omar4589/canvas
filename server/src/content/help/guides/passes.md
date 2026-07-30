@@ -33,7 +33,9 @@ When you create a walk list, **Pass 1 is created automatically**, so your usual 
 
 A follow-up pass doesn't have to walk every door again. After **New pass**, go to [Turf Cutting](turf-and-books) as usual — but before you generate, open the **Target doors** panel (it's available until the pass has published books). Tick the door statuses you're chasing — say **not home** and **unknocked** to sweep what you missed — and on a survey campaign you can target [survey answers](surveys) too, like every door that answered **Undecided**. Using both kinds at once? Choose whether a door must match **all** of them (AND) or **any** of them (OR).
 
-As you tick, a live count shows how many doors and voters match, and the map dims everything else — so you see the exact universe before you cut. Then generate: only the matching doors go into books, and canvassers see only those doors in the field.
+You can also say which doors to **skip**: the **Exclude doors** panel just below works the same way, but in reverse — a door matching **any** of its conditions is removed from the cut, *even if it matches the target above*. The classic use is a sign-drop round: target your supporters and undecideds, then exclude everyone who already answered **Yard Sign Delivered** — you go back to persuadable doors without re-knocking yards that already have a sign. One thing to know: excluding by a survey answer removes the **whole door** if *anyone* there gave that answer, from any round.
+
+As you tick, a live count shows how many doors and voters match (and how many the exclusions removed), and the map dims everything else — so you see the exact universe before you cut. Then generate: only the matching doors go into books, and canvassers see only those doors in the field.
 
 > Heads up: The status boxes read each door's **current** status — "not home" means the door reads not-home *now*, not "was not-home in Pass 1." For a follow-up that's usually exactly what you want: a not-home door that someone has since surveyed drops out of the target on its own.
 

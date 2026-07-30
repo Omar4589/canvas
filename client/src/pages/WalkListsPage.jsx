@@ -22,6 +22,9 @@ const EMPTY = {
   genders: [], parties: [], precincts: [], congressional: [], stateSenate: [], stateHouse: [],
   cities: [], zips: [], counties: [], ageMin: '', ageMax: '',
   priorPassId: '', priorPassStatuses: [], surveyResponse: 'any', answerFilters: [], answerTagFilters: [], combine: 'and',
+  // The NOT branch (flat `ex*` keys, assembled into filter.exclude by buildFilter).
+  // Doors matching ANY of these are removed from the resolved set, unconditionally.
+  exPriorPassStatuses: [], exSurveyResponse: 'any', exAnswerFilters: [], exAnswerTagFilters: [],
 };
 
 function buildFilter(f) {
@@ -43,6 +46,14 @@ function buildFilter(f) {
   if (f.answerFilters?.length) out.answerFilters = f.answerFilters;
   if (f.answerTagFilters?.length) out.answerTagFilters = f.answerTagFilters;
   out.combine = f.combine;
+  // Excludes always OR among themselves and subtract from the include result —
+  // `combine` never touches them. Omitted entirely when empty.
+  const ex = {};
+  if (f.exPriorPassStatuses.length) ex.priorPassStatuses = f.exPriorPassStatuses;
+  if (f.exSurveyResponse && f.exSurveyResponse !== 'any') ex.surveyResponse = f.exSurveyResponse;
+  if (f.exAnswerFilters?.length) ex.answerFilters = f.exAnswerFilters;
+  if (f.exAnswerTagFilters?.length) ex.answerTagFilters = f.exAnswerTagFilters;
+  if (Object.keys(ex).length) out.exclude = ex;
   return out;
 }
 
@@ -283,6 +294,12 @@ export default function WalkListsPage() {
       : [...f.priorPassStatuses, s]);
   }
 
+  function toggleExStatus(s) {
+    set('exPriorPassStatuses', f.exPriorPassStatuses.includes(s)
+      ? f.exPriorPassStatuses.filter((x) => x !== s)
+      : [...f.exPriorPassStatuses, s]);
+  }
+
   return (
     <div>
       <h1 className="mb-5 text-2xl font-semibold">Saved Searches</h1>
@@ -392,6 +409,50 @@ export default function WalkListsPage() {
             )}
           </div>
 
+          <div className="mb-4 rounded-md border border-danger/30 p-3">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-danger">Exclude doors</div>
+            <p className="mb-2 text-xs text-fg-muted">
+              Doors matching ANY of these are removed — even when they match the filters above. Statuses use the door’s
+              current status; survey answers match any round.
+            </p>
+            <div className="flex flex-wrap items-end gap-4">
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-medium text-fg-muted">Has survey response</span>
+                <select
+                  value={f.exSurveyResponse}
+                  onChange={(e) => set('exSurveyResponse', e.target.value)}
+                  className="rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                >
+                  <option value="any">—</option>
+                  <option value="exists">Has a response</option>
+                  <option value="not_exists">No response</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+              <span className="font-medium text-fg-muted">Door status:</span>
+              {STATUSES.map((s) => (
+                <label key={s} className="flex items-center gap-1">
+                  <input type="checkbox" checked={f.exPriorPassStatuses.includes(s)} onChange={() => toggleExStatus(s)} />
+                  {STATUS_LABEL[s]}
+                </label>
+              ))}
+            </div>
+            {(surveyQuestions.length > 0 || surveyTags.length > 0) && (
+              <div className="mt-3">
+                <div className="mb-1 text-xs font-medium text-fg-muted">Survey answers</div>
+                <AnswerFilters
+                  questions={surveyQuestions}
+                  value={f.exAnswerFilters}
+                  onChange={(v) => set('exAnswerFilters', v)}
+                  tags={surveyTags}
+                  tagValue={f.exAnswerTagFilters}
+                  onTagChange={(v) => set('exAnswerTagFilters', v)}
+                />
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <label className="flex items-center gap-2 text-sm">
               <span className="text-xs font-medium text-fg-muted">Combine</span>
@@ -407,7 +468,13 @@ export default function WalkListsPage() {
             {preview.data && (
               <span className="text-sm text-fg-muted">
                 <b>{preview.data.householdCount?.toLocaleString()}</b> households · <b>{preview.data.voterCount?.toLocaleString()}</b> voters
+                {preview.data.excludedDoorCount > 0 && (
+                  <> · <b className="text-danger">{preview.data.excludedDoorCount.toLocaleString()}</b> excluded</>
+                )}
               </span>
+            )}
+            {preview.data?.warnings?.length > 0 && (
+              <span className="text-xs text-danger">{preview.data.warnings.join(' · ')}</span>
             )}
           </div>
 

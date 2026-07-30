@@ -302,6 +302,17 @@ The panel shows a live door/voter count, and the cut produces books over just th
 **this effort only** (it never pulls another effort's doors). Recut without a target = the full universe,
 unchanged.
 
+Below it sits **Exclude doors** — the NOT side. Doors matching **any** of its conditions (status or
+survey answers) are **removed from the cut, even when they match the target above**; the AND/OR choice
+never applies to it, and an exclusion can only ever shrink the cut. The canonical use is a **sign-drop
+pass**: target *unknocked + not-home + Support/Likely/Undecided*, exclude *Yard Sign Delivered* — go
+back to everyone persuadable-or-better whose yard isn't already converted, without re-knocking the doors
+that took a sign (a sibling option like *Candidate Follow-Up* stays in). Exclusion is **door-level**:
+one household member with a matching answer removes the whole door, and it matches answers from **any**
+round. The count line reads "*N* doors · *V* voters · *M* excluded", where *M* counts only doors the cut
+would otherwise have walked. A malformed exclusion (one with no valid conditions) refuses to cut rather
+than silently walking the doors you removed.
+
 ## Each round is its own pass — door status is per-round
 
 Crucially, **a round is an independent billable pass.** A door's "done/not-done" that the canvasser
@@ -420,7 +431,7 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 
 | Model | File | Fields that matter |
 |---|---|---|
-| `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `effortId` (the walk list whose owned doors are the round's universe), `roundNumber` (unique **per walk list**, never reused), `name`, `targetFilter` (optional walk-list-shaped filter for a targeted follow-up round), `walkListId` (**deprecated** — null on new rounds; the door-set comes from the effort), `status` (`draft`/`active`/`archived`), `activatedAt` (set on activation; knock attribution is now door→book→walk-list, not this timestamp — see the banner), `archivedAt`, `recutLock{lockedAt,lockedBy}`. Unique index `{effortId, roundNumber}` ([Pass.js:58](../server/src/models/Pass.js#L58)). |
+| `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `effortId` (the walk list whose owned doors are the round's universe), `roundNumber` (unique **per walk list**, never reused), `name`, `targetFilter` (optional walk-list-shaped filter for a targeted follow-up round; may carry an `exclude` NOT-branch — see [WALKLISTS.md](WALKLISTS.md) §B), `walkListId` (**deprecated** — null on new rounds; the door-set comes from the effort), `status` (`draft`/`active`/`archived`), `activatedAt` (set on activation; knock attribution is now door→book→walk-list, not this timestamp — see the banner), `archivedAt`, `recutLock{lockedAt,lockedBy}`. Unique index `{effortId, roundNumber}` ([Pass.js:58](../server/src/models/Pass.js#L58)). |
 | `Turf` (= "book") | [models/Turf.js](../server/src/models/Turf.js) | `passId` (required), `campaignId`, `name`, `mode` (`attribute`/`geometric`/`manual`), `params`, `householdIds[]` (**ordered** = walk sequence), `doorCount`, `boundary`/`centroid` (GeoJSON, **display-only**, not geo-indexed), `status` (`draft`/`published`/`archived`), `generationJobId`, `generatedBy`. |
 | Active passes (derived) | [services/passes/activePasses.js](../server/src/services/passes/activePasses.js) | `activePassIds(campaignId)` derives the live passes from `Pass.status==='active'` — **one per active walk list** (a campaign can have several at once). There is **no** `Campaign.activePassId` field. |
 | `Household.turfId` / `walkOrder` | [models/Household.js](../server/src/models/Household.js) | Denormalized mirror of "which book + position" for the household; `null` until assigned by a cut. |

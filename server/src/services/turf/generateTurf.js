@@ -5,7 +5,7 @@ import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { attributeCut } from './attributeCut.js';
 import { geometricCut } from './geometricCut.js';
-import { resolveWalkList } from '../walklist/resolveWalkList.js';
+import { resolveWalkList, isActiveTargetFilter } from '../walklist/resolveWalkList.js';
 import { computeBoundary, computeCentroid, computeTerritories } from './boundary.js';
 import { computeWalkOrder } from './walkOrder.js';
 import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
@@ -49,18 +49,20 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
   };
 
   // Targeted follow-up round: restrict the universe to the effort's doors matching
-  // a walk-list-shaped filter (knock status + survey answers). The existing
-  // fullyVoted/fullyDnc/excludedFromTurf/coords exclusions still apply (intersection).
-  const isActiveFilter = (f) =>
-    !!f &&
-    Object.entries(f).some(([k, v]) => {
-      if (k === 'combine') return false;
-      if (Array.isArray(v)) return v.length > 0;
-      return v != null && v !== '' && v !== 'any';
-    });
-  const targeted = isActiveFilter(params.targetFilter);
+  // a walk-list-shaped filter (knock status + survey answers, minus its exclude
+  // branch). The existing fullyVoted/fullyDnc/excludedFromTurf/coords exclusions
+  // still apply (intersection). The active check is shared with the resolver.
+  const targeted = isActiveTargetFilter(params.targetFilter);
   if (targeted) {
-    const { householdIds } = await resolveWalkList(campaign, params.targetFilter, { effortId: pass.effortId });
+    const { householdIds, excludeDegenerate } = await resolveWalkList(campaign, params.targetFilter, {
+      effortId: pass.effortId,
+    });
+    // The admin asked to exclude doors but every exclude condition was unusable —
+    // cutting anyway would silently send canvassers to the doors they removed. Fail
+    // the job loudly instead (the throw surfaces via the generation job status).
+    if (excludeDegenerate) {
+      throw new Error('The exclusion filter has no valid conditions — fix or remove it, then re-cut');
+    }
     baseFilter._id = { $in: householdIds };
   }
   // Record (or clear) what this round targeted — for reproducibility + a label.
