@@ -292,7 +292,8 @@ test('a stale REPLAY does not destroy a newer disposition', { skip }, async () =
   assert.strictEqual(replay.json?.superseded, true, 'and says so explicitly');
   assert.strictEqual(
     replay.json?.household?.status, 'refused',
-    'and carries the authoritative household so the client overlay reconciles'
+    'and carries the PER-ROUND household status (single-pass fixture, so it equals the global ' +
+    'here — actionResponsePerRound.int.test.js pins the multi-round case where they differ)'
   );
 
   const rows = await myRows(door);

@@ -283,15 +283,15 @@ export function optimisticSubmit(qc, opts) {
       // canvasser's daily counts). Only on confirmed writes: a queued/offline write hasn't
       // been counted yet, so refetching would show the pre-knock number.
       for (const key of invalidateKeys) qc.invalidateQueries({ queryKey: key });
-      // Re-point each pending entry at the server-authoritative status we just
-      // wrote, so the next server fetch (which returns that same status) CLEARS the
-      // overlay instead of the overlay fighting the server forever.
-      const cur = qc.getQueryData(['bootstrap']);
-      const byId = new Map((cur?.households || []).map((h) => [String(h._id), h]));
-      for (const p of pending) {
-        const h = byId.get(String(p.id));
-        if (h) markPendingHousehold(p.id, h.status);
-      }
+      // Re-arm each pending entry with the status WE recorded (refreshing its TTL
+      // from confirmation time) — never echoed back from the just-reconciled cache.
+      // The cache echo is whatever the server returned, so a server regression to a
+      // global (cross-round) status would re-arm the overlay with a stale color it
+      // then DEFENDS against correct per-round deltas for the full TTL — the
+      // "not-home flips back to surveyed" field bug. With the server returning
+      // per-round truth this matches it exactly, and the next fetch clears the
+      // overlay as before.
+      for (const p of pending) markPendingHousehold(p.id, p.status);
     } else if (!result.queued) {
       // Server rejected it (not a network drop) and submitOrQueue won't retry —
       // drop the optimistic claim and pull server truth back so it can't linger.

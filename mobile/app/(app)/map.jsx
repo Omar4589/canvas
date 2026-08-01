@@ -24,7 +24,6 @@ import { api } from '../../lib/api';
 import { signOut } from '../../lib/authState';
 import {
   saveBootstrap,
-  loadBootstrap,
   loadActiveCampaign,
   saveActiveCampaign,
   clearBootstrap,
@@ -38,6 +37,7 @@ import {
 import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction } from '../../lib/recordAction';
+import { bootstrapQueryFn } from '../../lib/bootstrapQuery';
 import { distanceToCoords } from '../../lib/geo';
 import { guardedPush } from '../../lib/navGuard';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
@@ -287,24 +287,11 @@ export default function MapScreen() {
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['bootstrap'],
-    queryFn: async () => {
-      try {
-        const fresh = await api(`/mobile/bootstrap?campaignId=${activeCampaign.id}`);
-        // Hold any just-recorded, server-not-yet-confirmed statuses over this full
-        // refetch so it can't revert a fresh optimistic recolor (see recordAction).
-        fresh.households = reconcilePendingLocations(reconcilePendingHouseholds(fresh.households));
-        // Fire-and-forget: saveBootstrap never rejects, and awaiting a multi-MB
-        // disk write here would only delay first paint of the fresh data.
-        saveBootstrap(fresh);
-        return fresh;
-      } catch (err) {
-        const cached = await loadBootstrap();
-        if (cached && String(cached.campaign?.id) === String(activeCampaign.id)) {
-          return cached;
-        }
-        throw err;
-      }
-    },
+    // Shared with books.jsx (lib/bootstrapQuery.js): pending overlays applied to
+    // every fresh fetch; disk cache is a cold-start fallback only — a failed
+    // REFETCH rethrows so react-query keeps live in-memory data instead of
+    // replacing it with an older snapshot.
+    queryFn: bootstrapQueryFn(qc, activeCampaign?.id),
     enabled: !!activeCampaign?.id,
     staleTime: 30 * 1000,
     // Never auto-refetch the whole campaign on (re)mount. A full bootstrap refetch
@@ -812,14 +799,18 @@ export default function MapScreen() {
   const isLitDrop = activeCampaign?.type === 'lit_drop';
 
   // Selected household stats for the bottom sheet.
-  const selectedVoters = selected
-    ? votersByHousehold.get(String(selected._id)) || []
+  // The sheet renders the LIVE household row, not the snapshot frozen at pin-tap:
+  // `selected` is component state set once in onPinPress, so its status/lastActionAt
+  // would otherwise ignore every later optimistic recolor, reconcile, and delta.
+  const liveSelected = selected ? householdsById.get(String(selected._id)) || selected : null;
+  const selectedVoters = liveSelected
+    ? votersByHousehold.get(String(liveSelected._id)) || []
     : [];
   const selectedSurveyedCount = selectedVoters.filter(
     (v) => v.surveyStatus === 'surveyed'
   ).length;
-  const selectedLastSeen = selected ? timeAgo(selected.lastActionAt) : null;
-  const selectedId = selected ? String(selected._id) : '';
+  const selectedLastSeen = liveSelected ? timeAgo(liveSelected.lastActionAt) : null;
+  const selectedId = liveSelected ? String(liveSelected._id) : '';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -1158,9 +1149,9 @@ export default function MapScreen() {
             snapDelta={sheetSnapDelta}
             sheetHeight={sheetHeight}
           >
-            {selected ? (
+            {liveSelected ? (
               <SelectedHouseSheetContent
-                selected={selected}
+                selected={liveSelected}
                 voters={selectedVoters}
                 surveyedCount={selectedSurveyedCount}
                 lastSeen={selectedLastSeen}

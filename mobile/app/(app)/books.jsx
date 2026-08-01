@@ -4,10 +4,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
-import { api } from '../../lib/api';
 import {
-  saveBootstrap,
-  loadBootstrap,
   loadActiveCampaign,
   saveActiveCampaign,
   clearBootstrap,
@@ -17,6 +14,7 @@ import {
   loadCurrentEffort,
   clearCurrentEffort,
 } from '../../lib/cache';
+import { bootstrapQueryFn } from '../../lib/bootstrapQuery';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { initMapbox } from '../../lib/mapbox';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
@@ -84,19 +82,11 @@ export default function BooksScreen() {
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['bootstrap'],
-    queryFn: async () => {
-      try {
-        const fresh = await api(`/mobile/bootstrap?campaignId=${activeCampaign.id}`);
-        // Fire-and-forget: saveBootstrap never rejects, and awaiting a multi-MB
-        // disk write here would only delay first paint of the fresh data.
-        saveBootstrap(fresh);
-        return fresh;
-      } catch (err) {
-        const cached = await loadBootstrap();
-        if (cached && String(cached.campaign?.id) === String(activeCampaign.id)) return cached;
-        throw err;
-      }
-    },
+    // Shared with map.jsx (lib/bootstrapQuery.js). Two fixes over the old local
+    // fetcher: pending overlays now apply here too (this screen's refetch-on-mount
+    // could revert a just-recorded optimistic recolor), and the disk fallback no
+    // longer replaces LIVE in-memory data on a failed refetch.
+    queryFn: bootstrapQueryFn(qc, activeCampaign?.id),
     enabled: !!activeCampaign?.id,
     // Short window so a freshly-activated round refetches per-round status on mount
     // rather than showing the prior round's cached colors.

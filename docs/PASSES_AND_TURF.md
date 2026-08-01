@@ -329,11 +329,21 @@ book pointer), so you can **cut/prep the next round at any time** — even while
 being walked — without disturbing the active round's canvassers. (Activating the new round still archives
 the old one and needs its own book assignments — a new round is a fresh assignment.)
 
-**The round-fresh presentation goes all the way down to the voter.** On the canvasser's wire
-(bootstrap + delta), three fields are rewritten to the round of their assigned book: the door's
+**The round-fresh presentation goes all the way down to the voter.** On the canvasser's wire,
+three fields are rewritten to the round of their assigned book: the door's
 `status`, its `lastActionAt` (a round-fresh door shows **no** "Last visit", not "Unknocked · Last
 visit 3 weeks ago"), and each voter's `surveyStatus` — 'surveyed' means *surveyed in this round*, so
-a Round-1 supporter presents "Take survey", not a "Surveyed" badge with a "Re-survey" button. The
+a Round-1 supporter presents "Take survey", not a "Surveyed" badge with a "Re-survey" button.
+That wire has **four** lanes, and every one must speak per-round: the bootstrap, the `/changes`
+delta, `me.js` ("Remaining"), and the **action responses** — the body a disposition/survey POST
+returns, which the client's reconcile reads (`response.household.status`) and re-arms its
+optimistic overlay with (`toWireHousehold` in
+[canvass.js](../server/src/routes/mobile/canvass.js), pinned by
+[actionResponsePerRound.int.test.js](../server/test/actionResponsePerRound.int.test.js)). The
+action lane was the one missed when the wire went per-round: it echoed the stored **sticky**
+global status, so recording *not home* on a prior-round-surveyed door flipped the pin back to
+"surveyed" and the overlay defended the lie against correct deltas until app restart — the
+pass-3 field bug of 2026-07-31. The
 stored fields stay campaign-global for admin/reports. This is deliberate integrity design, not just
 cosmetics: a canvasser who can see who answered last round can "confirm" a knock without a
 conversation. The same principle gates the mobile voter profile (full cross-round answers, DOB,

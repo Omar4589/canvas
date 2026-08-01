@@ -566,8 +566,13 @@ timestamp defensible here and nowhere else.
 
 **A superseded replay returns `200 { household, superseded: true }`**, not a 4xx. The queue drains on
 any 2xx, and the client's optimistic overlay reads `response.household.status`
-(`recordAction.js`), so the pin reconciles to server truth for free — **no client release was needed,
-and phones already in the field are covered.** A 409 would have been the repo's usual shape for "your
+(`recordAction.js`), so the pin reconciles for free — **no client release was needed,
+and phones already in the field are covered.** The `household` here is the minimal **per-round**
+wire shape (`_id`, `status`, `lastActionAt` — `toWireHousehold`), not the raw doc: the stored
+`Household.status` is completion-sticky across rounds, and echoing it back used to flip a
+prior-round-surveyed door to "surveyed" right after a not-home, with the overlay then defending
+the wrong color against correct deltas for its whole TTL (fixed 2026-07-31; see
+`actionResponsePerRound.int.test.js`). A 409 would have been the repo's usual shape for "your
 write lost a race", but `recordAction.js` raises an "Action not saved" alert for unrecognised 4xx
 codes, which would have told a canvasser their correctly-superseded write had failed. `201` still
 means a real write, so the two remain distinguishable in logs.

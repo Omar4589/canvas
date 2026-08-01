@@ -19,6 +19,7 @@ import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/
 import { knockStateOf, knockStateDelta, bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
+import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
@@ -231,6 +232,29 @@ async function resolveAttribution(campaign, household) {
   return { passId: turf?.passId || null, turfId: turf?._id || null, effortId };
 }
 
+// The household as it goes on the ACTION-RESPONSE wire: per-round status + last
+// visit — the same values the bootstrap and /changes would show this door — and
+// nothing else. The client reconcile (mobile lib/recordAction.js, survey.jsx)
+// reads response.household.status and re-arms its optimistic overlay with it, so
+// a global (cross-round) status here poisons the phone until restart: the stored
+// Household.status is completion-STICKY across all rounds, and echoing it back
+// after a not_home on a prior-round-surveyed door flipped the pin to "surveyed"
+// and made the overlay defend the lie against correct deltas for its whole TTL.
+// The action responses are the FOURTH per-round wire, alongside bootstrap,
+// /changes, and me.js (docs/PASSES_AND_TURF.md). passId null = legacy/unbooked
+// door → keep the global value, matching the bootstrap's fallback for doors
+// outside doorPass. Deliberately minimal: the raw doc over-shipped (and the
+// survey route's raw Voter leaked dateOfBirth/phone/doNotContact — see
+// PRIVACY_VERIFICATION.md); nothing shipped ever read more than these fields.
+async function toWireHousehold(household, passId, campaignType) {
+  if (!passId) {
+    return { _id: String(household._id), status: household.status, lastActionAt: household.lastActionAt };
+  }
+  const m = await getPassStatusMap(passId, [household._id], campaignType);
+  const e = m.get(String(household._id));
+  return { _id: String(household._id), status: e?.status || 'unknocked', lastActionAt: e?.lastActionAt || null };
+}
+
 // recomputeHouseholdStatus / recomputeSurveyStatus now live in
 // services/canvass/status.js so the re-cut "clear knocks" path reuses them.
 
@@ -268,10 +292,11 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
 
   // MUST come before every mutation below — the deleteMany, the SurveyResponse cleanup, the create,
   // the status recompute, the lastActionAt write and the counter bumps. Returning the household
-  // lets the client's optimistic overlay reconcile to server truth for free (it reads
-  // response.household.status), so a superseded replay self-corrects the pin with no client change.
+  // (in the minimal PER-ROUND wire shape — toWireHousehold) lets the client's optimistic overlay
+  // reconcile to the round's truth for free (it reads response.household.status), so a superseded
+  // replay self-corrects the pin to the round's newer action with no client change.
   if (supersededByNewer(data, mineRows, ts)) {
-    return { household, superseded: true };
+    return { household: await toWireHousehold(household, passId, campaign.type), superseded: true };
   }
 
   const replaced = buildReplacedSnapshot(mineRows);
@@ -343,7 +368,9 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     if (priorSurveys.length) await bumpLive('surveyResponses', -priorSurveys.length, { isInternal });
   }
 
-  return { household, activity };
+  // Runs AFTER the activity create, so the per-round aggregate reflects the action
+  // just recorded. `activity` is deliberately not on the wire — nothing reads it.
+  return { household: await toWireHousehold(household, passId, campaign.type) };
 }
 
 // Shown VERBATIM to the user by the mobile alert (lib/recordAction.js renders `data.error`),
@@ -394,7 +421,20 @@ router.post('/households/:householdId/location', async (req, res, next) => {
         { lat: data.lat, lng: data.lng },
         { source: data.source, byUserId: req.user._id, accuracy: data.accuracy ?? null, scope: data.scope || 'unit' }
       );
-      return res.status(201).json({ household: updated[0], moved: updated.length });
+      // Minimal wire shape: the client reads only location/coordSource/coordConfidence
+      // (recordLocationCorrection reconcile) and `moved`. Not per-round — a pin move
+      // has no status semantics — but the raw doc over-shipped (previousLocation,
+      // correctedBy, normalizedAddress...).
+      const h = updated[0];
+      return res.status(201).json({
+        household: {
+          _id: String(h._id),
+          location: h.location,
+          coordSource: h.coordSource,
+          coordConfidence: h.coordConfidence,
+        },
+        moved: updated.length,
+      });
     } catch (err) {
       if (err.code === 'out_of_bounds' || err.code === 'invalid_coords') {
         return res.status(400).json({ error: err.message, code: err.code });
@@ -595,7 +635,9 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // alone, not on user or time, so a stale replay would blindly overwrite a newer submission's
     // answers and clear its editedBy/editedAt audit trail before we ever reached the delete.
     if (supersededByNewer(data, mineRows, ts)) {
-      return res.status(200).json({ household, superseded: true });
+      return res
+        .status(200)
+        .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true });
     }
 
     const replaced = buildReplacedSnapshot(mineRows);
@@ -723,7 +765,12 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       userId: req.user._id,
     });
 
-    res.status(201).json({ household, voter, surveyResponse, activity });
+    // Minimal per-round wire shape ONLY. The old body shipped the raw Voter doc —
+    // dateOfBirth, phone, phoneType, the full doNotContact subdoc — bypassing the
+    // toWireVoter privacy shaping the bootstrap enforces ("the strongest protection
+    // for a field is not sending it"). No shipped client ever read voter /
+    // surveyResponse / activity from this response.
+    res.status(201).json({ household: await toWireHousehold(household, passId, campaign.type) });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
