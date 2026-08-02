@@ -2317,7 +2317,9 @@ router.get('/canvasser-timeline', async (req, res, next) => {
 // Voters with MORE THAN ONE survey response (a "Surveys" count above "Surveyed voters" means
 // someone was surveyed twice). Surfaces who/when/round/where for each so the operator can tell a
 // legit revisit (different canvassers / different round) from a mistake (same canvasser, same
-// day). Fix path: open the voter profile and delete the extra response. See METRICS.md §Surveys.
+// day). Paged (skip/limit, `total` = full matching-group count) and filterable by ?userId=
+// (groups containing that canvasser) and ?kind=. Fix path: open the voter profile and delete the
+// extra response. See METRICS.md §Surveys.
 router.get('/duplicate-surveys', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -2326,8 +2328,27 @@ router.get('/duplicate-surveys', async (req, res, next) => {
     const dateRange = parseDateRange(req, 'submittedAt');
     const tz = req.anchorTz || 'UTC';
 
-    const dupes = await SurveyResponse.aggregate([
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+    const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+
+    // Optional canvasser filter — matched AFTER grouping (a group qualifies when ANY of its
+    // responses is theirs), so filtering never changes what counts as a duplicate.
+    let userFilter = null;
+    if (req.query.userId !== undefined) {
+      if (!mongoose.isValidObjectId(req.query.userId)) {
+        return res.status(400).json({ error: 'Invalid userId' });
+      }
+      userFilter = new mongoose.Types.ObjectId(req.query.userId);
+    }
+
+    const kind = req.query.kind || 'all';
+    if (!['all', 'sameCanvasserSameDay', 'differentCanvassers'].includes(kind)) {
+      return res.status(400).json({ error: 'Invalid kind' });
+    }
+
+    const [facets] = await SurveyResponse.aggregate([
       { $match: { ...cFilter, ...dateRange } },
+      { $set: { day: dayBucketExpr('submittedAt', tz) } },
       {
         $group: {
           _id: '$voterId',
@@ -2338,17 +2359,34 @@ router.get('/duplicate-surveys', async (req, res, next) => {
               submittedAt: '$submittedAt',
               passId: '$passId',
               userId: '$userId',
+              day: '$day',
             },
           },
+          // A repeated (user, local-day) key collapses in the set, so set < count ⇔ a repeat.
+          userDays: { $addToSet: { $concat: [{ $toString: '$userId' }, '|', '$day'] } },
+          users: { $addToSet: '$userId' },
         },
       },
       { $match: { count: { $gt: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 200 },
+      ...(userFilter ? [{ $match: { 'responses.userId': userFilter } }] : []),
+      {
+        $set: {
+          sameCanvasserSameDay: { $gt: ['$count', { $size: '$userDays' }] },
+          differentCanvassers: { $gt: [{ $size: '$users' }, 1] },
+        },
+      },
+      ...(kind === 'sameCanvasserSameDay' ? [{ $match: { sameCanvasserSameDay: true } }] : []),
+      ...(kind === 'differentCanvassers' ? [{ $match: { differentCanvassers: true } }] : []),
+      { $unset: ['userDays', 'users'] },
+      // Most suspicious first (false < true in BSON), then by count; voterId keeps pages stable.
+      { $sort: { sameCanvasserSameDay: -1, count: -1, _id: 1 } },
+      { $facet: { items: [{ $skip: skip }, { $limit: limit }], total: [{ $count: 'n' }] } },
     ]);
+    const dupes = facets?.items || [];
+    const total = facets?.total?.[0]?.n || 0;
 
     if (!dupes.length) {
-      return res.json({ duplicates: [], total: 0, timeZone: tz, tzAbbrev: tzAbbrev(tz) });
+      return res.json({ duplicates: [], total, limit, skip, timeZone: tz, tzAbbrev: tzAbbrev(tz) });
     }
 
     const voterIds = dupes.map((d) => d._id);
@@ -2393,7 +2431,7 @@ router.get('/duplicate-surveys', async (req, res, next) => {
           return {
             responseId: String(r.responseId),
             submittedAt: r.submittedAt,
-            day: zonedDayStr(r.submittedAt, tz),
+            day: r.day,
             canvasser: {
               userId: String(r.userId),
               firstName: u?.firstName || '',
@@ -2405,16 +2443,6 @@ router.get('/duplicate-surveys', async (req, res, next) => {
           };
         })
         .sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt));
-
-      // Two responses from the SAME canvasser on the SAME campaign-day = the "mistake" signal.
-      const seen = new Set();
-      let sameCanvasserSameDay = false;
-      for (const r of responses) {
-        const key = `${r.canvasser.userId}|${r.day}`;
-        if (seen.has(key)) sameCanvasserSameDay = true;
-        seen.add(key);
-      }
-      const differentCanvassers = new Set(responses.map((r) => r.canvasser.userId)).size > 1;
 
       return {
         voterId: String(d._id),
@@ -2437,17 +2465,12 @@ router.get('/duplicate-surveys', async (req, res, next) => {
             }
           : null,
         responses,
-        sameCanvasserSameDay,
-        differentCanvassers,
+        sameCanvasserSameDay: d.sameCanvasserSameDay,
+        differentCanvassers: d.differentCanvassers,
       };
     });
 
-    // Most suspicious first (same-canvasser-same-day), then by how many responses.
-    result.sort(
-      (a, b) => b.sameCanvasserSameDay - a.sameCanvasserSameDay || b.count - a.count
-    );
-
-    res.json({ duplicates: result, total: result.length, timeZone: tz, tzAbbrev: tzAbbrev(tz) });
+    res.json({ duplicates: result, total, limit, skip, timeZone: tz, tzAbbrev: tzAbbrev(tz) });
   } catch (err) {
     next(err);
   }
