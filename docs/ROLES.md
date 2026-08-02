@@ -382,8 +382,11 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   affordances on `isOrgAdmin`. [admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) and
   [index.jsx](../mobile/app/index.jsx) both use `isConsoleRole`; the canvasser drawer's **Admin
   dashboard** row is gated on `isConsoleUser` (it was `isOrgAdmin`, which stranded a lead who switched to
-  canvass mode). The org Users row is hidden for leads in
-  [more.jsx](../mobile/app/(app)/admin/more.jsx), and the campaign screen's **Team** tile
+  canvass mode). In [more.jsx](../mobile/app/(app)/admin/more.jsx) the org Users row is **shown** to
+  leads (server-scoped to their campaigns' rosters since 2026-07-23 — the old `isLead` branch that hid
+  it was deleted as dead code); the **Duplicate surveys** row is likewise `isConsoleUser`, but the
+  Delete inside that screen is `isOrgAdmin`, since `admin/voters.js` is `requireOrgRole('admin')`
+  router-wide — a lead reads every duplicate and can remove none. And the campaign screen's **Team** tile
   ([campaign/\[campaignId\].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) points at
   `campaign-assignments/:campaignId` — the campaign's own crew + book assignments — not at the org Users
   screen it used to open. That was the reported bug: a lead tapped it, `/admin/memberships` 403'd, and

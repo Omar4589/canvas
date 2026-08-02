@@ -398,6 +398,29 @@ Filtering the mobile admin map to a **single canvasser** also recolors each door
 own disposition** (green only where *they* surveyed, etc.), exactly like the web map — see
 [MAPS.md](MAPS.md).
 
+### Duplicate surveys — and the one thing you can delete from the phone
+**More → Duplicate surveys** lists voters with **more than one survey response** — the reason a
+campaign's *Surveys* can read higher than its *Surveyed voters*. It is the voter-unit twin of
+Overlaps: one says the same door was knocked twice, this says the same person was surveyed twice.
+
+Each voter starts **collapsed**, showing only what you need to triage: the name, the address, and
+the badges — a **count**, **Same canvasser · same day** (a double-submit; the one worth fixing) and
+**Different canvassers** (usually a legitimate later-round revisit). Both badges show when both are
+true, which is what a three-response entry looks like. Tap the voter to open who surveyed them, when
+and in which round; tap a response for its full detail, or **Open voter** for the profile.
+
+Same three filters as the web page — duplicate type, canvasser (departed canvassers included, since
+their work is still on the report), dates (opens on **All time**; it's a history report) — and
+**Load more** at the bottom.
+
+**An org admin can delete the extra response here**, which is the whole reason the screen earns its
+place: on the web the fix path is Open voter → profile → delete, and the mobile voter profile is
+read-only, so without an in-place delete the phone would only ever be able to *find* the problem.
+Confirming names the canvasser, the round and the time, and says plainly what is lost (the answers,
+permanently) and what is not (the knock stays on the timeline, the door still reads surveyed, only
+the Surveys total moves). **Team leads see the whole report and no Delete** — the row explains why,
+and the server refuses a lead's delete regardless of what the app shows.
+
 ### The More hub
 It reads as a **settings menu**: your name and email in a prominent row at the very top (it opens the
 profile screen), then small all-caps section captions over rows that each carry an icon, a label and
@@ -411,9 +434,11 @@ where relevant a grey line of explanation.
   all" opens the paged activity screen), temp password, assign/unassign (admins), deactivate/
   reactivate. The Add sheet creates a canvasser straight onto the selected campaign with an optional
   **coordinator** picked at birth. **GPS audit** ([AUDIT.md](AUDIT.md)) — defaults to Today, each
-  entry has "View on map"; **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)); **Overlaps** —
-  entries open a detail screen with a map of the house and "Open on live map"; Voter search; Switch
-  to canvass mode.
+  entry has "View on map"; **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)); **Exports** —
+  queues the everyday CSV types with a live row-count preview ([EXPORTS.md](EXPORTS.md));
+  **Overlaps** — entries open a detail screen with a map of the house and "Open on live map";
+  **Duplicate surveys** — voters with more than one response, where an admin deletes the extra one
+  (below); Voter search; Switch to canvass mode.
 - **On the web:** CSV import, Early voting, Turf cutting — these open a short note (managed on the web
   dashboard; file uploads / turf drawing aren't mobile-friendly).
 - **Support:** Help center.
@@ -581,6 +606,39 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 
 Every fetch carries `campaignId` (the reports router 403s a lead without a managed one). All of this
 is JS-only — ships via OTA, no native build.
+
+## The Duplicate surveys screen
+
+[admin/duplicate-surveys.jsx](../mobile/app/(app)/admin/duplicate-surveys.jsx) reads the shipped
+`GET /admin/reports/duplicate-surveys` (`campaignId`, `from`/`to`, `kind`, `userId`, `skip`/`limit`
+— see [METRICS.md](METRICS.md) §Surveys) and deletes via the shipped
+`DELETE /admin/voters/:voterId/surveys/:responseId`. **No server changes.** Three things are worth
+knowing before editing it:
+
+- **The read/write split.** The report router allows `admin` **and** `lead`, so a team lead reaches
+  this screen legitimately. `admin/voters.js` is `requireOrgRole('admin')` router-wide, so the
+  delete is admin-only. The client mirrors that with `useConsoleRole()` in the **positive** form
+  (`role === 'admin' || role === 'super'`) — the hook returns `undefined` while it reads the cache,
+  so a `!== 'lead'` test would flash a Delete button at a lead for one frame. Leads get an inline
+  caption instead. The button is gated for honesty, not security.
+- **`admin/voters.js` is now MOBILE-FACING** — this screen is its first mobile caller, so that file
+  (voter identity PATCH, notes, DNC, the Person edit-proposal flow) now shows up in
+  `npm run audit:mobile-api`. That is the tool working; read the flagged diffs against the shipped
+  bundle rather than assuming a web-only edit is safe.
+- **The paged fetch is written inline, not through [useInfinitePaged](../mobile/lib/useInfinitePaged.js).**
+  Deliberate: the audit script finds mobile's dependencies by grepping for literal paths at `api()`
+  call sites, and that helper builds its URL internally — endpoints consumed through it are
+  invisible to the audit (`/super-admin/users` and `/super-admin/emails` are missing from `--list`
+  today). An audit surface should not hide from the audit. The helper now carries a comment saying so.
+
+Deleting **invalidates** rather than splicing the row out locally: `sameCanvasserSameDay` /
+`differentCanvassers` are computed server-side from timezone-bucketed day keys, so a 3→2 delete can
+leave a wrong badge on the one screen whose entire job is those badges — and re-deriving them client
+side would duplicate the aggregation `duplicateSurveys.int.test.js` exists to protect. The route's
+response (a full rebuilt voter profile, richer than the screen shows) is discarded rather than
+seeded, which also keeps the extra PII out of the cache. The decisions that can be tested without a
+device — the badge set, the confirm copy, the error wording — live in
+[lib/duplicateSurveys.js](../mobile/lib/duplicateSurveys.js) and are pinned by `npm run test:mobile`.
 
 ## The admin Map screen — door detail + overlaps
 

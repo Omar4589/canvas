@@ -191,6 +191,18 @@ test('libraries: lead reads surveys/tags but cannot mutate them, and cannot reac
   // routes) lives in leadUserManagement.int.test.js; here we just pin reachability.
   assert.strictEqual((await call('GET', '/api/admin/memberships', opt)).status, 200, 'org Users (lead-scoped)');
   assert.strictEqual((await call('GET', '/api/admin/voters', opt)).status, 403, 'org voters');
+  // The whole /admin/voters router is admin-only, including the nested survey-response delete —
+  // pinned since 2026-08 because the mobile Duplicate surveys screen puts a lead one render
+  // condition away from it. The report itself IS lead-readable, so hiding the button is a UI
+  // courtesy; this is the actual gate. (Random ids: the router guard fires before any lookup.)
+  const vid = new mongoose.Types.ObjectId();
+  const rid = new mongoose.Types.ObjectId();
+  assert.strictEqual(
+    (await call('DELETE', `/api/admin/voters/${vid}/surveys/${rid}`, opt)).status,
+    403,
+    'delete a survey response'
+  );
+  assert.strictEqual((await call('GET', `/api/admin/voters/${vid}`, opt)).status, 403, 'voter profile');
 });
 
 test('a role 403 carries code FORBIDDEN_ROLE', { skip }, async () => {

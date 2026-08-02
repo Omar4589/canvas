@@ -10,6 +10,14 @@ import { api } from './api';
 //     { limit: 50, itemsKey: 'users' }
 //   );
 //   → usersQ.items (flattened), usersQ.total, usersQ.hasNextPage, usersQ.fetchNextPage, …
+//
+// TRAP: because the URL is built HERE, the endpoint literal never appears at an api() call site —
+// and scripts/mobile-api-surface.mjs finds mobile's server dependencies by grepping for exactly
+// that. Endpoints consumed only through this helper are INVISIBLE to `npm run audit:mobile-api`
+// (/super-admin/users and /super-admin/emails are both missing from --list today). So a route file
+// reachable only this way can be wrongly cleared as "not mobile-facing". If that matters for a
+// given screen, write the useInfiniteQuery inline with a literal path instead — see
+// admin/duplicate-surveys.jsx, which does exactly that and says why.
 export function useInfinitePaged(queryKey, path, params = {}, options = {}) {
   const { limit = 25, itemsKey = 'items', ...queryOpts } = options;
   const query = useInfiniteQuery({

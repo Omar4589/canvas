@@ -23,6 +23,13 @@ function answerText(a) {
   return Array.isArray(a) ? a.join(', ') : String(a);
 }
 
+// Admin screens that push here pass ?from=<key> so back returns to them. dismissTo (not back)
+// because the push crossed out of the admin Tabs navigator.
+const BACK_TO = {
+  notes: { label: 'Notes', path: '/(app)/admin/notes' },
+  duplicates: { label: 'Duplicates', path: '/(app)/admin/duplicate-surveys' },
+};
+
 function Card({ title, children }) {
   const styles = useThemedStyles(makeStyles);
   return (
@@ -40,7 +47,11 @@ export default function VoterProfile() {
   const styles = useThemedStyles(makeStyles);
   const { id, from } = useLocalSearchParams();
   const voterId = Array.isArray(id) ? id[0] : id;
-  const fromNotes = (Array.isArray(from) ? from[0] : from) === 'notes';
+  // ?from= is the breadcrumb an admin screen leaves so back returns THERE, not to the Voters
+  // list — pushing here exits the admin Tabs navigator, so router.back()'s default reads wrong.
+  // A map rather than the original one-off boolean: a second referrer (Duplicate surveys) made
+  // the `=== 'notes'` pair need editing in three places.
+  const backTo = BACK_TO[Array.isArray(from) ? from[0] : from] || null;
   const [campaign, setCampaign] = useState(undefined);
   const [note, setNote] = useState('');
   const cId = campaign?.id;
@@ -73,10 +84,10 @@ export default function VoterProfile() {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Pressable
-          onPress={() => (fromNotes ? router.dismissTo('/(app)/admin/notes') : router.back())}
+          onPress={() => (backTo ? router.dismissTo(backTo.path) : router.back())}
           hitSlop={8}
         >
-          <Text style={styles.back}>{fromNotes ? '‹ Notes' : '‹ Voters'}</Text>
+          <Text style={styles.back}>‹ {backTo ? backTo.label : 'Voters'}</Text>
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{v?.fullName || 'Voter'}</Text>
         <View style={{ width: 64 }} />

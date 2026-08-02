@@ -78,6 +78,10 @@ test('GET /help/index widens by role: canvasser < lead < admin', { skip }, async
   // lead adds the lead guides, still not the admin one
   assert.ok(slugs(lead).includes('voter-imports'));
   assert.ok(slugs(lead).includes('page-campaign-home'));
+  // A lead reaches the mobile Duplicate surveys screen and CANNOT delete there, so the article
+  // explaining that has to be readable by them — it was `audience: admin` until 2026-08, which
+  // hid it from exactly the people who need it.
+  assert.ok(slugs(lead).includes('page-duplicate-surveys'));
   assert.ok(!slugs(lead).includes('admin-getting-started'));
 
   // admin sees everything the lead does, plus admin-only content

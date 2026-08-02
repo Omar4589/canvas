@@ -94,6 +94,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="users/[id]" options={{ href: null }} />
       <Tabs.Screen name="overlaps" options={{ href: null }} />
       <Tabs.Screen name="overlap/[householdId]" options={{ href: null }} />
+      <Tabs.Screen name="duplicate-surveys" options={{ href: null }} />
       <Tabs.Screen name="audit" options={{ href: null }} />
       <Tabs.Screen name="notes" options={{ href: null }} />
       <Tabs.Screen name="exports" options={{ href: null }} />

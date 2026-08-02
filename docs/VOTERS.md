@@ -136,7 +136,9 @@ statuses above it isn't about what happened; it's a standing request:
 
 Canvassers get **lookup**: search voters in the **active campaign** (limited to the books assigned
 to them), open a **read-only** profile, and **add a note** from the field. Editing voter fields and
-survey answers is **web-admin only**.
+survey answers is **web-admin only** — with one carve-out: an **org admin** can delete a duplicate
+survey response from the mobile **Duplicate surveys** screen ([ADMIN_APP.md](ADMIN_APP.md)). The
+mobile voter profile itself stays read-only; the delete lives on that report, not here.
 
 **At a door**, a canvasser sees a deliberately short line: **Party · Age · Gender** ("Democratic ·
 34 yrs · Female"), plus a ✓ Voted tag and their survey status. It reads identically on the map's

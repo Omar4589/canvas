@@ -405,6 +405,36 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   **Assessment: NO published Privacy Policy / ToS / DPA sentence changes; no new
   subprocessor; DPA §6 untouched.**
 
+- *(v5 2026-08-02)* **Recorded as a NEGATIVE: an admin can now delete a survey response from the
+  PHONE, and that is NOT privacy-affecting.** The mobile admin app gained a **Duplicate surveys**
+  screen (`mobile/app/(app)/admin/duplicate-surveys.jsx`, More → Manage), the twin of the web report,
+  and an org admin can delete an extra response in place from an expanded card. Written down because
+  "an admin can now erase survey answers from a phone" is exactly the sentence that sends the next
+  reviewer to the checklist — and what it erases is GDPR Art. 9 material (political opinions bound to
+  a named voter, §(d) above), so the answer should not have to be re-derived.
+  **Why it clears every trigger.** **No server change of any kind** — both routes shipped long ago and
+  are byte-identical: the report is `GET /admin/reports/duplicate-surveys`, the delete is
+  `DELETE /admin/voters/:voterId/surveys/:responseId`. **No role gains anything**: `admin/voters.js` is
+  `requireOrgRole('admin')` router-wide, so a team lead 403s regardless of what the app renders (the UI
+  gate exists for honesty, not security, and the refusal is now pinned by `test/teamLead.int.test.js`).
+  Retention semantics are unchanged — same org-scoped `findOneAndDelete`, same `bumpCampaignStats`
+  (`surveyCount` only; the `survey_submitted` CanvassActivity row survives), same
+  `recomputeSurveyStatus`. No new field, no new query parameter, no export, no third party, no TTL or
+  cascade change. The audit trail is client-agnostic: `router.param('voterId')` calls
+  `addAuditSubjects(res, 'voter', …)` and `accessLog` records at response-finish for every `/admin`
+  request, so a delete from a phone logs exactly like a delete from the browser
+  (`test/accessLogCoverage.int.test.js`).
+  **The two things that DO change, and why they are written here rather than assumed.** (1)
+  `routes/admin/voters.js` — a **PII-returning** route file — gains a second client for the first time,
+  so it now appears in `npm run audit:mobile-api` and any future edit is a mobile-facing change. That
+  is a fact about the review surface even though no route moved. (2) The delete **responds with a full
+  rebuilt voter profile**, richer than the screen renders — the same shape as the §B finding about a
+  list rendering city/state while the JSON carries the full street address. The client therefore
+  **discards the body and invalidates instead of seeding it into the cache**; mobile has no react-query
+  persister, so nothing of it reaches the AsyncStorage stores catalogued in §C9(d). Keep it that way.
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence becomes false or incomplete; no new
+  subprocessor; DPA §6 untouched.**
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact
@@ -1475,7 +1505,7 @@ This is an **employee-monitoring / worker-privacy** exposure, not just a consume
 ### (d) VOTERS HAVE NO RIGHTS MECHANISM AT ALL. **VERIFIED.**
 There is **no voter account, no voter role** (Membership roles are `['admin','lead','canvasser']` only — `models/Membership.js:21`), and **no voter-facing route**. A grep across server, client and mobile for do-not-contact / opt-out / unsubscribe / DSAR / data-subject / right-to-erasure returns **no implementation**. There is no `DELETE /admin/voters/:voterId` and no delete route on the Person router. *[v3 update 2026-07-17: the grep result is now stale in one respect — an admin-operated **do-not-contact** mechanism exists (`Voter.doNotContact`, `routes/admin/dnc.js`, enforcement layers per docs/VOTERS.md §D). The voter-INITIATED absence stands: no account, no self-serve route, DSARs still manual.]*
 
-**What DOES exist:** an org admin can **correct** a voter's identity fields (`routes/admin/voters.js:186`), **delete a voter's survey response** (`:371`), and **delete a voter note** (`:303`). And a household can be marked `'restricted'` and excluded from future books via an admin `excludeRestricted` toggle (`models/Household.js:47-52`; `services/turf/generateTurf.js:49`, `:205`) — **door-level, admin-controlled, not voter-initiated,** and framed in the help copy as "couldn't physically reach the door," not as suppression.
+**What DOES exist:** an org admin can **correct** a voter's identity fields (`routes/admin/voters.js`, the identity PATCH), **delete a voter's survey response** (`DELETE /admin/voters/:voterId/surveys/:responseId`), and **delete a voter note**. *[v5 2026-08-02: the old line pins (`:186`, `:371`, `:303`) had rotted — the survey delete now sits at `:648`. Cited by route + method instead, per the 2026-07-29 rule below. That delete is reachable from the web voter profile and, since 2026-08, from the **mobile Duplicate surveys** screen; both are the same admin-only route.]* And a household can be marked `'restricted'` and excluded from future books via an admin `excludeRestricted` toggle (`models/Household.js:47-52`; `services/turf/generateTurf.js:49`, `:205`) — **door-level, admin-controlled, not voter-initiated,** and framed in the help copy as "couldn't physically reach the door," not as suppression.
 
 The currently-published policy states *"Voters do not interact with the Services directly."* *[v3: the policy is now `client/public/privacy.html`; the no-rights-mechanism finding is unchanged — it is v3 gap 1, still the largest gap.]* The only channel for a voter to exercise any right is a contact email on the policy page. **Every DSAR from a voter is a manual process with no tooling behind it, and there is no way to mark a person do-not-contact.**
 

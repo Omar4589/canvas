@@ -135,6 +135,7 @@ export default function AdminMore() {
           <InsetNavRow emphasis="menu" leading={<RowEmoji>📝</RowEmoji>} label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
           <InsetNavRow emphasis="menu" leading={<RowEmoji>📥</RowEmoji>} label="Exports" sub="Download your campaign data" onPress={() => router.push('/(app)/admin/exports')} />
           <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Overlaps" sub="Doors two canvassers both knocked" onPress={() => router.push('/(app)/admin/overlaps')} />
+          <InsetNavRow emphasis="menu" leading={<RowEmoji>👯</RowEmoji>} label="Duplicate surveys" sub="Voters surveyed more than once" onPress={() => router.push('/(app)/admin/duplicate-surveys')} />
           <InsetNavRow emphasis="menu" leading={<RowEmoji>🔍</RowEmoji>} label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
           <InsetNavRow emphasis="menu" leading={<RowEmoji>🚪</RowEmoji>} label="Switch to canvass mode" onPress={onCanvassMode} />
         </InsetGroup>
