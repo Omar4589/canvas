@@ -12,7 +12,10 @@ export const QUEUE_NAMES = {
   // invisible to the code, uncovered by any test, and can be removed or lost in a host migration
   // without a single thing failing. See services/retention/.
   MAINTENANCE: 'maintenance-queue',
-  // Future: GEOCODE: 'geocode-queue', EXPORT: 'export-queue'
+  // Export Center: background CSV/ZIP builds (services/export/exportProcessor.js). Isolated
+  // so a heavy full-backup can never head-of-line-block an import or turf cut.
+  EXPORT: 'export-queue',
+  // Future: GEOCODE: 'geocode-queue'
 };
 
 const DEFAULT_JOB_OPTIONS = {

@@ -8,6 +8,7 @@ import adminMembershipsRouter from './admin/memberships.js';
 import adminAssignmentsRouter from './admin/assignments.js';
 import adminCampaignHouseholdsRouter from './admin/campaignHouseholds.js';
 import adminImportsRouter from './admin/imports.js';
+import adminExportsRouter from './admin/exports.js';
 import adminReportsRouter from './admin/reports.js';
 import adminSurveysRouter from './admin/surveys.js';
 import adminTagsRouter from './admin/tags.js';
@@ -105,6 +106,9 @@ router.use('/super-admin', superAdminPlatformRouter);
 router.use('/admin/billing', adminBillingRouter);
 router.use('/admin/memberships', adminMembershipsRouter);
 router.use('/admin/imports', adminImportsRouter);
+// The Export Center. Must sit AFTER requireEntitlement (its POST rides a narrow carve-out
+// there) and AFTER accessLog — mounting earlier would open an unlogged path into voter data.
+router.use('/admin/exports', adminExportsRouter);
 router.use('/admin/reports', adminReportsRouter);
 router.use('/admin/surveys', adminSurveysRouter);
 router.use('/admin/tags', adminTagsRouter);

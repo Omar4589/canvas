@@ -10,6 +10,9 @@ import mongoose from 'mongoose';
 // mobile sync-boundary grace, entitlementFor's pure rules, and the monthly
 // statement's first-knock → archive-month billing window.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-billing';
+// The harness has no Redis: bound the export-create enqueue so the carve-out assertions get
+// a fast 503 instead of hanging on ioredis's offline buffer.
+process.env.EXPORT_ENQUEUE_TIMEOUT_MS = process.env.EXPORT_ENQUEUE_TIMEOUT_MS || '400';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -124,6 +127,13 @@ test('suspended org: reads pass, writes 402 with subscription-inactive', { skip 
   });
   assert.strictEqual(write.status, 402);
   assert.strictEqual(write.json.code, 'subscription-inactive');
+  // Suspended orgs keep the export window too — ownership is status-agnostic.
+  const exp = await call('POST', '/admin/exports', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+    body: { type: 'canvass-activity', campaignId: String(ctx.camp._id), params: {} },
+  });
+  assert.notStrictEqual(exp.status, 402, 'export creation must pass the entitlement gate while suspended');
 });
 
 test('expired trial acts suspended; live trial writes fine', { skip }, async () => {
@@ -156,6 +166,24 @@ test('canceled org: READ-ONLY (reads/exports pass, writes 402) — the wind-down
   });
   assert.strictEqual(write.status, 402, 'but writes are blocked');
   assert.strictEqual(write.json?.code, 'subscription-inactive');
+
+  // The Export Center carve-out: creating an export job is the ONE write a read-only org may
+  // perform (middleware/entitlement.js) — without it the wind-down "available to export"
+  // promise is broken for the queued-export path. Not-402 is the assertion: with no Redis in
+  // the harness the enqueue itself may 503, but the entitlement gate must have let it through.
+  const exp = await call('POST', '/admin/exports', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+    body: { type: 'canvass-activity', campaignId: String(ctx.camp._id), params: {} },
+  });
+  assert.notStrictEqual(exp.status, 402, 'export creation must pass the entitlement gate while canceled');
+  assert.ok([201, 503].includes(exp.status), `export create is 201 (queued) or 503 (queue down), got ${exp.status}`);
+  // …and the carve-out is method+path EXACT: an export DELETE is still an ordinary write.
+  const del = await call('DELETE', '/admin/exports/652f000000000000000000cc', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+  });
+  assert.strictEqual(del.status, 402, 'the carve-out must not widen to other export writes');
 });
 
 test('internal org: never gated', { skip }, async () => {

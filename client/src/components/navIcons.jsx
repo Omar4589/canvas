@@ -95,6 +95,16 @@ export function IconUpload({ size = 22 }) {
   );
 }
 
+export function IconDownload({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+    </svg>
+  );
+}
+
 export function IconBallot({ size = 22 }) {
   return (
     <svg width={size} height={size} {...baseProps}>
@@ -321,6 +331,7 @@ export const NAV_ICONS = {
   '/walklists': IconList,
   '/campaigns': IconFlag,
   '/import': IconUpload,
+  '/exports': IconDownload,
   '/efforts': IconLayers,
   '/early-voting': IconBallot,
   '/timeline': IconClock,

@@ -13,7 +13,8 @@ Related: [TIMEZONES.md](TIMEZONES.md) (what "a day" *is* — every window here r
 campaign's timezone), [METRICS.md](METRICS.md) (what each filtered number *means*, and which metrics
 honor the range vs. stay all-time), [MAPS.md](MAPS.md) (the admin map, where the filter narrows the
 pins), [EFFORTS.md](EFFORTS.md) (reports can also be scoped to one effort via `effortId`, independent
-of the date range).
+of the date range), [EXPORTS.md](EXPORTS.md) (export date filters resolve in the campaign anchor
+timezone, frozen onto the job at creation).
 
 ---
 

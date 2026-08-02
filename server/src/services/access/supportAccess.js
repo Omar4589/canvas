@@ -84,6 +84,7 @@ const RESOURCE_LABELS = [
   [/\/turfs/, 'turf'],
   [/\/voted/, 'voted'],
   [/^\/admin\/imports/, 'imports'],
+  [/^\/admin\/exports/, 'exports'],
   [/^\/mobile/, 'mobile'],
 ];
 

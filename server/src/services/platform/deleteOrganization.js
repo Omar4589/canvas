@@ -10,6 +10,8 @@ import { DncPendingId } from '../../models/DncPendingId.js';
 import { DncUpload } from '../../models/DncUpload.js';
 import { Effort } from '../../models/Effort.js';
 import { EffortMember } from '../../models/EffortMember.js';
+import { ExportJob } from '../../models/ExportJob.js';
+import { deleteArtifactsForScope } from '../export/exportArtifactStore.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { Household } from '../../models/Household.js';
 import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js';
@@ -49,7 +51,7 @@ import { captureOrgBeforeDelete } from './platformStats.js';
 export const ORG_SCOPED = [
   Campaign, CampaignAssignment, CampaignManager, CanvassActivity, ClientReport,
   ClientReportMapPoint, CoordinatorChange, DncPendingId, DncUpload, Effort, EffortMember,
-  FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, Membership, Pass,
+  ExportJob, FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, Membership, Pass,
   ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyResponse,
   SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
   VotedUpload, VotedVoter, Voter, VoterNote,
@@ -105,6 +107,14 @@ export async function deleteOrganization(orgId) {
   for (const id of jobIds) await deleteRawImport(id);
   const counts = {};
   if (jobIds.length) counts.rawImportFiles = jobIds.length;
+
+  // Export Center artifacts — the same lesson: ExportJob rows are swept by ORG_SCOPED below,
+  // but the GridFS files they point at would survive without an explicit purge, and "we aim
+  // to permanently delete" (privacy.html, DPA §9) covers a downloaded-file copy at rest too.
+  // Keyed by bucket metadata, not the job list, so a stranded artifact is caught even if its
+  // ExportJob doc is already gone.
+  const exportFiles = await deleteArtifactsForScope({ organizationId: org._id });
+  if (exportFiles) counts.exportArtifactFiles = exportFiles;
 
   // DeletedUserRecord is NOT in ORG_SCOPED, and adding it there would not have worked: it stores
   // `organizationIds` as an ARRAY (a user can belong to several orgs), so `deleteMany({

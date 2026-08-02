@@ -80,14 +80,18 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   migration (run it in prod).
 - *"an organization with an active subscription is never deleted for inactivity"* —
   `DORMANCY_PROTECTED_STATUSES`.
-- The 60-day read-only export window — the `canceled` branch of `middleware/entitlement.js`.
+- The 60-day read-only export window — the `canceled` branch of `middleware/entitlement.js`,
+  **plus the export-creation carve-out** (`POST /admin/exports` is the one write a read-only org
+  may perform — see the v4 2026-08-01 Export Center entry below).
 - Backups *"up to 12 months"* — an **Atlas console setting, not code**; verify against the console.
 - Geocode cache *"expire automatically after 18 months of disuse"* — the TTL index, inert until built.
 - The 180-day name retention on deletion records — still cron-kept on the worker dyno.
 - *(2026-07-17)* Do-not-contact enforcement: *"a flagged voter is excluded from walk-list exports
   and new surveys, and a fully-flagged door drops from every campaign type."* True only while the
   `KNOCKABLE_DOOR_FILTER` spread covers every knockable-door site, the export's live-state join
-  stays in `walklists.js` export.csv, and the `DO_NOT_CONTACT` backstop stays mounted in
+  stays in `walklists.js` export.csv **and in `services/export/exportScope.js` (the Export
+  Center's single DNC injection point — see the v4 2026-08-01 entry below)**, and the
+  `DO_NOT_CONTACT` backstop stays mounted in
   `routes/mobile/canvass.js`. **The policy now names it** (privacy.html "Canvassing activity" —
   contact preferences: recorded with the reason, used to "exclude that person from the
   organization's future canvassing lists and exports") — that published sentence anchors here.
@@ -315,6 +319,62 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   strictly wider than `leadVisibleUserIds`. Sourcing a roster from it would both show every org
   member as if rostered and, for a lead, skip the visibility filter that exists on the list route.
   **Assessment: NO published-policy change, and no claim in this document moves.**
+
+- *(v4 2026-08-01)* **New surface: the Export Center** (`ExportJob` + the `exportArtifacts`
+  GridFS bucket + `/api/admin/exports` + a worker queue). Customers can now queue background
+  CSV/ZIP exports — canvassing activity, doors-by-round, survey results (wide + long), a
+  RECONSTRUCTION of their voter file (optionally under the vendor's own headers from
+  `ImportJob.fieldMapping`), saved-search subsets, voter notes (admin-only; previously
+  exportable by NO route, §B8), and an admin-only full-backup ZIP — then download the
+  artifact from the campaign's Exports page (web) or the mobile admin Exports screen until
+  it expires. A new collection holding a *file of customer data at rest* is a named trigger,
+  hence this entry. Docs: [EXPORTS.md](EXPORTS.md).
+  **What it holds.** `ExportJob`: org/campaign ids, the export type + frozen filter params,
+  requesting user, status/progress, row/byte counts, `excludedDncCount`/`orphanedRows`
+  (honesty counters), capped subject-voter ids for audit tagging, and a pointer to one CSV or
+  ZIP artifact in the `exportArtifacts` GridFS bucket — **in the SAME MongoDB Atlas
+  deployment. No new subprocessor; DPA §6 unchanged, no customer notice event.** The
+  artifact contains voter/canvasser data the same tenant already reads in-app.
+  **Who can read it.** Org admins; team leads only for campaigns they manage
+  (`canManageCampaign`) — the same audience as the five pre-existing CSV endpoints (§B8).
+  Org-wide bundles, voter-notes, and the full backup are admin-only. Staff access rides the
+  fail-closed central access log: the download route classifies as `exports` (never
+  audit-exempt), and because a streamed response defeats accessLog's row counter, the
+  ExportJob doc itself is the durable record of rows/bytes and the download tags
+  `addAuditSubjects` from the post-DNC id set the worker persisted. `isInternal` orgs write
+  no AccessLog rows — by design, unchanged here.
+  **Retention/deletion.** Artifacts expire after `EXPORT_TTL_DAYS` (7) via the
+  `sweep-expired-exports` maintenance job (in `MAINTENANCE_JOBS`, deliberately NOT the
+  pinned retention-only `REPEATABLE_JOBS`); the sweep also clears failed-job leftovers and
+  orphan files. `ExportJob` is in `ORG_SCOPED` and `CAMPAIGN_SCOPED`, and both delete
+  cascades purge the bucket by metadata (`deleteArtifactsForScope`) — **an export artifact
+  must not outlive the org**, or the "we aim to permanently delete" sentences (privacy.html
+  "After termination", DPA §9) go false for a file at rest. Pinned by
+  `test/orgDelete.int.test.js` + `test/exports.int.test.js`.
+  **The entitlement carve-out.** `POST /admin/exports` is the ONE write a read-only
+  (suspended / expired-trial / canceled) org may perform — method-and-path exact, in
+  `middleware/entitlement.js` — so the published wind-down window ("may export its data
+  during that period", privacy.html; terms.html §13; DPA §9) is real for the queued-export
+  path, not just legacy GETs. The watchlist's 60-day line above anchors here too. Narrowness
+  guard-tested (`test/billing.int.test.js`: control write and export-DELETE still 402).
+  **Assessment: NO published-policy sentence changes; two get TRUER.** (a) DPA §7's "including
+  through the Service's export … capabilities" was an over-statement against §B8's "no
+  full-account export" — the Export Center closes it. (b) The wind-down export sentences were
+  kept true only by read-only GETs; the carve-out makes them fully true. (c) privacy.html's
+  "exclude that person from the organization's future canvassing lists **and exports**" stays
+  true the STRICT way (owner decision 2026-08-01): every builder receives the flagged-voter
+  set from ONE injection point (`services/export/exportScope.js`) — voter-unit rows are
+  dropped, door-unit rows keep the knock with every voter-identity column blanked and no
+  marker — and a registry-driven test iterates every export type asserting the flagged
+  fixture voter appears in NO artifact (`test/exportBuilders.int.test.js`). Documented
+  consequence: export totals can undercount dashboards; `excludedDncCount` on every job makes
+  the gap explainable.
+  **Claims to keep true:** DNC exclusion in every builder, forever (the registry test is the
+  tripwire); the carve-out stays scoped to export creation alone; artifacts TTL'd + purged on
+  org/campaign delete; the voter-file export remains a RECONSTRUCTION (raw uploads stay
+  deleted — §B8's "cannot be re-downloaded" remains TRUE, no retention change);
+  `Campaign.pricePerCampaignCents` (select:false) never enters a builder projection
+  (grep-guarded in the same test).
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -838,6 +898,14 @@ if (!WRITE_METHODS.has(req.method)) return next();            // entitlement.js:
 - **`past_due`** — full read AND write, banner only (`services/billing/entitlement.js:32-35`).
 
 ## B8. What data-portability / export mechanisms exist?
+
+*[v4 2026-08-01: **superseded** — the Export Center adds a queued, artifact-based export
+surface (background CSV/ZIP builds, 7-day-TTL GridFS artifacts, an admin-only full-backup
+bundle; see the v4 watchlist entry and [EXPORTS.md](EXPORTS.md)). The five endpoints below
+remain and are unchanged. "The original uploaded voter file cannot be re-downloaded" remains
+TRUE — the Export Center's voter-file export is a reconstruction from current rows, never the
+raw upload. "No full-account export" is history: the full-backup ZIP is exactly that,
+admin-only, DNC-excluded, and audit-tagged.]*
 
 **VERIFIED.** There is **no full-account export**. A repo-wide grep for `exportOrg|fullExport|dataExport|exportAll` returns nothing.
 

@@ -24,6 +24,7 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { PersonEditProposal } = await import('../src/models/PersonEditProposal.js');
 const { ORG_SCOPED } = await import('../src/services/platform/deleteOrganization.js');
+const { openArtifactUploadStream } = await import('../src/services/export/exportArtifactStore.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -206,15 +207,37 @@ test('cascade delete: org-scoped rows die; users and the sibling org live; the o
 // surveys, books, imports, reports, and share links" — prove the cascade is
 // EXHAUSTIVE, not just those: seed a stub row in every org-scoped collection
 // (raw inserts bypass validation), delete the org, then sweep EVERY collection
-// in the database for anything still referencing it. This also catches a future
-// model that gains organizationId without being added to ORG_SCOPED — the stub
-// would survive and this test would fail.
+// in the database for anything still referencing it. (NOTE: a future model that
+// gains organizationId WITHOUT being added to ORG_SCOPED is NOT caught here —
+// the stub loop only iterates the list, so an omitted model gets no stub and
+// the sweep finds nothing. The list itself is the thing reviews must keep true.)
 test('exhaustive sweep: every org-scoped collection empties; no reference survives anywhere', { skip }, async () => {
   const org2 = await Organization.create({ name: 'Sweep Org', slug: 'sweep-org', isActive: true });
   for (const M of ORG_SCOPED) {
     await M.collection.insertOne({ organizationId: org2._id, sweepStub: true });
   }
   await PersonEditProposal.collection.insertOne({ orgId: org2._id, sweepStub: true });
+
+  // GridFS is not a model, so the model sweep below is structurally blind to it: seed a real
+  // export artifact for this org and assert the bucket empties too (the deleteArtifactsForScope
+  // purge in deleteOrganization — an export artifact must not outlive the org, or the
+  // "we aim to permanently delete" sentences go false for a file at rest).
+  const fakeExportJobId = new mongoose.Types.ObjectId();
+  await new Promise((resolve, reject) => {
+    const up = openArtifactUploadStream(fakeExportJobId, {
+      filename: 'sweep.csv', contentType: 'text/csv; charset=utf-8',
+      organizationId: org2._id, campaignId: null,
+    });
+    up.on('error', reject);
+    up.on('finish', resolve);
+    up.end(Buffer.from('a,b\r\n1,2\r\n'));
+  });
+  assert.strictEqual(
+    await mongoose.connection.db.collection('exportArtifacts.files')
+      .countDocuments({ 'metadata.organizationId': String(org2._id) }),
+    1,
+    'artifact seeded'
+  );
 
   const r = await call('DELETE', `/super-admin/organizations/${org2._id}`, {
     token: ctx.superTok,
@@ -231,6 +254,13 @@ test('exhaustive sweep: every org-scoped collection empties; no reference surviv
       .countDocuments({ $or: [{ organizationId: org2._id }, { orgId: org2._id }] });
     assert.strictEqual(leftovers, 0, `collection '${c.name}' still references the deleted org`);
   }
+  // GridFS stores the org id under metadata (a string), invisible to the top-level sweep
+  // above — assert the export bucket explicitly.
+  assert.strictEqual(
+    await db.collection('exportArtifacts.files').countDocuments({ 'metadata.organizationId': String(org2._id) }),
+    0,
+    'export artifacts must not outlive the org'
+  );
   assert.strictEqual(await Organization.countDocuments({ _id: org2._id }), 0);
 });
 

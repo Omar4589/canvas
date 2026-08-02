@@ -269,9 +269,15 @@ password gates — super-admin surfaces are exempt. Org resolution mirrors `orgC
 indexed `Subscription.findOne` per request. Rules, in order:
 
 1. Super admins bypass entirely.
-2. `canceled` → **402** on everything (reads included).
-3. Non-mutating methods (GET/HEAD/OPTIONS) always pass — read-only means read-only.
-4. Writes pass when `canWrite`.
+2. Non-mutating methods (GET/HEAD/OPTIONS) always pass — read-only means read-only, and
+   `canceled` is read-only like `suspended` (the 60-day wind-down is a real export window;
+   it has NOT blocked reads since the Change-1 rewrite).
+3. Writes pass when `canWrite`.
+4. **The export carve-out**: `POST /admin/exports` (creating an Export Center job — see
+   [EXPORTS.md](EXPORTS.md)) passes for every read-only status. It is the ONE write a
+   suspended/expired-trial/canceled org may perform, method-and-path exact, because the
+   published wind-down promise ("may export its Customer Data during that period") is
+   meaningless if queueing an export 402s. Guard-tested in `test/billing.int.test.js`.
 5. **Sync-boundary grace**: a `/mobile` write whose `body.timestamp` predates
    `statusChangedAt` passes — a canvasser's offline queue recorded while entitled always
    flushes. Mobile-only, so an admin write can't smuggle an old timestamp.
@@ -449,7 +455,8 @@ never invoiced.)
 
 Web: [BillingBanner.jsx](../client/src/components/BillingBanner.jsx) (global, in
 [Layout.jsx](../client/src/components/Layout.jsx) beside `AddedToOrgBanner`; trial banner only in
-the last 3 days; a 402 on reads renders the canceled notice), org-admin
+the last 3 days; the canceled banner renders from the entitlement payload — reads no longer 402
+while canceled), org-admin
 [BillingPage.jsx](../client/src/pages/BillingPage.jsx) at `/billing` (ORG_NAV, not lead-visible),
 super-admin [OrgBillingPanel.jsx](../client/src/components/OrgBillingPanel.jsx) opened from
 [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) (Billing column + needs-attention

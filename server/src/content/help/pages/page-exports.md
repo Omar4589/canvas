@@ -1,0 +1,42 @@
+---
+slug: page-exports
+title: The Exports page
+audience: lead
+kind: page
+order: 114
+sourceDoc: EXPORTS.md
+summary: What each control on the campaign Exports page does — the type picker, filters, and the export history.
+tags: exports, page, download, csv
+---
+
+Open a campaign and pick **Exports** in the sidebar.
+
+## New export
+
+- **Type cards** — pick what to export. Each card explains what one row of the file is. Cards
+  marked admin-only (voter notes, full backup) don't appear for team leads.
+- **Filters** — only the filters that fit the chosen type appear: date range (in the campaign's
+  timezone), walk list, round, canvasser, a saved search (for **Filtered voters**), or the
+  **Columns** selector (for **Voter file** — pick an upload to get its vendor's column names).
+- **Queue export** — creates the job. Building happens in the background; the history below
+  polls until it's done. If the background worker is offline you'll see a notice — the export
+  starts when it returns.
+
+The yellow panel under **Voter file** is worth reading once: the export is a rebuild from
+current data, not the original uploaded file.
+
+## Export history
+
+Each row shows the type, the scope it was queued with, its status (**Queued → Building →
+Ready**), who requested it, row count, size, and when it expires (files keep for 7 days).
+
+- **Download** — saves the file. Ready rows only.
+- **Retry** — re-queues a failed export with the same scope.
+- **Delete** — removes the export and its file immediately (a copy you already downloaded is
+  unaffected). Building rows can't be deleted — let them finish first.
+
+"N withheld (do not contact)" on a row means that many entries were excluded because the person
+asked not to be contacted — that's why an export can show fewer rows than a dashboard.
+
+On the phone, Admin → **More → Exports** shows the same history with one-tap queueing of the
+simple types; downloads open the share sheet.

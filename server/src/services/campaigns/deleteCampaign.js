@@ -19,6 +19,8 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { deleteRawImport } from '../import/rawImportStore.js';
+import { ExportJob } from '../../models/ExportJob.js';
+import { deleteArtifactsForScope } from '../export/exportArtifactStore.js';
 import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js';
 import { Campaign } from '../../models/Campaign.js';
 import { DncPendingId } from '../../models/DncPendingId.js';
@@ -117,12 +119,15 @@ export async function deleteCampaignCascade(campaign) {
   const voters = await Voter.deleteMany({ campaignId });
   counts.voters = voters.deletedCount || 0;
 
-  // Every campaignId-scoped collection (audited via grep over models/).
+  // Every campaignId-scoped collection (audited via grep over models/). ExportJob rows with
+  // campaignId:null (org-wide backups) survive a campaign delete on purpose — a point-in-time
+  // bundle outliving one deleted campaign by ≤ the export TTL is the same exposure as a copy
+  // someone already downloaded, and the sweep expires it.
   const CAMPAIGN_SCOPED = [
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
     SavedSearch, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
     CampaignManager, ClientReport, ClientReportMapPoint, ReportShareLink,
-    CanvassActivity, SurveyResponse, ImportJob, HouseholdLocationChange,
+    CanvassActivity, SurveyResponse, ImportJob, HouseholdLocationChange, ExportJob,
   ];
 
   // The raw uploaded spreadsheets, FIRST — while we can still find the ImportJob rows that name
@@ -134,6 +139,11 @@ export async function deleteCampaignCascade(campaign) {
   const jobIds = await ImportJob.find({ campaignId }).distinct('_id');
   for (const id of jobIds) await deleteRawImport(id);
   counts.rawImportFiles = jobIds.length;
+
+  // Export Center artifacts scoped to this campaign — same original-vs-copy lesson as the
+  // raw imports above. Keyed by bucket metadata, so a stranded file is caught even if its
+  // ExportJob doc is already gone.
+  counts.exportArtifactFiles = await deleteArtifactsForScope({ organizationId: orgId, campaignId });
 
   for (const Model of CAMPAIGN_SCOPED) {
     const res = await Model.deleteMany({ campaignId });

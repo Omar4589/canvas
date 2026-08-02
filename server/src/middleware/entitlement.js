@@ -55,6 +55,15 @@ export async function requireEntitlement(req, res, next) {
     if (!WRITE_METHODS.has(req.method)) return next();
     if (ent.canWrite) return next();
 
+    // The wind-down (and any read-only state) is a REAL export window — privacy.html
+    // ("may export its data during that period"), terms.html §13, DPA §9, and the 402 copy
+    // below all promise it. Creating an export job is therefore the ONE write a read-only
+    // org may perform: method-and-path exact, nothing else rides through, and the
+    // role/campaign gates on the exports router still apply (this widens entitlement only,
+    // never authorization). Guard-tested in test/exports.int.test.js + billing.int.test.js.
+    const fullPath = `${req.baseUrl}${req.path}`.replace(/\/+$/, '');
+    if (req.method === 'POST' && /\/admin\/exports$/.test(fullPath)) return next();
+
     const isMobile = `${req.baseUrl}${req.path}`.includes('/mobile');
     const stampedAt = req.body?.timestamp ? Date.parse(req.body.timestamp) : NaN;
     if (

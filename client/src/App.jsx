@@ -22,6 +22,7 @@ const SurveyExplorerPage = lazy(() => import('./pages/SurveyExplorerPage.jsx'));
 const NotesPage = lazy(() => import('./pages/NotesPage.jsx'));
 const OverlapsPage = lazy(() => import('./pages/OverlapsPage.jsx'));
 const ClientReportsPage = lazy(() => import('./pages/ClientReportsPage.jsx'));
+const ExportsPage = lazy(() => import('./pages/ExportsPage.jsx'));
 const ClientReportBuilderPage = lazy(() => import('./pages/ClientReportBuilderPage.jsx'));
 const PublicReportLayout = lazy(() => import('./components/PublicReportLayout.jsx'));
 const PublicReportListPage = lazy(() => import('./pages/PublicReportListPage.jsx'));
@@ -165,6 +166,7 @@ export default function App() {
           <Route path="/campaigns/:campaignId/early-voting" element={<EarlyVotingPage />} />
           <Route path="/campaigns/:campaignId/reports" element={<ClientReportsPage />} />
           <Route path="/campaigns/:campaignId/reports/:id" element={<ClientReportBuilderPage />} />
+          <Route path="/campaigns/:campaignId/exports" element={<ExportsPage />} />
           {/* Back-compat: old /dashboard/:id + flat routes redirect to the launchpad */}
           <Route path="/dashboard/:campaignId" element={<DashboardRedirect />} />
           <Route path="/efforts" element={<Navigate to="/campaigns" replace />} />

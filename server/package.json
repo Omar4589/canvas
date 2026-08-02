@@ -61,6 +61,7 @@
     "@bull-board/api": "^7.1.5",
     "@bull-board/express": "^7.1.5",
     "@turf/turf": "^7.3.5",
+    "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.77.6",
     "compression": "^1.8.1",

@@ -5,6 +5,7 @@ import { purgeDeletedIdentities, JOB_NAME } from './purgeDeletedIdentities.js';
 import { runRetentionTriggers, TRIGGER_JOB } from './triggers.js';
 import { recomputeLive, recomputeDaily, STATS_JOB } from '../platform/platformStats.js';
 import { reconcileAllCampaignStats, CAMPAIGN_STATS_JOB } from '../reports/campaignCounters.js';
+import { sweepExpiredExports, EXPORT_SWEEP_JOB } from '../export/sweepExpiredExports.js';
 import { PLATFORM_METRICS } from '../../models/PlatformStats.js';
 
 // Registers the repeatable maintenance jobs on the worker dyno.
@@ -37,6 +38,11 @@ export const PLATFORM_STATS_CRON = process.env.PLATFORM_STATS_CRON || '47 3 * * 
 // recompute (03:47) and the retention triggers (04:41).
 export const CAMPAIGN_STATS_CRON = process.env.CAMPAIGN_STATS_CRON || '7 4 * * *';
 
+// Nightly Export Center artifact sweep: expired downloads deleted, failed-job leftovers and
+// orphan GridFS files cleaned. 05:23 keeps it clear of the purge (03:17), the stats
+// recomputes (03:47 / 04:07), and the triggers (04:41).
+export const EXPORT_SWEEP_CRON = process.env.EXPORT_SWEEP_CRON || '23 5 * * *';
+
 // The `label` is not decoration: the health surface reports on every job in this list, and when one
 // goes quiet the operator needs to be told WHICH promise stopped being kept.
 export const REPEATABLE_JOBS = [
@@ -61,6 +67,9 @@ export const MAINTENANCE_JOBS = [
     cron: CAMPAIGN_STATS_CRON,
     label: 'The nightly campaign-counter reconcile',
   },
+  // Deliberately here and NOT in REPEATABLE_JOBS: an export sweep going quiet must never
+  // read as "Retention: NOT ENFORCED" on the health banner.
+  { name: EXPORT_SWEEP_JOB, cron: EXPORT_SWEEP_CRON, label: 'The nightly export-artifact sweep' },
 ];
 
 /** Producer side: declare the repeatable schedule. Idempotent — BullMQ dedupes on (name, cron). */
@@ -129,6 +138,13 @@ export async function processMaintenanceJob(job) {
     } else {
       console.log(`[maintenance] ${CAMPAIGN_STATS_JOB}: ${res.scanned} campaign(s) checked, no drift`);
     }
+    return res;
+  }
+  if (job.name === EXPORT_SWEEP_JOB) {
+    const res = await sweepExpiredExports();
+    console.log(
+      `[maintenance] ${EXPORT_SWEEP_JOB}: expired ${res.expired}, failed-job leftovers ${res.failedCleaned}, orphan file(s) ${res.orphans}`
+    );
     return res;
   }
   throw new Error(`Unknown maintenance job: ${job.name}`);

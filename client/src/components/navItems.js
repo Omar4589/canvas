@@ -49,4 +49,5 @@ export const CAMPAIGN_NAV = [
   { slug: 'notes', label: 'Notes', icon: '/notes' },
   { slug: 'early-voting', label: 'Early Voting', icon: '/early-voting' },
   { slug: 'reports', label: 'Client Reports', icon: '/admin/client-reports' },
+  { slug: 'exports', label: 'Exports', icon: '/exports' },
 ];

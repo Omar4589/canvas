@@ -14,7 +14,8 @@ between "who's in my universe" and "which crew works which doors."
 Related: [EFFORTS.md](EFFORTS.md) (walk lists own disjoint doors; saved searches seed/claim them),
 [IMPORTS.md](IMPORTS.md) (how new voters/addresses reach the pool and Intake),
 [EARLY_VOTING.md](EARLY_VOTING.md) (the same Voter-ID CSV matcher marks voted voters),
-[PASSES_AND_TURF.md](PASSES_AND_TURF.md) (a saved search's doors get cut into books inside a round).
+[PASSES_AND_TURF.md](PASSES_AND_TURF.md) (a saved search's doors get cut into books inside a round),
+[EXPORTS.md](EXPORTS.md) (a saved search also scopes the Export Center's filtered-voters export).
 
 ---
 

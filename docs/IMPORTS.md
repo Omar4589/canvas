@@ -12,7 +12,9 @@ voters are linked to canonical People across orgs, and how new doors reach the f
 
 Related: [PERSONS.md](PERSONS.md) (the canonical cross-org People the import links to),
 [EFFORTS.md](EFFORTS.md) (Intake → assign to an effort), [WALKLISTS.md](WALKLISTS.md) (turn a
-Voter-ID CSV into a walk list without re-importing the universe), [VOTERS.md](VOTERS.md).
+Voter-ID CSV into a walk list without re-importing the universe), [VOTERS.md](VOTERS.md),
+[EXPORTS.md](EXPORTS.md) (the Export Center can *reconstruct* a CSV under the vendor's columns —
+it is not the original file, which is deleted after import).
 
 ---
 

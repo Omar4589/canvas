@@ -5,11 +5,16 @@ import { createRedis, assertNoeviction } from './queues/connection.js';
 import { QUEUE_NAMES } from './queues/index.js';
 import { processImportJob } from './services/import/importProcessor.js';
 import { processTurfJob } from './services/turf/turfProcessor.js';
+import { processExportJob } from './services/export/exportProcessor.js';
 import { registerMaintenanceJobs, processMaintenanceJob } from './services/retention/scheduler.js';
 import { GeocodeCache } from './models/GeocodeCache.js';
+import { ExportJob } from './models/ExportJob.js';
 
 const IMPORT_CONCURRENCY = Number(process.env.IMPORT_JOB_CONCURRENCY || 2);
 const TURF_CONCURRENCY = Number(process.env.TURF_JOB_CONCURRENCY || 1);
+// Exports are full-collection scans sharing this dyno with imports/turf — default 1 so a
+// heavy backup can never head-of-line-block real canvassing work.
+const EXPORT_CONCURRENCY = Number(process.env.EXPORT_JOB_CONCURRENCY || 1);
 
 // A long-lived worker must survive transient Redis/Mongo faults instead of
 // exiting. Without these, a stray unhandled rejection — or a Worker 'error'
@@ -35,6 +40,9 @@ async function main() {
   // collection — won't auto-build. The worker reads/writes that cache during imports,
   // so ensure its indexes once at boot (no-op if already present).
   await GeocodeCache.syncIndexes().catch((e) => console.error('[worker] GeocodeCache.syncIndexes failed', e?.message || e));
+  // Same reason for ExportJob (another new collection the worker writes; the deploy-time
+  // buildIndexes migration remains the primary path — this is the no-op belt-and-braces).
+  await ExportJob.syncIndexes().catch((e) => console.error('[worker] ExportJob.syncIndexes failed', e?.message || e));
 
   const probe = createRedis();
   await assertNoeviction(probe);
@@ -57,6 +65,10 @@ async function main() {
     new Worker(QUEUE_NAMES.MAINTENANCE, processMaintenanceJob, {
       connection: createRedis(),
       concurrency: 1, // housekeeping; never compete with real work
+    }),
+    new Worker(QUEUE_NAMES.EXPORT, processExportJob, {
+      connection: createRedis(),
+      concurrency: EXPORT_CONCURRENCY,
     }),
   ];
 

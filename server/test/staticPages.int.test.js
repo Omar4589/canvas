@@ -129,6 +129,7 @@ test('unknown top-level paths return a real 404 — never a redirect to /', { sk
 test('every known client route still gets the SPA shell with a 200', { skip }, async () => {
   for (const p of [
     '/', '/login', '/campaigns', '/campaigns/abc123/efforts/def456/passes',
+    '/campaigns/abc123/exports', // the Export Center page
     '/r/tok3n', '/r/tok3n/reports/rep1', // emailed client-report links — must never 404
     '/dashboard/abc123', // back-compat redirect route
     '/help/voter-imports', '/super-admin/users', '/admin/duplicate-surveys', '/queues',

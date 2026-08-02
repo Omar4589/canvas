@@ -189,6 +189,10 @@ test('STRUCTURAL: every known voter-data URL shape is loggable; only metadata is
     [`/admin/campaigns/${C}/households`, 'map'],
     [`/admin/campaigns/${C}/voted`, 'voted'],
     ['/admin/imports', 'imports'],
+    // The Export Center: the artifact download streams whole voter files; list/poll are
+    // logged too (fail-closed default), all under one label.
+    ['/admin/exports', 'exports'],
+    [`/admin/exports/${W}/download`, 'exports'],
     ['/admin/voters', 'voters'],
     ['/admin/households', 'map'],
     ['/admin/reports', 'reports'],

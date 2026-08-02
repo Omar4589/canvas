@@ -21,4 +21,9 @@ Three things to know:
 - **Pricing doesn't change.** Doorline bills per campaign per month; this export is the supporting detail behind the work, not a price calculator.
 - **Restricted homes can be included.** If this campaign counts restricted homes as billable doors, the export gains **Restricted doors** and **Billable doors** columns, and the TOTAL row carries the billable-door figure. If it doesn't, the export looks exactly as it always has. See [Can I bill for restricted doors?](bill-restricted-doors).
 
+**Want a file that sticks around, or the per-door detail behind these totals?** The campaign's
+**Exports** page can queue the same per-round numbers inside a full backup, plus a
+**Doors by round** file that reconciles to this table door by door — and exports keep working
+during the read-only wind-down after a subscription ends. See [Exporting your data](exports).
+
 See [Understanding the numbers](metrics) and [Billing and your account](billing).

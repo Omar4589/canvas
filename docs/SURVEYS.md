@@ -19,7 +19,9 @@ Related: [METRICS.md](METRICS.md) ("Surveys" and "Surveyed voters" definitions),
 [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (one survey per voter **per pass**),
 [EFFORTS.md](EFFORTS.md) (a **walk list can override** the campaign survey — the door's walk-list
 survey wins, falling back to the campaign default),
-[VOTERS.md](VOTERS.md) (editing a single response on a voter's profile).
+[VOTERS.md](VOTERS.md) (editing a single response on a voter's profile),
+[EXPORTS.md](EXPORTS.md) (full survey results at scale — wide + long CSVs; the in-page
+voters-by-answer CSV stays as the interactive drill).
 
 ---
 
