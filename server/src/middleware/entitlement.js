@@ -57,12 +57,14 @@ export async function requireEntitlement(req, res, next) {
 
     // The wind-down (and any read-only state) is a REAL export window — privacy.html
     // ("may export its data during that period"), terms.html §13, DPA §9, and the 402 copy
-    // below all promise it. Creating an export job is therefore the ONE write a read-only
-    // org may perform: method-and-path exact, nothing else rides through, and the
-    // role/campaign gates on the exports router still apply (this widens entitlement only,
-    // never authorization). Guard-tested in test/exports.int.test.js + billing.int.test.js.
+    // below all promise it. Creating an export job — and its /estimate preview, a read
+    // wearing POST (counts only, no artifact, no data write) — are therefore the ONLY
+    // writes a read-only org may perform: method-and-path exact ×2, nothing else rides
+    // through, and the role/campaign gates on the exports router still apply (this widens
+    // entitlement only, never authorization). Guard-tested in test/exports.int.test.js +
+    // billing.int.test.js; the scope amendment is stamped in docs/PRIVACY_VERIFICATION.md.
     const fullPath = `${req.baseUrl}${req.path}`.replace(/\/+$/, '');
-    if (req.method === 'POST' && /\/admin\/exports$/.test(fullPath)) return next();
+    if (req.method === 'POST' && /\/admin\/exports(\/estimate)?$/.test(fullPath)) return next();
 
     const isMobile = `${req.baseUrl}${req.path}`.includes('/mobile');
     const stampedAt = req.body?.timestamp ? Date.parse(req.body.timestamp) : NaN;

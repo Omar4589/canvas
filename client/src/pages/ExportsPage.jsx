@@ -25,6 +25,9 @@ function buildQuery(params) {
   return q ? `?${q}` : '';
 }
 
+// FALLBACK copy + the per-filter UI wiring. The server registry is the canonical copy
+// (GET /admin/exports/types — services/export/exportTypes.js): its label/desc overlay these
+// at render time, so edits to what a type IS happen server-side once, never here.
 const TYPES = [
   {
     id: 'canvass-activity',
@@ -154,7 +157,30 @@ export default function ExportsPage() {
   const [rowBusy, setRowBusy] = useState(null); // jobId of an in-flight download/delete
   const [rowError, setRowError] = useState('');
 
-  const visibleTypes = TYPES.filter((t) => !t.adminOnly || !isLead);
+  // Server registry copy overlaid on the local fallback (label/desc win by id). Once the
+  // role-filtered server list is present it also decides visibility, so a drifted local
+  // adminOnly flag can never show a lead a type the server would 403.
+  const typesQ = useQuery({
+    queryKey: ['admin', 'export-types'],
+    queryFn: () => api('/admin/exports/types'),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const serverById = typesQ.data?.types ? new Map(typesQ.data.types.map((t) => [t.id, t])) : null;
+  const visibleTypes = TYPES.filter((t) => (serverById ? serverById.has(t.id) : !t.adminOnly || !isLead)).map(
+    (t) => {
+      const s = serverById?.get(t.id);
+      if (!s) return t;
+      // filters overlay too — the local tokens are wiring + fallback, the registry decides
+      // which groups a type takes, so a server-side filter change reaches both clients.
+      return {
+        ...t,
+        label: s.label || t.label,
+        desc: s.desc || t.desc,
+        filters: Array.isArray(s.filters) && s.filters.length ? s.filters : t.filters,
+      };
+    }
+  );
   const type = visibleTypes.find((t) => t.id === typeId) || visibleTypes[0];
   const wants = (f) => type.filters.includes(f);
 

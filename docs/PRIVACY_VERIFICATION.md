@@ -376,6 +376,35 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   `Campaign.pricePerCampaignCents` (select:false) never enters a builder projection
   (grep-guarded in the same test).
 
+  *(v4 amendment 2026-08-02)* **Export preview + match-key columns + registry-served copy.**
+  Three changes to the surface above, none of which moves a published-policy sentence:
+  **(i) `POST /admin/exports/estimate`** — a pre-queue row-count preview (same auth and
+  lead/campaign scoping as the create via a shared scope resolver, same validated params).
+  It returns COUNTS ONLY (`rows`, `dncWithheld`, `approx`, a per-survey-file breakdown) — no
+  artifact, no record-level data, no `addAuditSubjects`; it classifies as `exports` in the
+  access log like its siblings (`test/accessLogCoverage.int.test.js`). **This amends the
+  claim above that "the carve-out stays scoped to export creation alone": the entitlement
+  carve-out is now export creation PLUS this read-only estimate** (a read wearing POST —
+  method-and-path exact ×2 in `middleware/entitlement.js`; a wind-down org must be able to
+  preview what it is about to export). Still no other write rides through — export DELETE
+  remains 402; narrowness re-pinned in `test/billing.int.test.js`.
+  **(ii) Match-key columns.** The `Voter ID` header in the activity/survey/notes CSVs is
+  renamed `State voter ID`, and a `UID` column (the vendor id from the customer's own import,
+  `Voter.uid`) is added beside it in those four files. Same-audience data: `uid` already
+  leaves via the voter-file/filtered exports' canonical columns to the identical audience, so
+  the "artifact contains voter/canvasser data the same tenant already reads in-app" sentence
+  above stays true. Every new cell derives from the DNC-guarded voter object — a
+  do-not-contact person's UID is blanked/dropped exactly like their name — and the
+  registry-driven leak sweep now carries flagged-fixture `uid` values, so the new column is
+  under the same "appears in NO artifact" guarantee (`test/exportBuilders.int.test.js`).
+  Also fixed: a dangling `voterId` in the activity export now counts into `orphanedRows`
+  instead of blanking silently (honesty counter, no data change).
+  **(iii) `GET /admin/exports/types`** serves the registry's user-facing labels/descriptions,
+  role-filtered — copy only, no customer data. The mobile Exports screen gains per-type
+  filters and the estimate before queueing; nothing new is exposed there beyond (i)–(ii).
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence changes; no new
+  subprocessor; DPA §6 untouched.**
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact
@@ -906,6 +935,13 @@ remain and are unchanged. "The original uploaded voter file cannot be re-downloa
 TRUE — the Export Center's voter-file export is a reconstruction from current rows, never the
 raw upload. "No full-account export" is history: the full-backup ZIP is exactly that,
 admin-only, DNC-excluded, and audit-tagged.]*
+
+*[v4 amendment 2026-08-02: the Export Center's voter-bearing CSVs (activity, both survey
+files, notes) now carry their voter-identity columns as **`State voter ID` + `UID`** (the
+customer's own import ids — the walk-list CSV below already exposed a Voter-ID-class column to
+the same audience), and a read-only `POST /admin/exports/estimate` previews row counts before
+queueing. Column contracts: [EXPORTS.md](EXPORTS.md) appendix; details in the v4 amendment
+stamp above.]*
 
 **VERIFIED.** There is **no full-account export**. A repo-wide grep for `exportOrg|fullExport|dataExport|exportAll` returns nothing.
 

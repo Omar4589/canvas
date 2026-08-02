@@ -8,17 +8,20 @@ import { Campaign } from '../../models/Campaign.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { EXPORT_TYPES } from '../../services/export/exportTypes.js';
 import { ExportUserError } from '../../services/export/exportErrors.js';
+import { loadDncVoterIdSet } from '../../services/export/exportScope.js';
 import { openArtifactDownloadStream, deleteArtifact } from '../../services/export/exportArtifactStore.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 
 // The Export Center API. Jobs are built in the background (services/export/exportProcessor
 // on the worker dyno) and downloaded from here until they expire.
 //
-// Entitlement: POST / is the ONE write a read-only (suspended / expired-trial / canceled)
-// org may perform — the carve-out lives in middleware/entitlement.js, because the published
-// wind-down promise ("your data is … available to export") is meaningless if creating an
-// export 402s. Every GET below already passes for read-only orgs (reads always pass).
-// DELETE is deliberately NOT carved out: leftovers expire via the TTL sweep.
+// Entitlement: POST / and POST /estimate are the ONLY writes a read-only (suspended /
+// expired-trial / canceled) org may perform — the carve-out lives in
+// middleware/entitlement.js, because the published wind-down promise ("your data is …
+// available to export") is meaningless if creating an export 402s, and /estimate is the
+// read-only preview of that same create (counts only, no artifact). Every GET below
+// already passes for read-only orgs (reads always pass). DELETE is deliberately NOT
+// carved out: leftovers expire via the TTL sweep.
 //
 // This router must stay mounted AFTER requireEntitlement and accessLog in routes/index.js —
 // mounting it earlier would create an unlogged path into voter data.
@@ -58,43 +61,64 @@ async function canSeeJob(req, job) {
   return job.campaignId ? canManageCampaign(req, job.campaignId) : false;
 }
 
+// The shared type/campaign/params gate, factored so POST / and POST /estimate cannot
+// drift: the preview can never see (or count) a campaign the create would refuse.
+// Responds itself and returns null on any failure.
+async function resolveExportScope(req, res) {
+  const orgId = activeOrgId(req);
+  const { type, campaignId } = req.body || {};
+  const def = EXPORT_TYPES[type];
+  if (!def) {
+    res.status(400).json({ error: 'Unknown export type.' });
+    return null;
+  }
+
+  let campaign = null;
+  if (def.requiresCampaign || campaignId) {
+    if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
+      res.status(400).json({ error: 'campaignId is required.' });
+      return null;
+    }
+    campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId }).lean();
+    if (!campaign) {
+      res.status(404).json({ error: 'Campaign not found' });
+      return null;
+    }
+    if (!(await canManageCampaign(req, campaignId))) {
+      res.status(403).json({ error: 'Forbidden' });
+      return null;
+    }
+  }
+  // Admin-only types, and the org-wide scope (campaignId null), are never lead territory.
+  if ((def.adminOnly || !campaign) && !isOrgAdmin(req)) {
+    res.status(403).json({ error: 'Forbidden' });
+    return null;
+  }
+
+  let params;
+  try {
+    params = await def.validateParams(req.body?.params || {}, {
+      organizationId: orgId,
+      campaignId: campaign ? campaign._id : null,
+    });
+  } catch (err) {
+    if (err instanceof ExportUserError || err?.isExportUserError) {
+      res.status(400).json({ error: err.message });
+      return null;
+    }
+    throw err;
+  }
+  return { def, type, campaign, params };
+}
+
 // Create a job and enqueue it.
 router.post('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
-    const { type, campaignId } = req.body || {};
-    const def = EXPORT_TYPES[type];
-    if (!def) return res.status(400).json({ error: 'Unknown export type.' });
-
-    let campaign = null;
-    if (def.requiresCampaign || campaignId) {
-      if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
-        return res.status(400).json({ error: 'campaignId is required.' });
-      }
-      campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId }).lean();
-      if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-      if (!(await canManageCampaign(req, campaignId))) {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    // Admin-only types, and the org-wide scope (campaignId null), are never lead territory.
-    if ((def.adminOnly || !campaign) && !isOrgAdmin(req)) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    let params;
-    try {
-      params = await def.validateParams(req.body?.params || {}, {
-        organizationId: orgId,
-        campaignId: campaign ? campaign._id : null,
-      });
-    } catch (err) {
-      if (err instanceof ExportUserError || err?.isExportUserError) {
-        return res.status(400).json({ error: err.message });
-      }
-      throw err;
-    }
+    const scope = await resolveExportScope(req, res);
+    if (!scope) return;
+    const { type, campaign, params } = scope;
     // The worker has no req — freeze the anchor timezone into the job so every dated
     // column renders in the campaign's zone, never UTC (docs/DATE_FILTERS.md).
     params.anchorTz = campaign?.timeZone || req.activeOrg?.timeZone || 'America/New_York';
@@ -138,6 +162,72 @@ router.post('/', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// Pre-queue row-count preview: the same auth, scoping, and validated params as POST /,
+// then the registry's estimate (exportEstimates.js — estimate==build). Counts only: no
+// artifact, no audit subjects (nothing record-level leaves; the access log still
+// classifies this under exports). Read-only, so it neither checks nor counts toward the
+// active-job throttle.
+router.post('/estimate', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const scope = await resolveExportScope(req, res);
+    if (!scope) return;
+    const { def, type, campaign, params } = scope;
+    if (!def.estimate) {
+      return res.status(400).json({ error: 'No preview is available for this export type.' });
+    }
+    const ctx = {
+      organizationId: activeOrgId(req),
+      campaignId: campaign ? campaign._id : null,
+      campaign,
+      params,
+      anchorTz: campaign?.timeZone || req.activeOrg?.timeZone || 'America/New_York',
+      dnc: await loadDncVoterIdSet(activeOrgId(req)),
+    };
+    let est;
+    try {
+      est = await def.estimate(ctx);
+    } catch (err) {
+      if (err instanceof ExportUserError || err?.isExportUserError) {
+        return res.status(400).json({ error: err.message });
+      }
+      throw err;
+    }
+    const contentKind = await def.contentKind(ctx);
+    res.json({
+      type,
+      contentKind,
+      rows: est.rows,
+      dncWithheld: est.dncWithheld,
+      approx: !!est.approx,
+      ...(est.files ? { files: est.files } : {}),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The registry's user-facing metadata, role-filtered — the single source both clients
+// render type pickers from (labels, descriptions, filter groups). Copy only, no data.
+// Registered BEFORE `/:id` so the literal path wins over the param route.
+router.get('/types', (req, res) => {
+  if (!ensureOrgScoped(req, res)) return;
+  const admin = isOrgAdmin(req);
+  const types = Object.entries(EXPORT_TYPES)
+    .filter(([, def]) => admin || !def.adminOnly)
+    .map(([id, def]) => ({
+      id,
+      label: def.label,
+      desc: def.desc,
+      oneRowIs: def.oneRowIs || null,
+      adminOnly: !!def.adminOnly,
+      requiresCampaign: !!def.requiresCampaign,
+      filters: def.filters || [],
+      estimate: typeof def.estimate === 'function',
+    }));
+  res.json({ types });
 });
 
 // Health: is a worker consuming the export queue? (The imports worker-status pattern.)

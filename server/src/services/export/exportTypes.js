@@ -19,12 +19,18 @@ import {
   buildVoterNotes,
   buildKnocksByRound,
 } from './exportBuilders.js';
+import { EXPORT_ESTIMATES } from './exportEstimates.js';
 
 // The Export Center type registry — the anti-drift spine. The route validates from it, the
 // processor builds from it, and the DNC guard test iterates it (a type cannot exist without
 // being under the "flagged voter appears in NO artifact" sweep). Keys come from the model
 // (EXPORT_TYPE_KEYS) so the enum and the registry cannot diverge silently — the mismatch
 // check at the bottom throws at import time.
+//
+// label/desc/oneRowIs/filters are the CANONICAL user-facing copy, served to both clients by
+// GET /admin/exports/types — the web page, the mobile sheet, and the help articles derive
+// from here, never the other way around. `filters` names UI filter groups, not param keys.
+// `estimate` (absent only on full-backup) is the pre-queue count from exportEstimates.js.
 
 const DOOR_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted'];
 const ACTION_TYPES = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'note_added', 'lit_dropped', 'restricted'];
@@ -77,6 +83,7 @@ const BACKUP_NOTES = [
   'voterfile-current.csv is a RECONSTRUCTION from the data currently in Doorline, not the originally uploaded file: unmapped vendor columns were never stored, rows that failed import are absent, and edits made since the upload are reflected.',
   'Counting units (never sum across them): "Survey doors" counts doors (one per household per pass), "Voters surveyed" counts distinct people, "Surveys taken" counts survey submissions. activity-log.csv rows are individual door events, finer than all three.',
   'knocks-by-round.csv is the invoice-grade per-round summary; doors-by-round.csv is its per-door detail — rows with a Round status other than unknocked/restricted reconcile to that round’s Knocks.',
+  'activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (not home, refused, lit drop) leave the voter columns blank — doors-by-round.csv is the per-door file.',
 ];
 
 const buildFullBackup = async (ctx, sink) => {
@@ -169,9 +176,13 @@ const buildFullBackup = async (ctx, sink) => {
 export const EXPORT_TYPES = {
   'canvass-activity': {
     label: 'Canvassing activity',
+    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, lit drop) are door-level records and leave them blank.',
+    oneRowIs: 'one door event — who knocked, when, and the outcome',
+    filters: ['date', 'effort', 'pass', 'canvasser'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
+    estimate: EXPORT_ESTIMATES['canvass-activity'],
     contentKind: async () => 'csv',
     validateParams: async (params, scope) => {
       const out = await normalizeCommon(params, scope);
@@ -188,9 +199,13 @@ export const EXPORT_TYPES = {
   },
   'doors-by-round': {
     label: 'Doors by round',
+    desc: 'One row per door per round with its status — filter it to "not home" and you have a re-knock list. A household file: it deliberately has no voter columns; use Canvassing activity for who was reached.',
+    oneRowIs: 'one door in one round, with its round status and visit count',
+    filters: ['effort', 'pass', 'roundStatus'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'household',
+    estimate: EXPORT_ESTIMATES['doors-by-round'],
     contentKind: async () => 'csv',
     validateParams: async (params, scope) => {
       const out = await normalizeCommon(params, scope, { canvasser: false });
@@ -208,9 +223,13 @@ export const EXPORT_TYPES = {
   },
   'survey-results': {
     label: 'Survey results',
+    desc: 'One row per survey taken, one column per question. A voter surveyed again in a later round is another row. If the campaign ran more than one survey, you get one file per survey.',
+    oneRowIs: 'one survey taken, one column per question',
+    filters: ['date', 'effort', 'pass', 'canvasser'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
+    estimate: EXPORT_ESTIMATES['survey-results'],
     // One file per template — several templates with responses in scope make it a ZIP.
     contentKind: async (ctx) => {
       const q = { organizationId: ctx.organizationId, campaignId: ctx.campaignId };
@@ -232,10 +251,14 @@ export const EXPORT_TYPES = {
     build: buildSurveyResultsWide,
   },
   'survey-answers': {
-    label: 'Survey answers (one row per answer)',
+    label: 'Survey answers (detailed)',
+    desc: 'One row per recorded answer, exactly as captured at the door — the audit-grade record that survives question re-wording.',
+    oneRowIs: 'one recorded answer, exactly as captured at the door',
+    filters: ['date', 'effort', 'pass', 'canvasser'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
+    estimate: EXPORT_ESTIMATES['survey-answers'],
     contentKind: async () => 'csv',
     validateParams: async (params, scope) =>
       EXPORT_TYPES['survey-results'].validateParams(params, scope),
@@ -243,9 +266,13 @@ export const EXPORT_TYPES = {
   },
   'voter-file': {
     label: 'Voter file',
+    desc: 'Your voter file, rebuilt from the data currently in Doorline — optionally using an import’s own vendor column names. Includes State Voter ID and UID for re-matching on another platform.',
+    oneRowIs: 'one voter currently in the campaign',
+    filters: ['import'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
+    estimate: EXPORT_ESTIMATES['voter-file'],
     contentKind: async () => 'csv',
     validateParams: async (params, scope) => {
       const out = {};
@@ -270,10 +297,14 @@ export const EXPORT_TYPES = {
     build: buildVoterFile,
   },
   'voters-filtered': {
-    label: 'Filtered voters (saved search)',
+    label: 'Filtered voters',
+    desc: 'Only the voters matching one of your saved searches.',
+    oneRowIs: 'one voter matching the saved search',
+    filters: ['savedSearch'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
+    estimate: EXPORT_ESTIMATES['voters-filtered'],
     contentKind: async () => 'csv',
     validateParams: async (params, scope) => {
       if (!params.savedSearchId || !isId(params.savedSearchId)) {
@@ -296,9 +327,13 @@ export const EXPORT_TYPES = {
   },
   'voter-notes': {
     label: 'Voter notes',
+    desc: 'Staff notes about voters, with author and date.',
+    oneRowIs: 'one staff note about a voter',
+    filters: ['date'],
     adminOnly: true,
     requiresCampaign: true,
     subjectType: 'voter',
+    estimate: EXPORT_ESTIMATES['voter-notes'],
     contentKind: async () => 'csv',
     validateParams: async (params, scope) => {
       const out = await normalizeCommon(params, scope, { pass: false, canvasser: false });
@@ -309,6 +344,8 @@ export const EXPORT_TYPES = {
   },
   'full-backup': {
     label: 'Full backup',
+    desc: 'Everything in one bundle: voter file, activity, doors by round, surveys, notes, and per-round totals — with a manifest and a plain-language README.',
+    filters: ['backupScope'],
     adminOnly: true,
     requiresCampaign: false,
     subjectType: 'voter',

@@ -38,5 +38,8 @@ Ready**), who requested it, row count, size, and when it expires (files keep for
 "N withheld (do not contact)" on a row means that many entries were excluded because the person
 asked not to be contacted — that's why an export can show fewer rows than a dashboard.
 
-On the phone, Admin → **More → Exports** shows the same history with one-tap queueing of the
-simple types; downloads open the share sheet.
+On the phone, Admin → **More → Exports** queues the four everyday types with the same filters
+and a live row-count preview: tap a type, and a sheet explains what one row of the file is,
+what's in it, and roughly how many rows your filters will produce before you queue. The other
+types — detailed survey answers, filtered voters, voter notes, and the full backup — stay on
+the web dashboard. Downloads open the share sheet, and touching and holding a row deletes it.

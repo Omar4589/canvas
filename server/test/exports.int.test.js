@@ -185,6 +185,81 @@ test('POST: per-org active-job throttle 429s', { skip }, async () => {
   await ExportJob.deleteMany({ _id: { $in: stubs.map((s) => s._id) } });
 });
 
+// ---- estimate + types ------------------------------------------------------------------
+
+test('POST /estimate: counts with the builder’s numbers, same scoping as create', { skip }, async () => {
+  const r = await call('POST', '/admin/exports/estimate', {
+    token: ctx.adminTok, orgId: ctx.org._id, body: { type: 'voter-file', campaignId: String(ctx.c1._id) },
+  });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.json.type, 'voter-file');
+  assert.strictEqual(r.json.contentKind, 'csv');
+  assert.strictEqual(r.json.rows, 1, 'Alice only — Donna is DNC');
+  assert.strictEqual(r.json.dncWithheld, 1);
+  assert.strictEqual(r.json.approx, false);
+
+  const managed = await call('POST', '/admin/exports/estimate', {
+    token: ctx.leadTok, orgId: ctx.org._id, body: { type: 'canvass-activity', campaignId: String(ctx.c1._id) },
+  });
+  assert.strictEqual(managed.status, 200, 'a lead previews a managed campaign');
+  assert.strictEqual(managed.json.rows, 1);
+
+  const unmanaged = await call('POST', '/admin/exports/estimate', {
+    token: ctx.leadTok, orgId: ctx.org._id, body: { type: 'canvass-activity', campaignId: String(ctx.c2._id) },
+  });
+  assert.strictEqual(unmanaged.status, 403, 'the preview refuses whatever the create would refuse');
+  const adminOnly = await call('POST', '/admin/exports/estimate', {
+    token: ctx.leadTok, orgId: ctx.org._id, body: { type: 'voter-notes', campaignId: String(ctx.c1._id) },
+  });
+  assert.strictEqual(adminOnly.status, 403);
+});
+
+test('POST /estimate: unknown type / previewless type / bad params are 400s', { skip }, async () => {
+  const unknown = await call('POST', '/admin/exports/estimate', {
+    token: ctx.adminTok, orgId: ctx.org._id, body: { type: 'nope', campaignId: String(ctx.c1._id) },
+  });
+  assert.strictEqual(unknown.status, 400);
+  const backup = await call('POST', '/admin/exports/estimate', {
+    token: ctx.adminTok, orgId: ctx.org._id, body: { type: 'full-backup' },
+  });
+  assert.strictEqual(backup.status, 400, 'full-backup has no preview');
+  assert.match(backup.json.error, /No preview/);
+  const badParam = await call('POST', '/admin/exports/estimate', {
+    token: ctx.adminTok, orgId: ctx.org._id,
+    body: { type: 'canvass-activity', campaignId: String(ctx.c1._id), params: { from: 'yesterday' } },
+  });
+  assert.strictEqual(badParam.status, 400);
+  assert.match(badParam.json.error, /YYYY-MM-DD/);
+});
+
+test('POST /estimate: read-only — never trips (or counts toward) the active-job throttle', { skip }, async () => {
+  const stubs = await ExportJob.insertMany(
+    [0, 1, 2].map(() => ({ organizationId: ctx.org._id, campaignId: ctx.c1._id, type: 'voter-file', status: 'pending' }))
+  );
+  const r = await call('POST', '/admin/exports/estimate', {
+    token: ctx.adminTok, orgId: ctx.org._id, body: { type: 'voter-file', campaignId: String(ctx.c1._id) },
+  });
+  assert.strictEqual(r.status, 200, 'an org at its job cap can still preview');
+  await ExportJob.deleteMany({ _id: { $in: stubs.map((s) => s._id) } });
+});
+
+test('GET /types: registry metadata, role-filtered, unified labels', { skip }, async () => {
+  const admin = await call('GET', '/admin/exports/types', { token: ctx.adminTok, orgId: ctx.org._id });
+  assert.strictEqual(admin.status, 200);
+  assert.strictEqual(admin.json.types.length, 8, 'admin sees every type');
+  const byId = Object.fromEntries(admin.json.types.map((t) => [t.id, t]));
+  assert.strictEqual(byId['survey-answers'].label, 'Survey answers (detailed)');
+  assert.strictEqual(byId['voters-filtered'].label, 'Filtered voters');
+  assert.ok(byId['canvass-activity'].desc.length > 0, 'descriptions ship from the registry');
+  assert.deepStrictEqual(byId['canvass-activity'].filters, ['date', 'effort', 'pass', 'canvasser']);
+  assert.strictEqual(byId['canvass-activity'].estimate, true);
+  assert.strictEqual(byId['full-backup'].estimate, false, 'the one previewless type');
+
+  const lead = await call('GET', '/admin/exports/types', { token: ctx.leadTok, orgId: ctx.org._id });
+  assert.strictEqual(lead.json.types.length, 6, 'admin-only types (voter-notes, full-backup) filtered out');
+  assert.ok(!lead.json.types.some((t) => t.adminOnly));
+});
+
 // ---- list / poll scoping ---------------------------------------------------------------
 
 test('GET list: org isolation, lead scoping, admin sees org-wide rows', { skip }, async () => {

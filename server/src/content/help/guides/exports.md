@@ -16,7 +16,8 @@ keep, open in Excel or Google Sheets, or load into another tool.
 ## How it works
 
 1. Pick an export type and, if you want, narrow it with filters (date range, walk list, round,
-   canvasser, or a saved search).
+   canvasser, or a saved search). On the phone, tapping a type opens a sheet that describes the
+   file, takes the same filters, and shows a **live row count** before you queue anything.
 2. Press **Queue export**. The file is built in the background — big exports can take a minute
    or two, and the list below updates as it goes.
 3. When the row says **Ready**, press **Download**. Files are kept for **7 days**, then deleted
@@ -25,7 +26,9 @@ keep, open in Excel or Google Sheets, or load into another tool.
 ## What you can export
 
 - **Canvassing activity** — every door result: who knocked, when, the outcome, and the voter at
-  that door. The complete field record.
+  that door. The complete field record. Voter name and IDs fill in only when a survey named the
+  voter — plain knocks like *not home* or *lit dropped* are about the door, so their voter
+  columns are blank on purpose.
 - **Doors by round** — one row per door per round with its status. Filter it to `not home` and
   you have a re-knock list.
 - **Survey results** — one row per survey taken, one column per question. If the campaign ran
@@ -41,6 +44,13 @@ keep, open in Excel or Google Sheets, or load into another tool.
 
 Team leads can export from the campaigns they manage; org-wide exports, voter notes, and the
 full backup are admin-only.
+
+## Matching your file on another platform
+
+The voter-bearing files carry two IDs side by side: **State voter ID** (the id from your voter
+file) and **UID** (the vendor id from your original upload, when it had one). Either lets
+another tool match the same people — so an export here re-matches cleanly wherever it goes
+next.
 
 ## About the voter file
 

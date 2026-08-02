@@ -169,6 +169,7 @@ export function InsetNavRow({
   accessory,
   emphasis,
   onPress,
+  onLongPress,
   hint,
   disabled,
   accessibilityLabel,
@@ -177,6 +178,7 @@ export function InsetNavRow({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}

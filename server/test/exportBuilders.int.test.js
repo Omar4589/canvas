@@ -34,6 +34,7 @@ const { ImportJob } = await import('../src/models/ImportJob.js');
 const { SavedSearch } = await import('../src/models/SavedSearch.js');
 const { ExportJob } = await import('../src/models/ExportJob.js');
 const { EXPORT_TYPES } = await import('../src/services/export/exportTypes.js');
+const { loadDncVoterIdSet } = await import('../src/services/export/exportScope.js');
 const { processExportJob } = await import('../src/services/export/exportProcessor.js');
 const { openArtifactDownloadStream } = await import('../src/services/export/exportArtifactStore.js');
 const { resolveWalkList } = await import('../src/services/walklist/resolveWalkList.js');
@@ -129,14 +130,18 @@ before(async () => {
       stateVoterId: sv, firstName: first, lastName: last, fullName: `${first} ${last}`, party,
       ...extra,
     });
-  ctx.alice = await mkVoter(ctx.h1, 'SV1', 'Alice', 'Able', 'DEM');
+  // uid = the vendor's import UID; the flagged voters get one too so the registry-driven
+  // sweep below proves the UID column is under the same no-leak guarantee as the name.
+  ctx.alice = await mkVoter(ctx.h1, 'SV1', 'Alice', 'Able', 'DEM', { uid: 'UAL1' });
   ctx.donna = await mkVoter(ctx.h1, 'SVDNC1', 'Donna', 'Dncerson', 'REP', {
+    uid: 'UIDDNC1',
     doNotContact: { flagged: true, at: new Date(), reason: 'asked at door', source: 'admin' },
   });
   ctx.frank = await mkVoter(ctx.h2, 'SV2', '=HYPERLINK("http://evil","x")', 'Formula', 'DEM');
   ctx.carol = await mkVoter(ctx.h3, 'SV3', 'Carol', 'Errorson', 'REP'); // not in insertedVoterIds — the "error row"
-  ctx.dave = await mkVoter(ctx.h4, 'SV4', 'Dave', 'Doorman', 'DEM');
+  ctx.dave = await mkVoter(ctx.h4, 'SV4', 'Dave', 'Doorman', 'DEM', { uid: 'UDAV1' });
   ctx.edna = await mkVoter(ctx.h5, 'SVDNC2', 'Edna', 'Dncerson', 'REP', {
+    uid: 'UIDDNC2',
     doNotContact: { flagged: true, at: new Date(), reason: 'asked', source: 'upload' },
   });
 
@@ -149,10 +154,13 @@ before(async () => {
       ...extra,
     });
   // P1: Alice surveyed (team Cora), Frank's door not-home by the DELETED canvasser,
-  // h5 bulk-restricted from the desk. P2: h1 re-knocked; Donna (DNC) refused — the row
-  // must survive with voter identity blanked. P3: Dave surveyed. Legacy: pre-turf not_home.
+  // h5 bulk-restricted from the desk, plus a survey whose voter row is GONE (dangling
+  // voterId — row kept with blank identity, counted as orphaned). P2: h1 re-knocked;
+  // Donna (DNC) refused — the row must survive with voter identity blanked. P3: Dave
+  // surveyed. Legacy: pre-turf not_home.
   await mkAct(ctx.h1, ctx.p1, ctx.uAda, 'survey_submitted', '2026-07-01T15:00:00Z', { voterId: ctx.alice._id, coordinatorId: ctx.uCoord._id });
   await mkAct(ctx.h2, ctx.p1, ctx.uDel, 'not_home', '2026-07-02T16:30:00Z');
+  await mkAct(ctx.h2, ctx.p1, ctx.uAda, 'survey_submitted', '2026-07-02T18:00:00Z', { voterId: new mongoose.Types.ObjectId() });
   await mkAct(ctx.h5, ctx.p1, ctx.uAda, 'restricted', '2026-07-02T17:00:00Z', { via: 'bulk' });
   await mkAct(ctx.h1, ctx.p2, ctx.uAda, 'not_home', '2026-07-10T15:00:00Z');
   await mkAct(ctx.h1, ctx.p2, ctx.uAda, 'refused', '2026-07-11T15:00:00Z', { voterId: ctx.donna._id });
@@ -191,9 +199,12 @@ before(async () => {
   await mkResp(ctx.dave, ctx.h4, ctx.p3, '2026-07-03T18:05:00Z', [
     { questionKey: 'support', questionLabel: 'Do you support?', answer: 'Yes', optionIds: ['o-yes'] },
   ]);
-  // Orphan: the voter row was removed by an import undo — dropped AND counted.
+  // Orphan: the voter row was removed by an import undo — dropped AND counted. TWO answers
+  // on purpose: orphanedRows is per-RESPONSE in the wide file but per-ANSWER in the long
+  // file, and a single-answer orphan would let the two units pass for each other.
   await mkResp(new mongoose.Types.ObjectId(), ctx.h1, ctx.p1, '2026-07-01T15:20:00Z', [
     { questionKey: 'support', questionLabel: 'Do you support?', answer: 'Yes', optionIds: ['o-yes'] },
+    { questionKey: 'notes2', questionLabel: 'Anything else?', answer: 'orphaned text', optionIds: [] },
   ]);
 
   ctx.importJob = await ImportJob.create({
@@ -240,7 +251,7 @@ test('EVERY export type: no DNC voter identity, no select:false price, in any ar
   for (const type of Object.keys(EXPORT_TYPES)) {
     const { doc, text } = await runExport(type, await paramsFor(type));
     ctx.artifacts[type] = { doc, text };
-    for (const leak of ['Donna', 'Dncerson', 'SVDNC1', 'Edna', 'SVDNC2']) {
+    for (const leak of ['Donna', 'Dncerson', 'SVDNC1', 'Edna', 'SVDNC2', 'UIDDNC1', 'UIDDNC2']) {
       assert.ok(!text.includes(leak), `${type}: DNC identity "${leak}" must not appear`);
     }
     assert.ok(!text.includes(String(PRICE)), `${type}: pricePerCampaignCents must never reach an artifact`);
@@ -262,14 +273,21 @@ test('EVERY export type: no DNC voter identity, no select:false price, in any ar
 test('canvass-activity: anchor-tz columns, DNC row blanked not dropped, bulk labeled, deleted-user name', { skip }, async () => {
   const { doc, text } = ctx.artifacts['canvass-activity'];
   const lines = csvLines(text);
-  assert.strictEqual(doc.rowCount, 7, 'all 7 ledger rows — including the blanked DNC row');
+  assert.strictEqual(doc.rowCount, 8, 'all 8 ledger rows — including the blanked DNC row and the dangling-voter row');
   assert.strictEqual(doc.excludedDncCount, 1, 'one identity withheld');
-  assert.strictEqual(lines.length, 8, 'header + 7 rows');
+  assert.strictEqual(doc.orphanedRows, 1, 'the dangling voterId is counted, not silently blank');
+  assert.strictEqual(lines.length, 9, 'header + 8 rows');
+  assert.match(lines[0], /State voter ID,UID,Voter first name/, 'identity columns: renamed state id + the import UID');
 
   // 2026-07-01T15:00:00Z in America/Chicago (CDT) = 10:00:00 on the same day.
   const aliceRow = lines.find((l) => l.includes('2026-07-01T15:00:00.000Z'));
   assert.match(aliceRow, /2026-07-01,10:00:00/, 'Date/Time render in the campaign anchor tz');
+  assert.match(aliceRow, /SV1,UAL1,Alice/, 'a voter-attached row carries state id + UID');
   assert.match(aliceRow, /Cora Coord/, 'frozen coordinator renders as the Team');
+
+  const danglingRow = lines.find((l) => l.includes('2026-07-02T18:00:00.000Z'));
+  assert.ok(danglingRow, 'the dangling-voter survey row stays in the ledger');
+  assert.ok(!danglingRow.includes('Able') && !danglingRow.includes('UAL1'), 'with voter identity blank');
 
   const donnaRow = lines.find((l) => l.includes('refused'));
   assert.ok(donnaRow, 'the DNC voter’s refused knock stays in the ledger');
@@ -324,6 +342,8 @@ test('survey-results (wide): one row per response, current option text, orphans 
   assert.strictEqual(doc.excludedDncCount, 1);
   assert.strictEqual(doc.orphanedRows, 1, 'import-undo orphan dropped AND counted');
   assert.strictEqual(lines.filter((l) => l.includes('Able')).length, 2, 'the twice-surveyed voter is two rows ("Surveys taken")');
+  assert.match(lines[0], /State voter ID,UID,Voter first name/, 'identity columns: renamed state id + the import UID');
+  assert.match(lines.find((l) => l.includes('Able')), /SV1,UAL1,Alice/, 'survey rows carry state id + UID');
   assert.match(lines[0], /Do you support\?/, 'question label is a column');
   const round2 = lines.find((l) => l.includes('2026-07-10'));
   assert.match(round2, /,No,|,No$/, 'retired option id still resolves to its current text');
@@ -332,6 +352,8 @@ test('survey-results (wide): one row per response, current option text, orphans 
 test('survey-answers (long): one row per answer entry, snapshot text', { skip }, async () => {
   const { doc, text } = ctx.artifacts['survey-answers'];
   assert.strictEqual(doc.rowCount, 4, '2 answers (r1) + 1 (r2) + 1 (dave); DNC + orphan dropped');
+  assert.strictEqual(doc.orphanedRows, 2, 'orphan counted in THIS file’s unit: its 2 answer entries, not 1 response');
+  assert.match(csvLines(text)[0], /State voter ID,UID,Voter first name/, 'identity columns present');
   assert.match(csvLines(text)[0], /Question key,Answer,Option ids/, 'snapshot columns present');
   assert.ok(text.includes('love it'), 'free-text snapshot preserved');
   assert.ok(text.includes('o-yes'), 'stable option ids exported for joins');
@@ -372,6 +394,77 @@ test('voters-filtered: row set equals resolveWalkList’s live resolution', { sk
 test('voter-notes: DNC voters’ notes dropped entirely', { skip }, async () => {
   const { doc, text } = ctx.artifacts['voter-notes'];
   assert.strictEqual(doc.rowCount, 1);
+  assert.match(csvLines(text)[0], /State voter ID,UID,Voter first name/, 'identity columns present');
   assert.ok(text.includes('Great convo about parks'));
   assert.ok(!text.includes('asked us not to come back'), 'the opt-out note itself must not ship');
+});
+
+// ---- estimates (estimate==build) -------------------------------------------------------
+
+// The same read-only ctx slice the estimate route hands each registry estimate.
+async function estimateFor(type, params = {}) {
+  const def = EXPORT_TYPES[type];
+  const validated = await def.validateParams(params, { organizationId: ctx.org._id, campaignId: ctx.camp._id });
+  return def.estimate({
+    organizationId: ctx.org._id,
+    campaignId: ctx.camp._id,
+    campaign: await Campaign.findById(ctx.camp._id).lean(),
+    params: validated,
+    anchorTz: TZ,
+    dnc: await loadDncVoterIdSet(ctx.org._id),
+  });
+}
+
+test('estimates: every campaign type has one; estimate==build on the whole fixture', { skip }, async () => {
+  for (const [type, def] of Object.entries(EXPORT_TYPES)) {
+    if (!def.requiresCampaign) continue; // full-backup is the one previewless type
+    assert.strictEqual(typeof def.estimate, 'function', `${type}: a campaign type cannot silently skip preview`);
+  }
+  for (const [type, def] of Object.entries(EXPORT_TYPES)) {
+    if (!def.estimate) continue;
+    const params = type === 'voters-filtered' ? { savedSearchId: String(ctx.savedSearch._id) } : {};
+    const est = await estimateFor(type, params);
+    const { doc } = ctx.artifacts[type];
+    assert.strictEqual(est.dncWithheld, doc.excludedDncCount, `${type}: dncWithheld predicts excludedDncCount`);
+    // approx types (surveys) also drop orphaned rows the count cannot see.
+    assert.strictEqual(
+      est.rows,
+      doc.rowCount + (est.approx ? doc.orphanedRows : 0),
+      `${type}: rows predicts rowCount`
+    );
+  }
+});
+
+test('estimates match filtered builds (estimate==build under params)', { skip }, async () => {
+  const cases = [
+    ['canvass-activity', { actionTypes: ['not_home'] }],
+    ['canvass-activity', { from: '2026-07-01', to: '2026-07-02' }],
+    ['doors-by-round', { roundStatuses: ['not_home'] }],
+    ['doors-by-round', { passId: 'legacy' }],
+    ['survey-results', { surveyTemplateId: String(ctx.template._id) }],
+  ];
+  for (const [type, params] of cases) {
+    const validated = await EXPORT_TYPES[type].validateParams(params, { organizationId: ctx.org._id, campaignId: ctx.camp._id });
+    const { doc } = await runExport(type, validated);
+    const est = await estimateFor(type, params);
+    const label = `${type} ${JSON.stringify(params)}`;
+    assert.strictEqual(est.rows, doc.rowCount + (est.approx ? doc.orphanedRows : 0), `${label}: rows reconcile`);
+    assert.strictEqual(est.dncWithheld, doc.excludedDncCount, `${label}: dncWithheld reconciles`);
+  }
+});
+
+test('survey-answers estimate counts answer entries, not responses', { skip }, async () => {
+  const est = await estimateFor('survey-answers');
+  // 2 (alice r1) + 1 (alice r2) + 1 (dave) + 2 (orphan, invisible to the count) = 6;
+  // reusing the response count here would say 4 — the $size aggregation is load-bearing.
+  assert.strictEqual(est.rows, 6);
+  assert.strictEqual(est.dncWithheld, 1, 'Donna’s dropped RESPONSE, the builder’s countDnc unit');
+});
+
+test('doors-by-round passId:legacy exports ONLY the null-pass bucket', { skip }, async () => {
+  const { doc, text } = await runExport('doors-by-round', { passId: 'legacy' });
+  const lines = csvLines(text);
+  assert.strictEqual(doc.rowCount, 1, 'the one pre-turf door (h3) — real rounds are skipped, not merely un-filtered');
+  assert.match(lines[1], /Legacy \/ no pass/, 'the emitted row is the legacy pseudo-round');
+  assert.ok(!text.includes('First knock') && !text.includes('Re-knock'), 'no real-round rows leak in');
 });

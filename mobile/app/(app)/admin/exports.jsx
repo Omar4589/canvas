@@ -1,38 +1,38 @@
 import { useCallback, useState } from 'react';
-import { View, Text, ScrollView, RefreshControl, Alert, StyleSheet } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { View, Text, Pressable, ScrollView, RefreshControl, Alert, StyleSheet } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { downloadArtifact } from '../../../lib/artifactDownload';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
-import { spacing } from '../../../lib/theme';
+import { deviceTimezone } from '../../../lib/dateRanges';
+import { spacing, radius } from '../../../lib/theme';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
+import { mergeTypeMeta } from '../../../lib/exportTypes';
 import CampaignChip from '../../../components/CampaignChip';
 import SectionHeader from '../../../components/SectionHeader';
+import ExportSheet from '../../../components/ExportSheet';
 import InsetGroup, {
   InsetNavRow,
-  InsetActionRow,
   InsetNoteRow,
   GroupFooter,
   RowEmoji,
 } from '../../../components/InsetGroup';
 
-// Mobile Export Center — view + download + one-tap queue (owner scope decision 2026-08-01).
-// The campaign's export history lists here, polls while a job builds, and a completed file
-// downloads TO DISK (lib/artifactDownload — binary-safe, memory-flat) and opens the share
-// sheet. Queueing covers the simple no-filter types; filters, voter-notes, and the
-// full-backup ZIP live on the web dashboard (the CSV-upload precedent). Works during the
-// read-only wind-down: creating an export is the one write the entitlement gate allows.
-
-// Same labels as the web page's TYPES — the two pickers must not drift.
-const QUEUEABLE = [
-  { id: 'canvass-activity', emoji: '🚪', label: 'Canvassing activity', sub: 'Every door result, with the voter at that door' },
-  { id: 'doors-by-round', emoji: '🔁', label: 'Doors by round', sub: 'One row per door per round, with its status' },
-  { id: 'survey-results', emoji: '📊', label: 'Survey results', sub: 'One row per survey taken, one column per question' },
-  { id: 'voter-file', emoji: '🗂️', label: 'Voter file', sub: 'Everyone currently in the campaign' },
-];
+// Mobile Export Center. Tapping a type opens ExportSheet — what one row is, what's in the
+// file, per-type filters, and a live row-count estimate — and only the sheet's button
+// queues. The campaign's export history lists below, polls while a job builds, and a
+// completed file downloads TO DISK (lib/artifactDownload — binary-safe, memory-flat) and
+// opens the share sheet. The 4-type scope is the owner's decision: detailed survey answers,
+// filtered voters, voter notes and the full-backup ZIP stay on the web dashboard. Works
+// during the read-only wind-down: creating an export (and its estimate) are the writes the
+// entitlement gate allows.
+//
+// Type copy comes from lib/exportTypes: local fallback strings, overlaid by the server
+// registry via GET /admin/exports/types when it responds — the pickers cannot drift.
 const TYPE_LABEL = {
   'canvass-activity': 'Canvassing activity',
   'doors-by-round': 'Doors by round',
@@ -61,12 +61,19 @@ const fmtBytes = (n) => {
 const daysLeft = (expiresAt) =>
   expiresAt == null ? null : Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
 
+// Any wire key besides the server-stamped anchorTz means the file was narrowed — two
+// same-type rows are otherwise indistinguishable in the history.
+const isFiltered = (job) => Object.keys(job.params || {}).some((k) => k !== 'anchorTz');
+
 export default function AdminExports() {
   const styles = useThemedStyles(makeStyles);
+  const roleLabel = useConsoleRoleLabel();
+  const router = useRouter();
   const qc = useQueryClient();
   const poll = useFocusedPoll();
   const [campaign, setCampaign] = useState(undefined);
   const [busyId, setBusyId] = useState(null);
+  const [sheetType, setSheetType] = useState(null);
 
   // Hidden Tabs screen stays mounted — re-sync the active campaign on focus (notes.jsx pattern).
   useFocusEffect(
@@ -77,6 +84,24 @@ export default function AdminExports() {
     }, [])
   );
   const cId = campaign?.id ? String(campaign.id) : null;
+  const tz = campaign?.timeZone || deviceTimezone();
+
+  // The sheet's filters are campaign-scoped state — close it if the campaign changes under it.
+  const [prevCid, setPrevCid] = useState(cId);
+  if (prevCid !== cId) {
+    setPrevCid(cId);
+    setSheetType(null);
+  }
+
+  // Server registry copy overlaid on the local fallback (older server → 404 → fallback).
+  const typesQ = useQuery({
+    queryKey: ['admin', 'export-types'],
+    queryFn: () => api('/admin/exports/types'),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const typeMeta = mergeTypeMeta(typesQ.data?.types);
+  const sheetMeta = sheetType ? typeMeta.find((t) => t.id === sheetType) : null;
 
   const listQ = useQuery({
     queryKey: ['admin', 'exports', cId],
@@ -90,11 +115,52 @@ export default function AdminExports() {
   });
   const jobs = listQ.data?.jobs || [];
 
-  const createMut = useMutation({
-    mutationFn: (type) => api('/admin/exports', { method: 'POST', body: { type, campaignId: cId, params: {} } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'exports', cId] }),
-    onError: (err) => Alert.alert('Could not queue the export', err?.message || 'Try again in a moment.'),
+  // The web page's worker banner: exports build on the worker dyno, and a queued job with
+  // no worker looks stuck — say so instead. `online === false` strictly; an errored status
+  // request shows nothing.
+  const workerQ = useQuery({
+    queryKey: ['admin', 'exports', 'worker-status'],
+    queryFn: () => api('/admin/exports/worker-status'),
+    refetchInterval: 15000,
+    ...useFocusedPoll(),
   });
+  const workerOffline = workerQ.data?.online === false;
+
+  const createMut = useMutation({
+    mutationFn: ({ type, campaignId, params }) =>
+      api('/admin/exports', {
+        method: 'POST',
+        body: { type, ...(campaignId ? { campaignId: String(campaignId) } : {}), params: params || {} },
+      }),
+    onSuccess: () => {
+      // The new row appearing at the top of Recent exports (and the 2s poll animating it
+      // Queued → Building → Ready) IS the confirmation — the app has no toast layer.
+      setSheetType(null);
+      qc.invalidateQueries({ queryKey: ['admin', 'exports', cId] });
+    },
+    onError: (err) => {
+      if (err?.data?.code === 'export-throttled') {
+        Alert.alert('Export limit reached', err.message);
+        return;
+      }
+      Alert.alert('Could not queue the export', err?.message || 'Try again in a moment.');
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (jobId) => api(`/admin/exports/${jobId}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'exports', cId] }),
+    onError: (err) => Alert.alert('Could not delete the export', err?.message || 'Try again in a moment.'),
+  });
+
+  const requeue = (job) =>
+    createMut.mutate({ type: job.type, campaignId: job.campaignId, params: job.params || {} });
+
+  const confirmDelete = (job) =>
+    Alert.alert('Delete this export?', 'A copy you already downloaded is unaffected.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteMut.mutate(job._id) },
+    ]);
 
   async function onRowPress(job) {
     if (job.status === 'completed') {
@@ -118,18 +184,34 @@ export default function AdminExports() {
       return;
     }
     if (job.status === 'failed') {
-      Alert.alert('Export failed', job.error || 'Try queueing it again.');
+      Alert.alert('Export failed', job.error || 'Try queueing it again.', [
+        { text: 'Retry', onPress: () => requeue(job) },
+        { text: 'Delete', style: 'destructive', onPress: () => confirmDelete(job) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
       return;
     }
     if (job.status === 'expired') {
-      Alert.alert('Expired', 'This export has expired — queue a fresh one.');
+      Alert.alert('Expired', 'This export has expired — queue a fresh one.', [
+        { text: 'Queue again', onPress: () => requeue(job) },
+        { text: 'Delete', style: 'destructive', onPress: () => confirmDelete(job) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
       return;
     }
     Alert.alert('Still building', 'This export is still being built — it will be ready shortly.');
   }
 
+  // A completed row's tap must stay download, so delete rides on long-press (the audit.jsx
+  // row-accelerator precedent). Running jobs can't be deleted (server 409s anyway).
+  function onRowLongPress(job) {
+    if (job.status === 'running') return;
+    confirmDelete(job);
+  }
+
   const jobSub = (job) => {
     const bits = [new Date(job.createdAt).toLocaleDateString()];
+    if (isFiltered(job)) bits.push('filtered');
     if (job.rowCount) bits.push(`${job.rowCount} rows`);
     if (job.bytes) bits.push(fmtBytes(job.bytes));
     if (job.status === 'completed') {
@@ -143,9 +225,24 @@ export default function AdminExports() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.headerLabel}>Exports</Text>
+        <Pressable onPress={() => router.back()} hitSlop={8}>
+          <Text style={styles.back}>‹ {roleLabel}</Text>
+        </Pressable>
+        <Text style={styles.headerTitle}>Exports</Text>
+        <View style={{ width: 80 }} />
+      </View>
+      <View style={styles.chipWrap}>
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
+
+      {workerOffline ? (
+        <View style={styles.workerBanner}>
+          <Text style={styles.workerBannerText}>
+            Exports are built in the background, and the background worker looks offline right
+            now — your export will start as soon as it returns.
+          </Text>
+        </View>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}
@@ -153,20 +250,23 @@ export default function AdminExports() {
       >
         <SectionHeader caption title="Queue an export" />
         <InsetGroup>
-          {QUEUEABLE.map((t) => (
-            <InsetActionRow
+          {typeMeta.map((t) => (
+            <InsetNavRow
               key={t.id}
+              emphasis="menu"
               leading={<RowEmoji>{t.emoji}</RowEmoji>}
               label={t.label}
-              disabled={!cId || createMut.isPending}
-              onPress={() => createMut.mutate(t.id)}
+              sub={t.sub}
+              disabled={!cId}
+              hint="Shows what's in this file and lets you filter it before queueing"
+              onPress={() => setSheetType(t.id)}
             />
           ))}
         </InsetGroup>
         <GroupFooter>
-          Built in the background — the list below updates as it finishes. Filters, voter notes and
-          the full-backup ZIP are on the web dashboard. Do-not-contact voters are excluded from
-          every export.
+          Tap a type to see what&apos;s in the file, set filters, and queue it. Exports build in
+          the background — the list below updates as each finishes. Detailed survey answers,
+          filtered voters, voter notes and the full-backup ZIP are on the web dashboard.
         </GroupFooter>
 
         <SectionHeader caption title="Recent exports" />
@@ -191,12 +291,27 @@ export default function AdminExports() {
                 hint={job.status === 'completed' ? 'Downloads and opens the share sheet' : undefined}
                 disabled={busyId === job._id}
                 onPress={() => onRowPress(job)}
+                onLongPress={() => onRowLongPress(job)}
               />
             ))
           )}
         </InsetGroup>
-        <GroupFooter>Files are kept for 7 days, then deleted automatically.</GroupFooter>
+        <GroupFooter>
+          Files are kept for 7 days, then deleted automatically. Touch and hold a row to delete
+          it sooner.
+        </GroupFooter>
       </ScrollView>
+
+      {sheetMeta && cId ? (
+        <ExportSheet
+          meta={sheetMeta}
+          campaignId={cId}
+          tz={tz}
+          queueing={createMut.isPending}
+          onQueue={(params) => createMut.mutate({ type: sheetMeta.id, campaignId: cId, params })}
+          onClose={() => setSheetType(null)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -206,12 +321,26 @@ function makeStyles(t) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.bg },
     header: {
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.md,
     },
-    headerLabel: { ...type.title, color: colors.fg },
+    back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
+    headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
+    chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+
+    workerBanner: {
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      backgroundColor: colors.warnBg,
+      borderWidth: 1,
+      borderColor: colors.warnBorder,
+      borderRadius: radius.md,
+    },
+    workerBannerText: { ...type.caption, color: colors.warnFg },
   });
 }

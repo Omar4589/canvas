@@ -134,6 +134,13 @@ test('suspended org: reads pass, writes 402 with subscription-inactive', { skip 
     body: { type: 'canvass-activity', campaignId: String(ctx.camp._id), params: {} },
   });
   assert.notStrictEqual(exp.status, 402, 'export creation must pass the entitlement gate while suspended');
+  // …and so must its preview (a read wearing POST — no queue involved, so exactly 200).
+  const est = await call('POST', '/admin/exports/estimate', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+    body: { type: 'canvass-activity', campaignId: String(ctx.camp._id), params: {} },
+  });
+  assert.strictEqual(est.status, 200, 'the estimate preview must pass the entitlement gate while suspended');
 });
 
 test('expired trial acts suspended; live trial writes fine', { skip }, async () => {
@@ -178,7 +185,15 @@ test('canceled org: READ-ONLY (reads/exports pass, writes 402) — the wind-down
   });
   assert.notStrictEqual(exp.status, 402, 'export creation must pass the entitlement gate while canceled');
   assert.ok([201, 503].includes(exp.status), `export create is 201 (queued) or 503 (queue down), got ${exp.status}`);
-  // …and the carve-out is method+path EXACT: an export DELETE is still an ordinary write.
+  // The preview that precedes the create is carved out too (counts only, no artifact) —
+  // a wind-down org must be able to see what it is about to export.
+  const est = await call('POST', '/admin/exports/estimate', {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+    body: { type: 'canvass-activity', campaignId: String(ctx.camp._id), params: {} },
+  });
+  assert.strictEqual(est.status, 200, 'the estimate preview must pass the entitlement gate while canceled');
+  // …and the carve-out is method+path EXACT ×2: an export DELETE is still an ordinary write.
   const del = await call('DELETE', '/admin/exports/652f000000000000000000cc', {
     token: ctx.adminTok,
     orgId: ctx.org._id,

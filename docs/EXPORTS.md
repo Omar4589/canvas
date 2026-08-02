@@ -27,11 +27,15 @@ entry this feature is bound by).
 ## What it is
 
 Open a campaign and pick **Exports** in the sidebar (on the phone: Admin → More → Exports). Pick
-what you want, optionally narrow it with filters, and press **Queue export**. The file is built
-in the background — big exports take a minute — and appears in the history below with a
-Download button when ready. Files are kept for **7 days**, then deleted automatically; queue a
-fresh one any time. Everything is CSV (opens in Excel/Sheets and re-imports cleanly into other
-tools); the full backup is a ZIP of CSVs.
+what you want, optionally narrow it with filters, and press **Queue export**. Each type
+describes itself before anything queues — what it is, what one row of the file means. On the
+phone, tapping a type opens a sheet that goes further: what's in the file, the same filters the
+web offers for that type, and a **live row count** for exactly the filters you've set. The
+file is built in the background — big exports take a minute — and appears in the
+history below with a Download button when ready. Files are kept for **7 days**, then deleted
+automatically; queue a fresh one any time (on the phone, touch and hold a row to delete it
+sooner). Everything is CSV (opens in Excel/Sheets and re-imports cleanly into other tools); the
+full backup is a ZIP of CSVs.
 
 Your data stays exportable even if your subscription is paused or has ended: during the 60-day
 wind-down after cancellation the account is read-only, but **queueing and downloading exports
@@ -52,6 +56,15 @@ still works** — that window exists precisely so you can take your data with yo
 
 Team leads see the campaign-scoped types for the campaigns they manage; org-wide exports, voter
 notes, and the full backup are admin-only.
+
+**Who each row identifies.** The voter-bearing files (activity, both survey files, notes, and
+the voter files) carry two match keys side by side: **State voter ID** (the id your voter file
+came with) and **UID** (the vendor id from your original upload, when it had one) — so a file
+can be re-matched on another platform. In **Canvassing activity**, the voter columns fill in
+only when the event named a voter — a survey at the door; plain knocks (not home, refused, lit
+drop) are records about the *door*, nobody was picked, and their voter columns are blank on
+purpose. **Doors by round** is a household file and deliberately has no voter columns at all —
+use Canvassing activity for who was reached.
 
 ## The voter-file caveats (please read before relying on it)
 
@@ -127,9 +140,24 @@ cursors in, backpressured writes out; ZIP entries append **sequentially** via ar
 [`services/export/exportTypes.js`](../server/src/services/export/exportTypes.js) is the
 anti-drift spine: each type declares `adminOnly` / `requiresCampaign` / `subjectType` /
 `validateParams` (whitelist; snapshots a SavedSearch's filter JSON at POST) / `contentKind`
-(survey-results becomes a ZIP when >1 template has responses) / `build`. The registry's keys
-must equal the model enum (checked at import time), and the DNC guard test **iterates the
-registry**, so a new type is born covered. Builders live in
+(survey-results becomes a ZIP when >1 template has responses) / `build` — plus the
+**user-facing copy**: `label` / `desc` / `oneRowIs` / `filters` (UI filter-group tokens),
+served by `GET /types`. The mobile sheet consumes all of it; the web overlays label/desc/filters
+onto its local TYPES list (which keeps the per-filter component wiring and the older-server
+fallback strings); `oneRowIs` renders on mobile only. Edits to what a type IS happen here once.
+The registry's keys must equal the model enum (checked at import time), and the DNC guard test
+**iterates the registry**, so a new type is born covered.
+
+Each campaign type also declares **`estimate`** (from
+[`services/export/exportEstimates.js`](../server/src/services/export/exportEstimates.js)) — the
+pre-queue row count behind `POST /estimate`. The rule is **estimate==build**: every estimate
+imports the same exported query constructor its builder streams (`canvassActivityQuery`,
+`surveyBaseQuery`, `voterNotesQuery`, `resolveDoorsByRoundRounds` — the turf target-preview
+principle), so `rows` predicts `rowCount` and `dncWithheld` predicts `excludedDncCount` by
+construction. The two survey types are `approx: true` (their builders also drop orphaned
+import-undo rows the count can't see: `rows === rowCount + orphanedRows`); survey-answers must
+count `$size(answers)` entries, never responses. All estimates are countDocuments-class and run
+inline in the web dyno; `full-backup` alone has no estimate (the endpoint 400s). Builders live in
 [`services/export/exportBuilders.js`](../server/src/services/export/exportBuilders.js); the
 full-backup **composes** them (never re-implements a file), and its `knocks-by-round.csv` calls
 [`services/reports/knocksByPass.js`](../server/src/services/reports/knocksByPass.js) — the
@@ -161,6 +189,13 @@ admin-only types + org-wide scope via `isOrgAdmin`.
 - `POST /` — validate via the registry, snapshot params + anchorTz, per-org active-job throttle
   (`EXPORT_MAX_ACTIVE_PER_ORG`, 3 → 429), enqueue with a stable jobId; queue ops are
   time-bounded (`EXPORT_ENQUEUE_TIMEOUT_MS`) so a wedged Redis 503s instead of hanging.
+- `POST /estimate` — same body as `POST /`, same scope gate (a shared `resolveExportScope`, so
+  the preview can never see a campaign the create would refuse), then the registry's `estimate`.
+  Returns `{type, contentKind, rows, dncWithheld, approx, files?}` (`files[]` = per-template
+  breakdown when survey-results will ZIP). Counts only: no artifact, no `addAuditSubjects`;
+  read-only, so it neither checks nor counts toward the active-job throttle.
+- `GET /types` — the registry's `label/desc/oneRowIs/adminOnly/requiresCampaign/filters/estimate`
+  per type, role-filtered (a lead never receives the admin-only types). Copy only, no data.
 - `GET /worker-status` — the imports worker-status pattern against the export queue.
 - `GET /` — history, paged; admins also see org-wide (`campaignId:null`) rows; leads only
   managed campaigns; `audit.subjectIds` projected out of every list.
@@ -175,10 +210,13 @@ admin-only types + org-wide scope via `isOrgAdmin`.
 ## The entitlement carve-out
 
 In [`middleware/entitlement.js`](../server/src/middleware/entitlement.js), after the `canWrite`
-check: `POST` to `/admin/exports` (method-and-path exact) passes for every read-only status.
-This is what makes the published 60-day wind-down export window true for the queued-export path.
-Widening it is the top privacy risk of this feature — `test/billing.int.test.js` pins narrowness
-(control write and export-DELETE still 402).
+check: `POST` to `/admin/exports` **and `POST` to `/admin/exports/estimate`** (method-and-path
+exact ×2 — the estimate is a read wearing POST: counts only, no artifact, no data write) pass
+for every read-only status. This is what makes the published 60-day wind-down export window true
+for the queued-export path, preview included. Widening it further is the top privacy risk of
+this feature — `test/billing.int.test.js` pins narrowness (control write and export-DELETE still
+402), and the scope amendment is stamped in
+[PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md).
 
 ## Retention
 
@@ -194,18 +232,70 @@ backup jobs (`campaignId:null`) survive a *campaign* delete on purpose and age o
 ## Frontends
 
 Web: [`pages/ExportsPage.jsx`](../client/src/pages/ExportsPage.jsx) (campaign drill-in, nav slug
-`exports`), downloads via the new shared
+`exports`), downloads via the shared
 [`lib/downloadFile.js`](../client/src/lib/downloadFile.js) (the raw-fetch attachment idiom,
-extracted). Mobile: [`admin/exports.jsx`](../mobile/app/(app)/admin/exports.jsx) — view +
-download/share + one-tap queue of the no-filter types;
+extracted); its local `TYPES` list is filter-UI wiring plus fallback copy — `GET /types`
+overlays label/desc and decides visibility when present. Mobile:
+[`admin/exports.jsx`](../mobile/app/(app)/admin/exports.jsx) — tapping one of the four everyday
+types opens [`components/ExportSheet.jsx`](../mobile/components/ExportSheet.jsx) (MetricSheet's
+Modal anatomy): description, "one row is…", contents, the web's filters for that type, and a
+live `POST /estimate` count (debounced on the serialized params, `keepPreviousData`, advisory —
+an estimate error never blocks Queue, so either deploy order works). Type copy comes from
+[`lib/exportTypes.js`](../mobile/lib/exportTypes.js) (local fallback, server registry overlaid).
+History rows: failed/expired taps offer Retry (re-POST of the frozen params) and Delete;
+long-press deletes any non-running row; a worker-offline banner mirrors the web's.
 [`lib/artifactDownload.js`](../mobile/lib/artifactDownload.js) downloads TO DISK
 (`FileSystem.downloadAsync` — binary-safe for ZIPs, memory-flat) then opens the share sheet.
-Filters and the full builder are web-only (the CSV-upload precedent).
+Four types stay web-only (owner scope decision): Survey answers (detailed), Filtered voters,
+Voter notes, and the full-backup ZIP.
 
 ## Tests
 
 `test/exportCsv.test.js` (writer unit), `test/exports.int.test.js` (lifecycle, scoping, expiry,
-sweeper placement, cascades), `test/exportBuilders.int.test.js` (per-type columns/semantics + the
-registry-driven DNC sweep — ZIPs run `EXPORT_ZIP_LEVEL=0` so artifacts stay greppable),
-`test/billing.int.test.js` (carve-out matrix), `test/accessLogCoverage.int.test.js` (the new URL
-shapes must log), `test/orgDelete.int.test.js` (bucket emptiness after org delete).
+sweeper placement, cascades; the estimate route's scope/400/throttle-independence matrix; the
+types route's role filtering), `test/exportBuilders.int.test.js` (per-type columns/semantics +
+the registry-driven DNC sweep — ZIPs run `EXPORT_ZIP_LEVEL=0` so artifacts stay greppable; the
+registry-driven **estimate==build** loop, filtered-parity cases, the survey-answers `$size`
+pin, and the canvass-activity orphan counter), `test/billing.int.test.js` (carve-out matrix ×2:
+create and estimate pass read-only, export-DELETE still 402),
+`test/accessLogCoverage.int.test.js` (the new URL shapes — including `/estimate` and `/types` —
+must log), `test/orgDelete.int.test.js` (bucket emptiness after org delete).
+
+## Appendix — column contracts (per type)
+
+The header arrays in `exportBuilders.js` are the source of truth; this is the readable copy.
+Voter identity in the four voter-bearing CSVs is always the pair **`State voter ID`, `UID`**
+(sentence case — the voter files use the title-case canonical labels `State Voter ID` / `UID`
+from `canonicalFields.js`; the two spellings coexist deliberately, matching each file's
+neighbors). Every new identity cell must derive from the DNC-guarded voter object, never from
+the event document — that guard is what blanks a do-not-contact person's row.
+
+- **`activity-log.csv`** — Timestamp (ISO), Date, Time (tz), Action; Address block (line 1/2,
+  City, State, Zip, County); **State voter ID, UID**, Voter first/last name, Party (filled only
+  when the event named a voter; blanked for DNC); Canvasser first/last/status, Team; Walk list,
+  Pass, Pass name, Via (field|bulk), Offline submission; Latitude, Longitude, GPS accuracy (m),
+  Distance from house (m); Replaces earlier action, Replaced at (ISO), Note; Household DB id,
+  Voter DB id, Activity DB id.
+- **`doors-by-round.csv`** — Walk list, Pass, Pass name, Pass status, Book; Address block +
+  Precinct; Round status, Door visits this round; Last action at (ISO)/Date/Time; Last action
+  by first/last/status; Campaign status, Active door, Household DB id. **No voter columns by
+  design** (household grain).
+- **`survey-results*.csv`** — Submitted (ISO)/Date/Time; Walk list, Pass, Pass name; **State
+  voter ID, UID**, Voter first/last name, Party; Address block minus County; Canvasser + Team; Template,
+  Template version, Offline submission, Edited, Note; one column per question (current text,
+  `Label (key)` on duplicates); Household/Voter/Response DB ids.
+- **`survey-answers.csv`** — Submitted (ISO)/Date/Time; **State voter ID, UID**, Voter
+  first/last name, Party; Address block minus County; Canvasser; Walk list, Pass, Pass name, Template,
+  Template version; Question, Question key, Answer (snapshot), Option ids, Other text; Note,
+  Offline submission; Household/Voter/Response DB ids.
+- **`voterfile-current.csv` / `voters-filtered.csv`** — every `CANONICAL_FIELDS` label (State
+  Voter ID, First Name, Last Name, UID, Phone, …, County, Latitude, Longitude) + Household DB
+  id, Voter DB id. **`voterfile-import.csv`** — the import's own vendor headers in canonical
+  order (duplicates collapse first-wins) + the two DB ids.
+- **`voter-notes.csv`** — Created (ISO)/Date/Time; **State voter ID, UID**, Voter first/last
+  name; Address, City, State, Zip; Author first/last/status; Edited, Edited at (ISO), Note;
+  Voter DB id, Note DB id.
+- **`knocks-by-round.csv`** (backup only) — Walk list, Pass, Pass name, Pass status,
+  Activated/Archived (ISO); Knocks, Survey doors, Lit knocks, Refused; [Restricted doors,
+  Billable doors when restricted billing is on]; Connection rate %, Contact rate %, New homes
+  reached; TOTAL row.

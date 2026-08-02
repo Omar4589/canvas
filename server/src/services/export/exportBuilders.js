@@ -89,9 +89,10 @@ const canvasserCells = (info) => [info?.firstName || '', info?.lastName || '', i
 // ---------------------------------------------------------------------------------------
 // canvass-activity — one row per CanvassActivity (door-unit ledger)
 
-export const buildCanvassActivity = async (ctx, sink) => {
+// The exact ledger query the builder streams, exported so the estimate endpoint counts the
+// SAME universe — estimate==build by construction (the turf target-preview principle).
+export const canvassActivityQuery = (ctx) => {
   const { params, anchorTz } = ctx;
-  const fmts = instantFmts(anchorTz);
   const q = { organizationId: ctx.organizationId, campaignId: ctx.campaignId };
   const range = dayRangeOf(params, anchorTz);
   if (range) q.timestamp = range;
@@ -109,6 +110,13 @@ export const buildCanvassActivity = async (ctx, sink) => {
   } else if (params.excludeBulk) {
     Object.assign(q, NOT_BULK);
   }
+  return q;
+};
+
+export const buildCanvassActivity = async (ctx, sink) => {
+  const { anchorTz } = ctx;
+  const fmts = instantFmts(anchorTz);
+  const q = canvassActivityQuery(ctx);
 
   const [{ passById, effortNameById }, userIds, coordIds, total] = await Promise.all([
     loadPassEffortMaps(ctx),
@@ -125,7 +133,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
   const writer = await sink.file('activity-log', [
     'Timestamp (ISO)', 'Date', `Time (${fmts.tzLabel})`, 'Action',
     'Address', 'Address line 2', 'City', 'State', 'Zip', 'County',
-    'Voter ID', 'Voter first name', 'Voter last name', 'Party',
+    'State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party',
     'Canvasser first name', 'Canvasser last name', 'Canvasser status', 'Team',
     'Walk list', 'Pass', 'Pass name', 'Via', 'Offline submission',
     'Latitude', 'Longitude', 'GPS accuracy (m)', 'Distance from house (m)',
@@ -141,7 +149,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
     const vIds = [...new Set(batch.map((a) => a.voterId && String(a.voterId)).filter(Boolean))];
     const [homes, voters] = await Promise.all([
       Household.find({ _id: { $in: hhIds } }, 'addressLine1 addressLine2 city state zipCode county').lean(),
-      vIds.length ? Voter.find({ _id: { $in: vIds } }, 'stateVoterId firstName lastName party').lean() : [],
+      vIds.length ? Voter.find({ _id: { $in: vIds } }, 'stateVoterId uid firstName lastName party').lean() : [],
     ]);
     const homeById = new Map(homes.map((h) => [String(h._id), h]));
     const voterById = new Map(voters.map((v) => [String(v._id), v]));
@@ -155,13 +163,14 @@ export const buildCanvassActivity = async (ctx, sink) => {
       if (dncHit) ctx.countDnc(1);
       const v = !dncHit && vid ? voterById.get(vid) : null;
       if (v) ctx.subjects.add(vid);
+      else if (vid && !dncHit) ctx.countOrphaned(1); // dangling voterId — Voter doc gone; row kept (door-unit rule)
       const p = a.passId ? passById.get(String(a.passId)) : null;
       const canv = people.get(String(a.userId)) || null;
       const team = a.coordinatorId ? people.get(String(a.coordinatorId)) : null;
       await writer.writeRow([
         ...instantCells(a.timestamp, fmts), a.actionType,
         h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '', h?.county || '',
-        v?.stateVoterId || '', v?.firstName || '', v?.lastName || '', v?.party || '',
+        v?.stateVoterId || '', v?.uid || '', v?.firstName || '', v?.lastName || '', v?.party || '',
         ...canvasserCells(canv),
         team ? `${team.firstName} ${team.lastName}`.trim() : '',
         p ? effortNameById.get(String(p.effortId)) || '' : '',
@@ -192,54 +201,31 @@ export const buildCanvassActivity = async (ctx, sink) => {
 // rows with `Round status` ∉ {unknocked, restricted} for a pass === that pass's `knocks`
 // in knocks-by-pass (both are distinct (household, pass) over KNOCK_ACTIONS).
 
-export const buildDoorsByRound = async (ctx, sink) => {
-  const { params, anchorTz } = ctx;
-  const fmts = instantFmts(anchorTz);
+const DOORS_HH_PROJ = 'addressLine1 addressLine2 city state zipCode county precinctValue status isActive';
+
+// Shared round/universe resolution — the builder and the estimate endpoint iterate the
+// SAME rounds, so estimate==build by construction (the turf target-preview principle).
+// `projection: '_id'` lets the estimate skip address hydration; `withStatus: false` skips
+// the status aggregations entirely for an unfiltered count. The expensive per-round joins
+// (visits, canvassers, turf names) stay in the builder — a count never needs them.
+export const resolveDoorsByRoundRounds = async function* (ctx, { projection = DOORS_HH_PROJ, withStatus = true } = {}) {
+  const { params } = ctx;
   const campaignType = ctx.campaign?.type || 'survey';
 
   const passQ = { organizationId: ctx.organizationId, campaignId: ctx.campaignId };
   if (params.effortId) passQ.effortId = oid(params.effortId);
   if (params.passId && params.passId !== 'legacy') passQ._id = oid(params.passId);
-  const [{ effortNameById }, passes, turfs] = await Promise.all([
+  // 'legacy' means ONLY the null-pass bucket (the passId:null mapping every other type
+  // uses) — real rounds are skipped entirely, not merely un-filtered.
+  const [{ effortNameById }, passes] = await Promise.all([
     loadPassEffortMaps(ctx),
-    Pass.find(passQ, 'roundNumber name status effortId').lean(),
-    Turf.find({ campaignId: ctx.campaignId }, 'name').lean(),
+    params.passId === 'legacy' ? [] : Pass.find(passQ, 'roundNumber name status effortId').lean(),
   ]);
-  const turfNameById = new Map(turfs.map((t) => [String(t._id), t.name]));
   passes.sort(
     (a, b) =>
       (effortNameById.get(String(a.effortId)) || '￿').localeCompare(effortNameById.get(String(b.effortId)) || '￿') ||
       a.roundNumber - b.roundNumber
   );
-  const statusFilter = params.roundStatuses?.length ? new Set(params.roundStatuses) : null;
-
-  const writer = await sink.file('doors-by-round', [
-    'Walk list', 'Pass', 'Pass name', 'Pass status', 'Book',
-    'Address', 'Address line 2', 'City', 'State', 'Zip', 'County', 'Precinct',
-    'Round status', 'Door visits this round',
-    'Last action at (ISO)', 'Date', `Time (${fmts.tzLabel})`,
-    'Last action by first name', 'Last action by last name', 'Last action by status',
-    'Campaign status', 'Active door', 'Household DB id',
-  ]);
-
-  const HH_PROJ = 'addressLine1 addressLine2 city state zipCode county precinctValue status isActive';
-
-  // Per-pass visit/attribution rollup (event-unit visits over BILLABLE_WITH_RESTRICTED,
-  // latest turf/user by time — the LEDGER's turfId, never Household.turfId, which mirrors
-  // only the current cut and would mislabel past rounds).
-  const visitAgg = (passIdMatch) =>
-    CanvassActivity.aggregate([
-      { $match: { campaignId: ctx.campaignId, passId: passIdMatch, actionType: { $in: BILLABLE_WITH_RESTRICTED } } },
-      { $sort: { timestamp: 1 } },
-      {
-        $group: {
-          _id: '$householdId',
-          visits: { $sum: 1 },
-          lastTurfId: { $last: '$turfId' },
-          lastUserId: { $last: '$userId' },
-        },
-      },
-    ]);
 
   // The legacy (passId:null) pseudo-round needs getPassStatusMap's exact sticky-completion
   // rule but that helper requires a real passId — this is the same aggregation with the
@@ -264,6 +250,81 @@ export const buildDoorsByRound = async (ctx, sink) => {
     return map;
   };
 
+  for (const pass of passes) {
+    // Universe = doors the effort owns now ∪ doors the ledger touched this round (catches
+    // doors deactivated or re-homed after being worked — they emit with Active door: no).
+    const [owned, touched] = await Promise.all([
+      Household.find({ campaignId: ctx.campaignId, effortId: pass.effortId, isActive: true }, projection).lean(),
+      CanvassActivity.distinct('householdId', { campaignId: ctx.campaignId, passId: pass._id }),
+    ]);
+    const homeById = new Map(owned.map((h) => [String(h._id), h]));
+    const extraIds = touched.map(String).filter((id) => !homeById.has(id));
+    if (extraIds.length) {
+      const extras = await Household.find({ _id: { $in: extraIds } }, projection).lean();
+      for (const h of extras) homeById.set(String(h._id), h);
+    }
+    const universeIds = [...homeById.keys()];
+    const statusMap = new Map();
+    if (withStatus) {
+      for (const ids of chunk(universeIds, 2000)) {
+        const m = await getPassStatusMap(pass._id, ids, campaignType);
+        for (const [k, v] of m) statusMap.set(k, v);
+      }
+    }
+    yield { pass, universeIds, homeById, statusMap };
+  }
+
+  // Legacy pre-turf bucket: doors with null-pass activity only, one pseudo-round for the
+  // campaign (legacy rows predate efforts, so there is no per-effort axis to put them on).
+  if (!params.passId || params.passId === 'legacy') {
+    const touched = await CanvassActivity.distinct('householdId', { campaignId: ctx.campaignId, passId: null });
+    if (touched.length) {
+      const ids = touched.map(String);
+      const homes = await Household.find({ _id: { $in: ids } }, projection).lean();
+      const homeById = new Map(homes.map((h) => [String(h._id), h]));
+      const statusMap = withStatus ? await legacyStatusMap(ids) : new Map();
+      yield { pass: null, universeIds: ids, homeById, statusMap };
+    }
+  }
+};
+
+export const buildDoorsByRound = async (ctx, sink) => {
+  const { params, anchorTz } = ctx;
+  const fmts = instantFmts(anchorTz);
+
+  const [{ effortNameById }, turfs] = await Promise.all([
+    loadPassEffortMaps(ctx),
+    Turf.find({ campaignId: ctx.campaignId }, 'name').lean(),
+  ]);
+  const turfNameById = new Map(turfs.map((t) => [String(t._id), t.name]));
+  const statusFilter = params.roundStatuses?.length ? new Set(params.roundStatuses) : null;
+
+  const writer = await sink.file('doors-by-round', [
+    'Walk list', 'Pass', 'Pass name', 'Pass status', 'Book',
+    'Address', 'Address line 2', 'City', 'State', 'Zip', 'County', 'Precinct',
+    'Round status', 'Door visits this round',
+    'Last action at (ISO)', 'Date', `Time (${fmts.tzLabel})`,
+    'Last action by first name', 'Last action by last name', 'Last action by status',
+    'Campaign status', 'Active door', 'Household DB id',
+  ]);
+
+  // Per-pass visit/attribution rollup (event-unit visits over BILLABLE_WITH_RESTRICTED,
+  // latest turf/user by time — the LEDGER's turfId, never Household.turfId, which mirrors
+  // only the current cut and would mislabel past rounds).
+  const visitAgg = (passIdMatch) =>
+    CanvassActivity.aggregate([
+      { $match: { campaignId: ctx.campaignId, passId: passIdMatch, actionType: { $in: BILLABLE_WITH_RESTRICTED } } },
+      { $sort: { timestamp: 1 } },
+      {
+        $group: {
+          _id: '$householdId',
+          visits: { $sum: 1 },
+          lastTurfId: { $last: '$turfId' },
+          lastUserId: { $last: '$userId' },
+        },
+      },
+    ]);
+
   const emitRound = async ({ pass, universeIds, homeById, statusMap, visitsById, people }) => {
     for (const hid of universeIds) {
       const st = statusMap.get(hid) || { status: 'unknocked', lastActionAt: null };
@@ -286,51 +347,17 @@ export const buildDoorsByRound = async (ctx, sink) => {
     ctx.progress(writer.rowsWritten);
   };
 
-  for (const pass of passes) {
-    // Universe = doors the effort owns now ∪ doors the ledger touched this round (catches
-    // doors deactivated or re-homed after being worked — they emit with Active door: no).
-    const [owned, touched] = await Promise.all([
-      Household.find({ campaignId: ctx.campaignId, effortId: pass.effortId, isActive: true }, HH_PROJ).lean(),
-      CanvassActivity.distinct('householdId', { campaignId: ctx.campaignId, passId: pass._id }),
-    ]);
-    const homeById = new Map(owned.map((h) => [String(h._id), h]));
-    const extraIds = touched.map(String).filter((id) => !homeById.has(id));
-    if (extraIds.length) {
-      const extras = await Household.find({ _id: { $in: extraIds } }, HH_PROJ).lean();
-      for (const h of extras) homeById.set(String(h._id), h);
-    }
-    const universeIds = [...homeById.keys()];
-    const statusMap = new Map();
-    for (const ids of chunk(universeIds, 2000)) {
-      const m = await getPassStatusMap(pass._id, ids, campaignType);
-      for (const [k, v] of m) statusMap.set(k, v);
-    }
-    const visits = await visitAgg(pass._id);
+  let universeSoFar = 0;
+  for await (const round of resolveDoorsByRoundRounds(ctx)) {
+    universeSoFar += round.universeIds.length;
+    ctx.setTotalEstimate(universeSoFar);
+    const visits = await visitAgg(round.pass ? round.pass._id : null);
     const visitsById = new Map(visits.map((v) => [String(v._id), v]));
     const people = await hydrateCanvassers(
       visits.map((v) => v.lastUserId && String(v.lastUserId)).filter(Boolean),
       ctx.organizationId,
     );
-    await emitRound({ pass, universeIds, homeById, statusMap, visitsById, people });
-  }
-
-  // Legacy pre-turf bucket: doors with null-pass activity only, one pseudo-round for the
-  // campaign (legacy rows predate efforts, so there is no per-effort axis to put them on).
-  if (!params.passId || params.passId === 'legacy') {
-    const touched = await CanvassActivity.distinct('householdId', { campaignId: ctx.campaignId, passId: null });
-    if (touched.length) {
-      const ids = touched.map(String);
-      const homes = await Household.find({ _id: { $in: ids } }, HH_PROJ).lean();
-      const homeById = new Map(homes.map((h) => [String(h._id), h]));
-      const statusMap = await legacyStatusMap(ids);
-      const visits = await visitAgg(null);
-      const visitsById = new Map(visits.map((v) => [String(v._id), v]));
-      const people = await hydrateCanvassers(
-        visits.map((v) => v.lastUserId && String(v.lastUserId)).filter(Boolean),
-        ctx.organizationId,
-      );
-      await emitRound({ pass: null, universeIds: ids, homeById, statusMap, visitsById, people });
-    }
+    await emitRound({ ...round, visitsById, people });
   }
 
   return { files: [{ name: 'doors-by-round', rows: writer.rowsWritten }] };
@@ -342,7 +369,8 @@ export const buildDoorsByRound = async (ctx, sink) => {
 // aggregations' stable-id contract) with the recorded snapshot as fallback; the LONG
 // export below is the never-rewritten snapshot record for disputes.
 
-const surveyBaseQuery = (ctx) => {
+// Exported for the estimate endpoint — the count and the build must share one query.
+export const surveyBaseQuery = (ctx) => {
   const q = { organizationId: ctx.organizationId, campaignId: ctx.campaignId };
   const range = dayRangeOf(ctx.params, ctx.anchorTz);
   if (range) q.submittedAt = range;
@@ -350,12 +378,12 @@ const surveyBaseQuery = (ctx) => {
   if (ctx.params.passId === 'legacy') q.passId = null;
   else if (ctx.params.passId) q.passId = oid(ctx.params.passId);
   if (ctx.params.userId) q.userId = oid(ctx.params.userId);
+  if (ctx.params.surveyTemplateId) q.surveyTemplateId = oid(ctx.params.surveyTemplateId);
   return q;
 };
 
 export const buildSurveyResultsWide = async (ctx, sink) => {
   const q = surveyBaseQuery(ctx);
-  if (ctx.params.surveyTemplateId) q.surveyTemplateId = oid(ctx.params.surveyTemplateId);
   const templateIds = (await SurveyResponse.distinct('surveyTemplateId', q)).filter(Boolean);
   if (!templateIds.length) {
     await sink.file('survey-results', ['Submitted (ISO)']);
@@ -419,7 +447,7 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
     const writer = await sink.file(name, [
       'Submitted (ISO)', 'Date', `Time (${fmts.tzLabel})`,
       'Walk list', 'Pass', 'Pass name',
-      'Voter ID', 'Voter first name', 'Voter last name', 'Party',
+      'State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party',
       'Address', 'Address line 2', 'City', 'State', 'Zip',
       'Canvasser first name', 'Canvasser last name', 'Canvasser status', 'Team',
       'Template', 'Template version', 'Offline submission', 'Edited', 'Note',
@@ -434,7 +462,7 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
       const vIds = [...new Set(batch.map((r) => String(r.voterId)))];
       const hhIds = [...new Set(batch.map((r) => String(r.householdId)))];
       const [voters, homes] = await Promise.all([
-        Voter.find({ _id: { $in: vIds } }, 'stateVoterId firstName lastName party').lean(),
+        Voter.find({ _id: { $in: vIds } }, 'stateVoterId uid firstName lastName party').lean(),
         Household.find({ _id: { $in: hhIds } }, 'addressLine1 addressLine2 city state zipCode').lean(),
       ]);
       const voterById = new Map(voters.map((v) => [String(v._id), v]));
@@ -461,7 +489,7 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
           ...instantCells(r.submittedAt, fmts),
           p ? effortNameById.get(String(p.effortId)) || '' : '',
           p ? p.roundNumber : '', p ? p.name : passLabel(p),
-          v.stateVoterId || '', v.firstName || '', v.lastName || '', v.party || '',
+          v.stateVoterId || '', v.uid || '', v.firstName || '', v.lastName || '', v.party || '',
           h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '',
           ...canvasserCells(canv),
           team ? `${team.firstName} ${team.lastName}`.trim() : '',
@@ -493,7 +521,6 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
 
 export const buildSurveyAnswersLong = async (ctx, sink) => {
   const q = surveyBaseQuery(ctx);
-  if (ctx.params.surveyTemplateId) q.surveyTemplateId = oid(ctx.params.surveyTemplateId);
   const fmts = instantFmts(ctx.anchorTz);
   const { passById, effortNameById } = await loadPassEffortMaps(ctx);
   const [userIds, total, templates] = await Promise.all([
@@ -507,7 +534,7 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
 
   const writer = await sink.file('survey-answers', [
     'Submitted (ISO)', 'Date', `Time (${fmts.tzLabel})`,
-    'Voter ID', 'Voter first name', 'Voter last name', 'Party',
+    'State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party',
     'Address', 'Address line 2', 'City', 'State', 'Zip',
     'Canvasser first name', 'Canvasser last name', 'Canvasser status',
     'Walk list', 'Pass', 'Pass name', 'Template', 'Template version',
@@ -524,7 +551,7 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
     const vIds = [...new Set(batch.map((r) => String(r.voterId)))];
     const hhIds = [...new Set(batch.map((r) => String(r.householdId)))];
     const [voters, homes] = await Promise.all([
-      Voter.find({ _id: { $in: vIds } }, 'stateVoterId firstName lastName party').lean(),
+      Voter.find({ _id: { $in: vIds } }, 'stateVoterId uid firstName lastName party').lean(),
       Household.find({ _id: { $in: hhIds } }, 'addressLine1 addressLine2 city state zipCode').lean(),
     ]);
     const voterById = new Map(voters.map((v) => [String(v._id), v]));
@@ -538,7 +565,10 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
       }
       const v = voterById.get(vid);
       if (!v) {
-        ctx.countOrphaned(1);
+        // orphanedRows counts dropped ROWS in this file's unit — answer entries, not
+        // responses (the wide file's unit) — so est.rows === rowCount + orphanedRows
+        // holds exactly for the answer-unit estimate.
+        ctx.countOrphaned((r.answers || []).length);
         continue;
       }
       ctx.subjects.add(vid);
@@ -547,7 +577,7 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
       const canv = people.get(String(r.userId));
       const shared = [
         ...instantCells(r.submittedAt, fmts),
-        v.stateVoterId || '', v.firstName || '', v.lastName || '', v.party || '',
+        v.stateVoterId || '', v.uid || '', v.firstName || '', v.lastName || '', v.party || '',
         h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '',
         ...canvasserCells(canv),
         p ? effortNameById.get(String(p.effortId)) || '' : '',
@@ -712,18 +742,24 @@ export const buildVotersFiltered = async (ctx, sink) => {
 // route could export before the Export Center). Notes about DNC voters are dropped
 // entirely: the note body frequently contains the opt-out request itself.
 
-export const buildVoterNotes = async (ctx, sink) => {
-  const fmts = instantFmts(ctx.anchorTz);
+// Exported for the estimate endpoint — the count and the build must share one query.
+export const voterNotesQuery = (ctx) => {
   const q = { organizationId: ctx.organizationId };
   const range = dayRangeOf(ctx.params, ctx.anchorTz);
   if (range) q.createdAt = range;
+  return q;
+};
+
+export const buildVoterNotes = async (ctx, sink) => {
+  const fmts = instantFmts(ctx.anchorTz);
+  const q = voterNotesQuery(ctx);
   const authorIds = await VoterNote.distinct('authorId', q);
   const people = await hydrateCanvassers(authorIds.filter(Boolean).map(String), ctx.organizationId);
   ctx.setTotalEstimate(await VoterNote.countDocuments(q));
 
   const writer = await sink.file('voter-notes', [
     'Created (ISO)', 'Date', `Time (${fmts.tzLabel})`,
-    'Voter ID', 'Voter first name', 'Voter last name',
+    'State voter ID', 'UID', 'Voter first name', 'Voter last name',
     'Address', 'City', 'State', 'Zip',
     'Author first name', 'Author last name', 'Author status',
     'Edited', 'Edited at (ISO)', 'Note',
@@ -740,7 +776,7 @@ export const buildVoterNotes = async (ctx, sink) => {
     // are per-campaign, so a note only belongs in this campaign's export if its voter does.
     const voters = await Voter.find(
       { _id: { $in: vIds }, campaignId: ctx.campaignId },
-      'stateVoterId firstName lastName householdId'
+      'stateVoterId uid firstName lastName householdId'
     ).lean();
     const voterById = new Map(voters.map((v) => [String(v._id), v]));
     const hhIds = [...new Set(voters.map((v) => String(v.householdId)).filter(Boolean))];
@@ -760,7 +796,7 @@ export const buildVoterNotes = async (ctx, sink) => {
       const author = people.get(String(n.authorId));
       await writer.writeRow([
         ...instantCells(n.createdAt, fmts),
-        v.stateVoterId || '', v.firstName || '', v.lastName || '',
+        v.stateVoterId || '', v.uid || '', v.firstName || '', v.lastName || '',
         h?.addressLine1 || '', h?.city || '', h?.state || '', h?.zipCode || '',
         ...canvasserCells(author),
         n.editedAt ? 'yes' : '', n.editedAt ? new Date(n.editedAt).toISOString() : '',
