@@ -42,6 +42,20 @@ function toWireVoter(v, voted) {
   return { ...rest, age: ageFromDob(dateOfBirth), voted, dnc: doNotContact?.flagged === true };
 }
 
+// Per-round voter state + the smart-confirm flag, in ONE place so the bootstrap and the
+// /changes delta cannot drift (a delta voter is never a partial view — the client spread-merges
+// it whole). `surveyedByMe` ships ONLY when the voter reads 'surveyed' this round: true = the
+// requesting canvasser took it, false = a teammate did (the door confirms before re-asking).
+// The teammate's IDENTITY never ships — a boolean, same minimalism as the dnc flag. Voters at
+// legacy null-pass doors keep the global status and carry no flag, matching door status.
+function stampPerRoundSurvey(w, doorPass, surveyedThisRound, meId) {
+  if (!doorPass.has(String(w.householdId))) return w;
+  const by = surveyedThisRound.get(String(w._id)) || null;
+  w.surveyStatus = by ? 'surveyed' : 'not_surveyed';
+  if (by) w.surveyedByMe = by === String(meId);
+  return w;
+}
+
 function ageFromDob(dob) {
   if (!dob) return null;
   const d = new Date(dob);
@@ -288,7 +302,7 @@ router.get('/bootstrap', async (req, res, next) => {
           }).lean()
         : Promise.resolve(null),
       VotedVoter.find({ campaignId: campaign._id }, { voterId: 1 }).lean(),
-      campaign.type === 'survey' ? surveyedVotersFromDoorPass(doorPass) : Promise.resolve(new Set()),
+      campaign.type === 'survey' ? surveyedVotersFromDoorPass(doorPass) : Promise.resolve(new Map()),
     ]);
     // Early voting: flag (not hide) voters who already voted so the app can show
     // a ✓ next to their name. Fully-voted doors were already dropped above.
@@ -299,13 +313,9 @@ router.get('/bootstrap', async (req, res, next) => {
     // Re-survey label, no cross-round tell. The stored Voter.surveyStatus stays the
     // campaign-global "ever surveyed" for admin/reports. Voters at doors outside
     // doorPass (legacy null-pass books) keep the global value, matching door status.
-    const voters = votersRaw.map((v) => {
-      const w = toWireVoter(v, votedSet.has(String(v._id)));
-      if (doorPass.has(String(w.householdId))) {
-        w.surveyStatus = surveyedThisRound.has(String(v._id)) ? 'surveyed' : 'not_surveyed';
-      }
-      return w;
-    });
+    const voters = votersRaw.map((v) =>
+      stampPerRoundSurvey(toWireVoter(v, votedSet.has(String(v._id))), doorPass, surveyedThisRound, req.user._id)
+    );
 
     const { books, efforts } = await canvasserBooks(req, campaign);
     // The campaign's active round ids — the client compares this to the /changes
@@ -449,13 +459,9 @@ router.get('/changes', async (req, res, next) => {
           surveyedVotersFromDoorPass(doorPass),
         ]);
         const votedSet = new Set(votedRecs.map((r) => String(r.voterId)));
-        changedVoters = raw.map((v) => {
-          const w = toWireVoter(v, votedSet.has(String(v._id)));
-          if (doorPass.has(String(w.householdId))) {
-            w.surveyStatus = surveyedThisRound.has(String(v._id)) ? 'surveyed' : 'not_surveyed';
-          }
-          return w;
-        });
+        changedVoters = raw.map((v) =>
+          stampPerRoundSurvey(toWireVoter(v, votedSet.has(String(v._id))), doorPass, surveyedThisRound, req.user._id)
+        );
       }
     }
 

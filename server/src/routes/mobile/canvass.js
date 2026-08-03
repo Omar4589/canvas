@@ -21,6 +21,7 @@ import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
+import { archiveOverwrittenResponse } from '../../services/surveys/archiveOverwrite.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
@@ -680,28 +681,51 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       editedAt: null,
     };
     const surveyFilter = { voterId: voter._id, passId };
-    // Whether the upsert truly INSERTED (vs replaced) decides the stats.surveyCount bump. The
-    // pre-check + the E11000 override below stay exact under the double-tap race: both racers can
-    // see "not exists", but only the insert winner keeps surveyInserted true.
-    let surveyInserted = !(await SurveyResponse.exists(surveyFilter));
-    let surveyResponse;
-    try {
-      surveyResponse = await SurveyResponse.findOneAndUpdate(
-        surveyFilter,
-        { $set: surveyFields },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-    } catch (err) {
-      if (err.code === 11000) {
-        // Lost the insert race to a concurrent submit for this (voter, pass) — the winner's row
-        // now exists, so update it (latest answers win).
-        surveyInserted = false;
-        surveyResponse = await SurveyResponse.findOneAndUpdate(
-          surveyFilter,
-          { $set: surveyFields },
-          { new: true }
-        );
-      } else throw err;
+    // Replace-vs-insert is decided by which WRITE actually ran, not by pre-read truthiness. The
+    // old blind upsert had a race the parity oracle tolerated but this fix cannot: a racer whose
+    // pre-read saw "no row" could land as a silent UPDATE (no E11000) after the winner's insert
+    // committed — double-bumping surveyCount and, now that overwrites are preserved, replacing a
+    // row it never read and so never archived. Splitting the paths (update-a-seen-row vs
+    // insert-only, E11000 → re-read + retry) makes both the counter and the archive invariant
+    // exact in every interleaving: a cross-canvasser replacement ALWAYS leaves an archive row.
+    //
+    // Full findOne (was .exists): same point-seek on the unique index, and the doc body is
+    // exactly what a cross-canvasser overwrite must preserve before the $set destroys it. A
+    // same-user re-submit is the designed self-heal and archives nothing.
+    let surveyInserted = false;
+    let surveyResponse = null;
+    const replaceSeenRow = async (seen) => {
+      if (String(seen.userId) !== String(req.user._id)) {
+        // Snapshot-before-write: answers, note, authorship, GPS and any admin edit survive
+        // for the admin surfaces + restore.
+        await archiveOverwrittenResponse(seen, { byUserId: req.user._id });
+      }
+      // No upsert: this must only ever hit the row we just read (deleted-in-between falls
+      // through to the insert path below).
+      return SurveyResponse.findOneAndUpdate(surveyFilter, { $set: surveyFields }, { new: true });
+    };
+    const existing = await SurveyResponse.findOne(surveyFilter).lean();
+    if (existing) surveyResponse = await replaceSeenRow(existing);
+    if (!surveyResponse) {
+      try {
+        surveyResponse = await SurveyResponse.create(surveyFields);
+        surveyInserted = true;
+      } catch (err) {
+        if (err.code !== 11000) throw err;
+        // Lost the insert race — the winner's row exists now. Their seconds-old response is
+        // still a real conversation; preserve it exactly like the slow path (latest answers win).
+        const winner = await SurveyResponse.findOne(surveyFilter).lean();
+        if (winner) surveyResponse = await replaceSeenRow(winner);
+        if (!surveyResponse) {
+          // Winner vanished in the microsecond between (a concurrent admin delete) — last
+          // resort blind upsert; the tiny counter drift is the documented reconcile-healed class.
+          surveyResponse = await SurveyResponse.findOneAndUpdate(
+            surveyFilter,
+            { $set: surveyFields },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
+        }
+      }
     }
 
     await CanvassActivity.deleteMany({

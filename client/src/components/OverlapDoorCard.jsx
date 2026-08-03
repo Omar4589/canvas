@@ -82,6 +82,20 @@ export default function OverlapDoorCard({ door, tz, onViewMap }) {
               </span>
             ))}
           </div>
+          {/* Superset contract: renders only when the engine attached it. A same-round pair of
+              surveys on one voter means the later submit REPLACED the earlier answers — preserved,
+              restorable from the voter profile. The worst kind of collision, so it reads danger. */}
+          {(p.overwrites || []).map((o, i) => (
+            <div key={`${o.voterId}-${i}`} className="mt-1 flex flex-wrap items-center gap-1.5 text-danger-fg">
+              <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-danger" />
+              {o.overwrittenBy?.name} replaced {o.by?.name}&apos;s survey answers for {o.voterName}
+              {o.overwrittenAt && (
+                <span className="text-fg-muted">
+                  {formatInTz(o.overwrittenAt, tz, { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, false)}
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       ))}
     </div>

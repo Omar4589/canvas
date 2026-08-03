@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import Section from '../components/Section.jsx';
+import { Badge } from '../components/ui/index.js';
 
 function fmtDate(d, tz, withTime = true) {
   if (!d) return '—';
@@ -268,6 +269,13 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
           {survey.editedAt && (
             <p className="mt-2 text-xs text-amber-600">Edited {fmtDate(survey.editedAt, tz)}{survey.editedBy ? ` by ${survey.editedBy.name}` : ''}</p>
           )}
+          {survey.replacedEarlier && (
+            <p className="mt-2 text-xs text-warning-fg">
+              Replaced {survey.replacedEarlier.by?.name || 'another canvasser'}&apos;s earlier answers
+              from {fmtDate(survey.replacedEarlier.submittedAt, tz)} — the earlier response is
+              preserved below.
+            </p>
+          )}
         </>
       ) : (
         <div className="space-y-3">
@@ -318,6 +326,50 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
 // A quiet audit footnote: did Doorline staff (a vendor inside a support session, not a member of
 // this org) touch THIS voter's record, and why? Own its own fetch so a hiccup here can never take
 // the profile down — on error it renders nothing at all.
+// A PRESERVED (overwritten) response — read-only, visually muted, restorable. The restore is a
+// lossless swap: these answers become current and the current ones land here the same way, so
+// flipping back and forth destroys nothing.
+function OverwrittenSurveyCard({ survey, onRestore, busy, tz }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-sunken p-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-medium text-fg-muted">
+          {survey.templateName || 'Survey'}{' '}
+          <span className="text-xs font-normal text-fg-subtle">
+            · Overwritten {fmtDate(survey.overwrittenAt, tz)}
+            {survey.by ? ` · was ${survey.by.name}'s` : ''}
+            {survey.overwrittenBy ? ` · replaced by ${survey.overwrittenBy.name}` : ''}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <Badge variant="danger">Overwritten</Badge>
+          <button
+            onClick={onRestore}
+            disabled={busy}
+            className="text-xs font-semibold text-brand-accent hover:underline disabled:opacity-50"
+          >
+            Restore this response…
+          </button>
+        </div>
+      </div>
+      <dl className="space-y-1.5 text-sm">
+        {survey.answers.map((a) => (
+          <div key={a.questionKey} className="flex gap-2">
+            <dt className="text-fg-subtle">{a.questionLabel}:</dt>
+            <dd className="text-fg-muted">{answerText(a.answer)}</dd>
+          </div>
+        ))}
+      </dl>
+      {survey.note && <p className="mt-2 rounded bg-card p-2 text-sm text-fg-muted">📝 {survey.note}</p>}
+      {survey.editedAt && (
+        <p className="mt-2 text-xs text-fg-subtle">
+          Edited {fmtDate(survey.editedAt, tz)}{survey.editedBy ? ` by ${survey.editedBy.name}` : ''} (before it was overwritten)
+        </p>
+      )}
+    </div>
+  );
+}
+
 function StaffAccessCard({ voterId, tz }) {
   const q = useQuery({
     queryKey: ['voter-staff-access', voterId],
@@ -406,6 +458,10 @@ export default function VoterDetailPage() {
   const delSurvey = useMutation({
     mutationFn: (responseId) => api(`/admin/voters/${voterId}/surveys/${responseId}`, { method: 'DELETE' }),
     onSuccess: invalidate, onError: onErr,
+  });
+  const restoreSurvey = useMutation({
+    mutationFn: (archiveId) => api(`/admin/voters/${voterId}/surveys/${archiveId}/restore`, { method: 'POST' }),
+    onSuccess: () => { setErr(''); invalidate(); }, onError: onErr,
   });
   const flagDnc = useMutation({
     mutationFn: (reason) => api(`/admin/voters/${voterId}/dnc`, { method: 'POST', body: { reason } }),
@@ -513,6 +569,27 @@ export default function VoterDetailPage() {
                 busy={editSurvey.isPending || delSurvey.isPending}
                 onSave={(body, done) => editSurvey.mutate({ responseId: s.id, body }, { onSuccess: done })}
                 onDelete={() => { if (window.confirm('Delete this survey response?')) delSurvey.mutate(s.id); }}
+                tz={orgTz}
+              />
+            ))}
+            {(p.overwrittenSurveys || []).map((s) => (
+              <OverwrittenSurveyCard
+                key={s.id}
+                survey={s}
+                busy={restoreSurvey.isPending}
+                onRestore={() => {
+                  const loser = s.by?.name || 'the earlier canvasser';
+                  const when = fmtDate(s.submittedAt, orgTz);
+                  if (
+                    window.confirm(
+                      `Restore ${loser}'s answers from ${when}? This swaps the two responses: ` +
+                        `${loser}'s answers become the voter's current response, and the current ` +
+                        `answers are preserved the same way. Nothing is deleted — you can swap back.`
+                    )
+                  ) {
+                    restoreSurvey.mutate(s.id);
+                  }
+                }}
                 tz={orgTz}
               />
             ))}

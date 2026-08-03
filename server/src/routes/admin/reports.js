@@ -12,6 +12,7 @@ import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { choiceKeyStages, mergeOptionRows, voterAnswerClause, answerTagClause } from '../../services/surveys/answerAgg.js';
 import { tagOptionMap, normalizeTag } from '../../services/surveys/tags.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
@@ -1680,16 +1681,53 @@ router.get('/responses/:responseId', async (req, res, next) => {
     if (!mongoose.isValidObjectId(responseId)) {
       return res.status(400).json({ error: 'Invalid responseId' });
     }
-    const r = await SurveyResponse.findOne({ _id: responseId, organizationId: orgId })
-      .populate('voterId', 'fullName party gender precinct')
-      .populate('householdId', 'addressLine1 addressLine2 city state zipCode location')
-      .populate('userId', 'firstName lastName email')
-      .populate('passId', 'roundNumber name')
-      .populate('editedBy', 'firstName lastName')
-      .lean();
+    const populates = (q) =>
+      q
+        .populate('voterId', 'fullName party gender precinct')
+        .populate('householdId', 'addressLine1 addressLine2 city state zipCode location')
+        .populate('userId', 'firstName lastName email')
+        .populate('passId', 'roundNumber name')
+        .populate('editedBy', 'firstName lastName')
+        .lean();
+    let r = await populates(SurveyResponse.findOne({ _id: responseId, organizationId: orgId }));
+    let archived = null;
+    if (!r) {
+      // Archived fallback: the id may be a PRESERVED (overwritten) response — the duplicate
+      // surveys report lists them under the archive id, and this screen is where an admin
+      // inspects (and on mobile, restores) one. Same campaign gate as the live path.
+      archived = await populates(
+        SurveyResponseArchive.findOne({ _id: responseId, organizationId: orgId }).populate(
+          'overwrittenBy',
+          'firstName lastName'
+        )
+      );
+      if (archived) r = archived;
+    }
     if (!r) return res.status(404).json({ error: 'Response not found' });
     if (!isOrgAdmin(req) && !(await canManageCampaign(req, r.campaignId))) {
       return res.status(403).json({ error: 'Forbidden' });
+    }
+    // On the LIVE path, say whether this response replaced a preserved earlier one (the
+    // "replaced X's earlier answers" line + the pointer the restore UI needs).
+    let replacedEarlier = null;
+    if (!archived) {
+      const prior = await SurveyResponseArchive.findOne(
+        { voterId: r.voterId?._id || r.voterId, passId: r.passId?._id || r.passId || null },
+        'userId submittedAt overwrittenAt'
+      )
+        .sort({ overwrittenAt: -1 })
+        .populate('userId', 'firstName lastName')
+        .lean();
+      if (prior) {
+        replacedEarlier = {
+          overwriteId: String(prior._id),
+          by: prior.userId
+            ? { id: String(prior.userId._id), firstName: prior.userId.firstName, lastName: prior.userId.lastName }
+            : null,
+          submittedAt: prior.submittedAt,
+          overwrittenAt: prior.overwrittenAt,
+        };
+      }
     }
     const coords = r.householdId?.location?.coordinates;
     res.json({
@@ -1708,6 +1746,22 @@ router.get('/responses/:responseId', async (req, res, next) => {
         editedBy: r.editedBy
           ? { id: String(r.editedBy._id), firstName: r.editedBy.firstName, lastName: r.editedBy.lastName }
           : null,
+        replacedEarlier,
+        ...(archived
+          ? {
+              archived: true,
+              overwrittenAt: archived.overwrittenAt,
+              overwrittenVia: archived.overwrittenVia,
+              overwrittenBy: archived.overwrittenBy
+                ? {
+                    id: String(archived.overwrittenBy._id),
+                    firstName: archived.overwrittenBy.firstName,
+                    lastName: archived.overwrittenBy.lastName,
+                  }
+                : null,
+              voterId: String(archived.voterId?._id || archived.voterId),
+            }
+          : {}),
       },
       voter: r.voterId
         ? {
@@ -2315,11 +2369,15 @@ router.get('/canvasser-timeline', async (req, res, next) => {
 });
 
 // Voters with MORE THAN ONE survey response (a "Surveys" count above "Surveyed voters" means
-// someone was surveyed twice). Surfaces who/when/round/where for each so the operator can tell a
-// legit revisit (different canvassers / different round) from a mistake (same canvasser, same
-// day). Paged (skip/limit, `total` = full matching-group count) and filterable by ?userId=
-// (groups containing that canvasser) and ?kind=. Fix path: open the voter profile and delete the
-// extra response. See METRICS.md §Surveys.
+// someone was surveyed twice). Live rows are always cross-round (the unique {voterId, passId}
+// index); preserved SAME-round overwrites join via $unionWith from SurveyResponseArchive as the
+// worst kind, `sameRoundOverwritten` — a second canvasser's submit replaced the first's answers
+// (preserved; restorable from the voter profile). Surfaces who/when/round/where for each so the
+// operator can tell a legit revisit (different canvassers, later round) from a mistake (same
+// canvasser, same day) from a destroyed-and-preserved pair. Paged (skip/limit, `total` = full
+// matching-group count) and filterable by ?userId= (groups containing that canvasser — either
+// participant of an overwrite) and ?kind=. Fix paths: delete the extra response, or restore the
+// preserved one. See METRICS.md §Surveys.
 router.get('/duplicate-surveys', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -2342,17 +2400,30 @@ router.get('/duplicate-surveys', async (req, res, next) => {
     }
 
     const kind = req.query.kind || 'all';
-    if (!['all', 'sameCanvasserSameDay', 'differentCanvassers'].includes(kind)) {
+    if (!['all', 'sameRoundOverwritten', 'sameCanvasserSameDay', 'differentCanvassers'].includes(kind)) {
       return res.status(400).json({ error: 'Invalid kind' });
     }
 
     const [facets] = await SurveyResponse.aggregate([
       { $match: { ...cFilter, ...dateRange } },
+      { $set: { overwritten: false } },
+      // Preserved (overwritten) responses join the report as rows of their voter's group — the
+      // "same round · overwritten" kind. Same campaign scope, same submittedAt window.
+      {
+        $unionWith: {
+          coll: SurveyResponseArchive.collection.name,
+          pipeline: [
+            { $match: { ...cFilter, ...dateRange } },
+            { $set: { overwritten: true } },
+          ],
+        },
+      },
       { $set: { day: dayBucketExpr('submittedAt', tz) } },
       {
         $group: {
           _id: '$voterId',
           count: { $sum: 1 },
+          liveCount: { $sum: { $cond: ['$overwritten', 0, 1] } },
           responses: {
             $push: {
               responseId: '$_id',
@@ -2360,26 +2431,46 @@ router.get('/duplicate-surveys', async (req, res, next) => {
               passId: '$passId',
               userId: '$userId',
               day: '$day',
+              overwritten: '$overwritten',
+              overwrittenAt: '$overwrittenAt',
+              overwrittenById: '$overwrittenBy',
             },
           },
+          // LIVE rows only (archived rows contribute null, stripped below), so the two existing
+          // flags keep their exact meaning — a same-round overwrite pair must NOT light
+          // "different canvassers", which is the cross-round revisit badge.
           // A repeated (user, local-day) key collapses in the set, so set < count ⇔ a repeat.
-          userDays: { $addToSet: { $concat: [{ $toString: '$userId' }, '|', '$day'] } },
-          users: { $addToSet: '$userId' },
+          userDays: {
+            $addToSet: {
+              $cond: ['$overwritten', null, { $concat: [{ $toString: '$userId' }, '|', '$day'] }],
+            },
+          },
+          users: { $addToSet: { $cond: ['$overwritten', null, '$userId'] } },
+          hasOverwrite: { $max: '$overwritten' },
         },
       },
       { $match: { count: { $gt: 1 } } },
       ...(userFilter ? [{ $match: { 'responses.userId': userFilter } }] : []),
       {
         $set: {
-          sameCanvasserSameDay: { $gt: ['$count', { $size: '$userDays' }] },
-          differentCanvassers: { $gt: [{ $size: '$users' }, 1] },
+          userDays: { $setDifference: ['$userDays', [null]] },
+          users: { $setDifference: ['$users', [null]] },
         },
       },
+      {
+        $set: {
+          sameCanvasserSameDay: { $gt: ['$liveCount', { $size: '$userDays' }] },
+          differentCanvassers: { $gt: [{ $size: '$users' }, 1] },
+          sameRoundOverwritten: '$hasOverwrite',
+        },
+      },
+      ...(kind === 'sameRoundOverwritten' ? [{ $match: { sameRoundOverwritten: true } }] : []),
       ...(kind === 'sameCanvasserSameDay' ? [{ $match: { sameCanvasserSameDay: true } }] : []),
       ...(kind === 'differentCanvassers' ? [{ $match: { differentCanvassers: true } }] : []),
-      { $unset: ['userDays', 'users'] },
-      // Most suspicious first (false < true in BSON), then by count; voterId keeps pages stable.
-      { $sort: { sameCanvasserSameDay: -1, count: -1, _id: 1 } },
+      { $unset: ['userDays', 'users', 'liveCount', 'hasOverwrite'] },
+      // Most suspicious first: destroyed-answers pairs, then same-day repeats (false < true in
+      // BSON), then by count; voterId keeps pages stable.
+      { $sort: { sameRoundOverwritten: -1, sameCanvasserSameDay: -1, count: -1, _id: 1 } },
       { $facet: { items: [{ $skip: skip }, { $limit: limit }], total: [{ $count: 'n' }] } },
     ]);
     const dupes = facets?.items || [];
@@ -2391,7 +2482,11 @@ router.get('/duplicate-surveys', async (req, res, next) => {
 
     const voterIds = dupes.map((d) => d._id);
     const userIds = [
-      ...new Set(dupes.flatMap((d) => d.responses.map((r) => String(r.userId)))),
+      ...new Set(
+        dupes.flatMap((d) =>
+          d.responses.flatMap((r) => [String(r.userId), ...(r.overwrittenById ? [String(r.overwrittenById)] : [])])
+        )
+      ),
     ];
     const passIds = [
       ...new Set(dupes.flatMap((d) => d.responses.map((r) => r.passId).filter(Boolean).map(String))),
@@ -2428,6 +2523,7 @@ router.get('/duplicate-surveys', async (req, res, next) => {
         .map((r) => {
           const u = uMap.get(String(r.userId));
           const pass = r.passId ? pMap.get(String(r.passId)) : null;
+          const ow = r.overwritten ? uMap.get(String(r.overwrittenById)) : null;
           return {
             responseId: String(r.responseId),
             submittedAt: r.submittedAt,
@@ -2440,6 +2536,20 @@ router.get('/duplicate-surveys', async (req, res, next) => {
             },
             passId: r.passId ? String(r.passId) : null,
             roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
+            // Archived rows only: responseId is the ARCHIVE id (response-details serves it via
+            // the archived fallback; a stale mobile Delete 404s into "Already deleted").
+            ...(r.overwritten
+              ? {
+                  overwritten: true,
+                  overwrittenAt: r.overwrittenAt,
+                  overwrittenBy: {
+                    userId: String(r.overwrittenById),
+                    firstName: ow?.firstName || '',
+                    lastName: ow?.lastName || '',
+                    email: ow?.email || '',
+                  },
+                }
+              : {}),
           };
         })
         .sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt));
@@ -2465,6 +2575,7 @@ router.get('/duplicate-surveys', async (req, res, next) => {
             }
           : null,
         responses,
+        sameRoundOverwritten: d.sameRoundOverwritten,
         sameCanvasserSameDay: d.sameCanvasserSameDay,
         differentCanvassers: d.differentCanvassers,
       };

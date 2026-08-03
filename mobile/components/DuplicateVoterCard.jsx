@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { formatInTz } from '../lib/datetime';
-import { badgesFor, summaryFor } from '../lib/duplicateSurveys';
+import { badgesFor, summaryFor, overwriteLineFor } from '../lib/duplicateSurveys';
 import { spacing, radius } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
 
@@ -90,12 +90,20 @@ export default function DuplicateVoterCard({
                 accessibilityRole={onOpenResponse ? 'button' : 'text'}
               >
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.respWho} numberOfLines={1}>
-                    {`${r.canvasser?.firstName || ''} ${r.canvasser?.lastName || ''}`.trim() || 'Unknown canvasser'}
-                  </Text>
+                  <View style={styles.respWhoRow}>
+                    <Text style={styles.respWho} numberOfLines={1}>
+                      {`${r.canvasser?.firstName || ''} ${r.canvasser?.lastName || ''}`.trim() || 'Unknown canvasser'}
+                    </Text>
+                    {r.overwritten ? <Pill styles={styles} tone="danger" text="Overwritten" /> : null}
+                  </View>
                   <Text style={styles.respMeta} numberOfLines={1}>
                     {formatInTz(r.submittedAt, tz)} · {r.roundLabel}
                   </Text>
+                  {r.overwritten ? (
+                    <Text style={styles.respMeta} numberOfLines={1}>
+                      {overwriteLineFor(r)}
+                    </Text>
+                  ) : null}
                 </View>
                 {onOpenResponse ? <Text style={styles.respChev}>›</Text> : null}
               </Pressable>
@@ -148,16 +156,19 @@ function makeStyles(t) {
     // to exist at all (THEMING.md). The tinted pills read on their own.
     pill_neutral: { backgroundColor: colors.sunken, borderWidth: 1, borderColor: colors.border },
     pill_danger: { backgroundColor: colors.dangerBg },
+    pill_warn: { backgroundColor: colors.warnBg },
     pill_info: { backgroundColor: colors.infoBg },
     pillDot: { width: 7, height: 7, borderRadius: 4 },
     // The dot may use the vivid base (3:1 graphic floor); the TEXT beside it may not — hence
     // dangerFg below. Never reuse flags.js's reviewToneColors here: its danger branch puts
     // colors.danger on dangerBg at 3.08:1, which THEMING's own table marks as failing small text.
     pillDot_danger: { backgroundColor: colors.danger },
+    pillDot_warn: { backgroundColor: colors.warn },
     pillDot_info: { backgroundColor: colors.info },
     pillText: { fontSize: 11, fontWeight: '700' },
     pillText_neutral: { color: colors.textPrimary },
     pillText_danger: { color: colors.dangerFg },
+    pillText_warn: { color: colors.warnFg },
     // There is no infoFg token; textPrimary on infoBg keeps the web's blue at ~14:1.
     pillText_info: { color: colors.textPrimary },
 
@@ -168,6 +179,7 @@ function makeStyles(t) {
       paddingTop: spacing.xs,
     },
     respRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44 },
+    respWhoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     respPress: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
     respWho: { ...type.body, fontSize: 13, fontWeight: '600' },
     // textSecondary (4.83:1), not textMuted (2.54:1) — this is 11pt text carrying the who/when an

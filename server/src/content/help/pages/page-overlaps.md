@@ -21,6 +21,10 @@ Say a door was knocked on the **5th**, and a different canvasser knocks it again
 
 A door whose knocks **all** fall outside the dates you picked isn't hidden from you either. It's counted underneath as **"+N more outside your dates"** — widen the range to bring those in.
 
+## When both canvassers surveyed the same voter
+
+If a collision includes **two surveys of the same voter in the same round**, the door says so — naming the voter, who surveyed them first, and who replaced those answers. The earlier answers aren't gone: they're preserved, listed on the [Duplicate Surveys page](page-duplicate-surveys) under **Same round · overwritten**, and an admin can restore them from there.
+
 ## Where else overlaps show up
 
 - **On the map** — turn on **Show overlaps** to see the same doors ringed in place, which is useful when you want to know *where* the collisions are clustered. Tap the count to review them.

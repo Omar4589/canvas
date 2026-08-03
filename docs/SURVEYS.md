@@ -353,7 +353,11 @@ At a voter, the canvasser opens the survey, reads the intro, and answers the que
 
 They can add a free-form note and submit. Surveys submitted while offline are queued and sync later.
 **One survey is kept per voter, per pass** — if a canvasser re-submits for the same voter in the
-same pass, the new one replaces the old. A house with three voters surveyed in one visit produces
+same pass, the new one replaces the old. When the earlier response belongs to **another canvasser**,
+the app asks before opening the survey ("Already surveyed this round") — and if they go ahead, the
+replaced answers are **preserved, not lost**: they appear on the voter's profile as a read-only
+preserved-response card, and an admin can **restore** them (a lossless swap — the two responses
+trade places, nothing is deleted). A house with three voters surveyed in one visit produces
 **three survey responses but counts as one knock** (see [METRICS.md](METRICS.md)).
 
 ## Editing a survey — what's allowed once it has answers
@@ -407,6 +411,7 @@ normalization, dual-read aggregation, edit classification), and the `survey-resu
 | `SurveyTemplate…visibleIf` | same (`visibleIfSchema`) | `logic` (`all`/`any`, default `all`) + `rules[]`. Each rule (`ruleSchema`): `questionKey` (an **earlier** question), `op` (`is`/`is_not`/`any_of`/`answered`/`not_answered`), `optionIds[]`. |
 | `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `surveyTemplateId`, **`surveyTemplateVersion`** (snapshot at submit), `answers[]`, `voterId`, `householdId`, `userId`, `campaignId`, `organizationId`, `passId`/`turfId`/`effortId` (metadata, nullable), `location`, `submittedAt`, `wasOfflineSubmission`, `editedBy`/`editedAt`. Unique index `{voterId, passId}` (within-pass dedup, DB-enforced); index `{householdId, passId}`. |
 | `SurveyResponse.answers[]` | same (`answerSchema`, `{ _id: false }`) | `questionKey` (matches a template question's `key`), `questionLabel` (**snapshot** at submit), **`optionIds[]`** (stable id(s) chosen — the id-native tracking key; single → 1, multi → N, empty for free-text), **`otherText`** (free text typed into the `__other__` option), `answer` (Mixed — string \| string[] \| free text; **kept as a human-readable snapshot AND the legacy reporting fallback** for rows recorded before stable ids existed). |
+| `SurveyResponseArchive` | [models/SurveyResponseArchive.js](../server/src/models/SurveyResponseArchive.js) | A **verbatim snapshot** of a `SurveyResponse` that a later write replaced — answers, note, `userId`, GPS, `submittedAt`/`syncedAt`, pass/turf/effort, `editedBy`/`editedAt`, the whole row — plus **server-stamped provenance**: `overwrittenBy`, `overwrittenVia` (`'submit'` = a different canvasser's field submission; `'restore'` = an admin restore displaced it), `overwrittenAt` — never accepted from a request body. **Deliberately a separate collection** so no aggregation, status recompute, or export can mistake a preserved response for a current one — by construction, not by auditing every reader. Restore **consumes** the row it promotes, so every row here is currently-archived (a second restore of the same row is an honest 404). Not unique on `{voterId, passId}` — restore flip-flops legitimately leave several. See §F. |
 
 The `key` is derived in the builder by slugifying the label, with collision suffixes
 (`top_issue`, `top_issue_2`, …); option `id`s are derived the same way within a question. Both are
@@ -580,13 +585,54 @@ visibility evaluator (just another id).
   — the door's effort survey wins over the campaign default; see [EFFORTS.md](EFFORTS.md)); resolves
   `passId`/`turfId`/`effortId` from the submission timestamp (see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)).
 - Runs `normalizeAndFilterAnswers(template, data.answers)` (`dropHidden:true`) before persisting.
-- **Atomic upsert keyed on `(voterId, passId)`** (`findOneAndUpdate(..., { upsert: true })`) → at
-  most one `SurveyResponse` per voter per pass; a re-submit replaces the prior answers, and a
-  double-tap race that hits the unique index (`11000`) falls back to an update of the winner's row.
+- **One row per `(voterId, passId)`, latest wins — with cross-canvasser preservation.** The write
+  is no longer a blind upsert: the route **pre-reads** the existing row (`findOne`), and when one
+  exists whose `userId` differs from the submitter's, it first snapshots it whole into
+  **`SurveyResponseArchive`** (`archiveOverwrittenResponse` in
+  [services/surveys/archiveOverwrite.js](../server/src/services/surveys/archiveOverwrite.js) —
+  snapshot-BEFORE-write, built from the pre-read doc, provenance stamped server-side:
+  `overwrittenBy`/`overwrittenVia: 'submit'`/`overwrittenAt`) and only then `$set`s the seen row
+  (no upsert on that path). A **same-canvasser re-submit archives nothing** — that replacement is
+  the designed self-heal. With no existing row the route does an **insert-only** `create`; an
+  `11000` race re-reads the winner and takes the same archive-then-update path, so a
+  cross-canvasser replacement **always** leaves an archive row in every interleaving (and the
+  `surveyCount` bump stays exact — the reason the paths were split).
 - Stores `surveyTemplateVersion: template.version || 1` and resets `editedBy`/`editedAt` (a fresh
   canvasser submission clears any prior admin-edit audit).
 - Writes a `survey_submitted` `CanvassActivity` (household-scoped dedup → one knock per
   user/house/pass even for a multi-voter house) and updates `Voter.surveyStatus` / household status.
+
+**The door knows whose survey it is.** The per-round voter wire (bootstrap **and** the `/changes`
+delta) carries **`surveyedByMe`** whenever the voter reads `surveyed` this round — `true` = the
+requesting canvasser took it, `false` = a teammate did, **absent** = not surveyed this round (or an
+old cache/server). The mobile survey screen uses it for a one-time confirm before a cross-canvasser
+overwrite ([CANVASSER_APP.md](CANVASSER_APP.md) → the superseded-replay section); the flag **fails
+open** by design — a possibly-wrong warning at a door is worse than none, and the server-side
+preservation above catches every collision the confirm misses.
+
+**Admin surfaces + the restore swap.** The voter profile lists preserved responses
+(`overwrittenSurveys[]`; the winning response carries `replacedEarlier`), and two org-admin-only
+routes live in [routes/admin/voters.js](../server/src/routes/admin/voters.js):
+
+- `POST /admin/voters/:voterId/surveys/:archiveId/restore` — a **lossless swap**: the displaced
+  current response is archived `via:'restore'`, the preserved one becomes current in place
+  (answers, authorship, GPS, and edit audit verbatim), and the promoted archive row is consumed
+  (re-restore = 404). If the current response was deleted meanwhile, restore **resurrects** it
+  (`surveyCount` +1). Then `recomputeSurveyStatus`.
+- `DELETE /admin/voters/:voterId/surveys/archive/:archiveId` — erases a preserved response
+  outright (overwritten answer content must never be undeletable).
+
+An admin DELETE of a *current* response never touches archived siblings. An overwrite or a
+restore swap moves **no counters** — one current row throughout — and no export ever reads the
+archive (leak-sentinel pinned in `exportBuilders.int.test.js`).
+
+**Tests:** [surveyOverwrite.int.test.js](../server/test/surveyOverwrite.int.test.js) (preservation +
+restore + insert races), [duplicateSurveys.int.test.js](../server/test/duplicateSurveys.int.test.js)
+(the report's `sameRoundOverwritten` kind),
+[perRoundVoterView.int.test.js](../server/test/perRoundVoterView.int.test.js) (`surveyedByMe` on
+the wire), [perCanvasserAndOverlaps.int.test.js](../server/test/perCanvasserAndOverlaps.int.test.js)
+(the overlaps annotation), plus [mobile/lib/resurvey.test.js](../mobile/lib/resurvey.test.js) and
+[mobile/lib/duplicateSurveys.test.js](../mobile/lib/duplicateSurveys.test.js) on the client.
 
 ## G. Frontend mapping
 

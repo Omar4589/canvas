@@ -29,6 +29,7 @@ const { Voter } = await import('../src/models/Voter.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
+const { SurveyResponseArchive } = await import('../src/models/SurveyResponseArchive.js');
 const { VoterNote } = await import('../src/models/VoterNote.js');
 const { ImportJob } = await import('../src/models/ImportJob.js');
 const { SavedSearch } = await import('../src/models/SavedSearch.js');
@@ -190,6 +191,20 @@ before(async () => {
     { questionKey: 'support', questionLabel: 'Do you support?', answer: 'Yes', optionIds: ['o-yes'] },
     { questionKey: 'notes2', questionLabel: 'Anything else?', answer: 'love it', optionIds: [] },
   ]);
+  // A PRESERVED (overwritten) response with sentinel content: the archive collection must be
+  // structurally invisible to every export type — the sweep below asserts the sentinels never
+  // reach any artifact, putting SurveyResponseArchive under the same never-leaks guarantee as
+  // DNC identity.
+  await SurveyResponseArchive.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id,
+    voterId: ctx.alice._id, householdId: ctx.h1._id, userId: ctx.uAda._id,
+    surveyTemplateId: ctx.template._id, surveyTemplateVersion: 1,
+    submittedAt: new Date('2026-07-01T14:00:00Z'), location: loc,
+    passId: ctx.p1._id, effortId: ctx.h1.effortId,
+    answers: [{ questionKey: 'support', questionLabel: 'Do you support?', answer: 'ARCHIVED-ANSWER-SENTINEL', optionIds: [] }],
+    note: 'ARCHIVED-NOTE-SENTINEL',
+    overwrittenBy: ctx.uAda._id, overwrittenVia: 'submit', overwrittenAt: new Date('2026-07-01T15:05:00Z'),
+  });
   await mkResp(ctx.alice, ctx.h1, ctx.p2, '2026-07-10T15:05:00Z', [
     { questionKey: 'support', questionLabel: 'Do you support?', answer: 'No', optionIds: ['o-no'] },
   ]);
@@ -253,6 +268,9 @@ test('EVERY export type: no DNC voter identity, no select:false price, in any ar
     ctx.artifacts[type] = { doc, text };
     for (const leak of ['Donna', 'Dncerson', 'SVDNC1', 'Edna', 'SVDNC2', 'UIDDNC1', 'UIDDNC2']) {
       assert.ok(!text.includes(leak), `${type}: DNC identity "${leak}" must not appear`);
+    }
+    for (const leak of ['ARCHIVED-ANSWER-SENTINEL', 'ARCHIVED-NOTE-SENTINEL']) {
+      assert.ok(!text.includes(leak), `${type}: a preserved (overwritten) response must never reach an artifact`);
     }
     assert.ok(!text.includes(String(PRICE)), `${type}: pricePerCampaignCents must never reach an artifact`);
     assert.ok(!text.includes('del-tomb'), `${type}: a deleted user's tombstone email must never leak`);

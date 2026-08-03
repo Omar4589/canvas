@@ -3,6 +3,7 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { Person } from '../../models/Person.js';
 import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
@@ -58,6 +59,7 @@ export async function undoImport(importJob) {
   for (const s of [
     await presentIds(VotedVoter, 'voterId', Vins),
     await presentIds(SurveyResponse, 'voterId', Vins),
+    await presentIds(SurveyResponseArchive, 'voterId', Vins),
     await presentIds(CanvassActivity, 'voterId', Vins),
   ]) for (const v of s) voterInUse.add(v);
 
@@ -119,6 +121,7 @@ export async function undoImport(importJob) {
   for (const s of [
     await presentIds(VotedVoter, 'voterId', deletableV),
     await presentIds(SurveyResponse, 'voterId', deletableV),
+    await presentIds(SurveyResponseArchive, 'voterId', deletableV),
     await presentIds(CanvassActivity, 'voterId', deletableV),
   ]) for (const v of s) recheckInUse.add(v);
   const curV = await findInChunks(Voter, '_id', deletableV.map(oid), { _id: 1, householdId: 1, 'doNotContact.flagged': 1 });

@@ -236,6 +236,15 @@ Tapping a voter opens their survey. A few things make the script feel like a rea
 - The **greeting** and **closing** scripts, when the survey has them, sit in the same amber callouts at
   the top and bottom.
 
+**If a teammate already surveyed this voter this round**, the app asks before opening the survey —
+a one-time "**Already surveyed this round**" prompt: *"Another canvasser already surveyed this
+voter this round. Your answers will replace theirs — the earlier response stays visible to your
+campaign admins."* **Cancel** backs out; **Survey anyway** opens the form. Re-opening a voter
+**you** surveyed never asks — correcting your own survey stays one tap. The prompt can't always
+fire (a phone working offline or on a stale cache may not know a teammate got there first), and
+that's fine either way: the server preserves the replaced answers, so nothing is ever lost to the
+campaign — admins can see the earlier response and even restore it (see [SURVEYS.md](SURVEYS.md)).
+
 Saving the survey marks that voter surveyed and turns the house green on the map right away, the same
 optimistic, never-wait-on-the-network behavior as the door buttons.
 
@@ -582,6 +591,26 @@ its own `deleteMany` and is keyed on `(voterId, passId)` alone, not on user or t
 would otherwise overwrite a newer submission's answers and clear its `editedBy`/`editedAt` audit trail.
 The disposition path matters just as much: it also deletes this canvasser's `SurveyResponse` rows for
 the pair, so an unguarded replayed `not_home` destroyed a newer survey's **answers**, not just a label.
+
+**The cross-canvasser branch (closed 2026-08).** The disposition paths were always
+same-canvasser-scoped (`deleteMany` on this `userId`), but the survey write on `(voterId, passId)`
+**crossed canvassers** — canvasser B's submit silently replaced canvasser A's answers, a data loss
+nothing reported. Two halves fix it: **server-side preservation** (the pre-read row is snapshotted
+whole into `SurveyResponseArchive` before the replace whenever the `userId` differs — mechanics in
+[SURVEYS.md](SURVEYS.md) §F) and a **door-side smart confirm**. The confirm's decisions live in
+[lib/resurvey.js](../mobile/lib/resurvey.js), pinned by
+[resurvey.test.js](../mobile/lib/resurvey.test.js) (plain node, no react-native imports):
+`shouldConfirmResurvey` fires **only** on `surveyStatus === 'surveyed' && surveyedByMe === false` —
+strict `=== false`, so an absent flag (old server, stale disk cache, pre-flag bootstrap) **fails
+open** with no prompt, because a possibly-wrong warning at a door is worse than none and the
+server-side preservation catches every collision the confirm misses. The survey screen shows it
+**once, at mount**; `buildResurveyPrompt` is deliberately nameless and countless (the wire carries
+only the boolean, so a stale flag can never make the copy a lie), and the confirm button is not
+destructive-styled — proceeding is legitimate. The submit's `optimisticPatch` stamps
+`surveyedByMe: true` on the canvasser's own voter, so their own re-survey stays one tap even before
+the next sync. `surveyedByMe` rides the per-round voter wire on bootstrap **and** the `/changes`
+delta; old app bundles without the confirm keep overwriting silently, which the server-side
+preservation covers — every wire change is additive, so no `CLIENT_API_VERSION` bump.
 
 **Doors corrupted before the guard shipped** are findable: a surviving row whose `replaced.timestamp`
 is *newer* than its own `timestamp` cannot occur in order. `npm run audit:stale-overwrites`

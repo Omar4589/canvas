@@ -435,6 +435,40 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   **Assessment: NO published Privacy Policy / ToS / DPA sentence becomes false or incomplete; no new
   subprocessor; DPA §6 untouched.**
 
+- *(v5 2026-08-02)* **New retained data class: replaced (superseded) survey responses — POSITIVE.**
+  When a second canvasser's same-round submit replaces a teammate's survey answers (and on every
+  admin restore swap), the displaced response is now snapshotted whole into a new
+  **`SurveyResponseArchive`** collection before the write, instead of being destroyed
+  (`services/surveys/archiveOverwrite.js`; docs [SURVEYS.md](SURVEYS.md) §F). A same-canvasser
+  re-submit still replaces silently — the designed self-heal, nothing archived. This is a new
+  place personal data lives, so it is recorded here as a POSITIVE entry.
+  **What it holds.** A full former `SurveyResponse`, verbatim: the Art. 9 answer content including
+  free text and the note, the canvasser's `userId`, the GPS stamp (including `mocked` /
+  `fixTimestamp`), timestamps, pass/turf/effort context, and any `editedBy`/`editedAt` admin-edit
+  audit — plus server-stamped provenance (`overwrittenBy`/`overwrittenVia`/`overwrittenAt`, never
+  accepted from a request body). The same CATEGORIES of data as current responses — no new field
+  class — but potentially more rows per voter per round.
+  **Who can read it.** Org admins, via the voter profile (`overwrittenSurveys[]` + the
+  preserved-response card with its Restore), the Duplicate surveys report (the
+  `sameRoundOverwritten` kind) and the response detail's archived fallback; team leads see the
+  report read-only (no restore, no erase — both routes sit in `admin/voters.js`,
+  `requireOrgRole('admin')` router-wide). Canvassers never see archive content — the door wire
+  carries only the `surveyedByMe` boolean, no names, no answers.
+  **Retention/deletion.** Kept while the org is active. Restorable — the restore is a lossless
+  swap that consumes the archive row it promotes; each row is individually erasable via
+  `DELETE /admin/voters/:voterId/surveys/archive/:archiveId` (overwritten Art. 9 content must
+  never be undeletable). Cascades verified: org delete (`ORG_SCOPED` + the sweep test), campaign
+  delete, pass clear-knocks (including the snapshot round-trip), demo rebuild. Account deletion
+  mirrors `SurveyResponse`: the row is retained as part of the org's field record, with names
+  de-identified by the existing purge.
+  **Exports.** Structurally never read — no export builder queries the archive collection, and the
+  registry-driven leak sentinel is pinned in `test/exportBuilders.int.test.js`.
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence becomes false** — privacy.html
+  :90/:118/:122/:128 already cover retained canvassing records reviewed by org admins, and no
+  published sentence promises one-response-per-voter; no new subprocessor, DPA §6 untouched.
+  **Claim to keep true:** a replaced response is admin-visible, tenant-confined, structurally
+  excluded from stats and exports, and dies with the organization.
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact

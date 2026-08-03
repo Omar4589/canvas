@@ -8,12 +8,14 @@ import { Household } from '../../models/Household.js';
 import { Campaign } from '../../models/Campaign.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { AccessLog } from '../../models/AccessLog.js';
 import { recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
+import { archiveOverwrittenResponse, snapshotFromArchive } from '../../services/surveys/archiveOverwrite.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
 import { recomputeFullyDnc } from '../../services/dnc/recomputeFullyDnc.js';
 import { Person } from '../../models/Person.js';
@@ -649,6 +651,9 @@ router.delete('/:voterId/surveys/:responseId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     // findOneAndDelete (not deleteOne) so the doc's campaignId is in hand for the stats bump.
+    // Archived (overwritten) siblings deliberately SURVIVE this delete — removing the current
+    // response and restoring a preserved one is the "swap in the earlier answers" flow. Full
+    // erasure of a preserved response is the archive DELETE below.
     const deleted = await SurveyResponse.findOneAndDelete({
       _id: req.params.responseId,
       voterId: req.params.voterId,
@@ -659,6 +664,71 @@ router.delete('/:voterId/surveys/:responseId', async (req, res, next) => {
     // are untouched (matching the live aggregations, which read the two ledgers independently).
     await bumpCampaignStats(deleted.campaignId, { surveys: -1 });
     await recomputeSurveyStatus([req.params.voterId]);
+    const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
+    res.json(profile);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Make a preserved (overwritten) response current again. A lossless SWAP with compensating
+// writes (no transactions): 1) archive the displaced current response (via:'restore', so the
+// swap can be swapped back), 2) write the preserved content into the SAME row in place —
+// editedBy/editedAt come back VERBATIM (the response as it was; the restore itself is audited
+// by the step-1 archive row), 3) only then drop the promoted archive row. A crash between any
+// two steps leaves a duplicate archive row at worst — never a lost response. If the current
+// response was deleted meanwhile, restore resurrects: create + surveys:+1, the inverse of the
+// DELETE above. Re-restoring a promoted id is an honest 404 (the row was consumed).
+router.post('/:voterId/surveys/:archiveId/restore', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.archiveId)) {
+      return res.status(400).json({ error: 'Invalid archiveId' });
+    }
+    const archived = await SurveyResponseArchive.findOne({
+      _id: req.params.archiveId,
+      voterId: req.params.voterId,
+      organizationId: activeOrgId(req),
+    }).lean();
+    if (!archived) return res.status(404).json({ error: 'Preserved response not found' });
+
+    const snapshot = snapshotFromArchive(archived);
+    const current = await SurveyResponse.findOne({
+      voterId: archived.voterId,
+      passId: archived.passId,
+    }).lean();
+    if (current) {
+      await archiveOverwrittenResponse(current, { byUserId: req.user._id, via: 'restore' });
+      await SurveyResponse.updateOne({ _id: current._id }, { $set: snapshot });
+      // No stats change: one current row before and after the swap.
+    } else {
+      await SurveyResponse.create(snapshot);
+      await bumpCampaignStats(archived.campaignId, { surveys: 1 });
+    }
+    await SurveyResponseArchive.deleteOne({ _id: archived._id });
+    await recomputeSurveyStatus([String(archived.voterId)]);
+    const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
+    res.json(profile);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Erase a preserved response outright — the erasure complement to the preservation, so
+// overwritten answer content (Art. 9 material) never becomes undeletable. No stats: archives
+// are never counted anywhere.
+router.delete('/:voterId/surveys/archive/:archiveId', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.archiveId)) {
+      return res.status(400).json({ error: 'Invalid archiveId' });
+    }
+    const { deletedCount } = await SurveyResponseArchive.deleteOne({
+      _id: req.params.archiveId,
+      voterId: req.params.voterId,
+      organizationId: activeOrgId(req),
+    });
+    if (!deletedCount) return res.status(404).json({ error: 'Preserved response not found' });
     const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
     res.json(profile);
   } catch (err) {

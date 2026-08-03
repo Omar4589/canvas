@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { shouldConfirmResurvey, buildResurveyPrompt } from '../../../../lib/resurvey';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { optimisticSubmit } from '../../../../lib/recordAction';
@@ -153,6 +154,25 @@ export default function VoterSurvey() {
   // call synchronously (state updates are async); isSubmitting drives the disabled/spinner UI.
   const [isSubmitting, setIsSubmitting] = useState(false);
   const firedRef = useRef(false);
+  const resurveyPromptedRef = useRef(false);
+
+  // Smart re-survey confirm — at mount, before any answer is entered, once per visit. Fires
+  // ONLY when a TEAMMATE surveyed this voter this round (surveyedByMe === false); an own
+  // re-survey stays the one-tap self-heal, and an absent flag (old cache/server) fails open —
+  // the server preserves the replaced response either way, so a missed confirm loses nothing.
+  // Declared with the other hooks, before the DNC early return, and skips DNC voters (that
+  // wall renders instead — the two alerts must never stack).
+  useEffect(() => {
+    if (resurveyPromptedRef.current) return;
+    if (!voter || voter.dnc) return;
+    if (!shouldConfirmResurvey(voter)) return;
+    resurveyPromptedRef.current = true;
+    const p = buildResurveyPrompt();
+    Alert.alert(p.title, p.message, [
+      { text: p.cancelText, style: 'cancel', onPress: () => router.back() },
+      { text: p.confirmText }, // default style — proceeding is legitimate, not destructive
+    ]);
+  }, [voter, router]);
 
   // Live visibility: recompute which questions show as answers change. Feed the
   // pure evaluator a normalized cell per non-retired question (choice → optionIds,
@@ -303,7 +323,9 @@ export default function VoterSurvey() {
       optimisticPatch: (prev) => ({
         ...prev,
         voters: prev.voters.map((v) =>
-          String(v._id) === String(id) ? { ...v, surveyStatus: 'surveyed' } : v
+          // surveyedByMe:true so a same-session return reads as an OWN re-survey (one tap),
+          // not a false teammate confirm; the next delta confirms it with server truth.
+          String(v._id) === String(id) ? { ...v, surveyStatus: 'surveyed', surveyedByMe: true } : v
         ),
         households: prev.households.map((h) =>
           String(h._id) === String(voter.householdId)

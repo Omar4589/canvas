@@ -30,6 +30,7 @@ const { Pass } = await import('../src/models/Pass.js');
 const { Household } = await import('../src/models/Household.js');
 const { Voter } = await import('../src/models/Voter.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
+const { SurveyResponseArchive } = await import('../src/models/SurveyResponseArchive.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 
@@ -45,7 +46,7 @@ before(async () => {
   await mongoose.connect(URI);
   for (const M of [
     Organization, User, Membership, Campaign, Effort, Pass,
-    Household, Voter, SurveyResponse, SurveyTemplate, Subscription,
+    Household, Voter, SurveyResponse, SurveyResponseArchive, SurveyTemplate, Subscription,
   ]) {
     await M.deleteMany({});
   }
@@ -82,13 +83,14 @@ before(async () => {
   });
 
   // Voters are created in order, so their ObjectIds ascend — that is the sort's stable tiebreak.
-  const [v1, v2, v3, v4, v5] = await Promise.all(
-    ['V1 Mistake', 'V2 Revisit', 'V3 Straddle', 'V4 Legacy', 'V5 Control'].map((name, i) =>
-      Voter.create({
-        organizationId: org._id, campaignId: camp._id, householdId: house._id,
-        stateVoterId: `SV-DUP-${i + 1}`,
-        firstName: name.split(' ')[0], lastName: name.split(' ')[1], fullName: name,
-      })
+  const [v1, v2, v3, v4, v5, v6] = await Promise.all(
+    ['V1 Mistake', 'V2 Revisit', 'V3 Straddle', 'V4 Legacy', 'V5 Control', 'V6 Overwritten'].map(
+      (name, i) =>
+        Voter.create({
+          organizationId: org._id, campaignId: camp._id, householdId: house._id,
+          stateVoterId: `SV-DUP-${i + 1}`,
+          firstName: name.split(' ')[0], lastName: name.split(' ')[1], fullName: name,
+        })
     )
   );
 
@@ -116,14 +118,24 @@ before(async () => {
     resp(v4, bob, p1._id, '2026-06-13T15:00:00Z'),
     // V5 — control: a single response never appears in the report.
     resp(v5, alice, p1._id, '2026-06-10T15:00:00Z'),
+    // V6 — the same-round overwrite: Bob's live row; Alice's replaced one is ARCHIVED below.
+    resp(v6, bob, p1._id, '2026-06-10T17:00:00Z'),
   ]);
+  // The preserved (overwritten) response — same round as Bob's live row, so this voter is the
+  // report's worst kind: sameRoundOverwritten. One live + one archived = a count-2 group.
+  await SurveyResponseArchive.create({
+    ...resp(v6, alice, p1._id, '2026-06-10T15:30:00Z'),
+    overwrittenBy: bob._id,
+    overwrittenVia: 'submit',
+    overwrittenAt: new Date('2026-06-10T17:00:00Z'),
+  });
 
   const app = createApp();
   server = http.createServer(app);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
-    org, camp, admin, alice, bob, v1, v2, v3, v4, v5, adminTok: signUserToken(admin),
+    org, camp, admin, alice, bob, v1, v2, v3, v4, v5, v6, adminTok: signUserToken(admin),
   });
 });
 
@@ -146,13 +158,30 @@ const report = (qs = '') =>
 
 const ids = (json) => json.duplicates.map((d) => d.voterId);
 
-test('baseline: flagged first, then by count, voterId as the tiebreak', { skip }, async () => {
-  const { v1, v2, v3, v4, v5 } = ctx;
+test('baseline: overwritten first, then flagged, then by count, voterId as the tiebreak', { skip }, async () => {
+  const { v1, v2, v3, v4, v5, v6, alice, bob } = ctx;
   const { status, json } = await report();
   assert.strictEqual(status, 200);
-  assert.deepStrictEqual(ids(json), [v1, v2, v3, v4].map((v) => String(v._id)));
+  assert.deepStrictEqual(ids(json), [v6, v1, v2, v3, v4].map((v) => String(v._id)));
   assert.ok(!ids(json).includes(String(v5._id)), 'a single-response voter is never a duplicate');
-  assert.strictEqual(json.total, 4);
+  assert.strictEqual(json.total, 5);
+
+  // The same-round overwrite group: worst kind, ranked first, neither legacy flag lit — the
+  // pair is the SAME round, so it must not read as a "different canvassers" cross-round revisit.
+  const d6 = json.duplicates[0];
+  assert.deepStrictEqual(
+    [d6.sameRoundOverwritten, d6.sameCanvasserSameDay, d6.differentCanvassers],
+    [true, false, false]
+  );
+  assert.strictEqual(d6.count, 2, 'one live + one archived');
+  const archivedRow = d6.responses.find((r) => r.overwritten);
+  const liveRow = d6.responses.find((r) => !r.overwritten);
+  assert.ok(archivedRow, 'the preserved response is listed');
+  assert.strictEqual(archivedRow.canvasser.firstName, 'Alice');
+  assert.strictEqual(archivedRow.overwrittenBy.firstName, 'Bob');
+  assert.ok(archivedRow.overwrittenAt);
+  assert.strictEqual(liveRow.canvasser.firstName, 'Bob');
+  assert.ok(!('overwritten' in liveRow), 'live rows carry no overwrite fields');
   assert.strictEqual(json.limit, 25);
   assert.strictEqual(json.skip, 0);
   assert.strictEqual(json.timeZone, 'America/Chicago');
@@ -195,8 +224,8 @@ test('?userId= filters groups CONTAINING that canvasser, without hiding co-respo
   const { bob, alice, v2, v4 } = ctx;
   const { status, json } = await report(`&userId=${bob._id}`);
   assert.strictEqual(status, 200);
-  assert.deepStrictEqual(ids(json), [String(v2._id), String(v4._id)]);
-  assert.strictEqual(json.total, 2);
+  assert.deepStrictEqual(ids(json), [String(ctx.v6._id), String(v2._id), String(v4._id)]);
+  assert.strictEqual(json.total, 3, 'an overwrite matches EITHER participant');
 
   // The group is matched after $group, so Alice's response on V2 is still in the returned group —
   // filtering the report must never change what a duplicate IS.
@@ -225,9 +254,15 @@ test('?kind= isolates each flag', { skip }, async () => {
   const diff = await report('&kind=differentCanvassers');
   assert.deepStrictEqual(ids(diff.json), [String(v2._id), String(v4._id)]);
   assert.strictEqual(diff.json.total, 2);
+  assert.ok(!ids(diff.json).includes(String(ctx.v6._id)),
+    'a same-round overwrite pair must NOT light the cross-round revisit kind');
+
+  const overwritten = await report('&kind=sameRoundOverwritten');
+  assert.deepStrictEqual(ids(overwritten.json), [String(ctx.v6._id)]);
+  assert.strictEqual(overwritten.json.total, 1);
 
   const all = await report('&kind=all');
-  assert.strictEqual(all.json.total, 4, 'kind=all is the same as omitting it');
+  assert.strictEqual(all.json.total, 5, 'kind=all is the same as omitting it');
 });
 
 test('?kind= rejects anything else', { skip }, async () => {
@@ -240,17 +275,17 @@ test('paging: total is the full matching count, not the page length', { skip }, 
   const { v1, v2 } = ctx;
 
   const page1 = await report('&limit=1&skip=0');
-  assert.deepStrictEqual(ids(page1.json), [String(v1._id)]);
-  assert.strictEqual(page1.json.total, 4);
+  assert.deepStrictEqual(ids(page1.json), [String(ctx.v6._id)], 'the overwrite ranks first');
+  assert.strictEqual(page1.json.total, 5);
 
   const page2 = await report('&limit=1&skip=1');
-  assert.deepStrictEqual(ids(page2.json), [String(v2._id)]);
-  assert.strictEqual(page2.json.total, 4);
+  assert.deepStrictEqual(ids(page2.json), [String(v1._id)]);
+  assert.strictEqual(page2.json.total, 5);
 
   // Past the end: an empty page still reports the true total (the pager needs it to walk back).
   const past = await report('&limit=1&skip=99');
   assert.deepStrictEqual(past.json.duplicates, []);
-  assert.strictEqual(past.json.total, 4);
+  assert.strictEqual(past.json.total, 5);
 
   const clamped = await report('&limit=500');
   assert.strictEqual(clamped.json.limit, 100, 'limit clamps to 100');

@@ -73,6 +73,7 @@ import { Membership } from '../../models/Membership.js';
 import { Campaign } from '../../models/Campaign.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { Effort } from '../../models/Effort.js';
@@ -687,9 +688,10 @@ async function resetActivityLayer(campaign, log) {
   const campaignId = campaign._id;
   // FlagReview joins the wipe: its actionId is a required ref to a CanvassActivity we are about
   // to delete, so skipping it orphans every review row. Campaign-scoped like its five siblings.
-  const [acts, resp, voted, uploads, pending, flags] = await Promise.all([
+  const [acts, resp, respArchives, voted, uploads, pending, flags] = await Promise.all([
     CanvassActivity.deleteMany({ campaignId }),
     SurveyResponse.deleteMany({ campaignId }),
+    SurveyResponseArchive.deleteMany({ campaignId }),
     VotedVoter.deleteMany({ campaignId }),
     VotedUpload.deleteMany({ campaignId }),
     VotedPendingId.deleteMany({ campaignId }),
@@ -711,6 +713,7 @@ async function resetActivityLayer(campaign, log) {
   const wiped = {
     activities: acts.deletedCount,
     surveys: resp.deletedCount,
+    surveyArchives: respArchives.deletedCount,
     votedMarks: voted.deletedCount,
     votedUploads: uploads.deletedCount,
     pendingIds: pending.deletedCount,

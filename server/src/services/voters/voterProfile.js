@@ -4,6 +4,7 @@ import { Household } from '../../models/Household.js';
 import { Campaign } from '../../models/Campaign.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { VoterNote } from '../../models/VoterNote.js';
@@ -36,10 +37,12 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   ).lean();
   const personRowIds = [voter._id, ...siblings.map((s) => s._id)];
 
-  const [voted, surveys, activity, voterNotesRaw, members, adminNotes] = await Promise.all([
+  const [voted, surveys, overwrites, activity, voterNotesRaw, members, adminNotes] = await Promise.all([
     campaignId ? VotedVoter.findOne({ campaignId, voterId: voter._id }).lean() : null,
     // All of the person's surveys, across campaigns — each carries its campaignId for labeling.
     SurveyResponse.find({ voterId: { $in: personRowIds } }).sort({ submittedAt: -1 }).lean(),
+    // Preserved (overwritten) responses — read-only history the restore UI works from.
+    SurveyResponseArchive.find({ voterId: { $in: personRowIds } }).sort({ overwrittenAt: -1 }).lean(),
     household
       ? CanvassActivity.find(
           { householdId: voter.householdId, actionType: { $in: KNOCK_ACTIONS } },
@@ -77,7 +80,11 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   }
 
   // Survey templates (for rendering/editing answers by question type).
-  const tplIds = [...new Set(surveys.map((s) => String(s.surveyTemplateId)).filter(Boolean))];
+  const tplIds = [
+    ...new Set(
+      [...surveys, ...overwrites].map((s) => String(s.surveyTemplateId)).filter(Boolean)
+    ),
+  ];
   const tpls = tplIds.length
     ? await SurveyTemplate.find({ _id: { $in: tplIds } }, 'name version questions').lean()
     : [];
@@ -91,6 +98,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   for (const a of activity) add(a.userId);
   for (const n of voterNotesRaw) add(n.userId);
   for (const s of surveys) { add(s.userId); add(s.editedBy); }
+  for (const o of overwrites) { add(o.userId); add(o.editedBy); add(o.overwrittenBy); }
   for (const n of adminNotes) { add(n.authorId); add(n.editedBy); }
   const users = userIds.size
     ? await User.find({ _id: { $in: [...userIds] } }, 'firstName lastName email').lean()
@@ -100,6 +108,14 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
     const u = id && uMap.get(String(id));
     return u ? { id: String(id), name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email } : null;
   };
+
+  // Latest preserved response per (voter, pass) — `overwrites` is sorted overwrittenAt desc,
+  // so first-seen wins.
+  const overwriteByKey = new Map();
+  for (const o of overwrites) {
+    const key = `${String(o.voterId)}|${o.passId ? String(o.passId) : ''}`;
+    if (!overwriteByKey.has(key)) overwriteByKey.set(key, o);
+  }
 
   // Derived (read-only) voter notes: voter-tagged activity notes + survey notes.
   const fieldNotes = [
@@ -231,6 +247,9 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
       : { isVoted: false },
     surveys: surveys.map((s) => {
       const tpl = tplMap.get(String(s.surveyTemplateId));
+      // The latest preserved response this one replaced, if any — keyed by (voter, pass), so
+      // the profile UI can say "replaced X's earlier answers" and offer the restore.
+      const ow = overwriteByKey.get(`${String(s.voterId)}|${s.passId ? String(s.passId) : ''}`);
       return {
         id: String(s._id),
         campaignId: String(s.campaignId),
@@ -242,6 +261,14 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
         editedBy: who(s.editedBy),
         by: who(s.userId),
         note: s.note || null,
+        replacedEarlier: ow
+          ? {
+              overwriteId: String(ow._id),
+              by: who(ow.userId),
+              submittedAt: ow.submittedAt,
+              overwrittenAt: ow.overwrittenAt,
+            }
+          : null,
         answers: (s.answers || []).map((a) => ({
           questionKey: a.questionKey,
           questionLabel: a.questionLabel,
@@ -252,6 +279,30 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
           .slice()
           .sort((a, b) => (a.order || 0) - (b.order || 0))
           .map((q) => ({ key: q.key, label: q.label, type: q.type, options: q.options || [], required: !!q.required })),
+      };
+    }),
+    // Preserved (overwritten) responses — read-only; restore/erase act on `id` (the archive id).
+    overwrittenSurveys: overwrites.map((o) => {
+      const tpl = tplMap.get(String(o.surveyTemplateId));
+      return {
+        id: String(o._id),
+        campaignId: String(o.campaignId),
+        passId: o.passId ? String(o.passId) : null,
+        surveyTemplateId: String(o.surveyTemplateId),
+        templateName: tpl?.name || null,
+        submittedAt: o.submittedAt,
+        editedAt: o.editedAt || null,
+        editedBy: who(o.editedBy),
+        by: who(o.userId),
+        note: o.note || null,
+        overwrittenAt: o.overwrittenAt,
+        overwrittenVia: o.overwrittenVia,
+        overwrittenBy: who(o.overwrittenBy),
+        answers: (o.answers || []).map((a) => ({
+          questionKey: a.questionKey,
+          questionLabel: a.questionLabel,
+          answer: a.answer,
+        })),
       };
     }),
     activity: activity.map((a) => ({

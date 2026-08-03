@@ -12,8 +12,9 @@ const LIMIT = 25;
 
 const KIND_OPTIONS = [
   { value: 'all', label: 'All' },
+  { value: 'sameRoundOverwritten', label: 'Same round, overwritten' },
   { value: 'sameCanvasserSameDay', label: 'Same canvasser, same day' },
-  { value: 'differentCanvassers', label: 'Different canvassers' },
+  { value: 'differentCanvassers', label: 'Different canvassers, later round' },
 ];
 
 function buildQuery(params) {
@@ -113,8 +114,10 @@ export default function DuplicateSurveysPage() {
           <h1 className="text-xl font-semibold text-fg">Duplicate surveys</h1>
           <p className="mt-1 max-w-xl text-sm text-fg-muted">
             Voters with more than one survey response — the reason “Surveys” can read higher than
-            “Surveyed voters.” Same canvasser, same day is usually a mistake; a different canvasser
-            or pass is usually a legitimate revisit. Open the voter to delete an extra response.
+            “Surveyed voters.” Same round · overwritten means a second canvasser's submit replaced
+            the first one's answers — the originals are preserved on the voter profile and can be
+            restored there. Same canvasser, same day is usually a double-submit; different
+            canvassers in a later round is usually a legitimate revisit.
           </p>
         </div>
         <CampaignSelector
@@ -168,16 +171,22 @@ export default function DuplicateSurveysPage() {
                   <span className="font-semibold text-fg">{d.voter?.fullName || 'Unknown voter'}</span>
                   {d.voter?.party && <span className="text-xs text-fg-muted">({d.voter.party})</span>}
                   <Badge variant="neutral">surveyed {d.count}×</Badge>
-                  {/* Both badges render: a same-day repeat can ALSO involve a third canvasser, and
-                      an auditor needs to see that rather than have it hidden behind precedence. */}
-                  {d.sameCanvasserSameDay && (
+                  {/* All flag badges render together — never one hidden behind another. Severity
+                      ladder: danger = answers were destroyed (preserved), warning = duplicate rows
+                      exist but nothing lost, info = benign cross-round history. */}
+                  {d.sameRoundOverwritten && (
                     <Badge variant="danger" dot>
+                      Same round · overwritten
+                    </Badge>
+                  )}
+                  {d.sameCanvasserSameDay && (
+                    <Badge variant="warning" dot>
                       Same canvasser · same day
                     </Badge>
                   )}
                   {d.differentCanvassers && (
                     <Badge variant="info" dot>
-                      Different canvassers
+                      Different canvassers · later round
                     </Badge>
                   )}
                 </div>
@@ -204,11 +213,19 @@ export default function DuplicateSurveysPage() {
                       key={r.responseId}
                       className="flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 py-1 text-xs"
                     >
-                      <span className="font-medium text-fg">
+                      <span className={r.overwritten ? 'font-medium text-fg-muted' : 'font-medium text-fg'}>
                         {r.canvasser.firstName} {r.canvasser.lastName}
                       </span>
                       <span className="text-fg-muted">{fmt(r.submittedAt, reportTz)}</span>
                       <span className="text-fg-subtle">{r.roundLabel}</span>
+                      {r.overwritten && (
+                        <span className="flex items-center gap-1.5">
+                          <Badge variant="danger">Overwritten</Badge>
+                          <span className="text-fg-subtle">
+                            replaced by {r.overwrittenBy?.firstName} {r.overwrittenBy?.lastName}
+                          </span>
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>

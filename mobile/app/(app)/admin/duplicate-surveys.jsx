@@ -227,8 +227,9 @@ export default function AdminDuplicateSurveys() {
       </View>
 
       <Text style={styles.intro}>
-        Voters with more than one survey response. Same canvasser on the same day is usually a
-        mistake; a different canvasser or pass is usually a legitimate revisit.
+        Voters with more than one survey response. Same round · overwritten means a second submit
+        replaced the first answers (preserved — open the response to restore). Same canvasser on
+        the same day is usually a mistake; a later-round canvasser is usually a legitimate revisit.
       </Text>
 
       <DateRangeBar value={range} onChange={setRange} tz={tz} presets={PRESETS} />
@@ -298,19 +299,24 @@ export default function AdminDuplicateSurveys() {
                   }
                   renderResponseAction={
                     canDelete
-                      ? (r, dupe) => (
-                          <Pressable
-                            onPress={() => confirmDelete(r, dupe)}
-                            disabled={delMut.isPending}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Delete this response`}
-                          >
-                            <Text style={[styles.delete, delMut.isPending && styles.deleteOff]}>
-                              {busyId === r.responseId ? 'Deleting…' : 'Delete'}
-                            </Text>
-                          </Pressable>
-                        )
+                      ? (r, dupe) =>
+                          r.overwritten ? (
+                            // Already not current — nothing to delete. Restore lives on the
+                            // response's detail screen (tap the row).
+                            <Text style={styles.preserved}>Preserved</Text>
+                          ) : (
+                            <Pressable
+                              onPress={() => confirmDelete(r, dupe)}
+                              disabled={delMut.isPending}
+                              hitSlop={8}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Delete this response`}
+                            >
+                              <Text style={[styles.delete, delMut.isPending && styles.deleteOff]}>
+                                {busyId === r.responseId ? 'Deleting…' : 'Delete'}
+                              </Text>
+                            </Pressable>
+                          )
                       : null
                   }
                 />
@@ -336,8 +342,8 @@ export default function AdminDuplicateSurveys() {
         {hasList ? (
           <GroupFooter>
             {total.toLocaleString()} voter{total === 1 ? '' : 's'} with more than one response. One
-            survey per voter per round is enforced now, so these are historical or cross-round
-            revisits.
+            survey per voter per round is enforced, so these are historical, cross-round revisits,
+            or same-round overwrites — where the replaced answers are preserved and restorable.
           </GroupFooter>
         ) : null}
       </ScrollView>
@@ -395,6 +401,7 @@ function makeStyles(t) {
       color: colors.textSecondary,
     },
     delete: { fontSize: 12, fontWeight: '700', color: colors.danger, paddingHorizontal: spacing.sm },
+    preserved: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, paddingHorizontal: spacing.sm },
     deleteOff: { opacity: 0.4 },
   });
 }

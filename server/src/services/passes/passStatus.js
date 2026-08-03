@@ -116,14 +116,18 @@ export async function statusesFromDoorPass(doorPass, campaignType) {
 // Voter.surveyStatus stays the campaign-global "ever surveyed" for admin/reports,
 // exactly as Household.status stays global while the wire status is per-round.
 // Rides the { householdId, passId } index ("per-pass survey existence").
+// Returns Map<voterIdStr, surveyorUserIdStr> — the id so the wire can also stamp
+// `surveyedByMe` (the door's smart re-survey confirm). `.has()` keeps working for the
+// membership checks; each voter appears at most once (one household → one pass in
+// doorPass, and {voterId, passId} is unique).
 export async function surveyedVotersFromDoorPass(doorPass) {
-  const out = new Set();
+  const out = new Map();
   for (const [pid, hids] of groupDoorPass(doorPass)) {
     const rows = await SurveyResponse.find(
       { householdId: { $in: hids.map(oid) }, passId: oid(pid) },
-      { voterId: 1 }
+      { voterId: 1, userId: 1 }
     ).lean();
-    for (const r of rows) out.add(String(r.voterId));
+    for (const r of rows) out.set(String(r.voterId), String(r.userId));
   }
   return out;
 }

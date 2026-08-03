@@ -5,6 +5,8 @@ import {
   badgesFor,
   summaryFor,
   deletableResponses,
+  overwriteLineFor,
+  buildRestorePrompt,
   buildDeletePrompt,
   deleteErrorMessage,
 } from './duplicateSurveys.js';
@@ -44,15 +46,34 @@ const dupe = (over = {}) => ({
   ...over,
 });
 
-test('badgesFor: BOTH flag badges render when both are true — the precedence bug', () => {
+test('badgesFor: ALL flag badges render together — the precedence bug, now three-way', () => {
   const both = dupe({
     count: 3,
     differentCanvassers: true,
     responses: [...dupe().responses, { responseId: 'r3', canvasser: chris, roundLabel: 'Pass 3 · Round 3' }],
   });
   const tones = badgesFor(both).map((b) => b.tone);
-  assert.deepEqual(tones, ['neutral', 'danger', 'info'], 'count, same-day AND different-canvassers');
+  // Severity ladder: same-day is WARN now (rows exist, nothing lost) — danger belongs to the
+  // overwrite kind, where answers were destroyed.
+  assert.deepEqual(tones, ['neutral', 'warn', 'info'], 'count, same-day AND different-canvassers');
   assert.equal(badgesFor(both)[0].text, '3× surveyed');
+
+  const worst = dupe({ sameRoundOverwritten: true, differentCanvassers: true });
+  assert.deepEqual(
+    badgesFor(worst).map((b) => b.tone),
+    ['neutral', 'danger', 'warn', 'info'],
+    'the overwrite badge leads and reads danger'
+  );
+  assert.equal(badgesFor(worst)[1].text, 'Same round · overwritten');
+});
+
+test('badge retitles carry the round distinction', () => {
+  const revisit = dupe({ sameCanvasserSameDay: false, differentCanvassers: true });
+  assert.equal(
+    badgesFor(revisit).find((b) => b.key === 'different').text,
+    'Different canvassers · later round',
+    'live cross-canvasser pairs are ALWAYS a later round — same-round pairs are the overwrite kind'
+  );
 });
 
 test('badgesFor: a legitimate cross-round revisit shows only the different-canvassers badge', () => {
@@ -78,8 +99,36 @@ test('summaryFor counts distinct canvassers and rounds, not responses', () => {
   assert.equal(summaryFor(dupe()), '1 canvasser · 2 rounds', 'singular reads right');
 });
 
-test('every response is deletable — the report never designates an authoritative one', () => {
+test('every LIVE response is deletable; archived rows are not (their affordance is restore)', () => {
   assert.equal(deletableResponses(dupe()).length, 2);
+  const withArchived = dupe({
+    responses: [
+      ...dupe().responses,
+      { responseId: 'a1', canvasser: chris, roundLabel: 'Pass 2 · Round 2', overwritten: true, overwrittenBy: chad },
+    ],
+  });
+  assert.equal(deletableResponses(withArchived).length, 2, 'the archived row is excluded');
+});
+
+test('overwriteLineFor names the replacing canvasser', () => {
+  assert.equal(
+    overwriteLineFor({ overwrittenBy: chad }),
+    'Overwritten · replaced by Chadwick Kluttz'
+  );
+});
+
+test('buildRestorePrompt: a lossless swap, and says so', () => {
+  const p = buildRestorePrompt({
+    voterName: 'Kenneth Halloway',
+    response: dupe().responses[0],
+    formatTime: () => 'Jul 21, 11:10 AM EDT',
+  });
+  assert.equal(p.title, "Restore Chadwick Kluttz's answers?");
+  assert.match(p.message, /Kenneth Halloway/);
+  assert.match(p.message, /swaps the two responses/);
+  assert.match(p.message, /Nothing is deleted/);
+  assert.match(p.message, /swap back/);
+  assert.equal(p.confirmText, 'Restore answers');
 });
 
 test('buildDeletePrompt names the canvasser, voter, round and time — you must know WHICH goes', () => {
@@ -127,5 +176,10 @@ test('deleteErrorMessage: 404 reads as a concurrent delete, 403 as admin-only', 
 });
 
 test('KIND_TABS keys are the wire values the server validates — nothing translates', () => {
-  assert.deepEqual(KIND_TABS.map((t) => t.key), ['all', 'sameCanvasserSameDay', 'differentCanvassers']);
+  assert.deepEqual(KIND_TABS.map((t) => t.key), [
+    'all',
+    'sameRoundOverwritten',
+    'sameCanvasserSameDay',
+    'differentCanvassers',
+  ]);
 });

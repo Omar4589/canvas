@@ -10,6 +10,7 @@ import { Household } from '../../models/Household.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { Voter } from '../../models/Voter.js';
@@ -358,6 +359,10 @@ router.post('/discard', async (req, res, next) => {
       clearedVoters = await SurveyResponse.distinct('voterId', { passId });
       await CanvassActivity.deleteMany({ passId });
       await SurveyResponse.deleteMany({ passId });
+      // Clear-knocks means "erase this round's field history" — archived (overwritten) responses
+      // for the round go with it, or shadow answers outlive the round they came from. The
+      // snapshot above preserved them, so discard → restore stays lossless.
+      await SurveyResponseArchive.deleteMany({ passId });
       // Bulk ledger delete → recompute Campaign.stats exactly (rare admin op; delta math for a
       // whole-pass wipe would be error-prone). Swallow: stats are a read cache, not the op.
       await recomputeCampaignStats(req.campaign._id, { swallowErrors: true });

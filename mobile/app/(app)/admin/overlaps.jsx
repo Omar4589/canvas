@@ -150,6 +150,7 @@ export default function AdminOverlaps() {
               {overlaps.map((o) => {
                 const latest = latestAt(o);
                 const passCount = (o.passes || []).length;
+                const owCount = (o.passes || []).reduce((n, p) => n + (p.overwrites?.length || 0), 0);
                 return (
                   <InsetNavRow
                     key={o.householdId}
@@ -166,6 +167,7 @@ export default function AdminOverlaps() {
                     sub={[
                       `${o.totalCanvassers} canvassers`,
                       `${passCount} ${passCount === 1 ? 'pass' : 'passes'}`,
+                      owCount ? `${owCount} survey${owCount === 1 ? '' : 's'} overwritten` : null,
                       latest ? `latest ${timeAgo(latest)}` : null,
                     ]
                       .filter(Boolean)

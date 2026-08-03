@@ -42,7 +42,10 @@ One page with everything about a voter:
 - **Identity & contact** — name, Voter ID, phone(s), party, gender, registration, districts/precinct.
 - **Household & campaign** — address, the campaign, other people at the address (click to jump).
 - **Voted status** — whether they've been marked early-voted.
-- **Survey responses** — every survey they've given, with answers and notes.
+- **Survey responses** — every survey they've given, with answers and notes. If a same-round
+  re-survey by a **different canvasser** replaced someone's answers, the winning response says so
+  ("Replaced X's earlier answers … preserved below") and the **preserved** earlier response shows
+  beneath it as a muted read-only card with a **Restore this response…** action (admins).
 - **Notes** — admin notes you add here, plus read-only notes captured in the field.
 - **Canvass activity** — what's happened at the household.
 
@@ -130,6 +133,12 @@ statuses above it isn't about what happened; it's a standing request:
 - **Edit a survey response in place** — correct answers or the note. Edits are **audited**: we
   record who changed it and when, and keep the voter's "surveyed" status in sync. You can also
   delete a response.
+- **Restore a replaced (preserved) response** — when a canvasser's same-round submit overwrote a
+  teammate's earlier answers, the earlier response is preserved and shown on the profile as a
+  muted read-only card. **Restore this response…** swaps it back losslessly: the current response
+  is preserved in its place, the earlier one becomes current, and no counts move. You can also
+  delete a preserved response outright. (Deleting a *current* response never touches its
+  preserved siblings.)
 - **Add notes** — free-form notes about the voter (with your name + timestamp), editable/deletable.
 
 ## On mobile (canvassers)
@@ -137,8 +146,9 @@ statuses above it isn't about what happened; it's a standing request:
 Canvassers get **lookup**: search voters in the **active campaign** (limited to the books assigned
 to them), open a **read-only** profile, and **add a note** from the field. Editing voter fields and
 survey answers is **web-admin only** — with one carve-out: an **org admin** can delete a duplicate
-survey response from the mobile **Duplicate surveys** screen ([ADMIN_APP.md](ADMIN_APP.md)). The
-mobile voter profile itself stays read-only; the delete lives on that report, not here.
+survey response — or **restore a preserved (overwritten) one** from its response-detail screen —
+via the mobile **Duplicate surveys** report ([ADMIN_APP.md](ADMIN_APP.md)). The
+mobile voter profile itself stays read-only; both actions live on that report, not here.
 
 **At a door**, a canvasser sees a deliberately short line: **Party · Age · Gender** ("Democratic ·
 34 yrs · Female"), plus a ✓ Voted tag and their survey status. It reads identically on the map's
@@ -195,7 +205,9 @@ guarded by `requireAuth, orgContext, requireOrgRole('admin')`:
 | `PATCH /admin/voters/:voterId` | Edit allowed fields (Zod). Locks `stateVoterId`/`householdId`/`organizationId`; stamps `lastEditedBy/At`; recomputes `fullName`. |
 | `POST/PATCH/DELETE /admin/voters/:voterId/notes[/:noteId]` | Admin voter-note CRUD. |
 | `PATCH /admin/voters/:voterId/surveys/:responseId` | Edit `answers`/`note`; sets `editedBy/At`; then `recomputeSurveyStatus`. |
-| `DELETE /admin/voters/:voterId/surveys/:responseId` | Delete a response; then `recomputeSurveyStatus`. |
+| `DELETE /admin/voters/:voterId/surveys/:responseId` | Delete a response; then `recomputeSurveyStatus`. Never touches archived (preserved) siblings. |
+| `POST /admin/voters/:voterId/surveys/:archiveId/restore` | **Lossless swap**: archive the displaced current response (`via:'restore'`), promote the preserved one verbatim, consume the archive row (re-restore = 404); resurrects (+1 `surveyCount`) if the current response was deleted meanwhile; then `recomputeSurveyStatus`. See [SURVEYS.md](SURVEYS.md) §F. |
+| `DELETE /admin/voters/:voterId/surveys/archive/:archiveId` | Erase a preserved (overwritten) response outright. No counters move — archives were never counted. |
 
 **Mobile** (`/mobile/voters`, [routes/mobile/voters.js](../server/src/routes/mobile/voters.js)) —
 `requireAuth, orgContext, requireOrgMember`; **active-campaign-scoped, read + add-note only**.
@@ -244,7 +256,7 @@ filter so undo attribution stays clean), `POST /undo` (reverts only rows carryin
 | File | Renders |
 |---|---|
 | [pages/VotersPage.jsx](../client/src/pages/VotersPage.jsx) | Directory: filters + server-paginated table; row → `/voters/:id`. Nav item in [navItems.js](../client/src/components/navItems.js); routes in [App.jsx](../client/src/App.jsx) under `requireOrgAdmin`. |
-| [pages/VoterDetailPage.jsx](../client/src/pages/VoterDetailPage.jsx) | Profile: editable identity/contact, household + members, survey responses (edit-in-place by question type, shows edited-by/at), admin notes CRUD + read-only field notes, activity. |
+| [pages/VoterDetailPage.jsx](../client/src/pages/VoterDetailPage.jsx) | Profile: editable identity/contact, household + members, survey responses (edit-in-place by question type, shows edited-by/at; a winning response renders its `replacedEarlier` note, and preserved responses from `overwrittenSurveys[]` render as muted read-only cards with **Restore this response…**), admin notes CRUD + read-only field notes, activity. |
 
 **Mobile** ([mobile/app/(app)/voters](../mobile/app/(app)/voters)):
 | File | Renders |

@@ -129,7 +129,10 @@ An organizer sees the whole campaign at once:
   the same pass** — a turf collision worth a look, since once a door is knocked in a pass nobody should
   return until the next one. Each such door gets a hollow **amber ring** around its pin, the header
   shows an **"N overlaps"** count, and a door's detail panel names the other canvassers who worked it in
-  that pass. It's **pass-wide and day-agnostic**: it catches two canvassers on the same door in one pass
+  that pass. When the collision includes a **same-round survey overwrite**, the door says so too —
+  "X replaced Y's survey answers for VoterName" — and the earlier answers are preserved on the
+  Duplicate Surveys report, restorable by an admin ([METRICS.md](METRICS.md) §Surveys). It's
+  **pass-wide and day-agnostic**: it catches two canvassers on the same door in one pass
   even when they knocked on **different days** — a cross-day collision the date-windowed Timeline
   reconciliation can miss (the two overlap surfaces are compared in [METRICS.md](METRICS.md)). Off by
   default, and never shown on the read-only client map. Overlaps are never double-billed regardless
@@ -527,7 +530,9 @@ constants). A small legend labels the two rings when they're shown.
   double-tap can't stack two identical screens. The hard guarantee is server-side — the survey route
   **upserts** on `(voter, pass)` against a **unique index** (see [METRICS.md](METRICS.md)), so a race
   can never persist two `SurveyResponse` rows; this also preserves the "re-survey replaces, counts
-  once" self-heal, just atomically.
+  once" self-heal, just atomically — and when the replaced response is **another canvasser's**, the
+  server snapshots it into `SurveyResponseArchive` before the replace, so a cross-canvasser
+  overwrite is preserved and admin-restorable, never a silent loss ([SURVEYS.md](SURVEYS.md) §F).
 - **The offline queue flushes on reconnect** (NetInfo listener in [map.jsx](../mobile/app/(app)/map.jsx))
   as well as on focus / foreground / refresh / next-action. NetInfo is a native module — it ships only in
   a native build, never an OTA (a bundle importing it would crash an older binary).

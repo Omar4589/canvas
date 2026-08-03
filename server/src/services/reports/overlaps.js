@@ -1,8 +1,10 @@
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Household } from '../../models/Household.js';
 import { User } from '../../models/User.js';
+import { Voter } from '../../models/Voter.js';
 import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { KNOCK_ACTIONS } from './aggregations.js';
 
 // Round labels must name their walk list once a campaign has more than one: roundNumber
@@ -52,6 +54,54 @@ const passLabeler = async (passes, campaignId) => {
 // `outOfRangeTotal` for the map's "N more outside your dates" hint.
 //
 // `match` = org/campaign/effort (+passId?) and must NOT carry a date range.
+// Preserved same-round survey overwrites at the SURFACED doors — a (household, pass) pair fact
+// the cards render as "X replaced Y's survey answers for VoterName". A separate tiny query after
+// each engine has its doors, never a pipeline stage: bounded by the cards about to be returned
+// (≤200 / ≤surfaced), not by campaign knock volume — the constraint this file exists to hold.
+// Both engines attach it as `passes[].overwrites`, ABSENT when none (the OverlapDoorCard
+// superset contract: fields render only when present). An overwrite always implies two
+// survey_submitted knocks by different canvassers at that (household, pass), so the door is
+// always already in the overlap set — this only annotates, never adds doors.
+async function overwritesForDoors(organizationId, householdIds) {
+  if (!householdIds.length) return new Map();
+  const rows = await SurveyResponseArchive.find(
+    {
+      ...(organizationId ? { organizationId } : {}),
+      householdId: { $in: householdIds },
+      overwrittenVia: 'submit', // restore swaps are admin curation, not field collisions
+    },
+    'voterId householdId passId userId overwrittenBy overwrittenAt'
+  ).lean();
+  if (!rows.length) return new Map();
+  const voterIds = [...new Set(rows.map((r) => String(r.voterId)))];
+  const userIds = [...new Set(rows.flatMap((r) => [String(r.userId), String(r.overwrittenBy)]))];
+  const [voters, users] = await Promise.all([
+    Voter.find({ _id: { $in: voterIds } }, 'fullName firstName lastName').lean(),
+    User.find({ _id: { $in: userIds } }, 'firstName lastName').lean(),
+  ]);
+  const vMap = new Map(voters.map((v) => [String(v._id), v]));
+  const uMap = new Map(users.map((u) => [String(u._id), u]));
+  const name = (id) => {
+    const u = uMap.get(String(id));
+    return u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Unknown' : 'Unknown';
+  };
+  const out = new Map();
+  for (const r of rows) {
+    const key = `${String(r.householdId)}|${r.passId ? String(r.passId) : ''}`;
+    if (!out.has(key)) out.set(key, []);
+    const v = vMap.get(String(r.voterId));
+    out.get(key).push({
+      voterId: String(r.voterId),
+      voterName:
+        (v && (v.fullName || `${v.firstName || ''} ${v.lastName || ''}`.trim())) || 'Unknown voter',
+      by: { id: String(r.userId), name: name(r.userId) },
+      overwrittenBy: { id: String(r.overwrittenBy), name: name(r.overwrittenBy) },
+      overwrittenAt: r.overwrittenAt,
+    });
+  }
+  return out;
+}
+
 // `userId` filters to collisions INVOLVING that canvasser — deliberately applied after grouping,
 // never as a $match: narrowing the rows to one canvasser first would leave every group with a
 // single distinct canvasser, so nothing could ever collide and the layer would read empty.
@@ -187,6 +237,15 @@ export async function computeOverlapDoors(match, { dateRange = null, userId = nu
   // Only doors the window does NOT already ring count as "more outside your dates" — a door with
   // one in-range collision and another out-of-range one is already on screen.
   for (const d of doors) outOfRangeHouseholds.delete(d.householdId);
+  const owMap = await overwritesForDoors(organizationId, doors.map((d) => d.householdId));
+  if (owMap.size) {
+    for (const d of doors) {
+      for (const p of d.passes) {
+        const ow = owMap.get(`${d.householdId}|${p.passId || ''}`);
+        if (ow) p.overwrites = ow;
+      }
+    }
+  }
   return {
     householdIds: doors.map((d) => d.householdId),
     doors,
@@ -307,6 +366,16 @@ export async function computeOverlaps(match, { organizationId, limit = 200 } = {
       totalCanvassers: e.canvasserSet.size,
     }))
     .sort((a, b) => b.totalCanvassers - a.totalCanvassers);
+
+  const owMap = await overwritesForDoors(organizationId, result.map((e) => e.household.id));
+  if (owMap.size) {
+    for (const e of result) {
+      for (const p of e.passes) {
+        const ow = owMap.get(`${e.household.id}|${p.passId || ''}`);
+        if (ow) p.overwrites = ow;
+      }
+    }
+  }
 
   return {
     overlaps: result,

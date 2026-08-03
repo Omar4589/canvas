@@ -231,6 +231,11 @@ test('1. bootstrap: doors AND voters present per-round fresh; stored globals unt
   assert.equal(vv.get(String(vB._id)).surveyStatus, 'surveyed', 'same-round voter keeps Re-survey');
   assert.equal(vv.get(String(vC._id)).surveyStatus, 'not_surveyed');
 
+  // The smart-confirm flag: present ONLY on per-round-surveyed voters; true = my own survey.
+  assert.equal(vv.get(String(vB._id)).surveyedByMe, true, 'own survey this round → surveyedByMe true');
+  assert.ok(!('surveyedByMe' in vv.get(String(vA._id))), 'round-fresh voter carries no flag');
+  assert.ok(!('surveyedByMe' in vv.get(String(vC._id))), 'never-surveyed voter carries no flag');
+
   // The wire rewrite must never touch the stored campaign-global fields.
   const storedA = await Voter.findById(vA._id, { surveyStatus: 1 }).lean();
   assert.equal(storedA.surveyStatus, 'surveyed', 'stored Voter.surveyStatus stays global (admin/reports)');
@@ -255,6 +260,33 @@ test('2. /changes delta applies the identical per-round rewrite (no global leak-
   const vv = new Map(r.json.voters.map((v) => [String(v._id), v]));
   assert.equal(vv.get(String(vA._id)).surveyStatus, 'not_surveyed', 'delta voter rewrite matches bootstrap');
   assert.equal(vv.get(String(vB._id)).surveyStatus, 'surveyed');
+  // The delta ALWAYS carries the flag for surveyed voters — the client spread-merges delta
+  // voters whole, so an omitted flag would leave a stale value behind on the phone.
+  assert.equal(vv.get(String(vB._id)).surveyedByMe, true, 'delta carries surveyedByMe');
+  assert.ok(!('surveyedByMe' in vv.get(String(vA._id))), 'delta: no flag on a round-fresh voter');
+});
+
+test("2b. a TEAMMATE's bootstrap reads the same voter as surveyed + surveyedByMe:false", { skip }, async () => {
+  const { org, campaign, effort, p2, vB, vA } = ctx;
+  // A second canvasser on the SAME book: vB was surveyed this round by Cal, so for this
+  // teammate the door must say 'surveyed' AND surveyedByMe:false — the exact pair the
+  // smart re-survey confirm keys on (true or absent must never fire it).
+  const mate = await User.create({
+    firstName: 'May', lastName: 'Mate', email: 'rv-mate@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: mate._id, organizationId: org._id, role: 'canvasser', isActive: true });
+  await CampaignAssignment.create({ organizationId: org._id, campaignId: campaign._id, userId: mate._id });
+  const book = await Turf.findOne({ campaignId: campaign._id, passId: p2._id }).lean();
+  await TurfAssignment.create({
+    organizationId: org._id, campaignId: campaign._id, passId: p2._id, turfId: book._id, userId: mate._id,
+  });
+
+  const r = await call(`/mobile/bootstrap?campaignId=${campaign._id}`, signUserToken(mate));
+  assert.equal(r.status, 200);
+  const vv = new Map(r.json.voters.map((v) => [String(v._id), v]));
+  assert.equal(vv.get(String(vB._id)).surveyStatus, 'surveyed');
+  assert.equal(vv.get(String(vB._id)).surveyedByMe, false, "a teammate's survey → surveyedByMe false");
+  assert.ok(!('surveyedByMe' in vv.get(String(vA._id))), 'round-fresh voter still carries no flag');
 });
 
 test('3. voter profile is management-only: canvasser 403, lead 200, wrong-campaign 403, admin 200', { skip }, async () => {

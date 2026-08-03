@@ -180,6 +180,24 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
               </div>
             )}
 
+            {r.replacedEarlier && (
+              <div className="text-xs text-warning-fg">
+                Replaced {r.replacedEarlier.by ? `${r.replacedEarlier.by.firstName || ''} ${r.replacedEarlier.by.lastName || ''}`.trim() : "another canvasser"}&apos;s
+                earlier answers from {formatInTz(r.replacedEarlier.submittedAt, tz, TIME_OPTS, true)} —
+                the earlier response is preserved on the voter record.
+              </div>
+            )}
+
+            {r.archived && (
+              <div className="rounded border border-danger/30 bg-danger-tint p-2 text-xs text-danger-fg">
+                <span className="font-semibold">Overwritten</span> — these answers were replaced at
+                the door by{' '}
+                {r.overwrittenBy ? `${r.overwrittenBy.firstName || ''} ${r.overwrittenBy.lastName || ''}`.trim() : 'another canvasser'}{' '}
+                on {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)} and preserved here. Restore
+                from the voter profile.
+              </div>
+            )}
+
             {household?.lng != null && household?.lat != null && (
               <DotMap lng={household.lng} lat={household.lat} />
             )}

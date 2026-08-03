@@ -1,6 +1,9 @@
 import mongoose from 'mongoose';
 
-const answerSchema = new mongoose.Schema(
+// Exported (not module-private) because SurveyResponseArchive embeds the SAME schemas —
+// an archived response is a verbatim snapshot, and sharing the schema objects means the
+// snapshot shape can never drift from the live one.
+export const answerSchema = new mongoose.Schema(
   {
     questionKey: { type: String, required: true },
     questionLabel: { type: String, required: true },
@@ -16,7 +19,7 @@ const answerSchema = new mongoose.Schema(
   { _id: false }
 );
 
-const locationSchema = new mongoose.Schema(
+export const locationSchema = new mongoose.Schema(
   {
     lat: { type: Number, required: true },
     lng: { type: Number, required: true },

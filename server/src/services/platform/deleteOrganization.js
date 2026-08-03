@@ -31,6 +31,7 @@ import { Statement } from '../../models/Statement.js';
 import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Tag } from '../../models/Tag.js';
 import { Turf } from '../../models/Turf.js';
@@ -53,7 +54,7 @@ export const ORG_SCOPED = [
   ClientReportMapPoint, CoordinatorChange, DncPendingId, DncUpload, Effort, EffortMember,
   ExportJob, FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, Membership, Pass,
   ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyResponse,
-  SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
+  SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
   VotedUpload, VotedVoter, Voter, VoterNote,
 ];
 

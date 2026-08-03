@@ -14,8 +14,13 @@ import InsetGroup, {
   InsetTitleRow,
   InsetBlockRow,
   InsetNoteRow,
+  InsetActionRow,
   GroupFooter,
 } from '../../../components/InsetGroup';
+import { useQueryClient, useMutation } from '@tanstack/react-query';
+import { Alert } from 'react-native';
+import { useConsoleRole } from '../../../lib/useConsoleRole';
+import { buildRestorePrompt } from '../../../lib/duplicateSurveys';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -59,6 +64,49 @@ export default function ResponseDetails() {
 
   const d = q.data;
   const hasPin = d?.household?.lng != null && d?.household?.lat != null;
+
+  // Restore (archived responses only) is org-admin only — positive form: useConsoleRole is
+  // undefined while resolving, and a lead must never see the button flash.
+  const qc = useQueryClient();
+  const viewerRole = useConsoleRole();
+  const canRestore = viewerRole === 'admin' || viewerRole === 'super';
+  const restoreMut = useMutation({
+    mutationFn: () =>
+      api(`/admin/voters/${d.response.voterId}/surveys/${d.response.id}/restore`, { method: 'POST' }),
+    onSuccess: () => {
+      // The restore moved the same caches a delete moves: this screen's own entry (the archive id
+      // is consumed — a refetch would 404), the report, and the voter profile.
+      qc.removeQueries({ queryKey: ['admin', 'response-details', d.response.id] });
+      qc.invalidateQueries({ queryKey: ['admin', 'duplicate-surveys'] });
+      qc.invalidateQueries({
+        predicate: (query) => query.queryKey?.[0] === 'mobile' && query.queryKey?.[1] === 'voter',
+      });
+      Alert.alert('Restored', 'These answers are the current response again.');
+      router.back();
+    },
+    onError: (err) =>
+      Alert.alert(
+        err?.status === 404 ? 'Already restored' : "Couldn't restore",
+        err?.status === 404
+          ? 'Someone else restored or removed this response. Pull to refresh the report.'
+          : err?.message || 'Try again in a moment.'
+      ),
+  });
+  const confirmRestore = () => {
+    const prompt = buildRestorePrompt({
+      voterName: d?.voter?.fullName,
+      response: {
+        canvasser: d?.canvasser,
+        roundLabel: d?.round ? `Pass ${d.round.roundNumber}${d.round.name ? ` — ${d.round.name}` : ''}` : null,
+        submittedAt: d?.response?.submittedAt,
+      },
+      formatTime: (at) => formatExact(at, tz),
+    });
+    Alert.alert(prompt.title, prompt.message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: prompt.confirmText, onPress: () => restoreMut.mutate() },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -162,11 +210,47 @@ export default function ResponseDetails() {
                   sub={formatExact(d.response.editedAt, tz)}
                 />
               ) : null}
+              {d.response.replacedEarlier ? (
+                <InsetRow
+                  label="Replaced"
+                  value={
+                    d.response.replacedEarlier.by
+                      ? `${d.response.replacedEarlier.by.firstName} ${d.response.replacedEarlier.by.lastName || ''}`.trim()
+                      : 'an earlier response'
+                  }
+                  sub={`earlier answers from ${formatExact(d.response.replacedEarlier.submittedAt, tz)} — preserved`}
+                />
+              ) : null}
+              {d.response.archived ? (
+                <InsetRow
+                  label="Overwritten by"
+                  value={
+                    d.response.overwrittenBy
+                      ? `${d.response.overwrittenBy.firstName} ${d.response.overwrittenBy.lastName || ''}`.trim()
+                      : 'another canvasser'
+                  }
+                  sub={formatExact(d.response.overwrittenAt, tz)}
+                  badge={{ text: 'Overwritten' }}
+                />
+              ) : null}
+              {d.response.archived && canRestore ? (
+                <InsetActionRow
+                  label={restoreMut.isPending ? 'Restoring…' : 'Restore these answers…'}
+                  disabled={restoreMut.isPending}
+                  onPress={confirmRestore}
+                />
+              ) : null}
               <InsetRow
                 label="Distance from home"
                 value={d.response.distanceFromHouseMeters != null ? formatDistance(d.response.distanceFromHouseMeters) : '—'}
               />
             </InsetGroup>
+            {d.response.archived ? (
+              <GroupFooter>
+                These answers were replaced at the door and are preserved here. Restoring swaps the
+                two responses — nothing is deleted.
+              </GroupFooter>
+            ) : null}
             {d.response.wasOfflineSubmission ? (
               <GroupFooter>
                 {d.response.syncedAt

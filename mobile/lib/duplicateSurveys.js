@@ -4,14 +4,18 @@
 // Alert presentation and the token→color mapping stay with their callers.
 
 export const KIND_ALL = 'all';
+export const KIND_OVERWRITTEN = 'sameRoundOverwritten';
 export const KIND_SAME_DAY = 'sameCanvasserSameDay';
 export const KIND_DIFFERENT = 'differentCanvassers';
 
 // TabSwitcher tabs. The keys ARE the server's `?kind=` values, so nothing translates in between.
+// Order = the report's severity ladder: overwritten (answers destroyed, preserved) > same-day
+// double-submit (rows to delete, nothing lost) > cross-round revisit (benign history).
 export const KIND_TABS = [
   { key: KIND_ALL, label: 'All' },
+  { key: KIND_OVERWRITTEN, label: 'Same round, overwritten' },
   { key: KIND_SAME_DAY, label: 'Same canvasser, same day' },
-  { key: KIND_DIFFERENT, label: 'Different canvassers' },
+  { key: KIND_DIFFERENT, label: 'Different canvassers, later round' },
 ];
 
 const canvasserName = (c) =>
@@ -23,11 +27,14 @@ const canvasserName = (c) =>
 // screen, and an auditor needs to see that a third person was involved.
 export const badgesFor = (dupe) => {
   const badges = [{ key: 'count', tone: 'neutral', text: `${dupe?.count || 0}× surveyed` }];
+  if (dupe?.sameRoundOverwritten) {
+    badges.push({ key: 'overwritten', tone: 'danger', text: 'Same round · overwritten' });
+  }
   if (dupe?.sameCanvasserSameDay) {
-    badges.push({ key: 'sameDay', tone: 'danger', text: 'Same canvasser · same day' });
+    badges.push({ key: 'sameDay', tone: 'warn', text: 'Same canvasser · same day' });
   }
   if (dupe?.differentCanvassers) {
-    badges.push({ key: 'different', tone: 'info', text: 'Different canvassers' });
+    badges.push({ key: 'different', tone: 'info', text: 'Different canvassers · later round' });
   }
   return badges;
 };
@@ -47,7 +54,32 @@ export const summaryFor = (dupe) => {
 // right (for a double-tap the SECOND submit is usually the good one; for a cross-round revisit the
 // LATER one is the current truth). There is also no last-response case to guard: the endpoint only
 // returns groups with count > 1, so a card can only go 3→2→gone.
-export const deletableResponses = (dupe) => dupe?.responses || [];
+// ...except archived (overwritten) rows: they are already not current — there is nothing to
+// delete. Their affordance is restore, on the response's detail screen.
+export const deletableResponses = (dupe) => (dupe?.responses || []).filter((r) => !r.overwritten);
+
+// The meta line an archived response row shows under who/when/round.
+export const overwriteLineFor = (r) => {
+  const w = `${r?.overwrittenBy?.firstName || ''} ${r?.overwrittenBy?.lastName || ''}`.trim();
+  return `Overwritten · replaced by ${w || 'another canvasser'}`;
+};
+
+// The restore confirm. NOT destructive: the swap is lossless in both directions, and the copy
+// says so. Pinned by duplicateSurveys.test.js; the server behavior it describes is pinned by
+// server/test/surveyOverwrite.int.test.js ('restore is a lossless swap').
+export const buildRestorePrompt = ({ voterName, response, formatTime }) => {
+  const who = `${response?.canvasser?.firstName || ''} ${response?.canvasser?.lastName || ''}`.trim() || 'the earlier canvasser';
+  const when = formatTime ? formatTime(response?.submittedAt) : '';
+  return {
+    title: `Restore ${who}'s answers?`,
+    message:
+      `${voterName || 'This voter'} · ${response?.roundLabel || 'Unknown round'}${when ? ` · ${when}` : ''}\n\n` +
+      'This swaps the two responses: these answers become the current response again, and the ' +
+      'answers that replaced them are preserved the same way. Nothing is deleted — you can ' +
+      'swap back.',
+    confirmText: 'Restore answers',
+  };
+};
 
 // The destructive confirm. Descriptor only (no Alert here) so the copy can be pinned in a test —
 // copy that names what is destroyed is exactly what rots silently.

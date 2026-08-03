@@ -36,6 +36,7 @@ const { Household } = await import('../src/models/Household.js');
 const { Voter } = await import('../src/models/Voter.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
+const { SurveyResponseArchive } = await import('../src/models/SurveyResponseArchive.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 
@@ -435,5 +436,51 @@ test('overlap round labels name their walk list ONLY once the campaign has 2+ ef
   } finally {
     // Leave the fixture as the earlier tests knew it, in case of future reordering.
     await Effort.deleteOne({ _id: south._id });
+  }
+});
+
+test('overlap doors carry passes[].overwrites when a survey response was preserved there — both engines', { skip }, async () => {
+  const { adminTok, org, camp, H, G, chad, chris, pass1 } = ctx;
+  // A preserved same-round overwrite at H: Chris's submit replaced Chad's response for H's voter.
+  // (The knock rows for both already exist in the fixture — an overwrite implies the collision.)
+  const voter = await Voter.findOne({ householdId: H._id }).lean();
+  const survey = await SurveyTemplate.findOne({ organizationId: org._id }).lean();
+  const archived = await SurveyResponseArchive.create({
+    organizationId: org._id, campaignId: camp._id, voterId: voter._id, householdId: H._id,
+    userId: chad._id, surveyTemplateId: survey._id, surveyTemplateVersion: 1, answers: [],
+    location: { lat: 32.35, lng: -95.299, accuracy: 10 }, distanceFromHouseMeters: 8,
+    submittedAt: new Date(`${DAY1}T15:00:00Z`), passId: pass1._id,
+    overwrittenBy: chris._id, overwrittenVia: 'submit', overwrittenAt: new Date(`${DAY5}T15:00:00Z`),
+  });
+  try {
+    // Engine 1: /overlap-doors (the map + Overlaps page).
+    const doors = await call('GET', `/api/admin/reports/overlap-doors?campaignId=${camp._id}`, { token: adminTok, orgId: org._id });
+    assert.strictEqual(doors.status, 200);
+    const hDoor = doors.json.doors.find((d) => String(d.householdId) === String(H._id));
+    const hPass = hDoor.passes.find((p) => String(p.passId) === String(pass1._id));
+    assert.ok(Array.isArray(hPass.overwrites), 'the annotated pass carries overwrites[]');
+    assert.strictEqual(hPass.overwrites.length, 1);
+    assert.strictEqual(hPass.overwrites[0].voterName, voter.fullName);
+    assert.strictEqual(hPass.overwrites[0].by.name, 'Chad Canvasser');
+    assert.strictEqual(hPass.overwrites[0].overwrittenBy.name, 'Chris Canvasser');
+    // The superset contract: a door with no overwrite carries NO key at all.
+    for (const d of doors.json.doors) {
+      if (String(d.householdId) === String(H._id)) continue;
+      for (const p of d.passes) assert.ok(!('overwrites' in p), 'absent when none');
+    }
+
+    // Engine 2: /overlaps (the timeline builder) must agree.
+    const windowed = await call(
+      'GET',
+      `/api/admin/reports/overlaps?campaignId=${camp._id}&from=${DAY1}&to=${DAY5}`,
+      { token: adminTok, orgId: org._id }
+    );
+    assert.strictEqual(windowed.status, 200);
+    const card = windowed.json.overlaps.find((o) => o.household.id === String(H._id));
+    const cardPass = card.passes.find((p) => String(p.passId) === String(pass1._id));
+    assert.ok(Array.isArray(cardPass.overwrites), 'both engines annotate alike');
+    assert.strictEqual(cardPass.overwrites[0].overwrittenBy.name, 'Chris Canvasser');
+  } finally {
+    await SurveyResponseArchive.deleteOne({ _id: archived._id });
   }
 });

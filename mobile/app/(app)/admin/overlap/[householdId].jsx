@@ -151,6 +151,17 @@ export default function OverlapDetail() {
                 </View>
               </View>
             ))}
+            {/* A same-round pair of surveys on one voter: the later submit REPLACED the earlier
+                answers — preserved, restorable from the voter profile. dangerFg on dangerBg per
+                the contrast table (raw danger fails small text). */}
+            {(p.overwrites || []).map((o, i) => (
+              <View key={`ow-${o.voterId}-${i}`} style={styles.overwriteRow}>
+                <Text style={styles.overwriteText}>
+                  {o.overwrittenBy?.name} replaced {o.by?.name}'s survey answers for {o.voterName}
+                </Text>
+                <Text style={styles.overwriteTime}>{formatExact(o.overwrittenAt, tzName)}</Text>
+              </View>
+            ))}
           </View>
         ))}
 
@@ -214,6 +225,15 @@ function makeStyles(t) {
       padding: spacing.md,
       marginTop: spacing.md,
     },
+    overwriteRow: {
+      backgroundColor: colors.dangerBg,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      marginTop: spacing.xs,
+    },
+    overwriteText: { fontSize: 12, fontWeight: '600', color: colors.dangerFg },
+    overwriteTime: { fontSize: 11, color: colors.dangerFg, marginTop: 1, fontVariant: ['tabular-nums'] },
     passLabel: { ...type.caption, fontWeight: '700', color: colors.textSecondary, marginBottom: spacing.sm },
     canvasserRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.sm },
     actionDot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },

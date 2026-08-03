@@ -17,6 +17,7 @@ import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { deleteRawImport } from '../import/rawImportStore.js';
 import { ExportJob } from '../../models/ExportJob.js';
@@ -127,7 +128,8 @@ export async function deleteCampaignCascade(campaign) {
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
     SavedSearch, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
     CampaignManager, ClientReport, ClientReportMapPoint, ReportShareLink,
-    CanvassActivity, SurveyResponse, ImportJob, HouseholdLocationChange, ExportJob,
+    CanvassActivity, SurveyResponse, SurveyResponseArchive, ImportJob, HouseholdLocationChange,
+    ExportJob,
   ];
 
   // The raw uploaded spreadsheets, FIRST — while we can still find the ImportJob rows that name

@@ -2,6 +2,7 @@ import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { Household } from '../../models/Household.js';
 import { Pass } from '../../models/Pass.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
@@ -33,9 +34,11 @@ export async function snapshotPass({ campaign, passId, reason, includeKnocks, us
 
   let activities = [];
   let responses = [];
+  let responseArchives = [];
   if (includeKnocks) {
     activities = await CanvassActivity.find({ passId }).lean();
     responses = await SurveyResponse.find({ passId }).lean();
+    responseArchives = await SurveyResponseArchive.find({ passId }).lean();
   }
 
   return TurfSnapshot.create({
@@ -57,6 +60,7 @@ export async function snapshotPass({ campaign, passId, reason, includeKnocks, us
     clearedKnocks: !!includeKnocks,
     activities,
     responses,
+    responseArchives,
     bookCount: books.length,
     knockCount: activities.length + responses.length,
     createdBy: userId || null,
@@ -136,6 +140,8 @@ export async function restoreSnapshot({ campaign, snapshot, userId }) {
     // Raw inserts preserve the original _ids and every field exactly.
     if (snap.activities?.length) await CanvassActivity.collection.insertMany(snap.activities);
     if (snap.responses?.length) await SurveyResponse.collection.insertMany(snap.responses);
+    if (snap.responseArchives?.length)
+      await SurveyResponseArchive.collection.insertMany(snap.responseArchives);
     const hhIds = [...new Set((snap.activities || []).map((a) => String(a.householdId)))];
     const voterIds = [...new Set((snap.responses || []).map((r) => String(r.voterId)))];
     await recomputeHouseholdStatusesByIds(hhIds, campaign.type);

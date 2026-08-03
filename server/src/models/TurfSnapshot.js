@@ -43,6 +43,8 @@ const turfSnapshotSchema = new mongoose.Schema(
     clearedKnocks: { type: Boolean, default: false },
     activities: { type: [mongoose.Schema.Types.Mixed], default: [] },
     responses: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    // Archived (overwritten) responses for the round — cleared with it, restored with it.
+    responseArchives: { type: [mongoose.Schema.Types.Mixed], default: [] },
 
     bookCount: { type: Number, default: 0 },
     knockCount: { type: Number, default: 0 },

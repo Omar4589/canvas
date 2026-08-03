@@ -404,10 +404,16 @@ campaign's *Surveys* can read higher than its *Surveyed voters*. It is the voter
 Overlaps: one says the same door was knocked twice, this says the same person was surveyed twice.
 
 Each voter starts **collapsed**, showing only what you need to triage: the name, the address, and
-the badges — a **count**, **Same canvasser · same day** (a double-submit; the one worth fixing) and
-**Different canvassers** (usually a legitimate later-round revisit). Both badges show when both are
-true, which is what a three-response entry looks like. Tap the voter to open who surveyed them, when
-and in which round; tap a response for its full detail, or **Open voter** for the profile.
+the badges — a **count**, plus up to three kinds in severity order: **Same round · overwritten**
+(a second canvasser's same-round submit **replaced** the first's answers — the earlier response is
+**preserved**, not lost), **Same canvasser · same day** (a double-submit or mis-tap) and
+**Different canvassers · later round** (usually a legitimate revisit). A voter can carry more than
+one badge when three or more responses are involved. Tap the voter to open who surveyed them, when
+and in which round; tap a response for its full detail, or **Open voter** for the profile. An
+overwritten (preserved) row shows an **Overwritten** badge and "replaced by {name}"; instead of
+Delete it reads **Preserved**, and its response-detail screen carries an admin-only **Restore** —
+the lossless swap that makes the earlier answers current again while preserving the ones they
+displace ([SURVEYS.md](SURVEYS.md) §F).
 
 Same three filters as the web page — duplicate type, canvasser (departed canvassers included, since
 their work is still on the report), dates (opens on **All time**; it's a history report) — and
@@ -418,8 +424,8 @@ place: on the web the fix path is Open voter → profile → delete, and the mob
 read-only, so without an in-place delete the phone would only ever be able to *find* the problem.
 Confirming names the canvasser, the round and the time, and says plainly what is lost (the answers,
 permanently) and what is not (the knock stays on the timeline, the door still reads surveyed, only
-the Surveys total moves). **Team leads see the whole report and no Delete** — the row explains why,
-and the server refuses a lead's delete regardless of what the app shows.
+the Surveys total moves). **Team leads see the whole report and no Delete or Restore** — the row
+explains why, and the server refuses a lead's delete or restore regardless of what the app shows.
 
 ### The More hub
 It reads as a **settings menu**: your name and email in a prominent row at the very top (it opens the
@@ -609,10 +615,16 @@ is JS-only — ships via OTA, no native build.
 
 ## The Duplicate surveys screen
 
-[admin/duplicate-surveys.jsx](../mobile/app/(app)/admin/duplicate-surveys.jsx) reads the shipped
+[admin/duplicate-surveys.jsx](../mobile/app/(app)/admin/duplicate-surveys.jsx) reads
 `GET /admin/reports/duplicate-surveys` (`campaignId`, `from`/`to`, `kind`, `userId`, `skip`/`limit`
 — see [METRICS.md](METRICS.md) §Surveys) and deletes via the shipped
-`DELETE /admin/voters/:voterId/surveys/:responseId`. **No server changes.** Three things are worth
+`DELETE /admin/voters/:voterId/surveys/:responseId`. **The screen is no longer server-untouched**
+(this doc used to say "No server changes" — true at launch, false since the overwrite-preservation
+release): the report gained a third kind, `sameRoundOverwritten` — preserved same-round overwrites
+join via `$unionWith` from `SurveyResponseArchive` and sort first — and `admin/voters.js` gained
+the **restore** (`POST …/surveys/:archiveId/restore`) and **archive-erase**
+(`DELETE …/surveys/archive/:archiveId`) routes, both org-admin-only; the mobile response-details
+screen hosts the Restore ([SURVEYS.md](SURVEYS.md) §F). Three things are worth
 knowing before editing it:
 
 - **The read/write split.** The report router allows `admin` **and** `lead`, so a team lead reaches
@@ -622,7 +634,8 @@ knowing before editing it:
   so a `!== 'lead'` test would flash a Delete button at a lead for one frame. Leads get an inline
   caption instead. The button is gated for honesty, not security.
 - **`admin/voters.js` is now MOBILE-FACING** — this screen is its first mobile caller, so that file
-  (voter identity PATCH, notes, DNC, the Person edit-proposal flow) now shows up in
+  (voter identity PATCH, notes, DNC, the Person edit-proposal flow, and now the survey
+  restore/archive-erase routes) now shows up in
   `npm run audit:mobile-api`. That is the tool working; read the flagged diffs against the shipped
   bundle rather than assuming a web-only edit is safe.
 - **The paged fetch is written inline, not through [useInfinitePaged](../mobile/lib/useInfinitePaged.js).**
@@ -631,8 +644,9 @@ knowing before editing it:
   invisible to the audit (`/super-admin/users` and `/super-admin/emails` are missing from `--list`
   today). An audit surface should not hide from the audit. The helper now carries a comment saying so.
 
-Deleting **invalidates** rather than splicing the row out locally: `sameCanvasserSameDay` /
-`differentCanvassers` are computed server-side from timezone-bucketed day keys, so a 3→2 delete can
+Deleting (and restoring) **invalidates** rather than splicing the row out locally:
+`sameRoundOverwritten` / `sameCanvasserSameDay` /
+`differentCanvassers` are computed server-side, so a 3→2 delete can
 leave a wrong badge on the one screen whose entire job is those badges — and re-deriving them client
 side would duplicate the aggregation `duplicateSurveys.int.test.js` exists to protect. The route's
 response (a full rebuilt voter profile, richer than the screen shows) is discarded rather than
