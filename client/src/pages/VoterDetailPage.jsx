@@ -558,7 +558,9 @@ export default function VoterDetailPage() {
       </Section>
 
       <Section title={`Survey responses (${p.surveys.length})`}>
-        {p.surveys.length === 0 ? (
+        {/* Preserved cards render even with ZERO live responses — deleting the only live response
+            must not strand its preserved sibling, which is the restore-into-the-void path. */}
+        {p.surveys.length === 0 && (p.overwrittenSurveys || []).length === 0 ? (
           <p className="text-sm text-fg-muted">No survey responses.</p>
         ) : (
           <div className="space-y-3">
