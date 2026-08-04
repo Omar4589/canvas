@@ -94,15 +94,16 @@ export async function sweepStaleImportJobs() {
 
   // Stray worker temp files: ExcelJS's streaming reader spools decompressed sheet
   // XML to the OS temp dir (tmp-*) and a crash skips its cleanup callback; our own
-  // import-spill-* files are removed in a finally but a SIGKILL can beat it. Both
-  // hold voter PII, so sweep anything older than 24h. Dyno FS is ephemeral, this
-  // is belt-and-braces for a long-lived worker.
+  // import-spill-* files and xlsx-norm-* entry-order-normalized zip copies are
+  // removed in a finally but a SIGKILL can beat it. All hold voter PII, so sweep
+  // anything older than 24h. Dyno FS is ephemeral, this is belt-and-braces for a
+  // long-lived worker.
   let tmpDeleted = 0;
   try {
     const dir = os.tmpdir();
     const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
     for (const name of fs.readdirSync(dir)) {
-      if (!/^(tmp-|import-spill-)/.test(name)) continue;
+      if (!/^(tmp-|import-spill-|xlsx-norm-)/.test(name)) continue;
       const full = path.join(dir, name);
       try {
         const st = fs.statSync(full);

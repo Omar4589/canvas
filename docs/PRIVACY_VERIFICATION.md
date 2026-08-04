@@ -480,7 +480,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   **bucket itself** — `rawImports.files` older than 24h, resolving each file's `ImportJob` by the
   filename convention — and deletes any whose job is terminal **or missing**, so pre-fix orphans and
   files stranded by a swallowed delete are reached without needing the destroyed jobIds; it also
-  removes stray worker temp files (`tmp-*` ExcelJS spools, `import-spill-*`) older than 24h;
+  removes stray worker temp files (`tmp-*` ExcelJS spools, `import-spill-*`, `xlsx-norm-*`
+  entry-order-normalized copies) older than 24h;
   **(iii)** a one-off console script (`npm run sweep:raw-imports`, root-proxied for the Heroku Run
   console) purges the accumulated backlog on demand. The same release makes a stuck import **fail
   with a message within minutes** (heartbeat + CAS expiry in `GET /admin/imports/:importId` and the
@@ -494,17 +495,19 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   subprocessor; DPA §6 untouched.**
 
 - *(v5 2026-08-04)* **NEW disclosure: transient voter-file copies on dyno ephemeral disk.** The
-  import pipeline now deliberately uses **disk instead of heap** in three places, each holding voter
+  import pipeline now deliberately uses **disk instead of heap** in four places, each holding voter
   PII briefly: **(i)** web-dyno uploads land via multer **`diskStorage`** in the OS temp dir (never
   in the web dyno's RSS) and are unlinked on the response `'close'` event — success, failure, or
   client abort; **(ii)** the worker's apply path spills valid rows to
   `import-spill-<jobId>.ndjson` (+ a `-linked` twin) in the OS temp dir, both removed in a
   `finally` — success OR failure; **(iii)** ExcelJS's streaming reader spools decompressed sheet XML
-  to `tmp-*` files with its own cleanup callback. Lifetime is the **request or the job**; nothing is
-  at rest past it. Failure modes are bounded: a SIGKILL can beat a `finally` or skip ExcelJS's
-  cleanup, so the nightly sweep (entry above) removes both patterns after 24h — and the dyno
-  filesystem is itself ephemeral (destroyed on restart, daily on Heroku). No new audience, no new
-  storage service (the OS temp dir of dynos we already run), no export.
+  to `tmp-*` files with its own cleanup callback; **(iv)** an xlsx whose zip entry order would
+  corrupt the streaming parse is first rewritten to a `xlsx-norm-*.zip` copy in the OS temp dir
+  (same content, reordered entries), unlinked in a `finally`. Lifetime is the **request or the
+  job**; nothing is at rest past it. Failure modes are bounded: a SIGKILL can beat a `finally` or
+  skip ExcelJS's cleanup, so the nightly sweep (entry above) removes all three patterns after 24h —
+  and the dyno filesystem is itself ephemeral (destroyed on restart, daily on Heroku). No new
+  audience, no new storage service (the OS temp dir of dynos we already run), no export.
   **Assessment: NO published Privacy Policy / ToS / DPA sentence becomes false — processing-time
   copies on our own compute, shorter-lived than the GridFS staging copy already disclosed; no new
   subprocessor; DPA §6 untouched.**

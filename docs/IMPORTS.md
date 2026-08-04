@@ -362,7 +362,20 @@ Papa** (`step` mode) and **XLSX via exceljs's `WorkbookReader`** (row-at-a-time;
 cached, so IDs keep leading zeros and date cells keep their type via the shared `readCell`), calling
 `onRow` once per non-empty row — **no rows array ever exists**. Materializing every row as a JS object
 was ~299 MB of live heap on a 166k-row file, which OOM'd the worker's 384 MB cap (§E); the streamed
-pipeline finishes the same file in 9.5 s under `--max-old-space-size=384` with identical outputs.
+pipeline finishes the same file in ~7 s under `--max-old-space-size=384` with identical outputs
+(219 MB peak RSS, normalization included). **Zip entry order is normalized first when needed**
+(`normalizeXlsxOrder`): exceljs's streaming reader is entry-order sensitive — a sheet arriving after
+sharedStrings but before `workbook.xml` crashed its inline path (`this.model.sheets`, exceljs 4.4.0),
+and a sheet arriving *before* sharedStrings in a **data-descriptor zip** (what streaming writers like
+exceljs's own `WorkbookWriter` emit) silently swallowed the rest of the stream, surfacing text cells
+as raw `{sharedString: n}` placeholders. The old `wb.xlsx.load` never saw either because it had random
+access. So `streamParse` reads the central directory (milliseconds), and only when a dependency entry
+(`workbook.xml`, rels, sharedStrings, styles) trails the first worksheet does it rewrite the zip
+deps-first to a transient `xlsx-norm-*.zip` temp file (streamed entry-by-entry, archiver level 1,
+unlinked in a `finally`, swept nightly). Files already in the safe order — everything desktop Excel
+writes — skip the rewrite entirely. Pinned by
+[test/parseUploadOrder.test.js](../server/test/parseUploadOrder.test.js) across both hostile orders, a
+genuine streaming-writer workbook, and the untouched safe order.
 `maxRows` / `maxCells` (env **`MAX_IMPORT_ROWS`** / **`MAX_IMPORT_CELLS`**, defaults 300,000 /
 8,000,000) are enforced **during** the parse — `ImportTooLargeError` (`code: 'file-too-many-rows'`)
 fires the moment a counter trips, not after materializing everything. `parseUpload` survives as the

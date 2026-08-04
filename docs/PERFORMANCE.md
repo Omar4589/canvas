@@ -254,8 +254,11 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
     heap** — an 8.8× blow-up over the file that OOM'd the worker's 384 MB cap
     (`--max-old-space-size=${WORKER_MAX_OLD_SPACE:-384}`, `server/package.json`). `streamParse`
     ([parseUpload.js](../server/src/services/import/parseUpload.js)) hands rows out one at a time;
-    verified: the full 166k xlsx **completes under `--max-old-space-size=384` in 9.5 s** with
-    identical outputs (166,149 valid / 106,958 households / 589 skips).
+    verified: the full 166k xlsx **completes under `--max-old-space-size=384` in ~7 s at 219 MB
+    peak RSS** with identical outputs (166,149 valid / 106,958 households / 589 skips) — that
+    includes the zip entry-order normalization pass (`normalizeXlsxOrder`, IMPORTS.md §G), which
+    rewrites hostile-order workbooks to a transient deps-first copy so exceljs's order-sensitive
+    streaming reader can never crash or mis-resolve shared strings.
   - **Apply-path spill**: valid rows go to an NDJSON spill file on the dyno's ephemeral disk instead
     of a ~160 MB heap array; the link pass re-writes them stamped with `personId`, and `applyImport`
     consumes `ndjsonBatches` — **one 2000-row batch (~2 MB) in heap at a time**, so worker heap is
