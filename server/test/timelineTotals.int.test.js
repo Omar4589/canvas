@@ -5,10 +5,11 @@ import mongoose from 'mongoose';
 // Campaign-to-date mode on /admin/reports/canvasser-timeline, over the REAL Express app:
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/tltot node --test test/timelineTotals.int.test.js
 //
-// The Timeline defaults to TODAY and is capped at 62 days, because a range renders one grid
-// column per day. That makes it impossible to see a whole campaign — so a canvasser who worked
-// it and then left is invisible, even though their knocks are in every total and on the invoice.
-// `?totals=1` lifts the cap by shipping no grid.
+// The Timeline defaults to TODAY; ranges render one grid column per bucket — days up to 62,
+// weeks up to the 183-day cap (timelineWeekBuckets.int.test.js covers that tier). Even so, a
+// capped range cannot see a whole campaign — a canvasser who worked it and then left would be
+// invisible, even though their knocks are in every total and on the invoice. `?totals=1` lifts
+// the cap by shipping no grid.
 //
 // The assertions that matter are the COUNTING ones:
 //   · totals mode == the sum of range mode's buckets, per canvasser, field by field;
@@ -134,10 +135,12 @@ after(async () => {
   if (URI) await mongoose.disconnect();
 });
 
-test('a >62-day range is still rejected — the grid cannot render it', { skip }, async () => {
-  const { campaign, token, org, D1, D2 } = ctx;
+test('a >183-day range is still rejected — the grid cannot render it', { skip }, async () => {
+  const { campaign, token, org, D2 } = ctx;
+  // 63..183 days now answers with WEEK columns (timelineWeekBuckets.int.test.js); past the
+  // range cap (TIMELINE_RANGE_MAX_DAYS) there is still a wall. 2025-09-01 → D2 is 201 days.
   const res = await call(
-    `/admin/reports/canvasser-timeline?campaignId=${campaign._id}&from=${D1}&to=${D2}`, token, org._id
+    `/admin/reports/canvasser-timeline?campaignId=${campaign._id}&from=2025-09-01&to=${D2}`, token, org._id
   );
   assert.equal(res.status, 400, 'the cap still guards the bucketed grid');
 });

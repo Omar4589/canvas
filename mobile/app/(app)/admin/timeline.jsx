@@ -45,11 +45,13 @@ const CELL_W = 40;
 const NAME_W = 134;
 const SUM_W = 48;
 
-// The endpoint caps ranges (62 days), so this screen doesn't offer "All time"
-// and validates custom ranges before querying (the server 400s as a backstop).
-const TIMELINE_MAX_DAYS = 62;
-// 'All time' is offered again: it swaps the hour/day grid for campaign-to-date totals, the only
-// view that shows everyone who has ever worked the campaign — canvassers who left included.
+// Three range tiers, validated before querying (the server 400s as a backstop): up to 62 days
+// the grid renders day columns; 63–183 days it renders WEEK columns (the server folds day
+// buckets to Mondays and skips the per-door overlap cards); past 183 days 'All time' is the
+// answer — it swaps the grid for campaign-to-date totals, the only view that shows everyone
+// who has ever worked the campaign, canvassers who left included.
+const TIMELINE_RANGE_MAX_DAYS = 183; // must match the server's TIMELINE_RANGE_MAX_DAYS
+const TIMELINE_DAY_BUCKET_MAX_DAYS = 62; // past this the server sends week columns
 const TIMELINE_PRESETS = PRESETS;
 
 // Sort keys for the canvasser list/grid — mapped to the timeline row fields.
@@ -179,20 +181,23 @@ export default function AdminTimeline() {
   // 'today' pins to the CURRENT today so the live poll doesn't silently widen into a
   // 2-day range after campaign-tz midnight. Recomputed every render.
   const today = todayInTz(tz);
-  // 'All time' = campaign-to-date. It asks for totals only (no hour/day buckets), which is what
-  // lets it escape the 62-day cap: the cap exists to stop the grid growing a column per day, not
-  // to limit the aggregation.
+  // 'All time' = campaign-to-date. It asks for totals only (no time buckets), which is what
+  // lets it escape the range cap: the caps exist to stop the grid growing a column per bucket,
+  // not to limit the aggregation.
   const allTime = range?.preset === 'all';
   const fromDay = range ? (range.preset === 'today' ? today : range.from) : null;
   const effectiveTo = range ? range.to || today : null;
   const isSingleDay = !allTime && !!range && fromDay === effectiveTo;
   const includesToday = allTime || (!!range && (!range.to || range.to >= today));
-  // Bad custom ranges (no start, inverted, > cap) get a notice instead of a query —
-  // otherwise the 20s live poll would retry the server's 400 forever. All-time is unbounded on
-  // purpose, so none of that applies to it.
-  const rangeInvalid =
-    !allTime &&
-    !!range && (!fromDay || fromDay > effectiveTo || ymdSpanDays(fromDay, effectiveTo) > TIMELINE_MAX_DAYS);
+  // Bad custom ranges get a notice instead of a query — otherwise the 20s live poll would retry
+  // the server's 400 forever. The CAUSE is kept so the notice can say what's actually wrong.
+  // All-time is unbounded on purpose, so none of this applies to it.
+  const rangeNoStart = !allTime && !!range && !fromDay;
+  const rangeInverted = !allTime && !!range && !!fromDay && fromDay > effectiveTo;
+  const rangeTooLong =
+    !allTime && !!range && !!fromDay && !rangeInverted &&
+    ymdSpanDays(fromDay, effectiveTo) > TIMELINE_RANGE_MAX_DAYS;
+  const rangeInvalid = rangeNoStart || rangeInverted || rangeTooLong;
 
   function stepDay(n) {
     const next = shiftDays(fromDay, n);
@@ -248,8 +253,10 @@ export default function AdminTimeline() {
   const isRange = data.mode === 'range';
   // Read the SERVER's mode, not the local `allTime` flag: keepPreviousData means the previous
   // range-shaped payload is still on screen during an all-time fetch, and gating the grid on the
-  // local flag would blank it a beat early.
+  // local flag would blank it a beat early. Same reasoning for `isWeek` — the caption must
+  // describe the grid actually on screen, not the range on its way.
   const isTotals = data.mode === 'totals';
+  const isWeek = data.bucket === 'week';
 
   // The coordinator comes from the LEDGER — the server stamps the team onto each knock when it
   // happens, and returns it on the row. It used to be joined here from the campaign ROSTER, which
@@ -384,7 +391,9 @@ export default function AdminTimeline() {
     [coordRows]
   );
 
-  // Grid columns: hours for a single day, days for a range. Mode-guarded so
+  // Grid columns: hours for a single day, days for a range — or WEEKS when bucket:'week'
+  // (days[] then carries Monday week-starts and the maps are keyed by them, so this needs no
+  // branch; the caption below the grid says what a column is). Mode-guarded so
   // keepPreviousData transitions (day-shaped data during a range fetch) never crash.
   const columns = useMemo(
     () =>
@@ -573,7 +582,7 @@ export default function AdminTimeline() {
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
 
-      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} requireFrom />
 
       {/* Stepper (single-day) + metric toggle. One flat row — the live pill moved up to the
           title band, which is what lets this fit on a single line again (~324pt of 343). */}
@@ -675,8 +684,11 @@ export default function AdminTimeline() {
         <View style={styles.groupWrap}>
           <InsetGroup>
             <InsetNoteRow>
-              That range won't work — pick a start date on or before the end date, spanning at
-              most {TIMELINE_MAX_DAYS} days.
+              {rangeNoStart
+                ? 'That range won’t work — it has no start date. Pick a From date, or tap All time for campaign-to-date totals.'
+                : rangeInverted
+                  ? 'That range won’t work — the start date is after the end date.'
+                  : `That range won’t work — it spans more than ${TIMELINE_RANGE_MAX_DAYS} days. Shorten it, or tap All time for campaign-to-date totals.`}
             </InsetNoteRow>
           </InsetGroup>
         </View>
@@ -802,12 +814,17 @@ export default function AdminTimeline() {
                   {data.overlapDoors > 0
                     ? `${data.overlapDoors} overlap door-pass${data.overlapDoors === 1 ? '' : 'es'} (counted once → ${data.billableKnocks}).`
                     : 'no overlaps.'}
+                  {/* Week/totals payloads skip the per-door overlap cards (the section below
+                      vanishes with them) — say so, or the count above reads as reviewable. */}
+                  {data.overlapsOmitted && (data.overlapDoors || 0) > 0
+                    ? ` Per-door overlap review needs a range of ${TIMELINE_DAY_BUCKET_MAX_DAYS} days or less.`
+                    : ''}
                 </GroupFooter>
               </View>
 
-              {/* Frozen-name-column grid (hours or days). Campaign-to-date ships no buckets —
-                  that is precisely what lets it escape the 62-day cap — so there is nothing to
-                  draw. The totals above are complete either way. */}
+              {/* Frozen-name-column grid (hours, days, or weeks). Campaign-to-date ships no
+                  buckets — that is precisely what lets it escape the range cap — so there is
+                  nothing to draw. The totals above are complete either way. */}
               {!isTotals && (
               <View style={styles.gridRow}>
                 <View style={{ width: NAME_W }}>
@@ -827,8 +844,9 @@ export default function AdminTimeline() {
                   </View>
                 </View>
 
-                {/* Up to 62 day columns ≈ 2.5k px of plain Views — fine at typical roster
-                    sizes; FlatList-ify only if a 62-day × 50-canvasser grid ever janks. */}
+                {/* Up to 62 day columns (or ~27 week columns) ≈ 2.5k px of plain Views — fine
+                    at typical roster sizes; FlatList-ify only if a 62-column × 50-canvasser
+                    grid ever janks. */}
                 <ScrollView horizontal showsHorizontalScrollIndicator>
                   <View>
                     <View style={{ flexDirection: 'row' }}>
@@ -876,11 +894,16 @@ export default function AdminTimeline() {
               </View>
               )}
 
+              {!isTotals && isWeek && (
+                <GroupFooter>Each column is one week (Mon–Sun).</GroupFooter>
+              )}
+
               {isTotals && (
                 <GroupFooter>
                   Campaign to date — everyone who has worked this campaign, including anyone who
-                  has since left the team. The hour-by-hour grid needs a range of{' '}
-                  {TIMELINE_MAX_DAYS} days or less.
+                  has since left the team. Ranges of {TIMELINE_DAY_BUCKET_MAX_DAYS} days or less
+                  show a day-by-day grid; longer ranges up to {TIMELINE_RANGE_MAX_DAYS} days show
+                  week columns.
                 </GroupFooter>
               )}
             </>

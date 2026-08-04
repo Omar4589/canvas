@@ -10,9 +10,11 @@ import DateRangePickerModal from './DateRangePickerModal';
 // value: { preset, from, to } where preset is one of PRESETS keys.
 // onChange({ preset, from, to }) fires whenever a preset or custom range is
 // chosen. Caller is responsible for re-fetching with the new range.
-// `presets` lets a screen offer a subset (e.g. the timeline drops 'all' — its
-// endpoint caps the span).
-export default function DateRangeBar({ value, onChange, tz, presets = PRESETS }) {
+// `presets` lets a screen offer a subset (e.g. the audit drops 'all' — its
+// endpoint caps the span). `requireFrom` is for screens whose endpoint rejects
+// an open start (Timeline, Audit): the custom picker then demands a From date
+// instead of advertising blank ends.
+export default function DateRangeBar({ value, onChange, tz, presets = PRESETS, requireFrom = false }) {
   const styles = useThemedStyles(makeStyles);
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -64,6 +66,7 @@ export default function DateRangeBar({ value, onChange, tz, presets = PRESETS })
         initialFrom={value?.from || null}
         initialTo={value?.to || null}
         tz={tz}
+        requireFrom={requireFrom}
         onClose={() => setPickerOpen(false)}
         onApply={applyCustom}
       />

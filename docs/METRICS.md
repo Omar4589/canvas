@@ -626,22 +626,30 @@ never looks like a two-person collision.
 | `GET /admin/reports/overlaps` | overlap review (date-**windowed**, event-level) | see §D; its `passes[]` rows also carry the **`overwrites`** annotation described on the row below (same shape, same absent-when-none contract — both engines attach it) | `timestamp` |
 | `GET /admin/reports/overlap-doors` | the map's overlap **indicator + review list** (**anchored** to the window) | `{ householdIds:[…], doors:[{ householdId, household{id,addressLine1,addressLine2,city,state,zipCode,location}, totalCanvassers, passes:[{ passId, roundLabel, effortName, canvassers:[{userId, firstName, lastName, name, actionType, lastAt, inRange}], overwrites?:[{ voterId, voterName, by{id,name}, overwrittenBy{id,name}, overwrittenAt }] }] }], total, outOfRangeTotal }` — **self-contained, so the Overlaps report renders from this alone**. **`passes[].overwrites`** is **absent when none** (the OverlapDoorCard superset contract) and is built from `SurveyResponseArchive` **`via:'submit'` rows only** (restore swaps are admin curation, not field collisions) — rendered as "X replaced Y's survey answers for VoterName"; it only annotates doors already in the overlap set, never adds one. Params: `campaignId` **required** (400 without — unscoped it would scan the org ledger), optional `effortId`/`passId`/`userId`/`from`/`to` (`computeOverlapDoors` — see §D). Lead-gated. | anchored: detected pass-wide, surfaced when ≥1 knock is in `[from, to)` |
 | `GET /admin/reports/duplicate-surveys` | voters with >1 survey response — preserved same-round overwrites included via **`$unionWith` from `SurveyResponseArchive`**; optional `?userId=` (groups containing that canvasser — matched **after** grouping, so the filter never changes what counts as a duplicate and the group still returns every response), `?kind=all\|sameRoundOverwritten\|sameCanvasserSameDay\|differentCanvassers`, `skip`/`limit` (default 25, max 100) | `{ duplicates[{ voterId, count, voter, household, responses[{ responseId, canvasser, submittedAt, day, passId, roundLabel, overwritten, overwrittenAt, overwrittenBy }], sameRoundOverwritten, sameCanvasserSameDay, differentCanvassers }], total, limit, skip, timeZone, tzAbbrev }`. **`total` is the true matching-group count** (it was the post-truncation page length before paging existed). All three flags are computed **in the aggregation** — `sameRoundOverwritten` when the group carries an archived (overwritten) row, `sameCanvasserSameDay` when a `(userId, local day)` key repeats among **live** rows (day bucketed in the anchor tz, so a 11:50 PM / 12:10 AM pair is two days), `differentCanvassers` when >1 distinct live userId. Sorted `sameRoundOverwritten` first, then `sameCanvasserSameDay`, then `count` desc, `voterId` as the tiebreak so pages don't shuffle. An archived row's `responseId` is its **archive id**, served by `/responses/:id`'s archived fallback (a live response that replaced someone's answers carries `replacedEarlier` there). | `submittedAt` |
-| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to`, max 62 days; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{} }` with per-canvasser `knocksByDay/surveysByDay`; `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). Also returns **`billableSurveyDoors`** and **`billableLitDoors`** — survey/lit doors deduped by (household, pass), the twins of `billableKnocks`. All three exist because the per-canvasser rows are RAW: clients must render these fields and never sum the columns (see the survey-doors callout in §"Survey DOORS vs survey VOTERS"). **Both connection-rate numerator terms ship deduped on purpose** — when only the survey term was, the clients still summed `dayLit` across canvassers, putting a RAW term over a DEDUPED denominator: invisible on a survey campaign (lit ≈ 0), live on a lit-drop one. | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
+| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to` — **day buckets up to 62 days, week buckets (Monday-start) from 63 to 183 days**, 400 past that; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{}, bucket:'day'\|'week' }` with per-canvasser `knocksByDay/surveysByDay` — **in `bucket:'week'` the `days[]` entries are Monday week-starts and every map is keyed by them** (the first/last week can be partial; the window still clips to `[from..to]`), plus `overlaps:[]` + `overlapsOmitted:true` and `inOverlap` always false (computeOverlaps is skipped, same reason as totals); `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). Also returns **`billableSurveyDoors`** and **`billableLitDoors`** — survey/lit doors deduped by (household, pass), the twins of `billableKnocks`. All three exist because the per-canvasser rows are RAW: clients must render these fields and never sum the columns (see the survey-doors callout in §"Survey DOORS vs survey VOTERS"). **Both connection-rate numerator terms ship deduped on purpose** — when only the survey term was, the clients still summed `dayLit` across canvassers, putting a RAW term over a DEDUPED denominator: invisible on a survey campaign (lit ≈ 0), live on a lit-drop one. | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
 
-### The 62-day cap, and why `totals` escapes it
+### The 62-day day-bucket bound, the 183-day cap, and why `totals` escapes both
 
-The cap exists to bound the **grid's columns** — a range renders one column per day — **not** the
-aggregation. So `?totals=1` lifts it by shipping no grid: no `knocksByDay`, no `days[]`, no hour
-maps. Everything else is unchanged, and it is the only way to see a whole campaign, which is the
-only way to see **every canvasser who ever worked it** — including the ones who have since left.
+Both limits exist to bound the **grid's columns** — a range renders one column per bucket — **not**
+the aggregation. Up to 62 days (`TIMELINE_DAY_BUCKET_MAX_DAYS`) a range renders day columns with
+live per-door overlap review. From 63 to 183 days (`TIMELINE_RANGE_MAX_DAYS`) the response switches
+to **week columns** (`bucket:'week'`): the server folds its day buckets to Mondays in the Node
+assembly loop, so a 6-month range is ~27 columns instead of 183. Past 183 days, `?totals=1` lifts
+everything by shipping no grid: no `knocksByDay`, no `days[]`, no hour maps. Everything else is
+unchanged, and totals is the only way to see a whole campaign, which is the only way to see
+**every canvasser who ever worked it** — including the ones who have since left.
 
-Three invariants, each of which a plausible "simplification" would break:
+Four invariants, each of which a plausible "simplification" would break:
 
-- **It still buckets BY DAY internally.** Grouping on `userId` alone would make `hoursOnDoors` equal
-  *(last knock ever − first knock ever)* — weeks, not hours — and collapse `doorsPerHour` to ~0.
-  Because it keeps the day bucket, every per-canvasser number in `totals` mode is **by construction**
-  the exact sum of its range-mode buckets. `test/timelineTotals.int.test.js` asserts that field by
-  field.
+- **It still buckets BY DAY internally — in every mode.** Grouping on `userId` alone would make
+  `hoursOnDoors` equal *(last knock ever − first knock ever)* — weeks, not hours — and collapse
+  `doorsPerHour` to ~0. Because it keeps the day bucket, every per-canvasser number in `totals`
+  mode is **by construction** the exact sum of its range-mode buckets
+  (`test/timelineTotals.int.test.js` asserts that field by field), and **week mode inherits the
+  same guarantee**: the Mongo `$group` is untouched — only the Node roll-up folds day keys to
+  their Monday, accumulating — so `hoursOnDoors` stays a per-DAY-span sum even when a column is a
+  week (`test/timelineWeekBuckets.int.test.js` seeds a morning+evening week and asserts 4h, not
+  ~82h).
 - **Per-canvasser knocks are NOT `knocksPipeline`.** The endpoint runs two aggregations: a
   `$group` on `{userId, bucket}` (raw row counts → the per-canvasser numbers) and
   `knocksPipeline(scoped)` (dedupes by `(householdId, passId)`, collapses **across users**, `_id:null`
@@ -650,11 +658,17 @@ Three invariants, each of which a plausible "simplification" would break:
   door in the same pass — that's the overlap-never-double-bills design, reconciled by `overlapDoors`.
   Routing per-canvasser counts through `knocksPipeline` would silently rewrite everyone's numbers;
   the test seeds a deliberate overlap and asserts `grandKnocks > billableKnocks` to catch it.
-- **Overlaps are skipped in `totals`.** `computeOverlaps` `$push`es every event into per-door arrays,
-  which over a whole campaign can breach Mongo's 100MB per-stage limit. The overlap **door count**
-  (`overlapDoors = grandKnocks − billableKnocks`) is pure arithmetic and stays honest; only the
-  per-door reconciliation **cards** need a bounded window. `overlapsOmitted:true` says so, so a client
-  never implies a campaign had zero overlaps.
+- **Overlaps are skipped in `totals` AND week mode.** `computeOverlaps` `$push`es every event into
+  per-door arrays, which over a long window can breach Mongo's 100MB per-stage limit. The overlap
+  **door count** (`overlapDoors = grandKnocks − billableKnocks`) is pure arithmetic and stays honest;
+  only the per-door reconciliation **cards** need a bounded window. `overlapsOmitted:true` says so,
+  and both clients now render that as "per-door overlap review needs a range of 62 days or less"
+  rather than implying a campaign had zero overlaps. Consequence: `inOverlap` is false on every row
+  whenever `overlapsOmitted` (the ⚠ badges only appear with `bucket:'day'`).
+- **The audit's 62 is NOT this 62.** The flags endpoint's cap is `AUDIT_WINDOW_MAX_DAYS`
+  (`flagThresholds.js`) — an OOM guard on `detectFlags`, which loads every matched row into Node.
+  The Timeline's constants live in `reports.js` and may drift from it freely; they were one
+  constant until the week tier decoupled them.
 
 **Cumulative summability:** `households`, `homesKnocked`, `knocks`, `surveyedKnocks`,
 `litKnocks`, `refusedKnocks`, `surveysSubmitted`, `surveyedVoters`, `litDropped` (and the coverage

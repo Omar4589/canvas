@@ -37,7 +37,7 @@ The Timeline opens on **today**, which is what you want mid-shift — but it mea
 
 Pick **All time** from the date range to get **campaign to date**: every canvasser who has ever worked this campaign, with their full totals. That includes people who have since **left the team** — their doors always counted toward the campaign, and this is where you see them.
 
-All time shows totals rather than the hour-by-hour grid, because a whole campaign is far too many columns to read. For the grid and the overlap reconciliation, pick a range of 62 days or less.
+The grid adapts to how much you're looking at. A range of **62 days or less** shows a day-by-day grid, plus the **Review overlap doors** list. A longer range — up to **6 months** — shows a **week-by-week** grid instead: each column is one Monday-to-Sunday week. On a week-by-week range the overlap **count** on the reconciliation line still covers your whole range, but the door-by-door review list needs 62 days or less — pick a shorter range to see which houses. **All time** shows totals with no grid at all, because a whole campaign is too many columns to read.
 
 > **"Knocking 3 of 5"** means three of the five people who were expected to work this range actually knocked. The five includes anyone who worked the campaign in that range, even if they've since left the team.
 

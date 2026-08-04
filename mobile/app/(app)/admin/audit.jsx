@@ -153,8 +153,12 @@ export default function AdminAudit() {
   const fromDay = range ? (range.preset === 'today' ? today : range.from) : null;
   const effectiveTo = range ? range.to || today : null;
   const includesToday = !!range && (!range.to || range.to >= today);
-  const rangeInvalid =
-    !!range && (!fromDay || fromDay > effectiveTo || ymdSpanDays(fromDay, effectiveTo) > AUDIT_MAX_DAYS);
+  // Cause kept separately so the notice can say what's actually wrong with the range.
+  const rangeNoStart = !!range && !fromDay;
+  const rangeInverted = !!range && !!fromDay && fromDay > effectiveTo;
+  const rangeTooLong =
+    !!range && !!fromDay && !rangeInverted && ymdSpanDays(fromDay, effectiveTo) > AUDIT_MAX_DAYS;
+  const rangeInvalid = rangeNoStart || rangeInverted || rangeTooLong;
 
   const q = useQuery({
     queryKey: ['admin', 'flags', cId, fromDay, range?.to, reviewStatus, userId, effortId],
@@ -386,7 +390,7 @@ export default function AdminAudit() {
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
 
-      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={AUDIT_PRESETS} />
+      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={AUDIT_PRESETS} requireFrom />
 
       <View style={styles.controls}>
         <TabSwitcher tabs={STATUS_TABS} activeKey={reviewStatus} onChange={setReviewStatus} />
@@ -425,7 +429,11 @@ export default function AdminAudit() {
         <View style={styles.groupWrap}>
           <InsetGroup>
             <InsetNoteRow>
-              That range won't work — pick a range spanning at most {AUDIT_MAX_DAYS} days.
+              {rangeNoStart
+                ? 'That range won’t work — it has no start date. Pick a From date.'
+                : rangeInverted
+                  ? 'That range won’t work — the start date is after the end date.'
+                  : `That range won’t work — it spans more than ${AUDIT_MAX_DAYS} days. Narrow the range and try again.`}
             </InsetNoteRow>
           </InsetGroup>
         </View>

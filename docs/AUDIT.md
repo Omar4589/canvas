@@ -470,7 +470,7 @@ gate, and anchor-tz resolution.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /admin/reports/flags` | Runs `detectFlags` over `{ baseFilter + date window + optional userId }` — `baseFilter` carries the optional `effortId`, so the walk-list filter (web select, mobile pill row) is server-side and scopes `summary` and `entries` together. Returns `{ summary, entries, total, timeZone, tzAbbrev, thresholds }`. **`summary` is always the full picture** for the scope; `reasonType` / `reviewStatus` (incl. `open`) / `severity` narrow the paginated `entries`. `view=summary` skips the entries payload. An explicit range over **62 days** is rejected (same cap as the timeline). |
+| `GET /admin/reports/flags` | Runs `detectFlags` over `{ baseFilter + date window + optional userId }` — `baseFilter` carries the optional `effortId`, so the walk-list filter (web select, mobile pill row) is server-side and scopes `summary` and `entries` together. Returns `{ summary, entries, total, timeZone, tzAbbrev, thresholds }`. **`summary` is always the full picture** for the scope; `reasonType` / `reviewStatus` (incl. `open`) / `severity` narrow the paginated `entries`. `view=summary` skips the entries payload. An explicit range over **62 days** is rejected (its own cap, `AUDIT_WINDOW_MAX_DAYS` — an OOM guard on `detectFlags`; the Timeline's range cap is now separate and wider). |
 | `POST /admin/reports/flags/review` | Body `{ actionModel, actionId, status, note?, reasonsAtReview? }`. Loads the action to re-derive its campaign and re-checks `canManageCampaign` (defense in depth — a lead can't review another campaign's entry by guessing an id). Upserts the decision; `status:'open'` **deletes** it (reopen). **Body-only — it takes no `?campaignId`, and is the one route EXEMPT from the router's campaign-scope guard** (see below). |
 | `POST /admin/reports/flags/review-bulk` | One decision for every flag matching a `/flags` query scope. **Scope in the QUERY STRING** — the same params as the GET (`campaignId` REQUIRED, `all=1` refused: no org-wide bulk; `from`/`to`, `reviewStatus`, `reasonType`, `severity`, `userId`, `effortId`) — body `{ status, note?, actionIds?, dryRun? }`. Re-runs detection over the scope (`resolveFlagScope`, the helper shared with the GET, so the set written is exactly the set the same query showed); `actionIds` only **narrows** that set (checkbox selection — out-of-scope ids are ignored, never written), and `reasonsAtReview` is snapshotted from the server's own detection, not the client. `dryRun:true` returns `{ matched }` without writing (exact confirm-dialog counts). Writes are one **unordered `bulkWrite` of upserts** (no transactions — the test harness runs a standalone mongod); `status:'open'` bulk-reopens via `deleteMany`. Refusals: a `truncated` detection → **409** (never partial-applies); more than `BULK_REVIEW_CAP` (2000) matches → **409**. The response splits **`createdActionIds`** (were open — undoable by reopening) from **`overwrittenActionIds`** (had a prior decision — clients never auto-undo those, since reopen is a delete). An **empty `note` leaves existing per-entry notes untouched**. **Deliberately NOT exempt from the campaign-scope guard** — the query scope is precisely how a lead's `canManageCampaign` check happens. `test/flagBulkReview.int.test.js`. |
 
@@ -496,8 +496,8 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **Audit page** — [AuditPage.jsx](../client/src/pages/AuditPage.jsx) at `/campaigns/:campaignId/audit`
   (console-user gated in [App.jsx](../client/src/App.jsx); nav slug `audit` in
   [navItems.js](../client/src/components/navItems.js)). Mirrors [TimelinePage.jsx](../client/src/pages/TimelinePage.jsx)
-  (campaign-tz `defaultRange('today')`, 62-day cap, `LiveStatus` + 20 s poll while the range includes
-  today). KPI cards + [AuditSummaryTable.jsx](../client/src/components/AuditSummaryTable.jsx) (per
+  (campaign-tz `defaultRange('today')`, `LiveStatus` + 20 s poll while the range includes today —
+  but with its own 62-day cap; the Timeline's range cap is wider). KPI cards + [AuditSummaryTable.jsx](../client/src/components/AuditSummaryTable.jsx) (per
   canvasser; row click sets the `userId` drill-in) + [FlaggedEntryList.jsx](../client/src/components/FlaggedEntryList.jsx)
   (cards with [FlagReasonBadges](../client/src/components/FlagReasonBadges.jsx) + the shared
   [FlagReviewControl](../client/src/components/FlagReviewControl.jsx) + a **"View on map"** deep-link).
@@ -584,7 +584,7 @@ computed+joined list in memory and returns the pre-slice `total`.
   the gate ever moves after `writeBootstrap`/`markPendingHousehold`, a blocked knock would need
   rollback and could linger as a phantom recolor.
 - **`openMockFlags` window parity.** The nudge counts `AUDIT_WINDOW_MAX_DAYS − 1` days (a strict
-  subset of the flags endpoint's `TIMELINE_MAX_DAYS = AUDIT_WINDOW_MAX_DAYS` cap, which the
+  subset of the flags endpoint's `AUDIT_WINDOW_MAX_DAYS` cap, which the
   dashboard deep link seeds) so a badge can never point at an entry the Audit page won't show. It
   excludes `via:'bulk'` (parity with the detector's scan filter), and open = no `FlagReview` row.
   Served by the partial index `{campaignId, 'location.mocked'}` — **deliberately a distinct key

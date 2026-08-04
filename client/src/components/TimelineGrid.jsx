@@ -1,3 +1,5 @@
+import { shiftDays } from '../lib/datePresets.js';
+
 // 9 → "9a", 12 → "12p", 17 → "5p"
 function formatHour(h) {
   const ampm = h < 12 ? 'a' : 'p';
@@ -11,8 +13,19 @@ function formatDayCol(ymd) {
   return `${Number(m)}/${Number(d)}`;
 }
 
-// Heatmap grid: rows = canvassers, columns = the day's active hours (single-day view) or
-// the range's days (multi-day view), cells = knocks (or surveys). First column is frozen
+// "2026-01-05" → "2026-01-05 – 2026-01-11", clipped to the requested range so a partial
+// first/last week's tooltip never names days outside the window (lexical ymd compare).
+function weekTitle(weekStart, range) {
+  const start = range?.from && range.from > weekStart ? range.from : weekStart;
+  let end = shiftDays(weekStart, 6);
+  if (range?.to && range.to < end) end = range.to;
+  return `${start} – ${end}`;
+}
+
+// Heatmap grid: rows = canvassers, columns = the day's active hours (single-day view), the
+// range's days (multi-day view), or the range's weeks (bucket:'week' — days[] carries Monday
+// week-starts and the maps are keyed by them, so the column plumbing is identical; only the
+// tooltip says a column is a span). Cells = knocks (or surveys). First column is frozen
 // (sticky) so it stays visible while the bucket columns scroll horizontally.
 //
 // `rows` is the (possibly coordinator-filtered) canvasser list from TimelinePage — column
@@ -21,8 +34,13 @@ function formatDayCol(ymd) {
 // CanvasserSummaryTable now, not here.
 export default function TimelineGrid({ data, rows, metric }) {
   const isRange = data?.mode === 'range';
+  const isWeek = data?.bucket === 'week';
   const columns = isRange
-    ? (data?.days || []).map((d) => ({ key: d, label: formatDayCol(d), title: d }))
+    ? (data?.days || []).map((d) => ({
+        key: d,
+        label: formatDayCol(d),
+        title: isWeek ? weekTitle(d, data?.range) : d,
+      }))
     : (data?.hours || []).map((h) => ({ key: h, label: formatHour(h), title: undefined }));
   const bucketKey = isRange
     ? metric === 'surveys'

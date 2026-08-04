@@ -14,9 +14,10 @@ export { RANGE_PRESETS, rangeFor, quickRangeFor, defaultRange, labelForRange };
 // Controlled preset bar. `value` is { preset, from, to }; `tz` is the anchor
 // (campaign/org) timezone so presets resolve to the campaign's days, not the device's.
 // onChange receives the full next object whenever a preset or custom range is chosen.
-// `presets` lets a page offer a subset (e.g. the timeline drops 'all' — its endpoint
-// caps the span).
-export default function DateRangeSelector({ value, onChange, tz, presets = RANGE_PRESETS }) {
+// `presets` lets a page offer a subset (e.g. the audit drops 'all' — its endpoint caps
+// the span). `requireFrom` is for pages whose endpoint rejects an open start (Timeline,
+// Audit): the custom picker then demands a From date instead of advertising blank ends.
+export default function DateRangeSelector({ value, onChange, tz, presets = RANGE_PRESETS, requireFrom = false }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const activePreset = value?.preset || 'today';
 
@@ -65,6 +66,7 @@ export default function DateRangeSelector({ value, onChange, tz, presets = RANGE
         initialFrom={value?.from || null}
         initialTo={value?.to || null}
         tz={tz}
+        requireFrom={requireFrom}
         onClose={() => setPickerOpen(false)}
         onApply={applyCustom}
       />

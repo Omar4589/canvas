@@ -16,11 +16,14 @@ function toInputDate(v) {
 
 // Custom from/to range picker. Open-controlled. `tz` anchors the quick chips to the
 // campaign/org clock. onApply receives { from: 'yyyy-mm-dd'|null, to: 'yyyy-mm-dd'|null }.
+// `requireFrom`: the host page rejects an open start (Timeline, Audit) — demand a From
+// date (Apply disabled without one, no clear-✕ trap) and only advertise a blank end.
 export default function DateRangePickerModal({
   open,
   initialFrom,
   initialTo,
   tz,
+  requireFrom = false,
   onClose,
   onApply,
 }) {
@@ -111,7 +114,7 @@ export default function DateRangePickerModal({
               onChange={(e) => setFrom(e.target.value)}
               className="flex-1 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
-            {from ? (
+            {from && !requireFrom ? (
               <button
                 type="button"
                 onClick={() => setFrom('')}
@@ -153,7 +156,9 @@ export default function DateRangePickerModal({
         </div>
 
         <p className="mt-3 text-xs text-fg-subtle">
-          Leave either end blank for an open-ended range.
+          {requireFrom
+            ? 'Leave the end blank to run through today.'
+            : 'Leave either end blank for an open-ended range.'}
         </p>
 
         <div className="mt-5 flex gap-2">
@@ -167,7 +172,8 @@ export default function DateRangePickerModal({
           <button
             type="button"
             onClick={apply}
-            className="flex-1 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            disabled={requireFrom && !from}
+            className="flex-1 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-40"
           >
             Apply
           </button>

@@ -228,7 +228,7 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
   [buildIndexes.js](../server/src/migrations/buildIndexes.js)).
 - **Bounded the heavy reads** — the `/flags` GPS audit
   ([flagDetection.js](../server/src/services/audit/flagDetection.js)) loaded the whole matched
-  `CanvassActivity` set into memory; it now clamps the window to `TIMELINE_MAX_DAYS` even with no
+  `CanvassActivity` set into memory; it now clamps the window to `AUDIT_WINDOW_MAX_DAYS` even with no
   `from` and count-guards at `AUDIT_ROW_CAP` (250k), returning `truncated` so the UI says "narrow the
   range". `campaignSummaries` ([campaignSummaries.js](../server/src/services/reports/campaignSummaries.js))
   stopped **counting** the two largest collections all-time just to test `hasCanvassed>0` — now an

@@ -52,11 +52,14 @@ function ymdLocal(d) {
 
 // Custom from/to range picker. Visible-controlled. `tz` anchors the quick chips to the
 // campaign clock. onApply receives { from: 'yyyy-mm-dd'|null, to: 'yyyy-mm-dd'|null }.
+// `requireFrom`: the host screen rejects an open start (Timeline, Audit) — demand a From
+// date (Apply disabled without one, no clear-✕ trap) and only advertise a blank end.
 export default function DateRangePickerModal({
   visible,
   initialFrom,
   initialTo,
   tz,
+  requireFrom = false,
   onClose,
   onApply,
 }) {
@@ -132,7 +135,7 @@ export default function DateRangePickerModal({
             >
               <Text style={styles.fieldValue}>{fmt(from)}</Text>
             </Pressable>
-            {from ? (
+            {from && !requireFrom ? (
               <Pressable onPress={() => setFrom(null)} hitSlop={8}>
                 <Text style={styles.clear}>✕</Text>
               </Pressable>
@@ -193,14 +196,20 @@ export default function DateRangePickerModal({
           )}
 
           <Text style={styles.hint}>
-            Leave either end blank for an open-ended range.
+            {requireFrom
+              ? 'Leave the end blank to run through today.'
+              : 'Leave either end blank for an open-ended range.'}
           </Text>
 
           <View style={styles.btnRow}>
             <Pressable onPress={onClose} style={[styles.btn, styles.btnGhost]}>
               <Text style={styles.btnGhostText}>Cancel</Text>
             </Pressable>
-            <Pressable onPress={apply} style={[styles.btn, styles.btnPrimary]}>
+            <Pressable
+              onPress={apply}
+              disabled={requireFrom && !from}
+              style={[styles.btn, styles.btnPrimary, requireFrom && !from && styles.btnDisabled]}
+            >
               <Text style={styles.btnPrimaryText}>Apply</Text>
             </Pressable>
           </View>
@@ -306,6 +315,7 @@ function makeStyles(t) {
     },
     btnGhostText: { color: t.colors.textPrimary, fontWeight: '600' },
     btnPrimary: { backgroundColor: t.colors.brand },
+    btnDisabled: { opacity: 0.4 },
     btnPrimaryText: { color: t.colors.textInverse, fontWeight: '700' },
   });
 }

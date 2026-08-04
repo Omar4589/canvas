@@ -25,7 +25,8 @@ function buildQuery(params) {
   return s ? `?${s}` : '';
 }
 
-// The endpoint caps ranges at 62 days, so (like the Timeline) this page drops "All time".
+// The flags endpoint caps ranges at 62 days (detectFlags loads every matched row into memory —
+// this is an OOM guard, unlike the Timeline's rendering cap), so this page drops "All time".
 const AUDIT_PRESETS = RANGE_PRESETS.filter((p) => p.id !== 'all');
 const AUDIT_MAX_DAYS = 62;
 const ENTRY_LIMIT = 500; // fetch cap; the summary is always the full picture
@@ -176,8 +177,12 @@ export default function AuditPage() {
   const fromDay = dateRange ? (dateRange.preset === 'today' ? today : dateRange.from) : null;
   const effectiveTo = dateRange ? dateRange.to || today : null;
   const includesToday = !!dateRange && (!dateRange.to || dateRange.to >= today);
-  const rangeInvalid =
-    !!dateRange && (!fromDay || fromDay > effectiveTo || ymdSpanDays(fromDay, effectiveTo) > AUDIT_MAX_DAYS);
+  // Cause kept separately so the notice can say what's actually wrong with the range.
+  const rangeNoStart = !!dateRange && !fromDay;
+  const rangeInverted = !!dateRange && !!fromDay && fromDay > effectiveTo;
+  const rangeTooLong =
+    !!dateRange && !!fromDay && !rangeInverted && ymdSpanDays(fromDay, effectiveTo) > AUDIT_MAX_DAYS;
+  const rangeInvalid = rangeNoStart || rangeInverted || rangeTooLong;
 
   // Fetch the full summary + entries for the current review status (reason + canvasser are
   // applied client-side so those toggles are instant). userId is NOT sent so the summary
@@ -422,14 +427,18 @@ export default function AuditPage() {
           <Segmented value={severityMin} onChange={setSeverityMin} options={SEVERITY_OPTIONS} size="sm" />
           <Segmented value={reviewStatus} onChange={setReviewStatus} options={REVIEW_STATUS} />
         </div>
-        <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} presets={AUDIT_PRESETS} />
+        <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} presets={AUDIT_PRESETS} requireFrom />
       </div>
 
       {rangeInvalid ? (
         <div className="rounded-lg border border-dashed border-border bg-sunken p-8 text-center">
           <p className="text-sm font-medium text-fg">That range won't work for the audit</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-fg-muted">
-            Pick a start date on or before the end date, spanning at most {AUDIT_MAX_DAYS} days.
+            {rangeNoStart
+              ? 'This range has no start date. Pick a From date to bound the audit.'
+              : rangeInverted
+                ? 'The start date is after the end date. Pick a From date on or before the To date.'
+                : `That range spans more than ${AUDIT_MAX_DAYS} days. Narrow the range and try again.`}
           </p>
         </div>
       ) : flagsQ.isLoading || !dateRange ? (

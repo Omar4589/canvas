@@ -1861,13 +1861,27 @@ router.get('/overlap-doors', async (req, res, next) => {
 // (= grandKnocks - billableKnocks) — exact in both modes. dayKnocks/daySurveys/dayLit
 // keep their names in both modes (they are the WINDOW totals; mobile only ever requests
 // one day). Reuses knocksPipeline + computeOverlaps. See docs/METRICS.md.
-// = AUDIT_WINDOW_MAX_DAYS so the flags/timeline range cap and the openMockFlags nudge
-// count (campaignSummaries.js) can never drift apart.
-const TIMELINE_MAX_DAYS = AUDIT_WINDOW_MAX_DAYS;
+// Request cap for the timeline's range mode. Wider than the day-bucket bound below because
+// ranges past that bound render WEEK columns (~27 at this cap); must match the client-side
+// guards (web TimelinePage.jsx, mobile admin/timeline.jsx) — changing it is a three-line
+// edit: here and the two clients.
+const TIMELINE_RANGE_MAX_DAYS = 183;
+// Past this span the grid switches to week columns and the per-door overlap cards are skipped
+// (computeOverlaps $pushes every event — 100MB $group risk on long windows). Deliberately NOT
+// AUDIT_WINDOW_MAX_DAYS any more: that 62 is detectFlags' OOM guard, this 62 is a rendering
+// bound. Same number today, free to drift.
+const TIMELINE_DAY_BUCKET_MAX_DAYS = 62;
 
 function addDaysYmd(ymd, n) {
   const [y, m, d] = ymd.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+// Monday of the week containing `ymd` (Monday-start weeks, matching the pickers' quick chips).
+function weekStartYmd(ymd) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun..6=Sat
+  return addDaysYmd(ymd, -((dow + 6) % 7));
 }
 
 function ymdSpanDays(from, to) {
@@ -2033,11 +2047,12 @@ router.get('/canvasser-timeline', async (req, res, next) => {
 
     // THREE request shapes.
     //   ?date=      (or nothing) — single day, the original/mobile shape.
-    //   ?from&to    — a range, capped at TIMELINE_MAX_DAYS.
-    //   ?totals=1   — campaign-to-date. No time buckets, so no columns, so NO CAP: the 62-day
-    //                 limit exists only because a range renders one grid column per day. This
-    //                 is the only way to see a whole campaign — including the people who worked
-    //                 it and have since left, whose knocks are in the totals either way.
+    //   ?from&to    — a range: DAY buckets up to TIMELINE_DAY_BUCKET_MAX_DAYS, WEEK buckets
+    //                 past that, capped at TIMELINE_RANGE_MAX_DAYS.
+    //   ?totals=1   — campaign-to-date. No time buckets, so no columns, so NO CAP: the range
+    //                 limits exist only because a range renders one grid column per bucket.
+    //                 This is the only way to see a whole campaign — including the people who
+    //                 worked it and have since left, whose knocks are in the totals either way.
     // Relative presets send to:null (open-ended through today), so a missing `to` defaults to
     // today-in-anchor-tz BEFORE the single-day check — otherwise "Today" (from=today, to=null)
     // would never take the day path.
@@ -2049,14 +2064,19 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       to = validYmd(req.query.to) || zonedDayStr(new Date(), tz);
       from = validYmd(req.query.from) || to;
       if (from > to) return res.status(400).json({ error: 'from must be on or before to' });
-      if (!totalsMode && ymdSpanDays(from, to) > TIMELINE_MAX_DAYS) {
-        return res.status(400).json({ error: `Date range too large (max ${TIMELINE_MAX_DAYS} days)` });
+      if (!totalsMode && ymdSpanDays(from, to) > TIMELINE_RANGE_MAX_DAYS) {
+        return res.status(400).json({ error: `Date range too large (max ${TIMELINE_RANGE_MAX_DAYS} days)` });
       }
     } else if (!totalsMode) {
       from = validYmd(req.query.date) || zonedDayStr(new Date(), tz);
       to = from;
     }
     const singleDay = !totalsMode && from === to;
+    // Past the day-bucket bound the response folds to WEEK columns. The Mongo aggregation below
+    // still buckets BY DAY either way (bucketExpr is untouched) — hoursOnDoors sums per-DAY
+    // (last − first) spans, and a week-sized bucket would inflate it ~7×. Only the Node
+    // assembly loop folds day keys to their Monday.
+    const weekMode = !totalsMode && !singleDay && ymdSpanDays(from, to) > TIMELINE_DAY_BUCKET_MAX_DAYS;
 
     // Campaign-to-date with no bounds = the whole ledger for this campaign: no timestamp filter.
     const window = totalsMode && !hasRange ? null : zonedDayRange(from, to, tz);
@@ -2111,8 +2131,10 @@ router.get('/canvasser-timeline', async (req, res, next) => {
             //   · hoursOnDoors is the SUM OF PER-DAY spans (see below). Grouping on userId
             //     alone would make it (last knock ever − first knock ever) — weeks, not hours —
             //     and doors/hour would collapse to ~0.
-            //   · the 62-day cap protects the CLIENT GRID's columns, not this aggregation.
-            //     Grouping a whole campaign by day is cheap; rendering 300 columns is not.
+            //   · the 62-day day-bucket bound protects the CLIENT GRID's day columns and
+            //     computeOverlaps, not this aggregation. Grouping a whole campaign by day is
+            //     cheap; rendering 300 columns is not. (Week mode leans on the same per-day
+            //     invariant: it folds these day buckets to Mondays in the assembly loop.)
             // So every per-canvasser number in totals mode is, by construction, exactly the sum
             // of its range-mode buckets.
             //
@@ -2148,8 +2170,9 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       CanvassActivity.aggregate(knocksPipeline(scoped, { includeRestricted: true })),
       // Overlaps $push every event into per-door arrays, which over a whole campaign can breach
       // Mongo's 100MB per-stage limit. Reconciling overlaps is a "what happened this week" job
-      // anyway — it needs a bounded window, so totals mode skips it rather than risk the query.
-      totalsMode
+      // anyway — it needs a bounded window, so totals mode AND week mode (a >62-day window has
+      // the same unbounded-events problem) skip it rather than risk the query.
+      totalsMode || weekMode
         ? Promise.resolve({ overlaps: [], total: 0, householdIds: [], overlapUserIds: [] })
         : computeOverlaps(scoped, { organizationId: orgId }),
     ]);
@@ -2191,11 +2214,15 @@ router.get('/canvasser-timeline', async (req, res, next) => {
         }
         if (r.surveys) row.surveysByHour[r._id.bucket] = r.surveys;
       } else {
-        if (r.knocks) row.knocksByDay[r._id.bucket] = r.knocks;
-        if (r.surveys) row.surveysByDay[r._id.bucket] = r.surveys;
-        // Range buckets ARE days, so summing per-bucket (last - first) is exactly the
-        // canvasser-summary endpoint's "sum of per-day active spans" method. Restricted
-        // marks are in the bucket, so their time counts toward shift hours (by design).
+        // Week mode folds day buckets to their Monday — ACCUMULATE, never assign: seven day
+        // buckets share one week key (assignment would keep only the last). Accumulation is a
+        // no-op in day mode (one bucket per key), so one path serves both.
+        const key = weekMode ? weekStartYmd(r._id.bucket) : r._id.bucket;
+        if (r.knocks) row.knocksByDay[key] = (row.knocksByDay[key] || 0) + r.knocks;
+        if (r.surveys) row.surveysByDay[key] = (row.surveysByDay[key] || 0) + r.surveys;
+        // Aggregation buckets ARE days (even in week mode), so summing per-bucket (last - first)
+        // is exactly the canvasser-summary endpoint's "sum of per-day active spans" method.
+        // Restricted marks are in the bucket, so their time counts toward shift hours (by design).
         row.hoursOnDoors += (r.last - r.first) / 3600000;
       }
       row.dayKnocks += r.knocks;
@@ -2226,16 +2253,24 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     }
 
     // Every day of the range, inclusive — pure calendar-string math (the tz-aware
-    // bucketing above already put each knock on its wall-clock day). Totals mode ships no
-    // grid, so it ships no day columns (and an unbounded totals request has no from/to to
+    // bucketing above already put each knock on its wall-clock day). Week mode walks
+    // MONDAYS instead — the first may precede `from` (a mid-week start makes a partial
+    // first column; the aggregation window still clips to [from..to]). Totals mode ships
+    // no grid, so it ships no columns (and an unbounded totals request has no from/to to
     // walk in the first place).
     const days = [];
     if (!singleDay && !totalsMode) {
-      for (let d = from; d <= to; d = addDaysYmd(d, 1)) days.push(d);
+      if (weekMode) {
+        for (let d = weekStartYmd(from); d <= to; d = addDaysYmd(d, 7)) days.push(d);
+      } else {
+        for (let d = from; d <= to; d = addDaysYmd(d, 1)) days.push(d);
+      }
     }
 
     // Uncapped: computeOverlaps' card list truncates at 200 (worst first), but the flag
     // must cover every colliding canvasser in the window — range mode can exceed the cap.
+    // Empty in week/totals mode (computeOverlaps is skipped), so `inOverlap` is only
+    // meaningful with bucket:'day'.
     const overlapUserIds = new Set(overlapRes.overlapUserIds || []);
 
     const userIds = [...byUser.keys()];
@@ -2314,6 +2349,8 @@ router.get('/canvasser-timeline', async (req, res, next) => {
             hourTotals.surveys[h] = (hourTotals.surveys[h] || 0) + c.surveysByHour[h];
         }
       } else {
+        // In week mode `days` holds Mondays and the per-row maps are week-keyed, so this
+        // walk yields week totals with no extra code.
         for (const d of days) {
           if (c.knocksByDay[d]) dayTotals.knocks[d] = (dayTotals.knocks[d] || 0) + c.knocksByDay[d];
           if (c.surveysByDay[d])
@@ -2327,7 +2364,13 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       range: { from: from ?? null, to: to ?? null }, // both null = campaign-to-date
       // Day mode keeps the original shape (date/hours/hourTotals) byte-compatible for
       // the mobile admin screen; range mode swaps in days/dayTotals. Totals mode has neither.
-      ...(totalsMode ? {} : singleDay ? { date: from, hours, hourTotals } : { days, dayTotals }),
+      // `bucket` says what a range column IS: past the day-bucket bound, days[] carries
+      // Monday week-starts and the maps are keyed by them — same plumbing, coarser columns.
+      ...(totalsMode
+        ? {}
+        : singleDay
+          ? { date: from, hours, hourTotals }
+          : { days, dayTotals, bucket: weekMode ? 'week' : 'day' }),
       tz,
       tzAbbrev: tzAbbrev(tz),
       canvassers,
@@ -2354,14 +2397,14 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       restrictedDoors: knockAgg[0]?.restrictedDoors || 0,
       billRestrictedDoors: billRestricted,
       // Pure arithmetic on two numbers we already have, so the overlap DOOR COUNT is honest
-      // even in totals mode — it's only the per-door reconciliation CARDS that need a bounded
+      // in every mode — it's only the per-door reconciliation CARDS that need a bounded
       // window (see the computeOverlaps skip above).
       overlapDoors: Math.max(0, grandKnocks - billableKnocks),
       overlaps: overlapRes.overlaps,
       overlapCount: overlapRes.total,
-      // Totals mode deliberately ships no overlap cards; the client says so rather than
-      // implying a campaign had zero overlaps.
-      overlapsOmitted: totalsMode,
+      // Totals and week modes deliberately ship no overlap cards; the clients say so rather
+      // than implying a campaign had zero overlaps.
+      overlapsOmitted: totalsMode || weekMode,
     });
   } catch (err) {
     next(err);
@@ -3994,7 +4037,9 @@ async function resolveFlagScope(req) {
   const orgId = activeOrgId(req);
   const tz = tzOf(req);
 
-  // Bound the scan the way the timeline does: an explicit from/to over 62 days is rejected.
+  // Bound the scan: an explicit from/to over AUDIT_WINDOW_MAX_DAYS is rejected — detectFlags
+  // loads every matched row into Node, so this cap is an OOM guard, not a rendering bound
+  // (the Timeline's range cap is now separate and wider).
   // (Relative presets send to:null → to defaults to today, so the span is still checked.
   // A fully open-ended range = campaign-bounded all-time, consistent with other reports.)
   const fromDay = req.query.from ? String(req.query.from).slice(0, 10) : null;
@@ -4002,8 +4047,8 @@ async function resolveFlagScope(req) {
     const toDay = req.query.to ? String(req.query.to).slice(0, 10) : zonedDayStr(new Date(), tz);
     if (/^\d{4}-\d{2}-\d{2}$/.test(fromDay) && /^\d{4}-\d{2}-\d{2}$/.test(toDay)) {
       if (fromDay > toDay) return { error: 'from must be on or before to', status: 400 };
-      if (ymdSpanDays(fromDay, toDay) > TIMELINE_MAX_DAYS) {
-        return { error: `Date range too large (max ${TIMELINE_MAX_DAYS} days)`, status: 400 };
+      if (ymdSpanDays(fromDay, toDay) > AUDIT_WINDOW_MAX_DAYS) {
+        return { error: `Date range too large (max ${AUDIT_WINDOW_MAX_DAYS} days)`, status: 400 };
       }
     }
   }
@@ -4014,10 +4059,10 @@ async function resolveFlagScope(req) {
   }
 
   // Guarantee a bounded scan even when `from` is absent — an open-ended range would otherwise pull
-  // the whole campaign/org ledger into memory. Default the lower bound to TIMELINE_MAX_DAYS back.
+  // the whole campaign/org ledger into memory. Default the lower bound to AUDIT_WINDOW_MAX_DAYS back.
   if (!match.timestamp || match.timestamp.$gte == null) {
     const upper = (match.timestamp && (match.timestamp.$lte || match.timestamp.$lt)) || new Date();
-    const lower = new Date(new Date(upper).getTime() - TIMELINE_MAX_DAYS * 24 * 60 * 60 * 1000);
+    const lower = new Date(new Date(upper).getTime() - AUDIT_WINDOW_MAX_DAYS * 24 * 60 * 60 * 1000);
     match.timestamp = { ...(match.timestamp || {}), $gte: lower };
   }
 

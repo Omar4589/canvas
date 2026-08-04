@@ -25,12 +25,14 @@ function buildQuery(params) {
   return s ? `?${s}` : '';
 }
 
-// The endpoint caps ranges (62 days), so this page doesn't offer "All time" and
-// validates custom ranges before querying (the server 400s as a backstop).
-// "All time" is offered again: it swaps the hour/day grid for campaign-to-date totals, which is
-// the only way to see everyone who has ever worked the campaign — including canvassers who left.
+// Three range tiers, validated before querying (the server 400s as a backstop): up to 62 days
+// the grid renders day columns with live per-door overlap review; 63–183 days it renders WEEK
+// columns (the server folds day buckets to Mondays and skips the overlap cards); past 183 days
+// "All time" is the answer — it swaps the grid for campaign-to-date totals, which is the only
+// way to see everyone who has ever worked the campaign, including canvassers who left.
 const TIMELINE_PRESETS = RANGE_PRESETS;
-const TIMELINE_MAX_DAYS = 62;
+const TIMELINE_RANGE_MAX_DAYS = 183; // must match the server's TIMELINE_RANGE_MAX_DAYS
+const TIMELINE_DAY_BUCKET_MAX_DAYS = 62; // past this the server sends week columns
 
 // Inclusive day count between two YYYY-MM-DD strings (UTC calendar math).
 function ymdSpanDays(from, to) {
@@ -109,23 +111,25 @@ export default function TimelinePage() {
   // 'today' preset re-pins `from` to the CURRENT today (its stored `from` was captured at
   // selection time and would silently widen into a 2-day range overnight).
   const today = todayInTz(tz);
-  // "All time" = campaign-to-date. It asks the server for totals only (no hour/day buckets), which
-  // is what lets it escape the 62-day cap — the cap exists to stop the grid growing a column per
-  // day, not to limit the aggregation. This is the only view that shows every canvasser who ever
-  // worked the campaign, including the ones who have since left.
+  // "All time" = campaign-to-date. It asks the server for totals only (no time buckets), which
+  // is what lets it escape the range cap — the caps exist to stop the grid growing a column per
+  // bucket, not to limit the aggregation. This is the only view that shows every canvasser who
+  // ever worked the campaign, including the ones who have since left.
   const allTime = dateRange?.preset === 'all';
   const fromDay = dateRange ? (dateRange.preset === 'today' ? today : dateRange.from) : null;
   const effectiveTo = dateRange ? dateRange.to || today : null;
   const isSingleDay = !allTime && !!dateRange && fromDay === effectiveTo;
   const includesToday = allTime || (!!dateRange && (!dateRange.to || dateRange.to >= today));
-  // Guard before querying: a custom "Until X" (from:null) is unbounded, a future start
-  // inverts the range (the live poll would retry the 400 every 20s), and a long custom
-  // range exceeds the endpoint's 62-day cap — show the notice, not a raw error.
-  // All-time is bounded by nothing on purpose, so none of that applies to it.
-  const rangeInvalid =
-    !allTime &&
-    !!dateRange &&
-    (!fromDay || fromDay > effectiveTo || ymdSpanDays(fromDay, effectiveTo) > TIMELINE_MAX_DAYS);
+  // Guard before querying, with the CAUSE kept so the notice can say what's actually wrong:
+  // a custom "Until X" (from:null) is unbounded, a future start inverts the range (the live
+  // poll would retry the 400 every 20s), and a long custom range exceeds the endpoint's
+  // 183-day cap. All-time is bounded by nothing on purpose, so none of this applies to it.
+  const rangeNoStart = !allTime && !!dateRange && !fromDay;
+  const rangeInverted = !allTime && !!dateRange && !!fromDay && fromDay > effectiveTo;
+  const rangeTooLong =
+    !allTime && !!dateRange && !!fromDay && !rangeInverted &&
+    ymdSpanDays(fromDay, effectiveTo) > TIMELINE_RANGE_MAX_DAYS;
+  const rangeInvalid = rangeNoStart || rangeInverted || rangeTooLong;
 
   function stepDay(n) {
     const next = shiftDays(fromDay, n);
@@ -154,6 +158,10 @@ export default function TimelinePage() {
     placeholderData: keepPreviousData,
   });
   const data = timelineQ.data || {};
+  // From the PAYLOAD, never recomputed from the picked range: keepPreviousData shows the
+  // previous payload while a new range fetches, and the caption/notes must describe the grid
+  // actually on screen, not the one on its way.
+  const weekBuckets = data.bucket === 'week';
 
   // The coordinator now comes from the LEDGER — it is stamped onto each knock at the moment it
   // happens. It used to be joined from the campaign roster, which meant a canvasser who was taken
@@ -386,7 +394,7 @@ export default function TimelinePage() {
               </button>
             </div>
           )}
-          <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} />
+          <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} requireFrom />
         </div>
       </div>
 
@@ -394,7 +402,11 @@ export default function TimelinePage() {
         <div className="rounded-lg border border-dashed border-border bg-sunken p-8 text-center">
           <p className="text-sm font-medium text-fg">That range won't work for the timeline</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-fg-muted">
-            Pick a start date on or before the end date, spanning at most {TIMELINE_MAX_DAYS} days.
+            {rangeNoStart
+              ? 'This range has no start date. Pick a From date, or choose All time for campaign-to-date totals.'
+              : rangeInverted
+                ? 'The start date is after the end date. Pick a From date on or before the To date.'
+                : `That range spans more than ${TIMELINE_RANGE_MAX_DAYS} days. Shorten it, or choose All time for campaign-to-date totals.`}
           </p>
         </div>
       ) : timelineQ.isLoading || !dateRange ? (
@@ -493,20 +505,35 @@ export default function TimelinePage() {
               {allTime && (
                 <p className="text-sm text-fg-muted">
                   Campaign to date — everyone who has worked this campaign, including anyone who has
-                  since left the team. The hour-by-hour grid and overlap reconciliation need a range
-                  of {TIMELINE_MAX_DAYS} days or less; pick a shorter range to see them.
+                  since left the team. Ranges of {TIMELINE_DAY_BUCKET_MAX_DAYS} days or less show a
+                  day-by-day grid with overlap review; longer ranges up to {TIMELINE_RANGE_MAX_DAYS}{' '}
+                  days show week columns.
                 </p>
               )}
-              {/* Campaign-to-date ships no hour/day buckets — that is exactly what lets it escape
-                  the 62-day cap — so there is no grid to draw and no per-door overlap cards to
-                  reconcile. The Doors/Surveys/rates above are complete either way. */}
+              {/* Campaign-to-date ships no time buckets — that is exactly what lets it escape the
+                  range cap — so there is no grid to draw and no per-door overlap cards to
+                  reconcile. The Doors/Surveys/rates above are complete either way. Week-bucket
+                  ranges DO draw a grid (Monday columns) but skip the overlap cards for the same
+                  unbounded-events reason; the reconciliation line stays (pure arithmetic). */}
               {!allTime && (
                 <>
                   <TimelineOverlaps
                     data={data}
-                    note={coordinatorId ? 'Overlap totals are campaign-wide (not filtered to this crew).' : null}
+                    note={
+                      [
+                        weekBuckets
+                          ? `Per-door overlap review needs a range of ${TIMELINE_DAY_BUCKET_MAX_DAYS} days or less; the overlap count above still covers this whole range.`
+                          : null,
+                        coordinatorId ? 'Overlap totals are campaign-wide (not filtered to this crew).' : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' ') || null
+                    }
                   />
                   <TimelineGrid data={data} rows={filteredRows} metric={metric} />
+                  {weekBuckets && (
+                    <p className="text-sm text-fg-muted">Each column is one week (Mon–Sun).</p>
+                  )}
                 </>
               )}
             </>
